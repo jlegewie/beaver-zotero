@@ -71,7 +71,7 @@ describe("canonical extraction schema helpers", () => {
                 ],
             },
         ];
-        assignDocumentIds(pages);
+        assignDocumentIds(pages, "document");
         expect(pages[0].items[0].id).toBe("heading1");
         expect(pages[0].items[1].id).toBe("p1");
         const sentence = pages[0].items[1];
@@ -87,6 +87,24 @@ describe("canonical extraction schema helpers", () => {
         expect(doc.citationIndex.heading1.kind).toBe("item");
         expect(doc.citationIndex.s1.kind).toBe("sentence");
         expect(resolveCitation(doc, "s1")?.bboxes).toEqual([[0, 10, 80, 20]]);
+    });
+
+    it("labels citation entries with printed labels, or declared ones for a document without them", () => {
+        const page = (index: number, label?: string) => ({
+            index, label, width: 100, height: 100,
+            items: [{ id: `p${index}`, kind: "text", text: "Text.", bbox: [0, 0, 10, 10] }],
+        }) as any;
+        const pages = [page(0, "i"), page(1, "1"), page(2)];
+        const index = buildCitationIndex(pages, { "1": "1201", "2": "1202" });
+        expect(index.p0.pageLabel).toBeUndefined();
+        expect(index.p1.pageLabel).toBe("1201");
+        expect(index.p2.pageLabel).toBe("1202");
+        expect(buildCitationIndex(pages).p1.pageLabel).toBe("1");
+
+        const doc = { pageCount: 3, pages, derivedPageLabels: { "1": "1201" } } as any;
+        expect(resolveCitation(doc, "p1")?.pageLabel).toBe("1201");
+        expect(resolveCitation(doc, "p0")?.pageLabel).toBeUndefined();
+        expect(buildCitationIndex(pages).p0.pageLabel).toBe("i");
     });
 
     it("clips overflow locators without changing page geometry or text", () => {
@@ -144,7 +162,7 @@ describe("canonical extraction schema helpers", () => {
         expect(page.items.map((item) => item.kind)).toEqual(["text", "margin"]);
         const textItem = page.items[0];
         expect("sentences" in textItem ? textItem.sentences?.[0].text : "").toBe("Text.");
-        expect(SCHEMA_VERSION).toBe("4");
+        expect(SCHEMA_VERSION).toBe("5");
     });
 
     it("rejects page selection for structured extraction at public layers", async () => {

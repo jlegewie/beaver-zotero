@@ -17,6 +17,31 @@ const restrictedGlobals = [
     "Zotero_Tabs",
 ];
 
+/**
+ * Firefox 153 (Zotero 11) regressions that must keep working on Zotero 7-10 too.
+ * Flat config replaces rule options instead of merging them, so every block
+ * that sets its own `no-restricted-syntax` spreads these in as well.
+ */
+const firefox153SyntaxBans = [
+    {
+        // Before Firefox 153, ="false" meant off. Firefox 153 treats these as
+        // presence-based, so ="false" turns them on.
+        selector:
+            "CallExpression[callee.property.name='setAttribute'][arguments.0.value=/^(hidden|collapsed|selected|disabled|checked)$/][arguments.1.value='false']",
+        message: "Boolean XUL attributes are presence-based on Firefox 153: use removeAttribute() or toggleAttribute().",
+    },
+    {
+        selector: "CallExpression[callee.property.name='setAttribute'][arguments.0.value=/^on[a-z]+$/i]",
+        message: "Inline event handlers are blocked by the chrome CSP on Firefox 153: use addEventListener().",
+    },
+];
+const firefox153PropertyBans = [
+    {
+        property: "ownerGlobal",
+        message: "Firefox 153 renamed ownerGlobal (it reads as undefined): use ownerDocument.defaultView.",
+    },
+];
+
 const l1CoreGlobals = [
     ...restrictedGlobals,
     {
@@ -248,6 +273,8 @@ export default tseslint.config(
         },
         rules: {
             "no-restricted-globals": ["error", ...restrictedGlobals],
+            "no-restricted-syntax": ["error", ...firefox153SyntaxBans],
+            "no-restricted-properties": ["error", ...firefox153PropertyBans],
 
             "@typescript-eslint/ban-ts-comment": [
                 "warn",
@@ -324,6 +351,9 @@ export default tseslint.config(
     // `../StyleAnalyzer`, and the extract types via
     // `@beaver/agent-core/extract/*`.
     //
+    // The structured pipeline (`src/beaver-extract/pipeline/`) runs in the
+    // worker too, at the same depth, so the same rules apply.
+    //
     // Path math reminder — relative specifiers from a file at
     // `src/beaver-extract/worker/<file>.ts`:
     //   ../X            → src/beaver-extract/X    (package internals — OK)
@@ -333,7 +363,7 @@ export default tseslint.config(
     // Bare `@beaver/agent-core/...` specifiers also leave the directory; only
     // its extract/* subpaths are worker-safe (enforced below).
     {
-        files: ["src/beaver-extract/worker/**/*.ts"],
+        files: ["src/beaver-extract/worker/**/*.ts", "src/beaver-extract/pipeline/**/*.ts"],
         rules: {
             "no-restricted-imports": [
                 "error",
@@ -406,6 +436,7 @@ export default tseslint.config(
             // Shared agent-run dispatchers + the request-side action fallback.
             "react/components/agentRuns/ModelResponseView.tsx",
             "react/components/agentRuns/AgentRunView.tsx",
+            "react/components/agentRuns/RunResolutionNotices.tsx",
             "react/components/agentRuns/RunContinueDisplay.tsx",
             "react/components/agentRuns/GenericAgentActionView.tsx",
             "react/components/agentRuns/AgentRunFooter.tsx",
@@ -423,6 +454,10 @@ export default tseslint.config(
             "react/components/agentRuns/ToolCallPartView.tsx",
             // The table write card: opens tables through getHost().navigation.
             "react/components/agentRuns/TableToolCallView.tsx",
+            // Column type tags, option chips and source icons, shared by the
+            // table card and the table tool card body.
+            "react/components/tables/columnTypes.tsx",
+            "react/components/tables/sourceKinds.ts",
             // Request-side label name resolution (extracted from ToolCallPartView):
             // goes through getHost().itemData, never the Zotero global.
             "react/utils/toolCallLabelEnrich.ts",
@@ -472,6 +507,9 @@ export default tseslint.config(
         files: [
             "src/services/artifacts/**/*.ts",
             "src/ui/openTable.ts",
+            "src/ui/tableTab.ts",
+            "src/ui/tableTabTypes.ts",
+            "src/ui/tableTabProbe.ts",
             "src/ui/tableItemPane.ts",
             "src/ui/tableItemPaneModel.ts",
         ],
@@ -515,6 +553,9 @@ export default tseslint.config(
             "src/services/artifacts/recoveryShadow.ts",
             "src/services/artifacts/view/**/*.ts",
             "src/ui/openTable.ts",
+            "src/ui/tableTab.ts",
+            "src/ui/tableTabTypes.ts",
+            "src/ui/tableTabProbe.ts",
             "src/ui/tableItemPane.ts",
             "src/ui/tableItemPaneModel.ts",
         ],
@@ -550,10 +591,9 @@ export default tseslint.config(
     // `src/hooks.ts`. Importing one from the webpack bundle does not fail
     // anything; it silently creates a SECOND copy of whatever state it keeps.
     // The esbuild copy does the real work while the webpack copy stays empty,
-    // so `/beaver/test/table-view-state` reports no views for readers that are
-    // demonstrably enhanced, and a view registered through the webpack copy is
-    // invisible to `cleanupReaderTableViews()` — leaking the reader's document
-    // and the window it lives in.
+    // so a dev endpoint reports no tabs that are demonstrably open, and a
+    // listener registered through the webpack copy is invisible to the cleanup
+    // `hooks.ts` runs — leaking the window realm it closes over.
     //
     // `openTable.ts` keeps no state of its own and is listed for the other half
     // of the rule: `Zotero.__beaverTables` is the single seam every caller of a
@@ -581,13 +621,15 @@ export default tseslint.config(
                         {
                             group: [
                                 "**/ui/openTable",
+                                "**/ui/tableTab",
+                                "**/ui/tableTabProbe",
                                 "**/ui/tableItemPane",
                                 "**/artifacts/view/readerTableView",
                                 "**/artifacts/tablesApiHost",
                             ],
                             allowTypeImports: true,
                             message:
-                                "This module owns stored-table runtime state and is compiled into the esbuild bundle. Importing it here creates a second, permanently empty copy of that state (empty registries, leaked reader views). Use `getTablesApi()` from src/services/artifacts/tablesApi.ts; import stateless helpers from artifacts/view/tableLinks.ts instead.",
+                                "This module owns stored-table runtime state and is compiled into the esbuild bundle. Importing it here creates a second, permanently empty copy of that state (empty registries, leaked listeners). Use `getTablesApi()` from src/services/artifacts/tablesApi.ts; import stateless helpers from artifacts/view/tableLinks.ts instead.",
                         },
                     ],
                 },
@@ -609,7 +651,32 @@ export default tseslint.config(
                 "error",
                 { paths: l1CorePackageBans, patterns: l1CoreImportBans },
             ],
-            "no-restricted-syntax": ["error", ...l1CoreAmbientTypeBan],
+            "no-restricted-syntax": ["error", ...l1CoreAmbientTypeBan, ...firefox153SyntaxBans],
+        },
+    },
+    // The export pipeline (source building, parsing, citation data, writers)
+    // is client-agnostic like the core: no Zotero, no React, no app graph, and
+    // no agent-ui. Zotero specifics (citation lookup and formatting, files) are
+    // implemented by the host in src/services/export. `npm run typecheck:export`
+    // is the stronger gate; this block covers every file as you write it.
+    {
+        files: ["packages/agent-export/src/**/*.ts"],
+        rules: {
+            "no-restricted-globals": ["error", ...l1CoreGlobals],
+            "no-restricted-imports": [
+                "error",
+                {
+                    paths: l1CorePackageBans,
+                    patterns: [
+                        ...l1CoreImportBans,
+                        {
+                            group: ["@beaver/agent-ui", "@beaver/agent-ui/**"],
+                            message: "The export pipeline must not import the shared React layer.",
+                        },
+                    ],
+                },
+            ],
+            "no-restricted-syntax": ["error", ...l1CoreAmbientTypeBan, ...firefox153SyntaxBans],
         },
     },
     // The shared React layer (theme, icons, primitives, render components) is
@@ -625,7 +692,7 @@ export default tseslint.config(
         rules: {
             "no-restricted-globals": ["error", ...l2UiGlobals],
             "no-restricted-imports": ["error", { patterns: l2UiImportBans }],
-            "no-restricted-syntax": ["error", ...l2UiAmbientTypeBan],
+            "no-restricted-syntax": ["error", ...l2UiAmbientTypeBan, ...firefox153SyntaxBans],
         },
     },
 );

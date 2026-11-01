@@ -1,57 +1,50 @@
 /**
- * Renders a `TableSpec` as self-contained HTML.
+ * Renders a `TableSpec` as the table's static snapshot: a self-contained HTML
+ * page.
  *
- * This is the third rendering of the same data model, beside the React grid
- * (`@beaver/agent-ui/layouts`) and — later — the Word add-in. It exists because
- * the other two need a live React tree and the two places this one goes do not:
- * a saved snapshot, and a temporary Zotero tab.
+ * A stored table is `table.json` in the attachment's storage directory. This
+ * page is what the store's renderer writes beside it, for everyone who opens
+ * the attachment without Beaver (Zotero without the plugin, the web library,
+ * the mobile apps, a browser) and for Zotero's full-text index. With Beaver
+ * running, Zotero's reader never shows it: the Beaver tab replaces any reader
+ * opened on a table.
  *
- * ## No script, so interaction is CSS
+ * ## Portable, so static
  *
- * Zotero's snapshot reader loads documents under a CSP whose `script-src` has no
- * `'unsafe-inline'`: author JavaScript never runs (see `reportHtml.ts` for the
- * full policy). Rather than ship a static table there and an interactive one in
- * a tab, everything here is done with form controls and selectors, so the same
- * document sorts, filters and expands in both:
+ * Zotero's snapshot reader loads documents under a CSP whose `script-src` has
+ * no `'unsafe-inline'`, and other viewers strip or sandbox what they do not
+ * know, so the page has no script and no controls that need one:
  *
- * - **Sort** — a radio per column and direction. Every row carries its rank in
- *   each sortable column as a custom property, and the checked radio maps that
- *   rank onto `order` in a flex column. Ascending and descending are each their
- *   own pass (empty cells last in both — not `n - asc`).
- * - **Filter** — a radio group per select or boolean column, each non-matching
- *   value hidden by one rule.
- * - **Row height** — a radio group swapping the line clamps and the row height.
- * - **Expand** — `<details>`, which needs neither script nor a rule.
+ * - Rows are emitted already sorted by `spec.sort`.
+ * - A row expands with `<details>` to its answers in full, their evidence
+ *   (quote, table context, citation marker) and the row's actions.
+ * - Citation markers and row verbs are plain `zotero://` links, and the cited
+ *   works are listed under the table.
+ * - A notice says the table was made with Beaver; its dismiss is a checkbox.
  *
- * Rows are also emitted already sorted by `spec.sort`, so a renderer that
- * supports none of the above still shows the table the producer intended.
- *
- * What is deliberately absent rather than faked: selection (its only purpose is
- * bulk verbs that cannot run here) and add-column (same). Row verbs are emitted
- * as links; a host that wants them to do something intercepts the clicks.
+ * What the page carries is chosen for size: every commit re-renders it, and
+ * Zotero re-indexes and re-uploads it. A cell's reasoning stays in
+ * `table.json` (the tab's inspector shows it), and evidence boxes, which only
+ * a reader highlight uses, are never written.
  *
  * ## Layout
  *
- * A flex column of grid rows rather than a `<table>`: `order` is what makes
- * CSS-only sorting possible, and table rows cannot be reordered. Alignment
- * comes from every row sharing one `grid-template-columns`.
+ * A flex column of grid rows rather than a `<table>`, so a row and its
+ * expansion are one `<details>` element. Alignment comes from every row sharing
+ * one `grid-template-columns`.
  *
- * This module is free of Zotero APIs — callers pass prebuilt link URIs and a
- * library-scope resolver, exactly as `reportHtml.ts` does.
+ * This module is free of Zotero APIs: callers pass prebuilt link URIs and a
+ * library-scope resolver.
  *
- * ## The document is the table
+ * ## The page is a rendering
  *
- * A stored table is a snapshot attachment and nothing else: no database row, no
- * server copy. So the document carries the spec it was rendered from, and
- * {@link parseTableDocument} reads it back — see {@link buildTableDocument}.
- *
- * That makes rendering a **pure function of its inputs**: no clock, no random
- * ids, no iteration over anything whose order is not fixed by the spec, so the
- * same spec always produces the same bytes and a re-render never moves text
- * that annotations are anchored to. The deliberate exceptions are the two
- * options that consult live Zotero state — `linksFor` (does this item still
- * have a file?) and `citationScopeFor` (is this library a group here?) — so
- * two renders of the same spec may differ in their links.
+ * It carries no state of its own, only the hashes of the spec it shows and of
+ * the whole `table.json` (see {@link buildTableDocument}). Rendering is a
+ * **pure function of its inputs**: no clock, no random ids, no iteration over
+ * anything whose order is not fixed by the spec, so the same spec always
+ * produces the same bytes. The deliberate exceptions are the two options that
+ * consult live Zotero state, `linksFor` and `citationScopeFor`, so two renders
+ * of the same spec may differ in their links.
  */
 
 import {
@@ -59,36 +52,35 @@ import {
     annotationComment,
     annotationTitle,
     annotationTypeLabel,
+    categoriesText,
     cellExpandedFields,
-    cellSortKey,
     defaultHiddenColumnIds,
-    citationsByKey,
     columnAlign,
-    compareSortKeys,
-    isColumnFilterable,
-    isColumnSortable,
-    readSpec,
+    evidenceHeading,
+    isUncitedAnswer,
+    isTitleAbstractOnly,
     rowActions,
     rowPrimaryAction,
-    selectLabelsInColumn,
+    selectOption,
     sortRows,
+    staleReason,
+    stripCitationTags,
     summarizeCoverage,
-    CITATION_TAG_RE,
     SELECT_COLORS,
     TABLE_SPEC_VERSION,
     type Cell,
     type Column,
+    type Evidence,
     type Row,
     type RowAction,
+    type RowFailure,
+    type SelectOption,
     type TableSpec,
 } from '@beaver/agent-core/layouts/table';
-import {
-    normalizeCitationTag,
-    parseRawCitationAttributes,
-    requestedCitationKey,
-} from '@beaver/agent-core/citations/citationGrammar';
-import type { Citation } from '@beaver/agent-core/types/citations';
-import { countTopLevelCssRules, escapeHtml, CSS_RULE_BUDGET } from '../../utils/html';
+import { citationForEvidence } from '@beaver/agent-core/layouts/tableCitations';
+import { baseCitationKey } from '@beaver/agent-core/citations/citationGrammar';
+import { getCitationPages, type Citation } from '@beaver/agent-core/types/citations';
+import { countTopLevelCssRules, escapeHtml } from '../../utils/html';
 
 /**
  * The href behind each of a row's verbs, keyed by verb. A verb with no entry
@@ -97,62 +89,18 @@ import { countTopLevelCssRules, escapeHtml, CSS_RULE_BUDGET } from '../../utils/
  */
 export type TableHtmlLinks = Partial<Record<RowAction, string | null>>;
 
-/** Durable acknowledgements committed atomically with the table document. */
-export interface TableOperationReceipt {
-    operation_id: string;
-    request_sha256: string;
-    version: number;
-    sha256: string;
-}
-
-export interface TableDocumentState {
-    operations?: TableOperationReceipt[];
-    creation?: {
-        operation_id: string;
-        request_sha256: string;
-        complete: boolean;
-        meta?: { actor: 'agent' | 'user' | 'system'; run_id?: string; thread_id?: string; change?: string };
-    };
-}
-
-export const TABLE_STORE_SCRIPT_ID = 'beaver-table-store';
-const STORE_SCRIPT_RE = new RegExp(
-    `<script\\b[^>]*\\bid="${TABLE_STORE_SCRIPT_ID}"[^>]*>([\\s\\S]*?)</script\\s*>`,
-    'i'
-);
-
-function isReceipt(value: unknown): value is TableOperationReceipt {
-    if (!value || typeof value !== 'object') return false;
-    const receipt = value as Partial<TableOperationReceipt>;
-    return typeof receipt.operation_id === 'string' &&
-        typeof receipt.request_sha256 === 'string' &&
-        typeof receipt.version === 'number' &&
-        typeof receipt.sha256 === 'string';
-}
-
-export function parseTableDocumentState(html: string): TableDocumentState {
-    const match = html.match(STORE_SCRIPT_RE);
-    if (!match) return {};
-    const state = JSON.parse(match[1]);
-    if (!state || typeof state !== 'object' || Array.isArray(state)) {
-        throw new Error('Invalid table operation receipts');
-    }
-    if (state.operations !== undefined &&
-        (!Array.isArray(state.operations) || !state.operations.every(isReceipt))) {
-        throw new Error('Invalid table operation receipts');
-    }
-    return state;
-}
-
 export interface TableHtmlOptions {
-    /** Store bookkeeping; excluded from the portable table spec. */
-    storeState?: TableDocumentState;
     /**
-     * Emits the sort, filter and row-height controls. Off gives a plain
-     * document sorted as the producer intended — the tier for a renderer that
-     * strips form controls, and for a table small enough not to need them.
+     * SHA-256 of the spec being rendered, written as a root attribute so the
+     * snapshot names the table state it shows. See {@link renderedSpecHash}.
      */
-    controls?: boolean;
+    specSha256?: string;
+    /**
+     * SHA-256 of the whole committed `table.json`. Zotero syncs a snapshot
+     * when its main file changes, so a commit that changes only the file's
+     * creation marker must still change the HTML.
+     */
+    fileSha256?: string;
     /** Per-row links. Rows it returns nothing for get no action links. */
     linksFor?: (row: Row) => TableHtmlLinks;
     /**
@@ -162,21 +110,15 @@ export interface TableHtmlOptions {
      * the personal library, which is all a caller with no Zotero can assume.
      */
     citationScopeFor?: (libraryId: number) => string;
-    /** Prefix for generated element ids, so two tables can share a document. */
-    idPrefix?: string;
 }
 
 /** Personal-library scope when the host does not supply {@link TableHtmlOptions.citationScopeFor}. */
 const USER_LIBRARY_SCOPE = () => 'library';
 
 export interface RenderedTable {
-    /** A fragment. `buildTableDocument` wraps it; a report embeds it. */
+    /** The complete document. */
     html: string;
-    /**
-     * Top-level rules in the emitted stylesheet, for budget assertions. From
-     * `renderTableHtml` this counts only the per-table rules the fragment
-     * carries; the caller adds {@link TABLE_CSS} and counts that too.
-     */
+    /** Top-level rules in its stylesheet, for the reader's budget. */
     cssRuleCount: number;
 }
 
@@ -185,25 +127,24 @@ export interface RenderedTable {
 // ---------------------------------------------------------------------------
 
 const RAIL_WIDTH = '2.6rem';
-const FLEX_COLUMN_MIN = 'minmax(14rem, 1.6fr)';
+const FLEX_COLUMN_MIN = 'minmax(8rem, 1fr)';
 
 /**
- * Mirrors the React renderer's per-type defaults so the two look like the same
- * table. A text column flexes; everything else is sized to its content.
+ * Per-type defaults. Text and reference columns share the width the reader
+ * gives the table, so a typical comparison fits without scrolling sideways and
+ * long answers wrap instead; their minimums only take over in a narrow pane or
+ * a very wide table, where the frame scrolls. Everything else is sized to its
+ * content.
  */
 function columnWidth(column: Column, isAnchor: boolean): string {
     if (column.width != null)
         return column.width === 'fill' ? FLEX_COLUMN_MIN : `${column.width}px`;
-    if (isAnchor) return '20rem';
+    if (isAnchor) return 'minmax(11rem, 1.3fr)';
     switch (column.type) {
         case 'reference':
-            return '16rem';
-        case 'number':
+            return 'minmax(11rem, 1fr)';
         case 'date':
-            // Wider than the React grid's: the sort control sits in the header
-            // here rather than appearing on hover, so the label needs room
-            // beside it.
-            return '8rem';
+            return '7rem';
         case 'boolean':
             return '5rem';
         case 'select':
@@ -233,49 +174,20 @@ const ARROW_UP_RIGHT_SVG =
     '<path d="M16.5 7.5L6 18" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>' +
     '<path d="M8 6.18791C8 6.18791 16.0479 5.50949 17.2692 6.73079C18.4906 7.95209 17.812 16 17.812 16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
-const CHEVRON_DOWN_SVG =
-    '<svg class="bt-gl" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
-    '<path d="m6 9 6 6 6-6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-
-const CHEVRON_UP_SVG =
-    '<svg class="bt-gl" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
-    '<path d="m6 15 6-6 6 6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-
-/** Both directions at once — a sortable column at rest. */
-const SORT_BOTH_SVG =
-    '<svg class="bt-gl" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
-    '<path d="m7 10 5-5 5 5M7 14l5 5 5-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-
 // ---------------------------------------------------------------------------
 // Cells
 // ---------------------------------------------------------------------------
 
 /**
- * The pill colour for a select label. Checked against agent-core's palette
- * rather than a list restated here: a colour added there but missing from a
- * local copy renders as grey in every stored table.
+ * The pill colour of a select label's option. Checked against agent-core's
+ * palette rather than a list restated here: a colour added there but missing
+ * from a local copy renders as grey in every stored table.
  */
-function selectHue(label: string, column: Column): string {
-    const declared = column.options?.find((o) => o.label === label)?.color;
+function selectHue(option: SelectOption | undefined): string {
+    const declared = option?.color;
     return declared && (SELECT_COLORS as readonly string[]).includes(declared)
         ? declared
         : 'gray';
-}
-
-/**
- * Grouped digits in a fixed locale rather than the host's.
- *
- * The rendered document is stored and re-read, so it has to be the same
- * everywhere: a bare `toLocaleString()` groups by the install's locale (and in
- * some locales changes the digits themselves), which would make the same spec
- * render differently on two machines.
- */
-function formatNumber(value: number): string | null {
-    // JSON has no NaN or Infinity, so a non-finite value cannot survive a save:
-    // `JSON.stringify` writes it as `null`, and a reloaded table would then
-    // render `null.toLocaleString()`. Treated as no value in both directions,
-    // the way `cellSortKey` already treats it.
-    return Number.isFinite(value) ? value.toLocaleString('en-US') : null;
 }
 
 /** A colour is inlined into a style attribute, so only a hex literal passes. */
@@ -289,29 +201,65 @@ function safeHref(uri: string | null | undefined): string | null {
     return /^(zotero:\/\/|https:\/\/)/i.test(uri) ? uri : null;
 }
 
+/** Why a cell is stale, as its marker's tooltip says it (the React grid says the same). */
+const STALE_REASON_TEXT: Record<'question' | 'document', string> = {
+    question: 'The question changed',
+    document: "The paper's document changed",
+};
+
 /**
- * One cell's value. In the expanded row (`detail`) an annotation names only
- * what it is and where it sits: its passage and comment are listed as fields
- * of their own there (`cellExpandedFields`).
+ * What stopped a row, in a few words: a row with nothing to read (no document
+ * and no abstract) is told apart from one whose document could not be read.
  */
-function renderCellValue(cell: Cell | undefined, column: Column, cites?: CitationNumbering, variant: 'cell' | 'detail' = 'cell'): string {
-    const html = renderCellValueInner(cell, column, cites, variant);
-    if (!cell) return html;
-    const states = [cell.flag === 'unsure' ? 'Unsure' : cell.flag === 'unsourced' ? 'Unsourced' : '', cell.stale ? 'Stale' : '', cell.provenance === 'user' ? 'Edited by you' : ''].filter(Boolean);
-    return html + (states.length ? `<small class="bt-cell-state"> · ${states.join(' · ')}</small>` : '');
+function rowFailureLabel(failure: RowFailure): string {
+    return failure.code === 'no_source' ? 'Nothing to read' : 'Could not be read';
 }
 
-function renderCellValueInner(
+/**
+ * One cell's value, followed by the markers of its evidence (given `cites`)
+ * and its state: staleness with what changed, an answer from title and
+ * abstract, and who edited it. The expanded row (`detail`) passes no `cites`,
+ * since its markers follow their quotes, and there an annotation names only
+ * what it is and where it sits: its passage and comment are listed as fields
+ * of their own (`cellExpandedFields`).
+ */
+function renderCellValue(
+    row: Row,
     cell: Cell | undefined,
     column: Column,
     cites?: CitationNumbering,
     variant: 'cell' | 'detail' = 'cell'
 ): string {
-    if (cell?.status === 'pending') {
-        return '<span class="bt-pending">Filling…</span>';
-    }
-    if (cell?.status === 'error') {
-        return `<span class="bt-err">${escapeHtml(cell.error ?? 'Could not be extracted')}</span>`;
+    const html = renderCellValueInner(cell, column, variant);
+    if (!cell) return html;
+    const markers = cites ? cites.markers(row, column.id) : '';
+    const stale = staleReason(row, cell);
+    const state = (text: string, className: string, title?: string): string =>
+        `<span class="${className}"${title ? ` title="${escapeHtml(title)}"` : ''}>${escapeHtml(text)}</span>`;
+    const states = [
+        stale ? state('Stale', 'bt-stale', STALE_REASON_TEXT[stale]) : '',
+        isTitleAbstractOnly(cell) ? state('From title and abstract', 'bt-ta') : '',
+        cell.outcome === 'cleared'
+            ? state('Cleared by you', 'bt-by-user')
+            : cell.provenance === 'user'
+              ? state('Edited by you', 'bt-by-user')
+              : '',
+    ].filter(Boolean);
+    return html + markers + (states.length ? `<small class="bt-cell-state"> · ${states.join(' · ')}</small>` : '');
+}
+
+/** The tooltip carrying a date's `display` in full, which the grid may cut short. */
+function displayTitle(display: string | undefined): string {
+    return display ? ` title="${escapeHtml(display)}"` : '';
+}
+
+function renderCellValueInner(
+    cell: Cell | undefined,
+    column: Column,
+    variant: 'cell' | 'detail' = 'cell'
+): string {
+    if (cell?.outcome === 'failed') {
+        return `<span class="bt-err">${escapeHtml(cell.error ?? 'Could not be answered')}</span>`;
     }
     // Nothing at all, rather than a placeholder glyph: a column of em dashes
     // reads as noise across a wide table, and the footer already counts what
@@ -321,29 +269,24 @@ function renderCellValueInner(
 
     switch (value.kind) {
         case 'text':
-            return `<span class="bt-clamp">${
-                cites ? cites.render(value.text) : escapeHtml(value.text)
-            }</span>`;
+            return `<span class="bt-clamp">${escapeHtml(stripCitationTags(value.text))}</span>`;
 
-        case 'number': {
-            const shown = value.display ?? formatNumber(value.value);
-            if (shown === null) return '<span class="bt-empty"></span>';
-            return `<span class="bt-num">${escapeHtml(
-                shown
-            )}${column.unit && !value.display ? `<span class="bt-unit">${escapeHtml(column.unit)}</span>` : ''}</span>`;
-        }
 
         case 'date':
-            return `<span class="bt-num">${escapeHtml(value.display ?? value.value)}</span>`;
+            return `<span class="bt-num"${displayTitle(value.display)}>${escapeHtml(value.display ?? value.value)}</span>`;
 
         case 'boolean':
-            // The check is the signal; false is its absence.
+            // A check for yes and the word in muted text for no: a blank no
+            // could not be told from a cell that was never answered.
             return value.value
                 ? '<span class="bt-yes" title="yes">✓</span>'
-                : '<span class="bt-no"></span>';
+                : '<span class="bt-no">No</span>';
 
-        case 'select':
-            return `<span class="bt-pill bt-pill--${selectHue(value.label, column)}">${escapeHtml(value.label)}</span>`;
+        case 'select': {
+            const option = selectOption(column, value.label);
+            const title = option?.description ? ` title="${escapeHtml(option.description)}"` : '';
+            return `<span class="bt-pill bt-pill--${selectHue(option)}"${title}>${escapeHtml(value.label)}</span>`;
+        }
 
         case 'reference': {
             const authors = value.subtitle
@@ -354,7 +297,7 @@ function renderCellValueInner(
                 : '';
             const meta =
                 authors || venue ? `<span class="bt-sub">${authors}${venue}</span>` : '';
-            return `<span class="bt-ref"><span class="bt-title">${escapeHtml(value.display_name)}</span>${meta}</span>`;
+            return `<span class="bt-ref"><span class="bt-title">${escapeHtml(value.title ?? value.display_name)}</span>${meta}</span>`;
         }
 
         case 'annotation': {
@@ -408,102 +351,137 @@ function renderCellValueInner(
 // Citations
 // ---------------------------------------------------------------------------
 
+/** One cited work in the bibliography, with every citation that names it. */
+interface CitedSource {
+    marker: number;
+    key: string;
+    citations: Citation[];
+}
+
 /**
- * Numbers every citation in the table and renders each tag as a marker.
+ * The work a citation belongs to: its owning item when there is one, else the
+ * cited object itself. Passages from one paper's PDF and a citation of the
+ * paper's own record therefore share a number, as they do in the chat's
+ * sources list.
+ */
+function citationSourceKey(citation: Citation): string {
+    const ref = citation.parent_ref ?? citation.resolved_ref ?? citation.requested_ref;
+    return ref ? baseCitationKey(ref) : citation.citation_id;
+}
+
+/**
+ * Numbers every cited source in the table and renders evidence as markers.
  *
- * The marker is what the chat's `Citation` renders: a small superscript number
- * that says where the claim came from, opens the cited page when clicked, and
- * shows the source and the cited passage on hover. Here it is a `zotero://`
- * link — which navigates on its own from a content docshell — and a native
- * `title`, because the cell it sits in is clamped with `overflow: hidden` and
- * would clip any card drawn inside it. A host that can do better upgrades the
- * hover from outside the document; see `view/enhanceTableDocument.ts`.
+ * A marker is a small number that says where an answer came from: a
+ * `zotero://` link to the cited page, with the source and page as its native
+ * tooltip. The passage itself is quoted beside the marker in the expanded row,
+ * so it is written once rather than again in every tooltip.
  *
- * Markers are assigned in document order across the whole table, so the same
- * source keeps one number wherever it is cited and the bibliography reads in
- * the order a person meets them.
+ * Numbers belong to sources, not to passages: every passage from one paper
+ * carries that paper's number, and the bibliography lists each paper once.
+ * They are assigned in document order, so the bibliography reads in the order
+ * a person meets the sources.
  */
 class CitationNumbering {
-    private readonly byKey: Record<string, Citation>;
-    private readonly markers = new Map<string, number>();
+    private readonly sources = new Map<string, CitedSource>();
     private readonly scopeFor: (libraryId: number) => string;
     /** Every cited source, in the order its marker was assigned. */
-    readonly cited: Array<{ marker: number; key: string; citation?: Citation }> = [];
+    readonly cited: CitedSource[] = [];
 
-    constructor(
-        citations: Citation[] | undefined,
-        scopeFor: (libraryId: number) => string = USER_LIBRARY_SCOPE
-    ) {
-        this.byKey = citationsByKey(citations);
+    constructor(scopeFor: (libraryId: number) => string = USER_LIBRARY_SCOPE) {
         this.scopeFor = scopeFor;
     }
 
     /**
-     * Attachment citations open their document; metadata citations reveal the item.
+     * Attachment citations open their document; item citations reveal the item.
      * Shared with the bibliography so a marker and its entry always agree.
      */
     hrefFor(citation: Citation | undefined): string | null {
         const ref = citation?.resolved_ref ?? citation?.requested_ref;
         if (!ref || !('zotero_key' in ref) || !ref.zotero_key) return null;
+        const scope = zoteroScopeOf(ref, this.scopeFor);
         if (citation?.citation_type === 'item') {
-            return `zotero://select/${this.scopeFor(ref.library_id)}/items/${ref.zotero_key}`;
+            return `zotero://select/${scope}/items/${ref.zotero_key}`;
         }
-        const page = citation?.pages?.[0];
-        const base = `zotero://open/${this.scopeFor(ref.library_id)}/items/${ref.zotero_key}`;
+        const page = getCitationPages(citation)[0];
+        const base = `zotero://open/${scope}/items/${ref.zotero_key}`;
         return page ? `${base}?page=${page}` : base;
     }
 
-    private markerFor(key: string): number {
-        const existing = this.markers.get(key);
-        if (existing) return existing;
-        const marker = this.markers.size + 1;
-        this.markers.set(key, marker);
-        this.cited.push({ marker, key, citation: this.byKey[key] });
-        return marker;
-    }
-
-    /** Escapes `text` and swaps each citation tag for its marker. */
-    render(text: string): string {
-        let out = '';
-        let last = 0;
-        CITATION_TAG_RE.lastIndex = 0;
-        for (const match of text.matchAll(CITATION_TAG_RE)) {
-            const at = match.index ?? 0;
-            out += escapeHtml(text.slice(last, at));
-            last = at + match[0].length;
-
-            const normalized = normalizeCitationTag(
-                parseRawCitationAttributes(match[1] || '')
-            );
-            // An unparseable tag is dropped rather than shown raw: a stray
-            // `<citation …/>` in a cell is noise the reader cannot act on.
-            if (!normalized.ok) continue;
-            const key = requestedCitationKey(normalized.ref);
-            out += this.marker(this.markerFor(key), this.byKey[key]);
+    /** Where a source's bibliography entry points: the cited work in the library. */
+    revealHrefFor(source: CitedSource): string | null {
+        for (const citation of source.citations) {
+            const ref = citation.parent_ref ?? citation.resolved_ref ?? citation.requested_ref;
+            if (ref && 'zotero_key' in ref && ref.zotero_key) {
+                return `zotero://select/${zoteroScopeOf(ref, this.scopeFor)}/items/${ref.zotero_key}`;
+            }
         }
-        return out + escapeHtml(text.slice(last));
+        return null;
     }
 
-    private marker(marker: number, citation: Citation | undefined): string {
+    /** The file a source's passages were read from, when it is a Zotero attachment. */
+    openHrefFor(source: CitedSource): { href: string; label: string } | null {
+        for (const citation of source.citations) {
+            if (citation.citation_type !== 'attachment') continue;
+            const ref = citation.resolved_ref ?? citation.requested_ref;
+            if (!ref || !('zotero_key' in ref) || !ref.zotero_key) continue;
+            return {
+                href: `zotero://open/${zoteroScopeOf(ref, this.scopeFor)}/items/${ref.zotero_key}`,
+                label: (citation.content_kind ?? 'pdf') === 'pdf' ? 'Open PDF' : 'Open',
+            };
+        }
+        return null;
+    }
+
+    private numberFor(citation: Citation): number {
+        const sourceKey = citationSourceKey(citation);
+        let source = this.sources.get(sourceKey);
+        if (!source) {
+            source = { marker: this.sources.size + 1, key: sourceKey, citations: [] };
+            this.sources.set(sourceKey, source);
+            this.cited.push(source);
+        }
+        if (!source.citations.some((known) => known.citation_id === citation.citation_id))
+            source.citations.push(citation);
+        return source.marker;
+    }
+
+    /** The markers of one cell's evidence, in order. */
+    markers(row: Row, columnId: string): string {
+        const evidence = row.cells[columnId]?.evidence ?? [];
+        return evidence.map((entry) => this.markerFor(row, entry)).join('');
+    }
+
+    /** The marker of one evidence entry, or nothing when it names no source. */
+    markerFor(row: Row, evidence: Evidence): string {
+        const citation = citationForEvidence(row, evidence);
+        if (!citation) return '';
+        const marker = this.numberFor(citation);
         const href = this.hrefFor(citation);
-        const parts = citationParts(citation);
-        const attrs = [
-            `class="bt-cite bt-cite--${citationTone(citation)}"`,
-            // The tooltip's parts, kept apart so a host can lay them out the
-            // way the app does; `title` is the fallback where none can.
-            parts.name ? `data-cite-name="${escapeHtml(parts.name)}"` : '',
-            parts.locator ? `data-cite-loc="${escapeHtml(parts.locator)}"` : '',
-            parts.preview ? `data-cite-preview="${escapeHtml(parts.preview)}"` : '',
-            parts.action ? `data-cite-action="${escapeHtml(parts.action)}"` : '',
-            parts.title ? `title="${escapeHtml(parts.title)}"` : '',
-            `data-bt-cite="${marker}"`,
-        ]
-            .filter(Boolean)
-            .join(' ');
+        const title = citationTitle(citation);
+        const attrs = `class="bt-cite bt-cite--${citationTone(citation)}"${
+            title ? ` title="${escapeHtml(title)}"` : ''
+        }`;
         return href
             ? `<a ${attrs} href="${escapeHtml(href)}">${marker}</a>`
             : `<span ${attrs}>${marker}</span>`;
     }
+}
+
+/**
+ * The `zotero://` scope a reference names. `library_ref` is the identity and
+ * names its scope without any lookup (`u` → `library`, `g<id>` → `groups/<id>`),
+ * which is what a table moved from another device carries; only a reference
+ * without one falls back to resolving its rowid.
+ */
+export function zoteroScopeOf(
+    ref: { library_id?: number; library_ref?: string },
+    scopeFor: (libraryId: number) => string = USER_LIBRARY_SCOPE
+): string {
+    if (ref.library_ref === 'u') return 'library';
+    const group = /^g([1-9][0-9]*)$/.exec(ref.library_ref ?? '');
+    if (group) return `groups/${group[1]}`;
+    return scopeFor(ref.library_id ?? 0);
 }
 
 /**
@@ -515,172 +493,29 @@ function citationTone(citation: Citation | undefined): 'locator' | 'external' | 
     if (!citation) return 'item';
     const ref = citation.resolved_ref ?? citation.requested_ref;
     if (ref && ref.kind === 'external') return 'external';
-    if (citation.pages?.length || (ref && 'loc' in ref && ref.loc)) return 'locator';
+    if (getCitationPages(citation).length || (ref && 'loc' in ref && ref.loc)) return 'locator';
     return 'item';
 }
 
-/** What the chat's citation card shows, in the pieces it shows them in. */
-function citationParts(citation: Citation | undefined): {
-    name?: string;
-    locator?: string;
-    preview?: string;
-    action?: string;
-    title?: string;
-} {
-    if (!citation) return {};
-    const name = citation.display_name ?? citation.formatted_citation;
-    const locator = citation.pages?.length
-        ? `Page ${citation.pages.join(', ')}`
-        : undefined;
-    // The passage as the app quotes it: trimmed, and in quotation marks so it
-    // reads as something lifted from the source rather than as prose of ours.
-    const raw = citation.preview?.replace(/\s+/g, ' ').trim();
-    const preview = raw ? `"${raw}${/[.!?"']$/.test(raw) ? '' : '…'}"` : undefined;
-    const action = locator
-        ? `Highlights passage on ${locator.toLowerCase()}`
-        : citation.filename
-          ? 'Opens the cited file'
-          : undefined;
-    const title = [name, locator, preview].filter(Boolean).join(' — ');
-    return { name, locator, preview, action, title: title || undefined };
-}
-
-// ---------------------------------------------------------------------------
-// Ranks
-// ---------------------------------------------------------------------------
-
-interface RowRanks {
-    /** Ascending position per sortable column, as `--o<i>`. */
-    asc: number[];
-    /** Descending position per sortable column, as `--p<i>`. */
-    desc: number[];
-}
-
 /**
- * Each row's position in each column, in both directions.
- *
- * This is what lets the checked radio reorder a flex container without script:
- * the ranks are computed once here, and the rule for a column maps them onto
- * `order`. Descending needs its own pass rather than `n - asc`, because empty
- * cells sort last in *either* direction — reversing the ascending order would
- * lead with them, which is how a failed row ends up at the top of a table
- * sorted by citation count.
+ * A marker's tooltip: the source and the pages it cites, as the chat's card
+ * names them. Sentence citations carry their pages in `locations`; the printed
+ * label is what the reader shows, so it is what the tooltip names.
  */
-function sortRanks(rows: Row[], columns: Column[]): Map<string, RowRanks> {
-    const ranks = new Map<string, RowRanks>(
-        rows.map((r) => [r.id, { asc: [], desc: [] }])
+function citationTitle(citation: Citation): string | undefined {
+    const name = citation.display_name ?? citation.formatted_citation;
+    const pages = getCitationPages(citation).map(
+        (page) => citation.page_labels?.[page - 1] ?? String(page)
     );
-    for (const column of columns) {
-        const keyed = rows.map((row, index) => ({
-            row,
-            index,
-            key: cellSortKey(row.cells[column.id]),
-        }));
-        for (const direction of ['asc', 'desc'] as const) {
-            const ordered = keyed.slice().sort((a, b) => {
-                const cmp = compareSortKeys(a.key, b.key, direction);
-                return cmp !== 0 ? cmp : a.index - b.index;
-            });
-            ordered.forEach((entry, position) =>
-                ranks.get(entry.row.id)![direction].push(position)
-            );
-        }
-    }
-    return ranks;
+    const locator = pages.length
+        ? `${pages.length > 1 ? 'Pages' : 'Page'} ${pages.join(', ')}`
+        : undefined;
+    return [name, locator].filter(Boolean).join(' — ') || undefined;
 }
 
 // ---------------------------------------------------------------------------
 // Render
 // ---------------------------------------------------------------------------
-
-interface FilterGroup {
-    column: Column;
-    /** Radio value labels; the first is always "All". */
-    options: string[];
-    /** Class each option matches, aligned with `options` after the first. */
-    classes: string[];
-}
-
-/**
- * The label list each `select` column filters on, keyed by column id.
- *
- * Built once and shared, because the chip in the toolbar and the class on the
- * row are two halves of one index: a chip is `bt-v<col>-<n>` and it hides every
- * row that does not carry that class. Enumerating the labels twice — once over
- * the sorted rows and once over the spec's — silently pairs "Alpha" with
- * "Zeta"'s rows the moment an undeclared select column is sorted.
- *
- * Enumerated over the rows in display order, so an open select's chips read in
- * the order the values appear on screen.
- */
-function selectFilterLabels(
-    spec: TableSpec,
-    sortedRows: Row[]
-): Map<string, string[]> {
-    const byColumn = new Map<string, string[]>();
-    for (const column of spec.columns) {
-        if (column.type !== 'select') continue;
-        byColumn.set(
-            column.id,
-            column.options?.length
-                ? column.options.map((o) => o.label)
-                : selectLabelsInColumn({ ...spec, rows: sortedRows }, column.id)
-        );
-    }
-    return byColumn;
-}
-
-function filterGroups(
-    spec: TableSpec,
-    selectLabels: Map<string, string[]>
-): FilterGroup[] {
-    const groups: FilterGroup[] = [];
-    for (const [index, column] of spec.columns.entries()) {
-        if (!isColumnFilterable(column)) continue;
-
-        if (column.type === 'select') {
-            const labels = selectLabels.get(column.id) ?? [];
-            if (labels.length > 1) {
-                groups.push({
-                    column,
-                    options: ['All', ...labels],
-                    classes: labels.map((_, i) => `bt-v${index}-${i}`),
-                });
-            }
-        }
-
-        if (column.type === 'boolean') {
-            groups.push({
-                column,
-                options: ['All', 'Yes', 'No'],
-                classes: [`bt-v${index}-1`, `bt-v${index}-0`],
-            });
-        }
-    }
-    return groups;
-}
-
-/** The classes a row carries so the filter rules can hide it. */
-function rowFilterClasses(
-    row: Row,
-    spec: TableSpec,
-    selectLabels: Map<string, string[]>
-): string[] {
-    const classes: string[] = [];
-    for (const [index, column] of spec.columns.entries()) {
-        const value = row.cells[column.id]?.value;
-        if (!value) continue;
-        if (value.kind === 'select') {
-            const labels = selectLabels.get(column.id) ?? [];
-            const at = labels.indexOf(value.label);
-            if (at >= 0) classes.push(`bt-v${index}-${at}`);
-        }
-        if (value.kind === 'boolean') {
-            classes.push(`bt-v${index}-${value.value ? 1 : 0}`);
-        }
-    }
-    return classes;
-}
 
 /**
  * The action links for one row, resolved once and handed to both places that
@@ -735,29 +570,51 @@ function renderActions(row: Row, spec: TableSpec, links: TableHtmlLinks | null):
     return parts.join('');
 }
 
+/**
+ * One evidence entry in the expanded row: the table context of a passage cited
+ * from a table (its caption and header rows) in small grey type, then the
+ * quote and its marker.
+ */
+function renderEvidenceLine(evidence: Evidence, marker: string): string {
+    const quote = evidence.quote.replace(/\s+/g, ' ').trim();
+    const context = evidence.context
+        ? `<span class="bt-ev-ctx">${escapeHtml(evidence.context)}</span>`
+        : '';
+    return `<li>${context}“${escapeHtml(quote)}”${marker}</li>`;
+}
+
+/**
+ * A row's expansion: each answer in full with its evidence, any failure, and
+ * every row verb. A cell's reasoning is not part of the page (see the module
+ * comment).
+ */
 function renderDetail(
     row: Row,
     spec: TableSpec,
     links: TableHtmlLinks | null,
     cites: CitationNumbering
 ): string {
-    const renderDetails = (details: NonNullable<Cell['details']>): string =>
+    const renderDetails = (details: { kind: 'text'; text: string } | { kind: 'list'; items: string[] }): string =>
         details.kind === 'text'
-            ? `<div class="bt-d-extra">${cites.render(details.text)}</div>`
+            ? `<div class="bt-d-extra">${escapeHtml(details.text)}</div>`
             : `<ul class="bt-d-list">${details.items
-                  .map((item) => `<li>${cites.render(item)}</li>`)
+                  .map((item) => `<li>${escapeHtml(item)}</li>`)
                   .join('')}</ul>`;
     const fields = spec.columns
-        .filter((column) => {
-            const cell = row.cells[column.id];
-            return !!cell?.value || !!cell?.details || !!cell?.status || !!cell?.outcome || cell?.provenance === 'user';
-        })
+        .filter((column) => !!row.cells[column.id])
         .map((column) => {
             const cell = row.cells[column.id];
-            // A labelled detail (an abstract) and an annotation's passage and
-            // comment are fields of their own, listed by name after their cell.
-            const inline =
-                cell?.details && !cell.details.label ? renderDetails(cell.details) : '';
+            // The answer's evidence sits under it, headed by the cell's
+            // outcome, each passage followed by its marker; an answer read
+            // from a document that cites nothing says so. An annotation's
+            // passage and comment are fields of their own.
+            const evidence = cell?.evidence?.length
+                ? `<div class="bt-d-h">${evidenceHeading(cell)}</div><ul class="bt-d-list">${cell.evidence
+                      .map((entry) => renderEvidenceLine(entry, cites.markerFor(row, entry)))
+                      .join('')}</ul>`
+                : isUncitedAnswer(cell)
+                  ? '<div class="bt-d-uncited">No passage cited</div>'
+                  : '';
             const own = cellExpandedFields(cell)
                 .map(
                     (field) =>
@@ -766,16 +623,15 @@ function renderDetail(
                 .join('');
             return [
                 `<dt>${escapeHtml(column.header)}</dt>`,
-                `<dd>${renderCellValue(cell, column, cites, 'detail')}${inline}</dd>`,
+                `<dd>${renderCellValue(row, cell, column, undefined, 'detail')}${evidence}</dd>`,
                 own,
             ].join('');
         })
         .join('');
 
-    const error =
-        row.status === 'error' && row.error
-            ? `<p class="bt-d-err">${escapeHtml(row.error)}</p>`
-            : '';
+    const error = row.failure
+        ? `<p class="bt-d-err"><strong>${escapeHtml(rowFailureLabel(row.failure))}.</strong> ${escapeHtml(row.failure.message)}</p>`
+        : '';
 
     const actions = renderActions(row, spec, links);
     return `<div class="bt-d">${error}<dl class="bt-d-fields">${fields}</dl>${
@@ -783,28 +639,11 @@ function renderDetail(
     }</div>`;
 }
 
-/**
- * The table as a fragment.
- *
- * `idPrefix` namespaces every form control, because the radios that drive sort
- * and filtering are real elements in the document: two tables sharing a prefix
- * would drive each other.
- */
-export function renderTableHtml(
-    spec: TableSpec,
-    options: TableHtmlOptions = {}
-): RenderedTable {
-    const prefix = options.idPrefix ?? 'bt';
-    const controls = options.controls ?? true;
+/** The table as a fragment of the page: title, grid, codebook, sources, footer. */
+export function renderTableHtml(spec: TableSpec, options: TableHtmlOptions = {}): string {
     const anchor = anchorColumn(spec);
-    const cites = new CitationNumbering(spec.citations, options.citationScopeFor);
+    const cites = new CitationNumbering(options.citationScopeFor);
     const rows = sortRows(spec, spec.sort);
-    const ranks = sortRanks(rows, spec.columns);
-    // Asked once per row, used twice: the anchor cell draws the primary verb
-    // and the expanded detail lists them all.
-    const rowLinks = new Map(
-        rows.map((row) => [row.id, resolveRowLinks(row, options.linksFor)] as const)
-    );
 
     // System columns stay out of the grid unless the table mixes row kinds;
     // a static document has no toggle, so the expanded row is where they show.
@@ -817,103 +656,22 @@ export function renderTableHtml(
         ...gridColumns.map((c) => columnWidth(c, c.id === anchor?.id)),
     ].join(' ');
 
-    // --- the radios that drive everything, before the body so `~` can reach it
-    const sortInputs: string[] = [];
-    if (controls) {
-        spec.columns.forEach((column, i) => {
-            if (!isColumnSortable(column)) return;
-            for (const dir of ['a', 'd'] as const) {
-                const checked =
-                    spec.sort?.column_id === column.id &&
-                    (spec.sort.direction === 'asc') === (dir === 'a');
-                sortInputs.push(
-                    `<input type="radio" name="${prefix}-sort" id="${prefix}-s${dir}${i}" class="bt-ctl"${checked ? ' checked' : ''}>`
-                );
-            }
-        });
-        // A resting state, so the baked DOM order can be restored.
-        sortInputs.push(
-            `<input type="radio" name="${prefix}-sort" id="${prefix}-s0" class="bt-ctl"${spec.sort ? '' : ' checked'}>`
-        );
-    }
-
-    // Every control costs rules, and past the reader's budget it stops theming
-    // the document properly — so a table wide enough to blow it loses its
-    // filters, which are far and away the most expensive, and keeps its sort.
-    const selectLabels = selectFilterLabels(spec, rows);
-    const wanted = controls ? filterGroups(spec, selectLabels) : [];
-    const groups = controls && fitsBudget(spec, prefix, wanted) ? wanted : [];
-    const filterInputs = groups
-        .map((group, g) =>
-            group.options
-                .map(
-                    (_, o) =>
-                        `<input type="radio" name="${prefix}-f${g}" id="${prefix}-f${g}-${o}" class="bt-ctl"${o === 0 ? ' checked' : ''}>`
-                )
-                .join('')
-        )
-        .join('');
-
-    const densityInputs = controls
-        ? ['c', 'z', 't']
-              .map(
-                  (d) =>
-                      `<input type="radio" name="${prefix}-d" id="${prefix}-d${d}" class="bt-ctl"${d === 'z' ? ' checked' : ''}>`
-              )
-              .join('')
-        : '';
-
-    // --- toolbar
-    const densityBar = controls
-        ? `<span class="bt-seg">${[
-              ['c', 'Compact rows'],
-              ['z', 'Cozy rows'],
-              ['t', 'Tall rows'],
-          ]
-              .map(
-                  ([d, label]) =>
-                      `<label class="bt-seg-o bt-seg-${d}" for="${prefix}-d${d}" title="${label}"><i></i></label>`
-              )
-              .join('')}</span>`
-        : '';
-
-    const filterBar = groups
-        .map(
-            (group, g) =>
-                `<span class="bt-fg"><span class="bt-fg-h">${escapeHtml(group.column.header)}</span>${group.options
-                    .map(
-                        (label, o) =>
-                            `<label class="bt-fo bt-fo${g}-${o}" for="${prefix}-f${g}-${o}">${escapeHtml(label)}</label>`
-                    )
-                    .join('')}</span>`
-        )
-        .join('');
-
     const coverage = summarizeCoverage(spec, rows);
     const footerParts = [`${rows.length} ${rows.length === 1 ? 'row' : 'rows'}`];
-    if (coverage.pending > 0) footerParts.push(`${coverage.pending} filling`);
     if (coverage.notReported > 0)
         footerParts.push(`${coverage.notReported} not reported`);
     if (coverage.error > 0) footerParts.push(`${coverage.error} failed`);
+    if (coverage.titleAbstractOnly > 0)
+        footerParts.push(`${coverage.titleAbstractOnly} from title and abstract`);
     if (coverage.errorRows > 0)
         footerParts.push(
-            `${coverage.errorRows} ${coverage.errorRows === 1 ? 'row' : 'rows'} incomplete`
+            `${coverage.errorRows} ${coverage.errorRows === 1 ? 'paper' : 'papers'} could not be read`
         );
 
-    // --- header
     const head = [
         '<div class="bt-head">',
         '<span class="bt-c bt-rail"></span>',
-        // Indexed by position in `spec.columns`, hidden or not: the sort
-        // rules and radios are keyed on that index.
-        ...spec.columns.map((column, i) => {
-            if (hidden.has(column.id) && column.id !== anchor?.id) return '';
-            const sort = controls && isColumnSortable(column);
-            // One control per column, showing the state it would move to next:
-            // both directions at rest, then ascending, then descending.
-            const sorter = sort
-                ? `<span class="bt-sorters"><label class="bt-so bt-so-a" for="${prefix}-sa${i}" title="Sort ascending">${SORT_BOTH_SVG}</label><label class="bt-so bt-so-d" for="${prefix}-sd${i}" title="Sort descending">${CHEVRON_UP_SVG}</label><label class="bt-so bt-so-0" for="${prefix}-s0" title="Clear sort">${CHEVRON_DOWN_SVG}</label></span>`
-                : '';
+        ...gridColumns.map((column) => {
             // Rendered whether or not this column has a question: the block
             // reserves the same two lines in every header, which is what keeps
             // the titles on one baseline instead of each floating above a
@@ -921,43 +679,29 @@ export function renderTableHtml(
             const description = hasQuestions
                 ? `<span class="bt-q">${escapeHtml(column.description ?? '')}</span>`
                 : '';
-            const full = column.description
-                ? ` title="${escapeHtml(column.description)}"`
-                : '';
-            return `<span class="bt-c bt-h bt-h${i} bt-${columnAlign(column)} bt-hk-${column.type}${sort ? ' bt-sortable' : ''}${column.id === anchor?.id ? ' bt-anchor' : ''}"${full}><span class="bt-h-top"><span class="bt-h-label">${escapeHtml(column.header)}</span>${sorter}</span>${description}</span>`;
+            // The question in full, then the categories' definitions.
+            const hover = [column.description, categoriesText(column)].filter(Boolean).join('\n\n');
+            const full = hover ? ` title="${escapeHtml(hover)}"` : '';
+            return `<span class="bt-c bt-h bt-${columnAlign(column)} bt-hk-${column.type}${column.id === anchor?.id ? ' bt-anchor' : ''}"${full}><span class="bt-h-label">${escapeHtml(column.header)}</span>${description}</span>`;
         }),
         '</div>',
-    ]
-        .filter(Boolean)
-        .join('');
+    ].join('');
 
-    // --- rows
     const body = rows
-        .map((row, position) => {
-            const rowRanks = ranks.get(row.id) ?? { asc: [], desc: [] };
-            const orderVars = [
-                ...rowRanks.asc.map((r, i) => `--o${i}:${r}`),
-                ...rowRanks.desc.map((r, i) => `--p${i}:${r}`),
-            ].join(';');
-            const classes = ['bt-r', ...rowFilterClasses(row, spec, selectLabels)];
-            if (row.status === 'error') classes.push('bt-r-err');
-
-            const links = rowLinks.get(row.id) ?? null;
+        .map((row) => {
+            const links = resolveRowLinks(row, options.linksFor);
             const cells = gridColumns
                 .map((column) => {
                     const isAnchor = column.id === anchor?.id;
-                    const sortable =
-                        (spec.capabilities?.sortable ?? true) &&
-                        isColumnSortable(column);
                     // The anchor cell carries the row's primary verb, where the
                     // React grid draws it too.
                     const action = isAnchor ? renderPrimaryAction(row, spec, links) : '';
-                    return `<span class="bt-c bt-${columnAlign(column)} bt-k-${column.type}${sortable ? ' bt-sortable' : ''}${isAnchor ? ' bt-anchor' : ''}" id="${escapeHtml(row.id)}/${escapeHtml(column.id)}">${renderCellValue(row.cells[column.id], column, cites)}${action}</span>`;
+                    return `<span class="bt-c bt-${columnAlign(column)} bt-k-${column.type}${isAnchor ? ' bt-anchor' : ''}" id="${escapeHtml(row.id)}/${escapeHtml(column.id)}">${renderCellValue(row, row.cells[column.id], column, cites)}${action}</span>`;
                 })
                 .join('');
 
             return [
-                `<details class="${classes.join(' ')}" id="${escapeHtml(row.id)}" style="${orderVars}">`,
+                `<details class="bt-r${row.failure ? ' bt-r-err' : ''}" id="${escapeHtml(row.id)}">`,
                 '<summary class="bt-row">',
                 `<span class="bt-c bt-rail">${CHEVRON_SVG}</span>`,
                 cells,
@@ -970,19 +714,13 @@ export function renderTableHtml(
 
     const title = spec.title
         ? `<div class="bt-title-bar"><h1 class="bt-t">${escapeHtml(spec.title)}</h1>${
-              spec.caption ? `<p class="bt-cap">${escapeHtml(spec.caption)}</p>` : ''
+              spec.description ? `<p class="bt-cap">${escapeHtml(spec.description)}</p>` : ''
           }</div>`
         : '';
 
-    const html = [
-        `<section class="bt-wrap" style="--cols:${escapeHtml(template)};--n:${rows.length}">`,
-        sortInputs.join(''),
-        filterInputs,
-        densityInputs,
+    return [
+        `<section class="bt-wrap" style="--cols:${escapeHtml(template)}">`,
         title,
-        controls
-            ? `<div class="bt-toolbar">${filterBar}<span class="bt-space"></span>${densityBar}</div>`
-            : '',
         '<div class="bt-scroll">',
         '<div class="bt-body">',
         head,
@@ -990,128 +728,77 @@ export function renderTableHtml(
         rows.length === 0 ? '<p class="bt-none">No rows.</p>' : '',
         '</div>',
         '</div>',
+        renderCodebook(spec),
         renderBibliography(cites),
         `<footer class="bt-foot">${escapeHtml(footerParts.join(' · '))}</footer>`,
         '</section>',
     ]
         .filter(Boolean)
         .join('\n');
-
-    // Without controls there are no radios to drive them, so the rules would
-    // name ids and a toolbar that are not in the document. The defaults on
-    // `.bt-body` already give the resting density.
-    const dynamic = controls ? renderDynamicCss(spec, prefix, groups) : [];
-    return {
-        html: dynamic.length
-            ? `${html}\n<style>\n${dynamic.join('\n')}\n</style>`
-            : html,
-        cssRuleCount: dynamic.length,
-    };
 }
 
 /**
- * Whether this table's controls fit under the reader's stylesheet budget.
- *
- * The static sheet is a fixed cost; the per-table rules grow with the columns
- * and their categories, and a document over the budget is re-themed by a path
- * that flattens every colour it uses.
+ * How the table's categories were coded: each select column with a defined
+ * category, its question and every category with its definition. Collapsed
+ * under the table, and plain `<details>`, so the document needs no script.
  */
-function fitsBudget(
-    spec: TableSpec,
-    prefix: string,
-    groups: FilterGroup[]
-): boolean {
-    const dynamic = renderDynamicCss(spec, prefix, groups).length;
-    const fixed = countTopLevelCssRules(DOCUMENT_CSS + TABLE_CSS);
-    return fixed + dynamic <= CSS_RULE_BUDGET;
+function renderCodebook(spec: TableSpec): string {
+    const coded = spec.columns.filter(
+        (column) => column.type === 'select' && column.options?.some((option) => option.description),
+    );
+    if (coded.length === 0) return '';
+    const columns = coded
+        .map((column) => {
+            const question = column.description
+                ? `<p class="bt-cb-q">${escapeHtml(column.description)}</p>`
+                : '';
+            const options = (column.options ?? [])
+                .map(
+                    (option) =>
+                        `<li><span class="bt-cb-l">${escapeHtml(option.label)}</span>${
+                            option.description ? ` — ${escapeHtml(option.description)}` : ''
+                        }</li>`,
+                )
+                .join('');
+            return `<div class="bt-cb-c"><h3 class="bt-cb-h">${escapeHtml(column.header)}</h3>${question}<ul class="bt-cb-o">${options}</ul></div>`;
+        })
+        .join('');
+    return `<details class="bt-codebook"><summary class="bt-codebook-h">Codebook</summary>${columns}</details>`;
 }
 
 /**
- * The cited sources, numbered as they were met.
+ * The cited sources, numbered as they were met, one entry per work.
  *
  * A table that carries citations has to carry what they refer to: the markers
  * are only useful next to a list that says what each one is, and the list is
  * what makes a saved table self-contained once it is away from the run that
  * produced it.
+ *
+ * Like the chat's sources list, an entry reveals the work in the library and
+ * offers the file its passages were read from as a separate link; a marker is
+ * what goes to a specific passage.
  */
 function renderBibliography(cites: CitationNumbering): string {
     if (cites.cited.length === 0) return '';
     const items = cites.cited
-        .map(({ marker, citation }) => {
+        .map((source) => {
+            const citation = source.citations[0];
             const label =
                 citation?.formatted_citation ??
                 citation?.display_name ??
                 'Source unavailable';
-            const href = cites.hrefFor(citation);
-            const body = href
-                ? `<a href="${escapeHtml(href)}">${escapeHtml(label)}</a>`
+            const reveal = cites.revealHrefFor(source);
+            const open = cites.openHrefFor(source);
+            const body = reveal
+                ? `<a href="${escapeHtml(reveal)}" title="Show in library">${escapeHtml(label)}</a>`
                 : escapeHtml(label);
-            return `<li id="bt-src-${marker}"><span class="bt-src-n">${marker}</span>${body}</li>`;
+            const openLink = open
+                ? ` <a class="bt-src-open" href="${escapeHtml(open.href)}">${escapeHtml(open.label)}</a>`
+                : '';
+            return `<li id="bt-src-${source.marker}"><span class="bt-src-n">${source.marker}</span><span class="bt-src-b">${body}${openLink}</span></li>`;
         })
         .join('');
     return `<section class="bt-srcs"><h2 class="bt-srcs-h">Sources</h2><ol class="bt-srcs-l">${items}</ol></section>`;
-}
-
-/**
- * The rules that depend on the spec: one per sort direction, one per filter
- * value. They live beside the table rather than in {@link TABLE_CSS} because
- * they name this table's own control ids.
- */
-function renderDynamicCss(
-    spec: TableSpec,
-    prefix: string,
-    groups: FilterGroup[]
-): string[] {
-    const rules: string[] = [];
-
-    spec.columns.forEach((column, i) => {
-        if (!isColumnSortable(column)) return;
-        rules.push(
-            `#${prefix}-sa${i}:checked ~ .bt-scroll .bt-r { order: var(--o${i}); }`,
-            `#${prefix}-sd${i}:checked ~ .bt-scroll .bt-r { order: var(--p${i}); }`,
-            // The active column keeps its control visible without a hover, and
-            // the control offers the next state rather than the current one.
-            `#${prefix}-sa${i}:checked ~ .bt-scroll .bt-h${i} .bt-sorters, #${prefix}-sd${i}:checked ~ .bt-scroll .bt-h${i} .bt-sorters { opacity: 1; color: var(--t-fg); }`,
-            `#${prefix}-sa${i}:checked ~ .bt-scroll .bt-h${i} .bt-so-a, #${prefix}-sd${i}:checked ~ .bt-scroll .bt-h${i} .bt-so-a { display: none; }`,
-            `#${prefix}-sa${i}:checked ~ .bt-scroll .bt-h${i} .bt-so-d { display: inline-flex; }`,
-            `#${prefix}-sd${i}:checked ~ .bt-scroll .bt-h${i} .bt-so-0 { display: inline-flex; }`
-        );
-    });
-
-    groups.forEach((group, g) => {
-        group.classes.forEach((cls, index) => {
-            rules.push(
-                `#${prefix}-f${g}-${index + 1}:checked ~ .bt-scroll .bt-r:not(.${cls}) { display: none; }`,
-                `#${prefix}-f${g}-${index + 1}:checked ~ .bt-toolbar .bt-fo${g}-${index + 1} { background: var(--t-sel); color: var(--t-fg); }`
-            );
-        });
-        rules.push(
-            `#${prefix}-f${g}-0:checked ~ .bt-toolbar .bt-fo${g}-0 { background: var(--t-sel); color: var(--t-fg); }`
-        );
-    });
-
-    for (const [key, lines, titleLines, height] of [
-        ['c', 2, 1, '3.7rem'],
-        ['z', 3, 2, '5.5rem'],
-        ['t', 6, 3, '9.5rem'],
-    ] as const) {
-        rules.push(
-            `#${prefix}-d${key}:checked ~ .bt-scroll .bt-body { --lines: ${lines}; --title-lines: ${titleLines}; --row-h: ${height}; }`,
-            key === 't'
-                ? `#${prefix}-dt:checked ~ .bt-scroll .bt-venue { display: block; }`
-                : '',
-            key === 't'
-                ? `#${prefix}-dt:checked ~ .bt-scroll .bt-authors + .bt-venue::before { content: none; }`
-                : '',
-            // A one-line row has no room for an annotation's comment.
-            key === 'c'
-                ? `#${prefix}-dc:checked ~ .bt-scroll .bt-ann-comment { display: none; }`
-                : '',
-            `#${prefix}-d${key}:checked ~ .bt-toolbar .bt-seg-${key} { background: var(--t-sel); color: var(--t-fg); }`
-        );
-    }
-
-    return rules.filter(Boolean);
 }
 
 /**
@@ -1129,7 +816,6 @@ export const TABLE_CSS = `
   --t-fade: #8b93a1;
   --t-line: #e4e7ec;
   --t-rule: #f0f2f5;
-  --t-sel: #eef1f7;
   --t-accent: #2f5bd7;
   --t-warn: #a04a00;
   display: block;
@@ -1141,70 +827,42 @@ export const TABLE_CSS = `
 .bt-title-bar { padding: 0 0 10px; border-bottom: 1px solid var(--t-line); }
 .bt-t { font-size: 20px; line-height: 1.3; letter-spacing: -0.01em; margin: 0; }
 .bt-cap { font-size: 13px; margin: 3px 0 0; color: var(--t-mut); }
-.bt-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-  padding: 8px 0; border-bottom: 1px solid var(--t-line); }
-.bt-space { flex: 1 1 auto; }
-.bt-fg { display: inline-flex; align-items: center; gap: 3px; }
-.bt-fg-h { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase;
-  color: var(--t-fade); margin-right: 3px; }
-.bt-fo { font-size: 12px; padding: 2px 8px; border-radius: 999px;
-  border: 1px solid var(--t-line); color: var(--t-mut); cursor: pointer; }
-.bt-fo:hover { border-color: var(--t-fade); }
-.bt-seg { display: inline-flex; border: 1px solid var(--t-line); border-radius: 6px; overflow: hidden; }
-.bt-seg-o { display: inline-flex; align-items: center; justify-content: center;
-  width: 26px; height: 20px; cursor: pointer; color: var(--t-fade); }
-.bt-seg-o + .bt-seg-o { border-left: 1px solid var(--t-line); }
-.bt-seg-o i { display: block; width: 12px; height: 11px;
-  background-image: repeating-linear-gradient(to bottom, currentColor 0 1px, transparent 1px var(--step)); }
-.bt-seg-c i { --step: 3px; }
-.bt-seg-z i { --step: 4px; }
-.bt-seg-t i { --step: 6px; }
-.bt-scroll { overflow-x: auto; }
-.bt-body { --lines: 3; --title-lines: 2; --row-h: 5.5rem;
+/* A size container, so an expanded row can be exactly as wide as the visible
+   part of a table that scrolls sideways. The gradients are the usual
+   scroll-shadow pair: a shadow at whichever edge has more columns past it,
+   covered by a scrolling white mask at the edge the table has reached. Overlay
+   scrollbars show nothing at rest, so without them a narrow frame hides its
+   last columns without a hint. */
+.bt-scroll { overflow-x: auto; container-type: inline-size;
+  background:
+    linear-gradient(to right, #fff 40%, rgba(255, 255, 255, 0)) left center / 28px 100% no-repeat local,
+    linear-gradient(to left, #fff 40%, rgba(255, 255, 255, 0)) right center / 28px 100% no-repeat local,
+    radial-gradient(farthest-side at 0 50%, rgba(0, 0, 0, 0.24), rgba(0, 0, 0, 0)) left center / 14px 100% no-repeat scroll,
+    radial-gradient(farthest-side at 100% 50%, rgba(0, 0, 0, 0.24), rgba(0, 0, 0, 0)) right center / 14px 100% no-repeat scroll; }
+/* Answers show up to eight lines in the grid; the expanded row has them whole. */
+.bt-body { --lines: 8; --title-lines: 3;
   display: flex; flex-direction: column; min-width: min-content; }
 .bt-head { display: grid; grid-template-columns: var(--cols); align-items: end;
   position: sticky; top: 0; z-index: 3; background: #fff;
-  border-bottom: 1px solid var(--t-line); order: -1; }
+  border-bottom: 1px solid var(--t-line); }
 .bt-c { padding: 8px 10px; min-width: 0; }
 .bt-h { font-size: 14px; font-weight: 700; color: var(--t-fg); }
-/* No item icon in this rendering, so a reference header needs no indent — the
-   class is here so the two renderers stay comparable at a glance. */
-.bt-hk-reference .bt-h-label { padding-left: 0; }
-/* Full width, so the label lines up on the same edge the values do. */
-.bt-h-top { position: relative; display: flex; align-items: center; gap: 3px;
-  width: 100%; min-width: 0; }
-.bt-end .bt-h-top { justify-content: flex-end; }
-.bt-center .bt-h-top { justify-content: center; }
 .bt-center { text-align: center; }
-.bt-h-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Wraps to a second line before it truncates: in a table that fits the frame
+   the columns are narrow, and a header cut to "Research qu…" names nothing. */
+.bt-h-label { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; overflow-wrap: anywhere; }
 /* A fixed two-line box, empty or not, so every header title shares a baseline.
    The full question is on the header's title attribute. */
 .bt-q { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
   overflow: hidden; height: 2.6em; font-size: 11px; font-weight: 400;
   line-height: 1.3; color: var(--t-fade); max-width: 22rem; }
-/* Out of flow: in it the sorters kept their width while invisible, which
-   pushed a right-aligned header label two controls' width in from the edge its
-   values line up on. Absolute, they land in the cell's own padding, at the same
-   place in every column. */
-/* One control, beside its own label. Pinned to the cell's edge it drifted far
-   from short headers and landed on top of narrow ones. Only the label for the
-   next state shows; the values of a sortable column leave the same gutter, so
-   the label still lines up with them. */
-.bt-sorters { flex: 0 0 15px; display: inline-flex; justify-content: center;
-  opacity: 0; transition: opacity 100ms ease; }
-.bt-so { display: none; }
-.bt-so-a { display: inline-flex; }
-.bt-c.bt-sortable.bt-end:not(.bt-h) { padding-right: 25px; }
-.bt-c.bt-sortable.bt-center:not(.bt-h) { padding-right: 25px; padding-left: 10px; }
-.bt-h:hover .bt-sorters, .bt-h:focus-within .bt-sorters { opacity: 1; }
-.bt-so { cursor: pointer; color: var(--t-fade); padding: 0; }
-.bt-so:hover { color: var(--t-fg); }
 .bt-gl { width: 11px; height: 11px; display: block; }
-.bt-r { display: flex; flex-direction: column; border-bottom: 1px solid var(--t-rule); }
+.bt-r { display: block; border-bottom: 1px solid var(--t-rule); }
 .bt-r > summary::marker { content: ''; }
 .bt-r > summary::-webkit-details-marker { display: none; }
 .bt-row { display: grid; grid-template-columns: var(--cols); align-items: start;
-  min-height: var(--row-h); list-style: none; cursor: pointer; }
+  list-style: none; cursor: pointer; }
 .bt-row:hover { background: #fafbfc; }
 /* Aligned to the first line of the row rather than to the middle of the cell,
    so the glyph sits level with the title beside it. */
@@ -1214,26 +872,23 @@ export const TABLE_CSS = `
 .bt-r[open] > .bt-row .bt-chev { transform: rotate(90deg); }
 .bt-start { text-align: left; }
 .bt-end { text-align: right; }
-.bt-num { font-variant-numeric: tabular-nums; white-space: nowrap; }
-.bt-unit { font-size: 11px; color: var(--t-mut); margin-left: 2px; }
+/* A long display ellipsises to one line in the grid, whole in its tooltip, and
+   wraps in full in the expanded row. */
+.bt-num { display: inline-block; max-width: 100%; vertical-align: top; overflow: hidden;
+  text-overflow: ellipsis; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.bt-d .bt-num { display: inline; white-space: normal; }
 .bt-clamp { display: -webkit-box; -webkit-line-clamp: var(--lines);
   -webkit-box-orient: vertical; overflow: hidden; color: var(--t-mut); }
 .bt-ref { display: block; min-width: 0; }
 .bt-title { display: -webkit-box; -webkit-line-clamp: var(--title-lines);
   -webkit-box-orient: vertical; overflow: hidden; font-weight: 550; }
-/* Closer to the title than it was: the attribution is part of the row, not a
-   footnote under it. */
 .bt-sub { display: block; font-size: 13px; color: var(--t-fade);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* Italic, because it is a publication name and not another author. The
-   separator travels with the venue, so it goes when the venue takes its own
-   line at the tallest row height and in the expanded row. */
-.bt-venue { font-style: italic; }
-.bt-authors + .bt-venue::before { content: ' · '; font-style: normal; }
-.bt-d .bt-venue { display: block; }
-.bt-d .bt-authors + .bt-venue::before { content: none; }
+/* Italic, because it is a publication name and not another author; on a line
+   of its own under the authors. */
+.bt-venue { display: block; font-style: italic; }
 /* An annotation's passage is a quotation, marked by a bar in the colour it has
-   in the reader; the comment follows in plain type, except in one-line rows. */
+   in the reader; the comment follows in plain type. */
 .bt-ann-quote { padding-left: 6px; border-left: 3px solid var(--t-line); font-weight: 400; }
 .bt-ann-comment { display: block; font-size: 13px; color: var(--t-mut); white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis; }
@@ -1246,13 +901,16 @@ export const TABLE_CSS = `
   display: -webkit-box; -webkit-line-clamp: var(--lines); -webkit-box-orient: vertical;
   overflow: hidden; }
 .bt-act { display: inline-flex; color: var(--t-fade); text-decoration: none; padding: 2px 3px; }
-/* The primary verb sits at the edge of the anchor cell, the one that never
-   scrolls away; the expanded row lists every verb. */
+/* The primary verb sits at the edge of the anchor cell; the expanded row lists
+   every verb. */
 .bt-anchor { position: relative; padding-right: 30px; }
 .bt-ref-act { position: absolute; top: 6px; right: 6px; }
 .bt-act:hover { color: var(--t-accent); }
 .bt-act .bt-gl { width: 14px; height: 14px; }
-.bt-d { padding: 4px 12px 14px 40px; background: #fbfcfd; }
+/* Pinned to the visible width: the row it expands may be wider than the
+   frame, and its text should not need a sideways scroll to read. */
+.bt-d { position: sticky; left: 0; box-sizing: border-box; width: 100cqi;
+  padding: 4px 12px 14px 40px; background: #fbfcfd; }
 .bt-d-fields { display: grid; grid-template-columns: 8rem minmax(0, 1fr); gap: 5px 14px; margin: 0; }
 .bt-d-fields dt { font-size: 12px; color: var(--t-fade); }
 .bt-d-fields dd { margin: 0; min-width: 0; }
@@ -1260,19 +918,19 @@ export const TABLE_CSS = `
 .bt-d .bt-sub { white-space: normal; }
 .bt-d-extra { margin-top: 4px; }
 .bt-d-list { margin: 4px 0 0; padding-left: 18px; }
+.bt-d-h { margin-top: 4px; font-size: 12px; color: var(--t-fade); }
+.bt-d-uncited { margin-top: 4px; font-size: 12px; color: var(--t-fade); }
+.bt-ev-ctx { display: block; font-size: 12px; color: var(--t-fade); }
 .bt-d-actions { margin-top: 10px; }
-/* The citation marker, as the chat renders it: a small raised number that says
-   where a claim came from and opens the cited page. */
 /* The citation marker, coloured the way the app colours it: green where it
    lands on a passage, blue for an external reference, grey for a plain item. */
 .bt-cite { display: inline-block; min-width: 15px; padding: 0 4px; margin-left: 2px;
   border: 1px solid transparent; border-radius: 4px;
   font-size: 10px; line-height: 14px; font-weight: 600; text-align: center;
-  text-decoration: none; vertical-align: 1px; cursor: pointer; }
+  text-decoration: none; vertical-align: 1px; }
 .bt-cite--item { background: #f1f3f5; border-color: #e3e6ea; color: var(--t-mut); }
 .bt-cite--locator { background: #e7f6ec; border-color: #cbe9d5; color: #1f7a3d; }
 .bt-cite--external { background: #e8f1fd; border-color: #cfe0f7; color: #1a5aa8; }
-.bt-cite:hover { filter: brightness(0.95); }
 .bt-srcs { padding: 18px 0 0; border-top: 1px solid var(--t-line); margin-top: 14px; }
 .bt-srcs-h { font-size: 12px; text-transform: uppercase; letter-spacing: 0.07em;
   color: var(--t-fade); margin: 0 0 8px; font-weight: 650; }
@@ -1282,10 +940,19 @@ export const TABLE_CSS = `
   font-variant-numeric: tabular-nums; }
 .bt-srcs-l a { color: var(--t-accent); text-decoration: none; }
 .bt-srcs-l a:hover { text-decoration: underline; }
+.bt-srcs-l .bt-src-open { margin-left: 8px; font-size: 12px; white-space: nowrap; color: var(--t-mut); }
+.bt-srcs-l .bt-src-open:hover { color: var(--t-accent); }
+.bt-codebook { padding: 14px 0 0; border-top: 1px solid var(--t-line); margin-top: 14px; font-size: 13px; }
+.bt-codebook-h { cursor: pointer; font-size: 12px; text-transform: uppercase; letter-spacing: 0.07em;
+  color: var(--t-fade); font-weight: 650; }
+.bt-cb-c { margin: 10px 0 0; }
+.bt-cb-h { font-size: 13px; font-weight: 650; margin: 0; }
+.bt-cb-q { margin: 2px 0 0; color: var(--t-mut); }
+.bt-cb-o { margin: 4px 0 0; padding-left: 18px; }
+.bt-cb-l { font-weight: 600; }
 .bt-foot { padding: 8px 0 0; font-size: 12px; color: var(--t-fade); }
 .bt-none { padding: 28px 0; text-align: center; color: var(--t-fade); }
 .bt-wrap .bt-empty { color: var(--t-fade); }
-.bt-wrap .bt-pending { color: var(--t-fade); font-style: italic; }
 .bt-wrap .bt-err { color: var(--t-warn); }
 .bt-wrap .bt-d-err { color: var(--t-warn); margin: 0 0 8px; font-size: 13px; }
 .bt-wrap .bt-yes { color: #1f7a3d; }
@@ -1304,41 +971,29 @@ export const TABLE_CSS = `
 // Document
 // ---------------------------------------------------------------------------
 
-/** Id of the `<script>` element that carries the embedded spec. */
-export const TABLE_SPEC_SCRIPT_ID = 'beaver-table-spec';
+/** Root attribute naming the SHA-256 of the spec the snapshot renders. */
+export const TABLE_SPEC_HASH_ATTRIBUTE = 'data-beaver-spec-sha256';
+
+/** Root attribute naming the SHA-256 of the `table.json` the snapshot was rendered from. */
+export const TABLE_FILE_HASH_ATTRIBUTE = 'data-beaver-file-sha256';
 
 /** Where the notice below sends a reader who does not have the plugin. */
 export const BEAVER_HOME_URL = 'https://www.beaverapp.ai';
-
-/**
- * The mark a host sets on `<html>` while it is enhancing this document, which
- * is what stands the notice down.
- *
- * Set by `view/enhanceTableDocument.ts` on the live DOM and removed when that
- * enhancement is disposed. The stored file never carries it: the file has to be
- * the un-enhanced document, or a viewer without the plugin would be told the
- * plugin was there.
- */
-export const BEAVER_ACTIVE_ATTRIBUTE = 'data-beaver-active';
 
 /** The checkbox that dismisses the notice; one notice per document, so one id. */
 const NOTICE_DISMISS_ID = 'beaver-table-notice-dismiss';
 
 /**
- * The notice a viewer without the plugin gets.
- *
- * The document is deliberately readable anywhere — it sorts, filters and
- * expands with no script — but the citation cards, the links into the library
- * and every kind of editing do need the plugin, and without it they are
- * silently inert (Zotero's snapshot reader turns a `zotero:` link into a hash
- * change and nothing else). The notice does not enumerate that: it says one
- * thing, so that it can be read in a glance and stay true as the table gains
+ * The notice every viewer of the page gets. Zotero with Beaver shows the table
+ * in the Beaver tab instead, so whoever reads the page almost always lacks the
+ * plugin. The page reads and expands anywhere, but the table's own surface
+ * (verification in the reader, editing, filling) needs Beaver, and Zotero's
+ * snapshot reader leaves the page's `zotero:` links inert. The notice says one
+ * thing, so that it can be read at a glance and stay true as the table gains
  * features.
  *
- * It is dismissible with the same checkbox-and-label the rest of the document's
- * controls use, and it hides itself when {@link BEAVER_ACTIVE_ATTRIBUTE} is
- * present. Emitted only by {@link buildTableDocument}: a fragment embedded in a
- * larger document is that document's business, not this one's.
+ * It is dismissible with a checkbox and its label, which needs no script.
+ * Emitted only by {@link buildTableDocument}.
  */
 function renderPluginNotice(): string {
     return [
@@ -1355,49 +1010,29 @@ function renderPluginNotice(): string {
 }
 
 /**
- * The spec as it is embedded in the document.
+ * The complete page.
  *
- * Compact on purpose: the file already carries the rendered table, so the JSON
- * is machine state, and a large table would pay for every space twice — on disk
- * and in whatever later uploads the file.
- *
- * `<` is written as its JSON escape, which is what keeps the data from ending
- * the element it lives in: a cell containing `</script>` or `<!--` would
- * otherwise truncate the table's own state. `\u003c` decodes back to `<` under
- * `JSON.parse`, so the escape is lossless. Nothing else is escaped, and nothing
- * else should be: the reader below does `JSON.parse` and no unescaping, so any
- * other scheme would silently corrupt the values it was meant to protect.
- */
-function serializeSpec(spec: TableSpec): string {
-    return JSON.stringify(spec).replace(/</g, '\\u003c');
-}
-
-/**
- * A complete document, for a tab or a saved snapshot.
- *
- * The document is round-trippable: it embeds the spec it was rendered from, so
- * the stored `.html` is both a table anyone can read in a browser and the only
- * copy of the table's state Beaver needs to open it again. See
- * {@link parseTableDocument} for the way back in.
+ * The page is a rendering, not the table: `table.json` is the table. The root
+ * names the hash of the spec it shows and the digest of the whole `table.json`
+ * it was rendered from: the first tells a current page from one a render
+ * behind, and the second makes every commit change the file Zotero syncs by,
+ * even one that leaves the spec as it was.
  */
 export function buildTableDocument(
     spec: TableSpec,
     options: TableHtmlOptions = {}
 ): RenderedTable {
-    const table = renderTableHtml(spec, options);
-    // The file is the only copy of its state, so it says which format wrote it.
-    // A spec that already names a version keeps it — as do `key` and `version`,
-    // which belong to whatever stores the file rather than to the renderer.
-    const stored: TableSpec =
-        spec.spec_version == null
-            ? { ...spec, spec_version: TABLE_SPEC_VERSION }
-            : spec;
+    const digest = (attribute: string, value: string | undefined) =>
+        value && /^[a-f0-9]{64}$/.test(value) ? ` ${attribute}="${value}"` : '';
+    const hash = digest(TABLE_SPEC_HASH_ATTRIBUTE, options.specSha256)
+        + digest(TABLE_FILE_HASH_ATTRIBUTE, options.fileSha256);
 
     const html = [
         '<!DOCTYPE html>',
-        // Marks the document as one of ours, so a viewer can recognise it (and
-        // read the format version off it) without parsing the spec.
-        `<html lang="en" data-beaver-table="${escapeHtml(String(stored.spec_version))}">`,
+        // Marks the document as one of ours, and the format it renders, so a
+        // viewer can recognise it without reading anything else. A spec built
+        // in this process names no version and is this build's format.
+        `<html lang="en" data-beaver-table="${escapeHtml(String(spec.spec_version ?? TABLE_SPEC_VERSION))}"${hash}>`,
         '<head>',
         '<meta charset="utf-8">',
         `<title>${escapeHtml(spec.title ?? 'Table')}</title>`,
@@ -1406,92 +1041,27 @@ export function buildTableDocument(
         '<body>',
         // Above the table because that is where it is read, and part of every
         // render so that re-rendering the same spec still produces the same
-        // bytes — the notice is a constant, not a decision made per file.
+        // bytes.
         renderPluginNotice(),
-        table.html,
-        // Last in the body, after the table, and it has to stay there: snapshot
-        // annotations anchor by character offset into the document's text, so
-        // anything that could count as text must come after the content it
-        // would otherwise displace. Tidying this into <head> — or anywhere
-        // above the table — would silently break every annotation on every
-        // stored table.
-        `<script type="application/json" id="${TABLE_SPEC_SCRIPT_ID}">${serializeSpec(stored)}</script>`,
-        ...(options.storeState
-            ? [
-                  `<script type="application/json" id="${TABLE_STORE_SCRIPT_ID}">${JSON.stringify(options.storeState).replace(/</g, '\\u003c')}</script>`,
-              ]
-            : []),
+        renderTableHtml(spec, options),
         '</body>',
         '</html>',
         '',
     ].join('\n');
 
-    return {
-        html,
-        cssRuleCount:
-            table.cssRuleCount + countTopLevelCssRules(DOCUMENT_CSS + TABLE_CSS),
-    };
+    return { html, cssRuleCount: countTopLevelCssRules(DOCUMENT_CSS + TABLE_CSS) };
 }
 
-export type ParsedTableDocument =
-    | { ok: true; spec: TableSpec }
-    | {
-          ok: false;
-          reason: 'no_spec' | 'unsupported_version' | 'invalid';
-          detail?: string;
-          specVersion?: number;
-      };
+/** The spec hash a rendered snapshot names, or null for one that names none. */
+export function renderedSpecHash(html: string): string | null {
+    const match = new RegExp(`<html\\b[^>]*\\b${TABLE_SPEC_HASH_ATTRIBUTE}="([a-f0-9]{64})"`).exec(html);
+    return match ? match[1] : null;
+}
 
-/**
- * The embedded spec, located by id. The document is our own deterministic
- * output, so the open tag is exact and the JSON body cannot contain `</script`
- * (see {@link serializeSpec}) — which is what makes the lazy match safe.
- */
-const SPEC_SCRIPT_RE = new RegExp(
-    `<script\\b[^>]*\\bid="${TABLE_SPEC_SCRIPT_ID}"[^>]*>([\\s\\S]*?)</script\\s*>`,
-    'i'
-);
-
-/**
- * Reads a built document back into the spec it was rendered from.
- *
- * This is not a convenience. It is the proof that the stored file is a faithful
- * representation of the table rather than a picture of one: everything the
- * table knows about itself survives a save and a load, so a snapshot can be
- * re-opened, re-sorted, extended with a column and written back without the
- * round trip losing anything.
- *
- * Deliberately without `DOMParser`: this module has to stay usable from the
- * esbuild bundle and from a plain Node unit test, and neither reliably has one.
- * The version guard is {@link readSpec}'s, and `unsupported_version` survives
- * with the version it read — a caller must be able to open a newer file
- * read-only instead of writing back something lossy.
- */
-export function parseTableDocument(html: string): ParsedTableDocument {
-    const match = SPEC_SCRIPT_RE.exec(html);
-    if (!match) return { ok: false, reason: 'no_spec' };
-
-    let raw: unknown;
-    try {
-        raw = JSON.parse(match[1]);
-    } catch (error) {
-        return {
-            ok: false,
-            reason: 'invalid',
-            detail: `embedded spec is not valid JSON: ${String(error)}`,
-        };
-    }
-
-    const read = readSpec(raw);
-    if (read.ok) return { ok: true, spec: read.spec };
-    if (read.reason === 'unsupported_version') {
-        return {
-            ok: false,
-            reason: 'unsupported_version',
-            specVersion: read.specVersion,
-        };
-    }
-    return { ok: false, reason: 'invalid', detail: read.detail };
+/** The `table.json` digest a rendered snapshot names on its root element, or null. */
+export function renderedFileHash(html: string): string | null {
+    const match = new RegExp(`<html\\b[^>]*\\b${TABLE_FILE_HASH_ATTRIBUTE}="([a-f0-9]{64})"`).exec(html);
+    return match ? match[1] : null;
 }
 
 /**
@@ -1503,15 +1073,12 @@ const DOCUMENT_CSS = `
 html { font-size: 14px; }
 body { margin: 0; padding: 20px 24px 32px; background: #fff; color: #16181d;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-/* The "needs Beaver" notice. Its meaning is carried by the border and the text
-   rather than by the background, so it survives the reader's static theme.
-   The delay is what keeps it from flashing on every open in a Zotero that
-   *does* have the plugin: the host sets the attribute below once the snapshot
-   frame has loaded, which is a moment after the document is first painted. */
+/* The "made with Beaver" notice. Its meaning is carried by the border and the
+   text rather than by the background, so it survives the reader's static theme. */
 .bt-nb { display: flex; align-items: baseline; gap: 10px; margin: 0 0 14px;
   padding: 8px 12px; font-size: 12px; line-height: 1.45; color: #5b6472;
   border: 1px solid #dbe2f0; border-left: 3px solid #2f5bd7; border-radius: 6px;
-  background: #f6f8fd; animation: bt-nb-in 1ms linear 800ms both; }
+  background: #f6f8fd; }
 .bt-nb strong { color: #16181d; font-weight: 600; }
 .bt-nb-b { flex: 1 1 auto; }
 .bt-nb-a { flex: 0 0 auto; white-space: nowrap; font-weight: 600;
@@ -1520,6 +1087,4 @@ body { margin: 0; padding: 20px 24px 32px; background: #fff; color: #16181d;
 .bt-nb-x { flex: 0 0 auto; cursor: pointer; color: #8b93a1; font-size: 15px; line-height: 1; }
 .bt-nb-x:hover { color: #5b6472; }
 #${NOTICE_DISMISS_ID}:checked ~ .bt-nb { display: none; }
-html[${BEAVER_ACTIVE_ATTRIBUTE}] .bt-nb { display: none; }
-@keyframes bt-nb-in { from { opacity: 0; } to { opacity: 1; } }
 `.trim();

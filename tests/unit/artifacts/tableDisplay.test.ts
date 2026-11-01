@@ -77,6 +77,7 @@ describe("current table display and snapshot navigation", () => {
             title: "Renamed in Zotero",
             rows: 1,
             columns: 1,
+            contentColumns: 1,
         });
         expect(deps.read).toHaveBeenCalledTimes(1);
     });
@@ -102,12 +103,13 @@ describe("current table display and snapshot navigation", () => {
             "Table provider unavailable.",
         );
     });
-    it("routes Open through the instance snapshot API and preserves errors", async () => {
-        expect(await openStoredTable("u-ABCDEFGH")).toEqual({ ok: true });
-        expect(deps.open).toHaveBeenCalledWith({
-            libraryID: 1,
-            key: "ABCDEFGH",
-        });
+    it("routes Open through the instance table API with the origin window and preserves errors", async () => {
+        const origin = { closed: false } as unknown as Window;
+        expect(await openStoredTable("u-ABCDEFGH", origin)).toEqual({ ok: true });
+        expect(deps.open).toHaveBeenCalledWith(
+            { libraryID: 1, key: "ABCDEFGH" },
+            { window: origin },
+        );
         deps.open.mockResolvedValueOnce({ error: "Missing file" });
         expect(await openStoredTable("u-ABCDEFGH")).toEqual({
             error: "Missing file",
@@ -138,5 +140,5 @@ it("resolves group display and Open to the same local snapshot identity", async 
     });
     expect(deps.lookup).toHaveBeenCalledWith(7, "ABCDEFGH");
     await openStoredTable("g6073928-ABCDEFGH");
-    expect(deps.open).toHaveBeenCalledWith({ libraryID: 7, key: "ABCDEFGH" });
+    expect(deps.open).toHaveBeenCalledWith({ libraryID: 7, key: "ABCDEFGH" }, { window: null });
 });

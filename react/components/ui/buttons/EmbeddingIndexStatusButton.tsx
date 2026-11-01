@@ -15,7 +15,6 @@ import { logger } from "@beaver/agent-core/platform/logger";
 
 /**
  * Button that shows embedding index status and allows manual reindex.
- * Similar to DatabaseStatusButton but for embedding/semantic search index.
  * 
  * Shows:
  * - Spinning icon when indexing

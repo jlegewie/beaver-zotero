@@ -1,4 +1,4 @@
-import { openReader } from '../../runtime/navigation';
+import { AttachmentFileUnavailableError, openReader } from '../../runtime/navigation';
 import { BEAVER_CITATION_ANNOTATION_AUTHOR } from "../../../src/constants/annotations";
 import { logger } from "@beaver/agent-core/platform/logger";
 import { getBestEpubAttachmentAsync } from "../../../src/utils/zoteroItemHelpers";
@@ -66,7 +66,13 @@ export async function navigateToEpubCitation(
     let reader = await getCurrentReaderAndWaitForView(undefined, false);
     if (!reader || reader.itemID !== attachment.id) {
         logger(`navigateToEpubCitation: Opening EPUB ${attachment.id} in reader`);
-        const opened = await openReader(attachment.id);
+        let opened: any;
+        try {
+            opened = await openReader(attachment.id);
+        } catch (error) {
+            if (error instanceof AttachmentFileUnavailableError) return "failed";
+            throw error;
+        }
         reader = await waitForReaderForItem(attachment.id, opened);
     }
     if (!reader) return "failed";

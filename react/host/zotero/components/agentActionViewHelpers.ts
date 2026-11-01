@@ -1,3 +1,4 @@
+import { withMergeChoicesForDisplay } from '../../../atoms/mergeItemsChoices';
 import { getHostWindow } from '../../../runtime/windowRuntime';
 import React from 'react';
 import { AgentAction, isCreateAnnotationsAgentAction } from '../../../agents/agentActions';
@@ -13,6 +14,7 @@ import {
     FolderDetailIcon,
     TaskDoneIcon,
     TagIcon,
+    BookCopyIcon,
     HighlighterIcon,
     DocumentValidationIcon,
     DollarCircleIcon,
@@ -21,7 +23,8 @@ import {
     EditIcon,
 } from '../../../components/icons/icons';
 import { truncateText } from '@beaver/agent-ui/utils/stringUtils';
-import { countEditAnnotationTargets } from './reviewChangeRows';
+import { countEditAnnotationTargets, isUnconfirmedAction } from './reviewChangeRows';
+import { textAnnotationStyle } from '@beaver/agent-core/types/agentActions/createAnnotations';
 
 export type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error';
 
@@ -151,6 +154,60 @@ export const STATUS_CONFIGS: Record<ActionStatus | 'awaiting', StatusConfig> = {
     },
 };
 
+/**
+ * How a card shows an action Zotero received but never reported on (see
+ * `isUnconfirmedAction`). The change may have landed, so the card offers
+ * neither applying it again nor retrying it; its message asks the user to
+ * check the library.
+ */
+const UNCONFIRMED_STATUS_CONFIG: StatusConfig = {
+    icon: AlertIcon,
+    label: 'Unconfirmed',
+    iconClassName: 'font-color-orange',
+    showApply: false,
+    showReject: false,
+    showUndo: false,
+    showRetry: false,
+};
+
+/**
+ * The card config for `status`, with an unconfirmed outcome in place of a
+ * failure when every failed action is unconfirmed. A batch that also holds a
+ * known failure keeps Retry, which leaves its unconfirmed actions alone.
+ */
+export function getStatusConfig(status: ActionStatus | 'awaiting', actions: AgentAction[]): StatusConfig {
+    const failed = actions.filter((action) => action.status === 'error');
+    if (status === 'error' && failed.length > 0 && failed.every(isUnconfirmedAction)) {
+        return UNCONFIRMED_STATUS_CONFIG;
+    }
+    return STATUS_CONFIGS[status];
+}
+
+/** For an unconfirmed action stored without the server's explanation. */
+const UNCONFIRMED_FALLBACK_MESSAGE =
+    'Zotero did not report whether this change was applied. Check the item in Zotero before asking for it again.';
+
+/**
+ * What a card says about its unconfirmed actions (see `isUnconfirmedAction`).
+ * They offer nothing to click, so this is all that tells the user to check
+ * the library. The server's explanation, which names the cause, when every
+ * action on the card is unconfirmed for the same one; otherwise a count. A
+ * card that can also retry a known failure says the retry leaves them out.
+ * Null when there are none.
+ */
+export function unconfirmedCaption(actions: AgentAction[]): string | null {
+    const unconfirmed = actions.filter(isUnconfirmedAction);
+    if (unconfirmed.length === 0) return null;
+    const messages = new Set(unconfirmed.map((action) => action.error_message || UNCONFIRMED_FALLBACK_MESSAGE));
+    const count = unconfirmed.length;
+    const caption = messages.size === 1 && count === actions.length
+        ? [...messages][0]
+        : `Zotero did not report whether ${count === 1 ? 'one of these changes was' : `${count} of these changes were`} applied. `
+            + `Check ${count === 1 ? 'the item' : 'the items'} in Zotero before asking again.`;
+    const retryable = actions.some((action) => action.status === 'error' && !isUnconfirmedAction(action));
+    return retryable ? `${caption} Retrying leaves ${count === 1 ? 'it' : 'them'} out.` : caption;
+}
+
 /** Tool-specific icon shared by Zotero agent-action review surfaces. */
 export function getAgentActionToolIcon(toolName: string): React.FC<React.SVGProps<SVGSVGElement>> {
     if (toolName === 'edit_metadata' || toolName === 'edit_item') return PropertyEditIcon;
@@ -161,6 +218,7 @@ export function getAgentActionToolIcon(toolName: string): React.FC<React.SVGProp
     if (toolName === 'edit_annotations' || toolName === 'delete_annotations') return HighlighterIcon;
     if (toolName === 'create_collection') return FolderAddIcon;
     if (toolName === 'organize_items') return TaskDoneIcon;
+    if (toolName === 'merge_items') return BookCopyIcon;
     if (toolName === 'manage_tags') return TagIcon;
     if (toolName === 'manage_collections') return FolderDetailIcon;
     if (toolName === 'create_items' || toolName === 'create_item') return DocumentValidationIcon;
@@ -253,9 +311,10 @@ export function getActionLabel(
             return completed ? 'Created Note' : 'Create Note';
         case 'create_highlight_annotations': {
             const count = actionData?.items?.length ?? 0;
+            const noun = textAnnotationStyle(actionData?.style) === 'underline' ? 'Underline' : 'Highlight';
             return count > 1
-                ? `${count} Highlights`
-                : 'Highlight';
+                ? `${count} ${noun}s`
+                : noun;
         }
         case 'create_note_annotations': {
             const count = actionData?.items?.length ?? 0;
@@ -280,12 +339,15 @@ export function getActionLabel(
                 : `${verb} Annotation`;
         }
         case 'create_item':
+        case 'import_item':
         case 'create_items':
             return completed ? 'Imported' : 'Import';
         case 'create_collection':
             return completed ? 'Created Collection' : 'Create Collection';
         case 'organize_items':
             return completed ? 'Organized' : 'Organize';
+        case 'merge_items':
+            return completed ? 'Merged Duplicates' : 'Merge Duplicates';
         case 'manage_tags':
             return 'Tag';
         case 'manage_collections':
@@ -333,6 +395,8 @@ export function getActionTitle(
                 ? itemTitle
                 : `${itemCount} item${itemCount !== 1 ? 's' : ''}`;
         }
+        case 'merge_items':
+            return actionData?.preview?.members?.find((m: any) => m.item_id === actionData.master_item_id)?.title ?? null;
         case 'manage_tags': {
             const name = actionData?.name;
             const op = actionData?.action;
@@ -370,11 +434,24 @@ export function getActionTitle(
             return 'Confirm External Search';
         }
         case 'create_item':
+        case 'import_item':
         case 'create_items': {
+            if (!actions || actions.length === 0) {
+                // v2 approval: the actions carry the items; the request carries
+                // their count and the first titles.
+                const titles = Array.isArray(actionData?.titles) ? actionData.titles : [];
+                if (actionData?.items_count === 1 && typeof titles[0] === 'string' && titles[0]) {
+                    return truncateText(titles[0], 60);
+                }
+                if (typeof actionData?.items_count === 'number' && actionData.items_count > 1) {
+                    return `${actionData.items_count} Items`;
+                }
+            }
             // For create_item, get title from the item data
             // Check actions first, then fall back to actionData (for pending approvals where actions may be empty)
             if (actions && actions.length === 1) {
-                const item = actions[0].proposed_data?.item ?? actionData?.item;
+                const proposed = actions[0].proposed_data;
+                const item = proposed?.item ?? proposed?.pending_resolution?.fallback_item ?? actionData?.item;
                 if (item?.title) {
                     return truncateText(item.title, 70);
                 }
@@ -420,7 +497,7 @@ export function buildPreviewData(
     if (action) {
         return {
             actionType: action.action_type,
-            actionData: action.proposed_data,
+            actionData: withMergeChoicesForDisplay(action).proposed_data,
             currentValue: undefined, // We don't have this for stored actions
             resultData: action.result_data,
             errorMessage: action.error_message,

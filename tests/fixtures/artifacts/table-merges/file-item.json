@@ -1,0 +1,149 @@
+{
+    "name": "a file and an item stay apart",
+    "existing": [],
+    "incoming": [
+        {
+            "row": {
+                "id": "r1",
+                "ref": {
+                    "kind": "file",
+                    "ext_key": "EXT1",
+                    "label": "notes.pdf"
+                },
+                "documents": [
+                    "ext-EXT1"
+                ],
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "notes.pdf",
+                            "title": "notes.pdf",
+                            "item_type": "journalArticle"
+                        }
+                    }
+                },
+                "in_library": false,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
+            }
+        },
+        {
+            "row": {
+                "id": "r2",
+                "ref": {
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "AAA"
+                },
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Sampling hard-to-reach groups online",
+                            "title": "Sampling hard-to-reach groups online",
+                            "item_type": "journalArticle"
+                        }
+                    },
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "date",
+                            "value": "2020"
+                        }
+                    }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
+            }
+        }
+    ],
+    "after": {
+        "rows": [
+            {
+                "id": "r1",
+                "ref": {
+                    "kind": "file",
+                    "ext_key": "EXT1",
+                    "label": "notes.pdf"
+                },
+                "documents": [
+                    "ext-EXT1"
+                ],
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "notes.pdf",
+                            "title": "notes.pdf",
+                            "item_type": "journalArticle"
+                        }
+                    }
+                },
+                "in_library": false,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
+            },
+            {
+                "id": "r2",
+                "ref": {
+                    "library_ref": "u",
+                    "zotero_key": "AAA",
+                    "kind": "item"
+                },
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Sampling hard-to-reach groups online",
+                            "title": "Sampling hard-to-reach groups online",
+                            "item_type": "journalArticle"
+                        }
+                    },
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "date",
+                            "value": "2020"
+                        }
+                    }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
+            }
+        ],
+        "added": [
+            "r1",
+            "r2"
+        ],
+        "merged": 0
+    }
+}

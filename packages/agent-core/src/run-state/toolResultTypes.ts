@@ -1521,7 +1521,9 @@ const GET_METADATA_TOOL_NAMES: readonly string[] = [
  * a compound `collection_key` ("<library_id>-<key>").
  */
 export interface BackendCollectionRef {
-    collection_key: string;
+    collection_id?: string;
+    parent_collection_id?: string;
+    collection_key?: string;
     name: string;
     /** Optional per-collection library scope (future backend format). */
     library_id?: number | null;
@@ -2121,13 +2123,14 @@ function parseCompoundCollectionKey(
  * compound value wins (the mismatch is logged). Returns null when no library
  * scope can be determined, so the caller can drop the collection defensively.
  */
-function normalizeBackendCollection(
+export function normalizeBackendCollection(
     coll: BackendCollectionRef,
     containerLibraryId: number | null | undefined,
     containerLibraryRef?: string | null,
 ): CollectionReference | null {
-    const compound = parseCompoundCollectionKey(coll.collection_key);
+    const compound = parseCompoundCollectionKey(coll.collection_id ?? coll.collection_key ?? '');
     const zoteroKey = compound ? compound.zotero_key : coll.collection_key;
+    if (!zoteroKey) return null;
 
     let libraryId: number | null = null;
     if (compound) {
@@ -2142,8 +2145,9 @@ function normalizeBackendCollection(
         libraryId = containerLibraryId;
     }
 
+    if (libraryId == null && (coll.library_ref || containerLibraryRef)) libraryId = 0;
     if (libraryId == null) return null;
-    const containerLibraryRefForResolvedLibrary = containerLibraryId === libraryId
+    const containerLibraryRefForResolvedLibrary = containerLibraryId == null || containerLibraryId === libraryId
         ? containerLibraryRef
         : undefined;
     const libraryRef = compound
@@ -2158,6 +2162,8 @@ function normalizeBackendCollection(
         zotero_key: zoteroKey,
         library_ref: libraryRef,
         name: coll.name,
+        collection_id: coll.collection_id,
+        parent_collection_id: coll.parent_collection_id,
         parent_key: coll.parent_key ?? null,
     };
 }
@@ -2212,7 +2218,7 @@ export function extractListCollectionsData(
         const obj = content as ListCollectionsResultContent;
         if (Array.isArray(obj.collections) && !isListCollectionsError(obj)) {
             const collections = normalizeCollections(obj.collections, obj.library_id, obj.library_ref);
-            if (collections == null || (collections.length === 0 && obj.library_id == null)) {
+            if (collections == null || (collections.length === 0 && obj.library_id == null && !obj.library_ref)) {
                 return null;
             }
             return {
@@ -2230,7 +2236,7 @@ export function extractListCollectionsData(
         const summary = metadata.summary as ListCollectionsResultSummary;
         if (Array.isArray(summary.collections) && !isListCollectionsError(summary)) {
             const collections = normalizeCollections(summary.collections, summary.library_id, summary.library_ref);
-            if (collections == null || (collections.length === 0 && summary.library_id == null)) {
+            if (collections == null || (collections.length === 0 && summary.library_id == null && !summary.library_ref)) {
                 return null;
             }
             return {

@@ -4,9 +4,11 @@ import { DocumentCache } from '../../../src/services/documentCache';
 import { gzipString } from '../../../src/utils/gzip';
 import { MockDBConnection } from '../../mocks/mockDBConnection';
 import { createMockAttachment } from '../../helpers/factories';
-import type { BeaverExtractResult } from '@beaver/agent-core/extract/schema';
+import { SCHEMA_VERSION, type BeaverExtractResult } from '@beaver/agent-core/extract/schema';
 import type { PageGeometry } from '../../../src/services/documentCache';
 import type { EpubDocument } from '../../../src/services/documentExtraction/epub';
+import { computeStructuredDocumentHash } from '../../../src/services/documentExtraction/structuredDocumentHash';
+import { expectedExtractionSchemaVersion } from '../../../src/services/documentExtraction/shared/extractionSchemaVersions';
 
 const mockIOUtils = (globalThis as any).IOUtils as {
     exists: ReturnType<typeof vi.fn>;
@@ -27,7 +29,7 @@ function createCacheAttachment(): CacheAttachmentItem {
 }
 
 const structuredResult: BeaverExtractResult = {
-    schemaVersion: '4',
+    schemaVersion: SCHEMA_VERSION,
     mode: 'structured',
     document: {
         pageCount: 1,
@@ -38,6 +40,12 @@ const structuredResult: BeaverExtractResult = {
         citationIndex: {},
     },
 };
+
+function structuredResultWithLabel(label: string): BeaverExtractResult {
+    const result = structuredClone(structuredResult);
+    result.document.pages[0].label = label;
+    return result;
+}
 
 const epubDocument: EpubDocument = {
     content_kind: 'epub',
@@ -131,6 +139,370 @@ describe('DocumentCache payloads', () => {
         await conn.closeDatabase();
     });
 
+    async function putStructured(result = structuredResult, extractionSource?: 'ocr', sourceMd5?: string) {
+        await cache.putResult({
+            item: createCacheAttachment(), filePath: sourcePath, mode: 'structured',
+            sourceSizeBytes: 3, contentType: 'application/pdf', result,
+            metadata: { pageCount: 1, pageLabels: { '0': '1' }, pages: onePageGeometry,
+                ...(extractionSource ? { extractionSource } : {}), ...(sourceMd5 ? { sourceMd5 } : {}) },
+        });
+    }
+
+    it('discards a native structured payload whose bytes match the rejected result', async () => {
+        await putStructured();
+        const ref = { libraryId: 1, zoteroKey: 'ABCD1234' };
+        const hash = await computeStructuredDocumentHash('pdf', structuredResult);
+        expect(await cache.discardRejectedStructuredPayload(ref, 'pdf', sourcePath, hash)).toBe('discarded');
+        expect(await db.getDocumentCachePayload(1, 'ABCD1234', 'structured')).toBeNull();
+        expect(await cache.getResult(ref, 'structured', sourcePath)).toBeNull();
+    });
+
+    it('keeps a replacement written after the rejected payload was read', async () => {
+        await putStructured();
+        const ref = { libraryId: 1, zoteroKey: 'ABCD1234' };
+        const replacement = structuredResultWithLabel('Replaced');
+        const originalGet = cache.getResult.bind(cache);
+        vi.spyOn(cache, 'getResult').mockImplementationOnce(async (...args) => {
+            const result = await originalGet(...args);
+            await putStructured(replacement);
+            return result;
+        });
+        const hash = await computeStructuredDocumentHash('pdf', structuredResult);
+        expect(await cache.discardRejectedStructuredPayload(ref, 'pdf', sourcePath, hash)).toBe('changed');
+        expect(await cache.getResult(ref, 'structured', sourcePath)).toEqual(replacement);
+    });
+
+    it('keeps a current payload when its hash differs from the rejected result', async () => {
+        const replacement = structuredResultWithLabel('Replaced');
+        await putStructured(replacement);
+        const ref = { libraryId: 1, zoteroKey: 'ABCD1234' };
+        const rejectedHash = await computeStructuredDocumentHash('pdf', structuredResult);
+        expect(await cache.discardRejectedStructuredPayload(ref, 'pdf', sourcePath, rejectedHash)).toBe('changed');
+        expect(await cache.getResult(ref, 'structured', sourcePath)).toEqual(replacement);
+    });
+
+    it('preserves protected OCR bytes when their structured hash is rejected', async () => {
+        await putStructured(structuredResult, 'ocr');
+        const ref = { libraryId: 1, zoteroKey: 'ABCD1234' };
+        const hash = await computeStructuredDocumentHash('pdf', structuredResult);
+        expect(await cache.discardRejectedStructuredPayload(ref, 'pdf', sourcePath, hash)).toBe('protected');
+        expect(await cache.getResult(ref, 'structured', sourcePath)).toEqual(structuredResult);
+    });
+
+    describe('retained OCR preparation after a version update', () => {
+        const ref = { libraryId: 1, zoteroKey: 'ABCD1234' };
+
+        it('is not reported while the OCR preparation can be served', async () => {
+            await putStructured(structuredResult, 'ocr');
+            expect(await cache.getProtectedRepreparation(ref, sourcePath)).toBeNull();
+            expect(await cache.getProtectedRepreparationKeys(1)).toEqual([]);
+        });
+
+        it('is reported for the same source after a payload-format update', async () => {
+            await putStructured(structuredResult, 'ocr');
+            await conn.queryAsync('UPDATE document_cache_payloads SET cache_format_version = 0');
+
+            expect(await cache.getProtectedRepreparation(ref, sourcePath)).toEqual({ pageCount: 1, sourceSizeBytes: 3 });
+            expect(await cache.getProtectedRepreparationKeys(1)).toEqual(['ABCD1234']);
+            expect((await cache.getStats()).ocr_repreparation_required_count).toBe(1);
+            expect(await cache.getResult(ref, 'structured', sourcePath)).toBeNull();
+            expect(await db.getDocumentCachePayload(1, 'ABCD1234', 'structured')).not.toBeNull();
+        });
+
+        it('is reported for the same source after an extraction-schema update', async () => {
+            await putStructured(structuredResult, 'ocr');
+            await conn.queryAsync("UPDATE document_cache_metadata SET extraction_schema_version = 'old'");
+            await conn.queryAsync("UPDATE document_cache_payloads SET extraction_schema_version = 'old'");
+
+            expect(await cache.getMetadata(ref, sourcePath)).toBeNull();
+            expect(await cache.getProtectedRepreparation(ref, sourcePath)).toEqual({ pageCount: 1, sourceSizeBytes: 3 });
+            expect(await cache.getProtectedRepreparationKeys(1)).toEqual(['ABCD1234']);
+        });
+
+        it('is not reported once the source file changed', async () => {
+            await putStructured(structuredResult, 'ocr');
+            await conn.queryAsync('UPDATE document_cache_payloads SET cache_format_version = 0');
+            mockIOUtils.stat.mockResolvedValue({ lastModified: 11, size: 3 } as any);
+
+            expect(await cache.getProtectedRepreparation(ref, sourcePath)).toBeNull();
+        });
+
+        it('is not reported for native text', async () => {
+            await putStructured();
+            await conn.queryAsync('UPDATE document_cache_payloads SET cache_format_version = 0');
+
+            expect(await cache.getProtectedRepreparation(ref, sourcePath)).toBeNull();
+            expect(await cache.getProtectedRepreparationKeys(1)).toEqual([]);
+        });
+    });
+
+    describe('relocated source', () => {
+        const ref = { libraryId: 1, zoteroKey: 'ABCD1234' };
+        const renamedPath = '/tmp/renamed.pdf';
+        const from = { filePath: sourcePath, mtimeMs: 10, sizeBytes: 3 };
+
+        it('serves the cached result from the new path and mtime', async () => {
+            await putStructured();
+            files.set(renamedPath, files.get(sourcePath)!);
+            mockIOUtils.stat.mockResolvedValue({ lastModified: 20, size: 3 } as any);
+
+            expect(await cache.relocateSource(ref, from, { filePath: renamedPath, mtimeMs: 20 })).toBe('relocated');
+
+            expect(await cache.getResult(ref, 'structured', renamedPath)).toEqual(structuredResult);
+        });
+
+        it('keeps a protected OCR preparation servable and re-preparable after a rename', async () => {
+            await putStructured(structuredResult, 'ocr');
+            files.set(renamedPath, files.get(sourcePath)!);
+
+            await cache.relocateSource(ref, from, { filePath: renamedPath, mtimeMs: 10 });
+
+            expect(await cache.getResult(ref, 'structured', renamedPath)).toEqual(structuredResult);
+            await conn.queryAsync('UPDATE document_cache_payloads SET cache_format_version = 0');
+            expect(await cache.getProtectedRepreparation(ref, renamedPath)).toEqual({ pageCount: 1, sourceSizeBytes: 3 });
+        });
+
+        it('leaves an entry recorded for a different source untouched', async () => {
+            await putStructured();
+
+            expect(await cache.relocateSource(ref, { ...from, mtimeMs: 9 },
+                { filePath: renamedPath, mtimeMs: 20 })).toBe('missing');
+
+            const metadata = await db.getDocumentCacheMetadataByKey(1, 'ABCD1234');
+            expect(metadata).toMatchObject({ filePath: sourcePath, fileSignature: { mtime_ms: 10, size_bytes: 3 } });
+            expect(await cache.getResult(ref, 'structured', sourcePath)).toEqual(structuredResult);
+        });
+
+        it('reports a payload already rebuilt for the new location as current', async () => {
+            files.set(renamedPath, files.get(sourcePath)!);
+            await cache.putResult({
+                item: createCacheAttachment(), filePath: renamedPath, mode: 'structured',
+                sourceSizeBytes: 3, contentType: 'application/pdf', result: structuredResult,
+                metadata: { pageCount: 1, pageLabels: { '0': '1' }, pages: onePageGeometry },
+            });
+
+            expect(await cache.relocateSource(ref, from, { filePath: renamedPath, mtimeMs: 10 })).toBe('current');
+        });
+
+        it('reports a discarded entry as missing', async () => {
+            await putStructured(structuredResult, 'ocr');
+            files.set(renamedPath, files.get(sourcePath)!);
+            // A read at the new path before relocation discards the entry.
+            expect(await cache.getResult(ref, 'structured', renamedPath)).toBeNull();
+
+            expect(await cache.relocateSource(ref, from, { filePath: renamedPath, mtimeMs: 10 })).toBe('missing');
+        });
+
+        describe('read before the reconciler relocates a protected OCR preparation', () => {
+            const md5Async = vi.fn();
+
+            beforeEach(async () => {
+                (Zotero.Utilities as any).Internal = { md5Async };
+                md5Async.mockResolvedValue('scan-md5');
+                // The processing ledger hashed the bytes at the cached location.
+                await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: 'ABCD1234', itemId: 100, contentKind: 'pdf' });
+                await conn.queryAsync(`UPDATE attachment_processing_state SET extract_status = 'done',
+                    file_hash = 'scan-md5', extraction_source = ? WHERE zotero_key = 'ABCD1234'`,
+                [JSON.stringify(['pdf', expectedExtractionSchemaVersion('pdf'), sourcePath, 10, 3])]);
+                await putStructured(structuredResult, 'ocr');
+            });
+
+            afterEach(() => {
+                delete (Zotero.Utilities as any).Internal;
+            });
+
+            it.each([
+                ['rename', renamedPath, 10],
+                ['mtime change', sourcePath, 20],
+            ])('serves and relocates the OCR text after a %s with unchanged bytes', async (_label, path, mtime) => {
+                files.set(path, files.get(sourcePath)!);
+                mockIOUtils.stat.mockResolvedValue({ lastModified: mtime, size: 3 } as any);
+
+                expect(await cache.getResult(ref, 'structured', path)).toEqual(structuredResult);
+
+                expect(md5Async).toHaveBeenCalledWith(path);
+                expect(await db.getDocumentCacheMetadataByKey(1, 'ABCD1234'))
+                    .toMatchObject({ filePath: path, fileSignature: { mtime_ms: mtime, size_bytes: 3 } });
+                expect(await db.getDocumentCachePayload(1, 'ABCD1234', 'structured'))
+                    .toMatchObject({ extractionSource: 'ocr', sourceFilePath: path });
+                // The reconciler's own relocation then finds the entry already moved.
+                expect(await cache.relocateSource(ref, from, { filePath: path, mtimeMs: mtime })).toBe('current');
+            });
+
+            it('keeps a moved preparation that a version update made unservable', async () => {
+                files.set(renamedPath, files.get(sourcePath)!);
+                await conn.queryAsync('UPDATE document_cache_payloads SET cache_format_version = 0');
+
+                expect(await cache.getResult(ref, 'structured', renamedPath)).toBeNull();
+
+                expect(await cache.getProtectedRepreparation(ref, renamedPath)).toEqual({ pageCount: 1, sourceSizeBytes: 3 });
+            });
+
+            it('discards the OCR text when the renamed file has different bytes', async () => {
+                files.set(renamedPath, new Uint8Array([4, 5, 6]));
+                md5Async.mockResolvedValue('other-md5');
+
+                expect(await cache.getResult(ref, 'structured', renamedPath)).toBeNull();
+
+                expect(await db.getDocumentCacheMetadataByKey(1, 'ABCD1234')).toBeNull();
+            });
+
+            it.each([false, true])('discards the OCR text when the ledger did not hash the cached location (stored md5=%s)', async (storedMd5) => {
+                // A prepared ledger row is authoritative over the md5 stored with the payloads.
+                if (storedMd5) await putStructured(structuredResult, 'ocr', 'scan-md5');
+                await conn.queryAsync(`UPDATE attachment_processing_state SET extraction_source = ?`,
+                    [JSON.stringify(['pdf', expectedExtractionSchemaVersion('pdf'), sourcePath, 9, 3])]);
+                files.set(renamedPath, files.get(sourcePath)!);
+
+                expect(await cache.getResult(ref, 'structured', renamedPath)).toBeNull();
+
+                expect(md5Async).not.toHaveBeenCalled();
+                expect(await db.getDocumentCacheMetadataByKey(1, 'ABCD1234')).toBeNull();
+            });
+
+            async function ledgerLocation() {
+                const row = await db.getAttachmentProcessingState(1, 'ABCD1234');
+                return { extractionSource: row?.extractionSource, fileMtimeMs: row?.fileMtimeMs };
+            }
+
+            it.each([
+                ['mtime changes', [[sourcePath, 20], [sourcePath, 30]]],
+                ['renames', [[renamedPath, 10], ['/tmp/renamed-again.pdf', 10]]],
+            ] as const)('keeps the OCR text across two successive %s, each followed by a read', async (_label, moves) => {
+                for (const [path, mtime] of moves) {
+                    files.set(path, files.get(sourcePath)!);
+                    mockIOUtils.stat.mockResolvedValue({ lastModified: mtime, size: 3 } as any);
+
+                    expect(await cache.getResult(ref, 'structured', path)).toEqual(structuredResult);
+
+                    expect(await db.getDocumentCachePayload(1, 'ABCD1234', 'structured'))
+                        .toMatchObject({ extractionSource: 'ocr', sourceFilePath: path, sourceFileSignature: { mtime_ms: mtime } });
+                    // The ledger moves with the entry, so the next change is verified against this location.
+                    expect(await ledgerLocation()).toEqual({
+                        extractionSource: JSON.stringify(['pdf', expectedExtractionSchemaVersion('pdf'), path, mtime, 3]),
+                        fileMtimeMs: mtime,
+                    });
+                }
+                expect(md5Async).toHaveBeenCalledTimes(2);
+                expect(await db.getAttachmentProcessingState(1, 'ABCD1234'))
+                    .toMatchObject({ extractStatus: 'done', fileHash: 'scan-md5' });
+            });
+
+            it('leaves the ledger in place when the cache entry could not be relocated', async () => {
+                files.set(renamedPath, files.get(sourcePath)!);
+                const before = await ledgerLocation();
+                vi.spyOn(cache, 'relocateSource').mockResolvedValueOnce('missing');
+
+                expect(await cache.getResult(ref, 'structured', renamedPath)).toBeNull();
+
+                expect(await ledgerLocation()).toEqual(before);
+            });
+
+            it('does not move a ledger row that changed while the bytes were hashed', async () => {
+                files.set(renamedPath, files.get(sourcePath)!);
+                md5Async.mockImplementation(async () => {
+                    await conn.queryAsync(`UPDATE attachment_processing_state SET file_hash = 'replaced-md5'`);
+                    return 'scan-md5';
+                });
+
+                await cache.getResult(ref, 'structured', renamedPath);
+
+                expect((await ledgerLocation()).extractionSource)
+                    .toBe(JSON.stringify(['pdf', expectedExtractionSchemaVersion('pdf'), sourcePath, 10, 3]));
+            });
+
+            it('does not relocate bytes that changed while they were hashed', async () => {
+                files.set(renamedPath, files.get(sourcePath)!);
+                md5Async.mockImplementation(async () => {
+                    mockIOUtils.stat.mockResolvedValue({ lastModified: 30, size: 3 } as any);
+                    return 'scan-md5';
+                });
+
+                expect(await cache.getResult(ref, 'structured', renamedPath)).toBeNull();
+
+                expect(await db.getDocumentCacheMetadataByKey(1, 'ABCD1234')).not.toMatchObject({ filePath: renamedPath });
+                expect((await ledgerLocation()).extractionSource)
+                    .toBe(JSON.stringify(['pdf', expectedExtractionSchemaVersion('pdf'), sourcePath, 10, 3]));
+            });
+        });
+
+        describe('protected OCR preparation without a prepared ledger row', () => {
+            const md5Async = vi.fn();
+
+            beforeEach(() => {
+                (Zotero.Utilities as any).Internal = { md5Async };
+                md5Async.mockResolvedValue('scan-md5');
+            });
+
+            afterEach(() => {
+                delete (Zotero.Utilities as any).Internal;
+            });
+
+            async function excludeLibraryAndRename() {
+                await putStructured(structuredResult, 'ocr', 'scan-md5');
+                // Exclusion drops the ledger and keeps the OCR preparation.
+                await cache.invalidateByLibrary(1, { retainProtectedOcr: true });
+                files.set(renamedPath, files.get(sourcePath)!);
+            }
+
+            it('verifies a renamed file against the md5 stored with the OCR text', async () => {
+                await excludeLibraryAndRename();
+
+                expect(await cache.getResult(ref, 'structured', renamedPath)).toEqual(structuredResult);
+
+                expect(md5Async).toHaveBeenCalledWith(renamedPath);
+                expect(await db.getDocumentCachePayload(1, 'ABCD1234', 'structured'))
+                    .toMatchObject({ extractionSource: 'ocr', sourceFilePath: renamedPath, sourceMd5: 'scan-md5' });
+                expect(await db.getAttachmentProcessingState(1, 'ABCD1234')).toBeNull();
+            });
+
+            it('verifies against the stored md5 while a re-created ledger row is not yet prepared', async () => {
+                await excludeLibraryAndRename();
+                await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: 'ABCD1234', itemId: 100, contentKind: 'pdf' });
+
+                expect(await cache.getResult(ref, 'structured', renamedPath)).toEqual(structuredResult);
+
+                expect(await db.getAttachmentProcessingState(1, 'ABCD1234'))
+                    .toMatchObject({ extractStatus: null, extractionSource: null });
+            });
+
+            it('discards the OCR text when the renamed file has different bytes', async () => {
+                await excludeLibraryAndRename();
+                md5Async.mockResolvedValue('other-md5');
+
+                expect(await cache.getResult(ref, 'structured', renamedPath)).toBeNull();
+
+                expect(await db.getDocumentCacheMetadataByKey(1, 'ABCD1234')).toBeNull();
+            });
+
+            it('discards an entry written without a stored md5, as before', async () => {
+                await putStructured(structuredResult, 'ocr');
+                await cache.invalidateByLibrary(1, { retainProtectedOcr: true });
+                files.set(renamedPath, files.get(sourcePath)!);
+
+                expect(await cache.getResult(ref, 'structured', renamedPath)).toBeNull();
+
+                expect(md5Async).not.toHaveBeenCalled();
+                expect(await db.getDocumentCacheMetadataByKey(1, 'ABCD1234')).toBeNull();
+            });
+
+            it('does not store an md5 with native payloads', async () => {
+                await putStructured(structuredResult, undefined, 'scan-md5');
+
+                expect((await db.getDocumentCachePayload(1, 'ABCD1234', 'structured'))?.sourceMd5).toBeNull();
+            });
+        });
+    });
+
+    it('does not claim a deletion succeeded when its compare-and-set fails', async () => {
+        await putStructured();
+        const ref = { libraryId: 1, zoteroKey: 'ABCD1234' };
+        const hash = await computeStructuredDocumentHash('pdf', structuredResult);
+        vi.spyOn(db, 'deleteDocumentCachePayloadIfUnchanged').mockResolvedValueOnce(null);
+        expect(await cache.discardRejectedStructuredPayload(ref, 'pdf', sourcePath, hash)).toBe('changed');
+        expect(await cache.getResult(ref, 'structured', sourcePath)).toEqual(structuredResult);
+    });
+
     it('putResult then getResult returns the cached extraction result', async () => {
         const item = createCacheAttachment();
         await cache.putResult({
@@ -210,7 +582,7 @@ describe('DocumentCache payloads', () => {
     it('serialized PDF probe does not accept pageCount substring matches', () => {
         const bytes = new TextEncoder().encode(
             JSON.stringify({
-                schemaVersion: '4',
+                schemaVersion: SCHEMA_VERSION,
                 mode: 'structured',
                 document: { pageCount: 15, pages: [] },
             }),
@@ -484,7 +856,7 @@ describe('DocumentCache payloads', () => {
         expect(await cache.getResult({ libraryId: input.item.libraryID, zoteroKey: input.item.key }, 'structured', sourcePath)).not.toBeNull();
     });
 
-    it.each(['replacement', 'deletion', 'exclusion'])('invalidates protected text for explicit %s', async reason => {
+    it.each(['replacement', 'deletion', 'library invalidation'])('invalidates protected text for explicit %s', async reason => {
         const item = createCacheAttachment();
         await cache.putResult({ item, filePath: sourcePath, mode: 'structured', sourceSizeBytes: 3,
             contentType: 'application/pdf', result: structuredResult,
@@ -500,6 +872,30 @@ describe('DocumentCache payloads', () => {
         expect(await db.getDocumentCacheMetadataCount()).toBe(0);
     });
 
+    it('keeps OCR text and drops native text when an excluded library is invalidated', async () => {
+        const scanned = createCacheAttachment();
+        const native = createMockAttachment({ id: 101, key: 'EFGH5678', libraryID: 1 }) as unknown as CacheAttachmentItem;
+        const other = createMockAttachment({ id: 102, key: 'IJKL9012', libraryID: 2 }) as unknown as CacheAttachmentItem;
+        for (const [item, extractionSource] of [[scanned, 'ocr'], [native, undefined], [other, undefined]] as const) {
+            await cache.putResult({ item, filePath: sourcePath, mode: 'structured', sourceSizeBytes: 3,
+                contentType: 'application/pdf', result: structuredResult,
+                metadata: { pageCount: 1, pageLabels: null, pages: onePageGeometry,
+                    ...(extractionSource ? { extractionSource } : {}) } });
+        }
+        const nativePayload = await db.getDocumentCachePayload(1, native.key, 'structured');
+
+        await cache.invalidateByLibrary(1, { retainProtectedOcr: true });
+
+        expect(await db.getDocumentCachePayload(1, native.key, 'structured')).toBeNull();
+        expect(await db.getDocumentCacheMetadataByKey(1, native.key)).toBeNull();
+        expect(files.has(nativePayload!.payloadPath)).toBe(false);
+        expect(await db.getDocumentCachePayload(2, other.key, 'structured')).not.toBeNull();
+        const retained = await db.getDocumentCachePayload(1, scanned.key, 'structured');
+        expect(retained).toMatchObject({ extractionSource: 'ocr' });
+        expect(files.has(retained!.payloadPath)).toBe(true);
+        expect(await cache.getResult({ libraryId: 1, zoteroKey: scanned.key }, 'structured', sourcePath)).not.toBeNull();
+    });
+
     it('retains incompatible OCR bytes without serving them', async () => {
         const item = createCacheAttachment();
         await cache.putResult({ item, filePath: sourcePath, mode: 'structured', sourceSizeBytes: 3,
@@ -511,6 +907,117 @@ describe('DocumentCache payloads', () => {
         await cache.clearAll();
         expect(await db.getDocumentCachePayloadCount()).toBe(1);
         expect(files.has(payload!.payloadPath)).toBe(true);
+    });
+
+    describe('cache write after resolving (writeAfterResolve)', () => {
+        const jsonBytes = new TextEncoder().encode(JSON.stringify(structuredResult));
+        const created = () => ({
+            schemaVersion: structuredResult.schemaVersion,
+            mode: 'structured' as const,
+            pageCount: 1,
+            byteLength: jsonBytes.byteLength,
+            jsonBytes,
+            cacheMetadata: { pageCount: 1, pageLabels: { '0': '1' }, pages: onePageGeometry },
+        });
+        const ref = { libraryId: 1, zoteroKey: 'ABCD1234' };
+
+        /** Hold every file write until the returned release is called. */
+        function holdWrites(): () => void {
+            let release!: () => void;
+            const barrier = new Promise<void>((resolve) => { release = resolve; });
+            mockIOUtils.write.mockImplementation(async (path: string, bytes: Uint8Array) => {
+                await barrier;
+                files.set(path, new Uint8Array(bytes));
+            });
+            return release;
+        }
+
+        async function request(
+            create: () => Promise<ReturnType<typeof created>>,
+            options: { writeAfterResolve?: boolean; onCacheWrite?: (ms: number) => void } = {},
+        ) {
+            return cache.getOrCreateSerializedResult({
+                item: createCacheAttachment(),
+                filePath: sourcePath,
+                mode: 'structured',
+                sourceSizeBytes: 0,
+                contentType: 'application/pdf',
+                lockScope: 'hot',
+                expectedSourceIdentity: await cache.getSourceIdentitySnapshot(sourcePath),
+                create,
+                ...options,
+            });
+        }
+
+        it('resolves before the write, shares the result while it runs, and serves the cache after', async () => {
+            const release = holdWrites();
+            const create = vi.fn(async () => created());
+            const onCacheWrite = vi.fn();
+
+            const result = await request(create, { writeAfterResolve: true, onCacheWrite });
+            expect(result?.jsonBytes).toEqual(jsonBytes);
+            await vi.waitFor(() => expect(mockIOUtils.write).toHaveBeenCalled());
+            expect(onCacheWrite).not.toHaveBeenCalled();
+            expect(await db.getDocumentCachePayloadCount()).toBe(0);
+
+            // While the write runs, a request finds the result without extracting.
+            const source = await cache.getSourceIdentitySnapshot(sourcePath);
+            expect(cache.getUnwrittenResult({
+                item: createCacheAttachment(), mode: 'structured', source, serialized: true, lockScope: 'hot',
+            })).toBe(result);
+            expect(cache.getUnwrittenResult({
+                item: createCacheAttachment(), mode: 'structured', source, serialized: false, lockScope: 'hot',
+            })).toBeNull();
+            await expect(request(create)).resolves.toBe(result);
+            expect(create).toHaveBeenCalledOnce();
+
+            release();
+            await vi.waitFor(() => expect(onCacheWrite).toHaveBeenCalledOnce());
+            expect(onCacheWrite.mock.calls[0][0]).toBeGreaterThanOrEqual(0);
+            await vi.waitFor(() => expect(cache.getUnwrittenResult({
+                item: createCacheAttachment(), mode: 'structured', source, serialized: true, lockScope: 'hot',
+            })).toBeNull());
+            expect(await db.getDocumentCachePayloadCount()).toBe(1);
+            const cached = await request(create);
+            expect(new TextDecoder().decode(cached?.jsonBytes)).toBe(JSON.stringify(structuredResult));
+            expect(create).toHaveBeenCalledOnce();
+            expect((await cache.getSerializedResult(ref, 'structured', sourcePath))?.byteLength).toBe(jsonBytes.byteLength);
+        });
+
+        it('keeps the result when the write fails, and the next request extracts again', async () => {
+            mockIOUtils.write.mockRejectedValue(new Error('disk full'));
+            const create = vi.fn(async () => created());
+            const onCacheWrite = vi.fn();
+
+            const result = await request(create, { writeAfterResolve: true, onCacheWrite });
+            expect(result?.jsonBytes).toEqual(jsonBytes);
+            await vi.waitFor(() => expect(onCacheWrite).toHaveBeenCalledOnce());
+            expect(await db.getDocumentCachePayloadCount()).toBe(0);
+
+            mockIOUtils.write.mockImplementation(async (path: string, bytes: Uint8Array) => {
+                files.set(path, new Uint8Array(bytes));
+            });
+            await vi.waitFor(async () => {
+                await request(create);
+                expect(create).toHaveBeenCalledTimes(2);
+            });
+        });
+
+        it('resolves only after the write by default', async () => {
+            const release = holdWrites();
+            const onCacheWrite = vi.fn();
+            let resolved = false;
+            const pending = request(async () => created(), { onCacheWrite }).then((value) => {
+                resolved = true;
+                return value;
+            });
+            await vi.waitFor(() => expect(mockIOUtils.write).toHaveBeenCalled());
+            expect(resolved).toBe(false);
+            release();
+            await expect(pending).resolves.toMatchObject({ byteLength: jsonBytes.byteLength });
+            expect(onCacheWrite).toHaveBeenCalledOnce();
+            expect(await db.getDocumentCachePayloadCount()).toBe(1);
+        });
     });
 
     it('coalesces concurrent cold result creation for the same source identity', async () => {
@@ -1083,7 +1590,7 @@ describe('DocumentCache payloads', () => {
             3,
             'application/pdf',
             '{not json',
-            '4',
+            SCHEMA_VERSION,
             1,
         );
         const metadataId = (raw.prepare(`
@@ -1111,7 +1618,7 @@ describe('DocumentCache payloads', () => {
             payloadPath,
             files.get(payloadPath)!.byteLength,
             null,
-            '4',
+            SCHEMA_VERSION,
             1,
         );
 
@@ -1147,7 +1654,7 @@ describe('DocumentCache payloads', () => {
             3,
             'application/pdf',
             JSON.stringify({ content_kind: 'epub', sectionCount: 1, sections: [] }),
-            '4',
+            SCHEMA_VERSION,
             1,
         );
         const metadataId = (raw.prepare(`
@@ -1175,7 +1682,7 @@ describe('DocumentCache payloads', () => {
             payloadPath,
             files.get(payloadPath)!.byteLength,
             null,
-            '4',
+            SCHEMA_VERSION,
             1,
         );
 

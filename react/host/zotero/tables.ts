@@ -13,12 +13,16 @@ function resolveTableRef(key: string) {
     return parsed && libraryID ? { libraryID, key: parsed.zotero_key } : null;
 }
 
-export async function openStoredTable(key: string) {
+/**
+ * Opens a stored table in the Beaver tab of `origin`'s main window. With
+ * `background`, the tab opens behind the selected one, so the chat stays in view.
+ */
+export async function openStoredTable(key: string, origin?: Window | null, options: { background?: boolean } = {}) {
     const api = getTablesApi();
     const ref = resolveTableRef(key);
     if (!api) return { error: "Table provider unavailable." };
     if (!ref) return { error: "Table library unavailable on this device." };
-    return api.openTable(ref);
+    return api.openTable(ref, { window: origin ?? null, ...(options.background ? { background: true } : {}) });
 }
 
 /** Local display only; submission validates access through the provider separately. */
@@ -56,6 +60,7 @@ export async function resolveTableDisplay(key: string): Promise<TableDisplay> {
             ),
             rows: result.spec.rows.length,
             columns: result.spec.columns.length,
+            contentColumns: result.spec.columns.filter((column) => !column.system).length,
         };
     } catch {
         return { status: "unavailable", reason: "Table provider unavailable." };

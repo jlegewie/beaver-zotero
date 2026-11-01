@@ -8,6 +8,7 @@ import { computeActionGroups } from '../utils/actionVisibility';
 import { openPreferencesWindow } from '../ui/openPreferencesWindow';
 import { Action, ActionCategory, ActionTargetType, KnownActionCategory } from '@beaver/agent-core/types/actions';
 import { SlashCommandDescriptor, getActionCommand } from '@beaver/agent-ui/composer/slashCommands';
+import { matchMenuTrigger, queryForMenuTrigger, OpenTrigger } from '@beaver/agent-ui/composer/useAddSourcesMenu';
 import { MenuPosition, SearchMenuItem } from '@beaver/agent-ui/primitives/SearchMenu';
 
 // Category icons match the homepage launcher and Actions preferences. Zap for missing/unknown categories.
@@ -27,7 +28,7 @@ export function useSlashMenu(
     inputRef: React.RefObject<HTMLElement | null>,
     verticalPosition: 'above' | 'below' = 'above',
     focusInput?: () => void,
-    insertSlashCommand?: (descriptor: SlashCommandDescriptor, queryLength: number) => void,
+    insertSlashCommand?: (descriptor: SlashCommandDescriptor, queryLength: number, keepAfter: number) => void,
     options?: {
         /** Where to write the editor content the menu logic consumed. Defaults
          *  to the shared compose atom; pass a local setter when the menu drives
@@ -38,11 +39,15 @@ export function useSlashMenu(
          *  true; the message edit overlay passes false because it maintains
          *  its own attachment list. */
         attachTargets?: boolean;
+        /** The caret's offset in the editor content, so a `/` typed in front
+         *  of existing text opens the menu. Defaults to the end. */
+        getCaretOffset?: () => number | null;
     },
 ) {
     const [, setComposeMessageContent] = useAtom(currentMessageContentAtom);
     const setMessageContent = options?.setContent ?? setComposeMessageContent;
     const attachTargets = options?.attachTargets ?? true;
+    const getCaretOffset = options?.getCaretOffset;
     const allActions = useAtomValue(actionsAtom);
     const ctx = useAtomValue(actionContextAtom);
     const resolveActionForStaging = useSetAtom(resolveActionForStagingAtom);
@@ -50,22 +55,25 @@ export function useSlashMenu(
     const [isSlashMenuOpen, setIsSlashMenuOpen] = useState(false);
     const [slashMenuPosition, setSlashMenuPosition] = useState<MenuPosition>({ x: 0, y: 0 });
     const [slashSearchQuery, setSlashSearchQuery] = useState('');
-    const preSlashTextRef = useRef('');
+    // The text around the typed `/` while the menu is open; null once closed.
+    const slashTriggerRef = useRef<OpenTrigger | null>(null);
     // Live mirror of the typed query so handleSlashSelect can compute how much
-    // trailing "/query" text to replace, even when the editor lost DOM focus to
-    // the menu (e.g. selecting with the mouse).
+    // "/query" text to replace, even when the editor lost DOM focus to the
+    // menu (e.g. selecting with the mouse).
     const slashQueryRef = useRef('');
 
     // Selecting an action attaches the targets it binds to and completes the
     // typed "/query" into a styled command pill. Both happen in this click, so
-    // the typed text is still the tail of the document when it is replaced.
+    // the text after the query is still what it was when the `/` was typed.
     // When the action cannot run nothing is staged, the typed text is left
     // alone, and a popup explains why.
     const handleSlashSelect = useCallback((action: Action, groupTargetType?: ActionTargetType) => {
         const queryLength = slashQueryRef.current.length;
+        const keepAfter = slashTriggerRef.current?.suffix.length ?? 0;
         setIsSlashMenuOpen(false);
         setSlashSearchQuery('');
         slashQueryRef.current = '';
+        slashTriggerRef.current = null;
 
         const descriptor = resolveActionForStaging({
             actionId: action.id,
@@ -75,11 +83,12 @@ export function useSlashMenu(
         });
         if (!descriptor) return;
 
-        insertSlashCommand?.(descriptor, queryLength);
+        insertSlashCommand?.(descriptor, queryLength, keepAfter);
         setTimeout(() => focusInput ? focusInput() : inputRef.current?.focus(), 0);
     }, [attachTargets, focusInput, inputRef, insertSlashCommand, resolveActionForStaging]);
 
     const handleSlashDismiss = useCallback(() => {
+        slashTriggerRef.current = null;
         setIsSlashMenuOpen(false);
         setSlashSearchQuery('');
     }, []);
@@ -93,6 +102,7 @@ export function useSlashMenu(
             label: 'Create Action',
             icon: PlusSignIcon,
             onClick: () => {
+                slashTriggerRef.current = null;
                 setIsSlashMenuOpen(false);
                 setSlashSearchQuery('');
                 openPreferencesWindow('actions');
@@ -229,14 +239,15 @@ export function useSlashMenu(
     /** Handle onChange for the textarea when the slash menu is open. Returns true if handled. */
     const handleSlashMenuChange = useCallback((value: string): boolean => {
         if (isSlashMenuOpen) {
-            const prefix = preSlashTextRef.current + '/';
-            if (value.startsWith(prefix)) {
-                const query = value.slice(prefix.length);
+            const trigger = slashTriggerRef.current;
+            const query = trigger ? queryForMenuTrigger('/', value, trigger) : null;
+            if (query !== null) {
                 slashQueryRef.current = query;
                 setSlashSearchQuery(query);
                 setMessageContent(value);
             } else {
                 slashQueryRef.current = '';
+                slashTriggerRef.current = null;
                 setIsSlashMenuOpen(false);
                 setSlashSearchQuery('');
                 setMessageContent(value);
@@ -248,22 +259,27 @@ export function useSlashMenu(
 
     /** Detect `/` trigger in onChange. Returns true if the slash menu was opened. */
     const handleSlashTrigger = useCallback((value: string, rect: DOMRect, baseline = ''): boolean => {
-        if (value.endsWith('/')) {
-            const prefix = value.slice(0, -1);
-            const charBefore = prefix.length > 0 ? prefix[prefix.length - 1] : null;
-            if (prefix === baseline || charBefore === null || charBefore === ' ' || charBefore === '\n') {
-                preSlashTextRef.current = prefix;
-                slashQueryRef.current = '';
-                const y = verticalPosition === 'above' ? rect.top - 5 : rect.bottom - 10;
-                setSlashMenuPosition({ x: rect.left, y });
-                setIsSlashMenuOpen(true);
-                setSlashSearchQuery('');
-                setMessageContent(value);
-                return true;
-            }
-        }
-        return false;
-    }, [setMessageContent, verticalPosition]);
+        const match = matchMenuTrigger('/', value, baseline, getCaretOffset?.() ?? value.length);
+        if (!match) return false;
+        slashTriggerRef.current = match;
+        slashQueryRef.current = '';
+        const y = verticalPosition === 'above' ? rect.top - 5 : rect.bottom - 10;
+        setSlashMenuPosition({ x: rect.left, y });
+        setIsSlashMenuOpen(true);
+        setSlashSearchQuery('');
+        setMessageContent(value);
+        return true;
+    }, [getCaretOffset, setMessageContent, verticalPosition]);
+
+    /**
+     * Where the caret belongs after an editor change: the end of the query
+     * while the menu is open, otherwise wherever the edit left it.
+     */
+    const slashCaretOffsetFor = useCallback((value: string): number => {
+        const trigger = slashTriggerRef.current;
+        if (trigger) return value.length - trigger.suffix.length;
+        return getCaretOffset?.() ?? value.length;
+    }, [getCaretOffset]);
 
     /** Handle keydown when the slash menu is open. Returns true if the event was consumed.
      *  preventDefault (never stopPropagation!) - the event must keep bubbling to
@@ -277,6 +293,7 @@ export function useSlashMenu(
         }
         if (e.key === 'Escape' || e.key === ' ') {
             e.preventDefault();
+            slashTriggerRef.current = null;
             setIsSlashMenuOpen(false);
             setSlashSearchQuery('');
             return true;
@@ -295,5 +312,6 @@ export function useSlashMenu(
         handleSlashMenuChange,
         handleSlashTrigger,
         handleSlashMenuKeyDown,
+        slashCaretOffsetFor,
     };
 }

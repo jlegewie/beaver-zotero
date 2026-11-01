@@ -41,8 +41,8 @@ function stubLibraries(): void {
     };
 }
 
-function row(ref: Row['ref']): Row {
-    return { id: 'r', ref, cells: {} };
+function row(ref: Row['ref'], documents?: string[]): Row {
+    return { id: 'r', ref, ...(documents ? { documents } : {}), cells: {} };
 }
 
 beforeEach(() => {
@@ -58,12 +58,7 @@ describe('zoteroLinksFor', () => {
     it('links an item row to its named file, and only reveals one without', () => {
         expect(
             zoteroLinksFor(
-                row({
-                    kind: 'item',
-                    library_id: LIBRARY_ID,
-                    zotero_key: 'AAA',
-                    attachment: { library_id: LIBRARY_ID, zotero_key: 'FFF' },
-                })
+                row({ kind: 'item', library_ref: 'u', library_id: LIBRARY_ID, zotero_key: 'AAA' }, ['u-FFF'])
             )
         ).toEqual({
             reveal: 'zotero://select/library/items/AAA',
@@ -72,13 +67,13 @@ describe('zoteroLinksFor', () => {
             open: 'zotero://open/library/items/FFF',
         });
         expect(
-            zoteroLinksFor(row({ kind: 'item', library_id: LIBRARY_ID, zotero_key: 'BBB' }))
+            zoteroLinksFor(row({ kind: 'item', library_ref: 'u', library_id: LIBRARY_ID, zotero_key: 'BBB' }))
         ).toEqual({ reveal: 'zotero://select/library/items/BBB' });
     });
 
     it('opens an attachment row itself', () => {
         expect(
-            zoteroLinksFor(row({ kind: 'attachment', library_id: LIBRARY_ID, zotero_key: 'FFF' }))
+            zoteroLinksFor(row({ kind: 'attachment', library_ref: 'u', library_id: LIBRARY_ID, zotero_key: 'FFF' }))
         ).toEqual({
             reveal: 'zotero://select/library/items/FFF',
             open: 'zotero://open/library/items/FFF',
@@ -90,10 +85,11 @@ describe('zoteroLinksFor', () => {
             zoteroLinksFor(
                 row({
                     kind: 'annotation',
+                    library_ref: 'u',
                     library_id: LIBRARY_ID,
                     zotero_key: 'ANN',
-                    attachment: { library_id: LIBRARY_ID, zotero_key: 'FFF' },
-                    parent_item: { library_id: LIBRARY_ID, zotero_key: 'AAA' },
+                    attachment: { library_ref: 'u', library_id: LIBRARY_ID, zotero_key: 'FFF' },
+                    parent_item: { library_ref: 'u', library_id: LIBRARY_ID, zotero_key: 'AAA' },
                 })
             )
         ).toEqual({
@@ -116,14 +112,55 @@ describe('zoteroLinksFor', () => {
         ).toEqual({});
         expect(rowActionHref({ kind: 'open_external_file', ext_key: 'AB12CD34' })).toBeNull();
         expect(
-            rowActionHref({ kind: 'open_item', ref: { library_id: LIBRARY_ID, zotero_key: 'AAA' } })
+            rowActionHref({ kind: 'open_item', ref: { library_ref: 'u', library_id: LIBRARY_ID, zotero_key: 'AAA' } })
         ).toBeNull();
     });
 
     it('names the group in a group library row, not `library`', () => {
         expect(
-            zoteroLinksFor(row({ kind: 'item', library_id: GROUP_LIBRARY_ID, zotero_key: 'GGG' }))
+            zoteroLinksFor(row({ kind: 'item', library_ref: `g${GROUP_ID}`, library_id: GROUP_LIBRARY_ID, zotero_key: 'GGG' }))
         ).toEqual({ reveal: `zotero://select/groups/${GROUP_ID}/items/GGG` });
+    });
+});
+
+describe('a table moved from another device', () => {
+    // Its references name the library portably and carry no rowid for this device.
+    const groupRef = { library_ref: `g${GROUP_ID}` };
+
+    it('links rows into the group its references name', () => {
+        expect(
+            zoteroLinksFor(row({ kind: 'item', ...groupRef, zotero_key: 'GGG' }, [`g${GROUP_ID}-PDF`]))
+        ).toEqual({
+            reveal: `zotero://select/groups/${GROUP_ID}/items/GGG`,
+            open: `zotero://open/groups/${GROUP_ID}/items/PDF`,
+        });
+    });
+
+    it('links citations and the source list into that group', () => {
+        const spec: TableSpec = {
+            id: 'moved',
+            columns: [{ id: 'finding', header: 'Finding', type: 'text' }],
+            rows: [
+                {
+                    id: 'r1',
+                    ref: { kind: 'item', ...groupRef, zotero_key: 'P1' },
+                    documents: [`g${GROUP_ID}-K1`],
+                    cells: {
+                        finding: {
+                            outcome: 'answered',
+                            provenance: 'model',
+                            documents: [`g${GROUP_ID}-K1`],
+                            value: { kind: 'text', text: 'Rose 13%.' },
+                            evidence: [{ document: `g${GROUP_ID}-K1`, locator: 'p4', quote: 'a 13% rise', page: 3 }],
+                        },
+                    },
+                },
+            ],
+        };
+        const { html } = buildTableDocument(spec, { linksFor: zoteroLinksFor, citationScopeFor: zoteroLinkScope });
+        expect(html).toContain(`zotero://open/groups/${GROUP_ID}/items/K1?page=4`);
+        expect(html).toContain(`zotero://select/groups/${GROUP_ID}/items/P1`);
+        expect(html).not.toMatch(/zotero:\/\/(open|select)\/library\//);
     });
 });
 
@@ -142,33 +179,23 @@ describe('zoteroLinkScope', () => {
 
 describe('a citation into a group library', () => {
     it('gets a link that resolves, not one under `library/`', () => {
+        const groupRef = { library_ref: `g${GROUP_ID}`, library_id: GROUP_LIBRARY_ID };
         const spec: TableSpec = {
             id: 'c',
             columns: [{ id: 'finding', header: 'Finding', type: 'text' }],
             rows: [
                 {
                     id: 'r1',
+                    ref: { kind: 'item', ...groupRef, zotero_key: 'P1' },
+                    documents: [`g${GROUP_ID}-K1`],
                     cells: {
                         finding: {
-                            value: {
-                                kind: 'text',
-                                text: 'Rose 13%. <citation id="g4242-K1" loc="page4"/>',
-                            },
+                            outcome: 'answered',
+                            provenance: 'model',
+                            documents: [`g${GROUP_ID}-K1`],
+                            value: { kind: 'text', text: 'Rose 13%.' },
+                            evidence: [{ document: `g${GROUP_ID}-K1`, locator: 'p4', quote: 'a 13% rise', page: 3 }],
                         },
-                    },
-                },
-            ],
-            citations: [
-                {
-                    citation_id: 'c1',
-                    raw_tag: '<citation id="g4242-K1" loc="page4"/>',
-                    display_name: 'Bloom 2015',
-                    pages: [4],
-                    resolved_ref: {
-                        kind: 'zotero',
-                        library_id: GROUP_LIBRARY_ID,
-                        library_ref: `g${GROUP_ID}`,
-                        zotero_key: 'K1',
                     },
                 },
             ],
@@ -191,12 +218,7 @@ describe('a stored table with rows of every kind', () => {
             capabilities: { row_actions: ['reveal', 'open', 'import'] },
             columns: [{ id: 'note', header: 'Note', type: 'text' }],
             rows: [
-                row({
-                    kind: 'item',
-                    library_id: LIBRARY_ID,
-                    zotero_key: 'AAA',
-                    attachment: { library_id: LIBRARY_ID, zotero_key: 'FFF' },
-                }),
+                row({ kind: 'item', library_ref: 'u', library_id: LIBRARY_ID, zotero_key: 'AAA' }, ['u-FFF']),
                 { ...row({ kind: 'file', ext_key: 'AB12CD34' }), id: 'file' },
             ].map((r, i) => ({ ...r, id: `r${i}` })),
         };

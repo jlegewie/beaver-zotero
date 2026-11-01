@@ -145,7 +145,7 @@ function editAction(
 }
 
 /** An applied in-place move of AAA. */
-function relocateAction(): AgentAction {
+function relocateAction(moveSnapshot: Record<string, any> = MOVE_SNAPSHOT): AgentAction {
     return {
         id: "action-1",
         run_id: "run-1",
@@ -163,7 +163,7 @@ function relocateAction(): AgentAction {
         result_data: {
             operation: "edit",
             applied_refs: [{ library_id: 1, zotero_key: "AAA" }],
-            before: [snapshot("AAA", { deleted: false, ...MOVE_SNAPSHOT })],
+            before: [snapshot("AAA", { deleted: false, ...moveSnapshot })],
         },
     } as unknown as AgentAction;
 }
@@ -380,6 +380,35 @@ describe("undoEditAnnotationsAction", () => {
         expect(moved.annotationText).toBe(MOVE_SNAPSHOT.text);
         expect(moved.annotationPageLabel).toBe(MOVE_SNAPSHOT.page_label);
         expect(result.fieldsReverted).toBe(1);
+    });
+
+    it("restores a two-page highlight's exact position, nextPageRects included", async () => {
+        const twoPagePosition =
+            '{"pageIndex":2,"rects":[[1,2,3,4]],"nextPageRects":[[5,6,7,8]]}';
+        const moved = annotation("AAA");
+        items.set("AAA", moved);
+
+        await undoEditAnnotationsAction(
+            relocateAction({ ...MOVE_SNAPSHOT, position: twoPagePosition }),
+        );
+
+        expect(moved.annotationPosition).toBe(twoPagePosition);
+    });
+
+    it("undoes a move onto two pages back to the one-page original", async () => {
+        const twoPagePosition =
+            '{"pageIndex":11,"rects":[[10,20,30,40]],"nextPageRects":[[5,6,7,8]]}';
+        const moved = annotation("AAA", { annotationPosition: twoPagePosition });
+        items.set("AAA", moved);
+
+        await undoEditAnnotationsAction(
+            relocateAction({
+                ...MOVE_SNAPSHOT,
+                moved_to: { ...MOVE_SNAPSHOT.moved_to, position: twoPagePosition },
+            }),
+        );
+
+        expect(moved.annotationPosition).toBe(OLD_POSITION);
     });
 
     it("still undoes a relocation persisted under the recreate contract", async () => {

@@ -45,6 +45,8 @@ describe('handleResolvePopulationRequest', () => {
     const attachmentsByParent = new Map<number, number[]>();
     /** Attachment itemIDs whose linkMode is LINK_MODE_LINKED_URL. */
     const linkedUrlAttachments = new Set<number>();
+    /** Attachment content types; an attachment absent here has none. */
+    const contentTypes = new Map<number, string>();
     /** What the native search resolves to. */
     let searchResultIds: number[] = [];
     /**
@@ -163,6 +165,7 @@ describe('handleResolvePopulationRequest', () => {
         itemRows.clear();
         attachmentsByParent.clear();
         linkedUrlAttachments.clear();
+        contentTypes.clear();
         collections.clear();
         searchResultIds = [];
         scopeSearchResultIds = null;
@@ -239,13 +242,15 @@ describe('handleResolvePopulationRequest', () => {
                     }
                     return;
                 }
-                if (/SELECT ia\.itemID FROM itemAttachments/.test(sql)) {
+                if (/SELECT ia\.itemID, ia\.parentItemID, ia\.contentType FROM itemAttachments/.test(sql)) {
                     // The trailing parameter is the excluded link mode.
                     const parentIDs = params.slice(0, -1);
                     expect(params[params.length - 1]).toBe(LINKED_URL);
                     for (const parentID of parentIDs) {
                         for (const attachmentID of attachmentsByParent.get(parentID) ?? []) {
-                            if (!linkedUrlAttachments.has(attachmentID)) emit([attachmentID]);
+                            if (!linkedUrlAttachments.has(attachmentID)) {
+                                emit([attachmentID, parentID, contentTypes.get(attachmentID) ?? null]);
+                            }
                         }
                     }
                     return;
@@ -1022,6 +1027,36 @@ describe('handleResolvePopulationRequest', () => {
             expect(response.collection_names).toEqual(['Theory', 'Methods']);
         });
 
+        it('names the saved searches savedSearch conditions point at, keyed by the value sent', async () => {
+            searchResultIds = [1];
+            seedItem(1);
+            (globalThis as any).Zotero.Searches = {
+                getByLibraryAndKey: vi.fn((libraryID: number, key: string) =>
+                    (libraryID === LIBRARY_ID && key === 'SRCH0001' ? { name: 'Reading list', deleted: false } : false)),
+            };
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                conditions: [{ field: 'savedSearch', operator: 'is', value: 'SRCH0001' }],
+            }));
+
+            expect(response.error).toBeUndefined();
+            expect(searches[0].addCondition).toHaveBeenCalledWith('savedSearch', 'is', 'SRCH0001');
+            expect(response.saved_search_names).toEqual({ SRCH0001: 'Reading list' });
+        });
+
+        it('refuses a savedSearch condition whose key is not in the library', async () => {
+            searchResultIds = [1];
+            seedItem(1);
+            (globalThis as any).Zotero.Searches = { getByLibraryAndKey: vi.fn(() => false) };
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                conditions: [{ field: 'savedSearch', operator: 'is', value: 'SRCH0001' }],
+            }));
+
+            expect(response.error_code).toBe('invalid_condition');
+            expect(response.item_ids).toEqual([]);
+        });
+
         it('names the library alone when the population is not scoped to a collection', async () => {
             searchResultIds = [1];
             seedItem(1);
@@ -1085,8 +1120,8 @@ describe('handleResolvePopulationRequest', () => {
             expect(response.item_ids).toEqual(['u-ATT101', 'u-ATT102']);
             expect(response.total_count).toBe(2);
             // Derived from itemAttachments, not from an `itemType is attachment` search.
-            expect(callsMatching(/SELECT ia\.itemID FROM itemAttachments/)).toHaveLength(1);
-            expect(callsMatching(/SELECT ia\.itemID FROM itemAttachments/)[0][1]).toEqual([1, 2, LINKED_URL]);
+            expect(callsMatching(/SELECT ia\.itemID, ia\.parentItemID, ia\.contentType FROM itemAttachments/)).toHaveLength(1);
+            expect(callsMatching(/SELECT ia\.itemID, ia\.parentItemID, ia\.contentType FROM itemAttachments/)[0][1]).toEqual([1, 2, LINKED_URL]);
         });
 
         it('leaves linked-URL attachments out of an attachment population', async () => {
@@ -1103,8 +1138,91 @@ describe('handleResolvePopulationRequest', () => {
             expect(response.total_count).toBe(1);
             // Both items still matched; one just has nothing readable.
             expect(response.matched_item_count).toBe(2);
-            const [sql] = callsMatching(/SELECT ia\.itemID FROM itemAttachments/)[0];
+            const [sql] = callsMatching(/SELECT ia\.itemID, ia\.parentItemID, ia\.contentType FROM itemAttachments/)[0];
             expect(sql).toContain('ia.linkMode != ?');
+        });
+
+        it('leaves out a web snapshot whose item also has a PDF or EPUB when asked', async () => {
+            searchResultIds = [1, 2, 3, 4];
+            seedItem(1, { attachments: [101, 102] });
+            seedItem(2, { attachments: [201, 202] });
+            seedItem(3, { attachments: [301] });
+            seedItem(4, { attachments: [401, 402] });
+            contentTypes.set(101, 'application/pdf');
+            contentTypes.set(102, 'text/html');
+            contentTypes.set(201, 'application/epub+zip');
+            contentTypes.set(202, 'text/html');
+            // A snapshot is the only document of item 3, so it stays.
+            contentTypes.set(301, 'text/html');
+            // A supplement beside a PDF is not a snapshot.
+            contentTypes.set(401, 'application/pdf');
+            contentTypes.set(402, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                item_category: 'attachment',
+                skip_sibling_snapshots: true,
+            }));
+
+            expect(response.error).toBeUndefined();
+            expect(response.item_ids).toEqual(['u-ATT101', 'u-ATT201', 'u-ATT301', 'u-ATT401', 'u-ATT402']);
+            expect(response.total_count).toBe(5);
+            expect(response.sibling_snapshots_skipped).toBe(2);
+            expect(response.matched_item_count).toBe(4);
+        });
+
+        it('keeps sibling snapshots and omits the echo unless asked', async () => {
+            searchResultIds = [1];
+            seedItem(1, { attachments: [101, 102] });
+            contentTypes.set(101, 'application/pdf');
+            contentTypes.set(102, 'text/html');
+
+            const response = await handleResolvePopulationRequest(makeRequest({ item_category: 'attachment' }));
+
+            expect(response.item_ids).toEqual(['u-ATT101', 'u-ATT102']);
+            expect(response.sibling_snapshots_skipped).toBeUndefined();
+        });
+
+        it('ignores skip_sibling_snapshots on a regular population', async () => {
+            searchResultIds = [1];
+            seedItem(1, { attachments: [101, 102] });
+
+            const response = await handleResolvePopulationRequest(makeRequest({ skip_sibling_snapshots: true }));
+
+            expect(response.item_ids).toEqual(['u-KEY1']);
+            expect(response.sibling_snapshots_skipped).toBeUndefined();
+        });
+
+        it('skips sibling snapshots before exclusion, so a continuation never inherits them', async () => {
+            searchResultIds = [1];
+            seedItem(1, { attachments: [101, 102] });
+            contentTypes.set(101, 'application/pdf');
+            contentTypes.set(102, 'text/html');
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                item_category: 'attachment',
+                skip_sibling_snapshots: true,
+                exclude_item_ids: ['u-ATT101'],
+            }));
+
+            expect(response.item_ids).toEqual([]);
+            expect(response.excluded_count).toBe(1);
+            expect(response.sibling_snapshots_skipped).toBe(1);
+        });
+
+        it('echoes the skipped snapshots on a count-only request', async () => {
+            searchResultIds = [1];
+            seedItem(1, { attachments: [101, 102] });
+            contentTypes.set(101, 'application/pdf');
+            contentTypes.set(102, 'text/html');
+
+            const response = await handleResolvePopulationRequest(makeRequest({
+                item_category: 'attachment',
+                skip_sibling_snapshots: true,
+                max_items: 0,
+            }));
+
+            expect(response.total_count).toBe(1);
+            expect(response.sibling_snapshots_skipped).toBe(1);
         });
 
         it('excludes trashed attachments from an attachment population', async () => {
@@ -1115,7 +1233,7 @@ describe('handleResolvePopulationRequest', () => {
 
             const response = await handleResolvePopulationRequest(makeRequest({ item_category: 'attachment' }));
 
-            const [sql] = callsMatching(/SELECT ia\.itemID FROM itemAttachments/)[0];
+            const [sql] = callsMatching(/SELECT ia\.itemID, ia\.parentItemID, ia\.contentType FROM itemAttachments/)[0];
             expect(sql).toContain('LEFT JOIN deletedItems');
             expect(sql).toContain('di.itemID IS NULL');
             expect(response.item_ids).toEqual(['u-ATT101']);

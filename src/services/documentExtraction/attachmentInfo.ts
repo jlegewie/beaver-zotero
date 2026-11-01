@@ -259,10 +259,16 @@ async function resolvePdfInfo(
             options.skipWorkerFallback ?? false,
         );
         if (pageCount === null) {
-            if (options.skipWorkerFallback || isRemoteFilePath(availability.filePath)) {
+            if (
+                options.skipWorkerFallback
+                || isRemoteFilePath(availability.filePath)
+                || !attachment.isPDFAttachment()
+            ) {
                 // Optimistic: the file exists and is the right type; it is
                 // just not fulltext-indexed yet (or remote-only, so the page
-                // count is determined on download).
+                // count is determined on download). Zotero's probes also
+                // reject a PDF stored under a nonstandard content type, so
+                // their failure says nothing about the file itself.
                 return { page_count: null, status: 'readable' };
             }
             // Both cheap probes failed — the PDF is likely encrypted,
@@ -508,7 +514,7 @@ function resolveSnapshotInfo(
                 page_count: snapshotMeta?.pageCount ?? null,
                 status: 'unreadable',
                 status_code: 'snapshot_no_text',
-                status_reason: 'Snapshot contains no extractable text.',
+                status_reason: 'Snapshot contains no extractable text (the saved page is empty, likely a placeholder such as a browser PDF viewer rather than the article).',
             };
         }
         // Snapshot reads use the same stamped synthetic page coordinate as
@@ -563,7 +569,11 @@ export async function getAttachmentInfo(
     };
 
     if (options.includeAnnotationsCount) {
-        base.annotations_count = item.isFileAttachment?.() ? item.getAnnotations().length : 0;
+        const isFileAttachment = !!item.isFileAttachment?.();
+        if (isFileAttachment && !loaded?.childItems) {
+            await item.loadDataType?.('childItems');
+        }
+        base.annotations_count = isFileAttachment ? item.numAnnotations() : 0;
     }
 
     // Linked URLs are web links, not files Beaver can read.

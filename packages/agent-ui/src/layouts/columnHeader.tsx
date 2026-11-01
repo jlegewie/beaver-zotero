@@ -1,5 +1,6 @@
 import React from "react";
 import {
+    categoriesText,
     columnAlign,
     isColumnSortable,
     type Column,
@@ -28,6 +29,8 @@ export interface ColumnHeaderCellProps {
     showProgress: boolean;
     /** When it returns items, the header gains a menu (edit / re-run / remove a column). */
     menuItems?: MenuItem[];
+    /** Filler cells in this column read from the title and abstract only. */
+    titleAbstractCount?: number;
 }
 
 /**
@@ -51,6 +54,7 @@ export function ColumnHeaderCell({
     showDescription,
     showProgress,
     menuItems,
+    titleAbstractCount,
 }: ColumnHeaderCellProps): React.ReactElement {
     const canSort = sortable && isColumnSortable(column);
     const direction =
@@ -60,7 +64,7 @@ export function ColumnHeaderCell({
     const details = detailsText(column);
     // The full text lives on the header itself: the visible line is clamped, and
     // a column's question is exactly the thing a reader will want in full.
-    const hoverText = [column.description, details]
+    const hoverText = [column.description, details, categoriesText(column)]
         .filter(Boolean)
         .join("\n\n");
 
@@ -132,6 +136,14 @@ export function ColumnHeaderCell({
                             {label}
                         </span>
                     )}
+                    {titleAbstractCount ? (
+                        <span
+                            className="bt-th-meta"
+                            title={`${titleAbstractCount} ${titleAbstractCount === 1 ? "cell was" : "cells were"} answered from the title and abstract only; the paper itself was not read`}
+                        >
+                            {titleAbstractCount} from abstract
+                        </span>
+                    ) : null}
                     {details ? (
                         <span className="bt-th-info" aria-hidden="true">
                             <Icon icon={InformationCircleIcon} size={12} />
@@ -194,8 +206,7 @@ export function ColumnHeaderCell({
 
 /**
  * `Column.details` as one string: the long form behind the header line — the
- * full prompt where the line is clamped, the coding rules, the unit
- * convention. Flattened because it is delivered through `title`, which the
+ * full prompt where the line is clamped, the coding rules. Flattened because it is delivered through `title`, which the
  * platform also exposes as the header's accessible description.
  */
 function detailsText(column: Column): string | undefined {

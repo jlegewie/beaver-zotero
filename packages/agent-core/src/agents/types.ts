@@ -246,12 +246,33 @@ export function isEmptyWriteReturn(
 ): boolean {
     if (part?.part_kind !== 'tool-return' || isUnsuccessfulToolReturn(part)) return false;
     if (typeof part.content === 'string') return true;
-    return (
-        part.tool_name === 'create_items' &&
-        !!part.content &&
-        typeof part.content === 'object' &&
-        Object.keys(part.content.items_created ?? {}).length === 0
-    );
+    if (!part.content || typeof part.content !== 'object') return false;
+    // The tag already had the requested name, or no longer exists (usually
+    // renamed by an earlier call or run).
+    if (part.tool_name === 'manage_tags') {
+        return part.content.status === 'unchanged' || part.content.status === 'not_found';
+    }
+    if (part.tool_name !== 'create_items') return false;
+    // v2 result: one outcome per input. Nothing to do only when every input was
+    // already in the library (or repeated another input); a failure is news.
+    if (Array.isArray(part.content.items)) {
+        return part.content.items.length > 0 && part.content.items.every((entry: any) =>
+            entry?.outcome === 'already_in_library' || entry?.outcome === 'duplicate_in_call');
+    }
+    return Object.keys(part.content.items_created ?? {}).length === 0;
+}
+
+/**
+ * True when a write changed nothing because its target does not exist, so the
+ * row must not claim the change was unnecessary.
+ */
+export function isNotFoundWriteReturn(
+    part: ToolReturnPart | RetryPromptPart | null | undefined
+): boolean {
+    return part?.part_kind === 'tool-return'
+        && part.tool_name === 'manage_tags'
+        && isEmptyWriteReturn(part)
+        && part.content.status === 'not_found';
 }
 
 export interface TextPart {

@@ -9,6 +9,7 @@ import { CancelIcon } from '../icons/icons';
 import Button from '@beaver/agent-ui/primitives/Button';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import { getJotaiState } from '../../utils/getJotaiState';
+import { redactSecrets } from '../../utils/redactSecrets';
 import { accountService } from '@beaver/agent-core/transport/clients/accountService';
 import { getPref } from '../../../src/utils/prefs';
 import { getDocumentFromElement } from '@beaver/agent-ui/utils/windowContext';
@@ -22,7 +23,7 @@ const getPluginPreferences = () => {
     // Get all plugin preferences defined in prefs.d.ts
     const prefKeys = [
         'userId', 'userEmail', 'currentPlanId', 'installedVersion', 
-        'showIndexingCompleteMessage', 'keyboardShortcut',
+        'keyboardShortcut',
         'statefulChat', 'addSelectedItemsOnOpen', 'addSelectedItemsOnNewThread',
         'customInstructions', 'googleGenerativeAiApiKey',
         'openAiApiKey', 'anthropicApiKey', 'lastUsedModel', 'recentItems',
@@ -31,13 +32,7 @@ const getPluginPreferences = () => {
     
     prefKeys.forEach(key => {
         try {
-            // Mask sensitive keys
-            if (key.includes('ApiKey')) {
-                const value = getPref(key);
-                prefs[key] = value ? '[MASKED]' : null;
-            } else {
-                prefs[key] = getPref(key);
-            }
+            prefs[key] = getPref(key);
         } catch (error) {
             prefs[key] = `Error reading pref: ${error}`;
         }
@@ -92,16 +87,23 @@ const ErrorReportDialog: React.FC = () => {
 
         setIsSending(true);
         try {
-            // Collect debugging information
-            const jotaiState = getJotaiState();
-            const preferences = getPluginPreferences();
-            
+            // Collect debugging information. Model atoms and the lastUsedModel
+            // preference carry custom-model API keys.
+            const jotaiState = redactSecrets(getJotaiState());
+            const preferences = redactSecrets(getPluginPreferences());
+            // Recent sign-in and session-storage events, which explain
+            // unexpected sign-outs. Recorded by the plugin realm, so read
+            // through the instance account rather than a window-local copy.
+            const localState = {
+                auth_diagnostics: Zotero.Beaver?.account?.getAuthDiagnostics() ?? [],
+            };
+
             // Send error report to backend
             await accountService.reportError(
                 errorText.trim(),
                 jotaiState,
-                preferences
-                // localDbState can be added later if needed
+                preferences,
+                localState,
             );
 
             // Local logging

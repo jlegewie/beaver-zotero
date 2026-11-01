@@ -1,9 +1,11 @@
 import {
     $getSelection,
     $getRoot,
+    $isElementNode,
     $isRangeSelection,
     COMMAND_PRIORITY_CRITICAL,
     COMPOSITION_END_COMMAND,
+    CONTROLLED_TEXT_INSERTION_COMMAND,
     type LexicalEditor,
 } from 'lexical';
 import { logger } from '@beaver/agent-core/platform/logger';
@@ -28,6 +30,11 @@ const NATIVE_CLEANUP_MAX_WAIT_MS = 100;
 
 type CompositionReplacementRange = { start: number; end: number };
 
+/** Editor text and selection captured when a composition started. */
+export type CompositionStartSnapshot = { model: string; range: CompositionReplacementRange };
+
+const ZERO_WIDTH_SPACE = /\u200b/g;
+
 /**
  * Decide whether and where to recover an IME payload that Gecko supplied only
  * through InputEvent.data. Exported for focused unit coverage of the timing and
@@ -40,6 +47,7 @@ export function decideCompositionPayloadRecovery(options: {
     replacementRange: CompositionReplacementRange;
     textSize: number;
     deadlineReached: boolean;
+    compositionStart?: CompositionStartSnapshot | null;
 }):
     | { action: 'already-present' }
     | { action: 'abort'; reason: 'invalid-baseline' | 'unrelated-change' }
@@ -57,6 +65,7 @@ export function decideCompositionPayloadRecovery(options: {
         replacementRange,
         textSize,
         deadlineReached,
+        compositionStart,
     } = options;
     const { start, end } = replacementRange;
     if (
@@ -70,6 +79,22 @@ export function decideCompositionPayloadRecovery(options: {
         || currentText.length !== textSize
     ) {
         return { action: 'abort', reason: 'invalid-baseline' };
+    }
+
+    // The committed text already sits where the composition started. An IME
+    // can apply its commit before `compositionend` (previous-version Microsoft
+    // Pinyin does), leaving the caret collapsed after it, so the replacement
+    // range alone cannot show the text is there. Zero-width spaces are
+    // Lexical's composition markers and are ignored on both sides.
+    if (compositionStart) {
+        const { model, range } = compositionStart;
+        const expected =
+            model.slice(0, range.start).replace(ZERO_WIDTH_SPACE, '')
+            + committedText
+            + model.slice(range.end).replace(ZERO_WIDTH_SPACE, '');
+        if (currentText.replace(ZERO_WIDTH_SPACE, '') === expected) {
+            return { action: 'already-present' };
+        }
     }
 
     const cleanedBaseline =
@@ -476,6 +501,8 @@ export function registerCompositionEndDeferral(
     let deferredDomText: string | null = null;
     let deferredModelText: string | null = null;
     let deferredReplacementRange: CompositionReplacementRange | null = null;
+    let compositionStartSnapshot: CompositionStartSnapshot | null = null;
+    let deferredCompositionStart: CompositionStartSnapshot | null = null;
 
     const getModelText = (): string | null => {
         // The optional guard keeps the small command-bus test double usable;
@@ -520,11 +547,31 @@ export function registerCompositionEndDeferral(
         payloadRecoveryTimer = null;
     };
 
-    const onCompositionActivity = () => {
+    const onCompositionActivity = (event: Event) => {
         // A recovery belongs exclusively to the composition that scheduled
         // it. Never let its delayed selection write cross into a new one.
         // compositionupdate is included for IMEs that omit compositionstart.
         clearPayloadRecovery();
+        if (event.type === 'compositionstart') captureCompositionStart();
+    };
+
+    // Records what the editor held before this composition, so recovery can
+    // recognize a commit the IME has already applied.
+    const captureCompositionStart = () => {
+        compositionStartSnapshot = null;
+        const model = getModelText();
+        if (model === null) return;
+        editor.getEditorState().read(() => {
+            const offsets = $getFlatSelectionOffsets();
+            if (!offsets) return;
+            compositionStartSnapshot = {
+                model,
+                range: {
+                    start: Math.min(offsets.anchor, offsets.focus),
+                    end: Math.max(offsets.anchor, offsets.focus),
+                },
+            };
+        });
     };
 
     const finish = (
@@ -559,6 +606,7 @@ export function registerCompositionEndDeferral(
                         replacementRange: deferredReplacementRange,
                         textSize: modelAfterCompositionEnd.length,
                         deadlineReached: false,
+                        compositionStart: deferredCompositionStart,
                     })
                     : null;
             if (
@@ -584,6 +632,7 @@ export function registerCompositionEndDeferral(
                     const replacementRange = deferredReplacementRange;
                     const baselineModel = deferredModelText;
                     const inputForTrace = finalInput;
+                    const compositionStart = deferredCompositionStart;
                     const win = recoveryRoot.ownerDocument.defaultView;
                     const deadline = Date.now() + NATIVE_CLEANUP_MAX_WAIT_MS;
                     clearPayloadRecovery();
@@ -601,8 +650,10 @@ export function registerCompositionEndDeferral(
                             replacementRange,
                             textSize,
                             deadlineReached: Date.now() >= deadline,
+                            compositionStart,
                         });
                         if (decision.action === 'already-present') {
+                            tracePhase('recovery skipped: payload already present', inputForTrace);
                             return;
                         }
                         if (decision.action === 'abort') {
@@ -655,6 +706,7 @@ export function registerCompositionEndDeferral(
             deferredDomText = null;
             deferredModelText = null;
             deferredReplacementRange = null;
+            deferredCompositionStart = null;
         }
     };
 
@@ -684,6 +736,8 @@ export function registerCompositionEndDeferral(
             deferredDomText = root.textContent;
             deferredModelText = getModelText();
             deferredReplacementRange = null;
+            deferredCompositionStart = compositionStartSnapshot;
+            compositionStartSnapshot = null;
             if (typeof editor.getEditorState === 'function') {
                 editor.getEditorState().read(() => {
                     const offsets = $getFlatSelectionOffsets();
@@ -730,6 +784,53 @@ export function registerCompositionEndDeferral(
         }
         unregisterRoot();
     };
+}
+
+/** Lexical's composition start character on non-WebKit engines. */
+const LEXICAL_COMPOSITION_START_CHAR = '\u200b';
+
+/**
+ * Stops Lexical from inserting its zero-width "composition start" character.
+ *
+ * When a composition follows a keydown within 30 ms (on a desktop keyboard,
+ * every composition), Lexical inserts that character at the caret and selects
+ * it at `compositionstart`, so the first composition text replaces it. In
+ * Gecko on Windows, some IMEs (Shouxin) then place their candidate window at
+ * the top-left corner of the screen instead of at the caret. Without
+ * the insertion the IME composes into the existing text node, as it does in
+ * any plain contenteditable.
+ *
+ * Only the insertion Lexical makes while it is starting a composition is
+ * swallowed, and only where the IME has somewhere to write without it: a
+ * collapsed caret inside a text node, or an empty paragraph (the browser
+ * creates the text node). A caret beside a pill or line break, and a
+ * composition typed over selected text, keep Lexical's start character; those
+ * compositions keep the original candidate-window placement.
+ *
+ * Callers keep this opt-in, meant for users of an affected IME: without the
+ * start character, commits depend more often on the composition-end payload
+ * recovery, and some IMEs that are fine without it misbehave with it on
+ * (Sogou can leave a commit selected; Microsoft IME for Japanese may show only
+ * the first composed character until commit).
+ */
+export function registerCompositionStartCharSuppression(editor: LexicalEditor): () => void {
+    return editor.registerCommand<unknown>(
+        CONTROLLED_TEXT_INSERTION_COMMAND,
+        payload => payload === LEXICAL_COMPOSITION_START_CHAR
+            && editor.isComposing()
+            && $isCaretSafeWithoutStartChar(),
+        COMMAND_PRIORITY_CRITICAL,
+    );
+}
+
+/** Whether an IME can compose at the current selection without Lexical's start character. */
+function $isCaretSafeWithoutStartChar(): boolean {
+    const selection = $getSelection();
+    if (!$isRangeSelection(selection) || !selection.isCollapsed()) return false;
+    const { anchor } = selection;
+    if (anchor.type === 'text') return true;
+    const node = anchor.getNode();
+    return $isElementNode(node) && node.getChildrenSize() === 0;
 }
 
 const TRACED_EVENTS = [

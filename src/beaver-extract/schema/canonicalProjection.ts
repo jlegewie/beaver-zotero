@@ -1,5 +1,6 @@
 import type { DocItem, SentenceItem } from "@beaver/agent-core/extract/types";
 import { bboxToRect } from "./bbox";
+import { kindCarriesSentences } from "./itemKinds";
 import type { DocumentItem, Sentence, StructuredPage } from "@beaver/agent-core/extract/schema";
 
 interface InternalPageForProjection {
@@ -42,14 +43,7 @@ function attachSentences(
     sentencesByParent: Map<string, SentenceItem[]>,
     precision: number,
 ): DocumentItem {
-    if (
-        publicItem.kind !== "text" &&
-        publicItem.kind !== "caption" &&
-        publicItem.kind !== "footnote" &&
-        publicItem.kind !== "list_item"
-    ) {
-        return publicItem;
-    }
+    if (!kindCarriesSentences(publicItem.kind)) return publicItem;
     const sourceSentences = sentencesByParent.get(internalItem.id) ?? [];
     if (sourceSentences.length === 0) return publicItem;
     const sentences = sourceSentences.map((sentence, index) =>
@@ -106,10 +100,22 @@ export function projectStructuredPage(
                     kind: "formula",
                     text: item.text,
                 };
+            case "reference":
+                return {
+                    ...base,
+                    kind: "reference",
+                    text: item.text,
+                };
             case "table":
-                return { ...base, kind: "table" };
+                return attachSentences({
+                    ...base,
+                    kind: "table",
+                    text: item.text,
+                }, item, sentencesByParent, bboxPrecision);
             case "picture":
-                return { ...base, kind: "picture" };
+                return item.text
+                    ? { ...base, kind: "picture", text: item.text }
+                    : { ...base, kind: "picture" };
         }
     });
 

@@ -8,8 +8,16 @@ import { createThreadStore as createStore } from '../../helpers/threadRepository
 
 const getThreadRunsMock = vi.fn();
 vi.mock('@beaver/agent-core/transport/agentService', () => ({
-    agentRunService: { getThreadRuns: (...args: unknown[]) => getThreadRunsMock(...args) },
-    agentService: { cancel: vi.fn() },
+    agentRunService: {
+        getThreadRuns: (...args: unknown[]) => getThreadRunsMock(...args),
+        // Reads the tail and activity through the history mock, as the real
+        // service does on a server without the activity endpoint.
+        getThreadActivity: async (threadId: string) => {
+            const history = await getThreadRunsMock(threadId, false);
+            return { tail_run_id: history.tail_run_id, activity: history.activity };
+        },
+    },
+    agentService: { cancel: vi.fn(), cancelHandoff: () => null, canLeaveRun: () => false, leaveRun: () => false, isReattaching: () => false },
 }));
 
 const getThreadMock = vi.fn();
@@ -50,6 +58,7 @@ vi.mock('../../../react/atoms/messageComposition', async () => {
             set(composerResetTokenAtom, get(composerResetTokenAtom) + 1);
         }),
         currentMessageCollectionsAtom: atom<unknown[]>([]),
+        currentMessageViewsAtom: atom<unknown[]>([]),
         currentMessageExternalFilesAtom: atom<unknown[]>([]),
         updateMessageItemsFromZoteroSelectionAtom: atom(null, () => {}),
         updateReaderAttachmentAtom: atom(null, () => {}),
@@ -112,6 +121,7 @@ vi.mock('@beaver/agent-core/citations/externalReferences', async () => {
     return {
         clearExternalReferenceCacheAtom: atom(null, () => {}),
         addExternalReferencesToMappingAtom: atom(null, () => {}),
+        externalReferenceMappingAtom: atom({}),
     };
 });
 
@@ -133,6 +143,7 @@ vi.mock('../../../react/atoms/agentRunAtoms', async () => {
     const { atom } = await import('jotai');
     return {
         abandonActiveRunLocallyAtom: atom(null, () => {}),
+        canLeaveReconnectingRun: () => false,
         isWSChatPendingAtom: atom(false),
         isWSConnectedAtom: atom(false),
         isWSReadyAtom: atom(false),
@@ -146,11 +157,14 @@ vi.mock('../../../react/agents/agentActions', async () => {
     return {
         threadAgentActionsAtom: atom<unknown[]>([]),
         isCreateItemAgentAction: vi.fn(() => false),
+        isImportItemAgentAction: vi.fn(() => false),
         validateAppliedAgentAction: (...args: unknown[]) => validateAppliedAgentActionMock(...args),
         undoAgentActionAtom: atom(null, (_get: unknown, _set: unknown, actionId: string) => {
             undoAgentActionWriteMock(actionId);
         }),
         clearAllPendingApprovalsAtom: atom(null, () => {}),
+        withUnrecordedResults: (_get: unknown, _set: unknown, actions: unknown[]) => actions,
+        resumeUnrecordedResultsAtom: atom(null, () => {}),
     };
 });
 

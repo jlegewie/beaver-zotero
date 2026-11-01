@@ -22,7 +22,7 @@ import { setBusyContextProvider } from '@beaver/agent-core/transport/busyContext
 
 /**
  * Numeric-only snapshot (booleans encoded as 0/1) so the fields can be merged
- * into `FrontendTimingMetadata`, whose index signature is `number | undefined`.
+ * into `FrontendTimingMetadata` as timing values.
  *
  * A type alias rather than an interface: only an alias picks up an implicit
  * index signature, which is what lets this satisfy the provider seam's
@@ -33,14 +33,27 @@ export type BusyContext = {
     busy_sync: number;
     /** 1 if a Zotero DB transaction is open right now (queries queue behind it) */
     busy_db_tx: number;
+    /**
+     * Age in ms of the open Zotero DB transaction, or 0 when none is open. Tells
+     * a write stalled behind another one (Zotero, another plugin, a bulk edit)
+     * from one that is slow itself.
+     */
+    busy_db_tx_ms: number;
     /** 1 if Zotero holds its global data lock */
     busy_zotero_locked: number;
     /** 1 if Zotero full-text indexing fired recently (within `INDEXING_RECENCY_MS`) */
     busy_indexing: number;
     /** 1 if Beaver's MuPDF worker has in-flight operations */
     busy_extracting: number;
-    /** Number of operations running or queued on the user-facing MuPDF worker */
+    /**
+     * Operations the user-facing MuPDF worker client has accepted: sent to the
+     * worker, or waiting for it to start or warm up
+     */
     extracting_hot_pending: number;
+    /** Calls waiting in the user-facing worker client's queue behind `extracting_hot_pending` */
+    extracting_hot_queued: number;
+    /** WASM heap of the user-facing worker after its latest operation, MB (0 when unknown) */
+    extracting_hot_heap_mb: number;
     /** Number of operations running or queued on the background MuPDF worker */
     extracting_background_pending: number;
     /** Age in ms of the oldest hot-worker operation, or 0 while idle */
@@ -67,6 +80,14 @@ export type BusyContext = {
     window_hidden: number;
     /** How many ms the 1s heartbeat is currently overdue */
     event_loop_lag_ms: number;
+    /** 1 if a library write holds Beaver's instance mutation queue */
+    mutation_active: number;
+    /** Age in ms of the write holding the mutation queue, or 0 while idle */
+    mutation_active_ms: number;
+    /** Number of library writes queued behind the active one */
+    mutation_pending: number;
+    /** 1 if Beaver currently holds its pause on Zotero sync */
+    sync_paused: number;
 }
 
 const HEARTBEAT_INTERVAL_MS = 1000;
@@ -159,9 +180,12 @@ export function getBusyContext(): BusyContext {
 
     let busySync = 0;
     let busyDbTx = 0;
+    let busyDbTxMs = 0;
     let busyLocked = 0;
     let busyExtracting = 0;
     let extractingHotPending = 0;
+    let extractingHotQueued = 0;
+    let extractingHotHeapMb = 0;
     let extractingBackgroundPending = 0;
     let extractingHotOldestMs = 0;
     let extractingBackgroundOldestMs = 0;
@@ -172,18 +196,26 @@ export function getBusyContext(): BusyContext {
     let extractingBackgroundSpawnCount = 0;
     let extractingBackgroundLeaseReapCount = 0;
     let windowHidden = 0;
+    let mutationActive = 0;
+    let mutationActiveMs = 0;
+    let mutationPending = 0;
+    let syncPaused = 0;
     try {
         // `as any`: syncInProgress is a defineProperty getter and may be
         // missing from zotero-types
         const Z = Zotero as any;
         busySync = Z.Sync?.Runner?.syncInProgress ? 1 : 0;
         busyDbTx = Z.DB?.inTransaction?.() ? 1 : 0;
+        busyDbTxMs = Zotero.Beaver?.transactionWatch?.openAgeMs(now) ?? 0;
         busyLocked = Z.locked ? 1 : 0;
         // Beaver's own PDF extraction: in-flight ops on either MuPDF worker
         // slot (exposed cross-bundle via these globals).
         const hot = Z.__beaverMuPDFWorkerClient_hot;
         const background = Z.__beaverMuPDFWorkerClient_background;
         extractingHotPending = hot?.inFlight ?? 0;
+        extractingHotQueued = hot?.queued ?? 0;
+        const hotHeapBytes = hot?.heapBytes;
+        extractingHotHeapMb = typeof hotHeapBytes === 'number' ? Math.round(hotHeapBytes / (1024 * 1024)) : 0;
         extractingBackgroundPending = background?.inFlight ?? 0;
         busyExtracting = extractingHotPending + extractingBackgroundPending > 0 ? 1 : 0;
 
@@ -218,15 +250,31 @@ export function getBusyContext(): BusyContext {
         // Window/document may be unavailable during startup/shutdown
     }
 
+    try {
+        // Beaver's own write queue: a write stuck here blocks every later one.
+        const queue = Zotero.Beaver?.mutations?.getSnapshot();
+        if (queue) {
+            mutationActive = queue.active !== null ? 1 : 0;
+            mutationActiveMs = queue.activeStartedAt ? Math.max(0, now - queue.activeStartedAt) : 0;
+            mutationPending = queue.pending;
+        }
+        syncPaused = Zotero.Beaver?.syncPause?.isSyncPaused() ? 1 : 0;
+    } catch {
+        // Plugin services may be unavailable during startup/shutdown
+    }
+
     const busyIndexing = now - lastIndexActivityAt < INDEXING_RECENCY_MS ? 1 : 0;
 
     return {
         busy_sync: busySync,
         busy_db_tx: busyDbTx,
+        busy_db_tx_ms: busyDbTxMs,
         busy_zotero_locked: busyLocked,
         busy_indexing: busyIndexing,
         busy_extracting: busyExtracting,
         extracting_hot_pending: extractingHotPending,
+        extracting_hot_queued: extractingHotQueued,
+        extracting_hot_heap_mb: extractingHotHeapMb,
         extracting_background_pending: extractingBackgroundPending,
         extracting_hot_oldest_ms: extractingHotOldestMs,
         extracting_background_oldest_ms: extractingBackgroundOldestMs,
@@ -238,6 +286,10 @@ export function getBusyContext(): BusyContext {
         extracting_background_lease_reap_count: extractingBackgroundLeaseReapCount,
         window_hidden: windowHidden,
         event_loop_lag_ms: Math.max(0, now - lastTick - HEARTBEAT_INTERVAL_MS),
+        mutation_active: mutationActive,
+        mutation_active_ms: mutationActiveMs,
+        mutation_pending: mutationPending,
+        sync_paused: syncPaused,
     };
 }
 

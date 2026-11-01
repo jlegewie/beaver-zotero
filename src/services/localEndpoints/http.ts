@@ -1,7 +1,10 @@
+import { handleDuplicatesRequest } from '../duplicates/discovery';
 import { handleTestProtectedCacheHttpRequest } from './handlers/testProtectedCacheHandlers';
 import { handleTestVoiceHttpRequest } from './handlers/testVoiceHandlers';
+import { handleTestExportHttpRequest, handleTestExportNoteHttpRequest } from './handlers/testExportHandlers';
 import { handleTestNoteCreateHttpRequest, handleTestNoteDeleteHttpRequest, handleTestNoteReadHttpRequest } from './handlers/testNoteHandlers';
-import { handleTestTableCreateHttpRequest, handleTestTableReadHttpRequest, handleTestTableListHttpRequest, handleTestTableWriteHttpRequest, handleTestTableEditHttpRequest, handleTestTableVersionsHttpRequest, handleTestTableRevertHttpRequest, handleTestTableDeleteHttpRequest, handleTestTableOpenHttpRequest, handleTestTableCorruptHttpRequest, handleTestTableShadowHttpRequest, handleTestTableRestoreShadowHttpRequest, handleTestTableTrimHttpRequest, handleTestTableViewStateHttpRequest, handleTestTableItemPaneHttpRequest } from './handlers/testTableHandlers';
+import { handleTestTableFillHttpRequest, handleTestTablePendingHttpRequest } from './handlers/testTableFillHandlers';
+import { handleTestTableCreateHttpRequest, handleTestTableReadHttpRequest, handleTestTableListHttpRequest, handleTestTableWriteHttpRequest, handleTestTableEditHttpRequest, handleTestTableVersionsHttpRequest, handleTestTableRevertHttpRequest, handleTestTableDeleteHttpRequest, handleTestTableOpenHttpRequest, handleTestTableCorruptHttpRequest, handleTestTableShadowHttpRequest, handleTestTableRestoreShadowHttpRequest, handleTestTableTrimHttpRequest, handleTestTableItemPaneHttpRequest } from './handlers/testTableHandlers';
 import {
     handleTestAttachmentImageHttpRequest,
     handleTestExcludedLibrariesHttpRequest,
@@ -34,6 +37,7 @@ import {
 import { captureInstanceOperation } from './operation';
 import { createEndpoint, registerEndpoint } from './registration';
 import { handleArtifactRequest } from '../artifacts/artifactProvider';
+import { handleTableTabProbe } from '../../ui/tableTabProbe';
 /** Local HTTP routes, owned by the plugin instance. */
 
 import { logger } from '@beaver/agent-core/platform/logger';
@@ -132,6 +136,12 @@ import {
     handleTestWorkerStatsHttpRequest,
     handleTestWorkerWedgeProbeHttpRequest,
 } from './handlers/testCacheHandlers';
+
+import {
+    handleTestItemImportCapabilitiesHttpRequest,
+    handleTestItemImportResolveHttpRequest,
+    handleTestItemImportWriteHttpRequest,
+} from './handlers/testItemImportHandlers';
 
 
 import {
@@ -435,13 +445,18 @@ async function handleLibraryListHttpRequest(request: any) {
         request_id: generateRequestId(),
         library_id: request.library_id,
         collection_key: request.collection_key,
+        special_collection: request.special_collection,
         tag: request.tag,
         item_category: request.item_category ?? 'regular',
+        include_children: request.include_children ?? false,
+        nest_children: request.nest_children ?? false,
+        include_abstract: request.include_abstract ?? false,
         recursive: request.recursive ?? true,
         sort_by: request.sort_by || 'dateModified',
         sort_order: request.sort_order || 'desc',
         limit: request.limit ?? 20,
         offset: request.offset ?? 0,
+        has_attachments: request.has_attachments ?? null,
     };
     
     const response = await handleListItemsRequest(wsRequest);
@@ -476,6 +491,7 @@ async function handleResolvePopulationHttpRequest(request: any) {
         any_conditions: request.any_conditions || [],
         item_category: request.item_category === 'attachment' ? 'attachment' : 'regular',
         include_standalone_attachments: request.include_standalone_attachments ?? false,
+        skip_sibling_snapshots: request.skip_sibling_snapshots ?? false,
         has_attachments: request.has_attachments ?? null,
         max_items: request.max_items ?? 1000,
         exclude_item_ids: request.exclude_item_ids ?? [],
@@ -501,6 +517,7 @@ async function handleResolvePopulationHttpRequest(request: any) {
         library_name: response.library_name,
         collection_names: response.collection_names,
         collection_ids: response.collection_ids,
+        saved_search_names: response.saved_search_names,
         // The join mode actually applied to `conditions`. Its absence is how the
         // caller detects a provider that predates the field, so it has to be
         // forwarded here too.
@@ -510,6 +527,7 @@ async function handleResolvePopulationHttpRequest(request: any) {
         // WIDER population than the caller described.
         any_conditions_applied: response.any_conditions_applied,
         standalone_attachments_included: response.standalone_attachments_included,
+        sibling_snapshots_skipped: response.sibling_snapshots_skipped,
         // A dropped condition widens the population; the caller must not act on
         // ids that came back with a warning.
         warnings: response.warnings,
@@ -830,6 +848,8 @@ export function registerEndpoints(): (() => void) | undefined {
         createEndpoint(handleListTagsHttpRequest);
 
     // Deferred tool endpoints
+    endpoints['/beaver/library/duplicates'] = createEndpoint((request: any) => handleDuplicatesRequest({ ...request, event: 'duplicates_request', request_id: generateRequestId() }));
+
     endpoints['/beaver/agent-action/validate'] =
         createEndpoint(handleAgentActionValidateHttpRequest);
 
@@ -886,6 +906,12 @@ export function registerEndpoints(): (() => void) | undefined {
 
         endpoints['/beaver/test/resolve-item'] =
             createEndpoint(handleTestResolveItemHttpRequest);
+        endpoints['/beaver/test/item-import-resolve'] =
+            createEndpoint(handleTestItemImportResolveHttpRequest);
+        endpoints['/beaver/test/item-import-write'] =
+            createEndpoint(handleTestItemImportWriteHttpRequest);
+        endpoints['/beaver/test/item-import-capabilities'] =
+            createEndpoint(handleTestItemImportCapabilitiesHttpRequest);
         endpoints['/beaver/test/resolve-readable'] =
             createEndpoint(handleTestResolveReadableHttpRequest);
         endpoints['/beaver/test/best-epub-attachment'] =
@@ -1123,7 +1149,13 @@ export function registerEndpoints(): (() => void) | undefined {
         endpoints['/beaver/test/list-actions'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/list-actions', request));
         endpoints['/beaver/test/approve-action'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/approve-action', request));
         endpoints['/beaver/test/confirm-credits'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/confirm-credits', request));
+        endpoints['/beaver/test/table-card'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/table-card', request));
+        endpoints['/beaver/test/table-fill-progress'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/table-fill-progress', request));
         endpoints['/beaver/test/undo-action'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/undo-action', request));
+        endpoints['/beaver/test/chat-drop-connection'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/chat-drop-connection', request));
+        endpoints['/beaver/test/run-snapshot'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/run-snapshot', request));
+        endpoints['/beaver/test/chat-stop'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/chat-stop', request));
+        endpoints['/beaver/test/chat-continue'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/chat-continue', request));
 
         endpoints['/beaver/test/application-state'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/application-state', request));
 
@@ -1144,6 +1176,10 @@ export function registerEndpoints(): (() => void) | undefined {
 
         endpoints['/beaver/test/table-list'] = createEndpoint(handleTestTableListHttpRequest);
 
+        // The Beaver tab (dev-only): fixed commands that open, close and time
+        // it through the product paths, and report its tabs and the session.
+        endpoints['/beaver/test/table-tab'] = createEndpoint(handleTableTabProbe);
+
         // The versioned store (dev-only): the write protocol, the version log,
         // revert, trash/restore, and the crash recovery `open` performs.
         // `table-corrupt` damages the storage directory on purpose so that
@@ -1151,6 +1187,10 @@ export function registerEndpoints(): (() => void) | undefined {
         endpoints['/beaver/test/table-write'] = createEndpoint(handleTestTableWriteHttpRequest);
 
         endpoints['/beaver/test/table-edit'] = createEndpoint(handleTestTableEditHttpRequest);
+        // Table fills (dev-only): plan, start, wait for, stop and inspect the
+        // plugin's fill jobs, and read a table's pending work.
+        endpoints['/beaver/test/table-fill'] = createEndpoint(handleTestTableFillHttpRequest);
+        endpoints['/beaver/test/table-pending'] = createEndpoint(handleTestTablePendingHttpRequest);
 
         endpoints['/beaver/test/table-versions'] = createEndpoint(handleTestTableVersionsHttpRequest);
 
@@ -1171,13 +1211,6 @@ export function registerEndpoints(): (() => void) | undefined {
 
         endpoints['/beaver/test/table-restore-shadow'] = createEndpoint(handleTestTableRestoreShadowHttpRequest);
 
-        // The reader host (dev-only): open a stored table in the reader and
-        // report which of the enhancer's seams attached, and list every table
-        // document currently enhanced in either host.
-        endpoints['/beaver/test/table-open-reader'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/table-open-reader', request));
-
-        endpoints['/beaver/test/table-view-state'] = createEndpoint(handleTestTableViewStateHttpRequest);
-
         // The item-pane section (dev-only): whether it is registered, and the
         // fields it would render for one table.
         endpoints['/beaver/test/table-item-pane'] = createEndpoint(handleTestTableItemPaneHttpRequest);
@@ -1188,11 +1221,19 @@ export function registerEndpoints(): (() => void) | undefined {
 
         endpoints['/beaver/test/run-status-popup'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/run-status-popup', request));
 
+        endpoints['/beaver/test/feature-tip'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/feature-tip', request));
+
         endpoints['/beaver/test/quick-prompt'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/quick-prompt', request));
 
         endpoints['/beaver/test/version-popup'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/version-popup', request));
 
         endpoints['/beaver/test/saved-actions'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/saved-actions', request));
+
+        // File export without the save dialog: a given source, or a response of
+        // a window's open thread.
+        endpoints['/beaver/test/export'] = createEndpoint(handleTestExportHttpRequest);
+        // Export of a Zotero note (or given note HTML) without the save dialog.
+        endpoints['/beaver/test/export-note'] = createEndpoint(handleTestExportNoteHttpRequest);
     }
 
     const releases = Object.entries(endpoints).map(([path, handler]) =>

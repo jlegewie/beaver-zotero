@@ -1,0 +1,61 @@
+{
+  "description": "A fill card that fits under the run's authorization (no credits quoted), declined with instructions.",
+  "request": {
+    "event": "table_card_request",
+    "card_id": "00000000-0000-4000-8000-0000000000ca",
+    "run_id": "00000000-0000-4000-8000-0000000000a1",
+    "thread_id": "00000000-0000-4000-8000-0000000000b1",
+    "toolcall_id": "test-tool-call-id",
+    "scope": "fill",
+    "title": "Comparison",
+    "description": "Sample sizes and designs.",
+    "table": {
+      "key": "u-TABLE222",
+      "title": "Comparison"
+    },
+    "destination": null,
+    "sources": [],
+    "merge": null,
+    "row_cap": null,
+    "total": null,
+    "criteria": [],
+    "columns": [
+      {
+        "header": "Sample size",
+        "type": "text",
+        "description": "How many participants?",
+        "options": null
+      },
+      {
+        "header": "Design",
+        "type": "select",
+        "description": "What is the study design?",
+        "options": [
+          {
+            "label": "RCT",
+            "description": "Random assignment of units to arms."
+          },
+          {
+            "label": "Observational",
+            "description": null
+          }
+        ]
+      }
+    ],
+    "cost": {
+      "rows": 3,
+      "documents": 2,
+      "title_abstract": 1,
+      "no_input": 0,
+      "credits": 0.45
+    },
+    "user_instructions_prefill": "",
+    "timeout_seconds": 600.0
+  },
+  "reply": {
+    "type": "table_card_response",
+    "card_id": "00000000-0000-4000-8000-0000000000ca",
+    "approved": false,
+    "user_instructions": "Try three papers first"
+  }
+}

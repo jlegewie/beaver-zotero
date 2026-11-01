@@ -13,20 +13,28 @@ import {
     WSZoteroDocumentRequest,
     WSZoteroDocumentResponse,
 } from '@beaver/agent-core/protocol/agentProtocol';
-import type { ServedAttachmentDiagnostics, ZoteroDocumentErrorCode } from '@beaver/agent-core/protocol/agentProtocol';
+import type { ServedAttachmentDiagnostics, WSDocumentTimings, ZoteroDocumentErrorCode } from '@beaver/agent-core/protocol/agentProtocol';
 import type { AttachmentStub, ItemStub } from '@beaver/agent-core/types/zotero';
 import {
     extractAndCacheEpubDocument,
     extractAndCacheResolvedPdfDocument,
     extractAndCacheSnapshotDocument,
+    type PdfDocumentTimings,
 } from '../documentExtractionCore';
 import {
     extractTextDocument,
+    fileAccessDeniedMessage,
     loadAttachmentData,
     resolveToReadableAttachment,
     resolveAttachmentFileSource,
 } from '../documentExtraction';
 import { readableToExtractKind, type ExtractContentKind, type ReadableContentKind } from '@beaver/agent-core/extract/document/shared/contentKinds';
+import type { DocumentExtractResult } from '@beaver/agent-core/extract/document/shared/documentExtractResult';
+import { toBackendDocumentPayload } from '../documentExtraction/backendDocumentPayload';
+import {
+    isCurrentExtractionSchemaVersion,
+    unsupportedSchemaVersionMessage,
+} from '../documentExtraction/shared/extractionSchemaVersions';
 import {
     DEFAULT_PAGES_TIMEOUT_SECONDS,
     MAX_PDF_TIMEOUT_SECONDS,
@@ -57,12 +65,21 @@ import { getBestAttachmentBatch } from '../documentExtraction/attachmentInfoBatc
 import { libraryRefForLibraryID, modelObjectId } from '../../utils/libraryIdentity';
 import {
     createPreparedJsonMessage,
+    isPreparedJsonMessage,
+    preparedJsonEnvelope,
     type PreparedJsonMessage,
 } from '@beaver/agent-core/transport/preparedJsonMessage';
 
 export interface ZoteroDocumentRequestOptions {
     responseMode?: 'object' | 'websocket';
 }
+
+type DocumentErrorResponse = (
+    error: string,
+    error_code: ZoteroDocumentErrorCode,
+    total_pages?: number | null,
+    content_kind?: ExtractContentKind,
+) => WSZoteroDocumentResponse;
 
 const PDF_CONTENT_KIND_INSERT = '"content_kind":"pdf",';
 
@@ -82,6 +99,99 @@ function serializedPdfResultToWireJson(jsonBytes: Uint8Array): string {
         throw new Error('Serialized PDF result must be a JSON object');
     }
     return `{"content_kind":"pdf",${raw.slice(1)}`;
+}
+
+/**
+ * Success response for a pre-serialized PDF result. The cached serialization
+ * is already in the form the backend consumes, so its bytes are spliced into
+ * the envelope without parsing them.
+ */
+function buildSerializedPdfSuccessResponse(
+    request: WSZoteroDocumentRequest,
+    envelope: Omit<WSZoteroDocumentResponse, 'result'>,
+    jsonBytes: Uint8Array,
+    totalPages: number | null,
+    errorResponse: DocumentErrorResponse,
+): WSZoteroDocumentResponse | PreparedJsonMessage {
+    const oversized = guardSerializedPayloadSize(
+        request,
+        serializedPdfWireResultBytes(jsonBytes.byteLength),
+        totalPages,
+        'pdf',
+        errorResponse,
+    );
+    if (oversized) return oversized;
+    return createPreparedJsonMessage(envelope, { result: serializedPdfResultToWireJson(jsonBytes) });
+}
+
+const WIRE_TIMING_KEYS: readonly [keyof PdfDocumentTimings, keyof WSDocumentTimings][] = [
+    ['resolveMs', 'resolve_ms'],
+    ['cacheLookupMs', 'cache_lookup_ms'],
+    ['fileReadMs', 'file_read_ms'],
+    ['pageCountMs', 'page_count_ms'],
+    ['extractMs', 'extract_ms'],
+    ['clientQueueMs', 'client_queue_ms'],
+    ['workerStartMs', 'worker_start_ms'],
+    ['workerQueueMs', 'worker_queue_ms'],
+    ['workerOpMs', 'worker_op_ms'],
+    ['cacheWriteMs', 'cache_write_ms'],
+    ['workerHeapMb', 'worker_heap_mb'],
+    ['workerPeakHeapMb', 'worker_peak_heap_mb'],
+];
+
+/**
+ * The `timings` envelope field of a PDF success response: the request's
+ * plugin timings, its total since `startedAt`, and the wait for
+ * `attachment_diagnostics`.
+ */
+function documentTimingsField(
+    timings: PdfDocumentTimings | undefined,
+    startedAt: number,
+    diagnosticsWaitMs: number | undefined,
+): { timings?: WSDocumentTimings } {
+    if (!timings) return {};
+    const wire: WSDocumentTimings = { total_ms: Date.now() - startedAt, source: timings.source };
+    for (const [from, to] of WIRE_TIMING_KEYS) {
+        const ms = timings[from];
+        if (typeof ms === 'number') (wire as unknown as Record<string, number>)[to] = Math.round(ms);
+    }
+    if (timings.workerState) wire.worker_state = timings.workerState;
+    if (timings.workerSlot) wire.worker_slot = timings.workerSlot;
+    if (timings.overflowSkip) wire.overflow_skip = timings.overflowSkip;
+    if (diagnosticsWaitMs !== undefined) wire.diagnostics_wait_ms = diagnosticsWaitMs;
+    return { timings: wire };
+}
+
+/**
+ * Success response carrying an extracted document object.
+ *
+ * WebSocket responses go to the backend, so the document is sent in its
+ * backend projection, serialized once, and spliced into the envelope as a
+ * prepared field. Local callers (`responseMode: 'object'`) get the document
+ * as extracted.
+ */
+function buildDocumentSuccessResponse(
+    request: WSZoteroDocumentRequest,
+    options: ZoteroDocumentRequestOptions,
+    envelope: Omit<WSZoteroDocumentResponse, 'result'>,
+    document: DocumentExtractResult,
+    totalPages: number | null,
+    contentKind: ExtractContentKind,
+    errorResponse: DocumentErrorResponse,
+): WSZoteroDocumentResponse | PreparedJsonMessage {
+    if (options.responseMode !== 'websocket') {
+        return guardPayloadSize(request, { ...envelope, result: document }, totalPages, contentKind, errorResponse);
+    }
+    const resultJson = JSON.stringify(toBackendDocumentPayload(document));
+    const oversized = guardSerializedPayloadSize(
+        request,
+        new TextEncoder().encode(resultJson).byteLength,
+        totalPages,
+        contentKind,
+        errorResponse,
+    );
+    if (oversized) return oversized;
+    return createPreparedJsonMessage(envelope, { result: resultJson });
 }
 
 function buildPayloadTooLargeResponse(
@@ -240,7 +350,7 @@ export async function resolveServedAttachmentDiagnostics(
         const [bestAttachmentByParent] = await Promise.all([bestAttachments, childItems]);
         return {
             is_primary: parentID !== null && bestAttachmentByParent.get(parentID) === attachment.id,
-            annotations_count: attachment.getAnnotations().length,
+            annotations_count: attachment.numAnnotations(),
         };
     } catch (error) {
         logger(`handleZoteroDocumentRequest: attachment diagnostics failed for ${attachment.libraryID}-${attachment.key}: ${error}`, 1);
@@ -263,16 +373,6 @@ async function settleWithinBudget<T>(pending: Promise<T | null>, budgetMs: numbe
     }
 }
 
-function buildPreparedPdfDocumentResponse(
-    envelope: Omit<WSZoteroDocumentResponse, 'result'>,
-    jsonBytes: Uint8Array,
-): PreparedJsonMessage {
-    return createPreparedJsonMessage(
-        envelope,
-        { result: serializedPdfResultToWireJson(jsonBytes) },
-    );
-}
-
 /**
  * Handle zotero_document_request event.
  */
@@ -290,6 +390,7 @@ export async function handleZoteroDocumentRequest(
     // `max_file_size_mb` on the request is deliberately ignored: the file-size
     // ceiling is a client-side preference (see attachmentLimits.ts).
     const { attachment, external_file_key, mode, max_pages, request_id, timeout_seconds } = request;
+    const requestStartedAt = Date.now();
 
     // Populated once the attachment resolves so post-resolution error responses
     // carry the same view-row metadata as success responses (best-effort:
@@ -299,9 +400,13 @@ export async function handleZoteroDocumentRequest(
     // Started once the attachment resolves so the DB reads overlap extraction;
     // success responses collect it under a short budget.
     let pendingDiagnostics: Promise<ServedAttachmentDiagnostics | null> | null = null;
+    // Time spent waiting for them, reported in the response's `timings`.
+    let diagnosticsWaitMs: number | undefined;
     const diagnosticsField = async (): Promise<{ attachment_diagnostics?: ServedAttachmentDiagnostics }> => {
         if (!pendingDiagnostics) return {};
+        const waitStartedAt = Date.now();
         const diagnostics = await settleWithinBudget(pendingDiagnostics, SERVED_ATTACHMENT_DIAGNOSTICS_BUDGET_MS);
+        diagnosticsWaitMs = Date.now() - waitStartedAt;
         return diagnostics ? { attachment_diagnostics: diagnostics } : {};
     };
 
@@ -399,6 +504,12 @@ export async function handleZoteroDocumentRequest(
         }
 
         timeoutContentKind = readableToExtractKind(contentKind);
+        if (timeoutContentKind) {
+            const unsupportedVersion = unsupportedSchemaVersionMessage(timeoutContentKind, request.schema_version, mode);
+            if (unsupportedVersion) {
+                return errorResponse(unsupportedVersion, 'unsupported_schema_version', null, timeoutContentKind);
+            }
+        }
         // View-row metadata for the backend tool-result view (parent-centric
         // display + the served file's own name/content_kind). Both are optional;
         // a failure here must never fail document delivery, and both ride on
@@ -438,6 +549,14 @@ export async function handleZoteroDocumentRequest(
                         'text',
                     );
                 }
+                if (source.code === 'file_permission_denied') {
+                    return errorResponse(
+                        fileAccessDeniedMessage('text', resolvedKey),
+                        'file_permission_denied',
+                        null,
+                        'text',
+                    );
+                }
                 return errorResponse(
                     `Attachment ${resolvedKey} file is too large (${(source.sizeMB ?? 0).toFixed(1)}MB > ${source.maxMB}MB).`,
                     'file_too_large',
@@ -467,6 +586,15 @@ export async function handleZoteroDocumentRequest(
                     return errorResponse(
                         `Failed to download attachment ${resolvedKey} from remote storage.`,
                         'download_failed',
+                        null,
+                        'text',
+                    );
+                }
+                if (data.code === 'file_permission_denied') {
+                    return errorResponse(
+                        `Zotero does not have permission to read text attachment ${resolvedKey}. `
+                            + 'The user needs to grant Zotero access to the folder containing the file.',
+                        'file_permission_denied',
                         null,
                         'text',
                     );
@@ -520,7 +648,7 @@ export async function handleZoteroDocumentRequest(
                     const { libraryId, zoteroKey } = result.resolvedAttachment;
                     logger(`handleZoteroDocumentRequest: document cache hit for ${libraryId}-${zoteroKey} content_kind=epub`, 3);
                 }
-                return guardPayloadSize(request, {
+                return buildDocumentSuccessResponse(request, options, {
                     type: 'zotero_document',
                     request_id,
                     resolved_attachment: {
@@ -530,11 +658,10 @@ export async function handleZoteroDocumentRequest(
                     },
                     content_type: result.contentType,
                     content_kind: 'epub',
-                    result: result.document,
                     ...(parentItem ? { parent_item: parentItem } : {}),
                     ...(servedAttachment ? { served_attachment: servedAttachment } : {}),
                     ...(await diagnosticsField()),
-                }, null, 'epub', errorResponse);
+                }, result.document, null, 'epub', errorResponse);
             }
 
             return errorResponse(result.message, result.code, result.pageCount ?? null, 'epub');
@@ -558,7 +685,7 @@ export async function handleZoteroDocumentRequest(
                     const { libraryId, zoteroKey } = result.resolvedAttachment;
                     logger(`handleZoteroDocumentRequest: document cache hit for ${libraryId}-${zoteroKey} content_kind=snapshot`, 3);
                 }
-                return guardPayloadSize(request, {
+                return buildDocumentSuccessResponse(request, options, {
                     type: 'zotero_document',
                     request_id,
                     resolved_attachment: {
@@ -568,11 +695,10 @@ export async function handleZoteroDocumentRequest(
                     },
                     content_type: result.contentType,
                     content_kind: 'snapshot',
-                    result: result.document,
                     ...(parentItem ? { parent_item: parentItem } : {}),
                     ...(servedAttachment ? { served_attachment: servedAttachment } : {}),
                     ...(await diagnosticsField()),
-                }, null, 'snapshot', errorResponse);
+                }, result.document, null, 'snapshot', errorResponse);
             }
 
             return errorResponse(result.message, result.code, result.pageCount ?? null, 'snapshot');
@@ -599,6 +725,7 @@ export async function handleZoteroDocumentRequest(
             externalAbortSignal: timeout.signal,
             onRemoteDownloadFailure: notifyRemoteDownloadFailure,
             serializedResult: options.responseMode === 'websocket',
+            schemaVersion: request.schema_version,
         });
 
         if (result.kind === 'ok') {
@@ -606,32 +733,8 @@ export async function handleZoteroDocumentRequest(
                 const { libraryId, zoteroKey } = result.resolvedAttachment;
                 logger(`handleZoteroDocumentRequest: document cache hit for ${libraryId}-${zoteroKey} mode=${mode}`, 3);
             }
-            if (result.serializedResult) {
-                const payloadBytes = serializedPdfWireResultBytes(result.serializedResult.byteLength);
-                const oversized = guardSerializedPayloadSize(
-                    request,
-                    payloadBytes,
-                    result.totalPages ?? null,
-                    'pdf',
-                    errorResponse,
-                );
-                if (oversized) return oversized;
-                return buildPreparedPdfDocumentResponse({
-                    type: 'zotero_document',
-                    request_id,
-                    resolved_attachment: {
-                        library_id: result.resolvedAttachment.libraryId,
-                        zotero_key: result.resolvedAttachment.zoteroKey,
-                        library_ref: libraryRefForLibraryID(result.resolvedAttachment.libraryId) ?? undefined,
-                    },
-                    content_type: result.contentType,
-                    content_kind: 'pdf',
-                    ...(parentItem ? { parent_item: parentItem } : {}),
-                    ...(servedAttachment ? { served_attachment: servedAttachment } : {}),
-                    ...(await diagnosticsField()),
-                }, result.serializedResult.jsonBytes);
-            }
-            return guardPayloadSize(request, {
+            const diagnostics = await diagnosticsField();
+            const envelope: Omit<WSZoteroDocumentResponse, 'result'> = {
                 type: 'zotero_document',
                 request_id,
                 resolved_attachment: {
@@ -641,11 +744,20 @@ export async function handleZoteroDocumentRequest(
                 },
                 content_type: result.contentType,
                 content_kind: 'pdf',
-                result: { ...result.result, content_kind: 'pdf' as const },
                 ...(parentItem ? { parent_item: parentItem } : {}),
                 ...(servedAttachment ? { served_attachment: servedAttachment } : {}),
-                ...(await diagnosticsField()),
-            }, result.totalPages ?? null, 'pdf', errorResponse);
+                ...diagnostics,
+                ...documentTimingsField(result.timings, requestStartedAt, diagnosticsWaitMs),
+            };
+            if (result.serializedResult) {
+                return buildSerializedPdfSuccessResponse(
+                    request, envelope, result.serializedResult.jsonBytes, result.totalPages ?? null, errorResponse,
+                );
+            }
+            return buildDocumentSuccessResponse(
+                request, options, envelope, { ...result.result, content_kind: 'pdf' as const },
+                result.totalPages ?? null, 'pdf', errorResponse,
+            );
         }
 
         if (result.kind === 'timeout' || (result.kind === 'external_abort' && timeout.signal.aborted)) {
@@ -656,8 +768,11 @@ export async function handleZoteroDocumentRequest(
             try {
                 // Exclusions can change while the foreground extraction is in
                 // flight. Recheck the live boundary before staging follow-up
-                // work so an excluded library never reaches the queue.
-                if (isLibrarySearchable(target.libraryId)) {
+                // work so an excluded library never reaches the queue. A
+                // non-current schema version is on-demand only: the background
+                // queue produces and caches the current version.
+                if (isCurrentExtractionSchemaVersion('pdf', request.schema_version)
+                    && isLibrarySearchable(target.libraryId)) {
                     await Zotero.Beaver?.db?.enqueueBackgroundJob({
                         jobType: 'document_extract',
                         libraryId: target.libraryId,
@@ -689,6 +804,7 @@ export async function handleZoteroDocumentRequest(
                 {
                     workerDispatched: result.workerDispatched === true,
                     leaseReaped: result.kind === 'timeout' && result.leaseReaped === true,
+                    slot: result.workerSlot,
                 },
             );
         }
@@ -723,6 +839,57 @@ export async function handleZoteroDocumentRequest(
     }
 }
 
+/** A document in the form the backend reads, or why it could not be read. */
+export type BackendDocumentRead =
+    | {
+          ok: true;
+          /** The backend-bound extraction, serialized once, ready to splice into a body. */
+          json: string;
+          contentKind: ExtractContentKind;
+          totalPages: number | null;
+      }
+    | {
+          ok: false;
+          code: ZoteroDocumentErrorCode;
+          message: string;
+          contentKind?: ExtractContentKind;
+      };
+
+/**
+ * Extracts a document for the backend: the payload the chat socket sends for
+ * `zotero_document_request`, with the same resolution, cache, citation level,
+ * page and size limits, returned as serialized JSON rather than wrapped in a
+ * socket message. Callers that post a document over HTTP (a table fill) use
+ * it so the backend reads exactly what the chat path would have sent.
+ */
+export async function readBackendDocument(
+    request: WSZoteroDocumentRequest,
+): Promise<BackendDocumentRead> {
+    const response = await handleZoteroDocumentRequest(request, { responseMode: 'websocket' });
+    if (isPreparedJsonMessage(response)) {
+        const envelope = preparedJsonEnvelope(response) as Omit<WSZoteroDocumentResponse, 'result'>;
+        const json = response.rawFields.result;
+        if (!json || !envelope.content_kind) {
+            return { ok: false, code: 'extraction_failed', message: 'The document response carried no result.' };
+        }
+        return { ok: true, json, contentKind: envelope.content_kind, totalPages: envelope.total_pages ?? null };
+    }
+    if (response.error || response.result == null || !response.content_kind) {
+        return {
+            ok: false,
+            code: response.error_code ?? 'extraction_failed',
+            message: response.error ?? 'The document response carried no result.',
+            ...(response.content_kind ? { contentKind: response.content_kind } : {}),
+        };
+    }
+    return {
+        ok: true,
+        json: JSON.stringify(response.result),
+        contentKind: response.content_kind,
+        totalPages: response.total_pages ?? null,
+    };
+}
+
 /** Model-facing message for an external file whose managed copy is unavailable. */
 export function externalFileMissingMessage(extKey: string, record: ExternalFileRecord | null): string {
     const label = record ? `'ext-${extKey}' ('${record.filename}')` : `'ext-${extKey}'`;
@@ -751,6 +918,7 @@ async function handleExternalFileDocumentRequest(
 ): Promise<WSZoteroDocumentResponse | PreparedJsonMessage> {
     const { mode, max_pages, request_id, timeout_seconds } = request;
     const requestKey = `ext-${extKey}`;
+    const requestStartedAt = Date.now();
 
     // Attach the served-file stub to post-resolution error responses too (it is
     // null until the registry resolves the key, so the early file_missing error
@@ -794,6 +962,11 @@ async function handleExternalFileDocumentRequest(
                 `External file '${requestKey}' ('${record.filename}') is an image. Use the view tool to look at it.`,
                 'unsupported_type',
             );
+        }
+
+        const unsupportedVersion = unsupportedSchemaVersionMessage(record.contentKind, request.schema_version, mode);
+        if (unsupportedVersion) {
+            return errorResponse(unsupportedVersion, 'unsupported_schema_version', null, record.contentKind);
         }
 
         if (record.contentKind === 'text') {
@@ -850,15 +1023,14 @@ async function handleExternalFileDocumentRequest(
                 if (result.cached) {
                     logger(`handleZoteroDocumentRequest: document cache hit for ${requestKey} content_kind=epub`, 3);
                 }
-                return guardPayloadSize(request, {
+                return buildDocumentSuccessResponse(request, options, {
                     type: 'zotero_document',
                     request_id,
                     external_file_key: extKey,
                     content_type: result.contentType,
                     content_kind: 'epub',
-                    result: result.document,
                     served_attachment: servedExternal,
-                }, null, 'epub', errorResponse);
+                }, result.document, null, 'epub', errorResponse);
             }
             if (result.code === 'file_missing') {
                 return errorResponse(externalFileMissingMessage(extKey, record), 'file_missing', null, 'epub');
@@ -877,40 +1049,31 @@ async function handleExternalFileDocumentRequest(
             workerName: 'hot',
             externalAbortSignal: timeout.signal,
             serializedResult: options.responseMode === 'websocket',
+            schemaVersion: request.schema_version,
         });
 
         if (result.kind === 'ok') {
             if (result.cached) {
                 logger(`handleZoteroDocumentRequest: document cache hit for ${requestKey} mode=${mode}`, 3);
             }
-            if (result.serializedResult) {
-                const payloadBytes = serializedPdfWireResultBytes(result.serializedResult.byteLength);
-                const oversized = guardSerializedPayloadSize(
-                    request,
-                    payloadBytes,
-                    result.totalPages ?? null,
-                    'pdf',
-                    errorResponse,
-                );
-                if (oversized) return oversized;
-                return buildPreparedPdfDocumentResponse({
-                    type: 'zotero_document',
-                    request_id,
-                    external_file_key: extKey,
-                    content_type: result.contentType,
-                    content_kind: 'pdf',
-                    served_attachment: servedExternal,
-                }, result.serializedResult.jsonBytes);
-            }
-            return guardPayloadSize(request, {
+            const envelope: Omit<WSZoteroDocumentResponse, 'result'> = {
                 type: 'zotero_document',
                 request_id,
                 external_file_key: extKey,
                 content_type: result.contentType,
                 content_kind: 'pdf',
-                result: { ...result.result, content_kind: 'pdf' as const },
                 served_attachment: servedExternal,
-            }, result.totalPages ?? null, 'pdf', errorResponse);
+                ...documentTimingsField(result.timings, requestStartedAt, undefined),
+            };
+            if (result.serializedResult) {
+                return buildSerializedPdfSuccessResponse(
+                    request, envelope, result.serializedResult.jsonBytes, result.totalPages ?? null, errorResponse,
+                );
+            }
+            return buildDocumentSuccessResponse(
+                request, options, envelope, { ...result.result, content_kind: 'pdf' as const },
+                result.totalPages ?? null, 'pdf', errorResponse,
+            );
         }
 
         if (result.kind === 'timeout' || result.kind === 'external_abort') {
@@ -928,6 +1091,7 @@ async function handleExternalFileDocumentRequest(
                 {
                     workerDispatched: result.workerDispatched === true,
                     leaseReaped: result.kind === 'timeout' && result.leaseReaped === true,
+                    slot: result.workerSlot,
                 },
             );
         }

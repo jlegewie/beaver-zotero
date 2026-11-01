@@ -67,6 +67,7 @@ import { decodeHtmlEntities } from '../../utils/noteHtmlEntities';
 import {
     getOrSimplify,
     invalidateSimplificationCache,
+    normalizeNoteHtml,
     type SimplificationMetadata,
 } from '../../utils/noteHtmlSimplifier';
 import { assertNoPreviewMarkers, containsPreviewMarkers, stripPreviewMarkers } from '../../utils/notePreviewGuard';
@@ -633,7 +634,11 @@ export async function executeEditNoteAction(
     //     citations keep a page locator instead of dropping it on save.
     const structuralLocators = await preloadStructuralLocatorPages(new_string);
     const resolvedLocatorPages = structuralLocators.pages;
-    const locatorWarning = buildUnresolvedLocatorWarning(structuralLocators.unresolved);
+    const locatorWarning = buildUnresolvedLocatorWarning(
+        structuralLocators.unresolved,
+        structuralLocators.unavailable,
+        structuralLocators.missing,
+    );
 
     // ── rewrite mode: replace entire note body ──
     if (operation === 'rewrite') {
@@ -690,7 +695,7 @@ export async function executeEditNoteAction(
         clearNoteEditorSelection(library_id, zotero_key);
         invalidateSimplificationCache(noteId);
 
-        const duplicateWarning = checkDuplicateCitations(new_string, metadata);
+        const duplicateWarning = checkDuplicateCitations(new_string, metadata, old_string);
         const warnings = collectWarnings(duplicateWarning, locatorWarning, ...(externalRefContext.externalFileWarnings ?? []));
 
         return {
@@ -759,7 +764,7 @@ export async function executeEditNoteAction(
         clearNoteEditorSelection(library_id, zotero_key);
         invalidateSimplificationCache(noteId);
 
-        const duplicateWarning = checkDuplicateCitations(new_string, metadata);
+        const duplicateWarning = checkDuplicateCitations(new_string, metadata, old_string);
         const warnings = collectWarnings(duplicateWarning, locatorWarning, ...(externalRefContext.externalFileWarnings ?? []));
 
         const result: EditNoteResultData = {
@@ -962,7 +967,7 @@ export async function executeEditNoteAction(
     invalidateSimplificationCache(noteId);
 
     // 15. Check for duplicate citation warnings
-    const duplicateWarning = checkDuplicateCitations(new_string, metadata);
+    const duplicateWarning = checkDuplicateCitations(new_string, metadata, old_string);
     const warnings = collectWarnings(duplicateWarning, locatorWarning, ...(externalRefContext.externalFileWarnings ?? []));
 
     const result: EditNoteResultData = {
@@ -1133,8 +1138,9 @@ export async function undoEditNoteAction(
         let undoOldHtml = expandedOld!;
         let undoNewHtml = expandedNew!;
 
-        let beforeCtx = resultData?.undo_before_context;
-        let afterCtx = resultData?.undo_after_context;
+        // Absent fields arrive from the backend as null.
+        let beforeCtx = resultData?.undo_before_context ?? undefined;
+        let afterCtx = resultData?.undo_after_context ?? undefined;
 
         // PM may have decoded HTML entities (e.g. &#x27; → ') in the note
         // since the undo data was stored. If the stored new_html isn't found,
@@ -1209,8 +1215,8 @@ export async function undoEditNoteAction(
             strippedHtml,
             undoOldHtml: expandedOld!,
             undoNewHtml: isDeletion ? '' : expandedNew!,
-            beforeCtx: resultData?.undo_before_context,
-            afterCtx: resultData?.undo_after_context,
+            beforeCtx: resultData?.undo_before_context ?? undefined,
+            afterCtx: resultData?.undo_after_context ?? undefined,
             libraryId: library_id,
             logPrefix: 'undoEditNoteAction',
             logLabel: `note ${noteId}`,
@@ -1254,19 +1260,19 @@ export async function undoEditNoteAction(
 /** Build the thrown Error for a batch that failed the pre-check re-validation pass. */
 function buildPrepFailureError(failures: BatchEditFailure[]): Error {
     const first = failures[0];
-    return new Error(
+    return Object.assign(new Error(
         `Batch cannot be applied: ${failures.length} edit(s) failed re-validation `
         + `(edit ${first.index}: ${first.error})`
-    );
+    ), { code: first.errorCode });
 }
 
 /** Build the thrown Error for a batch whose edits no longer resolve against the current note. */
 function buildResolveFailureError(failures: BatchEditFailure[]): Error {
     const first = failures[0];
-    return new Error(
+    return Object.assign(new Error(
         `Batch cannot be applied: ${failures.length} edit(s) no longer resolve against the current note `
         + `(edit ${first.index}: ${first.error})`
-    );
+    ), { code: first.errorCode });
 }
 
 /**
@@ -1291,7 +1297,11 @@ async function executeBatchSingleRewrite(
     const newPageLabels = await preloadPageLabelsForNewCitations(edit.new_string);
     const structuralLocators = await preloadStructuralLocatorPages(edit.new_string);
     const resolvedLocatorPages = structuralLocators.pages;
-    const locatorWarning = buildUnresolvedLocatorWarning(structuralLocators.unresolved);
+    const locatorWarning = buildUnresolvedLocatorWarning(
+        structuralLocators.unresolved,
+        structuralLocators.unavailable,
+        structuralLocators.missing,
+    );
 
     let expandedNew: string;
     try {
@@ -1444,14 +1454,20 @@ export async function executeEditNoteBatchAction(
     }
 
     // 3. Snapshot the note once. Every edit resolves against this snapshot.
+    //    Page labels are pre-seeded first, as the agent executor does, so the
+    //    simplified note renders citation locators the way validation did.
     const externalRefContext = await getExternalRefContext(edits.map(edit => edit.new_string).join('\n<!-- edit boundary -->\n'), context);
+    await preloadNotePageLabels(item.getNote(), library_id, { extractOnCacheMiss: true });
     const oldHtml: string = item.getNote();
     const noteId = `${library_id}-${zotero_key}`;
     const pageLabelsByItemId = await preloadNotePageLabels(oldHtml, library_id);
     const { simplified, metadata } = getOrSimplify(noteId, oldHtml, library_id, pageLabelsByItemId);
 
-    const existingCitationCache = extractDataCitationItems(oldHtml);
-    const strippedHtml = stripDataCitationItems(oldHtml);
+    // Match and splice against the note as the editor serializes it: citation
+    // expansion produces that canonical form, so the raw stored HTML can miss.
+    const normalizedOldHtml = normalizeNoteHtml(oldHtml);
+    const existingCitationCache = extractDataCitationItems(normalizedOldHtml);
+    const strippedHtml = stripDataCitationItems(normalizedOldHtml);
 
     const threadId = context.threadId ?? null;
 
@@ -1493,10 +1509,10 @@ export async function executeEditNoteBatchAction(
     const overlaps = detectOverlaps(resolvedEdits);
     if (overlaps.length > 0) {
         const o = overlaps[0];
-        throw new Error(
+        throw Object.assign(new Error(
             `Batch cannot be applied: edits ${o.firstIndex} and ${o.secondIndex} now target overlapping `
             + 'regions of the note.'
-        );
+        ), { code: 'overlapping_edits' });
     }
 
     // 5. Apply ALL edits in one pass, footer + citation-item rebuild ONCE.
@@ -1538,7 +1554,7 @@ export async function executeEditNoteBatchAction(
     // 8. Warnings: per-edit duplicate-citation + batch locator warnings.
     const warnings: string[] = [...labels.locatorWarnings, ...(externalRefContext.externalFileWarnings ?? [])];
     for (const edit of edits) {
-        const dup = checkDuplicateCitations(edit.new_string, metadata);
+        const dup = checkDuplicateCitations(edit.new_string, metadata, edit.old_string);
         if (dup) warnings.push(dup);
     }
 
@@ -1598,9 +1614,12 @@ function applyBatchUndoRecord(
         return undoOldHtml;
     }
 
+    // Undo records round-trip through the backend, which sends absent optional
+    // fields as null; treat those like missing fields.
+    const occCtxs = record.undo_occurrence_contexts ?? undefined;
+
     // ── str_replace_all: per-occurrence context replay ──
-    if (record.undo_occurrence_contexts !== undefined) {
-        const occCtxs = record.undo_occurrence_contexts;
+    if (occCtxs !== undefined) {
         if (occCtxs.length === 0) {
             throw new Error(`Cannot undo edit ${record.index}: no occurrence context data recorded for a str_replace_all edit.`);
         }
@@ -1645,8 +1664,8 @@ function applyBatchUndoRecord(
         strippedHtml,
         undoOldHtml,
         undoNewHtml,
-        beforeCtx: record.undo_before_context,
-        afterCtx: record.undo_after_context,
+        beforeCtx: record.undo_before_context ?? undefined,
+        afterCtx: record.undo_after_context ?? undefined,
         libraryId,
         logPrefix: 'undoEditNoteBatchAction',
         logLabel: `edit ${record.index}`,

@@ -5,6 +5,7 @@ import {
     getCitationBoundingBoxes,
     getContentKind,
     getSymbolicLocation,
+    type Citation as CitationMetadata,
 } from '@beaver/agent-core/types/citations';
 import {
     externalReferenceMappingAtom,
@@ -14,7 +15,8 @@ import {
 import { pageLabelsByAttachmentIdAtom, externalFileLocalPathsAtom } from '@beaver/agent-core/citations/atoms';
 import { useCitationMarker } from './useCitationMarker';
 import { getHost } from '../host';
-import { useCitationViewModel } from './useCitationViewModel';
+import type { CitationExportRender } from '../host/types';
+import { useCitationViewModel, type CitationViewModel } from './useCitationViewModel';
 import { hasAlternateModifier, useAlternateActivation } from './useAlternateActivation';
 import { Icon, LibraryIcon, PdfIcon, FileIcon, GlobalSearchIcon, NoteIcon, HighlighterIcon, TextAlignLeftIcon, ExternalLinkIcon } from '../icons';
 const TOOLTIP_WIDTH = '250px';
@@ -57,6 +59,164 @@ interface CitationProps {
     // Rendering options
     exportRendering?: boolean;
     children?: React.ReactNode;
+    /**
+     * An assembled citation, rendered without a tag or the thread's store, and
+     * the numeric marker its caller numbered it with.
+     */
+    citation?: CitationMetadata;
+    marker?: string;
+}
+
+/**
+ * Wrap a host-rendered export citation: raw HTML, or a native citation span
+ * carrying its serialized payload. Both hold HTML, e.g.
+ * "(<span class="citation-item">Author, 2024</span>)".
+ */
+function renderExportedCitation(exported: CitationExportRender): React.ReactElement {
+    if (exported.kind === 'html') {
+        return <span dangerouslySetInnerHTML={{ __html: exported.html }} />;
+    }
+    return (
+        <span
+            className="citation"
+            data-citation={exported.citationData}
+            dangerouslySetInnerHTML={{ __html: exported.html }}
+        />
+    );
+}
+
+/**
+ * What a citation is and where its click leads, derived from its view model.
+ * Shared by the citation marker and by callers that draw their own anchor for
+ * an assembled citation (a table's page tags), so both navigate alike.
+ */
+export interface CitationTargetFlags {
+    isNoteCitation: boolean;
+    isAnnotationCitation: boolean;
+    isEpubCitation: boolean;
+    hasEpubSymbolicLocator: boolean;
+    isTextCitation: boolean;
+    isSnapshotCitation: boolean;
+    hasSnapshotSymbolicLocator: boolean;
+    hasBoundingBoxes: boolean;
+    /** A PDF or EPUB page-or-box locator: the click lands inside the document. */
+    hasLocator: boolean;
+    /** Whether alternate activation (reveal the cited work) changes anything. */
+    canRevealItem: boolean;
+}
+
+export function citationTargetFlags(vm: CitationViewModel): CitationTargetFlags {
+    const metadata = vm.metadata;
+    const isNoteCitation = metadata?.citation_type === 'note';
+    const isAnnotationCitation = metadata?.citation_type === 'annotation';
+    const contentKind = getContentKind(metadata);
+    const symbolic = getSymbolicLocation(metadata);
+    const isEpubCitation = contentKind === 'epub';
+    const hasEpubSymbolicLocator = isEpubCitation && symbolic?.content_kind === 'epub';
+    const isTextCitation = contentKind === 'text';
+    const isSnapshotCitation = contentKind === 'snapshot';
+    // Snapshots resolve a cited passage from the symbolic anchor/text, not pages
+    // (the reader is a continuous scroll view); any synthetic page on the wire is
+    // a coarse navigation hint only and is never shown.
+    const hasSnapshotSymbolicLocator = isSnapshotCitation && symbolic?.content_kind === 'snapshot';
+    const hasBoundingBoxes = !isNoteCitation && !isAnnotationCitation && !!metadata && getCitationBoundingBoxes(metadata).length > 0;
+    // PDF/EPUB page-or-box locator. Snapshots are excluded here: they carry a
+    // synthetic page that must not be presented as a PDF page locator.
+    const hasLocator = !isNoteCitation && !isAnnotationCitation && !isSnapshotCitation
+        && (vm.pages.length > 0 || hasBoundingBoxes || hasEpubSymbolicLocator);
+    // Alternate activation acts on the cited work rather than the cited passage.
+    // It stays inert wherever it would change nothing: an unmapped external
+    // reference and an external file have no library item behind them; a
+    // streaming or invalid citation has no click at all; and a plain
+    // locator-less item is already revealed in the library by an ordinary
+    // click. What is left is exactly the set whose click it redirects.
+    const defaultRevealsItem = !hasLocator
+        && !isSnapshotCitation
+        && !isTextCitation
+        && !isNoteCitation
+        && !isAnnotationCitation;
+    const canRevealItem = !vm.isExternalFile
+        && (!vm.isExternal || !!vm.mappedZoteroItem)
+        && !!vm.effectiveItemKey
+        && !vm.isStreaming
+        && !vm.isInvalid
+        && !defaultRevealsItem;
+    return {
+        isNoteCitation,
+        isAnnotationCitation,
+        isEpubCitation,
+        hasEpubSymbolicLocator,
+        isTextCitation,
+        isSnapshotCitation,
+        hasSnapshotSymbolicLocator,
+        hasBoundingBoxes,
+        hasLocator,
+        canRevealItem,
+    };
+}
+
+/**
+ * Hand a ready citation to the host's activation: the cited passage, or the
+ * cited work when `alternate` asks for it and that changes anything.
+ */
+function activateCitationViewModel(
+    vm: CitationViewModel,
+    flags: CitationTargetFlags,
+    ownerDocument: Document,
+    alternate: boolean,
+): void {
+    if (!vm.metadata || vm.isStreaming || vm.isInvalid) return;
+    void getHost().navigation?.activateCitation({
+        metadata: vm.metadata,
+        intent: flags.canRevealItem && alternate ? 'item' : 'passage',
+        isExternal: vm.isExternal,
+        isExternalFile: vm.isExternalFile,
+        externalFileKey: vm.externalFileKey,
+        externalSourceId: vm.externalSourceId,
+        hasMappedItem: !!vm.mappedZoteroItem,
+        effectiveLibraryID: vm.effectiveLibraryID,
+        effectiveItemKey: vm.effectiveItemKey,
+        effectiveLibraryRef: vm.effectiveLibraryRef,
+        previewText: vm.previewText,
+        ownerDocument,
+    });
+}
+
+/** An assembled citation's view model and its activation, for a caller-drawn anchor. */
+export interface CitationActivationHandle {
+    vm: CitationViewModel;
+    flags: CitationTargetFlags;
+    /** Whether the citation can be activated at all (ready, not invalid). */
+    ready: boolean;
+    /**
+     * Activate as the citation marker's own click does. Pass the click so the
+     * alternate-activation modifier is honoured; anything with an
+     * `ownerDocument` (an element) activates the passage.
+     */
+    activate(source: React.MouseEvent | { ownerDocument: Document }): void;
+}
+
+/**
+ * The click of the chat's `Citation` for an assembled citation whose anchor
+ * the caller draws itself: the same view model and the same host activation,
+ * so a table's page tag opens the passage exactly as a marker would.
+ */
+export function useCitationActivation(citation: CitationMetadata): CitationActivationHandle {
+    const props = React.useMemo(() => ({ citation }), [citation]);
+    const vm = useCitationViewModel(props);
+    const flags = citationTargetFlags(vm);
+    const ready = !!vm.metadata && !vm.isStreaming && !vm.isInvalid;
+    const activate = (source: React.MouseEvent | { ownerDocument: Document }) => {
+        if ('currentTarget' in source) {
+            source.preventDefault();
+            const target = source.currentTarget as Element;
+            const doc = target.ownerDocument;
+            activateCitationViewModel(vm, flags, doc, hasAlternateModifier(source, doc.defaultView?.navigator));
+            return;
+        }
+        activateCitationViewModel(vm, flags, source.ownerDocument, false);
+    };
+    return { vm, flags, ready, activate };
 }
 
 const Citation: React.FC<CitationProps> = (props) => {
@@ -89,7 +249,8 @@ const Citation: React.FC<CitationProps> = (props) => {
         citation,
         formatted_citation,
         previewText,
-        pagesDisplay,
+        locatorDisplay,
+        pageReference,
         pages,
     } = vm;
 
@@ -108,7 +269,10 @@ const Citation: React.FC<CitationProps> = (props) => {
 
     // Get or assign numeric marker using base key (same item = same marker)
     // Uses markerKey (without sid/page) so all citations to the same item share a marker
-    const numericMarker = useCitationMarker(markerKey, exportRendering);
+    // A direct citation belongs to its caller (a table's evidence), which numbers
+    // it; it never takes a number from the thread's marker map.
+    const direct = props.citation !== undefined;
+    const numericMarker = useCitationMarker(direct ? '' : markerKey, exportRendering);
 
     // Whether the alternate-activation modifier is being held. Document-wide, so
     // every citation flips together and the hold reads as a mode.
@@ -120,31 +284,40 @@ const Citation: React.FC<CitationProps> = (props) => {
 
     // Format for display
     let displayText = '';
-    const hasLocatorDisplay = pagesDisplay.trim().length > 0;
+    const hasLocatorDisplay = locatorDisplay.length > 0;
     if (authorYearFormat) {
         if (isStreaming || isInvalid) {
             // We don't know the author/year string yet, or citation is invalid. Render a subtle placeholder.
             displayText = '?';
         } else {
             displayText = consecutive
-                ? (hasLocatorDisplay ? `p.${pagesDisplay}` : 'Ibid')
-                : (hasLocatorDisplay ? `${citation}, p.${pagesDisplay}` : citation);
+                ? (hasLocatorDisplay ? locatorDisplay : 'Ibid')
+                : (hasLocatorDisplay ? `${citation}, ${locatorDisplay}` : citation);
         }
     } else {
         // Numeric markers should be stable and independent of citationMetadata.
         // If key is missing (invalid/malformed citation) or invalid, show placeholder.
-        displayText = (markerKey && !isInvalid) ? numericMarker : '?';
+        displayText = (markerKey && !isInvalid) ? (direct ? props.marker ?? '?' : numericMarker) : '?';
     }
 
     // Rendering for export to Zotero note (using CSL JSON for citations)
     if (exportRendering) {
         displayText = authorYearFormat ? ` (${displayText})` : ` [${displayText}]`;
 
-        // External citations cannot be exported as proper Zotero citations
+        // External works not in the library: a host-native citation when the
+        // host can build one, otherwise a link to the work.
         if (isExternal && !mappedZoteroItem) {
             const externalReference = externalSourceId
                 ? externalReferenceMap[externalSourceId]
                 : undefined;
+            const exportedReference = externalSourceId && externalReference
+                ? getHost().documentExport?.renderExternalReferenceCitation?.({
+                    externalId: externalSourceId,
+                    reference: externalReference,
+                    requestedRef,
+                })
+                : null;
+            if (exportedReference) return renderExportedCitation(exportedReference);
             const label = citation
                 || (externalReference ? formatExternalReferenceLabel(externalReference) : '')
                 || externalSourceId
@@ -174,7 +347,7 @@ const Citation: React.FC<CitationProps> = (props) => {
             // local copy. Name it by its id rather than export an empty pair of
             // parentheses.
             const fileLabel = citation || (externalFileKey ? `Attached file ext-${externalFileKey}` : '');
-            const locatorSuffix = hasLocatorDisplay ? `, p.${pagesDisplay}` : '';
+            const locatorSuffix = hasLocatorDisplay ? `, ${locatorDisplay}` : '';
             const exportedFile = getHost().documentExport?.renderExternalFileCitation?.({
                 externalFileKey,
                 displayName: fileLabel,
@@ -199,60 +372,26 @@ const Citation: React.FC<CitationProps> = (props) => {
             metadata: citationMetadata,
             pageLabelsByAttachmentId: labelsByAttachmentId,
         });
-        if (!exported) return null;
-        if (exported.kind === 'html') {
-            return <span dangerouslySetInnerHTML={{ __html: exported.html }} />;
-        }
-        // Use dangerouslySetInnerHTML because the formatted citation is HTML
-        // (e.g., "(<span class="citation-item">Author, 2024</span>)").
-        return (
-            <span
-                className="citation"
-                data-citation={exported.citationData}
-                dangerouslySetInnerHTML={{ __html: exported.html }}
-            />
-        );
+        return exported ? renderExportedCitation(exported) : null;
     }
 
     // Determine the CSS class based on citation type and state
-    const isNoteCitation = citationMetadata?.citation_type === 'note';
-    const isAnnotationCitation = citationMetadata?.citation_type === 'annotation';
-    const isEpubCitation = getContentKind(citationMetadata) === 'epub';
-    const hasEpubSymbolicLocator = isEpubCitation
-        && getSymbolicLocation(citationMetadata)?.content_kind === 'epub';
-    const isTextCitation = getContentKind(citationMetadata) === 'text';
-    const isSnapshotCitation = getContentKind(citationMetadata) === 'snapshot';
+    const flags = citationTargetFlags(vm);
+    const {
+        isNoteCitation,
+        isAnnotationCitation,
+        isEpubCitation,
+        isTextCitation,
+        isSnapshotCitation,
+        hasSnapshotSymbolicLocator,
+        hasBoundingBoxes,
+        hasLocator,
+        canRevealItem,
+    } = flags;
     const symbolicLocationForDisplay = getSymbolicLocation(citationMetadata);
     const textLineLocation = isTextCitation && symbolicLocationForDisplay?.content_kind === 'text'
         ? symbolicLocationForDisplay
         : undefined;
-    // Snapshots resolve a cited passage from the symbolic anchor/text, not pages
-    // (the reader is a continuous scroll view); any synthetic page on the wire is
-    // a coarse navigation hint only and is never shown.
-    const hasSnapshotSymbolicLocator = isSnapshotCitation
-        && symbolicLocationForDisplay?.content_kind === 'snapshot';
-    const hasBoundingBoxes = !isNoteCitation && !isAnnotationCitation && !!citationMetadata && getCitationBoundingBoxes(citationMetadata).length > 0;
-    // PDF/EPUB page-or-box locator. Snapshots are excluded here: they carry a
-    // synthetic page that must not be presented as a PDF page locator.
-    const hasLocator = !isNoteCitation && !isAnnotationCitation && !isSnapshotCitation
-        && (pages.length > 0 || hasBoundingBoxes || hasEpubSymbolicLocator);
-    // Alternate activation acts on the cited work rather than the cited passage.
-    // It stays inert wherever it would change nothing: an unmapped external
-    // reference and an external file have no library item behind them; a
-    // streaming or invalid citation has no click at all; and a plain
-    // locator-less item is already revealed in the library by an ordinary
-    // click. What is left is exactly the set whose click it redirects.
-    const defaultRevealsItem = !hasLocator
-        && !isSnapshotCitation
-        && !isTextCitation
-        && !isNoteCitation
-        && !isAnnotationCitation;
-    const canRevealItem = !isExternalFile
-        && (!isExternal || !!mappedZoteroItem)
-        && !!effectiveItemKey
-        && !isStreaming
-        && !isInvalid
-        && !defaultRevealsItem;
     const showItemInfo = isAlternate && canRevealItem;
 
     // Click handler — delegates all client-specific navigation to the host.
@@ -260,25 +399,14 @@ const Citation: React.FC<CitationProps> = (props) => {
     // only runs for "ready" citations where metadata is present.
     const handleClick = (e: React.MouseEvent) => {
         e.preventDefault();
-        if (!citationMetadata) return;
-        getHost().navigation?.activateCitation({
-            metadata: citationMetadata,
-            // Read the modifier off the click rather than the hover state, so
-            // the action always matches the key that was actually held down.
-            intent: (canRevealItem && hasAlternateModifier(e, e.currentTarget.ownerDocument.defaultView?.navigator))
-                ? 'item'
-                : 'passage',
-            isExternal,
-            isExternalFile,
-            externalFileKey,
-            externalSourceId,
-            hasMappedItem: !!mappedZoteroItem,
-            effectiveLibraryID,
-            effectiveItemKey,
-            effectiveLibraryRef,
-            previewText,
-            ownerDocument: e.currentTarget.ownerDocument,
-        });
+        // Read the modifier off the click rather than the hover state, so the
+        // action always matches the key that was actually held down.
+        activateCitationViewModel(
+            vm,
+            flags,
+            e.currentTarget.ownerDocument,
+            hasAlternateModifier(e, e.currentTarget.ownerDocument.defaultView?.navigator),
+        );
     };
 
     // The locator style promises navigation to a place inside the document.
@@ -324,7 +452,7 @@ const Citation: React.FC<CitationProps> = (props) => {
                 <span className="flex-1" />
                 {!showItemInfo && hasLocatorDisplay && (
                     <span className="font-color-secondary text-sm" style={{ flexShrink: 0, whiteSpace: 'nowrap' }}>
-                        {`Page ${pagesDisplay}`}
+                        {pageReference.charAt(0).toUpperCase() + pageReference.slice(1)}
                     </span>
                 )}
                 {!showItemInfo && (!pages || pages.length === 0) && textLineLocation && (
@@ -404,10 +532,10 @@ const Citation: React.FC<CitationProps> = (props) => {
                             <Icon icon={PdfIcon} className="font-color-secondary" />
                             <span className="text-sm font-color-secondary">
                                 {isEpubCitation
-                                    ? (hasLocatorDisplay ? `Opens EPUB at page ${pagesDisplay}` : 'Opens EPUB at location')
+                                    ? (hasLocatorDisplay ? `Opens EPUB at ${pageReference}` : 'Opens EPUB at location')
                                     : hasBoundingBoxes
-                                        ? (hasLocatorDisplay ? `Highlights passage on page ${pagesDisplay}` : 'Highlights passage in PDF')
-                                        : (hasLocatorDisplay ? `Opens PDF on page ${pagesDisplay}` : 'Opens PDF at location')}
+                                        ? (hasLocatorDisplay ? `Highlights passage on ${pageReference}` : 'Highlights passage in PDF')
+                                        : (hasLocatorDisplay ? `Opens PDF on ${pageReference}` : 'Opens PDF at location')}
                             </span>
                         </span>
                     </span>

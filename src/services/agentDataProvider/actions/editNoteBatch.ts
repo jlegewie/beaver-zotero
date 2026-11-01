@@ -202,7 +202,9 @@ export async function preloadBatchLabels(edits: EditNoteBatchEditItem[]): Promis
     ]);
 
     const locatorWarnings: string[] = [];
-    const warning = buildUnresolvedLocatorWarning(structural.unresolved);
+    const warning = buildUnresolvedLocatorWarning(
+        structural.unresolved, structural.unavailable, structural.missing,
+    );
     if (warning) locatorWarnings.push(warning);
 
     return { pageLabels, resolvedLocatorPages: { ...structural.pages }, locatorWarnings };
@@ -451,11 +453,11 @@ async function validateEditNoteBatchAction(
         const itemId = modelObjectIdFromReference({ library_id: resolvedLibraryId, library_ref, zotero_key });
         let error = `Item ${itemId} is not a note`;
         if (item.isRegularItem()) {
-            error = `Item ${itemId} is a regular item and not a note. To create a new zotero note that is attached to the regular item ${itemId}, use the the <note title="..." item_id="${itemId}">...</note> tag in your response.`;
+            error = `Item ${itemId} is a regular item and not a note. To create a new note attached to it, use create_note with parent_item_id="${itemId}".`;
         } else if (item.isAttachment()) {
-            error = `Item ${itemId} is an attachment and not a note. To create a new zotero note, use the the <note title="..." item_id="${itemId}">...</note> tag in your response. To edit a note, use the edit_note with an existing note id.`;
+            error = `Item ${itemId} is an attachment and not a note. To create a new note, use create_note. To edit a note, use edit_note with an existing note id.`;
         } else if (item.isAnnotation()) {
-            error = `Item ${itemId} is an annotation and not a note. To create a new zotero note, use the the <note title="..." item_id="${itemId}">...</note> tag in your response. To edit a note, use the edit_note with an existing note id.`;
+            error = `Item ${itemId} is an annotation and not a note. To create a new note, use create_note. To edit a note, use edit_note with an existing note id.`;
         }
         return validateError(request.request_id, error, 'not_a_note');
     }
@@ -804,7 +806,7 @@ async function executeEditNoteBatchAction(
     // Warnings: per-edit duplicate-citation + batch locator warnings.
     const warnings: string[] = [...labels.locatorWarnings, ...(externalRefContext.externalFileWarnings ?? [])];
     for (const edit of edits) {
-        const dup = checkDuplicateCitations(edit.new_string, metadata);
+        const dup = checkDuplicateCitations(edit.new_string, metadata, edit.old_string);
         if (dup) warnings.push(dup);
     }
 

@@ -39,6 +39,10 @@ export interface TableSectionConflict {
     shadowVersion: number;
     /** Whether the retained spec is still here to be restored. */
     restorable: boolean;
+    /** False when the library is excluded or read-only, so nothing can be restored into it. */
+    writable?: boolean;
+    /** True when the table itself refuses the restore's write right now (e.g. it is in the trash). */
+    unavailable?: boolean;
 }
 
 export interface TableSectionInput {
@@ -92,9 +96,12 @@ export interface TableSectionFields {
     /** `rows × columns` — the denominator for {@link filled}. */
     cells: number;
     filled: number;
-    unsure: number;
-    unsourced: number;
+    /** Filler answers read from the title and abstract only. */
+    titleAbstractOnly: number;
+    /** Cells whose question or whose row's document changed since they were written. */
     stale: number;
+    /** Rows whose last fill stopped before they were answered. */
+    failedRows: number;
     version: number | null;
     /** The oldest version still in the log, or null when the log is empty. */
     oldestVersion: number | null;
@@ -111,7 +118,10 @@ export interface TableSectionFields {
     dimensionsLine: string;
     /** "58 of 84 cells filled", or empty when there are no cells. */
     coverageLine: string;
-    /** "3 unsure · 1 unsourced · 2 stale", or empty when nothing is flagged. */
+    /**
+     * "1 from title and abstract · 2 stale · 1 paper could not be read", or
+     * empty when nothing is flagged.
+     */
     flagsLine: string;
     /** "Version 12 · history goes back to v7", or empty when unknown. */
     versionLine: string;
@@ -254,9 +264,9 @@ function emptyFields(annotations: number): TableSectionFields {
         columns: 0,
         cells: 0,
         filled: 0,
-        unsure: 0,
-        unsourced: 0,
+        titleAbstractOnly: 0,
         stale: 0,
+        failedRows: 0,
         version: null,
         oldestVersion: null,
         historyTruncated: false,
@@ -330,26 +340,30 @@ export function buildTableSectionFields(
         return fields;
     }
 
+    // Counted over the question columns, as the chat's table cards count:
+    // reference, year and identifier are filled by Beaver, not answered.
+    const details = Object.values(summary.columns_detail ?? {});
+    const systemColumns = details.filter((detail) => detail?.system).length;
     const rows = Math.max(0, summary.rows);
-    const columns = Math.max(0, summary.columns);
+    const columns = Math.max(0, summary.columns - systemColumns);
     const cells = rows * columns;
 
     let filled = 0;
-    let unsure = 0;
-    let unsourced = 0;
+    let titleAbstractOnly = 0;
     let stale = 0;
-    for (const detail of Object.values(summary.columns_detail ?? {})) {
-        if (!detail) continue;
-        filled += detail.filled ?? 0;
-        unsure += detail.unsure ?? 0;
-        unsourced += detail.unsourced ?? 0;
+    for (const detail of details) {
+        if (!detail || detail.system) continue;
+        filled += detail.answered ?? 0;
+        titleAbstractOnly += detail.title_abstract_only ?? 0;
         stale += detail.stale ?? 0;
     }
+    const failedRows = Math.max(0, summary.failed_rows ?? 0);
 
     const flags: string[] = [];
-    if (unsure) flags.push(`${unsure} unsure`);
-    if (unsourced) flags.push(`${unsourced} unsourced`);
+    if (titleAbstractOnly) flags.push(`${titleAbstractOnly} from title and abstract`);
     if (stale) flags.push(`${stale} stale`);
+    if (failedRows)
+        flags.push(`${plural(failedRows, 'paper', 'papers')} could not be read`);
 
     const annotationWarning = annotationsBeforeLastWrite > 0;
 
@@ -359,9 +373,9 @@ export function buildTableSectionFields(
         columns,
         cells,
         filled,
-        unsure,
-        unsourced,
+        titleAbstractOnly,
         stale,
+        failedRows,
         version,
         oldestVersion,
         historyTruncated,
@@ -430,9 +444,13 @@ function conflictLineFor(conflict: TableSectionConflict): string {
             ? `Showing a different version ${conflict.documentVersion} from another device`
             : `Showing version ${conflict.documentVersion} from another device`;
     const wrote = `this device last wrote version ${conflict.shadowVersion}`;
-    const tail = conflict.restorable
-        ? `your version ${conflict.shadowVersion} is kept here and can be restored as a new version.`
-        : `but Beaver no longer keeps a copy of your version ${conflict.shadowVersion}.`;
+    const tail = !conflict.restorable
+        ? `but Beaver no longer keeps a copy of your version ${conflict.shadowVersion}.`
+        : conflict.writable === false
+            ? `your version ${conflict.shadowVersion} is kept here, but Beaver cannot write to this library to restore it.`
+            : conflict.unavailable
+                ? `your version ${conflict.shadowVersion} is kept here, but the table cannot be restored right now (it may be in the trash).`
+                : `your version ${conflict.shadowVersion} is kept here and can be restored as a new version.`;
     return `${showing}; ${wrote}. Nothing was merged and nothing was overwritten — ${tail}`;
 }
 

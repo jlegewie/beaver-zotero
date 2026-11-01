@@ -2,16 +2,21 @@ import React from "react";
 import {
     anchorColumn,
     isColumnFilterable,
+    isColumnSortable,
     selectLabelsInColumn,
+    selectOption,
     type Column,
     type Filter,
     type TableSpec,
 } from "@beaver/agent-core/layouts/table";
 import {
+    ArrowDownIcon,
+    ArrowUpIcon,
     CancelIcon,
     FilterIcon,
     Icon,
     LayersIcon,
+    ChevronIcon,
     TickIcon,
 } from "../../icons";
 import MenuButton from "../../primitives/MenuButton";
@@ -38,6 +43,16 @@ export interface TableToolbarProps {
      */
     showSearch?: boolean;
     searchPlaceholder?: string;
+    /**
+     * A Sort menu beside Filter, for a surface where the header's hover-only
+     * sort control is too easy to miss.
+     */
+    showSortMenu?: boolean;
+    /**
+     * Offer "has a value" / "no value" for every column the filter menu has
+     * no categories for, so a table of prose still has something to filter by.
+     */
+    valueFilters?: boolean;
 }
 
 /**
@@ -54,9 +69,19 @@ export function TableToolbar({
     actions,
     showSearch = false,
     searchPlaceholder = "Filter rows",
+    showSortMenu = false,
+    valueFilters = false,
 }: TableToolbarProps): React.ReactElement {
     const filterable = table.capabilities?.filterable ?? true;
-    const filterItems = filterable ? buildFilterMenu(table, state) : [];
+    const filterItems = filterable
+        ? buildFilterMenu(table, state, valueFilters)
+        : [];
+    const sortable = table.capabilities?.sortable ?? true;
+    const sortItems =
+        showSortMenu && sortable ? buildSortMenu(table, state) : [];
+    const sortColumn = state.sort
+        ? table.columns.find((c) => c.id === state.sort!.column_id)
+        : undefined;
 
     return (
         <div className="bt-toolbar">
@@ -68,6 +93,23 @@ export function TableToolbar({
                     buttonLabel="Filter"
                     className={`bt-toolbar-button${state.hasFilters ? " bt-active" : ""}`}
                     ariaLabel="Filter rows"
+                    maxHeight="24rem"
+                    width="16rem"
+                />
+            ) : null}
+
+            {sortItems.length > 0 ? (
+                <MenuButton
+                    menuItems={sortItems}
+                    variant={sortColumn ? "surface" : "ghost-secondary"}
+                    icon={ChevronIcon}
+                    buttonLabel={
+                        sortColumn
+                            ? `Sort: ${sortColumn.header} ${state.sort!.direction === "asc" ? "↑" : "↓"}`
+                            : "Sort"
+                    }
+                    className={`bt-toolbar-button${sortColumn ? " bt-active" : ""}`}
+                    ariaLabel="Sort rows"
                     maxHeight="24rem"
                     width="16rem"
                 />
@@ -111,7 +153,7 @@ export function TableToolbar({
  * narrowed table honest: the menu is out of sight once it closes, and a table
  * silently showing three of forty rows is how people misread a result set.
  */
-function FilterChips({
+export function FilterChips({
     table,
     state,
 }: {
@@ -153,7 +195,7 @@ function describeFilter(filter: Filter): string {
         case "equals":
             return filter.value ? "yes" : "no";
         case "empty":
-            return filter.empty ? "empty" : "not empty";
+            return filter.empty ? "no value" : "has a value";
         case "range":
             return [filter.min, filter.max]
                 .filter((v) => v != null)
@@ -167,11 +209,43 @@ function describeFilter(filter: Filter): string {
  * exist in the state hook but have no control yet — an honest gap rather than
  * a half-built one.
  */
-function buildFilterMenu(table: TableSpec, state: TableState): MenuItem[] {
+export function buildFilterMenu(
+    table: TableSpec,
+    state: TableState,
+    valueFilters: boolean,
+): MenuItem[] {
     const items: MenuItem[] = [];
+    const anchorId = anchorColumn(table)?.id;
 
     for (const column of table.columns) {
         if (!isColumnFilterable(column)) continue;
+
+        if (
+            valueFilters &&
+            column.id !== anchorId &&
+            column.type !== "select" &&
+            column.type !== "boolean" &&
+            !state.hiddenColumns.has(column.id)
+        ) {
+            items.push(sectionItem(column.header));
+            for (const [label, empty] of [
+                ["Has a value", false],
+                ["No value", true],
+            ] as const) {
+                const active = state.filters.some(
+                    (f) =>
+                        f.column_id === column.id &&
+                        f.kind === "empty" &&
+                        f.empty === empty,
+                );
+                items.push(
+                    checkItem(label, active, () =>
+                        state.toggleEmptyFilter(column.id, empty),
+                    ),
+                );
+            }
+            continue;
+        }
 
         if (column.type === "select") {
             const labels = column.options?.length
@@ -187,8 +261,11 @@ function buildFilterMenu(table: TableSpec, state: TableState): MenuItem[] {
                         f.labels.includes(label),
                 );
                 items.push(
-                    checkItem(label, active, () =>
-                        state.toggleSelectFilter(column.id, label),
+                    checkItem(
+                        label,
+                        active,
+                        () => state.toggleSelectFilter(column.id, label),
+                        selectOption(column, label)?.description || undefined,
                     ),
                 );
             }
@@ -224,6 +301,53 @@ function buildFilterMenu(table: TableSpec, state: TableState): MenuItem[] {
     return items;
 }
 
+/**
+ * One entry per sortable column in view; picking the sorted column again
+ * flips its direction, and "Original order" restores the table's own.
+ */
+export function buildSortMenu(table: TableSpec, state: TableState): MenuItem[] {
+    const items: MenuItem[] = [];
+    for (const column of table.columns) {
+        if (!isColumnSortable(column) || state.hiddenColumns.has(column.id))
+            continue;
+        const direction =
+            state.sort?.column_id === column.id
+                ? state.sort.direction
+                : undefined;
+        items.push({
+            label: column.header,
+            onClick: () =>
+                state.setSort({
+                    column_id: column.id,
+                    direction: direction === "asc" ? "desc" : "asc",
+                }),
+            customContent: (
+                <div
+                    className={`bt-menu-check${direction ? " bt-checked" : ""}`}
+                >
+                    <span className="bt-menu-tick" aria-hidden="true">
+                        <Icon
+                            icon={
+                                direction === "desc"
+                                    ? ArrowDownIcon
+                                    : ArrowUpIcon
+                            }
+                            size={12}
+                        />
+                    </span>
+                    <span>{column.header}</span>
+                </div>
+            ),
+        });
+    }
+    if (items.length > 0 && state.sort)
+        items.push({
+            label: "Original order",
+            onClick: () => state.setSort(undefined),
+        });
+    return items;
+}
+
 function sectionItem(label: string): MenuItem {
     return {
         label,
@@ -237,12 +361,17 @@ function checkItem(
     label: string,
     active: boolean,
     onClick: () => void,
+    /** Shown on hover: what a select category means. */
+    title?: string,
 ): MenuItem {
     return {
         label,
         onClick,
         customContent: (
-            <div className={`bt-menu-check${active ? " bt-checked" : ""}`}>
+            <div
+                className={`bt-menu-check${active ? " bt-checked" : ""}`}
+                title={title}
+            >
                 <span className="bt-menu-tick" aria-hidden="true">
                     <Icon icon={TickIcon} size={12} />
                 </span>

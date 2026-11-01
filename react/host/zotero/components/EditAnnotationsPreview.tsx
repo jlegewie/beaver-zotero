@@ -21,6 +21,7 @@ import {
     getAnnotationTooltipIcon,
 } from '../../../components/agentRuns/AnnotationTooltip';
 import type { ActionStatus } from './agentActionViewHelpers';
+import { useItemContextMenu } from '@beaver/agent-ui/chat/useItemContextMenu';
 
 /** One edit and the annotations it applies to, in wire order. */
 export interface EditGroupView {
@@ -324,6 +325,7 @@ export const EditAnnotationsPreview: React.FC<{
         );
     }, [actionData, snapshots]);
 
+    const { openItemMenu, itemMenu } = useItemContextMenu();
     const handleClick = useCallback(
         async (snapshot: AnnotationPreviewSnapshot) => {
             try {
@@ -340,6 +342,7 @@ export const EditAnnotationsPreview: React.FC<{
     const isDimmed = status === 'rejected' || status === 'undone';
     return (
         <div className="edit-annotations-preview overflow-hidden">
+            {itemMenu}
             <div className="display-flex flex-col px-3 py-2 gap-25">
                 {groups.map((group) => (
                     <div
@@ -389,6 +392,7 @@ export const EditAnnotationsPreview: React.FC<{
                                                         : ''
                                                 } ${isDimmed ? 'opacity-60' : ''}`}
                                                 onClick={() => handleClick(snapshot)}
+                                                onContextMenu={(event) => openItemMenu(snapshot, event)}
                                             >
                                                 <ZoteroIcon
                                                     icon={

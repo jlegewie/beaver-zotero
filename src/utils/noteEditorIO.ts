@@ -134,6 +134,29 @@ export function getLatestNoteHtml(item: any, options?: { excludeInstance?: any }
 }
 
 /**
+ * The HTML one note editor shows, given its content window, or null when that
+ * editor is not a live, authoritative editor of `item` (a diff preview, for
+ * one). Unlike `getLatestNoteHtml`, which picks among every editor of the
+ * note, this reads the editor the user is interacting with.
+ */
+export function getEditorNoteHtml(item: any, iframeWindow: Window | null | undefined): string | null {
+    if (!iframeWindow) return null;
+    try {
+        const instances = (Zotero as any).Notes?._editorInstances;
+        const instance = Array.isArray(instances)
+            ? instances.find((candidate: any) => candidate._iframeWindow === iframeWindow)
+            : null;
+        if (!instance || instance._item?.id !== item.id || instance._disableSaving || !isLiveNoteEditor(instance)) {
+            return null;
+        }
+        const html = instance._iframeWindow.wrappedJSObject.getDataSync(false)?.html;
+        return typeof html === 'string' ? String(html) : null;
+    } catch {
+        return null;
+    }
+}
+
+/**
  * Return the HTML snapshot of every connected, non-disabled live editor
  * instance for `item`, in `getLatestNoteHtml`'s preference order (selected
  * tab > viewMode='tab' > savedHtml-matching > rest). Empty/whitespace-only

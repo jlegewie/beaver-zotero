@@ -1,0 +1,305 @@
+{
+    "name": "user cells: a correction and a clear keep the model answer they replaced, a user not-reported cell, a stale user cell, column revisions and removed papers; replaced answers are not counted",
+    "spec": {
+        "id": "t-user-cells",
+        "spec_version": 2,
+        "title": "User cells",
+        "anchor_column_id": "_reference",
+        "sources": [
+            {
+                "id": "s1",
+                "type": "items",
+                "ids": [
+                    "u-AAAAAAAA",
+                    "u-BBBBBBBB",
+                    "u-CCCCCCCC"
+                ]
+            }
+        ],
+        "removed": [
+            {
+                "ref": {
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "DDDDDDDD"
+                },
+                "removed_at": "2026-10-31T09:30:00.000Z"
+            }
+        ],
+        "columns": [
+            {
+                "id": "_reference",
+                "header": "Reference",
+                "type": "reference",
+                "system": true
+            },
+            {
+                "id": "_year",
+                "header": "Year",
+                "type": "date",
+                "system": true,
+                "priority": "secondary"
+            },
+            {
+                "id": "design",
+                "header": "Design",
+                "type": "select",
+                "description": "What is the design?",
+                "revision": 2,
+                "options": [
+                    {
+                        "label": "RCT",
+                        "color": "blue"
+                    },
+                    {
+                        "label": "Observational",
+                        "color": "green"
+                    }
+                ]
+            },
+            {
+                "id": "n",
+                "header": "Sample",
+                "type": "text",
+                "description": "How many participants?",
+                "revision": 1
+            }
+        ],
+        "rows": [
+            {
+                "id": "r1",
+                "ref": {
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "AAAAAAAA"
+                },
+                "documents": [
+                    "u-AAAAAPDF"
+                ],
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-30"
+                    }
+                ],
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Ames 2020",
+                            "title": "Ames 2020 title words"
+                        }
+                    },
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "date",
+                            "value": "2020"
+                        }
+                    },
+                    "design": {
+                        "outcome": "answered",
+                        "provenance": "user",
+                        "value": {
+                            "kind": "select",
+                            "label": "Observational"
+                        },
+                        "reasoning": "The authors call it a natural experiment.",
+                        "replaced": {
+                            "outcome": "answered",
+                            "provenance": "model",
+                            "value": {
+                                "kind": "select",
+                                "label": "RCT"
+                            },
+                            "documents": [
+                                "u-AAAAAPDF"
+                            ],
+                            "confidence": "medium",
+                            "evidence": [
+                                {
+                                    "document": "u-AAAAAPDF",
+                                    "locator": "s3",
+                                    "quote": "Schools were assigned by lottery.",
+                                    "page": 2
+                                }
+                            ]
+                        }
+                    },
+                    "n": {
+                        "outcome": "not_reported",
+                        "provenance": "user",
+                        "stale": true,
+                        "reasoning": "Not given anywhere."
+                    }
+                }
+            },
+            {
+                "id": "r2",
+                "ref": {
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "BBBBBBBB"
+                },
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-30"
+                    }
+                ],
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Burke 2019",
+                            "title": "Burke 2019 title words"
+                        }
+                    },
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "date",
+                            "value": "2019"
+                        }
+                    },
+                    "design": {
+                        "outcome": "cleared",
+                        "provenance": "user",
+                        "replaced": {
+                            "outcome": "not_reported",
+                            "provenance": "model",
+                            "stale": true,
+                            "reasoning": "The abstract does not say."
+                        }
+                    },
+                    "n": {
+                        "outcome": "answered",
+                        "provenance": "model",
+                        "value": {
+                            "kind": "text",
+                            "text": "about 300"
+                        },
+                        "stale": true
+                    }
+                }
+            },
+            {
+                "id": "r3",
+                "ref": {
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "CCCCCCCC"
+                },
+                "documents": [
+                    "u-CCCCCPDF"
+                ],
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-30"
+                    }
+                ],
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Cole 2021",
+                            "title": "Cole 2021 title words"
+                        }
+                    },
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "date",
+                            "value": "2021"
+                        }
+                    },
+                    "design": {
+                        "outcome": "answered",
+                        "provenance": "model",
+                        "value": {
+                            "kind": "select",
+                            "label": "RCT"
+                        },
+                        "documents": [
+                            "u-CCCCCPDF"
+                        ]
+                    }
+                }
+            }
+        ]
+    },
+    "summary": {
+        "rows": 3,
+        "columns": 4,
+        "sources": 1,
+        "in_scope_rows": 3,
+        "failed_rows": 0,
+        "user_edits": 3,
+        "columns_detail": {
+            "_reference": {
+                "type": "reference",
+                "answered": 3,
+                "not_reported": 0,
+                "failed": 0,
+                "cleared": 0,
+                "unattempted": 0,
+                "in_failed_rows": 0,
+                "stale": 0,
+                "needs_review": 0,
+                "title_abstract_only": 0,
+                "system": true
+            },
+            "_year": {
+                "type": "date",
+                "answered": 3,
+                "not_reported": 0,
+                "failed": 0,
+                "cleared": 0,
+                "unattempted": 0,
+                "in_failed_rows": 0,
+                "stale": 0,
+                "needs_review": 0,
+                "title_abstract_only": 0,
+                "system": true
+            },
+            "design": {
+                "type": "select",
+                "answered": 2,
+                "not_reported": 0,
+                "failed": 0,
+                "cleared": 1,
+                "unattempted": 0,
+                "in_failed_rows": 0,
+                "stale": 0,
+                "needs_review": 0,
+                "title_abstract_only": 0,
+                "distribution": {
+                    "Observational": 1,
+                    "RCT": 1
+                }
+            },
+            "n": {
+                "type": "text",
+                "answered": 1,
+                "not_reported": 1,
+                "failed": 0,
+                "cleared": 0,
+                "unattempted": 1,
+                "in_failed_rows": 0,
+                "stale": 2,
+                "needs_review": 0,
+                "title_abstract_only": 1
+            }
+        }
+    }
+}

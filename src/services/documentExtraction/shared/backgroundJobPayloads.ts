@@ -14,6 +14,8 @@ export interface IndexBackgroundJobMetadata {
   index_cleanup_reason?: "replacement" | "stale_completion" | "exclusion";
   index_scope_ref?: string;
   index_local_id?: string;
+  /** Set once the cleanup's owner queued a reacquisition of this membership. */
+  index_reacquire_attempted?: boolean;
   index_action?: "upsert" | "untag";
   /** Hash to untag for a delete/replacement operation. */
   doc_hash?: string;

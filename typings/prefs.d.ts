@@ -11,7 +11,6 @@ declare namespace _ZoteroTypes {
       "userEmail": string;
       "currentPlanId": string;
       "installedVersion": string;
-      "showIndexingCompleteMessage": boolean;
       "showHighTokenUsageWarningMessage": boolean;
       "authMethod": string;
       "voice.helperExplained": boolean;
@@ -30,11 +29,11 @@ declare namespace _ZoteroTypes {
       "maxAddAttachmentToMessage": number;
       "readerExplainPrompt": string;
       "imeCompositionOrderFix": boolean;
+      "imeSuppressCompositionStartChar": boolean;
       "debugImeTrace": boolean;
       "accessRemoteFiles": boolean;
       "dataProviderEnabled": boolean;
       "autoApplyAnnotations": boolean;
-      "autoCreateNotes": boolean;
       "autoImportItems": boolean;
       "confirmExtractionCosts": boolean;
       "confirmExternalSearchCosts": boolean;
@@ -76,17 +75,16 @@ declare namespace _ZoteroTypes {
       "versionUpdatePopupShownAt": string;
       "onboardingSignInTextShown": boolean;
       "interruptedThread": string;
+      "beaverTabsToRestore": string;
       "threadsClaimKey": string;
       "mcpServerEnabled": boolean;
       "mcpCreateNoteToolEnabled": boolean;
       "backgroundExtractorEnabled": boolean;
+      "pdf.backgroundOverflow": boolean;
       "backgroundProcessingEnabled": boolean;
       "backgroundProcessingSearchInitialized": boolean;
       "backgroundProcessingWelcomeAck": boolean;
       "backgroundProcessingWelcomeDeferred": boolean;
-      "runConsistencyCheck": boolean;
-      "runCollectionSync": boolean;
-      "runWebDAVSync": boolean;
       "runEmbeddingFullDiff": boolean;
       "pendingVersionNotifications": string;
       "librarySuggestions": string;
@@ -95,6 +93,7 @@ declare namespace _ZoteroTypes {
       "documentCacheMaxBytes": number;
       "maxAttachmentFileSizeMB": number;
       "tables.defaultLibraryID": number;
+      "tables.fillWaitSeconds": number;
       "cloudPreparationConsent": string;
     };
   }

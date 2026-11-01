@@ -1,4 +1,6 @@
 import { threadReadOnlyAtom } from '../../runtime/threadProjection';
+import { RECONNECT_HELD_CAPTION, RECONNECT_UNAVAILABLE_TOOLTIP } from '@beaver/agent-core/transport/connectionFailure';
+import { useRunReconnectShown } from '../../hooks/useVisibleReconnect';
 import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
 import { useComposerVoice } from "../../hooks/useComposerVoice";
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
@@ -6,7 +8,7 @@ import { MicIcon, StopIcon, GlobalSearchIcon, ArrowUpLineIcon } from '../icons/i
 import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai';
 import { newThreadAtom, currentThreadIdAtom } from '../../atoms/threads';
 import { currentMessageContentAtom, currentMessagePillsAtom, pendingPillInsertsAtom, composerResetTokenAtom, pendingAttachmentTokensAtom, clearComposerAtom } from '../../atoms/messageComposition';
-import { sendWSMessageAtom, isWSChatPendingAtom, closeWSConnectionAtom, answerPendingApprovalsAtom, setRunPermissionModeAtom, approvalVerdictInFlightAtom, beginApprovalVerdictAtom, releaseApprovalVerdictAtom, streamingDoneRunIdsAtom } from '../../atoms/agentRunAtoms';
+import { sendWSMessageAtom, isWSChatPendingAtom, answerPendingApprovalsAtom, setRunPermissionModeAtom, approvalVerdictInFlightAtom, beginApprovalVerdictAtom, releaseApprovalVerdictAtom, streamingDoneRunIdsAtom, isRunReconnectingAtom, stoppingPreviousRunAtom } from '../../atoms/agentRunAtoms';
 import { pendingApprovalsAtom, agentActionsByRunAtom } from '../../agents/agentActions';
 import { isCoveredByFullAccess, runApprovalPolicyAtom } from '../../atoms/runApprovalPolicy';
 import RunPermissionButton, { RunPermissionMode } from '../ui/buttons/RunPermissionButton';
@@ -24,11 +26,13 @@ import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import PendingActionsBar from './PendingActionsBar';
 import ThreadPresenceBar from './ThreadPresenceBar';
 import BatchProgressPanel from './BatchProgressPanel';
+import TableFillProgressPanel from './TableFillProgressPanel';
 import HighTokenUsageWarningBar from './HighTokenUsageWarningBar';
 import NextStepsPanel from '../pages/firstRun/NextStepsPanel';
 import RunContinueDisplay from '../agentRuns/RunContinueDisplay';
 import BackToSuggestions, { FirstRunBackTarget } from '../pages/firstRun/BackToSuggestions';
 import { continuationOfferAtom, hasWhereToStartRunAtom, lastRunSummaryAtom, threadRunIdsAtom } from '@beaver/agent-core/run-state/atoms';
+import { waitsOnFillAtom } from '@beaver/agent-core/run-state/tableChatFills';
 import { PromptOrigin } from '@beaver/agent-core/agents/types';
 import { firstRunNextStepsDismissedAtom } from '../../atoms/firstRun';
 import { dismissHighTokenWarningForThreadAtom, dismissedHighTokenWarningByThreadAtom, backendHighTokenUsageRunsAtom } from '../../atoms/messageUIState';
@@ -40,6 +44,7 @@ import { useSlashMenu } from '../../hooks/useSlashMenu';
 import { useAddSourcesMenu, AddSourcesMenuHandle } from '@beaver/agent-ui/composer/useAddSourcesMenu';
 import { useComposerPasteHandlers } from '../../hooks/useComposerPasteHandlers';
 import { useActionPopupResolver } from '../../hooks/useActionPopupResolver';
+import { useStopRun } from '../../hooks/useStopRun';
 import { sendComposedMessageAtom } from '../../atoms/actions';
 import { dismissActiveEditNotePreview } from '../../host/zotero/editNotePreviewLifecycle';
 
@@ -83,6 +88,8 @@ const InputArea: React.FC<InputAreaProps> = ({
     const runIds = useAtomValue(threadRunIdsAtom);
     const hasWhereToStartRun = useAtomValue(hasWhereToStartRunAtom);
     const currentThreadId = useAtomValue(currentThreadIdAtom);
+    // While the response waits on a table fill, stopping it stops the fill too.
+    const waitsOnFill = useAtomValue(waitsOnFillAtom);
     const dismissedHighTokenByThread = useAtomValue(dismissedHighTokenWarningByThreadAtom);
     const dismissHighTokenWarning = useSetAtom(dismissHighTokenWarningForThreadAtom);
     const backendHighTokenUsageRuns = useAtomValue(backendHighTokenUsageRunsAtom);
@@ -110,13 +117,14 @@ const InputArea: React.FC<InputAreaProps> = ({
     }, []);
     // The open Add Sources menu, for stepping back out of one of its submenus.
     const addSourcesMenuRef = useRef<AddSourcesMenuHandle | null>(null);
-    const deleteTrailingQuery = useCallback((length: number) => {
-        editorHandleRef.current?.deleteTrailingQuery(length);
+    const deleteTrailingQuery = useCallback((length: number, keepAfter: number) => {
+        editorHandleRef.current?.deleteTrailingQuery(length, keepAfter);
     }, []);
+    const getCaretOffset = useCallback(() => editorHandleRef.current?.getSelectionOffset() ?? null, []);
     // Stable forwarder so the slash menu can insert a command pill into the
     // Lexical editor (the editor handle isn't available until after mount).
-    const insertSlashCommand = useCallback((descriptor: SlashCommandDescriptor, queryLength: number | null) => {
-        editorHandleRef.current?.insertSlashCommand(descriptor, queryLength);
+    const insertSlashCommand = useCallback((descriptor: SlashCommandDescriptor, queryLength: number | null, keepAfter?: number) => {
+        editorHandleRef.current?.insertSlashCommand(descriptor, queryLength, keepAfter);
     }, []);
 
     // A programmatic composer reset (new thread, thread switch, send) can write
@@ -130,7 +138,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     // WebSocket state
     const sendWSMessage = useSetAtom(sendWSMessageAtom);
     const sendComposedMessage = useSetAtom(sendComposedMessageAtom);
-    const closeWSConnection = useSetAtom(closeWSConnectionAtom);
+    const stopRun = useStopRun('InputArea');
     const isPending = useAtomValue(isWSChatPendingAtom);
 
     // A file staged for THIS composition is still being attached, so sending is
@@ -189,7 +197,15 @@ const InputArea: React.FC<InputAreaProps> = ({
     const showVerdictButtons = isAwaitingApproval && messageContent.trim().length > 0;
     // Held from the click until the decision is delivered, so a second click
     // cannot overtake the first while a note preview is being torn down.
-    const isVerdictInFlight = useAtomValue(approvalVerdictInFlightAtom);
+    // Also held while the run's connection is being recovered: the decision
+    // could only be queued until then.
+    const verdictClaimed = useAtomValue(approvalVerdictInFlightAtom);
+    const isReconnecting = useAtomValue(isRunReconnectingAtom);
+    const reconnectShown = useRunReconnectShown();
+    const isVerdictInFlight = verdictClaimed || isReconnecting;
+    // A new message waiting for a stopped response to end says so in the
+    // presence bar.
+    const stoppingPreviousRun = useAtomValue(stoppingPreviousRunAtom);
     const beginApprovalVerdict = useSetAtom(beginApprovalVerdictAtom);
     const releaseApprovalVerdict = useSetAtom(releaseApprovalVerdictAtom);
     // Note: while an ask_user_question request is pending (and no approval is),
@@ -272,7 +288,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     // band takes a place here instead of stacking. Laid out lowest-priority
     // first so the winner sits nearest the composer.
     const composerBand: 'high-token' | 'next-steps' | 'back-to-suggestions' | 'continue' | 'approvals' | 'full-access' | 'thread-presence' | null =
-        threadReadOnly
+        threadReadOnly || stoppingPreviousRun
             ? 'thread-presence'
             : isAwaitingApproval
                 ? 'approvals'
@@ -298,7 +314,8 @@ const InputArea: React.FC<InputAreaProps> = ({
         handleSlashMenuChange,
         handleSlashTrigger,
         handleSlashMenuKeyDown,
-    } = useSlashMenu(inputRef, verticalPosition, focusEditor, insertSlashCommand);
+        slashCaretOffsetFor,
+    } = useSlashMenu(inputRef, verticalPosition, focusEditor, insertSlashCommand, { getCaretOffset });
 
     // A `@` typed in the editor drives the Add Sources menu the same way: the
     // caret never leaves the editor and the text after the `@` is the menu's
@@ -309,6 +326,7 @@ const InputArea: React.FC<InputAreaProps> = ({
         position: addSourcesMenuPosition,
         query: addSourcesSearchQuery,
         querySource: addSourcesQuerySource,
+        hasTextAfterQuery: addSourcesHasTextAfter,
         setQuery: setAddSourcesSearchQuery,
         openFromButton: openAddSourcesMenu,
         handleTrigger: handleAddSourcesTrigger,
@@ -317,9 +335,11 @@ const InputArea: React.FC<InputAreaProps> = ({
         dismiss: dismissAddSourcesMenu,
         commit: commitAddSourcesMenu,
         resetQuery: resetAddSourcesQuery,
+        caretOffsetFor: addSourcesCaretOffset,
     } = useAddSourcesMenu({
         verticalPosition,
         deleteTrailingQuery,
+        getCaretOffset,
         focusEditor,
         setMessageContent,
         menuRef: addSourcesMenuRef,
@@ -412,12 +432,12 @@ const InputArea: React.FC<InputAreaProps> = ({
         // The open Add Sources menu owns every keystroke until it closes, so a
         // `/` typed into its query is a search term, not an actions trigger.
         if (handleAddSourcesChange(value)) {
-            queueSelectionRestore(value.length, false);
+            queueSelectionRestore(addSourcesCaretOffset(value), false);
             return;
         }
 
         if (handleSlashMenuChange(value)) {
-            queueSelectionRestore(value.length, false);
+            queueSelectionRestore(slashCaretOffsetFor(value), false);
             return;
         }
 
@@ -426,7 +446,7 @@ const InputArea: React.FC<InputAreaProps> = ({
         // instructions for that decision, and a pill's prompt and attachments
         // are resolved only on the send path.
         if (inputEl && !isAwaitingApproval && handleSlashTrigger(value, inputEl.getBoundingClientRect())) {
-            queueSelectionRestore(value.length, false);
+            queueSelectionRestore(slashCaretOffsetFor(value), false);
             return;
         }
 
@@ -436,12 +456,13 @@ const InputArea: React.FC<InputAreaProps> = ({
             !hideAttachmentMenu &&
             handleAddSourcesTrigger(value, inputEl)
         ) {
-            queueSelectionRestore(value.length, false);
+            queueSelectionRestore(addSourcesCaretOffset(value), false);
             return;
         }
 
         setMessageContent(value);
     }, [
+        addSourcesCaretOffset,
         handleAddSourcesChange,
         handleAddSourcesTrigger,
         handleSlashMenuChange,
@@ -451,6 +472,7 @@ const InputArea: React.FC<InputAreaProps> = ({
         isAwaitingApproval,
         queueSelectionRestore,
         setMessageContent,
+        slashCaretOffsetFor,
     ]);
 
     const handleEditorKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -504,8 +526,7 @@ const InputArea: React.FC<InputAreaProps> = ({
             e.preventDefault();
             e.stopPropagation();
         }
-        logger('Stopping chat completion');
-        closeWSConnection(); // Also clears all pending approvals
+        stopRun();
     };
 
     /**
@@ -610,6 +631,7 @@ const InputArea: React.FC<InputAreaProps> = ({
             {/* Live batch progress. Above the band so it stacks as: what the
                 run is doing, then what it wants from the user. */}
             <BatchProgressPanel />
+            <TableFillProgressPanel />
 
             {/* One band, chosen by `composerBand`. Lowest priority first so
                 the winner sits on the composer. */}
@@ -687,6 +709,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                 <PendingActionsBar
                     onDecide={(approved) => handleApprovalVerdict(approved, true)}
                     disabled={isVerdictInFlight}
+                    heldCaption={reconnectShown ? RECONNECT_HELD_CAPTION : undefined}
                 />
             )}
 
@@ -738,7 +761,10 @@ const InputArea: React.FC<InputAreaProps> = ({
                         inlineHint={
                             isAddSourcesMenuOpen &&
                             addSourcesQuerySource === 'editor' &&
-                            addSourcesSearchQuery.length === 0
+                            addSourcesSearchQuery.length === 0 &&
+                            // The hint sits at the end of the content, so it
+                            // would be misplaced ahead of existing text.
+                            !addSourcesHasTextAfter
                                 ? 'Type to search'
                                 : null
                         }
@@ -851,6 +877,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                                 className="composer-reject"
                                 ariaLabel={rejectVerdictLabel}
                                 disabled={isVerdictInFlight}
+                                title={isReconnecting ? RECONNECT_UNAVAILABLE_TOOLTIP : undefined}
                                 onClick={() => handleApprovalVerdict(false, true)}
                             >
                                 {rejectVerdictLabel}
@@ -861,19 +888,26 @@ const InputArea: React.FC<InputAreaProps> = ({
                                 className="composer-approve"
                                 ariaLabel={approveVerdictLabel}
                                 disabled={isVerdictInFlight}
+                                title={isReconnecting ? RECONNECT_UNAVAILABLE_TOOLTIP : undefined}
                                 onClick={() => handleApprovalVerdict(true, true)}
                             >
                                 {approveVerdictLabel}
                             </Button>
                         </>
                     ) : isPending ? (
-                        <IconButton
-                            icon={StopIcon}
-                            variant="surface"
-                            className="composer-send composer-send-stop"
-                            ariaLabel="Stop generating"
-                            onClick={handleStop}
-                        />
+                        <Tooltip
+                            content={waitsOnFill ? 'Stop response (also stops the table fill)' : 'Stop response'}
+                            showArrow
+                            singleLine
+                        >
+                            <IconButton
+                                icon={StopIcon}
+                                variant="surface"
+                                className="composer-send composer-send-stop"
+                                ariaLabel={waitsOnFill ? 'Stop response (also stops the table fill)' : 'Stop generating'}
+                                onClick={handleStop}
+                            />
+                        </Tooltip>
                     ) : (
                         <IconButton
                             icon={ArrowUpLineIcon}

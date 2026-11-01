@@ -2,8 +2,9 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useAtomValue } from 'jotai';
 import { Icon, Spinner, RepeatIcon } from '../icons/icons';
 import { AgentRunStatus } from '@beaver/agent-core/agents/types';
-import { wsReconnectingAtom, wsRetryAtom } from '@beaver/agent-core/run-state/atoms';
+import { wsRetryAtom } from '@beaver/agent-core/run-state/atoms';
 import { runStatusText } from '@beaver/agent-core/run-state/runStatusCopy';
+import { useVisibleReconnect } from '../../hooks/useVisibleReconnect';
 
 /**
  * How long a wait runs before the indicator starts counting it out loud.
@@ -37,6 +38,12 @@ interface RunStatusIndicatorProps {
      * a caller waiting on something else names that instead.
      */
     idleLabel?: string;
+    /**
+     * Leave the spinner's slot empty, so the line reads as a caption aligned
+     * with the label above it. For a reconnect under a tool call that already
+     * spins for the same wait.
+     */
+    hideIcon?: boolean;
 }
 
 /**
@@ -67,9 +74,9 @@ function useElapsedSeconds(since: number | null | undefined): number {
  * connection.
  * Note: Errors are displayed separately by RunErrorDisplay.
  */
-export const RunStatusIndicator: React.FC<RunStatusIndicatorProps> = ({ status, runId, lastMessageHasToolCall, followsText, waitingSince, idleLabel = 'Generating' }) => {
+export const RunStatusIndicator: React.FC<RunStatusIndicatorProps> = ({ status, runId, lastMessageHasToolCall, followsText, waitingSince, idleLabel = 'Generating', hideIcon = false }) => {
     const retryState = useAtomValue(wsRetryAtom);
-    const reconnectState = useAtomValue(wsReconnectingAtom);
+    const reconnectState = useVisibleReconnect();
     const elapsedSeconds = useElapsedSeconds(waitingSince);
 
     // Check if retry state applies to this run
@@ -106,7 +113,10 @@ export const RunStatusIndicator: React.FC<RunStatusIndicatorProps> = ({ status, 
                     aria-busy="true"
                 >
                     <div className="display-flex flex-row px-3 gap-2">
-                        <div className="flex-1 display-flex mt-010">
+                        <div
+                            className="flex-1 display-flex mt-010"
+                            style={hideIcon ? { visibility: 'hidden' } : undefined}
+                        >
                             <Icon icon={Spinner} />
                         </div>
                         <div className="display-flex shimmer-text" aria-hidden="true">

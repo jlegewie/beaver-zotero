@@ -6,21 +6,25 @@ import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import type { ContentKind } from '@beaver/agent-core/types/zotero';
 import { truncateText } from '@beaver/agent-ui/utils/stringUtils';
 import { ANNOTATION_ICON_BY_TYPE, ANNOTATION_TEXT_BY_TYPE } from '../../../utils/annotationDisplay';
-import type { ValidAnnotationType, ExternalFileContentKind } from '@beaver/agent-core/types/attachments/apiTypes';
+import type { ValidAnnotationType, ExternalFileContentKind, ViewAttachment } from '@beaver/agent-core/types/attachments/apiTypes';
 import { ChipWithPopup, type ChipPopupContent, type ChipPopupSubtitle } from '@beaver/agent-ui/chat/ChipPopup';
+import { collectionMenuItems } from '@beaver/agent-ui/chat/useItemContextMenu';
+import type { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
 import { useRemoveContextMenu } from '../../../hooks/useRemoveContextMenu';
 import { ChipButton } from './ChipButton';
 import { ChipRemovableIcon } from './ChipRemovableIcon';
+import { useSurfaceWindow } from '../../../runtime/SurfaceWindowContext';
 
 const MAX_CHIP_TEXT_LENGTH = 30;
 
 /**
  * A stored table as a request chip. Carries the table glyph rather than the
  * snapshot glyph of its Zotero item so it reads as the same thing the table
- * cards and the artifacts list show; clicking opens the current snapshot.
+ * cards and the artifacts list show; clicking opens it in the Beaver tab.
  */
 export function TableChip({ title, tableKey, remove }: { title: string; tableKey: string; remove?: ChipRemoveConfig }) {
     const [error, setError] = React.useState('');
+    const surfaceWindow = useSurfaceWindow();
     return <>
         <ChipShell
             icon={
@@ -33,7 +37,7 @@ export function TableChip({ title, tableKey, remove }: { title: string; tableKey
             onClick={() => {
                 const open = getHost().navigation?.openTable;
                 if (!open) { setError('Table provider unavailable.'); return; }
-                void open(tableKey).then(result => setError('error' in result ? result.error : result.warning ?? ''))
+                void open(tableKey, surfaceWindow).then(result => setError('error' in result ? result.error : result.warning ?? ''))
                     .catch(() => setError('Table provider unavailable.'));
             }}
         />
@@ -68,7 +72,11 @@ function attachmentIconName(contentKind?: ContentKind | ExternalFileContentKind 
     }
 }
 
-/** Shared chip body. `remove` adds the hover "x" and the Remove context menu. */
+/**
+ * Shared chip body. `remove` adds the hover "x" and the Remove context menu;
+ * `itemRef` adds the host's item menu (show in library, open, show file) and
+ * `menuItems` fixed entries for objects that are not items.
+ */
 function ChipShell({
     icon,
     label,
@@ -76,6 +84,8 @@ function ChipShell({
     popup,
     onClick,
     remove,
+    itemRef,
+    menuItems,
 }: {
     icon: React.ReactNode;
     label: string;
@@ -83,11 +93,15 @@ function ChipShell({
     popup?: ChipPopupContent | null;
     onClick?: () => void;
     remove?: ChipRemoveConfig;
+    itemRef?: ZoteroItemReference;
+    menuItems?: MenuItem[];
 }) {
     const { isRemoveMenuOpen, contextMenuHandlers, removeHandlers, removeMenu } = useRemoveContextMenu({
         onRemove: () => remove?.onRemove(),
         onRemoveAll: remove?.onRemoveAll,
         canEdit: Boolean(remove),
+        itemRef,
+        extraMenuItems: menuItems,
     });
 
     const button = (
@@ -160,6 +174,7 @@ export function ItemChip({
             }}
             onClick={() => getHost().navigation?.revealInLibrary(itemRef)}
             remove={remove}
+            itemRef={itemRef}
         />
     );
 }
@@ -186,6 +201,7 @@ export function AnnotationChip({
             popup={buildAnnotationChipPopup({ annotationType, color, title })}
             onClick={() => getHost().navigation?.openAnnotation(annotationRef)}
             remove={remove}
+            itemRef={annotationRef}
         />
     );
 }
@@ -238,6 +254,7 @@ export function NoteChip({
             }}
             onClick={() => getHost().navigation?.openSource(noteRef)}
             remove={remove}
+            itemRef={noteRef}
         />
     );
 }
@@ -273,6 +290,45 @@ export function CollectionChip({
                 action: { icon: LibraryIcon, label: 'Reveal in library' },
             }}
             onClick={() => getHost().navigation?.revealCollection(collectionRef)}
+            remove={remove}
+            menuItems={collectionMenuItems(collectionRef)}
+        />
+    );
+}
+
+/**
+ * Collections-pane icon and description of a saved search or built-in view.
+ * Zotero's collections-tree icon names match the row types.
+ */
+export function viewChipDisplay(view: ViewAttachment): { iconName: string; kindLabel: string } {
+    if (view.type === 'saved_search') return { iconName: 'search', kindLabel: 'Saved search' };
+    return { iconName: view.special_collection, kindLabel: 'Library view' };
+}
+
+export function ViewChip({
+    view,
+    remove,
+}: {
+    view: ViewAttachment;
+    remove?: ChipRemoveConfig;
+}) {
+    const { iconName, kindLabel } = viewChipDisplay(view);
+    const icon = (
+        <span className="scale-90">
+            <CSSIcon name={iconName} className="icon-16" />
+        </span>
+    );
+    return (
+        <ChipShell
+            icon={icon}
+            label={truncateText(view.name, 20)}
+            popup={{
+                icon,
+                title: view.name,
+                subtitle: { text: kindLabel },
+                action: { icon: LibraryIcon, label: 'Reveal in library' },
+            }}
+            onClick={() => void getHost().navigation?.revealView?.(view)}
             remove={remove}
         />
     );

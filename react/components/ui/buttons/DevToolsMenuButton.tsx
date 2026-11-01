@@ -183,7 +183,7 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
             const totalTextLength = result.document.pages.reduce(
                 (sum, page) =>
                     sum + page.items.reduce(
-                        (itemSum, item) => itemSum + ("text" in item ? item.text.length : 0),
+                        (itemSum, item) => itemSum + ("text" in item ? item.text?.length ?? 0 : 0),
                         0,
                     ),
                 0,
@@ -195,7 +195,7 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
             for (const page of result.document.pages) {
                 const sentences = page.items.flatMap((item) => ("sentences" in item ? item.sentences ?? [] : []));
                 const textLength = page.items.reduce(
-                    (sum, item) => sum + ("text" in item ? item.text.length : 0),
+                    (sum, item) => sum + ("text" in item ? item.text?.length ?? 0 : 0),
                     0,
                 );
                 
@@ -488,7 +488,7 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
             }
             const sentences = page.items.flatMap((item) => ("sentences" in item ? item.sentences ?? [] : []));
             const textLength = page.items.reduce(
-                (sum, item) => sum + ("text" in item ? item.text.length : 0),
+                (sum, item) => sum + ("text" in item ? item.text?.length ?? 0 : 0),
                 0,
             );
             

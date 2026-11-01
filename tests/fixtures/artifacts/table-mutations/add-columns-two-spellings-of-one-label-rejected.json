@@ -1,30 +1,48 @@
 {
-    "name": "a new column declaring one label twice under two spellings is refused",
+    "name": "add_columns refuses two spellings of one option label",
     "before": {
-        "id": "t2",
-        "spec_version": 1,
-        "anchor_column_id": "paper",
+        "id": "t1",
+        "spec_version": 2,
+        "title": "Sampling methods",
+        "description": "How the papers sampled their respondents.",
+        "anchor_column_id": "_reference",
+        "sources": [
+            {
+                "id": "s1",
+                "type": "items",
+                "ids": [
+                    "u-AAA",
+                    "u-BBB",
+                    "u-CCC"
+                ]
+            }
+        ],
         "columns": [
             {
-                "id": "paper",
-                "header": "Paper",
-                "type": "reference"
+                "id": "_reference",
+                "header": "Reference",
+                "type": "reference",
+                "system": true
             },
             {
-                "id": "design",
-                "header": "Design",
-                "type": "select",
-                "description": "What design does the study use?",
-                "options": [
-                    {
-                        "label": "RCT",
-                        "color": "blue"
-                    },
-                    {
-                        "label": "Quasi-experiment",
-                        "color": "green"
-                    }
-                ]
+                "id": "_year",
+                "header": "Year",
+                "type": "date",
+                "system": true,
+                "priority": "secondary"
+            },
+            {
+                "id": "_identifier",
+                "header": "Identifier",
+                "type": "link",
+                "system": true,
+                "priority": "secondary"
+            },
+            {
+                "id": "method",
+                "header": "Method",
+                "type": "text",
+                "description": "What method does the paper use?"
             }
         ],
         "rows": [
@@ -32,18 +50,156 @@
                 "id": "r1",
                 "ref": {
                     "kind": "item",
-                    "library_id": 1,
-                    "zotero_key": "AAA"
+                    "library_ref": "u",
+                    "zotero_key": "AAA",
+                    "library_id": 1
                 },
+                "documents": [
+                    "u-AAAPDF"
+                ],
                 "cells": {
-                    "paper": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
                         "value": {
                             "kind": "reference",
-                            "display_name": "Alpha"
+                            "display_name": "Alpha 2020",
+                            "title": "Sampling hard-to-reach groups",
+                            "item_type": "journalArticle"
+                        }
+                    },
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "date",
+                            "value": "2020"
+                        }
+                    },
+                    "_identifier": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "link",
+                            "url": "https://doi.org/10.1000/alpha",
+                            "label": "10.1000/alpha"
+                        }
+                    },
+                    "method": {
+                        "outcome": "answered",
+                        "provenance": "model",
+                        "value": {
+                            "kind": "text",
+                            "text": "Telephone survey"
                         },
-                        "provenance": "imported"
+                        "documents": [
+                            "u-AAAPDF"
+                        ],
+                        "evidence": [
+                            {
+                                "document": "u-AAAPDF",
+                                "locator": "s12-s13",
+                                "quote": "Respondents were sampled by random digit dialing.",
+                                "page": 3,
+                                "boxes": [
+                                    [
+                                        72,
+                                        410,
+                                        523,
+                                        436
+                                    ]
+                                ]
+                            }
+                        ]
                     }
-                }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
+            },
+            {
+                "id": "r2",
+                "ref": {
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "BBB",
+                    "library_id": 1
+                },
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Beta 2019",
+                            "title": "Mail surveys revisited",
+                            "item_type": "journalArticle"
+                        }
+                    },
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "date",
+                            "value": "2019"
+                        }
+                    },
+                    "method": {
+                        "outcome": "answered",
+                        "provenance": "model",
+                        "value": {
+                            "kind": "text",
+                            "text": "Mail survey"
+                        }
+                    }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
+            },
+            {
+                "id": "r3",
+                "ref": {
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "CCC",
+                    "library_id": 1
+                },
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Gamma 2021",
+                            "title": "Register studies in practice",
+                            "item_type": "journalArticle"
+                        }
+                    },
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "date",
+                            "value": "2021"
+                        }
+                    }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
             }
         ]
     },
@@ -52,18 +208,15 @@
             "op": "add_columns",
             "columns": [
                 {
-                    "id": "blinded",
-                    "header": "Blinded",
+                    "id": "design",
+                    "header": "Design",
                     "type": "select",
                     "options": [
                         {
-                            "label": "Yes"
+                            "label": "RCT"
                         },
                         {
-                            "label": "No"
-                        },
-                        {
-                            "label": "yes"
+                            "label": "rct."
                         }
                     ]
                 }

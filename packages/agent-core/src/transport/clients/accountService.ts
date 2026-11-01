@@ -1,19 +1,8 @@
 import { ApiService, type RequestOptions } from '../apiService';
-import { ExcludedLibrary, OverallSyncStatus, SafeProfileWithPlan } from '../../types/profile';
+import { ExcludedLibrary, SafeProfileWithPlan } from '../../types/profile';
 import { ModelConfig } from '../../types/models';
-import { ZoteroLibrary } from '../../types/zotero';
 import { resolveClientIdentity } from '../clientIdentity';
 import { logger } from '../../platform/logger';
-
-interface AuthorizationRequest {
-    zotero_local_id: string;
-    zotero_user_id: string | undefined;
-    libraries: ZoteroLibrary[];
-    require_onboarding: boolean;
-    use_zotero_sync: boolean;
-    consent_to_share: boolean;
-    email_notifications: boolean;
-}
 
 interface FreeAuthorizationRequest {
     zotero_local_id: string;
@@ -36,17 +25,6 @@ interface ProfileResponse {
     required_data_version: number;
     minimum_frontend_version: string;
 }
-
-interface OnboardingRequest {
-    sync_status?: OverallSyncStatus;
-    libraries?: ZoteroLibrary[];
-}
-
-
-interface SyncLibrariesRequest {
-    libraries: ZoteroLibrary[];
-}
-
 
 interface ExcludedLibrariesRequest {
     excluded_libraries: ExcludedLibrary[];
@@ -151,7 +129,7 @@ export class AccountService extends ApiService {
     }
 
     /**
-     * Fetches the user's profile including the plan name
+     * Fetches the user's profile
      * @returns Promise with the profile data
      */
     async getProfileWithPlan(options?: RequestOptions): Promise<ProfileResponse> {
@@ -168,7 +146,7 @@ export class AccountService extends ApiService {
                 // `has_authorized_free_access && zotero_local_ids == []`.
                 register_first_device: true,
             } as ProfileRequest, options);
-            logger(`accountService.getProfileWithPlan: success, plan=${result.profile?.plan?.name}, has_authorized_access=${result.profile?.has_authorized_access}, has_authorized_free_access=${result.profile?.has_authorized_free_access}`);
+            logger(`accountService.getProfileWithPlan: success, has_authorized_access=${result.profile?.has_authorized_access}, has_authorized_free_access=${result.profile?.has_authorized_free_access}`);
             return result;
         } catch (error) {
             logger(`accountService.getProfileWithPlan: error=${error instanceof Error ? error.message : error}`, 2);
@@ -177,65 +155,9 @@ export class AccountService extends ApiService {
     }
 
     /**
-     * Fetches the list of models supported by the backend
-     * @returns Promise resolving to an array of supported models
-     */
-    async getModelList(plan_id: string): Promise<ModelConfig[]> {
-        try {
-            return await this.get<ModelConfig[]>(`/api/v1/account/model-configs?plan_id=${plan_id}`);
-        } catch (error) {
-            logger(`getModelList: getModelList error - ${error}`, 1);
-            // Return empty array on error
-            return [];
-        }
-    }
-
-    /**
-     * Sets the user's authorization status to authorized and records consent timestamp
-     * @param requireOnboarding Whether the user needs to complete onboarding
-     * @param libraries List of Zotero libraries to sync
-     * @param syncWithZotero Whether to sync with Zotero
-     * @param consentToShare Whether user consents to share data
-     * @param emailNotifications Whether user wants email notifications
-     * @returns Promise with the response message
-     */
-    /**
-     * Sets the user's authorization status to authorized and records consent timestamp.
-     * Used for Pro/Beta plan users who go through the full onboarding flow.
-     * @param requireOnboarding Whether the user needs to complete onboarding
-     * @param libraries List of Zotero libraries to sync
-     * @param syncWithZotero Whether to sync with Zotero
-     * @param consentToShare Whether user consents to share data
-     * @param emailNotifications Whether user wants email notifications
-     * @returns Promise with the response message
-     */
-    async authorizeAccess(
-        requireOnboarding: boolean = true,
-        libraries: ZoteroLibrary[],
-        syncWithZotero: boolean = false,
-        consentToShare: boolean = false,
-        emailNotifications: boolean = false
-    ): Promise<{ message: string }> {
-        const { local_user_key: localUserKey = '', user_id: userID } = resolveClientIdentity().zoteroInstance ?? {};
-        return this.post<{ message: string }>('/api/v1/account/authorize', {
-            zotero_local_id: localUserKey,
-            zotero_user_id: userID,
-            require_onboarding: requireOnboarding,
-            libraries: libraries,
-            use_zotero_sync: syncWithZotero,
-            consent_to_share: consentToShare,
-            email_notifications: emailNotifications
-        } as AuthorizationRequest);
-    }
-
-    /**
-     * Sets the free plan user's authorization status and records consent timestamp.
-     * Used for Free plan users who go through the simplified onboarding flow.
-     * 
-     * Key differences from Pro/Beta authorization:
-     * - Sets has_authorized_free_access instead of has_authorized_access
-     * - Does NOT set has_completed_onboarding (free users don't need full onboarding)
-     * - Does NOT send libraries (per privacy policy - Free users don't sync data)
+     * Records the user's consent and sets has_authorized_free_access.
+     * Used by the onboarding page for accounts that have not yet consented
+     * (accounts created on the website consent there).
      * 
      * @param consentToShare Whether user consents to share data
      * @param emailNotifications Whether user wants email notifications
@@ -255,21 +177,6 @@ export class AccountService extends ApiService {
     }
 
     /**
-     * Sets the user's onboarding status to completed
-     * @returns Promise with the response message
-     */
-    async completeOnboarding(
-        overallSyncStatus: OverallSyncStatus,
-        libraries?: ZoteroLibrary[]
-    ): Promise<{ message: string }> {
-        return this.post<{ message: string }>('/api/v1/account/complete-onboarding', {
-            sync_status: overallSyncStatus,
-            libraries: libraries
-        } as OnboardingRequest);
-    }
-
-
-    /**
      * Updates the user's preference
      * @param preference The preference to update
      * @param value The value to set for the preference
@@ -280,17 +187,6 @@ export class AccountService extends ApiService {
             preference,
             value
         } as PreferenceRequest);
-    }
-
-    /**
-     * Updates the user's sync libraries
-     * @param libraries The libraries to sync
-     * @returns Promise with the response message
-     */
-    async updateSyncLibraries(libraries: ZoteroLibrary[]): Promise<{ message: string }> {
-        return this.post<{ message: string }>('/api/v1/account/update-sync-libraries', {
-            libraries,
-        } as SyncLibrariesRequest);
     }
 
     /**
@@ -335,10 +231,11 @@ export class AccountService extends ApiService {
     }
 
     /**
-     * Fetches available subscription plans with live Stripe pricing
+     * Fetches available plans with live Stripe pricing: monthly and yearly
+     * subscriptions (`interval` 'month' / 'year') and credit packs (`interval` null).
      */
     async getPlans(): Promise<PlansResponse> {
-        return this.get<PlansResponse>('/api/v1/billing/plans');
+        return this.get<PlansResponse>('/api/v1/billing/plans?include_annual=true');
     }
 
     async getScheduledChange(): Promise<ScheduledChangeResponse> {
@@ -373,20 +270,6 @@ export class AccountService extends ApiService {
             target_sku: targetSku,
             return_url: returnUrl
         } as UpgradeSessionRequest);
-    }
-
-    /**
-     * Completes the upgrade consent process (Free → Pro)
-     * Sets has_authorized_access and clears pending_upgrade_consent.
-     * After this, user is routed to library selection (ProOnboardingPage Step 2).
-     * @returns Promise with the response message
-     */
-    async completeUpgradeConsent(): Promise<{ message: string }> {
-        const { local_user_key: localUserKey = '', user_id: userID } = resolveClientIdentity().zoteroInstance ?? {};
-        return this.post<{ message: string }>('/api/v1/account/complete-upgrade-consent', {
-            zotero_local_id: localUserKey,
-            zotero_user_id: userID,
-        });
     }
 
     /**

@@ -1,12 +1,15 @@
+import { resolveCollection } from '../../../src/services/collections/collectionIdentity';
 import { tryGetWindowRuntime } from '../../runtime/windowRuntime';
 import { openStoredTable } from './tables';
 import type { NavigationHost, AttachmentMatchNavigation } from '@beaver/agent-ui/host/types';
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
+import type { ViewAttachment } from '@beaver/agent-core/types/attachments/apiTypes';
 import type { AttachmentMatchTarget } from '@beaver/agent-core/run-state/toolResultTypes';
 import type { BatchOutcomeTarget } from '@beaver/agent-core/run-state/batchProgress';
 import { revealSource, openSource as openZoteroSource } from '../../utils/sourceUtils';
-import { selectCollection, selectLibrary, selectTagFilter } from '../../utils/selectItem';
+import { selectCollection, selectLibrary, selectTagFilter, selectView } from '../../utils/selectItem';
 import { activateCitation } from './citationActivation';
+import { itemMenuItems } from './itemMenu';
 import { launchExternalFile, notifyReferenceUnavailable, notifyTagAmbiguous } from './sourceActions';
 import { navigateToAnnotation } from '../../utils/readerUtils';
 import { navigateToAttachmentMatch as navigateToAttachmentMatchImpl } from '../../utils/attachmentMatchNavigation';
@@ -40,22 +43,13 @@ function batchLibraryID(libraryRef?: string): number | null | 'unavailable' {
     return resolveLibraryRef({ library_ref: libraryRef }) ?? 'unavailable';
 }
 
-/**
- * Find a collection by key, in one library or across all of them.
- *
- * Scanning is safe where the batch named no library: keys are per-library but
- * random 8-character strings, so a collision is not a practical concern.
- */
+/** Resolve history navigation without widening an explicit library scope. */
 function findCollectionByKey(key: string, libraryID: number | null): Zotero.Collection | null {
-    const libraryIDs = libraryID
-        ? [libraryID]
-        : Zotero.Libraries.getAll().map((library) => library.libraryID);
-    for (const id of libraryIDs) {
-        // Returns false when this library holds no such collection.
-        const found = Zotero.Collections.getByLibraryAndKey(id, key);
-        if (found) return found as Zotero.Collection;
+    try {
+        return resolveCollection(key, { libraryID: libraryID ?? undefined, access: 'local' }).collection;
+    } catch {
+        return null;
     }
-    return null;
 }
 
 /**
@@ -67,6 +61,7 @@ function findCollectionByKey(key: string, libraryID: number | null): Zotero.Coll
  */
 export const zoteroNavigation: NavigationHost = {
     openTable: openStoredTable,
+    itemMenuItems,
     revealInLibrary(ref: ZoteroItemReference): void {
         const resolved = resolveItemID(ref);
         if (!resolved || resolved === 'library_unavailable') {
@@ -88,6 +83,15 @@ export const zoteroNavigation: NavigationHost = {
         const found = Zotero.Collections.getByLibraryAndKey(libraryID, ref.zotero_key);
         if (found) selectCollection(found);
         else notifyReferenceUnavailable('collection');
+    },
+    async revealView(view: ViewAttachment): Promise<void> {
+        const kind = view.type === 'saved_search' ? 'search' : 'view';
+        const libraryID = resolveLibraryRef(view);
+        if (!libraryID) {
+            notifyReferenceUnavailable(kind, 'library_unavailable');
+            return;
+        }
+        if (!(await selectView(view, libraryID))) notifyReferenceUnavailable(kind);
     },
     async revealObject(ref: ZoteroItemReference): Promise<void> {
         // Click handler: an uncaught throw here is a silent dead link.

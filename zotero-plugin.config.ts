@@ -86,6 +86,25 @@ export default defineConfig({
         external: ["chrome://*"],
         outfile: `.scaffold/build/addon/content/scripts/mupdf-worker.js`,
       },
+      {
+        // Export runtime: the parser and writers of @beaver/agent-export with
+        // remark, KaTeX and docx. Loaded on first export into its own script
+        // scope (src/services/export/exportRuntime.ts), so the main bundle does
+        // not carry it. `neutral` keeps esbuild off the packages' `browser`
+        // builds, which assume a DOM the plugin realm does not have.
+        entryPoints: ["packages/agent-export/src/runtime.ts"],
+        define: {
+          "process.env.NODE_ENV": JSON.stringify(mode),
+        },
+        bundle: true,
+        format: "iife",
+        globalName: "BeaverExportRuntime",
+        platform: "neutral",
+        mainFields: ["module", "main"],
+        target: "firefox115",
+        minify: mode === "production",
+        outfile: `.scaffold/build/addon/content/scripts/beaver-export.js`,
+      },
     ],
     hooks: {
       "build:copyAssets": async (ctx) => {

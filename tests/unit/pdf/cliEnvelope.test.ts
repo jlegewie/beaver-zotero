@@ -577,6 +577,25 @@ describe('runCli — analysis window accepts Infinity', () => {
         );
     });
 
+    it('extract --schema-version validates the result against the requested version', async () => {
+        const structured = (schemaVersion: string) => ({
+            mode: 'structured',
+            schemaVersion,
+            document: { pageCount: 0, bboxOrigin: 'top-left', bboxPrecision: 1, pages: [] },
+        });
+        const { deps, api } = makeDeps();
+        api.extractPdf.mockResolvedValue(structured('5'));
+        expect(await runCli(['extract', 'fake.pdf', '--schema-version', '5', '--json'], deps)).toBe(0);
+        expect(api.extractPdf.mock.calls[0][0].schemaVersion).toBe('5');
+
+        process.exitCode = undefined;
+        const mismatch = makeDeps();
+        mismatch.api.extractPdf.mockResolvedValue(structured('4'));
+        expect(await runCli(['extract', 'fake.pdf', '--schema-version', '5', '--json'], mismatch.deps)).toBe(1);
+        expect(mismatch.stderr.text()).toContain('$.schemaVersion must be \\"5\\"');
+        process.exitCode = undefined;
+    });
+
     it('extract --analysis-window 0 still works (lower bound)', async () => {
         const { deps, api } = makeDeps();
         api.extractPdf.mockResolvedValue({

@@ -8,7 +8,12 @@ import type {
     DocumentCachePayloadKind,
     DocumentCachePayloadRecord,
 } from './database';
-import { getFileSignature, isRemoteFilePath, type FileSignature } from './documentFileIdentity';
+import {
+    getFileSignature,
+    isRemoteFilePath,
+    parseLocalSourceIdentity,
+    type FileSignature,
+} from './documentFileIdentity';
 import { logger } from '@beaver/agent-core/platform/logger';
 import {
     gzipJsonValueChunked,
@@ -28,6 +33,8 @@ import {
     validateStructuredExtractResult,
 } from '../beaver-extract/schema/validators';
 import type { PageGeometry } from '@beaver/agent-core/extract/types';
+import { derivedPageLabelsForCache } from '../beaver-extract/pipeline/output';
+import { pdfExtractionPreset } from '../beaver-extract/schema/presets';
 import {
     buildEpubCachedMetadata,
     buildPdfCachedMetadata,
@@ -41,6 +48,8 @@ import {
 } from './documentExtraction/shared/extractionSchemaVersions';
 import { validateEpubDocument, type EpubDocument } from './documentExtraction/epub';
 import { validateSnapshotDocument, type SnapshotDocument } from './documentExtraction/snapshot';
+import { computeStructuredDocumentHash } from './documentExtraction/structuredDocumentHash';
+import type { DocumentExtractResult } from '@beaver/agent-core/extract/document/shared/documentExtractResult';
 
 export const DOCUMENT_METADATA_FORMAT_VERSION = 1;
 export const DOCUMENT_PAYLOAD_FORMAT_VERSION = 1;
@@ -86,6 +95,13 @@ export interface DocumentCacheStats {
 
 type DocumentRef = { libraryId: number; zoteroKey: string };
 
+/** A retained OCR preparation that must be prepared again before it is served. */
+export interface ProtectedRepreparation {
+    /** Page count recorded when the scan was prepared. */
+    pageCount: number | null;
+    sourceSizeBytes: number;
+}
+
 /**
  * Minimal item identity the cache stores with each entry. Zotero.Item
  * satisfies it structurally; external files pass a synthetic ref
@@ -105,9 +121,17 @@ export interface DocumentCacheSourceIdentity {
 
 interface CacheMetadataInput {
     extractionSource?: "native" | "ocr";
+    /** md5 of the local source bytes an OCR payload was prepared from. */
+    sourceMd5?: string | null;
     contentKind?: ExtractContentKind;
     pageCount: number | null;
     pageLabels: PageLabels | Record<number, string> | null;
+    /**
+     * Printed page numbers from full structured extraction; `null` when
+     * that extraction has none, absent when the write does not know (a
+     * metadata-only preflight keeps the value already stored for the source).
+     */
+    derivedPageLabels?: PageLabels | Record<number, string> | null;
     pages: (PageGeometry | null)[] | null;
     epubSections?: EpubSectionSummary[];
     /** EPUB total page count (max stamped `pageNumber`); PDF uses `pageCount`. */
@@ -123,6 +147,56 @@ interface CacheMetadataInput {
     snapshotExtractedTextChars?: number | null;
     /** Authoritative error reason; omitted or `null` marks a successful extraction. */
     errorCode?: DocumentCacheErrorCode | null;
+}
+
+/** Bytes of a serialized result searched for the document's derived page labels. */
+const DERIVED_LABELS_SCAN_BYTES = 1024 * 1024;
+
+/**
+ * Read `document.derivedPageLabels` from a serialized structured result
+ * without parsing the whole payload. The document object writes its label maps
+ * before its pages, so only a prefix is decoded. Returns `null` when the
+ * document has no derived labels and `undefined` when the prefix does not tell.
+ */
+export function derivedPageLabelsFromSerializedResult(
+    jsonBytes: Uint8Array,
+): Record<string, string> | null | undefined {
+    const text = new TextDecoder().decode(
+        jsonBytes.subarray(0, Math.min(jsonBytes.byteLength, DERIVED_LABELS_SCAN_BYTES)),
+    );
+    const documentStart = text.indexOf('"document":{');
+    if (documentStart < 0) return undefined;
+    const key = '"derivedPageLabels":';
+    const keyIndex = text.indexOf(key, documentStart);
+    const pagesIndex = text.indexOf('"pages":', documentStart);
+    if (keyIndex < 0 || (pagesIndex >= 0 && pagesIndex < keyIndex)) {
+        return pagesIndex >= 0 ? null : undefined;
+    }
+    const start = keyIndex + key.length;
+    if (text[start] !== '{') return undefined;
+    let inString = false;
+    for (let i = start + 1; i < text.length; i++) {
+        const char = text[i];
+        if (inString) {
+            if (char === '\\') i++;
+            else if (char === '"') inString = false;
+        } else if (char === '"') {
+            inString = true;
+        } else if (char === '}') {
+            try {
+                const parsed: unknown = JSON.parse(text.slice(start, i + 1));
+                if (!parsed || typeof parsed !== 'object') return undefined;
+                const labels = Object.fromEntries(
+                    Object.entries(parsed as Record<string, unknown>)
+                        .filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
+                );
+                return Object.keys(labels).length > 0 ? labels : null;
+            } catch {
+                return undefined;
+            }
+        }
+    }
+    return undefined;
 }
 
 interface CacheablePayload {
@@ -146,6 +220,23 @@ interface ExtractionLockEntry<T extends CacheablePayload = BeaverExtractResult> 
     sharedTimer: ReturnType<typeof setTimeout> | null;
     /** Wall-clock time the in-flight lock was created; anchors waiter deadlines. */
     createdAt: number;
+    /** The extracted result while its deferred cache write runs (`writeAfterResolve`). */
+    unwritten?: T;
+    /** The deferred cache write; the lock stays registered until it settles. */
+    pendingWrite?: Promise<void>;
+}
+
+/** How `getOrCreateResult` / `getOrCreateSerializedResult` store a fresh result. */
+interface SharedResultWriteOptions {
+    /**
+     * Resolve the waiters as soon as the result exists and write the cache
+     * entry afterwards. Until the write settles, callers that join the
+     * extraction (or ask `getUnwrittenResult`) get the in-memory result. A
+     * failed write is logged, not surfaced.
+     */
+    writeAfterResolve?: boolean;
+    /** Called with the cache write's duration, ms, once it settles. */
+    onCacheWrite?: (ms: number) => void;
 }
 
 /** Full-document PDF extraction cache backed by SQLite metadata and gzip payload files. */
@@ -161,6 +252,8 @@ export class DocumentCache {
     private itemWriteLocks = new Map<string, Promise<void>>();
     private writeLocks = new Map<string, Promise<void>>();
     private extractionLocks = new Map<string, ExtractionLockEntry<CacheablePayload>>();
+    /** In-flight uncached extractions; clearing the cache leaves them running. */
+    private uncachedExtractions = new Map<string, ExtractionLockEntry<CacheablePayload>>();
     /** Wall-clock time of the last size-budget pass; 0 = never run. */
     private lastBudgetPassAt = 0;
     /** Payload bytes written since the last size-budget pass. */
@@ -199,30 +292,64 @@ export class DocumentCache {
         filePath: string,
     ): Promise<DocumentCacheMetadata | null> {
         try {
-            const record = await this.db.getDocumentCacheMetadataByKey(ref.libraryId, ref.zoteroKey);
+            let record = await this.db.getDocumentCacheMetadataByKey(ref.libraryId, ref.zoteroKey);
             if (!record) return null;
 
             if (await this.isMetadataStale(record, filePath)) {
-                const protectedPayload = (await this.db.getDocumentCachePayloadsForMetadata(record.id))
-                    .some(p => p.extractionSource === 'ocr');
-                const source = protectedPayload ? await this.getSourceIdentity(filePath, record.sourceSizeBytes) : null;
-                if (source && this.sourceIdentityMatches(source, {
-                    filePath: record.filePath, fileSignature: record.fileSignature, sourceSizeBytes: record.sourceSizeBytes,
-                })) {
+                const retained = await this.retainProtectedSource(ref, record, filePath);
+                if (retained === 'unservable') {
                     logger('Prepared OCR cache requires re-preparation for this extraction version; retained on disk.', 1);
                     return null;
                 }
-                const deletedPayloads = await this.db.deleteDocumentCacheMetadataIfUnchanged(record);
-                if (deletedPayloads) {
-                    await this.removePayloadFiles(deletedPayloads);
+                if (!retained) {
+                    const deletedPayloads = await this.db.deleteDocumentCacheMetadataIfUnchanged(record);
+                    if (deletedPayloads) {
+                        await this.removePayloadFiles(deletedPayloads);
+                    }
+                    return null;
                 }
-                return null;
+                record = retained;
             }
 
             await this.db.touchDocumentCacheMetadata(record.id).catch(() => undefined);
             return record;
         } catch (error) {
             logger(`DocumentCache.getMetadata error: ${error}`, 1);
+            return null;
+        }
+    }
+
+    /**
+     * Describe a retained OCR preparation of the current source that can no
+     * longer be served because a metadata, payload or extraction version moved
+     * on. Its bytes stay on disk until a compatible OCR preparation replaces
+     * them, and the retained record is evidence that this exact source is a
+     * scan. Returns `null` for compatible, native, or replaced sources.
+     */
+    async getProtectedRepreparation(
+        ref: DocumentRef,
+        filePath: string,
+    ): Promise<ProtectedRepreparation | null> {
+        try {
+            const record = await this.db.getDocumentCacheMetadataByKey(ref.libraryId, ref.zoteroKey);
+            if (!record || record.contentKind !== 'pdf' || record.filePath !== filePath) return null;
+            const payloads = (await this.db.getDocumentCachePayloadsForMetadata(record.id))
+                .filter(p => p.extractionSource === 'ocr');
+            if (payloads.length === 0) return null;
+            // Mirrors the incompatible count reported by getStats().
+            const schemaVersion = expectedExtractionSchemaVersion('pdf');
+            const compatible = record.metadataFormatVersion === DOCUMENT_METADATA_FORMAT_VERSION
+                && record.extractionSchemaVersion === schemaVersion
+                && payloads.every(p => p.cacheFormatVersion === DOCUMENT_PAYLOAD_FORMAT_VERSION
+                    && p.extractionSchemaVersion === schemaVersion);
+            if (compatible) return null;
+            const source = await this.getSourceIdentity(filePath, record.sourceSizeBytes);
+            if (!this.sourceIdentityMatches(source, {
+                filePath: record.filePath, fileSignature: record.fileSignature, sourceSizeBytes: record.sourceSizeBytes,
+            })) return null;
+            return { pageCount: record.pageCount, sourceSizeBytes: record.sourceSizeBytes };
+        } catch (error) {
+            logger(`DocumentCache.getProtectedRepreparation error: ${error}`, 1);
             return null;
         }
     }
@@ -306,6 +433,9 @@ export class DocumentCache {
             }
 
             await this.db.touchDocumentCachePayload(payload.id).catch(() => undefined);
+            if (metadata.derivedPageLabels === undefined) {
+                this.backfillDerivedPageLabels(metadata, derivedPageLabelsForCache(result));
+            }
             return result;
         } catch (error) {
             logger(`DocumentCache.getResult error: ${error}`, 1);
@@ -361,6 +491,18 @@ export class DocumentCache {
             }
 
             await this.db.touchDocumentCachePayload(payload.id).catch(() => undefined);
+            let derivedPageLabels = metadata.documentMetadata.derivedPageLabels;
+            if (
+                derivedPageLabels === undefined
+                && mode === 'structured'
+                && pdfExtractionPreset(metadata.extractionSchemaVersion)?.derivedPageLabels
+            ) {
+                // A prefix that does not tell leaves the record unknown, so a
+                // later read scans again; documents whose label maps exceed
+                // the prefix are rare enough to accept that.
+                derivedPageLabels = derivedPageLabelsFromSerializedResult(jsonBytes);
+                this.backfillDerivedPageLabels(metadata, derivedPageLabels);
+            }
             return {
                 schemaVersion: metadata.extractionSchemaVersion,
                 mode,
@@ -370,6 +512,7 @@ export class DocumentCache {
                 metadata: {
                     pageCount: metadata.documentMetadata.pageCount,
                     pageLabels: metadata.documentMetadata.pageLabels,
+                    derivedPageLabels,
                     pages: metadata.documentMetadata.pages,
                 },
             };
@@ -525,7 +668,9 @@ export class DocumentCache {
         readCached?: (ref: DocumentRef) => Promise<T | null>;
         create: (signal: AbortSignal) => Promise<T>;
         metadata: (result: T) => CacheMetadataInput;
-    }): Promise<T | null> {
+        /** Called when this caller joins another caller's in-flight extraction. */
+        onJoin?: () => void;
+    } & SharedResultWriteOptions): Promise<T | null> {
         if (this.clearing) return null;
         const generation = this.extractionGeneration(input.item);
         const ref = {
@@ -545,10 +690,10 @@ export class DocumentCache {
         const payloadKind = DocumentCache.payloadKindForMode(input.mode);
         const contentKind = input.contentKind ?? 'pdf';
         const suffix = contentKind === 'pdf' ? '' : `/${contentKind}`;
-        const lockScope = input.lockScope ?? 'default';
-        const lockKey = `${ref.libraryId}/${ref.zoteroKey}/${payloadKind}/${this.sourceIdentityKey(source)}${suffix}/scope:${lockScope}/generation:${generation}`;
+        const lockKey = this.extractionLockKey(ref, payloadKind, source, suffix, input.lockScope, generation);
         const existing = this.extractionLocks.get(lockKey) as ExtractionLockEntry<T> | undefined;
         if (existing) {
+            input.onJoin?.();
             return this.waitForSharedExtraction(existing, input.abortSignal, input.sharedTimeoutMs);
         }
 
@@ -558,6 +703,7 @@ export class DocumentCache {
 
         const refreshedExisting = this.extractionLocks.get(lockKey) as ExtractionLockEntry<T> | undefined;
         if (refreshedExisting) {
+            input.onJoin?.();
             return this.waitForSharedExtraction(refreshedExisting, input.abortSignal, input.sharedTimeoutMs);
         }
 
@@ -583,7 +729,7 @@ export class DocumentCache {
                 this.clearSharedExtractionTimer(entry);
             }
             if (controller.signal.aborted || generation !== this.extractionGeneration(input.item)) return null;
-            await this.putResult({
+            return this.storeSharedResult(entry, result, () => this.putResult({
                 item: input.item,
                 filePath: input.filePath,
                 mode: input.mode,
@@ -592,8 +738,7 @@ export class DocumentCache {
                 result,
                 metadata: input.metadata(result),
                 expectedSourceIdentity: source,
-            });
-            return result;
+            }), input);
         })()
             .catch((error) => {
                 logger(`DocumentCache.getOrCreateResult error: ${error}`, 1);
@@ -602,9 +747,7 @@ export class DocumentCache {
             .finally(() => {
                 entry.settled = true;
                 this.clearSharedExtractionTimer(entry);
-                if (this.extractionLocks.get(lockKey) === entry) {
-                    this.extractionLocks.delete(lockKey);
-                }
+                this.releaseExtractionLock(lockKey, entry);
             });
 
         this.extractionLocks.set(lockKey, entry);
@@ -625,7 +768,9 @@ export class DocumentCache {
         abortSignal?: AbortSignal;
         expectedSourceIdentity?: DocumentCacheSourceIdentity | null;
         create: (signal: AbortSignal) => Promise<SerializedBeaverExtractResult>;
-    }): Promise<SerializedDocumentCacheResult | null> {
+        /** Called when this caller joins another caller's in-flight extraction. */
+        onJoin?: () => void;
+    } & SharedResultWriteOptions): Promise<SerializedDocumentCacheResult | null> {
         if (this.clearing) return null;
         const generation = this.extractionGeneration(input.item);
         const ref = {
@@ -645,10 +790,10 @@ export class DocumentCache {
         }
         if (generation !== this.extractionGeneration(input.item) || this.clearing) return null;
         const payloadKind = DocumentCache.payloadKindForMode(input.mode);
-        const lockScope = input.lockScope ?? 'default';
-        const lockKey = `${ref.libraryId}/${ref.zoteroKey}/${payloadKind}/${this.sourceIdentityKey(source)}/serialized/scope:${lockScope}/generation:${generation}`;
+        const lockKey = this.extractionLockKey(ref, payloadKind, source, '/serialized', input.lockScope, generation);
         const existing = this.extractionLocks.get(lockKey) as ExtractionLockEntry<SerializedDocumentCacheResult> | undefined;
         if (existing) {
+            input.onJoin?.();
             return this.waitForSharedExtraction(existing, input.abortSignal, input.sharedTimeoutMs);
         }
 
@@ -658,6 +803,7 @@ export class DocumentCache {
 
         const refreshedExisting = this.extractionLocks.get(lockKey) as ExtractionLockEntry<SerializedDocumentCacheResult> | undefined;
         if (refreshedExisting) {
+            input.onJoin?.();
             return this.waitForSharedExtraction(refreshedExisting, input.abortSignal, input.sharedTimeoutMs);
         }
 
@@ -692,10 +838,11 @@ export class DocumentCache {
                 metadata: {
                     pageCount: created.cacheMetadata.pageCount,
                     pageLabels: created.cacheMetadata.pageLabels,
+                    derivedPageLabels: created.cacheMetadata.derivedPageLabels,
                     pages: created.cacheMetadata.pages,
                 },
             };
-            await this.putSerializedResult({
+            return this.storeSharedResult(entry, stored, () => this.putSerializedResult({
                 item: input.item,
                 filePath: input.filePath,
                 mode: input.mode,
@@ -704,8 +851,7 @@ export class DocumentCache {
                 result: stored,
                 metadata: stored.metadata,
                 expectedSourceIdentity: source,
-            });
-            return stored;
+            }), input);
         })()
             .catch((error) => {
                 logger(`DocumentCache.getOrCreateSerializedResult error: ${error}`, 1);
@@ -714,12 +860,140 @@ export class DocumentCache {
             .finally(() => {
                 entry.settled = true;
                 this.clearSharedExtractionTimer(entry);
-                if (this.extractionLocks.get(lockKey) === entry) {
-                    this.extractionLocks.delete(lockKey);
-                }
+                this.releaseExtractionLock(lockKey, entry);
             });
 
         this.extractionLocks.set(lockKey, entry);
+        return this.waitForSharedExtraction(entry, input.abortSignal, input.sharedTimeoutMs);
+    }
+
+    /**
+     * The result of a finished shared extraction whose deferred cache write
+     * (`writeAfterResolve`) is still running, or null. Lets a caller that
+     * missed the cache take the result before doing the work that precedes
+     * `getOrCreateResult` / `getOrCreateSerializedResult`. `source` is the
+     * identity the extraction was keyed by (`getSourceIdentitySnapshot`).
+     */
+    getUnwrittenResult<T extends CacheablePayload>(input: {
+        item: DocumentCacheItemRef;
+        mode: ExtractionMode;
+        source: DocumentCacheSourceIdentity;
+        serialized: boolean;
+        lockScope?: string;
+    }): T | null {
+        if (this.clearing) return null;
+        const lockKey = this.extractionLockKey(
+            { libraryId: input.item.libraryID, zoteroKey: input.item.key },
+            DocumentCache.payloadKindForMode(input.mode),
+            input.source,
+            input.serialized ? '/serialized' : '',
+            input.lockScope,
+            this.extractionGeneration(input.item),
+        );
+        return (this.extractionLocks.get(lockKey)?.unwritten as T | undefined) ?? null;
+    }
+
+    /** Key of a shared extraction: attachment, payload, source identity, result form, scope, generation. */
+    private extractionLockKey(
+        ref: DocumentRef,
+        payloadKind: PayloadKind,
+        source: DocumentCacheSourceIdentity,
+        variant: string,
+        lockScope: string | undefined,
+        generation: string,
+    ): string {
+        return `${ref.libraryId}/${ref.zoteroKey}/${payloadKind}/${this.sourceIdentityKey(source)}${variant}`
+            + `/scope:${lockScope ?? 'default'}/generation:${generation}`;
+    }
+
+    /**
+     * Write a shared extraction's result to the cache and return it: after the
+     * write, or at once with `writeAfterResolve` (the lock entry then holds the
+     * result until the write settles; see `releaseExtractionLock`).
+     */
+    private async storeSharedResult<T extends CacheablePayload>(
+        entry: ExtractionLockEntry<T>,
+        result: T,
+        write: () => Promise<void>,
+        options: SharedResultWriteOptions,
+    ): Promise<T> {
+        const startedAt = Date.now();
+        const written = write().finally(() => options.onCacheWrite?.(Date.now() - startedAt));
+        if (!options.writeAfterResolve) {
+            await written;
+            return result;
+        }
+        entry.unwritten = result;
+        entry.pendingWrite = written.catch((error) => {
+            logger(`DocumentCache: cache write after responding failed: ${error}`, 1);
+        });
+        return result;
+    }
+
+    /** Unregister a settled shared extraction, after its deferred cache write if one runs. */
+    private releaseExtractionLock<T extends CacheablePayload>(lockKey: string, entry: ExtractionLockEntry<T>): void {
+        const release = () => {
+            entry.unwritten = undefined;
+            if (this.extractionLocks.get(lockKey) === entry) {
+                this.extractionLocks.delete(lockKey);
+            }
+        };
+        if (entry.pendingWrite) void entry.pendingWrite.then(release);
+        else release();
+    }
+
+    /**
+     * Run one shared extraction that is never read from or written to the
+     * cache, for results in a non-current schema version.
+     *
+     * Concurrent callers with the same `key` join the same extraction and get
+     * the same waiter deadlines and last-waiter abort as cached extractions.
+     * Callers must put everything that distinguishes results (attachment,
+     * source file, mode, schema version, result form, worker slot) in `key`.
+     */
+    async getOrCreateUncachedResult<T extends CacheablePayload>(input: {
+        key: string;
+        sharedTimeoutMs?: number;
+        abortSignal?: AbortSignal;
+        create: (signal: AbortSignal) => Promise<T>;
+        /** Called when this caller joins another caller's in-flight extraction. */
+        onJoin?: () => void;
+    }): Promise<T | null> {
+        const existing = this.uncachedExtractions.get(input.key) as ExtractionLockEntry<T> | undefined;
+        if (existing) {
+            input.onJoin?.();
+            return this.waitForSharedExtraction(existing, input.abortSignal, input.sharedTimeoutMs);
+        }
+        const controller = createAbortController();
+        const entry: ExtractionLockEntry<T> = {
+            controller,
+            waiters: new Map(),
+            settled: false,
+            promise: Promise.resolve(null),
+            sharedTimer: null,
+            createdAt: Date.now(),
+        };
+        entry.promise = (async () => {
+            try {
+                const result = await input.create(controller.signal);
+                return controller.signal.aborted ? null : result;
+            } finally {
+                this.clearSharedExtractionTimer(entry);
+            }
+        })()
+            .catch((error) => {
+                logger(`DocumentCache.getOrCreateUncachedResult error: ${error}`, 1);
+                throw error;
+            })
+            .finally(() => {
+                entry.settled = true;
+                this.clearSharedExtractionTimer(entry);
+                if (this.uncachedExtractions.get(input.key) === entry) {
+                    this.uncachedExtractions.delete(input.key);
+                }
+            });
+
+        this.uncachedExtractions.set(input.key, entry);
         return this.waitForSharedExtraction(entry, input.abortSignal, input.sharedTimeoutMs);
     }
 
@@ -827,7 +1101,7 @@ export class DocumentCache {
                     input.item,
                     source,
                     input.contentType,
-                    input.metadata,
+                    this.withStoredDerivedPageLabels(input.metadata, existing, source),
                 );
                 const { deletedPayloads } = await this.db.upsertDocumentCacheMetadata(record);
                 await this.removePayloadFiles(deletedPayloads);
@@ -957,13 +1231,75 @@ export class DocumentCache {
         }
     }
 
-    /** Invalidate all document-cache state for a library. */
-    async invalidateByLibrary(libraryId: number): Promise<void> {
+    /**
+     * Keep one attachment's cached content, including a protected OCR
+     * preparation, after its file moved or its mtime changed. The caller must
+     * have verified that the bytes at `to` equal those cached for `from`.
+     *
+     * `current`: a structured payload already records `to` (a read after the
+     * move rebuilt it). `missing`: there is no structured payload for either
+     * location, for example because a read after the move discarded it.
+     */
+    async relocateSource(
+        ref: DocumentRef,
+        from: { filePath: string; mtimeMs: number; sizeBytes: number },
+        to: { filePath: string; mtimeMs: number },
+    ): Promise<'relocated' | 'current' | 'missing'> {
+        let outcome: 'relocated' | 'current' | 'missing' = 'missing';
+        await this.trackCacheWrite(async () => {
+            try {
+                if (await this.db.relocateDocumentCacheSource(ref.libraryId, ref.zoteroKey, from, to)) {
+                    const payload = await this.db.getDocumentCachePayload(ref.libraryId, ref.zoteroKey, 'structured');
+                    outcome = payload ? 'relocated' : 'missing';
+                    return;
+                }
+                const payload = await this.db.getDocumentCachePayload(ref.libraryId, ref.zoteroKey, 'structured');
+                if (payload?.sourceFilePath === to.filePath && payload.sourceFileSignature.mtime_ms === to.mtimeMs
+                    && payload.sourceFileSignature.size_bytes === from.sizeBytes) outcome = 'current';
+            } catch (error) {
+                logger(`DocumentCache.relocateSource error: ${error}`, 1);
+            }
+        }, true, { id: 0, libraryID: ref.libraryId, key: ref.zoteroKey });
+        return outcome;
+    }
+
+    /** Discard a rejected native structured payload only if the inspected row is still current. */
+    async discardRejectedStructuredPayload(
+        ref: DocumentRef,
+        kind: Extract<ExtractContentKind, 'pdf' | 'epub' | 'snapshot'>,
+        filePath: string,
+        rejectedHash: string,
+    ): Promise<'discarded' | 'changed' | 'protected'> {
+        const before = await this.db.getDocumentCachePayload(ref.libraryId, ref.zoteroKey, 'structured');
+        if (!before) return 'changed';
+        const result = kind === 'pdf'
+            ? await this.getResult(ref, 'structured', filePath)
+            : kind === 'epub'
+                ? await this.getEpubResult(ref, filePath)
+                : await this.getSnapshotResult(ref, filePath);
+        if (!result || await computeStructuredDocumentHash(kind, result as DocumentExtractResult) !== rejectedHash) return 'changed';
+        const after = await this.db.getDocumentCachePayload(ref.libraryId, ref.zoteroKey, 'structured');
+        if (!after || after.id !== before.id || after.payloadSha256 !== before.payloadSha256
+            || after.payloadPath !== before.payloadPath) return 'changed';
+        if (before.extractionSource === 'ocr') return 'protected';
+        return await this.deletePayload(before) ? 'discarded' : 'changed';
+    }
+
+    /**
+     * Invalidate all document-cache state for a library. `retainProtectedOcr`
+     * keeps OCR payloads and their metadata, as `clearAll` does: they cannot
+     * be rebuilt locally, and a later read revalidates them against the file.
+     */
+    async invalidateByLibrary(libraryId: number, options: { retainProtectedOcr?: boolean } = {}): Promise<void> {
         this.libraryGenerations.set(libraryId, (this.libraryGenerations.get(libraryId) ?? 0) + 1);
         await Promise.allSettled([...this.itemWriteLocks]
             .filter(([key]) => key.startsWith(`${libraryId}/`))
             .map(([, write]) => write));
         try {
+            if (options.retainProtectedOcr) {
+                await this.removePayloadFiles(await this.db.deleteUnprotectedDocumentCacheByLibrary(libraryId));
+                return;
+            }
             const payloads = await this.db.deleteDocumentCacheMetadataByLibrary(libraryId);
             await this.removePayloadFiles(payloads);
             if (this.payloadCacheDir) {
@@ -1103,10 +1439,7 @@ export class DocumentCache {
 
     /** Return compact document-cache counts and directory information. */
     async getStats(): Promise<DocumentCacheStats> {
-        const protectedStats = await this.db.getProtectedDocumentCacheStats({
-            metadata: DOCUMENT_METADATA_FORMAT_VERSION, payload: DOCUMENT_PAYLOAD_FORMAT_VERSION,
-            pdf: expectedExtractionSchemaVersion('pdf'),
-        });
+        const protectedStats = await this.db.getProtectedDocumentCacheStats(this.pdfCompatibilityVersions());
         // Polling uses registered cache state. Reads and startup GC reconcile external
         // file changes; cache writes, eviction, and clearing update these rows directly.
         return {
@@ -1125,6 +1458,20 @@ export class DocumentCache {
             ocr_repreparation_required_count: protectedStats.incompatible,
             payload_budget_bytes: DocumentCache.budgetBytes(),
         };
+    }
+
+    /** Versions a PDF cache entry must carry to be served. */
+    pdfCompatibilityVersions(): { metadata: number; payload: number; pdf: string | null } {
+        return {
+            metadata: DOCUMENT_METADATA_FORMAT_VERSION,
+            payload: DOCUMENT_PAYLOAD_FORMAT_VERSION,
+            pdf: expectedExtractionSchemaVersion('pdf'),
+        };
+    }
+
+    /** Attachments in a library whose retained OCR preparation must be prepared again. */
+    async getProtectedRepreparationKeys(libraryId: number): Promise<string[]> {
+        return this.db.getIncompatibleProtectedDocumentKeys(libraryId, this.pdfCompatibilityVersions());
     }
 
     /**
@@ -1311,7 +1658,12 @@ export class DocumentCache {
             && this.sourceIdentityMatches(source, { filePath: existing.filePath, fileSignature: existing.fileSignature, sourceSizeBytes: existing.sourceSizeBytes })
             && (await this.db.getDocumentCachePayloadsForMetadata(existing.id)).some(p => p.extractionSource === 'ocr')) return;
         const payloadKind = DocumentCache.payloadKindForMode(input.mode);
-        const metadataInput = this.buildMetadataInput(input.item, source, input.contentType, input.metadata);
+        const metadataInput = this.buildMetadataInput(
+            input.item,
+            source,
+            input.contentType,
+            this.withStoredDerivedPageLabels(input.metadata, existing, source),
+        );
         const result = input.result as { mode?: string; schemaVersion: string };
         if (
             (result.mode !== undefined && result.mode !== input.mode)
@@ -1343,6 +1695,7 @@ export class DocumentCache {
             extractionSchemaVersion: metadataInput.extractionSchemaVersion,
             cacheFormatVersion: DOCUMENT_PAYLOAD_FORMAT_VERSION,
             extractionSource: input.metadata.extractionSource ?? "native",
+            sourceMd5: input.metadata.extractionSource === 'ocr' ? input.metadata.sourceMd5 ?? null : null,
         });
         const cleanup = oldPayload && oldPayload.payloadPath !== payloadWrite.path
             ? [...deletedPayloads, oldPayload]
@@ -1375,7 +1728,12 @@ export class DocumentCache {
             && this.sourceIdentityMatches(source, { filePath: existing.filePath, fileSignature: existing.fileSignature, sourceSizeBytes: existing.sourceSizeBytes })
             && (await this.db.getDocumentCachePayloadsForMetadata(existing.id)).some(p => p.extractionSource === 'ocr')) return;
         const payloadKind = DocumentCache.payloadKindForMode(input.mode);
-        const metadataInput = this.buildMetadataInput(input.item, source, input.contentType, input.metadata);
+        const metadataInput = this.buildMetadataInput(
+            input.item,
+            source,
+            input.contentType,
+            this.withStoredDerivedPageLabels(input.metadata, existing, source),
+        );
         if (
             input.result.mode !== input.mode
             || input.result.schemaVersion !== metadataInput.extractionSchemaVersion
@@ -1406,6 +1764,7 @@ export class DocumentCache {
             extractionSchemaVersion: metadataInput.extractionSchemaVersion,
             cacheFormatVersion: DOCUMENT_PAYLOAD_FORMAT_VERSION,
             extractionSource: input.metadata.extractionSource ?? "native",
+            sourceMd5: input.metadata.extractionSource === 'ocr' ? input.metadata.sourceMd5 ?? null : null,
         });
         const cleanup = oldPayload && oldPayload.payloadPath !== payloadWrite.path
             ? [...deletedPayloads, oldPayload]
@@ -1414,6 +1773,112 @@ export class DocumentCache {
             cleanup.filter((payload) => payload.payloadPath !== payloadWrite.path),
         );
         this.scheduleSizeBudgetPass(payloadWrite.size);
+    }
+
+    /**
+     * Keep a stale entry holding a protected OCR preparation whose file bytes
+     * are unchanged: OCR text cannot be rebuilt locally, so a rename, a move or
+     * a rewritten mtime must not discard it.
+     *
+     * Returns the entry, relocated to `filePath` when only the path or mtime
+     * changed; `unservable` when a metadata, payload or extraction version
+     * moved on, so the entry is retained until it is prepared again; `null`
+     * when the entry may be discarded.
+     */
+    private async retainProtectedSource(
+        ref: DocumentRef,
+        record: DocumentCacheMetadataRecord,
+        filePath: string,
+    ): Promise<DocumentCacheMetadataRecord | 'unservable' | null> {
+        const payloads = await this.db.getDocumentCachePayloadsForMetadata(record.id);
+        if (!payloads.some(p => p.extractionSource === 'ocr')) return null;
+        const source = await this.getSourceIdentity(filePath, record.sourceSizeBytes);
+        let current: DocumentCacheMetadataRecord | null = record;
+        if (!this.sourceIdentityMatches(source, DocumentCache.recordedSource(record))) {
+            current = await this.relocateUnchangedSource(ref, record, source);
+            if (!current || !this.sourceIdentityMatches(source, DocumentCache.recordedSource(current))) return null;
+        }
+        return await this.isMetadataStale(current, filePath) ? 'unservable' : current;
+    }
+
+    /**
+     * Move an entry to `source` when only the file's path or mtime changed and
+     * the bytes are verified unchanged. A processing ledger row that has
+     * prepared the attachment is authoritative: the bytes must hash to its
+     * `fileHash` and its hashed location must be the cached location; the row
+     * is then moved with the entry, so a later read or a further change is
+     * verified against the new location. Without such a row, the md5 stored
+     * with the OCR payloads is the reference. Returns the updated entry, or
+     * `null` when the bytes cannot be verified.
+     */
+    private async relocateUnchangedSource(
+        ref: DocumentRef,
+        record: DocumentCacheMetadataRecord,
+        source: DocumentCacheSourceIdentity,
+    ): Promise<DocumentCacheMetadataRecord | null> {
+        if (isRemoteFilePath(record.filePath) || isRemoteFilePath(source.filePath)) return null;
+        if (source.fileSignature.size_bytes !== record.fileSignature.size_bytes
+            || source.sourceSizeBytes !== record.sourceSizeBytes) return null;
+        const from = { filePath: record.filePath, mtimeMs: record.fileSignature.mtime_ms, sizeBytes: record.fileSignature.size_bytes };
+        const row = await this.db.getAttachmentProcessingState(ref.libraryId, ref.zoteroKey);
+        const hashed = row?.extractStatus === 'done' && row.fileHash && row.extractionSource
+            ? parseLocalSourceIdentity(row.extractionSource)
+            : null;
+        const ledger = hashed && row?.fileHash && row.extractionSource
+            ? { ...hashed, identity: row.extractionSource, fileHash: row.fileHash }
+            : null;
+        let expectedHash: string | null;
+        if (ledger) {
+            if (ledger.location.filePath !== from.filePath
+                || ledger.location.mtimeMs !== from.mtimeMs
+                || ledger.location.sizeBytes !== from.sizeBytes) return null;
+            expectedHash = ledger.fileHash;
+        } else {
+            expectedHash = await this.storedOcrSourceMd5(record);
+        }
+        if (!expectedHash) return null;
+        const fileHash = await Zotero.Utilities.Internal.md5Async(source.filePath).catch(() => null);
+        if (fileHash !== expectedHash) return null;
+        // Bytes replaced while they were hashed must not inherit the cached text.
+        const after = await getFileSignature(source.filePath);
+        if (after.mtime_ms !== source.fileSignature.mtime_ms || after.size_bytes !== source.fileSignature.size_bytes) {
+            return null;
+        }
+        const to = { filePath: source.filePath, mtimeMs: source.fileSignature.mtime_ms };
+        const cached = await this.relocateSource(ref, from, to);
+        if (ledger && cached !== 'missing') {
+            // Same identity format as `observeAttachmentSource`, so the
+            // reconciler sees the moved row as current rather than changed.
+            await this.db.relocateAttachmentExtractionSource({
+                libraryId: ref.libraryId,
+                zoteroKey: ref.zoteroKey,
+                expectedSource: ledger.identity,
+                fileHash: ledger.fileHash,
+                source: JSON.stringify([ledger.kind, ledger.schema, to.filePath, to.mtimeMs, from.sizeBytes]),
+                fileMtimeMs: to.mtimeMs,
+            }).catch((error) => logger(`DocumentCache: ledger relocation failed: ${error}`, 1));
+        }
+        return this.db.getDocumentCacheMetadataByKey(ref.libraryId, ref.zoteroKey);
+    }
+
+    /**
+     * The source md5 recorded with an entry's OCR payloads, when every OCR
+     * payload carries the same one for the entry's current location.
+     */
+    private async storedOcrSourceMd5(record: DocumentCacheMetadataRecord): Promise<string | null> {
+        const ocr = (await this.db.getDocumentCachePayloadsForMetadata(record.id))
+            .filter(p => p.extractionSource === 'ocr');
+        const hashes = new Set(ocr.map(p => p.sourceFilePath === record.filePath
+            && p.sourceFileSignature.mtime_ms === record.fileSignature.mtime_ms
+            && p.sourceFileSignature.size_bytes === record.fileSignature.size_bytes
+            ? p.sourceMd5 ?? null
+            : null));
+        const [hash] = hashes;
+        return hashes.size === 1 && hash ? hash : null;
+    }
+
+    private static recordedSource(record: DocumentCacheMetadataRecord): DocumentCacheSourceIdentity {
+        return { filePath: record.filePath, fileSignature: record.fileSignature, sourceSizeBytes: record.sourceSizeBytes };
     }
 
     private async isMetadataStale(record: DocumentCacheMetadataRecord, filePath: string): Promise<boolean> {
@@ -1580,6 +2045,9 @@ export class DocumentCache {
             throw new Error(`Document cache does not support ${contentKind} writes yet`);
         }
         const pageLabels = this.normalizePageLabels(metadata.pageLabels);
+        const derivedPageLabels = metadata.derivedPageLabels === undefined
+            ? undefined
+            : this.normalizeDerivedPageLabels(metadata.derivedPageLabels);
         const pages = metadata.pages ?? null;
         return {
             itemId: item.id,
@@ -1603,11 +2071,62 @@ export class DocumentCache {
                         metadata.snapshotPageCount,
                         metadata.snapshotExtractedTextChars,
                     )
-                    : buildPdfCachedMetadata(metadata.pageCount, pageLabels, pages),
+                    : buildPdfCachedMetadata(metadata.pageCount, pageLabels, pages, derivedPageLabels),
             errorCode: metadata.errorCode ?? null,
             extractionSchemaVersion,
             metadataFormatVersion: DOCUMENT_METADATA_FORMAT_VERSION,
         };
+    }
+
+    /**
+     * Metadata for a write that does not know the derived page labels (a
+     * metadata-only preflight, a markdown payload) keeps the ones stored for
+     * the same source. A changed source drops them with its payloads.
+     */
+    private withStoredDerivedPageLabels(
+        metadata: CacheMetadataInput,
+        existing: DocumentCacheMetadata | null,
+        source: DocumentCacheSourceIdentity,
+    ): CacheMetadataInput {
+        if (metadata.derivedPageLabels !== undefined || !existing) return metadata;
+        if (existing.derivedPageLabels === undefined) return metadata;
+        const sameSource = this.sourceIdentityMatches(source, {
+            filePath: existing.filePath,
+            fileSignature: existing.fileSignature,
+            sourceSizeBytes: existing.sourceSizeBytes,
+        });
+        return sameSource ? { ...metadata, derivedPageLabels: existing.derivedPageLabels } : metadata;
+    }
+
+    /** Derived labels with string keys; an empty map means the extraction has none. */
+    private normalizeDerivedPageLabels(labels: PageLabels | Record<number, string> | null): PageLabels | null {
+        const normalized = this.normalizePageLabels(labels);
+        return normalized && Object.keys(normalized).length > 0 ? normalized : null;
+    }
+
+    /**
+     * Record derived page labels on metadata written before they were cached.
+     * Best effort and detached from the read that found them; skipped when the
+     * row changed meanwhile or the value is still not known.
+     */
+    private backfillDerivedPageLabels(
+        metadata: DocumentCacheMetadata,
+        derivedPageLabels: PageLabels | null | undefined,
+    ): void {
+        const documentMetadata = metadata.documentMetadata;
+        if (derivedPageLabels === undefined || documentMetadata?.content_kind !== 'pdf') return;
+        const item = { id: metadata.itemId, libraryID: metadata.libraryId, key: metadata.zoteroKey };
+        void this.trackCacheWrite(async () => {
+            if (Zotero.__beaverShuttingDown) return;
+            try {
+                await this.db.updateDocumentCacheDocumentMetadataIfUnchanged(metadata, {
+                    ...documentMetadata,
+                    derivedPageLabels: this.normalizeDerivedPageLabels(derivedPageLabels),
+                });
+            } catch (error) {
+                logger(`DocumentCache.backfillDerivedPageLabels error: ${error}`, 1);
+            }
+        }, false, item);
     }
 
     private normalizePageLabels(labels: PageLabels | Record<number, string> | null): PageLabels | null {

@@ -5,11 +5,12 @@ import { citationMapAtom } from '@beaver/agent-core/citations/atoms';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
 import { allRunsAtom, runsCountAtom, toolResultsMapAtom } from '@beaver/agent-core/run-state/atoms';
 import Spinner from '@beaver/agent-ui/icons/Spinner';
+import { getHost } from '@beaver/agent-ui/host';
+import type { FileExportFormat } from '@beaver/agent-ui/host/types';
 import { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
 import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
 import { useAtomValue, useSetAtom } from 'jotai';
 import React, { useCallback, useState } from 'react';
-import { getSelectedCollection } from '../../../../src/utils/zoteroSelection';
 import { currentZoteroInstanceRef } from '../../../../src/utils/zoteroUtils';
 import { userAtom } from '../../../atoms/auth';
 import {
@@ -26,16 +27,31 @@ import { useSurfaceWindow } from '../../../runtime/SurfaceWindowContext';
 import { getContextWindow } from '../../../runtime/windowRuntime';
 import { store } from '../../../store';
 import { prepareCitationRenderContext } from '../../../utils/citationRenderContext';
-import { preprocessNoteContent, renderToHTML, renderToMarkdown } from '../../../utils/citationRenderers';
+import { preprocessNoteContent, renderToHTML, renderToMarkdownAsync } from '../../../utils/citationRenderers';
 import { copyToClipboard } from '../../../utils/clipboard';
+import { exportWithFeedback, fileExportMenuItem } from '../../../utils/fileExportFeedback';
+import { menuDivider, saveAsNoteMenuItem } from '../../../utils/saveNoteMenu';
 import { getBeaverNoteFooterHTML } from '../../../utils/noteActions';
+import { addPopupMessageAtom } from '../../../utils/popupMessageUtils';
 import { selectItem, selectItemById } from '../../../utils/selectItem';
 import { flushPendingPartEvents } from '../../../utils/streamingPartQueue';
 import { extractThreadContent, ExtractThreadContentOptions } from '../../../utils/threadContent';
 import { confirmAndDeleteThread, renameThread } from '../../../utils/threadActions';
 import { resolveToolCallLabelEnrichMap } from '../../../utils/toolCallLabelEnrich';
-import { getZoteroTargetContextSync } from '../../../utils/zoteroTargetContext';
-import { MoreHorizontalIcon } from '../../icons/icons';
+import { getLibraryViewCollection, getZoteroTargetContextSync, isLibraryTabSelected } from '../../../utils/zoteroTargetContext';
+import {
+    CopyIcon,
+    DeleteIcon,
+    EditIcon,
+    Icon,
+    LinkIcon,
+    MoreHorizontalIcon,
+    PictureInPictureIcon,
+    PinIcon,
+    PinOffIcon,
+    SearchIcon,
+    ToolsIcon,
+} from '../../icons/icons';
 
 interface ThreadMenuButtonProps {
     className?: string;
@@ -104,6 +120,7 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
     const citationDataMap = useAtomValue(citationMapAtom);
     const externalReferenceMapping = useAtomValue(externalReferenceItemMappingAtom);
     const externalReferencesMap = useAtomValue(externalReferenceMappingAtom);
+    const addPopupMessage = useSetAtom(addPopupMessageAtom);
 
     const getThreadMeta = () => {
         const threadId = store.get(currentThreadIdAtom);
@@ -140,7 +157,7 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
 
     const handleCopyThread = async () => {
         const content = await getThreadContent();
-        const formatted = renderToMarkdown(content);
+        const formatted = await renderToMarkdownAsync(content);
         await copyToClipboard(formatted);
     };
 
@@ -148,8 +165,8 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
         const win = getContextWindow();
         const context = getZoteroTargetContextSync(win);
         if (context.targetLibraryId === undefined) return;
-        const selectedCollection = getSelectedCollection(win?.ZoteroPane);
-        const isInReader = win?.Zotero_Tabs?.selectedType === 'reader';
+        const selectedCollection = getLibraryViewCollection(win);
+        const inLibraryTab = isLibraryTabSelected(win);
         const content = await getThreadContent({ includeRunLinks: false, userMessageAsBlockquote: true });
         const renderContent = preprocessNoteContent(content);
         const renderContextData = await prepareCitationRenderContext(renderContent, {
@@ -176,14 +193,14 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
         newNote.setNote(htmlContent);
         await newNote.saveTx();
 
-        // Always add to the current collection (even when items are selected)
+        // Always add to the library tab's collection (even when items are selected)
         if (selectedCollection) {
             await Zotero.DB.executeTransaction(async () => {
                 selectedCollection.addItem(newNote.id);
             });
         }
 
-        if (!isInReader) {
+        if (inLibraryTab) {
             await selectItemById(newNote.id, true, selectedCollection?.id, win);
         }
     };
@@ -192,7 +209,7 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
         const win = getContextWindow();
         const context = getZoteroTargetContextSync(win);
         if (context.targetLibraryId === undefined) return;
-        const isInReader = win?.Zotero_Tabs?.selectedType === 'reader';
+        const inLibraryTab = isLibraryTabSelected(win);
         const content = await getThreadContent({ includeRunLinks: false, userMessageAsBlockquote: true });
         const renderContent = preprocessNoteContent(content);
         const renderContextData = await prepareCitationRenderContext(renderContent, {
@@ -220,9 +237,30 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
         newNote.setNote(htmlContent);
         await newNote.saveTx();
 
-        if (!isInReader) {
+        if (inLibraryTab) {
             selectItem(newNote, true, win);
         }
+    };
+
+    /**
+     * Export the whole chat — every prompt, response, note and tool call — to
+     * a file. The host asks where to save and formats citations in the
+     * citation style setting.
+     */
+    const handleExportThread = async (format: FileExportFormat) => {
+        const documentExport = getHost().documentExport;
+        const exportThread = documentExport?.exportThreadToFile;
+        if (!exportThread) return;
+        // As for copying: include the streamed parts not yet applied.
+        flushPendingPartEvents();
+        const runs = store.get(allRunsAtom);
+        if (runs.length === 0) return;
+        await exportWithFeedback(
+            format,
+            () => exportThread({ runs, format }),
+            addPopupMessage,
+            { reveal: documentExport.revealExportedFile, open: documentExport.openExportedFile },
+        );
     };
 
     const handleCopyThreadUrl = async () => {
@@ -283,22 +321,29 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
         await confirmAndDeleteThread(threadId, surfaceWindow);
     };
 
+    const handleCopyThreadId = async () => {
+        await copyToClipboard(store.get(currentThreadIdAtom) || '');
+    };
+
     const getMenuItems = (): MenuItem[] => {
         const hasRuns = runsCount > 0;
+        const host = getHost();
         const context = getZoteroTargetContextSync();
         const hasParent = context.parentReference !== null;
         const pinPending = !!threadId && isPinPending(pinsPending, threadId);
 
-        // The chat's own housekeeping first, then ways to look at it, then
-        // ways to take it elsewhere.
+        // The chat's own housekeeping, ways to look at it, the clipboard, notes
+        // and files made from it, and last, apart, deleting it.
         const items: MenuItem[] = [
             {
-                label: 'Rename chat',
+                label: 'Rename chat…',
+                icon: EditIcon,
                 onClick: handleRenameChat,
                 disabled: !threadId,
             },
             {
                 label: isPinned ? 'Unpin chat' : 'Pin chat',
+                icon: isPinned ? PinOffIcon : PinIcon,
                 onClick: handleTogglePin,
                 disabled: !threadId || isPinned === null || pinPending,
                 customContent: pinPending ? (
@@ -310,30 +355,29 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
                     </span>
                 ) : undefined,
             },
+            menuDivider('thread-actions-divider'),
             {
-                label: 'Delete chat',
-                onClick: handleDeleteChat,
-                disabled: !threadId,
-            },
-            {
-                label: 'thread-actions-divider',
-                onClick: () => {},
-                isDivider: true,
-            },
-            {
-                // MenuItem carries no shortcut field, so the ⌘F / Ctrl+F chord
-                // that also opens the bar is not shown here.
                 label: 'Find in chat',
+                icon: SearchIcon,
+                // Display only: the chord itself is handled by the sidebar.
+                shortcut: Zotero.isMac ? '⌘F' : 'Ctrl+F',
+                ariaKeyShortcuts: Zotero.isMac ? 'Meta+F' : 'Control+F',
                 onClick: findControls.open,
                 disabled: !hasRuns || !findControls.isAvailable,
             },
             ...(!inWindow ? [{
                 label: "Open in Beaver window",
+                icon: PictureInPictureIcon,
                 disabled: !canOpenFinishedChat,
-                customContent: !canOpenFinishedChat && !availabilityPending ? <div>
-                    <div>Open in Beaver window</div>
-                    <div className="text-xs">{RESPONSE_FINISH_MESSAGE}</div>
-                </div> : undefined,
+                customContent: !canOpenFinishedChat && !availabilityPending ? (
+                    <span className="display-flex items-start gap-2">
+                        <Icon icon={PictureInPictureIcon} size={14} className="mt-010" />
+                        <span>
+                            <div>Open in Beaver window</div>
+                            <div className="text-xs">{RESPONSE_FINISH_MESSAGE}</div>
+                        </span>
+                    </span>
+                ) : undefined,
                 onClick: () => {
                     if (threadId)
                         void BeaverUIFactory.commandBeaverWindow("open-chat", {
@@ -341,29 +385,44 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
                         }).then(result => { if (result?.message) surfaceWindow.alert(result.message); }).catch(Zotero.logError);
                 },
             }] : []),
+            menuDivider('clipboard-divider'),
             {
-                label: 'find-in-chat-divider',
-                onClick: () => {},
-                isDivider: true,
-            },
-            {
-                label: 'Copy entire chat',
+                label: 'Copy chat',
+                icon: CopyIcon,
                 onClick: handleCopyThread,
                 disabled: !hasRuns,
             },
             {
-                label: 'Save chat as note',
-                onClick: handleSaveAsNote,
-                disabled: !hasRuns,
-            },
-            {
-                label: 'Save chat as child note',
-                onClick: handleSaveAsChildNote,
-                disabled: !hasParent || !hasRuns,
-            },
-            {
                 label: 'Copy link to chat',
+                icon: LinkIcon,
                 onClick: handleCopyThreadUrl,
+                disabled: !threadId,
+            },
+            menuDivider('output-divider'),
+            saveAsNoteMenuItem({
+                onSaveStandalone: handleSaveAsNote,
+                onSaveChild: handleSaveAsChildNote,
+                hasParent,
+                parentTitle: hasParent ? host.noteWriter?.childNoteParentTitle?.() : null,
+                disabled: !hasRuns,
+            }),
+            ...(host.documentExport?.exportThreadToFile
+                ? [fileExportMenuItem(handleExportThread, !hasRuns)]
+                : []),
+            ...((host.config?.isDevelopment() ?? false) ? [
+                menuDivider('developer-divider'),
+                {
+                    label: 'Copy chat ID',
+                    icon: ToolsIcon,
+                    onClick: handleCopyThreadId,
+                    disabled: !threadId,
+                },
+            ] : []),
+            menuDivider('delete-divider'),
+            {
+                label: 'Delete chat…',
+                icon: DeleteIcon,
+                onClick: handleDeleteChat,
                 disabled: !threadId,
             },
         ];

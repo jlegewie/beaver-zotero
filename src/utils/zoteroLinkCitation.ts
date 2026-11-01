@@ -104,7 +104,7 @@ export function isLinkCitationItem(item: any): boolean {
  * `preloadStandaloneAttachmentLinks` primes for every cited attachment; an
  * unchecked attachment reads as null and still opens.
  */
-export function buildZoteroCitationLinkURI(item: any, navPage?: number): string | null {
+export function buildZoteroCitationLinkURI(item: any, navPage?: number, physicalPages?: string): string | null {
     if (!item || !item.key || !item.libraryID) return null;
 
     const segment = librarySegment(item.libraryID);
@@ -113,11 +113,15 @@ export function buildZoteroCitationLinkURI(item: any, navPage?: number): string 
     }
 
     if (isStandaloneAttachment(item)) {
+        const isPdf = item.isPDFAttachment?.() === true;
         if (item.isFileAttachment?.() !== true || item.fileExistsCached?.() === false) {
-            return `zotero://select/${segment}/items/${item.key}`;
+            return `zotero://select/${segment}/items/${item.key}${isPdf ? pagesFragment(physicalPages) : ''}`;
         }
-        const pageQuery = navPage && item.isPDFAttachment?.() === true ? `?page=${navPage}` : '';
-        return `zotero://open/${segment}/items/${item.key}${pageQuery}`;
+        const pageQuery = navPage && isPdf ? `?page=${navPage}` : '';
+        const fragment = isPdf && physicalPages && physicalPages !== String(navPage)
+            ? pagesFragment(physicalPages)
+            : '';
+        return `zotero://open/${segment}/items/${item.key}${pageQuery}${fragment}`;
     }
 
     if (isAnnotationItem(item)) {
@@ -158,14 +162,59 @@ export function buildZoteroCitationLinkLabel(item: any): string {
 }
 
 /**
+ * Fragment recording the physical pages a link citation cites. Zotero's URL
+ * router strips fragments before routing (`PathParser.run`), so it changes
+ * nothing about where the link goes; Beaver reads it back
+ * (`parseZoteroCitationLinkPages`) because the visible suffix is a page label,
+ * which cannot always be translated back: printed labels repeat, and a
+ * `zotero://select` link carries no `?page=`.
+ */
+const PAGES_FRAGMENT = 'beaver-pages=';
+
+function pagesFragment(physicalPages: string | undefined): string {
+    const pages = physicalPages ? normalizePhysicalPages(physicalPages) : null;
+    return pages ? `#${PAGES_FRAGMENT}${encodeURIComponent(pages)}` : '';
+}
+
+/** Physical pages ("4", "4-7", "2, 9") in canonical form, or null for anything else. */
+function normalizePhysicalPages(pages: string): string | null {
+    const normalized = pages.trim().replace(/[\u2012-\u2015\u2212]/g, '-').replace(/\s*([-,])\s*/g, (_m, sep) => sep === ',' ? ', ' : '-');
+    return /^[1-9]\d*(?:(?:-|, )[1-9]\d*)*$/.test(normalized) ? normalized : null;
+}
+
+/**
+ * The physical pages a link citation records in its fragment
+ * (`#beaver-pages=4-7`), or null when it records none.
+ */
+export function parseZoteroCitationLinkPages(href: string): string | null {
+    const decoded = decodeHrefAttrValue(href);
+    const hash = decoded.indexOf('#');
+    if (hash < 0) return null;
+    const fragment = decoded.slice(hash + 1);
+    if (!fragment.startsWith(PAGES_FRAGMENT)) return null;
+    try {
+        return normalizePhysicalPages(decodeURIComponent(fragment.slice(PAGES_FRAGMENT.length)));
+    } catch {
+        return null;
+    }
+}
+
+/**
  * Build plain HTML for a note, annotation, or attachment citation link.
  *
  * `locator` is what the reader sees (a page label, possibly a range); `navPage`
  * is the physical page the link navigates to. They are resolved separately
  * because Zotero's `?page=` counts pages by position, not by label.
+ * `physicalPages` (the physical pages behind `locator`) is recorded in the
+ * link when `?page=` alone does not say them (see `pagesFragment`).
  */
-export function buildZoteroCitationLinkHTML(item: any, locator?: Locator, navPage?: number): string {
-    const uri = buildZoteroCitationLinkURI(item, navPage);
+export function buildZoteroCitationLinkHTML(
+    item: any,
+    locator?: Locator,
+    navPage?: number,
+    physicalPages?: string,
+): string {
+    const uri = buildZoteroCitationLinkURI(item, navPage, physicalPages);
     if (!uri) {
         throw new Error(
             `Error: Zotero item "${item?.libraryID ?? ''}-${item?.key ?? ''}" cannot be embedded as a note link.`
@@ -201,6 +250,39 @@ export function zoteroLinkCitationPattern(): RegExp {
 export function parseLinkCitationPageSuffix(suffix: string | undefined): string | null {
     const match = suffix ? /^,\s*p\.\s*(\S[^<]*?)\s*$/.exec(suffix) : null;
     return match ? unescapeAttr(match[1]) : null;
+}
+
+/**
+ * The physical 1-based page a link citation opens (`zotero://open/…?page=12`),
+ * or null when the link names none. Links are built with the first page the
+ * citation cites (`buildZoteroCitationLinkURI`).
+ */
+export function parseZoteroCitationLinkPage(href: string): number | null {
+    const match = decodeHrefAttrValue(href).match(/^zotero:\/\/open\/[^?#]*\?([^#]*)/);
+    if (!match) return null;
+    const page = new URLSearchParams(match[1]).get('page');
+    return page && /^\d+$/.test(page) && Number(page) > 0 ? Number(page) : null;
+}
+
+/**
+ * Label namespace for the page suffix of a link citation to `item`.
+ *
+ * A standalone PDF whose file this computer has links with `zotero://open`
+ * and `?page=` (`buildZoteroCitationLinkURI`), so the link records the
+ * physical page and the suffix can show the Zotero locator label. Any other
+ * standalone attachment links with `zotero://select`, which cannot carry the
+ * page: its suffix is the only record, so it stays in the PDF's declared
+ * labels, the convention such a suffix is read back in.
+ *
+ * Call after the attachment's file state is known (`getFilePathAsync` primes
+ * `fileExistsCached`), so the choice matches the link built later.
+ */
+export function linkCitationPageLabelNamespace(item: any): 'locator' | 'declared' {
+    if (!isStandaloneAttachment(item)) return 'locator';
+    const recordsPage = item.isFileAttachment?.() === true
+        && item.fileExistsCached?.() !== false
+        && item.isPDFAttachment?.() === true;
+    return recordsPage ? 'locator' : 'declared';
 }
 
 /**
@@ -258,7 +340,7 @@ export async function preloadStandaloneAttachmentLinks(
         if (seen.has(identity)) continue;
         seen.add(identity);
         try {
-            const item = Zotero.Items.getByLibraryAndKey(libraryID, key);
+            const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryID, key);
             if (item && isStandaloneAttachment(item)) items.push(item);
         } catch {
             // Skip unavailable targets without preventing other titles from loading.

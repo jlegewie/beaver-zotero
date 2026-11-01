@@ -1,23 +1,30 @@
 import { logger } from '@beaver/agent-core/platform/logger';
 import { refuseCaptchaChallengeUrls } from '../utils/pdfChallengeUrls';
 import { getSystemTimers } from '../utils/systemTimers';
+import { isPdfDocument } from '../utils/attachmentFiles';
 import { coordinateLibraryMutation } from './libraryMutations';
+import { PDF_FETCH_CANCELLED_MESSAGE, type PdfFetchDiagnostics } from './pdfFetchDiagnostics';
 
 const PDF_FETCH_BUDGET_MS = 60_000;
 
-/** Download without holding the library queue; only attachment admission and saving are serialized. */
+/**
+ * Download without holding the library queue; only attachment admission and saving are serialized.
+ *
+ * The caller owns `diagnostics`, so what was tried survives a throw.
+ */
 export async function fetchPdfAttachment(
     item: Zotero.Item,
     resolvers: Record<string, unknown>[],
     signal: AbortSignal,
     assertAccess: () => void,
+    diagnostics?: PdfFetchDiagnostics,
 ): Promise<{ attachment: Zotero.Item | null; accessMethod?: string }> {
     const attachments = Zotero.Attachments as any;
     let directory: string | undefined;
     let abandoned = false;
     let accessMethod: string | undefined;
     const assertCurrent = () => {
-        if (signal.aborted || abandoned) throw new Error('PDF fetch cancelled or timed out');
+        if (signal.aborted || abandoned) throw new Error(PDF_FETCH_CANCELLED_MESSAGE);
         assertAccess();
     };
     const cleanup = async () => {
@@ -34,9 +41,13 @@ export async function fetchPdfAttachment(
     const stopped = new Promise<never>((_, reject) => {
         cancel = () => {
             abandoned = true;
-            reject(new Error('PDF fetch cancelled or timed out'));
+            diagnostics?.stop();
+            reject(new Error(PDF_FETCH_CANCELLED_MESSAGE));
         };
-        timer = timers.setTimeout(cancel, PDF_FETCH_BUDGET_MS);
+        timer = timers.setTimeout(() => {
+            diagnostics?.markTimeout();
+            cancel();
+        }, PDF_FETCH_BUDGET_MS);
         signal.addEventListener('abort', cancel, { once: true });
         if (signal.aborted) cancel();
     });
@@ -49,10 +60,16 @@ export async function fetchPdfAttachment(
             enforceFileType: true,
             shouldDisplayCaptcha: false,
             onBeforeRequest: (url: string) => {
+                // Record first so a refused URL still shows up as an attempt.
+                diagnostics?.onBeforeRequest(url);
                 assertCurrent();
                 refuseCaptchaChallengeUrls(url);
             },
-            onAccessMethodStart: (method: string) => { accessMethod = method; },
+            onAccessMethodStart: (method: string) => {
+                accessMethod = method;
+                diagnostics?.onAccessMethodStart(method);
+            },
+            onRequestError: diagnostics?.onRequestError,
         });
         return { result, path };
     })();
@@ -61,8 +78,10 @@ export async function fetchPdfAttachment(
         timers.clearTimeout(timer);
         assertCurrent();
         if (!result?.url) return { attachment: null };
+        diagnostics?.markSucceeded();
         const mimeType = result.mimeType || await Zotero.MIME.getMIMETypeFromFile(path);
         if (!attachments.FIND_AVAILABLE_FILE_TYPES.includes(mimeType)) {
+            diagnostics?.markUnsupportedType();
             throw new Error(`Resolved file is unsupported type ${mimeType}`);
         }
         const version = result.props?.articleVersion;
@@ -81,7 +100,7 @@ export async function fetchPdfAttachment(
             const ids = await current.getAttachments();
             const existing = await Promise.all(ids.map(id => Zotero.Items.getAsync(id)));
             assertCurrent();
-            const pdf = existing.find(candidate => candidate && !candidate.deleted && candidate.isPDFAttachment());
+            const pdf = existing.find(candidate => candidate && !candidate.deleted && isPdfDocument(candidate));
             if (pdf) return { attachment: pdf };
             const attachment = await attachments.createURLAttachmentFromTemporaryStorageDirectory({
                 directory, libraryID: current.libraryID, parentItemID: current.id,

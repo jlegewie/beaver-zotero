@@ -37,8 +37,12 @@ export interface ExtractionTableProps {
     onRemoveColumn?: (column: Column) => void;
     /** Re-runs a single cell — offered beside a cell that failed. */
     onRetryCell?: (row: Row, column: Column) => void;
+    /** Rows marked "Can be improved" (`DataTableProps.improvableRows`). */
+    improvableRows?: ReadonlySet<string>;
 
     onExport?: (csv: string, table: TableSpec) => void;
+    /** Receives the current view as text for the clipboard. Absent ⇒ no control. */
+    onCopy?: (text: string, table: TableSpec) => void;
     /** Reveals the table's own library item. Absent ⇒ no control. */
     onShowInLibrary?: (table: TableSpec) => void;
     /** Adds more items to extract from. */
@@ -48,6 +52,27 @@ export interface ExtractionTableProps {
     density?: TableSurfaceProps["density"];
     /** Narrow surface: carry the primary columns only. */
     primaryColumnsOnly?: boolean;
+
+    /**
+     * The view controls a full-size surface offers: the row search, the Sort
+     * menu and value filters. Off for the embedded and narrow surfaces, where
+     * the header and the filter menu are enough.
+     */
+    fullControls?: boolean;
+    /** Window the rows, for a long table (`DataTableProps.virtualize`). */
+    virtualize?: boolean;
+    /** Never scroll sideways (`DataTableProps.fitWidth`). */
+    fitWidth?: boolean;
+    /** A warning about the whole table, kept above the grid. */
+    notice?: React.ReactNode;
+    /** News about the table under the toolbar (a fill's result). */
+    banner?: React.ReactNode;
+    /** Controls after the toolbar's own verbs (the Fill button). */
+    toolbarEnd?: React.ReactNode;
+    /** Show only these rows (`UseTableStateOptions.onlyRows`). */
+    onlyRows?: ReadonlySet<string> | null;
+    /** Extra footer text. */
+    footerNote?: React.ReactNode;
     className?: string;
 }
 
@@ -74,15 +99,28 @@ export function ExtractionTable({
     onEditColumn,
     onRemoveColumn,
     onRetryCell,
+    improvableRows,
     onExport,
+    onCopy,
     onShowInLibrary,
     onAddRows,
     renderText,
     density,
     primaryColumnsOnly,
+    fullControls = false,
+    virtualize,
+    fitWidth,
+    notice,
+    banner,
+    toolbarEnd,
+    onlyRows,
+    footerNote,
     className,
 }: ExtractionTableProps): React.ReactElement {
-    const state = useTableState(table, { density: density ?? "tall" });
+    const state = useTableState(table, {
+        density: density ?? "tall",
+        onlyRows,
+    });
     const [composer, setComposer] = useState<Composer>(undefined);
 
     const canAddColumn =
@@ -134,15 +172,30 @@ export function ExtractionTable({
             rowNoun="item"
             renderText={renderText}
             primaryColumnsOnly={primaryColumnsOnly}
-            className={className}
+            className={
+                [fullControls ? "bt-surface-discoverable" : "", className]
+                    .filter(Boolean)
+                    .join(" ") || undefined
+            }
             emptyText="Nothing extracted yet"
             columnMenuItems={columnMenuItems}
             onRetryCell={onRetryCell}
+            improvableRows={improvableRows}
+            showSearch={fullControls}
+            searchPlaceholder="Search rows"
+            showSortMenu={fullControls}
+            valueFilters={fullControls}
+            virtualize={virtualize}
+            fitWidth={fitWidth}
+            notice={notice}
+            banner={banner}
+            footerNote={footerNote}
             headerActions={
                 <TableHeaderActions
                     table={table}
                     state={state}
                     onExport={onExport}
+                    onCopy={onCopy}
                     onShowInLibrary={onShowInLibrary}
                 />
             }
@@ -166,6 +219,7 @@ export function ExtractionTable({
                             Add column
                         </Button>
                     ) : null}
+                    {toolbarEnd}
                 </>
             }
             overlay={

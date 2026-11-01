@@ -43,8 +43,10 @@ function run(id: string, parts: unknown[]): AgentRun {
 describe("table artifacts for the end-of-run list", () => {
     it("treats read_table as a read and the other table tools as writes", () => {
         expect(isTableWriteToolName("read_table")).toBe(false);
-        for (const name of ["create_table", "edit_rows", "edit_table", "fill_table"])
+        for (const name of ["create_table", "edit_table", "fill_table"])
             expect(isTableWriteToolName(name)).toBe(true);
+        // `edit_rows` is no longer a table tool.
+        expect(isTableWriteToolName("edit_rows")).toBe(false);
         expect(tableRecordFromMetadata(undefined)).toBeNull();
         expect(
             tableRecordFromMetadata({ view: { view_type: "item_list" } }),
@@ -59,11 +61,11 @@ describe("table artifacts for the end-of-run list", () => {
                 tableReturn("fill_table", "call-3", "u-AAAAAAAA", "Filled 4 rows", 4),
             ]),
             run("run-2", [
-                tableReturn("edit_rows", "call-4", "u-BBBBBBBB", "Added a row", 9),
+                tableReturn("edit_table", "call-4", "u-BBBBBBBB", "Added a row", 9),
                 tableReturn("edit_table", "call-5", "u-AAAAAAAA", "Added a column", 4),
                 {
                     part_kind: "tool-return",
-                    tool_name: "edit_rows",
+                    tool_name: "edit_table",
                     tool_call_id: "call-6",
                     content: { ok: false, error_code: "conflict" },
                 },

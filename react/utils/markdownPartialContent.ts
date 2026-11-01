@@ -24,8 +24,6 @@ export function processPartialContent(content: string, exportRendering: boolean)
 function stripPartialTrailingTag(content: string): string {
     const partialTagPatterns = [
         /<citation[^>]*$/,
-        /<note[^>]*$/,
-        /<\/note$/,
         /<[a-z][a-z0-9]*(?:\s+[^>]*)?$/i,
     ];
 

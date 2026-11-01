@@ -2,7 +2,9 @@
  * Utilities for executing and undoing create_collection agent actions.
  * These functions are used by AgentActionView for post-run action handling.
  */
-
+import { readCollectionActionData } from '@beaver/agent-core/identity/collectionActionData';
+import { formatCollectionId } from '../collections/collectionIdentity';
+import { assertLibraryWritable, recheckCollection, recheckCollectionForUndo } from '../collections/collectionMutations';
 import { AgentAction } from '@beaver/agent-core/agents/agentActionTypes';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { CreateCollectionResultData } from '@beaver/agent-core/types/agentActions/base';
@@ -22,7 +24,7 @@ import {
 export async function executeCreateCollectionAction(
     action: AgentAction
 ): Promise<CreateCollectionResultData> {
-    const { library_id: rawLibraryId, library_ref, library_name, name, parent_key, item_ids } = action.proposed_data as {
+    const { library_id: rawLibraryId, library_ref, library_name, name, parent_key, item_ids } = readCollectionActionData(action.proposed_data) as {
         library_id?: number | null;
         library_ref?: string | null;
         library_name?: string | null;
@@ -35,20 +37,19 @@ export async function executeCreateCollectionAction(
     if (!targetLibrary.ok) throw new Error(targetLibrary.message);
     const library_id = targetLibrary.libraryID;
 
+    assertLibraryWritable(library_id);
+
     // Build collection params
     const collectionParams: { name: string; libraryID: number; parentID?: number } = {
         name,
         libraryID: library_id,
     };
 
-    // Set parent if provided
+    // Set parent if provided. A parent deleted since approval raises a typed
+    // `collection_not_found`; never fall back to creating at top level or to a
+    // same-named replacement.
     if (parent_key) {
-        const parentCollection = await Zotero.Collections.getByLibraryAndKeyAsync(library_id, parent_key);
-        if (parentCollection) {
-            collectionParams.parentID = parentCollection.id;
-        } else {
-            throw new Error(`Parent collection not found: ${parent_key}`);
-        }
+        collectionParams.parentID = recheckCollection(parent_key, library_id).collection.id;
     }
 
     // Create the collection
@@ -83,7 +84,7 @@ export async function executeCreateCollectionAction(
                     continue;
                 }
                 const item = resolved.item;
-                if (!item.isAttachment() && !item.isNote() && !item.isAnnotation()) {
+                if (item.libraryID === library_id && !item.isAttachment() && !item.isNote() && !item.isAnnotation()) {
                     itemIdsToAdd.push(item.id);
                 } else {
                     skippedItemIds.push(itemIdStr);
@@ -102,6 +103,7 @@ export async function executeCreateCollectionAction(
         library_id,
         library_ref: libraryRefForLibraryID(library_id) ?? undefined,
         collection_key: collection.key,
+        collection_id: formatCollectionId(collection.libraryID, collection.key),
         items_added: itemsAdded,
         skipped_item_ids: skippedItemIds,
     };
@@ -124,7 +126,7 @@ export async function undoCreateCollectionAction(
 ): Promise<void> {
     const resultData = action.result_data as CreateCollectionResultData | undefined;
 
-    if (!resultData?.collection_key || !resultData?.library_id) {
+    if (!resultData?.collection_key || (!resultData?.library_id && !resultData?.library_ref)) {
         throw new Error('No result data available for undo - collection was not created');
     }
 
@@ -135,10 +137,11 @@ export async function undoCreateCollectionAction(
         return;
     }
 
-    const collection = await Zotero.Collections.getByLibraryAndKeyAsync(
+    assertLibraryWritable(libraryID);
+    const collection = recheckCollectionForUndo(
+        typeof resultData.collection_id === 'string' ? resultData.collection_id : resultData.collection_key,
         libraryID,
-        resultData.collection_key
-    );
+    )?.collection;
 
     if (!collection) {
         // Collection may have already been deleted manually

@@ -8,6 +8,7 @@ import { PreferencePageTab } from "../../react/atoms/ui";
 import { ActionCategoryFilter } from "@beaver/agent-core/types/actions";
 
 import { contextMainWindow, resolveChatWindow } from "../runtime/navigation";
+import { attachViewRowDrag, detachViewRowDrag } from "../modules/viewRowDrag";
 
 let keyboardManager: KeyboardManager | null = null;
 
@@ -36,6 +37,7 @@ interface BeaverWindow extends Window {
         renderAiSidebar: (container: Element, location: string) => any;
         renderGlobalInitializer: (container: Element) => any;
         renderWindowSidebar: (container: Element) => any;
+        renderTableTab?: import("./tableTabTypes").RenderTableTab;
         renderFloatingPopup: (container: Element) => any;
         renderPreferencesWindow: (container: Element, initialTab?: PreferencePageTab | null, initialActionsCategoryFilter?: ActionCategoryFilter | null) => any;
         unmountFromElement: (container: Element) => boolean;
@@ -104,7 +106,10 @@ export class BeaverUIFactory {
         }
 
         // Add toggle button to toolbar
-        if (!standalone) this.addToolbarButton(win);
+        if (!standalone) {
+            this.addToolbarButton(win);
+            attachViewRowDrag(win);
+        }
         ztoolkit.log("registerChatPanel: toolbar button setup finished");
 
         // Load React bundle
@@ -363,6 +368,14 @@ export class BeaverUIFactory {
                 return;
             }
 
+            // The window's Beaver tabs are rendered by its bundle, which is
+            // about to go away; close them (unmounting their roots) first.
+            try {
+                Zotero.__beaverTabs?.closeForWindow(win);
+            } catch (e) {
+                ztoolkit.log(`removeChatPanel: closing Beaver tabs failed: ${e}`);
+            }
+
             // Dismiss any active diff preview in note editors.
             // This must happen BEFORE React unmount because the preview module
             // state (activePreview, poll timer) lives in the webpack bundle.
@@ -467,6 +480,7 @@ export class BeaverUIFactory {
             if (win.document) {
                 try {
                     this.removeToolbarFocusHandler(win);
+                    detachViewRowDrag(win);
 
                     const elementIds = [
                         "beaver-pane-library",

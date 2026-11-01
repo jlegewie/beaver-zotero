@@ -1,4 +1,5 @@
-import type { AgentAction } from '@beaver/agent-core/agents/agentActionTypes';
+import { isUnconfirmedAction, type AgentAction } from '@beaver/agent-core/agents/agentActionTypes';
+import { textAnnotationStyle } from '@beaver/agent-core/types/agentActions/createAnnotations';
 import { getActionToolGroup } from '../../../atoms/runApprovalPolicy';
 
 /** A tool call the changes card lists, with all of its actions. */
@@ -78,8 +79,27 @@ export interface OpenNoteTarget {
  */
 export function getOpenNoteTarget(row: ReviewRow): OpenNoteTarget | null {
     if (row.actions.length !== 1) return null;
-    const [action] = row.actions;
-    if (changeTypeKey(action) !== 'create_note' || action.status !== 'applied') return null;
+    return createdNoteTarget(row.actions[0], action => action.status === 'applied');
+}
+
+/**
+ * The note a row's Export reads, or null when the row has no note in the
+ * library: an applied action's note, or the note of an action whose undo
+ * failed (it keeps its result, and the note may still exist). The exporter
+ * reports a note that no longer exists.
+ */
+export function getExportNoteTarget(row: ReviewRow): OpenNoteTarget | null {
+    return row.actions.length === 1 ? getCreatedNoteExportTarget(row.actions[0]) : null;
+}
+
+/** The note a `create_note` action's Export reads; see `getExportNoteTarget`. */
+export function getCreatedNoteExportTarget(action: AgentAction): OpenNoteTarget | null {
+    return createdNoteTarget(action, candidate => candidate.status === 'applied'
+        || (candidate.status === 'error' && candidate.result_data != null));
+}
+
+function createdNoteTarget(action: AgentAction, hasNote: (action: AgentAction) => boolean): OpenNoteTarget | null {
+    if (changeTypeKey(action) !== 'create_note' || !hasNote(action)) return null;
 
     const result = action.result_data as Record<string, any> | undefined;
     if (!result?.zotero_key) return null;
@@ -90,10 +110,187 @@ export function getOpenNoteTarget(row: ReviewRow): OpenNoteTarget | null {
     };
 }
 
+/** Identity of a note across actions: its library and key. */
+export function noteIdentityKey(target: OpenNoteTarget): string {
+    return `${target.library_ref ?? `id:${target.library_id}`}:${target.zotero_key}`;
+}
+
+/** Every identity a note target answers to: by portable library ref and by local library id. */
+function noteIdentityKeys(target: OpenNoteTarget): string[] {
+    const keys: string[] = [];
+    if (target.library_ref != null) keys.push(`${target.library_ref}:${target.zotero_key}`);
+    if (target.library_id != null) keys.push(`id:${target.library_id}:${target.zotero_key}`);
+    return keys;
+}
+
+/** What one answer's edits did to one note. */
+export interface NoteEditSummary {
+    /** Run and tool call of the note's first edit: they key its row and its cached title. */
+    runId: string;
+    toolcallId: string;
+    note: OpenNoteTarget;
+    /** Edits in the library now. */
+    appliedChanges: number;
+    /** Edits awaiting a decision. */
+    pendingChanges: number;
+}
+
 /**
- * Types the shared executor has no apply path for: inline notes apply through
- * their own surface, and the per-annotation types are legacy. A row here would
- * offer a dead ✓.
+ * The edits an action carries, by state. A batch carries many edits in one
+ * action, and what an apply reports having done is preferred over what it
+ * proposed. An action whose apply failed but left a result is in the library.
+ */
+function countNoteEdits(action: AgentAction): { applied: number; pending: number } {
+    const isBatch = action.action_type === 'edit_note_batch';
+    const proposed = isBatch ? Math.max((action.proposed_data as any)?.edits?.length ?? 0, 1) : 1;
+    if (action.status === 'pending') return { applied: 0, pending: proposed };
+    const inEffect = action.status === 'applied' || (action.status === 'error' && action.result_data != null);
+    if (!inEffect) return { applied: 0, pending: 0 };
+    const applied = isBatch ? (action.result_data as any)?.applied?.length ?? proposed : 1;
+    return { applied, pending: 0 };
+}
+
+/**
+ * Every note an answer edited that still has an applied or pending edit, one
+ * summary per note in the order it was first edited. Edits that were rejected,
+ * undone or never landed do not count, and live approvals belong to the
+ * in-stream card until they are decided.
+ */
+/** Options for the note-edit summaries. */
+export interface NoteEditOptions extends Pick<BuildReviewRowsOptions, 'liveApprovalActionIds'> {
+    /**
+     * Fill in the identity a note target lacks (its library ref from its local
+     * library id, or the reverse), so edits naming one note differently are
+     * recognized as one. Without it, only an edit naming both joins them.
+     */
+    completeNoteIdentity?: (note: OpenNoteTarget) => OpenNoteTarget;
+}
+
+export function summarizeNoteEdits(
+    actionsByRun: AgentAction[][],
+    options: NoteEditOptions = {},
+): NoteEditSummary[] {
+    const complete = options.completeNoteIdentity ?? ((note: OpenNoteTarget) => note);
+    // An action may name its note by portable library ref, by local library
+    // id, or by both; one naming both ties the other two forms together, so
+    // summaries are found by either and merged when an action joins them.
+    let summaries: NoteEditSummary[] = [];
+    const byIdentity = new Map<string, NoteEditSummary>();
+    for (const action of actionsByRun.flat()) {
+        if (changeTypeKey(action) !== 'edit_note') continue;
+        if (options.liveApprovalActionIds?.has(action.id)) continue;
+        // What an apply reports is the note it wrote, and names it more
+        // reliably than the proposal: an older proposal may carry only a
+        // device-local library id. A pending edit has only its proposal.
+        const result = action.result_data as Record<string, any> | undefined;
+        const data = result?.zotero_key && (result.library_ref != null || result.library_id != null)
+            ? result
+            : action.proposed_data as Record<string, any> | undefined;
+        if (!data?.zotero_key || (data.library_ref == null && data.library_id == null)) continue;
+        const note = complete({
+            library_ref: data.library_ref,
+            library_id: data.library_id,
+            zotero_key: data.zotero_key,
+        });
+
+        const matched = new Set<NoteEditSummary>();
+        for (const key of noteIdentityKeys(note)) {
+            const found = byIdentity.get(key);
+            if (found) matched.add(found);
+        }
+        let summary: NoteEditSummary;
+        if (matched.size === 0) {
+            summary = {
+                runId: action.run_id,
+                toolcallId: action.toolcall_id ?? action.id,
+                note,
+                appliedChanges: 0,
+                pendingChanges: 0,
+            };
+            summaries.push(summary);
+        } else {
+            // The earliest summary keeps its place and absorbs the others.
+            summary = summaries.find((candidate) => matched.has(candidate))!;
+            for (const other of matched) {
+                if (other === summary) continue;
+                summary.appliedChanges += other.appliedChanges;
+                summary.pendingChanges += other.pendingChanges;
+                summary.note = { ...other.note, ...definedFields(summary.note) };
+                for (const key of noteIdentityKeys(other.note)) byIdentity.set(key, summary);
+            }
+            summaries = summaries.filter((candidate) => candidate === summary || !matched.has(candidate));
+            summary.note = { ...note, ...definedFields(summary.note) };
+        }
+        for (const key of noteIdentityKeys(summary.note)) byIdentity.set(key, summary);
+
+        const { applied, pending } = countNoteEdits(action);
+        summary.appliedChanges += applied;
+        summary.pendingChanges += pending;
+    }
+    return summaries.filter((summary) => summary.appliedChanges + summary.pendingChanges > 0);
+}
+
+/** A note target without its absent fields, so spreading it never erases a known one. */
+function definedFields(target: OpenNoteTarget): Partial<OpenNoteTarget> {
+    return Object.fromEntries(Object.entries(target).filter(([, value]) => value != null));
+}
+
+/**
+ * The notes an answer edited without creating them, for the artifacts list:
+ * the note the answer revised is what the user opens or exports next. A note
+ * the answer also created already has its row. The edits themselves stay in
+ * the changes card, which is where they are reviewed and undone.
+ */
+export function buildEditedNoteArtifacts(
+    actionsByRun: AgentAction[][],
+    options: NoteEditOptions = {},
+): NoteEditSummary[] {
+    const complete = options.completeNoteIdentity ?? ((note: OpenNoteTarget) => note);
+    const created = new Set<string>();
+    for (const action of actionsByRun.flat()) {
+        if (changeTypeKey(action) !== 'create_note') continue;
+        const result = action.result_data as Record<string, any> | undefined;
+        if (!result?.zotero_key) continue;
+        for (const key of noteIdentityKeys(complete({
+            library_ref: result.library_ref,
+            library_id: result.library_id,
+            zotero_key: result.zotero_key,
+        }))) created.add(key);
+    }
+    return summarizeNoteEdits(actionsByRun, options)
+        .filter((summary) => !noteIdentityKeys(summary.note).some((key) => created.has(key)));
+}
+
+/**
+ * Edits awaiting a decision to a note, matched by library ref or local
+ * library id. Every matching summary counts: without an edit naming the note
+ * both ways, one note can have a summary under each.
+ */
+export function pendingNoteChanges(summaries: NoteEditSummary[], target: OpenNoteTarget): number {
+    const keys = new Set(noteIdentityKeys(target));
+    return summaries
+        .filter((summary) => noteIdentityKeys(summary.note).some((key) => keys.has(key)))
+        .reduce((total, summary) => total + summary.pendingChanges, 0);
+}
+
+/**
+ * Header of an edited-note row: "Edited Note" and "3 changes, 1 pending".
+ * Counts the edits to this one note, where the changes card counts notes.
+ */
+export function getEditedNoteHeading(summary: NoteEditSummary): { label: string; detail: string } {
+    const { appliedChanges: applied, pendingChanges: pending } = summary;
+    if (applied === 0) return { label: 'Note Edits', detail: `${plural(pending, 'change')} pending` };
+    return {
+        label: 'Edited Note',
+        detail: pending > 0 ? `${plural(applied, 'change')}, ${pending} pending` : plural(applied, 'change'),
+    };
+}
+
+/**
+ * Types the shared executor has no apply path for, all of them retired: the
+ * per-annotation types, and `zotero_note` from before note creation moved to
+ * the `create_note` tool. Threads still hold their records, and a row here
+ * would offer a ✓ and an Undo that no executor answers.
  */
 const UNAPPLIABLE_ACTION_TYPES = new Set<string>([
     'zotero_note',
@@ -238,6 +435,7 @@ function countChangedUnits(action: AgentAction): number {
         case 'organize_items':
             return action.result_data?.items_modified ?? data?.item_ids?.length ?? 0;
         case 'create_highlight_annotations':
+        case 'create_underline_annotations':
         case 'create_note_annotations':
             return action.result_data?.created?.length ?? data?.items?.length ?? 0;
         case 'edit_annotations':
@@ -278,12 +476,16 @@ function changeTypeKey(action: AgentAction): string {
     // Widened: callers may hold either the stored type or the tool name it came
     // from, and two tool names differ from the type they store.
     const actionType: string = action.action_type;
-    if (actionType === 'create_items') return 'create_item';
+    if (actionType === 'create_items' || actionType === 'import_item') return 'create_item';
     if (actionType === 'edit_item') return 'edit_metadata';
     // One kind of change for the heading: both tools edit a note.
     if (actionType === 'edit_note_batch') return 'edit_note';
     if (actionType === 'edit_annotations' && (action.proposed_data as any)?.operation === 'delete') {
         return 'delete_annotations';
+    }
+    // Underlines are written by the highlight action but counted on their own.
+    if (actionType === 'create_highlight_annotations' && textAnnotationStyle((action.proposed_data as any)?.style) === 'underline') {
+        return 'create_underline_annotations';
     }
     return actionType;
 }
@@ -296,9 +498,11 @@ const CHANGE_KINDS: Record<string, { verb: string; noun: string }> = {
     edit_metadata: { verb: 'edited', noun: 'item' },
     edit_note: { verb: 'edited', noun: 'note' },
     organize_items: { verb: 'organized', noun: 'item' },
+    merge_items: { verb: 'merged', noun: 'group' },
     manage_tags: { verb: 'updated', noun: 'tag' },
     manage_collections: { verb: 'updated', noun: 'collection' },
     create_highlight_annotations: { verb: 'created', noun: 'highlight' },
+    create_underline_annotations: { verb: 'created', noun: 'underline' },
     create_note_annotations: { verb: 'created', noun: 'sticky note' },
     edit_annotations: { verb: 'edited', noun: 'annotation' },
     delete_annotations: { verb: 'deleted', noun: 'annotation' },
@@ -339,25 +543,7 @@ function countUnits(actions: AgentAction[]): number {
     return units;
 }
 
-/**
- * `error_details.outcome` when the backend closed an action out without an
- * answer from Zotero: the change was sent and the plugin stopped responding
- * before it reported what happened.
- */
-const UNCONFIRMED_OUTCOME = 'unconfirmed';
-
-/**
- * True when an errored action's effect on the library is unknown, rather than
- * known to have failed or known to have landed.
- *
- * Only the backend can tell these apart — it knows whether the plugin ever
- * received the request — so it says so explicitly instead of leaving the
- * client to read it out of `result_data`, which is absent both for a change
- * that never ran and for one whose outcome never came back.
- */
-export function isUnconfirmedAction(action: AgentAction): boolean {
-    return action.status === 'error' && action.error_details?.outcome === UNCONFIRMED_OUTCOME;
-}
+export { isUnconfirmedAction };
 
 /** The card's heading names the surface; its trail carries all of the state. */
 const CHANGES_CARD_LEAD = 'Library changes';

@@ -168,7 +168,15 @@ if (!parsed.options.lib || nonEsLibs.length > 0) {
 // `layouts/tableMutations.ts` is a root for the same reason as the table model
 // it edits: the mutation vocabulary is what a client (and the test corpus that
 // pins it) calls to change a stored table, and nothing inside the package
-// applies a mutation.
+// applies a mutation. `layouts/tableCitations.ts` is a root too: clients build
+// the citations a table's evidence renders as, and nothing inside the package
+// renders one. `layouts/tableFill.ts` (selection and pending work) and
+// `protocol/tableFillProtocol.ts` (the fill endpoint and the plugin's fill job)
+// are roots for the same reason: a client plans and shows fills with them, and
+// nothing inside the package runs one.
+// `identity/itemLinks.ts` parses the Zotero object links the model writes in
+// chat markdown. Clients render and export them; nothing inside the package
+// follows a link, so it is a root too.
 // Voice is a standalone session API, independent of the agent-run protocol.
 // Its controller and injectable fakes are separate roots consumed by hosts/tests.
 const entryPaths = [
@@ -197,11 +205,17 @@ const entryPaths = [
   "src/run-state/toolResultTypes.ts",
   "src/run-state/toolCallRequest.ts",
   "src/run-state/runResumeHelpers.ts",
+  "src/run-state/runResolution.ts",
   "src/run-state/loadThreadRuns.ts",
   "src/run-state/toolLabels.ts",
   "src/run-state/pendingQuestions.ts",
   "src/run-state/pendingCreditConfirmations.ts",
   "src/run-state/pendingBatchApprovals.ts",
+  "src/run-state/pendingTableCards.ts",
+  "src/run-state/tableCardDraft.ts",
+  "src/run-state/tableChatFills.ts",
+  "src/run-state/tableFillCopy.ts",
+  "src/run-state/tableEditCopy.ts",
   "src/run-state/runErrorCopy.ts",
   "src/run-state/runStatusCopy.ts",
   "src/run-state/runStatusVisibility.ts",
@@ -210,6 +224,12 @@ const entryPaths = [
   "src/citations/externalReferences.ts",
   "src/layouts/table.ts",
   "src/layouts/tableMutations.ts",
+  "src/layouts/tableFill.ts",
+  "src/layouts/tableEdit.ts",
+  "src/protocol/tableFillProtocol.ts",
+  "src/layouts/tableCitations.ts",
+  "src/identity/itemLinks.ts",
+  "src/extract/pageLabels/printedPageLabels.ts",
 ].map((p) => path.join(pkgDir, p));
 
 const listed = parsed.fileNames.map((f) => path.resolve(f));

@@ -11,17 +11,18 @@ vi.mock('../../../src/utils/zoteroUtils', () => ({
     getIndexScopeRef: vi.fn(() => 'lLOCAL123'),
     getZoteroUserIdentifier: vi.fn(() => ({ localUserKey: 'LOCAL123' })),
 }));
+import { SCHEMA_VERSION } from '@beaver/agent-core/extract/schema';
 import { reconcileRemoteRefs } from '../../../src/services/backgroundProcessing/remoteRefsReconcile';
 
-const row = (key = 'LOCAL001') => ({ libraryId: 1, zoteroKey: key, itemId: 10, contentKind: 'pdf', structuredDocumentHash: 'a'.repeat(64), extractStatus: 'done', extractSchemaVersion: '4', upsertStatus: 'done', upsertIndexVersion: '3' });
+const row = (key = 'LOCAL001') => ({ libraryId: 1, zoteroKey: key, itemId: 10, contentKind: 'pdf', structuredDocumentHash: 'a'.repeat(64), extractStatus: 'done', extractSchemaVersion: SCHEMA_VERSION, upsertStatus: 'done', upsertIndexVersion: '3' });
 
 describe('strong fulltext reconciliation', () => {
     let db: any;
     beforeEach(() => {
         vi.clearAllMocks();
         enabled.mockReturnValue(true);
-        requirements.mockResolvedValue({ index_version: 3, extract_schema_versions: { pdf: ['4'], epub: ['2'], snapshot: ['1'] } });
-        verify.mockImplementation(async (_device, refs) => ({ checked_at: '2026-09-17T00:00:00Z', refs: refs.map((ref: any) => ({ ...ref, state: 'current', index_version: 3, extract_schema_version: '4', chunk_count: 1 })) }));
+        requirements.mockResolvedValue({ index_version: 3, extract_schema_versions: { pdf: [SCHEMA_VERSION], epub: ['2'], snapshot: ['1'] } });
+        verify.mockImplementation(async (_device, refs) => ({ checked_at: '2026-09-17T00:00:00Z', refs: refs.map((ref: any) => ({ ...ref, state: 'current', index_version: 3, extract_schema_version: SCHEMA_VERSION, chunk_count: 1 })) }));
         db = { getPendingFulltextUpsertKeys: vi.fn(async () => new Set()), getAttachmentProcessingStatesByLibrary: vi.fn(async () => [row()]), markAttachmentUpsertDone: vi.fn(), enqueueBackgroundJobs: vi.fn() };
         (globalThis as any).Zotero.Beaver = { hasSearchIndexAccess: true, db, backgroundExtractor: { notify: vi.fn() } };
     });
@@ -79,6 +80,17 @@ describe('strong fulltext reconciliation', () => {
         expect(db.enqueueBackgroundJobs).toHaveBeenCalledWith([
             expect.objectContaining({ zoteroKey: 'PENDING1', jobType: 'fulltext_upsert' }),
         ]);
+    });
+    it('skips rows extracted under an earlier schema that the reconciler will re-extract', async () => {
+        db.getAttachmentProcessingStatesByLibrary.mockResolvedValue([
+            { ...row('STALE001'), extractSchemaVersion: String(Number(SCHEMA_VERSION) - 1) },
+            row('CURRENT1'),
+        ]);
+        verify.mockImplementation(async (_device, refs) => ({ refs: refs.map((ref: any) => ({ ...ref, state: 'missing' })) }));
+        await reconcileRemoteRefs([1], () => false);
+        expect(verify).toHaveBeenCalledTimes(1);
+        expect(verify.mock.calls[0][1]).toEqual([expect.objectContaining({ zotero_key: 'CURRENT1' })]);
+        expect(db.enqueueBackgroundJobs).toHaveBeenCalledWith([expect.objectContaining({ zoteroKey: 'CURRENT1' })]);
     });
     it('ignores late results after cancellation', async () => {
         let cancelled = false;

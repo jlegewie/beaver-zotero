@@ -9,7 +9,7 @@ vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     isRemoteAccessAvailable: vi.fn(() => false),
 }));
 
-import { resolvePageLabelFromLabels } from '@beaver/agent-ui/utils/pageLabels';
+import { formatCitedPages, hasPageLabels, resolvePageLabelFromLabels } from '@beaver/agent-ui/utils/pageLabels';
 
 describe('pageLabels', () => {
     it('resolves 1-based citation pages against 0-based backend label maps', () => {
@@ -23,5 +23,15 @@ describe('pageLabels', () => {
     it('falls back to the page number when the label is empty', () => {
         expect(resolvePageLabelFromLabels({ 0: '' }, 1)).toBe('1');
         expect(resolvePageLabelFromLabels({ 0: '   ' }, 1)).toBe('1');
+    });
+
+    it('treats a map whose labels are all empty as having no labels', () => {
+        expect(hasPageLabels({ 10: '' })).toBe(false);
+        expect(hasPageLabels({ 0: ' ', 1: '' })).toBe(false);
+        expect(hasPageLabels({ 0: '', 1: 'ii' })).toBe(true);
+    });
+
+    it('shows plain physical pages, not the PDF form, for all-empty label maps', () => {
+        expect(formatCitedPages([11], { 10: '' })).toEqual({ locator: 'p.11', reference: 'page 11' });
     });
 });

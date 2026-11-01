@@ -25,6 +25,7 @@ import {
 } from '../../beaver-extract';
 import { makeRemoteFilePath } from '../documentFileIdentity';
 import { createWorkerDispatchFlag, withWorkerDiagnostics } from './workerDiagnostics';
+import { PdfRequestWorker } from '../documentExtraction/pdfRequestWorker';
 import {
     preflightZoteroAttachmentRequest,
     resolveToPdfAttachment,
@@ -34,7 +35,13 @@ import {
     isRemoteAccessAvailable,
     preflightCachedPdfMeta,
 } from './utils';
+import {
+    FileAccessDeniedError,
+    classifyFileAccess,
+    fileAccessDeniedMessage,
+} from '../documentExtraction/attachmentSource';
 import { ensurePageLabelsForResolution, resolvePageValue, InvalidPageValueError } from './pageLabelResolution';
+import { declaredPageLabelsFromMetadata, loadPageLabelsForMetadata } from '../documentExtraction/pageLabels';
 import {
     DEFAULT_IMAGES_TIMEOUT_SECONDS,
     MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS,
@@ -42,6 +49,7 @@ import {
     createTimeoutController,
 } from './timeout';
 import { effectiveMaxFileSizeMB, effectiveMaxPageCount } from '@beaver/agent-core/transport/attachmentLimits';
+import { MAX_PAGE_IMAGE_DIMENSION } from './imageProcessing';
 
 // Convert raw bytes to base64 in 32 KB chunks
 function uint8ToBase64(bytes: Uint8Array): string {
@@ -98,6 +106,8 @@ export async function handleZoteroAttachmentPageImagesRequest(
     const { signal, timeoutSeconds, throwIfTimedOut, dispose } = timeout;
 
     const workerDispatched = createWorkerDispatchFlag();
+    // The worker this request's ops run on (interactive routing); set once the PDF is resolved.
+    let requestWorker: PdfRequestWorker | null = null;
 
     try {
         const zoteroItem = await Zotero.Items.getByLibraryAndKeyAsync(
@@ -148,7 +158,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
         // 4. Check file size limit (remote files are checked after download)
         const maxFileSizeMB = effectiveMaxFileSizeMB();
         if (!isRemoteOnly) {
-            const fileSize = await Zotero.Attachments.getTotalFileSize(pdfItem);
+            const fileSize = await classifyFileAccess(Zotero.Attachments.getTotalFileSize(pdfItem));
             throwIfTimedOut('file_size_check');
 
             if (fileSize) {
@@ -201,9 +211,21 @@ export async function handleZoteroAttachmentPageImagesRequest(
         }
 
         // 5. Resolve page labels and (only if needed) page count up-front.
-        const extractor = new BeaverExtractor();
+        // The response reports printed labels; a requested label also matches
+        // the labels the PDF declares.
+        requestWorker = new PdfRequestWorker({
+            interactive: true,
+            workerName: 'hot',
+            signal,
+            affinityKey: `${pdfItem.libraryID}/${pdfItem.key}`,
+        });
+        const extractor = new BeaverExtractor(requestWorker);
         let pdfData: Uint8Array | null = null;
-        let pageLabels: Record<number, string> | null = null;
+        // Metadata cached before printed labels were recorded recovers them
+        // from its structured payload (once; the read backfills the record).
+        const printedLabels = await loadPageLabelsForMetadata(cachedMeta, 'printed', effectiveFilePath);
+        throwIfTimedOut('page_label_lookup');
+        let declaredLabels: Record<number, string> | null = null;
         let totalPages: number | null = null;
 
         // 5a. Load page labels for label-aware resolution. Short-circuits on cache.
@@ -216,15 +238,15 @@ export async function handleZoteroAttachmentPageImagesRequest(
                 workerDispatched.mark,
             );
             throwIfTimedOut('page_label_resolution');
-            pageLabels = labelResult.labels;
+            declaredLabels = labelResult.labels;
             if (labelResult.pageCount != null) {
                 totalPages = labelResult.pageCount;
             }
             if (labelResult.pdfData) {
                 pdfData = labelResult.pdfData;
             }
-        } else if (cachedMeta?.pageLabels && Object.keys(cachedMeta.pageLabels).length > 0) {
-            pageLabels = cachedMeta.pageLabels;
+        } else {
+            declaredLabels = declaredPageLabelsFromMetadata(cachedMeta);
         }
 
         // 5b. Adopt cached page count when available (no doc-open).
@@ -239,7 +261,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
         if (needsUpfrontPageCount) {
             if (!pdfData) {
                 try {
-                    pdfData = await loadPdfData(pdfItem, effectiveFilePath, isRemoteOnly);
+                    pdfData = await classifyFileAccess(loadPdfData(pdfItem, effectiveFilePath, isRemoteOnly));
                     throwIfTimedOut('pdf_data_load_for_page_count');
                 } catch (error) {
                     if (!isRemoteOnly) throw error;
@@ -299,7 +321,11 @@ export async function handleZoteroAttachmentPageImagesRequest(
         if (pages && pages.length > 0) {
             let resolvedPages: number[];
             try {
-                resolvedPages = pages.map(p => resolvePageValue(p, pageLabels, prefer_page_labels === true));
+                resolvedPages = pages.map(p => resolvePageValue(
+                    p,
+                    { printed: printedLabels, declared: declaredLabels },
+                    prefer_page_labels === true,
+                ));
             } catch (error) {
                 if (error instanceof InvalidPageValueError) {
                     throwIfTimedOut('invalid_page_value_response');
@@ -331,7 +357,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
         // 8. Ensure PDF bytes are loaded before render.
         if (!pdfData) {
             try {
-                pdfData = await loadPdfData(pdfItem, effectiveFilePath, isRemoteOnly);
+                pdfData = await classifyFileAccess(loadPdfData(pdfItem, effectiveFilePath, isRemoteOnly));
                 throwIfTimedOut('pdf_data_load_for_render');
             } catch (error) {
                 if (!isRemoteOnly) throw error;
@@ -360,6 +386,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
             dpi: dpi ?? 0,
             format: format ?? 'png' as const,
             jpegQuality: jpeg_quality ?? 85,
+            maxDimension: MAX_PAGE_IMAGE_DIMENSION,
         };
 
         // 10. Render — fused metadata + render in one round-trip.
@@ -377,9 +404,6 @@ export async function handleZoteroAttachmentPageImagesRequest(
 
         // Refresh local state from the worker result.
         totalPages = renderResult.pageCount;
-        if (!pageLabels && Object.keys(renderResult.pageLabels).length > 0) {
-            pageLabels = renderResult.pageLabels;
-        }
 
         // 11. Convert to base64 and build response
         const pageImages: WSPageImage[] = renderResult.pages.map((result) => {
@@ -387,7 +411,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
 
             return {
                 page_number: result.pageIndex + 1, // Convert back to 1-indexed
-                page_label: pageLabels?.[result.pageIndex],
+                page_label: printedLabels?.[result.pageIndex],
                 image_data: base64Data,
                 format: result.format,
                 width: result.width,
@@ -422,11 +446,20 @@ export async function handleZoteroAttachmentPageImagesRequest(
                     'timeout',
                     resolvedCachedPageCount,
                 ),
-                { workerDispatched: workerDispatched.value, leaseReaped: isWorkerDeadlineError(error) },
+                {
+                    // A request that timed out waiting for a free worker never reached one.
+                    workerDispatched: workerDispatched.value && requestWorker?.slot !== undefined,
+                    leaseReaped: isWorkerDeadlineError(error),
+                    slot: requestWorker?.slot,
+                },
             );
         }
 
         logger(`handleZoteroAttachmentPageImagesRequest: Rendering failed: ${error}`, 1);
+
+        if (error instanceof FileAccessDeniedError) {
+            return errorResponse(fileAccessDeniedMessage('PDF', errorKey), 'file_permission_denied');
+        }
 
         if (isExtractionError(error)) {
             // PAGE_OUT_OF_RANGE carries `pageCount` in payload (worker strict resolvers).
@@ -470,6 +503,7 @@ export async function handleZoteroAttachmentPageImagesRequest(
             'render_failed'
         );
     } finally {
+        requestWorker?.close();
         dispose();
     }
 }

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { AgentRunStatus, ToolCallPart, isEmptyWriteReturn, isUnsuccessfulToolReturn } from '@beaver/agent-core/agents/types';
+import { AgentRunStatus, ToolCallPart, isEmptyWriteReturn, isNotFoundWriteReturn, isUnsuccessfulToolReturn } from '@beaver/agent-core/agents/types';
 import { getToolCallStatusFromResult, toolResultAtom } from '@beaver/agent-core/run-state/atoms';
 import { isTableToolName, isTableWriteToolName, tableResultMessages } from '@beaver/agent-core/run-state/tableResults';
 import { getToolCallLabel, type ToolCallLabelEnrich } from '@beaver/agent-core/run-state/toolLabels';
@@ -9,9 +9,9 @@ import {
     getToolResultRenderableCount,
     type ToolResultView as ToolResultViewModel,
 } from '@beaver/agent-core/run-state/toolResultViews';
-import { ToolResultView } from './ToolResultView';
-import { TableToolCallView } from './TableToolCallView';
+import { ToolResultView, hasRenderableResult } from './ToolResultView';
 import { GenericAgentActionView } from './GenericAgentActionView';
+import { TableToolCallView } from './TableToolCallView';
 import { getHost } from '@beaver/agent-ui/host';
 import { getPendingApprovalForToolcallAtom, getAgentActionsByToolcallAtom } from '../../agents/agentActions';
 import {
@@ -42,6 +42,8 @@ import {
     FlowConnectionIcon,
     WrenchIcon,
     TableIcon,
+    BookCopyIcon,
+    BookSearchIcon,
 } from '../icons/icons';
 import { toolExpandedAtom, setToolExpandedAtom } from '../../atoms/messageUIState';
 import { resolveToolCallLabelEnrich } from '../../utils/toolCallLabelEnrich';
@@ -94,7 +96,6 @@ const TOOL_ICONS: Record<string, IconComponent> = {
     // Table tools (the writes render as TableToolCallView; read_table is a plain row)
     create_table: TableIcon,
     read_table: TableIcon,
-    edit_rows: TableIcon,
     edit_table: TableIcon,
     fill_table: TableIcon,
 
@@ -105,6 +106,7 @@ const TOOL_ICONS: Record<string, IconComponent> = {
     external_search: GlobalSearchIcon,
     lookup_work: GlobalSearchIcon,
     find_related_works: FlowConnectionIcon,
+    find_book_chapters: BookSearchIcon,
 
     // Create item tool
     create_zotero_item: DocumentValidationIcon,
@@ -115,6 +117,14 @@ const TOOL_ICONS: Record<string, IconComponent> = {
 
     // Organize items tool
     organize_items: TaskDoneIcon,
+
+    // Tag and collection management (matches getAgentActionToolIcon)
+    manage_tags: TagIcon,
+    manage_collections: FolderDetailIcon,
+
+    // Duplicate tools
+    find_duplicates: BookCopyIcon,
+    merge_items: BookCopyIcon,
 
     // Read tool result
     read_file: TextAlignLeftIcon,
@@ -150,14 +160,6 @@ const NON_EXPANDABLE_TOOLS = new Set([
     'batch_digest',
     'batch_results',
 ]);
-
-/**
- * Tools whose expanded body exists only as a view model. Their raw return is
- * framework-internal state written for the model (batch_start returns the
- * whole batch ledger), so a call that predates the view — or one whose view
- * could not be built — stays collapsed rather than showing that state.
- */
-const VIEW_ONLY_EXPANDABLE_TOOLS = new Set(['batch_start']);
 
 /** Tools that support streaming argument preview */
 const STREAMING_PREVIEW_TOOLS = new Set(['create_note']);
@@ -295,6 +297,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
         part.tool_name === 'edit_annotations' ||
         part.tool_name === 'delete_annotations' ||
         part.tool_name === 'organize_items' ||
+        part.tool_name === 'merge_items' ||
         part.tool_name === 'manage_tags' ||
         part.tool_name === 'manage_collections' ||
         part.tool_name === 'create_items' ||
@@ -341,6 +344,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
         view,
         enrich: labelEnrich,
         noChange: isNoChangeReturn,
+        notFound: isNoChangeReturn && isNotFoundWriteReturn(result),
     });
 
     // Use global Jotai atom for expansion state (persists across re-renders and syncs between panes)
@@ -349,7 +353,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
     const setExpanded = useSetAtom(setToolExpandedAtom);
     // A failed table read can still carry recovery status worth opening.
     const hasTableStatus = isTableToolName(part.tool_name) && !!result
-        && tableResultMessages(result.content).length > 0;
+        && tableResultMessages(result.content, part.tool_name).length > 0;
     const isExpanded = expansionState[expansionKey] ?? hasTableStatus;
     const wasConfirmApprovalRef = useRef(isConfirmApproval);
 
@@ -379,7 +383,9 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
         // If we can compute a count (search-like tools), block expansion for 0 results.
         (renderableCount === null || renderableCount > 0) &&
         !NON_EXPANDABLE_TOOLS.has(part.tool_name) &&
-        (!VIEW_ONLY_EXPANDABLE_TOOLS.has(part.tool_name) || view !== null) &&
+        // Only a view this client renders is shown; a raw return (unknown tool,
+        // missing or unsupported view) stays collapsed.
+        hasRenderableResult(result) &&
         !isExtractionRejected &&
         !isExternalSearchRejected &&
         // A write that changed nothing has no result payload to show.
@@ -413,7 +419,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
         && STREAMING_PREVIEW_TOOLS.has(part.tool_name) && !showAgentActionView && !hasError;
 
     // Table writes are cards like the note actions: the header names the table
-    // and opens it, the body carries the call's summary and recovery notices.
+    // and opens it, the body carries the call's summary and reveal / open.
     if (isTableWriteToolName(part.tool_name)) {
         return (
             <TableToolCallView

@@ -1,15 +1,14 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { PopupMessage, POPUP_MESSAGE_DURATION } from '../../../types/popupMessage';
-import { Icon, AlertIcon, InformationCircleIcon, PuzzleIcon } from '../../icons/icons';
+import { Icon, AlertIcon, InformationCircleIcon } from '../../icons/icons';
 import { useSetAtom } from 'jotai';
 import { removePopupMessageAtom } from '../../../utils/popupMessageUtils';
-import PlanChangeMessageContent from './PlanChangeMessageContent';
-import IndexingCompleteMessageContent from './IndexingCompleteMessageContent';
 import VersionUpdateMessageContent from './VersionUpdateMessageContent';
 import WelcomeOnboardingContent from './WelcomeOnboardingContent';
 import ReaderTipContent from './ReaderTipContent';
 import NoteTipContent from './NoteTipContent';
 import FeatureTipContent from './FeatureTipContent';
+import FileExportMessageContent from './FileExportMessageContent';
 import { CitationTipContent } from '../../sources/CitationTipContent';
 import Button from "@beaver/agent-ui/primitives/Button";
 import PopupMessageHeader from './PopupMessageHeader';
@@ -69,9 +68,6 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message, onRemove, 
                 return <Icon icon={AlertIcon} className="scale-12 mt-020 font-color-primary" />;
             case 'error':
                 return <Icon icon={AlertIcon} className="scale-12 mt-020 font-color-red" />;
-            case 'plan_change':
-            case 'indexing_complete':
-                return <Icon icon={PuzzleIcon} className="scale-12 mt-020 font-color-primary" />;
             case 'version_update':
                 // return <Icon icon={AiMagicIcon} className="scale-12 mt-020 font-color-secondary" />;
                 return null;
@@ -91,8 +87,6 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message, onRemove, 
             break;
         case 'info':
         case 'warning':
-        case 'plan_change':
-        case 'indexing_complete':
         case 'version_update':
         default:
             fontColor = 'font-color-primary';
@@ -120,7 +114,7 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message, onRemove, 
                 `}
             >
                 {/* Floating version_update/welcome_onboarding/reader_tip/cloud_consent render their own headers; a feature tip always does */}
-                {!(isFloating && (message.type === 'version_update' || message.type === 'welcome_onboarding' || message.type === 'reader_tip' || message.type === 'note_tip' || message.type === 'cloud_consent')) && message.type !== 'feature_tip' && (
+                {!(isFloating && (message.type === 'version_update' || message.type === 'welcome_onboarding' || message.type === 'reader_tip' || message.type === 'note_tip' || message.type === 'cloud_consent')) && message.type !== 'feature_tip' && message.type !== 'file_export' && (
                     <PopupMessageHeader
                         icon={message.icon || getDefaultIcon()}
                         rightIcon={message.rightIcon}
@@ -171,16 +165,6 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message, onRemove, 
                     )
                 )}
 
-                {/* Content for plan_change */}
-                {message.type === 'plan_change' && (
-                    <PlanChangeMessageContent message={message} />
-                )}
-
-                {/* Content for indexing_complete */}
-                {message.type === 'indexing_complete' && (
-                    <IndexingCompleteMessageContent message={message} />
-                )}
-
                 {message.type === 'version_update' && (
                     <VersionUpdateMessageContent message={message} onDismiss={handleDismiss} isFloating={isFloating} />
                 )}
@@ -199,6 +183,10 @@ const PopupMessageItem: React.FC<PopupMessageItemProps> = ({ message, onRemove, 
 
                 {message.type === 'feature_tip' && message.tipId && (
                     <FeatureTipContent tipId={message.tipId} onDismiss={handleDismiss} />
+                )}
+
+                {message.type === 'file_export' && (
+                    <FileExportMessageContent message={message} onDismiss={handleDismiss} />
                 )}
 
                 {message.type === 'citation_tip' && (

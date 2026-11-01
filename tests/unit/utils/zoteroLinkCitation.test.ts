@@ -6,6 +6,8 @@ import {
     buildZoteroCitationLinkLabel,
     buildZoteroCitationLinkURI,
     parseZoteroCitationLinkHref,
+    parseZoteroCitationLinkPage,
+    parseZoteroCitationLinkPages,
 } from '../../../src/utils/zoteroLinkCitation';
 
 describe('zoteroLinkCitation', () => {
@@ -246,7 +248,7 @@ describe('zoteroLinkCitation', () => {
         const second = { ...item, getFilePathAsync: vi.fn().mockResolvedValue('/b.pdf') };
         const child = { ...item, parentID: 42, getFilePathAsync: vi.fn().mockResolvedValue('/c.pdf') };
         (Zotero as any).Items = {
-            getByLibraryAndKey: vi.fn((_libraryID, key) =>
+            getByLibraryAndKeyAsync: vi.fn((_libraryID, key) =>
                 key === 'ATTACH12' ? item : key === 'ATTACH34' ? second : child),
             loadDataTypes: vi.fn().mockResolvedValue(undefined),
         };
@@ -255,7 +257,7 @@ describe('zoteroLinkCitation', () => {
                 + '<citation id="u-ATTACH34"/><citation id="u-CHILDPDF"/><citation id="g42-BLOCKED1"/>',
             libraryID => libraryID === 1,
         );
-        expect(Zotero.Items.getByLibraryAndKey).toHaveBeenCalledTimes(3);
+        expect(Zotero.Items.getByLibraryAndKeyAsync).toHaveBeenCalledTimes(3);
         expect(Zotero.Items.loadDataTypes).toHaveBeenCalledExactlyOnceWith([item, second], ['itemData']);
         // Resolving each path is what populates the file state the link builder reads.
         expect(item.getFilePathAsync).toHaveBeenCalledOnce();
@@ -270,7 +272,7 @@ describe('zoteroLinkCitation', () => {
             getFilePathAsync: vi.fn().mockRejectedValue(new Error('Volume unavailable')),
         };
         (Zotero as any).Items = {
-            getByLibraryAndKey: vi.fn(() => item),
+            getByLibraryAndKeyAsync: vi.fn(() => item),
             loadDataTypes: vi.fn().mockResolvedValue(undefined),
         };
         await expect(preloadStandaloneAttachmentLinks('<citation id="u-ATTACH12"/>')).resolves.toBeUndefined();
@@ -280,7 +282,7 @@ describe('zoteroLinkCitation', () => {
     it('keeps filename fallback available when batch title loading fails', async () => {
         const item = { isAttachment: () => true, parentID: false, attachmentFilename: 'Report.pdf' };
         (Zotero as any).Items = {
-            getByLibraryAndKey: vi.fn(() => item),
+            getByLibraryAndKeyAsync: vi.fn(() => item),
             loadDataTypes: vi.fn().mockRejectedValue(new Error('Unavailable')),
         };
         await expect(preloadStandaloneAttachmentLinks('<citation id="u-ATTACH12"/>')).resolves.toBeUndefined();
@@ -290,5 +292,22 @@ describe('zoteroLinkCitation', () => {
     it('rejects Beaver and unrelated Zotero links', () => {
         expect(parseZoteroCitationLinkHref('zotero://beaver/thread/abc')).toBeNull();
         expect(parseZoteroCitationLinkHref('zotero://select/library/collections/COLL123')).toBeNull();
+    });
+
+    it('reads the physical page a link citation opens', () => {
+        expect(parseZoteroCitationLinkPage('zotero://open/library/items/ATTACH12?page=6')).toBe(6);
+        expect(parseZoteroCitationLinkPage('zotero://open/groups/42/items/ATTACH12?foo=1&amp;page=12')).toBe(12);
+        expect(parseZoteroCitationLinkPage('zotero://open/library/items/ATTACH12')).toBeNull();
+        expect(parseZoteroCitationLinkPage('zotero://open/library/items/ATTACH12?page=0')).toBeNull();
+        expect(parseZoteroCitationLinkPage('zotero://open/library/items/ATTACH12?page=xii')).toBeNull();
+        expect(parseZoteroCitationLinkPage('zotero://select/library/items/NOTE1234')).toBeNull();
+    });
+
+    it('reads the physical pages a link records in its fragment', () => {
+        expect(parseZoteroCitationLinkPages('zotero://open/library/items/ATTACH12?page=1#beaver-pages=1-4')).toBe('1-4');
+        expect(parseZoteroCitationLinkPages('zotero://select/library/items/ATTACH12#beaver-pages=2%2C%209')).toBe('2, 9');
+        expect(parseZoteroCitationLinkPages('zotero://open/library/items/ATTACH12?page=1')).toBeNull();
+        expect(parseZoteroCitationLinkPages('zotero://open/library/items/ATTACH12#beaver-pages=xii')).toBeNull();
+        expect(parseZoteroCitationLinkPages('zotero://open/library/items/ATTACH12#other')).toBeNull();
     });
 });

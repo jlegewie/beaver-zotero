@@ -14,16 +14,149 @@ import {
     WSListItemsRequest,
     WSListItemsResponse,
     ListItemsResultItem,
+    LISTABLE_SPECIAL_COLLECTION_NAMES,
+    ListableSpecialCollectionType,
     RegularListResultItem,
     AttachmentRowResult,
+    NoteResultItem,
 } from '@beaver/agent-core/protocol/agentProtocol';
 import { ItemStub } from '@beaver/agent-core/types/zotero';
 import { serializeNote, serializeItemStub } from '../../utils/zoteroSerializers';
+import { readWithDataReload } from '../../utils/zoteroDataLoading';
 import { libraryRefForLibraryID, modelObjectId } from '../../utils/libraryIdentity';
-import { getCollectionByIdOrName, validateLibraryAccess, extractYear, formatCreatorsString, getAttachmentInfoForItem, degradedAttachmentRow, resolveStoredTagName } from './utils';
+import {
+    getCollectionByIdOrName,
+    validateLibraryAccess,
+    extractYear,
+    formatCreatorsString,
+    getAttachmentInfoForItem,
+    getBestAttachmentBatch,
+    degradedAttachmentRow,
+    degradedNoteRow,
+    degradedRegularRow,
+    resolveStoredTagName,
+    ROW_DATA_TYPES,
+} from './utils';
 
 function isAnnotationItem(item: Zotero.Item): boolean {
     return String(item.itemType) === 'annotation' || (item as { isAnnotation?: () => boolean }).isAnnotation?.() === true;
+}
+
+/**
+ * Built-in views `special_collection` can list, each filled by the Zotero
+ * search condition of the same name.
+ */
+const LISTABLE_SPECIAL_COLLECTIONS: ReadonlySet<string> = new Set<ListableSpecialCollectionType>([
+    'unfiled',
+    'publications',
+    'retracted',
+]);
+
+type ListItemsError = Pick<WSListItemsResponse, 'error' | 'error_code'>;
+
+type NestedChildren = Required<Pick<RegularListResultItem, 'attachments' | 'notes'>>;
+
+function compareChildTitles(a: { title?: string | null }, b: { title?: string | null }): number {
+    return (a.title ?? '').localeCompare(b.title ?? '');
+}
+
+async function nestedAttachmentRow(
+    item: Zotero.Item,
+    parentItemId: string,
+    isPrimary: boolean,
+): Promise<AttachmentRowResult> {
+    try {
+        const info = await getAttachmentInfoForItem(item, {
+            parentItemId,
+            isPrimary,
+            includeAnnotationsCount: true,
+            skipWorkerFallback: true,
+        });
+        return { ...info, result_type: 'attachment' };
+    } catch (error) {
+        logger(`handleListItemsRequest: Degrading unreadable attachment ${item.key}: ${error}`, 2);
+        return { ...degradedAttachmentRow(item, null), parent_item_id: parentItemId, is_primary: isPrimary };
+    }
+}
+
+async function nestedNoteRow(item: Zotero.Item, parentItemId: string): Promise<NoteResultItem> {
+    try {
+        const row = await readWithDataReload(item, ROW_DATA_TYPES, () => serializeNote(item, null));
+        return { ...row, parent_item_id: parentItemId };
+    } catch (error) {
+        logger(`handleListItemsRequest: Degrading unreadable note ${item.key}: ${error}`, 2);
+        return { ...degradedNoteRow(item, null), parent_item_id: parentItemId };
+    }
+}
+
+/**
+ * Child attachments and notes of the listed parents, for a `nest_children`
+ * listing. Attachments put the parent's best attachment first, then sort by
+ * title; notes sort by title. A parent whose children cannot be read is left
+ * out, so its row carries no child lists rather than empty ones.
+ */
+async function loadNestedChildren(
+    parents: Zotero.Item[],
+    publishedOnly: boolean,
+): Promise<Map<number, NestedChildren>> {
+    const nested = new Map<number, NestedChildren>();
+    if (parents.length === 0) return nested;
+    await Zotero.Items.loadDataTypes(parents, ['childItems']);
+
+    const childIdsByParent = new Map<number, number[]>();
+    for (const parent of parents) {
+        try {
+            childIdsByParent.set(parent.id, [...parent.getAttachments(), ...parent.getNotes()]);
+        } catch (error) {
+            logger(`handleListItemsRequest: Skipping unreadable children of ${parent.key}: ${error}`, 2);
+        }
+    }
+
+    const children = (await Zotero.Items.getAsync([...childIdsByParent.values()].flat()))
+        .filter((c): c is Zotero.Item => c !== null)
+        .filter(child => !isAnnotationItem(child))
+        // A published item's unpublished children are not part of My Publications.
+        .filter(child => !publishedOnly || child.inPublications);
+    const attachments = children.filter(child => child.isAttachment());
+    if (children.length > 0) {
+        await Zotero.Items.loadDataTypes(children, ['primaryData', 'itemData']);
+    }
+    if (attachments.length > 0) {
+        await Zotero.Items.loadDataTypes(attachments, ['childItems']);
+    }
+
+    let bestAttachments = new Map<number, number>();
+    try {
+        bestAttachments = await getBestAttachmentBatch([...childIdsByParent.keys()]);
+    } catch (error) {
+        logger(`handleListItemsRequest: Could not resolve primary attachments: ${error}`, 2);
+    }
+
+    const childrenById = new Map(children.map(child => [child.id, child]));
+    for (const parent of parents) {
+        const childIds = childIdsByParent.get(parent.id);
+        if (!childIds) continue;
+        const parentItemId = modelObjectId(parent.libraryID, parent.key);
+        const parentChildren = childIds
+            .map(id => childrenById.get(id))
+            .filter((child): child is Zotero.Item => child !== undefined);
+        const [attachmentRows, noteRows] = await Promise.all([
+            Promise.all(parentChildren
+                .filter(child => child.isAttachment())
+                .map(child => nestedAttachmentRow(child, parentItemId, bestAttachments.get(parent.id) === child.id))),
+            Promise.all(parentChildren
+                .filter(child => child.isNote())
+                .map(child => nestedNoteRow(child, parentItemId))),
+        ]);
+        attachmentRows.sort((a, b) => Number(b.is_primary) - Number(a.is_primary) || compareChildTitles(a, b));
+        noteRows.sort(compareChildTitles);
+        nested.set(parent.id, { attachments: attachmentRows, notes: noteRows });
+    }
+    return nested;
+}
+
+function listItemsError(request: WSListItemsRequest, error: ListItemsError): WSListItemsResponse {
+    return { type: 'list_items', request_id: request.request_id, items: [], total_count: 0, ...error };
 }
 
 /**
@@ -33,9 +166,25 @@ function isAnnotationItem(item: Zotero.Item): boolean {
 export async function handleListItemsRequest(
     request: WSListItemsRequest
 ): Promise<WSListItemsResponse> {
-    logger(`handleListItemsRequest: collection=${request.collection_key}, tag=${request.tag}`, 1);
+    logger(`handleListItemsRequest: collection=${request.collection_key}, special_collection=${request.special_collection}, tag=${request.tag}`, 1);
     
     try {
+        const specialCollection = request.special_collection ?? null;
+        if (specialCollection !== null) {
+            if (!LISTABLE_SPECIAL_COLLECTIONS.has(specialCollection)) {
+                return listItemsError(request, {
+                    error: `Unknown special_collection '${specialCollection}'. Supported: ${[...LISTABLE_SPECIAL_COLLECTIONS].join(', ')}.`,
+                    error_code: 'invalid_special_collection',
+                });
+            }
+            if (request.collection_key) {
+                return listItemsError(request, {
+                    error: 'Pass either collection_key or special_collection, not both.',
+                    error_code: 'invalid_special_collection',
+                });
+            }
+        }
+
         // Validate library (checks both existence and searchability)
         let validation = validateLibraryAccess(request.library_id);
         const resolvedCollection = request.collection_key && (request.library_id == null || validation.valid)
@@ -58,6 +207,13 @@ export async function handleListItemsRequest(
         const library = validation.library!;
         let collectionName: string | null = null;
         let resolvedCollectionId: number | null = null;
+
+        if (specialCollection === 'publications' && library.libraryID !== Zotero.Libraries.userLibraryID) {
+            return listItemsError(request, {
+                error: `${LISTABLE_SPECIAL_COLLECTION_NAMES.publications} exists only in the personal library, not in '${library.name}'. Omit the library or pass library='u'.`,
+                error_code: 'special_collection_unavailable',
+            });
+        }
         
         // Resolve collection if specified (supports both key and name)
         if (request.collection_key) {
@@ -84,13 +240,19 @@ export async function handleListItemsRequest(
         const search = new Zotero.Search() as unknown as ZoteroSearchWritable;
         search.libraryID = library.libraryID || Zotero.Libraries.userLibraryID;
         
-        // Apply collection filter to search
-        if (resolvedCollectionId !== null) {
-            search.addCondition('collectionID', 'is', String(resolvedCollectionId));
-            if (request.recursive !== false) {
-                search.addCondition('recursive', 'true', '');
+        // The place being listed: a collection or a built-in view. Applied to
+        // the main search and, for child categories, to the parent walk below.
+        const applyScope = (target: ZoteroSearchWritable) => {
+            if (resolvedCollectionId !== null) {
+                target.addCondition('collectionID', 'is', String(resolvedCollectionId));
+                if (request.recursive !== false) {
+                    target.addCondition('recursive', 'true', '');
+                }
+            } else if (specialCollection !== null) {
+                target.addCondition(specialCollection, 'true', '');
             }
-        }
+        };
+        applyScope(search);
         
         // Tag filter: resolve to stored casing; unknown tags error instead of matching nothing.
         // The resolved spelling is kept for the child-expansion filter below, which
@@ -152,22 +314,26 @@ export async function handleListItemsRequest(
         // Child items (notes/attachments) are linked to a collection
         // through their parent, so they aren't returned by the primary search. When
         // a child category is requested with a collection filter, walk the parents
-        // and pull their children of the requested type(s).
+        // and pull their children of the requested type(s). Unfiled Items and
+        // Retracted Items hold only top-level items too. My Publications is
+        // different: Zotero records each published child itself, and a parent's
+        // unpublished children are not part of the view, so it is never walked.
         const wantsChildItems =
             itemCategory === 'note' ||
             itemCategory === 'attachment' ||
             itemCategory === 'all';
+        const scopeHoldsTopLevelOnly =
+            resolvedCollectionId !== null
+            || specialCollection === 'unfiled'
+            || specialCollection === 'retracted';
 
-        if (resolvedCollectionId !== null && wantsChildItems) {
+        if (scopeHoldsTopLevelOnly && wantsChildItems) {
             const wantNotes = itemCategory === 'note' || itemCategory === 'all';
             const wantAttachments = itemCategory === 'attachment' || itemCategory === 'all';
 
             const parentSearch = new Zotero.Search() as unknown as ZoteroSearchWritable;
             parentSearch.libraryID = library.libraryID;
-            parentSearch.addCondition('collectionID', 'is', String(resolvedCollectionId));
-            if (request.recursive !== false) {
-                parentSearch.addCondition('recursive', 'true', '');
-            }
+            applyScope(parentSearch);
             parentSearch.addCondition('noChildren', 'true', '');
             parentSearch.addCondition('itemType', 'isNot', 'note');
             parentSearch.addCondition('itemType', 'isNot', 'annotation');
@@ -218,7 +384,13 @@ export async function handleListItemsRequest(
         // by the list_items_include_children feature: the backend only sets the flag for
         // clients that declared support. Children are included regardless of a `tag`
         // filter — the parents already matched it, and a paper's PDF is rarely tagged.
-        if (request.include_children === true && itemCategory === 'regular') {
+        // With nest_children, only top-level items are sorted and paged, and the
+        // children of the page's items are nested on their rows below. Otherwise
+        // the children are listed as rows of their own.
+        const nestChildren = request.include_children === true
+            && request.nest_children === true
+            && itemCategory === 'regular';
+        if (request.include_children === true && itemCategory === 'regular' && !nestChildren) {
             const regularParents = validItems.filter(item => item.isRegularItem());
             if (regularParents.length > 0) {
                 await Zotero.Items.loadDataTypes(regularParents, ['childItems']);
@@ -236,7 +408,9 @@ export async function handleListItemsRequest(
             if (newChildIds.length > 0) {
                 const children = (await Zotero.Items.getAsync(newChildIds))
                     .filter((c): c is Zotero.Item => c !== null)
-                    .filter(child => !isAnnotationItem(child));
+                    .filter(child => !isAnnotationItem(child))
+                    // A published item's unpublished children are not part of My Publications.
+                    .filter(child => specialCollection !== 'publications' || child.inPublications);
                 validItems.push(...children);
             }
         }
@@ -344,12 +518,18 @@ export async function handleListItemsRequest(
 
         // Build result items
         const items: ListItemsResultItem[] = [];
+        const regularRows = new Map<number, RegularListResultItem>();
         // Single-library request; the portable ref is constant across results.
         const libraryRef = libraryRefForLibraryID(library.libraryID) ?? undefined;
         for (const { item } of paginatedItems) {
             if (item.isNote()) {
                 const parentInfo = item.parentItemID ? parentMap.get(item.parentItemID) : null;
-                items.push(serializeNote(item, parentInfo));
+                try {
+                    items.push(await readWithDataReload(item, ROW_DATA_TYPES, () => serializeNote(item, parentInfo)));
+                } catch (error) {
+                    logger(`handleListItemsRequest: Degrading unreadable note ${item.key}: ${error}`, 2);
+                    items.push(degradedNoteRow(item, parentInfo ?? null));
+                }
             } else if (item.isAttachment()) {
                 const parentInfo = item.parentItemID ? parentMap.get(item.parentItemID) : null;
                 let attachmentItem: AttachmentRowResult;
@@ -376,25 +556,54 @@ export async function handleListItemsRequest(
                 }
                 items.push(attachmentItem);
             } else {
-                const creators = item.getCreators();
-                let date = '';
-                try { date = item.getField('date', false, true) as string; } catch { /* */ }
-                let title = '';
-                try { title = item.getField('title', false, true) as string; }
-                catch { title = item.getDisplayTitle?.() || ''; }
+                let regularRow: RegularListResultItem;
+                try {
+                    regularRow = await readWithDataReload(item, ROW_DATA_TYPES, (): RegularListResultItem => {
+                        const creators = item.getCreators();
+                        let date = '';
+                        try { date = item.getField('date', false, true) as string; } catch { /* */ }
+                        let title = '';
+                        try { title = item.getField('title', false, true) as string; }
+                        catch { title = item.getDisplayTitle?.() || ''; }
 
-                const resultItem: RegularListResultItem = {
-                    result_type: 'regular',
-                    item_id: modelObjectId(library.libraryID, item.key),
-                    library_ref: libraryRef,
-                    item_type: item.itemType,
-                    title,
-                    creators: formatCreatorsString(creators),
-                    year: extractYear(date),
-                    date_added: item.dateAdded,
-                    date_modified: item.dateModified,
-                };
-                items.push(resultItem);
+                        const row: RegularListResultItem = {
+                            result_type: 'regular',
+                            item_id: modelObjectId(library.libraryID, item.key),
+                            library_ref: libraryRef,
+                            item_type: item.itemType,
+                            title,
+                            creators: formatCreatorsString(creators),
+                            year: extractYear(date),
+                            date_added: item.dateAdded,
+                            date_modified: item.dateModified,
+                        };
+                        if (request.include_abstract === true) {
+                            // getField returns '' both for an empty abstract and for
+                            // an item type without the field.
+                            row.abstract = (item.getField('abstractNote') as string) || '';
+                        }
+                        return row;
+                    });
+                } catch (error) {
+                    // Isolate the row so one unreadable record does not empty the page.
+                    logger(`handleListItemsRequest: Degrading unreadable item ${item.key}: ${error}`, 2);
+                    regularRow = degradedRegularRow(item);
+                }
+                items.push(regularRow);
+                regularRows.set(item.id, regularRow);
+            }
+        }
+
+        if (nestChildren) {
+            const parents = paginatedItems.map(({ item }) => item).filter(item => regularRows.has(item.id));
+            try {
+                const nested = await loadNestedChildren(parents, specialCollection === 'publications');
+                for (const [parentId, children] of nested) {
+                    Object.assign(regularRows.get(parentId)!, children);
+                }
+            } catch (error) {
+                // The page stays valid; its rows carry no child lists.
+                logger(`handleListItemsRequest: Could not load nested children: ${error}`, 2);
             }
         }
         

@@ -90,40 +90,41 @@ export function useTasksByType(type: BackgroundTaskType): BackgroundTaskState[] 
 }
 
 /**
- * Check if a PDF fetch is in progress for an item.
+ * Status of the background attachment task (PDF fetch or page snapshot) for an item.
  * @param libraryId - Library ID
  * @param itemKey - Zotero item key
- * @returns Status including isLoading and any error
+ * @returns Status including isLoading, the running task's kind, and any error
  */
 export function usePdfFetchStatus(
     libraryId: number | undefined,
     itemKey: string | undefined
-): { isLoading: boolean; error?: string } {
+): { isLoading: boolean; error?: string; kind?: 'pdf_fetch' | 'snapshot' } {
     const tasks = useItemBackgroundTasks(libraryId, itemKey);
 
     return useMemo(() => {
-        const pdfTasks = tasks.filter(t => t.type === 'pdf_fetch');
-        if (pdfTasks.length === 0) {
+        const attachmentTasks = tasks.filter(t => t.type === 'pdf_fetch' || t.type === 'snapshot');
+        if (attachmentTasks.length === 0) {
             return { isLoading: false };
         }
 
         // Prefer active tasks (pending/running) over completed/failed
-        const activeTask = pdfTasks.find(
+        const activeTask = attachmentTasks.find(
             t => t.status === 'pending' || t.status === 'running'
         );
         if (activeTask) {
-            return { isLoading: true };
+            return { isLoading: true, kind: activeTask.type as 'pdf_fetch' | 'snapshot' };
         }
 
         // No active task - find the most recent completed/failed task
-        const sortedTasks = pdfTasks
+        const sortedTasks = attachmentTasks
             .filter(t => t.startedAt !== undefined)
             .sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));
         
-        const latestTask = sortedTasks[0] || pdfTasks[0];
+        const latestTask = sortedTasks[0] || attachmentTasks[0];
         
         return {
             isLoading: false,
+            kind: latestTask.type as 'pdf_fetch' | 'snapshot',
             error: latestTask.status === 'failed' ? latestTask.error : undefined,
         };
     }, [tasks]);

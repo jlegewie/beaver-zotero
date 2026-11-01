@@ -115,6 +115,23 @@ describe('extractAndCacheDocument timeout handling', () => {
         expect(vi.getTimerCount()).toBe(0);
     });
 
+    it('reports a PDF the OS refuses to stat as file_permission_denied, not as missing', async () => {
+        const item = { libraryID: 1, key: 'ABCD1234', loadAllData: vi.fn().mockResolvedValue(undefined) };
+        (Zotero as any).Items = { getByLibraryAndKeyAsync: vi.fn().mockResolvedValue(item) };
+        vi.mocked(resolveToReadableAttachment).mockResolvedValueOnce({
+            resolved: true, item, key: '1-ABCD1234', contentKind: 'pdf', contentType: 'application/pdf',
+        } as any);
+        vi.mocked(resolveAttachmentFileSource).mockResolvedValueOnce({ kind: 'error', code: 'file_permission_denied' });
+
+        const result = await extractAndCacheDocument({
+            libraryId: 1, zoteroKey: 'ABCD1234', mode: 'structured', maxPages: null,
+            timeoutSeconds: 5, workerName: 'background',
+        });
+
+        expect(result).toMatchObject({ kind: 'response_error', code: 'file_permission_denied' });
+        expect((result as { message: string }).message).toContain('does not have permission to read the PDF file');
+    });
+
     it('times out while resolving the Zotero item', async () => {
         vi.useFakeTimers();
         (globalThis as any).Zotero.Items = {

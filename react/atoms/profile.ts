@@ -1,17 +1,15 @@
 import { atom } from "jotai";
 import { selectAtom } from 'jotai/utils';
-import { ExcludedLibrary, SafeProfileWithPlan, PlanFeatures, ProfileBalance, ProcessingMode, CreditPlanStatus, CreditBreakdown, CreditPlan } from "@beaver/agent-core/types/profile";
+import { ExcludedLibrary, SafeProfileWithPlan, ProfileBalance, ProcessingMode, CreditPlanStatus, CreditBreakdown, CreditPlan } from "@beaver/agent-core/types/profile";
 import { ZoteroLibrary } from "@beaver/agent-core/types/zotero";
-import { fileStatusAtom } from "./files";
 import { compareVersions } from "../utils/compareVersions";
-import { effectiveMaxPageCount } from "@beaver/agent-core/transport/attachmentLimits";
 
 export const cloudConsentAtom = atom<'pending' | 'declined' | 'accepted'>('pending');
 
 export const accountGenerationAtom = atom(-1);
 export const accountRevisionAtom = atom(-1);
 
-// Profile and plan state
+// Profile state
 export const isProfileLoadedAtom = atom<boolean>(false);
 export const profileProjectionAtom = atom<SafeProfileWithPlan | null>(null);
 export const profileWithPlanAtom = atom(get => get(profileProjectionAtom));
@@ -109,20 +107,6 @@ export function excludedEntryFromLibrary(library: Pick<ZoteroLibrary, 'is_group'
     return { type: 'user' };
 }
 
-// Libraries with synced=true (for Pro sync operations)
-export const syncedLibrariesAtom = atom<ZoteroLibrary[]>((get) => {
-    const profile = get(profileWithPlanAtom);
-    // return (profile?.libraries || []).filter(lib => lib.synced);
-    return profile?.libraries || [];
-});
-
-// Library IDs for synced libraries (for sync operations)
-export const syncedLibraryIdsAtom = selectAtom(
-    syncedLibrariesAtom,
-    (libraries) => libraries.map(lib => lib.library_id),
-    sameIds
-);
-
 const searchableLibraryIdsSourceAtom = atom<number[]>((get) => {
     if (!get(isProfileLoadedAtom)) return [];
     const excluded = new Set(get(excludedLibrariesAtom).map(excludedEntryKey));
@@ -179,44 +163,6 @@ export const allLibrariesExcludedAtom = atom<boolean>((get) => {
     return get(isLibraryAccessReadyAtom) && get(searchableLibraryIdsAtom).length === 0;
 });
 
-// Plan data
-export const planIdAtom = atom<string>((get) => {
-    const profile = get(profileWithPlanAtom);
-    return profile?.plan.id || '';
-});
-
-export const planNameAtom = atom<string>((get) => {
-    const profile = get(profileWithPlanAtom);
-    return profile?.plan.name || 'Unknown';
-});
-
-export const planDisplayNameAtom = atom<string>((get) => {
-    const profile = get(profileWithPlanAtom);
-    return profile?.plan.display_name || 'Unknown';
-});
-
-export const isDatabaseSyncSupportedAtom = atom<boolean>((get) => {
-    const planFeatures = get(planFeaturesAtom);
-    return planFeatures?.databaseSync || false;
-});
-
-export const isBackendIndexingCompleteAtom = atom<boolean>((get) => {
-    const profile = get(profileWithPlanAtom);
-    const fileStatus = get(fileStatusAtom);
-    
-    // Only prioritize realtime data if it's actually available
-    // If fileStatus is null, it means either:
-    // 1. Realtime subscription hasn't connected yet (use profile as fallback)
-    // 2. User doesn't have pro access or databaseSync (use profile as source of truth)
-    // 3. Connection failed/disconnected (use profile as fallback)
-    if (fileStatus !== null) {
-        return fileStatus.indexing_complete;
-    }
-    
-    // Fallback to profile data (refreshed every 15 min via useProfileSync)
-    return profile?.indexing_complete || false;
-});
-
 /** Backend-computed OCR entitlement */
 export const hasOcrAccessAtom = selectAtom(
     profileWithPlanAtom,
@@ -248,22 +194,6 @@ export const cloudProductNameAtom = selectAtom(
 export const cloudBetaAtom = selectAtom(indexingPlanLabelAtom, (label) => label === null);
 
 export const processingModeAtom = atom<ProcessingMode>(() => ProcessingMode.FRONTEND);
-
-// Plan features
-export const planFeaturesAtom = atom<PlanFeatures>((get) => {
-    const profile = get(profileWithPlanAtom);
-    // The plan's own upload ceiling, which the backend enforces — unrelated to
-    // the local read ceiling in `attachmentLimits`. A plan row carries whatever
-    // the API returned, so treat anything but a positive number as unset.
-    const planFileSizeLimit = profile?.plan.max_file_size_mb;
-    return {
-        databaseSync: profile?.plan.sync_database || false,
-        uploadFiles: profile?.plan.upload_files || false,
-        maxUserAttachments: profile?.plan.max_user_attachments || 2,
-        uploadFileSizeLimit: planFileSizeLimit && planFileSizeLimit > 0 ? planFileSizeLimit : 10,
-        maxPageCount: effectiveMaxPageCount(profile?.plan.max_page_count ?? 100),
-    } as PlanFeatures;
-});
 
 // Spendable credits, not the raw pool. The backend zeroes the subscription side
 // for billing states that grant no access (unpaid, paused, incomplete, past_due
@@ -341,12 +271,7 @@ export const hasCreditPlanAtom = atom<boolean>((get) => {
     return status === 'active' || status === 'past_due';
 });
 
-// Onboarding state - separate atoms for pro and free authorization
-export const hasAuthorizedProAccessAtom = selectAtom(
-    profileWithPlanAtom,
-    (profile: SafeProfileWithPlan | null) => profile?.has_authorized_access || false
-);
-
+// Onboarding state
 export const hasAuthorizedFreeAccessAtom = selectAtom(
     profileWithPlanAtom,
     (profile: SafeProfileWithPlan | null) => profile?.has_authorized_free_access || false
@@ -360,23 +285,7 @@ export const hasAuthorizedAccessAtom = atom<boolean>((get) => {
     return profile.has_authorized_access || profile.has_authorized_free_access;
 });
 
-export const hasCompletedOnboardingAtom = atom<boolean>((get) => {
-    const profile = get(profileWithPlanAtom);
-    const isDatabaseSyncSupported = get(isDatabaseSyncSupportedAtom);
-    return (
-        profile?.has_completed_onboarding ||
-        // Free accounts don't need to complete onboarding
-        !isDatabaseSyncSupported ||
-        false
-    );
-});
-
 // Plan transition atoms
-export const pendingUpgradeConsentAtom = selectAtom(
-    profileWithPlanAtom,
-    (profile: SafeProfileWithPlan | null) => profile?.pending_upgrade_consent || false
-);
-
 export const pendingDowngradeAckAtom = selectAtom(
     profileWithPlanAtom,
     (profile: SafeProfileWithPlan | null) => profile?.pending_downgrade_ack || false
@@ -386,11 +295,6 @@ export const dataDeletionScheduledForAtom = selectAtom(
     profileWithPlanAtom,
     (profile: SafeProfileWithPlan | null) => profile?.data_deletion_scheduled_for || null
 );
-
-export const isMcpServerSupportedAtom = atom<boolean>((get) => {
-    const profile = get(profileWithPlanAtom);
-    return profile?.plan.mcp_server || false;
-});
 
 export const syncWithZoteroAtom = atom<boolean>((get) => {
     const profile = get(profileWithPlanAtom);
@@ -405,24 +309,7 @@ export const syncWithZoteroAtom = atom<boolean>((get) => {
 export const prefWindowFocusRefreshAtom = atom<boolean>(false);
 
 /**
- * Atom to signal that a sync request was denied due to plan restrictions.
- * When set to true, useProfileSync will force a profile refresh to update
- * the local plan state, which will cause isDatabaseSyncSupportedAtom to
- * update and useZoteroSync to unregister its observer.
- */
-export const syncDeniedForPlanAtom = atom<boolean>(false);
-
-/**
  * Signal atom: set to true when an error with has_beaver_fallback is displayed.
  * useProfileSync watches this and forces a profile refresh so credit state is up to date.
  */
 export const errorCreditCheckAtom = atom<boolean>(false);
-
-/**
- * Indexing progress atom - returns the current indexing progress (0-100)
- * from files_status realtime subscription, or from profile as fallback.
- */
-export const indexingProgressAtom = atom<number>((get) => {
-    const fileStatus = get(fileStatusAtom);
-    return fileStatus?.indexing_progress ?? 0;
-});

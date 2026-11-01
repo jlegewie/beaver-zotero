@@ -31,6 +31,7 @@ vi.mock('../../../react/host/zotero/components/reviewChanges/useRunActionRows', 
         mocks.useArtifactRows(runIds);
         return [];
     },
+    useEditedNoteArtifacts: () => [],
 }));
 
 vi.mock('../../../react/host/zotero/components/reviewChanges/ChangesCard', () => ({

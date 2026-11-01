@@ -5,8 +5,8 @@
  * Zotero shows for any snapshot: a file name, a URL, an "archived from" link.
  * None of that says anything about the table. This section replaces that
  * silence with the three facts a stored table has and a snapshot does not —
- * how big it is and how much of it is filled in, how much of it we are unsure
- * about, and which version it is at — plus the ways to open it.
+ * how big it is and how much of it is filled in, how much of it needs a
+ * second look, and which version it is at — plus the ways to open it.
  *
  * It is also where a table that went *backwards* is surfaced: a Zotero file
  * conflict resolved toward another device replaces the whole storage directory,
@@ -42,6 +42,7 @@
 
 import { renderTableDocumentActions, tableActionErrorMessage } from './tableDocumentActions';
 import { logger } from '@beaver/agent-core/platform/logger';
+import { getAnnotationIDs } from '../utils/zoteroDataLoading';
 import { summarize } from '@beaver/agent-core/layouts/tableMutations';
 import type { TableSpec } from '@beaver/agent-core/layouts/table';
 import {
@@ -189,8 +190,17 @@ export interface TableSectionData {
     fields: TableSectionFields;
     /** Why the counts are missing, when they are. */
     reason: string | null;
-    /** Whether the reader action has a file to open. */
-    hasFile: boolean;
+    /**
+     * Whether "Open table" would open it: the table is not in the trash and
+     * its `table.json` reads (or rebuilds from history). The snapshot is not
+     * required; opening re-renders a missing one.
+     */
+    canOpen: boolean;
+    /**
+     * The table went backwards or cannot be read, and "Restore my version"
+     * would write this device's last version back as a new version.
+     */
+    canRestore?: boolean;
 }
 
 /** Column headers by id, so a distribution read from a spec is labelled. */
@@ -212,7 +222,8 @@ async function annotationDates(item: Zotero.Item): Promise<string[]> {
     try {
         if (!item.isFileAttachment()) return [];
         await item.loadDataType('childItems');
-        return (item.getAnnotations() as Zotero.Item[])
+        const annotations = await Zotero.Items.getAsync(await getAnnotationIDs(item));
+        return annotations
             .map((annotation) => annotation?.dateAdded)
             .filter((date): date is string => typeof date === 'string' && !!date);
     } catch (error) {
@@ -245,15 +256,27 @@ export async function readTableSectionData(
     } else {
         reason = read.message;
     }
-
-    let hasFile = false;
-    try {
-        hasFile = !!(await item.getFilePathAsync());
-    } catch (error) {
-        logger(`tableItemPane: could not resolve the file: ${String(error)}`, 2);
+    // Offered only where it would work: the store checks the retained copy,
+    // the library and the table's current file the way the restore does.
+    let canRestore = false;
+    const check = getTablesApi()?.shadow.check;
+    if (check && (input.conflict || (!read.ok && read.code !== 'no_file'))) {
+        const outcome = await check({ libraryID: item.libraryID, key: item.key });
+        canRestore = outcome === 'ok';
+        if (input.conflict) {
+            input.conflict = {
+                ...input.conflict,
+                restorable: outcome === 'ok' || outcome === 'not_writable' || outcome === 'unavailable',
+                writable: outcome !== 'not_writable',
+                unavailable: outcome === 'unavailable',
+            };
+        }
     }
 
-    return { fields: buildTableSectionFields(input), reason, hasFile };
+    // The checks openTable makes before showing anything.
+    const canOpen = !item.deleted && read.ok;
+
+    return { fields: buildTableSectionFields(input), reason, canOpen, canRestore };
 }
 
 /** Compare the recovery shadow with the validated document, never the sidecar. */
@@ -398,7 +421,7 @@ async function populateSection({
         const open = body.querySelector<HTMLButtonElement>(
             '[data-beaver-action="open"]'
         );
-        if (open) open.disabled = !data.hasFile;
+        if (open) open.disabled = !data.canOpen;
 
         const restore = body.querySelector<HTMLButtonElement>(
             '[data-beaver-action="restore-shadow"]'
@@ -406,8 +429,8 @@ async function populateSection({
         if (restore) {
             const actions = tableSectionActions(
                 windowOf(doc),
-                data.hasFile,
-                !!data.fields.conflict?.restorable
+                data.canOpen,
+                !!data.canRestore
             );
             restore.disabled = !actions.restoreShadow;
             restore.hidden = !actions.restoreShadow;
@@ -471,9 +494,9 @@ export interface TableSectionActions {
     open: boolean;
     showInLibrary: boolean;
     /**
-     * True only for a table another device's copy replaced whose own version is
-     * still retained. There is nothing to restore otherwise, and an enabled
-     * button that cannot work is worse than no button.
+     * True only when the restore would run: the table went backwards or cannot
+     * be read, this device's version is retained and verifies, and the library
+     * can be written. An enabled button that cannot work is worse than none.
      */
     restoreShadow: boolean;
 }
@@ -487,18 +510,18 @@ function canShowInLibrary(win: Window | null): boolean {
 /**
  * What the section's buttons would do for this item.
  *
- * `open` needs a file on disk and `restoreShadow` needs a retained version,
- * neither of which is knowable without a read, so both are passed in rather
- * than guessed.
+ * `open` needs a readable table outside the trash and `restoreShadow` needs a
+ * retained version, neither of which is knowable without a read, so both are
+ * passed in rather than guessed.
  */
 export function tableSectionActions(
     win: Window | null,
-    hasFile: boolean,
+    canOpen: boolean,
     canRestoreShadow = false
 ): TableSectionActions {
     const api = !!getTablesApi();
     return {
-        open: api && hasFile,
+        open: api && canOpen,
         showInLibrary: canShowInLibrary(win),
         restoreShadow: api && canRestoreShadow,
     };
@@ -513,19 +536,21 @@ function refOf(item: Zotero.Item): TableRef {
 }
 
 /**
- * Opens the table in the reader, through the shared namespace.
+ * Opens the table in the Beaver tab of the window this section is in, through
+ * the shared namespace. The section also renders in the reader's context
+ * pane; that is still the same main window.
  *
  * `Zotero.__beaverTables` rather than a direct import even though this module
  * is in the same bundle as `openTable`: the namespace is the one seam every
  * caller of a table surface uses, and going through it means a torn-down bundle
  * reports "not up" instead of running a dead realm's closure.
  */
-async function openTable(ref: TableRef): Promise<string> {
+async function openTable(ref: TableRef, win: Window | null): Promise<string> {
     const api = getTablesApi();
     if (!api) {
         return 'Table document actions are unavailable.';
     }
-    const outcome = await api.openTable(ref);
+    const outcome = await api.openTable(ref, { window: win });
     return 'error' in outcome ? outcome.error : outcome.warning ?? '';
 }
 
@@ -569,10 +594,10 @@ function renderActions(doc: Document, item: Zotero.Item): HTMLElement {
     const status = doc.createElement('div');
     status.setAttribute('role', 'status');
     wrapper.append(
-        // Enabled optimistically; the async half disables it when the item has
-        // no file, which is the only way to know.
+        // Enabled optimistically; the async half disables it when the table
+        // is trashed or unreadable, which only a read can tell.
         button(doc, 'open', 'Open table', actions.open, () =>
-            void openTable(ref).then((message) => { status.textContent = message; })
+            void openTable(ref, win).then((message) => { status.textContent = message; })
         ),
         button(doc, 'library', 'Show in library', actions.showInLibrary, () =>
             showInLibrary(win, item)
@@ -667,7 +692,7 @@ export async function describeTableItemPane(
         actions: tableSectionActions(win, false),
     };
 
-    const item = Zotero.Items.getByLibraryAndKey(ref.libraryID, ref.key) as
+    const item = await Zotero.Items.getByLibraryAndKeyAsync(ref.libraryID, ref.key) as
         | Zotero.Item
         | false;
     if (!item) {
@@ -690,8 +715,8 @@ export async function describeTableItemPane(
         fields: data.fields,
         actions: tableSectionActions(
             win,
-            data.hasFile,
-            !!data.fields.conflict?.restorable
+            data.canOpen,
+            !!data.canRestore
         ),
     };
 }

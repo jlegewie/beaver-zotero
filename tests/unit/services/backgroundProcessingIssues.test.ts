@@ -42,6 +42,30 @@ describe('classifyProcessingIssue', () => {
         }
     });
 
+    it('separates permission-denied reads from generic extraction failures', () => {
+        for (const lastError of ['file_permission_denied', 'file_permission_denied: Zotero does not have permission']) {
+            expect(classifyProcessingIssue(row({ extractStatus: 'failed', lastError }), withOcr)).toBe('permission_denied');
+        }
+        expect(classifyProcessingIssue(row({ extractStatus: 'failed', lastError: 'extraction_failed: boom' }), withOcr))
+            .toBe('extract_failed');
+        expect(classifyProcessingIssue(row({ extractStatus: 'done', ocrStatus: 'failed',
+            lastError: 'ocr_local_read_failed: file_permission_denied' }), withOcr)).toBe('permission_denied');
+    });
+
+    it('groups dead-lettered permission denials from either read stage under their own reason', () => {
+        const dead = (jobType: string, zoteroKey: string, lastError: string) =>
+            ({ jobType, libraryId: 1, zoteroKey, lastError, diedAt: 1 });
+        const groups = groupProcessingIssues([], [
+            dead('document_extract', 'EXTRACT1', 'file_permission_denied: Zotero does not have permission'),
+            dead('document_ocr', 'OCRDENY1', 'ocr_local_read_failed: file_permission_denied'),
+            dead('document_ocr', 'OCRFAIL1', 'ocr_unexpected: boom'),
+        ], withOcr);
+        expect(groups.map(({ reason, count }) => ({ reason, count }))).toEqual([
+            { reason: 'permission_denied', count: 2 },
+            { reason: 'ocr_failed', count: 1 },
+        ]);
+    });
+
     it('recognises encrypted, oversized and unsupported files', () => {
         expect(classifyProcessingIssue(row({ extractStatus: 'skipped', lastError: 'encrypted' }), noOcr)).toBe('encrypted');
         expect(classifyProcessingIssue(row({ extractStatus: 'skipped', lastError: 'too_many_pages' }), noOcr)).toBe('too_large');

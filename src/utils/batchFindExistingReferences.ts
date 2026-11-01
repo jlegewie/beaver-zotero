@@ -48,6 +48,12 @@ export interface BatchReferenceCheckItem {
     id: string;
     /** Reference data to check */
     data: FindReferenceData;
+    /**
+     * Whether `data.ISBN` identifies this reference (default true). Pass false
+     * for a part of a book, which carries its volume's ISBN: the ISBN then only
+     * rejects title matches from another volume.
+     */
+    matchByISBN?: boolean;
 }
 
 /**
@@ -134,7 +140,7 @@ function cleanIdentifiers(items: BatchReferenceCheckItem[]): {
             }
         }
 
-        if (item.data.ISBN) {
+        if (item.data.ISBN && item.matchByISBN !== false) {
             const cleanISBN = Zotero.Utilities.cleanISBN(String(item.data.ISBN));
             if (cleanISBN) {
                 const existing = isbnMap.get(cleanISBN) || [];
@@ -227,8 +233,11 @@ async function batchFindByIdentifiers(
         }
     })();
 
+    // An ISBN identifies a book: chapters and conference papers carry the ISBN
+    // of their volume, so only existing books match on it.
+    const bookTypeID = Zotero.ItemTypes.getID('book');
     const isbnPromise = (async () => {
-        if (!(isbnMap.size > 0 && isbnFieldID)) return;
+        if (!(isbnMap.size > 0 && isbnFieldID && bookTypeID)) return;
         const isbnLikeClauses = Array.from(isbnMap.keys()).map(() => `REPLACE(REPLACE(idv.value, '-', ''), ' ', '') LIKE ?`);
         const isbnLikeParams = Array.from(isbnMap.keys()).map(isbn => `%${isbn}%`);
 
@@ -240,12 +249,13 @@ async function batchFindByIdentifiers(
             LEFT JOIN deletedItems di ON i.itemID = di.itemID
             WHERE i.libraryID IN (${libraryPlaceholders})
             AND id.fieldID = ?
+            AND i.itemTypeID = ?
             AND (${isbnLikeClauses.join(' OR ')})
             AND di.itemID IS NULL
         `;
 
         try {
-            const params = [...libraryIds, isbnFieldID, ...isbnLikeParams];
+            const params = [...libraryIds, isbnFieldID, bookTypeID, ...isbnLikeParams];
             const matchedRows: { library_id: number; zotero_key: string; cleanISBN: string }[] = [];
             await Zotero.DB.queryAsync(sql, params, {
                 onRow: (row: any) => {

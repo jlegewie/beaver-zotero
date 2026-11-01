@@ -1,4 +1,4 @@
-# Collection resolution and read responses
+# Collection identity and resolution
 
 `src/services/collections/collectionIdentity.ts` is the React-free lookup boundary.
 `resolveCollection` accepts portable IDs (`u-KEY`, `g12345-KEY`), legacy local
@@ -26,8 +26,9 @@ It returns null only for a missing collection; other typed failures propagate.
 
 ## Additive wire contract
 
-Existing request fields and native response keys retain their meanings. No new
-collection capability is advertised by this change.
+Existing request fields and native response keys retain their meanings. The
+`collection_ids` capability additionally covers the mutation and client contracts
+described below.
 
 | Response | Additional fields |
 | --- | --- |
@@ -47,9 +48,8 @@ Ambiguity messages provide portable candidates with readable parent paths only
 within the permitted scope. Missing portable mapping produces an availability error,
 never a fabricated personal-library ID.
 
-Mutation lifecycle identity, historical payload migration, and model-facing output
-activation are separate work. The optional fields above do not change the meaning
-of native execution or undo records.
+Model-facing output activation is controlled by the backend. The optional fields
+above do not change the meaning of native execution or undo records.
 
 Resolution failures identify the supplied reference and suggest a bounded retry:
 rediscover a missing ID with `list_collections`, correct conflicting explicit library
@@ -60,6 +60,63 @@ same request after initialization. Errors never suggest stripping qualification 
 removing a narrowing condition to obtain results, and do not expose excluded names,
 paths, or inferred library mappings.
 
+The `collection_ids` client capability is advertised in both the chat and Zotero
+provider handshakes through the shared Zotero client identity. A backend must
+check the executing provider as well as the consuming client before switching
+its model-facing interface. `portable_ids` alone does not imply this support.
+
+## Mutation and client compatibility
+
+Existing required fields retain their meanings. Older backends may ignore these
+fields and continue using the native key plus library pair.
+
+| Surface | Portable fields | Native fields retained |
+| --- | --- | --- |
+| Collection reference, attachment, filter, current collection, metadata membership | `collection_id`, optional `parent_collection_id` | `zotero_key` or `collection_key`, library identity, parent key |
+| Create collection validation | `parent_collection_id`, `library_ref` | `parent_key`, `library_id` |
+| Create collection result | `collection_id`, `library_ref` | `collection_key`, `library_id` |
+| Manage collections proposal/result | `collection_id`, `new_parent_collection_id`; result also `old_parent_collection_id` | target and parent keys, library identity, undo snapshot |
+| Create item validation/result and create note validation/result | `collection_ids` | `collection_keys`, legacy singular note key, library identity |
+| Organize items result | `collection_ids_added`, `collection_ids_removed` | `collections_added`, `collections_removed`; owning item IDs scope the native memberships |
+
+Validation's `normalized_action_data` must be merged into the action before
+execution or persistence. It retains exact keys and portable library references.
+Create-item validation returns both `collections` and `collection_keys` so batch
+inputs and per-item proposals can retain the resolved memberships. Collection
+names in organize-item validation include native and portable map keys.
+
+Execution rechecks the recorded identity, current access, editability, existence,
+and applicable move/delete guards. A name is never resolved to a replacement
+collection after approval. A parent or target a create/rename/move/delete names
+must still exist: it fails before any write. A membership that no longer exists
+is dropped instead. For a remove, the requested state already holds. For an add
+by create-item, create-note, or a manually executed or redone organize-items, the
+item, note or tag changes still apply without it; a redo of an undone
+create-collection recreates it under a new key, so earlier memberships cannot
+resolve. The in-run organize-items executor still fails a missing add target so
+the model does not treat incomplete work as done. Child notes inherit
+their parent's membership and do not receive direct collection assignments.
+Restore permits a trashed collection only through an explicit exact-identity
+lookup and rechecks its parent.
+
+Undo resolves recorded targets the same way with two allowances, because it is
+the user's only way back out of an applied action: it accepts a trashed
+collection, whose memberships still exist, and treats a collection that is gone
+entirely as nothing left to restore, continuing with the rest of the undo.
+Access, editability and library-availability failures still stop it. Resolution
+errors quote the reference the caller supplied, never one the recheck qualified
+on its behalf.
+
+Readers accept portable ID-only collection rows, scoped legacy keys, and
+historical compound keys. Structured action and attachment decoding preserves
+portable identity without rewriting prose. Explicit collection navigation keeps
+its collection kind; ambiguous unscoped batch keys do not select a first match.
+Batch outcome groups can reconcile a native key with a portable ID only when the
+batch supplies its library reference.
+
+Regression fixtures live in the collection mutation lifecycle, item import,
+note collection resolution, and collection compatibility unit suites.
+
 ## Backend integration follow-ups
 
 The backend must preserve `unresolved_collections` in model-facing discovery
@@ -69,12 +126,9 @@ repeated aliases. Typed plugin errors should retain their recovery message rathe
 than being wrapped with another “Collection not found” prefix or replaced.
 
 Search input validation must allow the collection reference grammar described
-above. Write tools need a coordinated normalization step before broadening their
-model-facing inputs: `create_collection` currently consumes a native `parent_key`,
-and `organize_items` consumes native collection keys scoped to the items' library.
-Resolve richer references under that same library constraint and persist normalized
-keys for execution and undo; changing only the backend schema is insufficient.
+above. Write tools persist the normalized keys and portable references returned
+in `normalized_action_data`; changing only the backend schema is insufficient.
 
 Full metadata memberships exclude trashed collections. Collection write validation
 rejects trashed targets, and execution rechecks create parents, move parents and
-sources, and organize add targets after approval.
+sources, and organize memberships after approval.

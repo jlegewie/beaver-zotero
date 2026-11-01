@@ -1,9 +1,9 @@
+import { readCollectionActionData } from '../identity/collectionActionData';
 import { ZoteroItemReference } from '../types/zotero';
 import { hasLibraryIdentity } from '../identity/libraryRef';
 import {
     ActionStatus,
     ActionType,
-    NoteProposedData,
     EditMetadataProposedData,
 } from '../types/agentActions/base';
 import {
@@ -12,6 +12,7 @@ import {
     normalizeNotePosition,
 } from '../types/agentActions/annotations';
 import type { CreateItemProposedData, CreateItemResultData } from '../types/agentActions/items';
+import type { ImportItemProposedData, ImportItemResultData } from '../types/itemImport';
 import type { ManageCollectionsProposedData, ManageCollectionsResultData } from '../types/agentActions/base';
 import type {
     CreatedAnnotationResult,
@@ -23,7 +24,7 @@ import type {
     HighlightAnnotationItem,
     NoteAnnotationItem,
 } from '../types/agentActions/createAnnotations';
-import { normalizeAnnotationTags } from '../types/agentActions/createAnnotations';
+import { normalizeAnnotationTags, textAnnotationStyle } from '../types/agentActions/createAnnotations';
 import type {
     AnnotationPlacementSnapshot,
     AnnotationPreviewSnapshot,
@@ -101,13 +102,6 @@ export const isEditAnnotationsAgentAction = (action: AgentAction): action is Edi
     action.action_type === 'edit_annotations';
 
 /**
- * Type guard for zotero note actions
- */
-export const isZoteroNoteAgentAction = (action: AgentAction): boolean => {
-    return action.action_type === 'zotero_note';
-};
-
-/**
  * Type guard for create note actions (via create_note tool)
  */
 export const isCreateNoteAgentAction = (action: AgentAction): boolean => {
@@ -120,6 +114,41 @@ export const isCreateNoteAgentAction = (action: AgentAction): boolean => {
 export const isCreateItemAgentAction = (action: AgentAction): action is CreateItemAgentAction => {
     return action.action_type === 'create_item';
 };
+
+/**
+ * Type guard for import item actions (create_items v2)
+ */
+export const isImportItemAgentAction = (action: AgentAction): action is ImportItemAgentAction => {
+    return action.action_type === 'import_item';
+};
+
+/** Actions whose apply creates one new top-level library item: `create_item` and `import_item`. */
+export type ItemCreatingAgentAction = CreateItemAgentAction | ImportItemAgentAction;
+
+export const isItemCreatingAgentAction = (action: AgentAction): action is ItemCreatingAgentAction =>
+    isCreateItemAgentAction(action) || isImportItemAgentAction(action);
+
+/**
+ * The library item an applied item-creating action created. Both result shapes
+ * carry the same reference, so callers need not branch on the action type.
+ */
+export function createdItemRef(action: AgentAction): ZoteroItemReference | null {
+    if (!isItemCreatingAgentAction(action)) return null;
+    const result = action.result_data;
+    if (!result?.zotero_key || !hasLibraryIdentity(result)) return null;
+    return {
+        library_id: result.library_id,
+        zotero_key: result.zotero_key,
+        ...(result.library_ref ? { library_ref: result.library_ref } : {}),
+    };
+}
+
+/** The search-provider id an item-creating action imports (external-reference markers), if any. */
+export function itemActionExternalId(action: AgentAction): string | undefined {
+    if (isCreateItemAgentAction(action)) return action.proposed_data?.item?.source_id || undefined;
+    if (isImportItemAgentAction(action)) return action.proposed_data?.source?.external_id || undefined;
+    return undefined;
+}
 
 /**
  * Type guard for edit metadata actions
@@ -189,6 +218,15 @@ export const isConfirmExternalSearchAgentAction = (action: AgentAction): boolean
 };
 
 /**
+ * Typed agent action for import_item actions (create_items v2)
+ */
+export type ImportItemAgentAction = AgentAction & {
+    action_type: 'import_item';
+    proposed_data: ImportItemProposedData;
+    result_data?: ImportItemResultData;
+};
+
+/**
  * Typed agent action for create_item actions
  */
 export type CreateItemAgentAction = AgentAction & {
@@ -223,6 +261,26 @@ export type EditAnnotationsAgentAction = AgentAction & {
     proposed_data: EditAnnotationsProposedData;
     result_data?: EditAnnotationsResultData;
 };
+
+/**
+ * `error_details.outcome` when the backend closed an action out without an
+ * answer from Zotero: the change was sent and the plugin stopped responding
+ * before it reported what happened.
+ */
+const UNCONFIRMED_OUTCOME = 'unconfirmed';
+
+/**
+ * True when an errored action's effect on the library is unknown, rather than
+ * known to have failed or known to have landed.
+ *
+ * Only the backend can tell these apart — it knows whether the plugin ever
+ * received the request — so it says so explicitly instead of leaving the
+ * client to read it out of `result_data`, which is absent both for a change
+ * that never ran and for one whose outcome never came back.
+ */
+export function isUnconfirmedAction(action: AgentAction): boolean {
+    return action.status === 'error' && action.error_details?.outcome === UNCONFIRMED_OUTCOME;
+}
 
 /**
  * Check if an agent action has been applied and has a Zotero item reference.
@@ -481,6 +539,7 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
                 ? proposedData.items.map(normalizeHighlightAnnotationItem)
                 : [],
             tags: normalizeAnnotationTags(proposedData.tags),
+            ...(textAnnotationStyle(proposedData.style) === 'underline' ? { style: 'underline' } : {}),
         } as CreateHighlightAnnotationsProposedData;
     } else if (actionType === 'create_note_annotations') {
         proposedData = {
@@ -540,33 +599,6 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
                 ...carried,
             } as EditAnnotationsProposedData;
         }
-    } else if (actionType === 'zotero_note') {
-        const libraryIdRaw = proposedData.library_id ?? proposedData.libraryId;
-        const zoteroKeyRaw = proposedData.zotero_key ?? proposedData.zoteroKey;
-        const rawTag = proposedData.raw_tag ?? proposedData.rawTag;
-
-        let normalizedLibraryId: number | undefined;
-        if (libraryIdRaw !== undefined && libraryIdRaw !== null) {
-            const parsed = typeof libraryIdRaw === 'number' ? libraryIdRaw : Number(libraryIdRaw);
-            normalizedLibraryId = Number.isNaN(parsed) ? undefined : parsed;
-        }
-
-        proposedData = {
-            title: proposedData.title ?? '',
-            content: typeof proposedData.content === 'string' || proposedData.content === null
-                ? proposedData.content
-                : (proposedData.content ?? null),
-            library_id: normalizedLibraryId,
-            zotero_key: typeof zoteroKeyRaw === 'string'
-                ? zoteroKeyRaw
-                : (zoteroKeyRaw !== undefined && zoteroKeyRaw !== null ? String(zoteroKeyRaw) : undefined),
-            library_ref: typeof proposedData.library_ref === 'string'
-                ? proposedData.library_ref
-                : (typeof proposedData.libraryRef === 'string' ? proposedData.libraryRef : undefined),
-            library: typeof proposedData.library === 'string' ? proposedData.library : undefined,
-            collection: typeof proposedData.collection === 'string' ? proposedData.collection : undefined,
-            raw_tag: typeof rawTag === 'string' ? rawTag : undefined,
-        } as NoteProposedData;
     } else if (actionType === 'create_item') {
         const libraryIdRaw = proposedData.library_id ?? proposedData.libraryId;
         const parsedLibraryId = libraryIdRaw == null || libraryIdRaw === ''
@@ -584,9 +616,26 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
             downloaded_url: proposedData.downloaded_url ?? proposedData.downloadedUrl,
             storage_path: proposedData.storage_path ?? proposedData.storagePath,
             text_path: proposedData.text_path ?? proposedData.textPath,
+            collection_ids: proposedData.collection_ids,
             collection_keys: proposedData.collection_keys ?? proposedData.collectionKeys,
             suggested_tags: proposedData.suggested_tags ?? proposedData.suggestedTags,
         } as CreateItemProposedData;
+    } else if (actionType === 'import_item') {
+        const libraryIdRaw = proposedData.library_id ?? proposedData.libraryId;
+        const parsedLibraryId = libraryIdRaw == null || libraryIdRaw === ''
+            ? undefined
+            : (typeof libraryIdRaw === 'number' ? libraryIdRaw : Number(libraryIdRaw));
+        const source = proposedData.source && typeof proposedData.source === 'object'
+            ? proposedData.source
+            : { kind: 'identifier', input: '' };
+        proposedData = {
+            ...proposedData,
+            library_id: Number.isNaN(parsedLibraryId) ? undefined : parsedLibraryId,
+            library_ref: proposedData.library_ref ?? proposedData.libraryRef,
+            source,
+            pdf_candidates: Array.isArray(proposedData.pdf_candidates) ? proposedData.pdf_candidates : [],
+            tags: Array.isArray(proposedData.tags) ? proposedData.tags : undefined,
+        } as ImportItemProposedData;
     } else if (actionType === 'edit_metadata') {
         // Normalize edit_metadata proposed data
         const edits = Array.isArray(proposedData.edits) ? proposedData.edits : [];
@@ -622,6 +671,7 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
                 : Number(proposedData.library_id ?? proposedData.libraryId ?? 0),
             library_ref: proposedData.library_ref ?? proposedData.libraryRef,
             name: proposedData.name ?? '',
+            parent_collection_id: proposedData.parent_collection_id,
             parent_key: proposedData.parent_key ?? proposedData.parentKey ?? null,
             item_ids: proposedData.item_ids ?? proposedData.itemIds ?? [],
         };
@@ -631,6 +681,7 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
             item_ids: proposedData.item_ids ?? proposedData.itemIds ?? [],
             tags: proposedData.tags ?? null,
             collections: proposedData.collections ?? null,
+            collection_ids: proposedData.collection_ids,
             current_state: proposedData.current_state ?? proposedData.currentState ?? null,
         };
     } else if (actionType === 'confirm_extraction') {
@@ -719,18 +770,22 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
             ...(skipped?.length ? { skipped } : {}),
             ...(relocated?.length ? { relocated } : {}),
         } as EditAnnotationsResultData;
-    } else if (resultData && actionType === 'zotero_note') {
+    } else if (resultData && actionType === 'import_item') {
         const zoteroKey = resultData.zotero_key ?? resultData.zoteroKey;
         const libraryId = resultData.library_id ?? resultData.libraryId;
         const libraryRef = resultData.library_ref ?? resultData.libraryRef;
-        const parentKey = resultData.parent_key ?? resultData.parentKey;
         if (zoteroKey) {
             resultData = {
                 zotero_key: String(zoteroKey),
                 library_id: typeof libraryId === 'number' ? libraryId : Number(libraryId ?? 0),
                 ...(typeof libraryRef === 'string' && libraryRef ? { library_ref: libraryRef } : {}),
-                ...(parentKey ? { parent_key: String(parentKey) } : {})
-            };
+                collection_ids: resultData.collection_ids,
+                collection_keys: resultData.collection_keys,
+                attachment_status: resultData.attachment_status ?? resultData.attachmentStatus ?? 'none',
+                attachment_key: resultData.attachment_key ?? resultData.attachmentKey,
+                attachment_resolved_at: resultData.attachment_resolved_at ?? resultData.attachmentResolvedAt,
+                file_attachment_key: resultData.file_attachment_key ?? resultData.fileAttachmentKey,
+            } as ImportItemResultData;
         }
     } else if (resultData && actionType === 'create_item') {
         const zoteroKey = resultData.zotero_key ?? resultData.zoteroKey ?? resultData.item_key ?? resultData.itemKey;
@@ -742,11 +797,18 @@ export function toAgentAction(raw: Record<string, any>): AgentAction {
                 zotero_key: String(zoteroKey),
                 library_id: typeof libraryId === 'number' ? libraryId : Number(libraryId ?? 0),
                 ...(typeof libraryRef === 'string' && libraryRef ? { library_ref: libraryRef } : {}),
+                collection_ids: resultData.collection_ids,
+                collection_keys: resultData.collection_keys,
                 attachment_status: resultData.attachment_status ?? resultData.attachmentStatus ?? 'none',
                 attachment_key: resultData.attachment_key ?? resultData.attachmentKey,
                 attachment_resolved_at: resultData.attachment_resolved_at ?? resultData.attachmentResolvedAt,
             };
         }
+    }
+
+    if (['create_collection', 'manage_collections'].includes(actionType)) {
+        proposedData = readCollectionActionData(proposedData);
+        if (resultData) resultData = readCollectionActionData(resultData);
     }
 
     return {

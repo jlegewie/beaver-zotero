@@ -1,0 +1,375 @@
+{
+    "name": "a column whose role this version does not know is never counted as unattempted",
+    "spec": {
+        "id": "t1",
+        "spec_version": 2,
+        "title": "Sampling methods",
+        "description": "How the papers sampled their respondents.",
+        "anchor_column_id": "_reference",
+        "sources": [
+            {
+                "id": "s1",
+                "type": "items",
+                "ids": [
+                    "u-AAA",
+                    "u-BBB",
+                    "u-CCC"
+                ]
+            }
+        ],
+        "columns": [
+            {
+                "id": "_reference",
+                "header": "Reference",
+                "type": "reference",
+                "system": true
+            },
+            {
+                "id": "_year",
+                "header": "Year",
+                "type": "date",
+                "system": true,
+                "priority": "secondary"
+            },
+            {
+                "id": "_identifier",
+                "header": "Identifier",
+                "type": "link",
+                "system": true,
+                "priority": "secondary"
+            },
+            {
+                "id": "method",
+                "header": "Method",
+                "type": "text",
+                "description": "What method does the paper use?"
+            },
+            {
+                "id": "adults",
+                "header": "Adults",
+                "type": "select",
+                "role": "criterion",
+                "description": "Study population is adults.",
+                "options": [
+                    {
+                        "label": "yes",
+                        "color": "green"
+                    },
+                    {
+                        "label": "no",
+                        "color": "red"
+                    },
+                    {
+                        "label": "unclear",
+                        "color": "gray"
+                    }
+                ]
+            },
+            {
+                "id": "decision",
+                "header": "Decision",
+                "type": "select",
+                "role": "decision",
+                "options": [
+                    {
+                        "label": "include",
+                        "color": "green"
+                    },
+                    {
+                        "label": "exclude",
+                        "color": "red"
+                    },
+                    {
+                        "label": "unsure",
+                        "color": "gray"
+                    }
+                ]
+            },
+            {
+                "id": "ft_adults",
+                "header": "Adults (full text)",
+                "type": "select",
+                "role": "some_future_role",
+                "description": "The full text reports an adult study population.",
+                "options": [
+                    {
+                        "label": "yes",
+                        "color": "green"
+                    },
+                    {
+                        "label": "no",
+                        "color": "red"
+                    }
+                ]
+            }
+        ],
+        "rows": [
+            {
+                "id": "r1",
+                "ref": {
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "AAA",
+                    "library_id": 1
+                },
+                "documents": [
+                    "u-AAAPDF"
+                ],
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Alpha 2020",
+                            "title": "Sampling hard-to-reach groups",
+                            "item_type": "journalArticle"
+                        }
+                    },
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "date",
+                            "value": "2020"
+                        }
+                    },
+                    "_identifier": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "link",
+                            "url": "https://doi.org/10.1000/alpha",
+                            "label": "10.1000/alpha"
+                        }
+                    },
+                    "decision": {
+                        "outcome": "answered",
+                        "provenance": "user",
+                        "value": {
+                            "kind": "select",
+                            "label": "include"
+                        }
+                    },
+                    "adults": {
+                        "outcome": "answered",
+                        "provenance": "model",
+                        "value": {
+                            "kind": "select",
+                            "label": "yes"
+                        },
+                        "reasoning": "The abstract says adult respondents."
+                    },
+                    "ft_adults": {
+                        "outcome": "answered",
+                        "provenance": "model",
+                        "value": {
+                            "kind": "select",
+                            "label": "yes"
+                        },
+                        "documents": [
+                            "u-AAAPDF"
+                        ]
+                    }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
+            },
+            {
+                "id": "r2",
+                "ref": {
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "BBB",
+                    "library_id": 1
+                },
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Beta 2019",
+                            "title": "Mail surveys revisited",
+                            "item_type": "journalArticle"
+                        }
+                    },
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "date",
+                            "value": "2019"
+                        }
+                    },
+                    "decision": {
+                        "outcome": "answered",
+                        "provenance": "user",
+                        "value": {
+                            "kind": "select",
+                            "label": "exclude"
+                        }
+                    }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
+            },
+            {
+                "id": "r3",
+                "ref": {
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "CCC",
+                    "library_id": 1
+                },
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Gamma 2021",
+                            "title": "Register studies in practice",
+                            "item_type": "journalArticle"
+                        }
+                    },
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "date",
+                            "value": "2021"
+                        }
+                    }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
+            }
+        ]
+    },
+    "summary": {
+        "rows": 3,
+        "columns": 7,
+        "sources": 1,
+        "in_scope_rows": 1,
+        "failed_rows": 0,
+        "user_edits": 2,
+        "columns_detail": {
+            "_reference": {
+                "type": "reference",
+                "answered": 3,
+                "not_reported": 0,
+                "failed": 0,
+                "cleared": 0,
+                "unattempted": 0,
+                "in_failed_rows": 0,
+                "stale": 0,
+                "needs_review": 0,
+                "title_abstract_only": 0,
+                "system": true
+            },
+            "_year": {
+                "type": "date",
+                "answered": 3,
+                "not_reported": 0,
+                "failed": 0,
+                "cleared": 0,
+                "unattempted": 0,
+                "in_failed_rows": 0,
+                "stale": 0,
+                "needs_review": 0,
+                "title_abstract_only": 0,
+                "system": true
+            },
+            "_identifier": {
+                "type": "link",
+                "answered": 1,
+                "not_reported": 0,
+                "failed": 0,
+                "cleared": 0,
+                "unattempted": 0,
+                "in_failed_rows": 0,
+                "stale": 0,
+                "needs_review": 0,
+                "title_abstract_only": 0,
+                "system": true
+            },
+            "method": {
+                "type": "text",
+                "answered": 0,
+                "not_reported": 0,
+                "failed": 0,
+                "cleared": 0,
+                "unattempted": 1,
+                "in_failed_rows": 0,
+                "stale": 0,
+                "needs_review": 0,
+                "title_abstract_only": 0
+            },
+            "adults": {
+                "type": "select",
+                "answered": 1,
+                "not_reported": 0,
+                "failed": 0,
+                "cleared": 0,
+                "unattempted": 2,
+                "in_failed_rows": 0,
+                "stale": 1,
+                "needs_review": 0,
+                "title_abstract_only": 1,
+                "role": "criterion",
+                "distribution": {
+                    "yes": 1
+                }
+            },
+            "decision": {
+                "type": "select",
+                "answered": 2,
+                "not_reported": 0,
+                "failed": 0,
+                "cleared": 0,
+                "unattempted": 0,
+                "in_failed_rows": 0,
+                "stale": 0,
+                "needs_review": 0,
+                "title_abstract_only": 0,
+                "role": "decision",
+                "distribution": {
+                    "include": 1,
+                    "exclude": 1
+                }
+            },
+            "ft_adults": {
+                "type": "select",
+                "answered": 1,
+                "not_reported": 0,
+                "failed": 0,
+                "cleared": 0,
+                "unattempted": 0,
+                "in_failed_rows": 0,
+                "stale": 0,
+                "needs_review": 0,
+                "title_abstract_only": 0,
+                "role": "some_future_role",
+                "distribution": {
+                    "yes": 1
+                }
+            }
+        }
+    }
+}

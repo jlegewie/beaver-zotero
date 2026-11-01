@@ -18,7 +18,7 @@ import { CollectionReference } from '@beaver/agent-core/types/zotero';
 import { collectionToReference } from '../utils/zoteroReferences';
 import { sendWSMessageAtom } from './agentRunAtoms';
 import { newThreadAtom } from './threads';
-import { profileWithPlanAtom, isDeviceAuthorizedAtom, isDatabaseSyncSupportedAtom } from './profile';
+import { profileWithPlanAtom, isDeviceAuthorizedAtom } from './profile';
 import { libraryItemCountAtom, SMALL_LIBRARY_THRESHOLD } from './zoteroContext';
 import { isWebSearchAllowedAtom, isWebSearchEnabledAtom } from './ui';
 import { beaverDefaultModelAtom, updateSelectedModelAtom } from './models';
@@ -119,10 +119,8 @@ export const isFirstRunVisibleAtom = atom((get) => {
     if (firstRunReturnRequested) return true;
     const profile = get(profileWithPlanAtom);
     const isDeviceAuthorized = get(isDeviceAuthorizedAtom);
-    const isDatabaseSyncSupported = get(isDatabaseSyncSupportedAtom);
     return (
         !!profile?.has_authorized_free_access &&
-        !isDatabaseSyncSupported &&
         isDeviceAuthorized &&
         !profile?.first_run_completed_at
     );
@@ -265,8 +263,9 @@ async function hydrateAttachments(
             }
             continue;
         }
-        if (a.type === 'external_file') {
-            // External files are not Zotero objects; nothing to hydrate.
+        if (a.type === 'external_file' || a.type === 'saved_search' || a.type === 'special_collection') {
+            // External files and views are not Zotero items or collections;
+            // nothing to hydrate.
             continue;
         }
         // A library_id whose library isn't available on this device resolves

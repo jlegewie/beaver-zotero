@@ -4,7 +4,6 @@ import { v4 as uuidv4 } from 'uuid';
 import { ProcessingProgressStore, type ProcessingProgressScope } from './backgroundProcessing/progress';
 import { ThreadData } from '../../react/atoms/threads';
 import { getPref } from '../utils/prefs';
-import { SyncMethod, SyncType } from '../../react/atoms/sync';
 import {
     isExtractContentKind,
     parseCachedDocumentMetadata,
@@ -184,6 +183,8 @@ export interface DocumentCacheMetadataRecord {
     documentMetadata: CachedDocumentMetadata | null;
     pageCount: number | null;
     pageLabels: DocumentCachePageLabels | null;
+    /** See `CachedDocumentMetadata.derivedPageLabels`; `undefined` = not known. */
+    derivedPageLabels: DocumentCachePageLabels | null | undefined;
     pages: PdfCachedDocumentMetadata['pages'];
     errorCode: DocumentCacheErrorCode | null;
     extractionSchemaVersion: string;
@@ -208,6 +209,11 @@ export interface DocumentCachePayloadRecord {
     payloadPath: string;
     payloadSizeBytes: number;
     payloadSha256: string | null;
+    /**
+     * md5 of the source file bytes a protected OCR payload was prepared from.
+     * Lets a renamed or touched file be verified without a processing ledger row.
+     */
+    sourceMd5?: string | null;
     extractionSchemaVersion: string;
     cacheFormatVersion: number;
     createdAt: string;
@@ -224,6 +230,7 @@ export type DocumentCacheMetadataInput = Omit<
     | 'documentMetadata'
     | 'pageCount'
     | 'pageLabels'
+    | 'derivedPageLabels'
     | 'pages'
 > & {
     documentMetadata: CachedDocumentMetadata;
@@ -380,6 +387,22 @@ export type AttachmentExtractStatus = 'done' | 'failed' | 'skipped' | null;
 export type AttachmentOcrStatus = 'na' | 'needed' | 'done' | 'failed' | null;
 export type AttachmentUpsertStatus = 'done' | 'failed' | null;
 
+export interface MarkAttachmentUpsertDoneInput {
+    libraryId: number;
+    zoteroKey: string;
+    structuredDocumentHash: string;
+    upsertIndexVersion: string;
+    remoteIdentity?: AttachmentProcessingStateRecord['upsertRemoteIdentity'];
+    expectedUpsertStatus?: AttachmentUpsertStatus;
+    expectedUpsertIndexVersion?: string | null;
+    expectedExtractStatus?: AttachmentExtractStatus;
+    /**
+     * Also retire this account's pending cleanup of the membership just
+     * confirmed. Only for callers holding the attachment's index lock.
+     */
+    supersedeIndexCleanup?: boolean;
+}
+
 /** Durable per-attachment progress ledger for whole-library processing. */
 export interface AttachmentProcessingStateRecord {
     libraryId: number;
@@ -497,6 +520,9 @@ export interface ThreadRecord {
     created_at: string;
     updated_at: string;
 }
+
+type SyncType = 'initial' | 'incremental' | 'consistency' | 'verification';
+type SyncMethod = 'version' | 'date_modified';
 
 /* 
  * Interface for the 'sync_logs' table row
@@ -907,6 +933,10 @@ export class BeaverDB {
                     }
                 });
             }
+            // Nullable and ignored by older builds, so the schema version stays put.
+            if (!columns.has('source_md5')) {
+                await this.queryAsync(`ALTER TABLE document_cache_payloads ADD COLUMN source_md5 TEXT`);
+            }
         }
         await this.setSchemaVersion('document_cache', DOCUMENT_CACHE_SCHEMA_VERSION);
 
@@ -960,6 +990,7 @@ export class BeaverDB {
                 payload_size_bytes         INTEGER NOT NULL,
                 payload_sha256             TEXT,
                 extraction_source          TEXT NOT NULL DEFAULT 'native',
+                source_md5                 TEXT,
                 extraction_schema_version  TEXT NOT NULL,
                 cache_format_version       INTEGER NOT NULL,
                 created_at                 TEXT NOT NULL DEFAULT (datetime('now')),
@@ -1143,10 +1174,17 @@ export class BeaverDB {
     }
 
     /**
-     * Close the database connection.
+     * Close the database connection permanently.
+     *
+     * Every caller is a teardown path, and each plugin instance opens its own
+     * connection. A non-permanent close lets `Zotero.DBConnection` reopen on
+     * the next query, and it keeps the connection's idle observer (backup +
+     * vacuum) registered with the app. After a plugin reload or a quit, a late
+     * query or an idle callback would then reopen a connection nothing closes,
+     * and Sqlite.sys.mjs blocks app shutdown waiting for it.
      */
     public async closeDatabase(): Promise<void> {
-        await this.conn.closeDatabase();
+        await this.conn.closeDatabase(true);
     }
 
     /**
@@ -1354,50 +1392,6 @@ export class BeaverDB {
     // --- Sync Logs Methods ---
 
     /**
-     * Insert a new sync log record.
-     * @param syncLog The sync log data to insert (without id, which will be generated)
-     * @returns The complete SyncLogsRecord with generated id
-     */
-    public async insertSyncLog(syncLog: Omit<SyncLogsRecord, 'id' | 'timestamp'>): Promise<SyncLogsRecord> {
-        // Validate required fields
-        const requiredFields = ['session_id', 'user_id', 'sync_type', 'method', 'zotero_local_id', 'library_id', 'library_version', 'library_date_modified'] as const;
-        for (const field of requiredFields) {
-            if (syncLog[field] === undefined || syncLog[field] === null) {
-                throw new Error(`insertSyncLog: Required field '${field}' is ${syncLog[field]}. Full syncLog: ${JSON.stringify(syncLog)}`);
-            }
-        }
-        
-        const id = uuidv4();
-        const now = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
-        
-        await this.queryAsync(
-            `INSERT INTO sync_logs (id, session_id, user_id, sync_type, method, zotero_local_id, zotero_user_id, library_id, total_upserts, total_deletions, library_version, library_date_modified, timestamp) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-                id,
-                syncLog.session_id,
-                syncLog.user_id,
-                syncLog.sync_type,
-                syncLog.method,
-                syncLog.zotero_local_id,
-                syncLog.zotero_user_id ?? null,
-                syncLog.library_id,
-                syncLog.total_upserts,
-                syncLog.total_deletions,
-                syncLog.library_version,
-                syncLog.library_date_modified,
-                now
-            ]
-        );
-        
-        return {
-            id,
-            ...syncLog,
-            timestamp: now,
-        };
-    }
-
-    /**
      * Get sync log record for library_id and user_id with the highest library_version.
      * @param user_id The user_id to filter by
      * @param library_id The library_id to filter by
@@ -1439,88 +1433,6 @@ export class BeaverDB {
         }
         
         return BeaverDB.rowToSyncLogsRecord(rows[0]);
-    }
-
-    /**
-     * Get all sync log records for specific library_id and user_id.
-     * @param user_id The user_id to filter by
-     * @param library_id The library_id to filter by
-     * @param orderBy Optional ordering field ('timestamp', 'library_version', 'library_date_modified')
-     * @param orderDirection Optional order direction ('ASC' or 'DESC')
-     * @returns Array of SyncLogsRecord objects
-     */
-    public async getAllSyncLogsForLibrary(
-        user_id: string, 
-        library_id: number,
-        orderBy: 'timestamp' | 'library_version' | 'library_date_modified' = 'timestamp',
-        orderDirection: 'ASC' | 'DESC' = 'DESC'
-    ): Promise<SyncLogsRecord[]> {
-        const validOrderBy = ['timestamp', 'library_version', 'library_date_modified'];
-        const validDirection = ['ASC', 'DESC'];
-        
-        if (!validOrderBy.includes(orderBy)) {
-            throw new Error(`Invalid orderBy field: ${orderBy}`);
-        }
-        
-        if (!validDirection.includes(orderDirection)) {
-            throw new Error(`Invalid order direction: ${orderDirection}`);
-        }
-        
-        const rows = await this.queryAsync(
-            `SELECT * FROM sync_logs 
-             WHERE user_id = ? AND library_id = ? 
-             ORDER BY ${orderBy} ${orderDirection}`,
-            [user_id, library_id]
-        );
-        
-        return rows.map((row: any) => BeaverDB.rowToSyncLogsRecord(row));
-    }
-
-    public async getMostRecentSyncLogForLibraries(user_id: string, library_ids: number[]): Promise<SyncLogsRecord | null> {
-        if (!library_ids || library_ids.length === 0) return null;
-
-        const placeholders = library_ids.map(() => '?').join(',');
-        const rows = await this.queryAsync(
-            `SELECT * FROM sync_logs
-             WHERE user_id = ? AND library_id IN (${placeholders})
-             ORDER BY timestamp DESC
-             LIMIT 1`,
-            [user_id, ...library_ids]
-        );
-
-        if (rows.length === 0) {
-            return null;
-        }
-        return BeaverDB.rowToSyncLogsRecord(rows[0]);
-    }
-
-    /**
-     * Deletes all sync log records for a specific library.
-     * @param user_id The user_id to filter by
-     * @param library_ids The library_ids to delete logs for
-     */
-    public async deleteSyncLogsForLibraryIds(user_id: string, library_ids: number[]): Promise<void> {
-        if (library_ids.length === 0) {
-            return;
-        }
-
-        const placeholders = library_ids.map(() => '?').join(',');
-        await this.queryAsync(
-            `DELETE FROM sync_logs WHERE user_id = ? AND library_id IN (${placeholders})`,
-            [user_id, ...library_ids]
-        );
-    }
-
-    /**
-     * Deletes all sync log records for a user.
-     * Used during onboarding to ensure fresh sync state (e.g., after plan transitions).
-     * @param user_id The user_id to delete logs for
-     */
-    public async deleteAllSyncLogsForUser(user_id: string): Promise<void> {
-        await this.queryAsync(
-            `DELETE FROM sync_logs WHERE user_id = ?`,
-            [user_id]
-        );
     }
 
     // --- Embedding Methods ---
@@ -2539,6 +2451,25 @@ export class BeaverDB {
         return existing;
     }
 
+    /**
+     * Drop ledger rows for attachments that left the library, queueing cleanup
+     * for any remote membership they record. Reading the row, queueing its
+     * cleanup and deleting it share one transaction, so a concurrent upsert or
+     * cleanup never observes a row whose deletion cleanup is already queued,
+     * and the cleanup always reflects the latest recorded owner.
+     */
+    public async retireAttachmentProcessingStates(libraryId: number, zoteroKeys: string[]): Promise<void> {
+        if (zoteroKeys.length === 0) return;
+        await this.conn.executeTransaction(async () => {
+            for (const zoteroKey of zoteroKeys) {
+                const row = await this.deleteAttachmentProcessingState(libraryId, zoteroKey);
+                if (row?.structuredDocumentHash && row.upsertRemoteIdentity) {
+                    await this.enqueueBackgroundJobInTransaction(buildUntagJobInput(row, Date.now()));
+                }
+            }
+        });
+    }
+
     public async deleteAttachmentProcessingStatesByLibrary(libraryId: number): Promise<void> {
         await this.queryAsync(`DELETE FROM attachment_reading_state WHERE library_id = ?`, [libraryId]);
         await this.queryAsync(
@@ -2630,6 +2561,42 @@ export class BeaverDB {
                AND file_mtime_ms = ? AND file_size_bytes = ?`,
             [input.source, input.libraryId, input.zoteroKey, input.contentKind,
                 input.fileMtimeMs, input.fileSizeBytes],
+        );
+    }
+
+    /** Swap the recorded source identity only while it still equals `expectedSource`. */
+    public async replaceAttachmentExtractionSource(input: {
+        libraryId: number;
+        zoteroKey: string;
+        expectedSource: string;
+        source: string;
+    }): Promise<boolean> {
+        return await this.executeChangedRow(
+            `UPDATE attachment_processing_state SET extraction_source = ?
+             WHERE library_id = ? AND zotero_key = ? AND extraction_source = ?`,
+            [input.source, input.libraryId, input.zoteroKey, input.expectedSource],
+        );
+    }
+
+    /**
+     * Move a successful extraction to a new path or mtime of the same bytes.
+     * Applies only while the row still records `expectedSource` and the
+     * verified `fileHash`, so every downstream stage stays as it is.
+     */
+    public async relocateAttachmentExtractionSource(input: {
+        libraryId: number;
+        zoteroKey: string;
+        expectedSource: string;
+        fileHash: string;
+        source: string;
+        fileMtimeMs: number;
+    }): Promise<boolean> {
+        return await this.executeChangedRow(
+            `UPDATE attachment_processing_state SET extraction_source = ?, file_mtime_ms = ?
+             WHERE library_id = ? AND zotero_key = ? AND extraction_source = ?
+               AND extract_status = 'done' AND file_hash = ?`,
+            [input.source, input.fileMtimeMs, input.libraryId, input.zoteroKey,
+                input.expectedSource, input.fileHash],
         );
     }
 
@@ -2731,6 +2698,42 @@ export class BeaverDB {
             applied = changed;
         });
         return applied;
+    }
+
+    /**
+     * Record a fresh scan detection for an OCR-prepared attachment that is being
+     * prepared again. Unlike {@link markAttachmentExtracted}, the prepared hash,
+     * OCR stage and index membership are kept, so search keeps serving the
+     * previous preparation until the OCR completion publishes its replacement.
+     */
+    public async markAttachmentExtractedForOcrRestore(input: {
+        libraryId: number;
+        zoteroKey: string;
+        expectedExtractStatus: AttachmentExtractStatus;
+        fileMtimeMs: number;
+        fileSizeBytes: number;
+        fileHash: string | null;
+        extractSchemaVersion: string;
+        extractionSource?: string | null;
+    }): Promise<boolean> {
+        return await this.executeChangedRow(
+            `UPDATE attachment_processing_state SET
+                extract_status = 'done', extract_schema_version = ?, extraction_source = ?,
+                last_error = NULL, updated_at = datetime('now')
+             WHERE library_id = ? AND zotero_key = ? AND ocr_status = 'done'
+               AND file_mtime_ms IS ? AND file_size_bytes IS ? AND file_hash IS ?
+               AND extract_status IS ?`,
+            [
+                input.extractSchemaVersion,
+                input.extractionSource ?? null,
+                input.libraryId,
+                input.zoteroKey,
+                input.fileMtimeMs,
+                input.fileSizeBytes,
+                input.fileHash,
+                input.expectedExtractStatus,
+            ],
+        );
     }
 
     public async markAttachmentExtractFailure(input: {
@@ -2868,6 +2871,47 @@ export class BeaverDB {
         );
     }
 
+    /** Move a parked attachment behind the others waiting for OCR admission. */
+    public async touchAttachmentOcrUnavailable(libraryId: number, zoteroKey: string): Promise<void> {
+        await this.queryAsync(
+            `UPDATE attachment_processing_state SET updated_at = datetime('now')
+             WHERE library_id = ? AND zotero_key = ?
+               AND extract_status = 'done' AND ocr_status = 'needed' AND last_error = ?`,
+            [libraryId, zoteroKey, OCR_SERVICE_UNAVAILABLE],
+        );
+    }
+
+    /**
+     * Rows parked by a closed OCR admission gate, oldest marker first.
+     * `ticketed` is true while an OCR job for the attachment is queued, running
+     * or waiting on the backend.
+     */
+    public async getOcrUnavailableAttachments(
+        libraryIds: number[],
+    ): Promise<Array<{ libraryId: number; zoteroKey: string; ticketed: boolean }>> {
+        if (libraryIds.length === 0) return [];
+        const rows: Array<{ libraryId: number; zoteroKey: string; ticketed: boolean }> = [];
+        await this.queryAsync(
+            `SELECT s.library_id, s.zotero_key, EXISTS (
+                    SELECT 1 FROM background_jobs j
+                    WHERE j.job_type = 'document_ocr'
+                      AND j.library_id = s.library_id AND j.zotero_key = s.zotero_key
+                )
+             FROM attachment_processing_state s
+             WHERE s.library_id IN (${libraryIds.map(() => '?').join(',')})
+               AND s.content_kind = 'pdf' AND s.extract_status = 'done'
+               AND s.ocr_status = 'needed' AND s.last_error = ?
+             ORDER BY s.updated_at, s.library_id, s.zotero_key`,
+            [...libraryIds, OCR_SERVICE_UNAVAILABLE],
+            { onRow: (row: any) => rows.push({
+                libraryId: row.getResultByIndex(0),
+                zoteroKey: row.getResultByIndex(1),
+                ticketed: Boolean(row.getResultByIndex(2)),
+            }) },
+        );
+        return rows;
+    }
+
     private async enqueueReplacementUntag(previous: AttachmentProcessingStateRecord | null, newHash: string | null): Promise<void> {
         if (previous?.upsertRemoteIdentity && previous.structuredDocumentHash && previous.structuredDocumentHash !== newHash) {
             await this.enqueueBackgroundJobInTransaction(buildUntagJobInput(previous, Date.now(), { reason: 'replacement' }));
@@ -2903,16 +2947,31 @@ export class BeaverDB {
         return result;
     }
 
-    public async markAttachmentUpsertDone(input: {
-        libraryId: number;
-        zoteroKey: string;
-        structuredDocumentHash: string;
-        upsertIndexVersion: string;
-        remoteIdentity?: AttachmentProcessingStateRecord['upsertRemoteIdentity'];
-        expectedUpsertStatus?: AttachmentUpsertStatus;
-        expectedUpsertIndexVersion?: string | null;
-        expectedExtractStatus?: AttachmentExtractStatus;
-    }): Promise<boolean> {
+    public async markAttachmentUpsertDone(input: MarkAttachmentUpsertDoneInput): Promise<boolean> {
+        const identity = input.remoteIdentity;
+        if (!input.supersedeIndexCleanup || !identity) return await this.markAttachmentUpsertDoneRow(input);
+        let applied = false;
+        // The ledger now records exactly this membership, so a cleanup of it is
+        // superseded. Any later retirement re-queues cleanup from the ledger.
+        await this.conn.executeTransaction(async () => {
+            applied = await this.markAttachmentUpsertDoneRow(input);
+            if (!applied) return;
+            const job = { zoteroKey: input.zoteroKey,
+                payload: { ...identity, doc_hash: input.structuredDocumentHash } as BackgroundJobPayload };
+            const key = indexCleanupIdentity(job);
+            // A queued cleanup may belong to a deletion or exclusion that removes
+            // the ledger row next, outside this attachment's index lock. Keep its
+            // durable intent; the queued job settles it against the ledger itself.
+            const retired = await this.executeChangedRow(`DELETE FROM index_cleanup_outbox
+                WHERE identity = ? AND NOT EXISTS (SELECT 1 FROM background_jobs
+                    WHERE job_type = 'fulltext_untag' AND library_id = ? AND zotero_key = ?
+                      AND dedupe_key = ?)`, [key, input.libraryId, input.zoteroKey, key]);
+            if (retired) await this.deleteDeadIndexCleanupCopies(job);
+        });
+        return applied;
+    }
+
+    private async markAttachmentUpsertDoneRow(input: MarkAttachmentUpsertDoneInput): Promise<boolean> {
         const guardStatus = input.expectedUpsertStatus !== undefined;
         const guardVersion = input.expectedUpsertIndexVersion !== undefined;
         const guardExtract = input.expectedExtractStatus !== undefined;
@@ -3378,6 +3437,7 @@ export class BeaverDB {
             documentMetadata,
             pageCount: pdfMetadata?.pageCount ?? null,
             pageLabels: pdfMetadata?.pageLabels ?? null,
+            derivedPageLabels: pdfMetadata?.derivedPageLabels,
             pages: pdfMetadata?.pages ?? null,
             errorCode: row.error_code ?? null,
             extractionSchemaVersion: row.extraction_schema_version,
@@ -3407,6 +3467,7 @@ export class BeaverDB {
             payloadSizeBytes: row.payload_size_bytes,
             payloadSha256: row.payload_sha256 ?? null,
             extractionSource: row.extraction_source === "ocr" ? "ocr" : "native",
+            sourceMd5: row.source_md5 ?? null,
             extractionSchemaVersion: row.extraction_schema_version,
             cacheFormatVersion: row.cache_format_version,
             createdAt: row.created_at,
@@ -3765,6 +3826,7 @@ export class BeaverDB {
                     updated_at: row.getResultByIndex(17),
                     last_accessed_at: row.getResultByIndex(18),
                     extraction_source: row.getResultByIndex(19),
+                    source_md5: row.getResultByIndex(20),
                 });
             },
         });
@@ -3785,7 +3847,7 @@ export class BeaverDB {
                        content_kind, source_file_path, source_file_mtime_ms, source_file_size_bytes,
                        source_size_bytes, payload_path, payload_size_bytes,
                        payload_sha256, extraction_schema_version, cache_format_version,
-                       created_at, updated_at, last_accessed_at, extraction_source
+                       created_at, updated_at, last_accessed_at, extraction_source, source_md5
                 FROM document_cache_payloads`;
     }
 
@@ -3918,6 +3980,37 @@ export class BeaverDB {
         return payloads;
     }
 
+    /**
+     * Point one attachment's cache metadata and payloads at a new path/mtime.
+     * Only rows that still record the `from` location are changed.
+     */
+    public async relocateDocumentCacheSource(
+        libraryId: number,
+        zoteroKey: string,
+        from: { filePath: string; mtimeMs: number; sizeBytes: number },
+        to: { filePath: string; mtimeMs: number },
+    ): Promise<boolean> {
+        let relocated = false;
+        await this.conn.executeTransaction(async () => {
+            const metadata = await this.getDocumentCacheMetadataByKey(libraryId, zoteroKey);
+            if (!metadata || metadata.filePath !== from.filePath
+                || metadata.fileSignature.mtime_ms !== from.mtimeMs
+                || metadata.fileSignature.size_bytes !== from.sizeBytes) return;
+            await this.queryAsync(
+                `UPDATE document_cache_payloads SET source_file_path = ?, source_file_mtime_ms = ?
+                 WHERE metadata_id = ? AND source_file_path = ?
+                   AND source_file_mtime_ms = ? AND source_file_size_bytes = ?`,
+                [to.filePath, to.mtimeMs, metadata.id, from.filePath, from.mtimeMs, from.sizeBytes],
+            );
+            relocated = await this.executeChangedRow(
+                `UPDATE document_cache_metadata SET file_path = ?, file_mtime_ms = ?
+                 WHERE id = ?`,
+                [to.filePath, to.mtimeMs, metadata.id],
+            );
+        });
+        return relocated;
+    }
+
     /** Delete a metadata row only if it still matches the inspected record. */
     public async deleteDocumentCacheMetadataIfUnchanged(
         metadata: DocumentCacheMetadataRecord,
@@ -3943,6 +4036,28 @@ export class BeaverDB {
         return deletedPayloads;
     }
 
+    /**
+     * Replace a row's document metadata when the row is still exactly the one
+     * inspected. Leaves `updated_at` alone: the content is unchanged, only a
+     * field the row was written without is filled in. Returns whether it wrote.
+     */
+    public async updateDocumentCacheDocumentMetadataIfUnchanged(
+        metadata: DocumentCacheMetadataRecord,
+        documentMetadata: CachedDocumentMetadata,
+    ): Promise<boolean> {
+        let updated = false;
+        await this.conn.executeTransaction(async () => {
+            const current = await this.getDocumentCacheMetadataById(metadata.id);
+            if (!current || !BeaverDB.documentCacheMetadataMatches(current, metadata)) return;
+            await this.queryAsync(
+                `UPDATE document_cache_metadata SET document_metadata_json = ? WHERE id = ?`,
+                [JSON.stringify(documentMetadata), metadata.id],
+            );
+            updated = true;
+        });
+        return updated;
+    }
+
     /** Delete metadata rows for a library and return payload rows for file cleanup. */
     public async deleteDocumentCacheMetadataByLibrary(libraryId: number): Promise<DocumentCachePayloadRecord[]> {
         const payloads = await this.selectDocumentCachePayloads(
@@ -3956,6 +4071,30 @@ export class BeaverDB {
         return payloads;
     }
 
+    /**
+     * Delete a library's cached content except OCR payloads and their metadata,
+     * returning the deleted payload rows for file cleanup.
+     */
+    public async deleteUnprotectedDocumentCacheByLibrary(libraryId: number): Promise<DocumentCachePayloadRecord[]> {
+        let payloads: DocumentCachePayloadRecord[] = [];
+        await this.conn.executeTransaction(async () => {
+            payloads = await this.selectDocumentCachePayloads(
+                `${BeaverDB.documentCachePayloadSelect()} WHERE library_id = ? AND extraction_source != 'ocr'`,
+                [libraryId],
+            );
+            await this.queryAsync(
+                `DELETE FROM document_cache_payloads WHERE library_id = ? AND extraction_source != 'ocr'`,
+                [libraryId],
+            );
+            await this.queryAsync(
+                `DELETE FROM document_cache_metadata WHERE library_id = ? AND id NOT IN
+                    (SELECT metadata_id FROM document_cache_payloads WHERE extraction_source = 'ocr')`,
+                [libraryId],
+            );
+        });
+        return payloads;
+    }
+
     /** Insert or update a document-cache payload by metadata/payload kind. */
     public async upsertDocumentCachePayload(record: DocumentCachePayloadInput): Promise<DocumentCachePayloadRecord> {
         await this.queryAsync(
@@ -3963,8 +4102,8 @@ export class BeaverDB {
                 (metadata_id, item_id, library_id, zotero_key, payload_kind, content_kind,
                  source_file_path, source_file_mtime_ms, source_file_size_bytes,
                  source_size_bytes, payload_path, payload_size_bytes, payload_sha256,
-                 extraction_schema_version, cache_format_version, extraction_source, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                 extraction_schema_version, cache_format_version, extraction_source, source_md5, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
              ON CONFLICT(metadata_id, payload_kind) DO UPDATE SET
                 metadata_id = excluded.metadata_id,
                 item_id = excluded.item_id,
@@ -3981,6 +4120,7 @@ export class BeaverDB {
                 extraction_schema_version = excluded.extraction_schema_version,
                 cache_format_version = excluded.cache_format_version,
                 extraction_source = excluded.extraction_source,
+                source_md5 = excluded.source_md5,
                 updated_at = datetime('now')`,
             [
                 record.metadataId,
@@ -3999,6 +4139,7 @@ export class BeaverDB {
                 record.extractionSchemaVersion,
                 record.cacheFormatVersion,
                 record.extractionSource ?? "native",
+                record.sourceMd5 ?? null,
             ],
         );
         const payload = await this.getDocumentCachePayload(record.libraryId, record.zoteroKey, record.payloadKind);
@@ -4071,6 +4212,24 @@ export class BeaverDB {
             },
         });
         return stats;
+    }
+
+    /** Attachment keys in one library whose retained OCR preparation is incompatible. */
+    public async getIncompatibleProtectedDocumentKeys(
+        libraryId: number,
+        versions: { metadata: number; payload: number; pdf: string | null },
+    ): Promise<string[]> {
+        const keys: string[] = [];
+        await this.queryAsync(`SELECT DISTINCT m.zotero_key
+            FROM document_cache_payloads p JOIN document_cache_metadata m ON m.id = p.metadata_id
+            WHERE p.extraction_source = 'ocr' AND m.library_id = ? AND m.content_kind = 'pdf'
+                AND (p.cache_format_version != ? OR p.extraction_schema_version != ?
+                    OR m.metadata_format_version != ? OR m.extraction_schema_version != ?)
+            ORDER BY m.zotero_key`,
+        [libraryId, versions.payload, versions.pdf, versions.metadata, versions.pdf], {
+            onRow: (row: any) => keys.push(row.getResultByIndex(0)),
+        });
+        return keys;
     }
 
     /**
@@ -4283,12 +4442,24 @@ export class BeaverDB {
         });
     }
 
-    /** Processed files missing local content, ordered by recent use or addition. */
+    /**
+     * Processed files missing local content, ordered by recent use or addition.
+     * With `protectedVersions`, a retained OCR preparation that no longer
+     * carries those versions counts as missing, so it is prepared again.
+     */
     public async getUncachedProcessingCandidates(options: {
         libraryIds: number[]; hasOcrAccess: boolean; firstOnly?: boolean;
+        protectedVersions?: { metadata: number; payload: number; pdf: string | null };
     }): Promise<Array<{ libraryId: number; zoteroKey: string }>> {
         const result: Array<{ libraryId: number; zoteroKey: string }> = [];
         if (options.libraryIds.length === 0) return result;
+        const versions = options.protectedVersions;
+        const incompatibleProtected = versions ? `OR EXISTS (SELECT 1 FROM document_cache_payloads OP
+                    JOIN document_cache_metadata OM ON OM.id = OP.metadata_id
+                    WHERE OP.library_id = S.library_id AND OP.zotero_key = S.zotero_key
+                        AND OP.extraction_source = 'ocr'
+                        AND (OP.cache_format_version != ? OR OP.extraction_schema_version != ?
+                            OR OM.metadata_format_version != ? OR OM.extraction_schema_version != ?))` : '';
         await this.queryAsync(`SELECT S.library_id, S.zotero_key
             FROM attachment_processing_state S
             LEFT JOIN document_cache_metadata M
@@ -4296,15 +4467,19 @@ export class BeaverDB {
             WHERE S.library_id IN (${options.libraryIds.map(() => '?').join(',')})
                 AND S.extract_status = 'done'
                 AND (S.ocr_status = 'na' ${options.hasOcrAccess ? "OR S.ocr_status = 'done'" : ''})
-                AND NOT EXISTS (SELECT 1 FROM document_cache_payloads P
+                AND (NOT EXISTS (SELECT 1 FROM document_cache_payloads P
                     WHERE P.library_id = S.library_id AND P.zotero_key = S.zotero_key
                         AND P.payload_kind = 'structured')
+                    ${incompatibleProtected})
                 AND NOT EXISTS (SELECT 1 FROM background_jobs J
                     WHERE J.library_id = S.library_id AND J.zotero_key = S.zotero_key)
                 AND NOT EXISTS (SELECT 1 FROM background_jobs
                     WHERE json_extract(payload_json, '$.prepare_cache') = 1)
             ORDER BY COALESCE(M.last_accessed_at, S.created_at) DESC, S.library_id, S.zotero_key
-            ${options.firstOnly ? 'LIMIT 1' : ''}`, options.libraryIds, {
+            ${options.firstOnly ? 'LIMIT 1' : ''}`, [
+            ...options.libraryIds,
+            ...(versions ? [versions.payload, versions.pdf, versions.metadata, versions.pdf] : []),
+        ], {
             onRow: (row: any) => result.push({
                 libraryId: row.getResultByIndex(0), zoteroKey: row.getResultByIndex(1),
             }),
@@ -4663,7 +4838,12 @@ export class BeaverDB {
                     available_at  = CASE WHEN content_kind != ? OR ? < priority
                                          THEN MIN(available_at, ?) ELSE available_at END,
                     content_kind  = ?,
-                    payload_json  = CASE WHEN content_kind = ? AND json_extract(?, '$.request_context') = 'interactive'
+                    payload_json  = CASE WHEN ? = 'fulltext_upsert' AND content_kind = ? AND ? >= priority
+                                              AND json_extract(payload_json, '$.cache_recovery') IS NOT NULL
+                                              AND json_extract(payload_json, '$.doc_hash') IS json_extract(?, '$.doc_hash')
+                                         THEN json_set(?, '$.cache_recovery',
+                                             json_extract(payload_json, '$.cache_recovery'))
+                                         WHEN content_kind = ? AND json_extract(?, '$.request_context') = 'interactive'
                                          THEN json_set(COALESCE(payload_json, ?), '$.request_context', 'interactive')
                                          WHEN priority >= 100 AND ? >= 100
                                               AND json_extract(?, '$.prepare_cache') = 1 THEN ?
@@ -4681,6 +4861,7 @@ export class BeaverDB {
                     priority,
                     input.now,
                     input.contentKind,
+                    input.jobType, input.contentKind, priority, payloadJson, payloadJson,
                     input.contentKind, payloadJson, payloadJson,
                     priority, payloadJson, payloadJson,
                     input.contentKind, priority,
@@ -4740,21 +4921,35 @@ export class BeaverDB {
         return restored;
     }
 
+    /** Record on the durable intent that its owner has queued one reacquisition. */
+    public async markIndexCleanupReacquireAttempted(job: BackgroundJobRecord): Promise<void> {
+        await this.queryAsync(`UPDATE index_cleanup_outbox
+            SET job_json = json_set(job_json, '$.payload.index_reacquire_attempted', json('true'))
+            WHERE identity = ?`, [indexCleanupIdentity(job)]);
+    }
+
     /** Retire an identity after removal, confirmed supersession, or terminal rejection. */
     public async acknowledgeIndexCleanup(job: BackgroundJobRecord): Promise<void> {
         await this.conn.executeTransaction(async () => {
             await this.queryAsync('DELETE FROM index_cleanup_outbox WHERE identity = ?', [indexCleanupIdentity(job)]);
-            // A restored live job can still have a diagnostic dead-letter copy.
-            // Retire every copy of this exact remote identity in the same transaction.
-            await this.queryAsync(`DELETE FROM background_jobs_dead
-                WHERE job_type = 'fulltext_untag' AND zotero_key = ?
-                  AND json_extract(payload_json, '$.index_account_id') IS ?
-                  AND json_extract(payload_json, '$.index_scope_ref') IS ?
-                  AND json_extract(payload_json, '$.index_local_id') IS ?
-                  AND json_extract(payload_json, '$.doc_hash') IS ?`,
-                [job.zoteroKey, job.payload?.index_account_id ?? null, job.payload?.index_scope_ref ?? null,
-                    job.payload?.index_local_id ?? null, job.payload?.doc_hash ?? null]);
+            await this.deleteDeadIndexCleanupCopies(job);
         });
+    }
+
+    /**
+     * A restored live job can still have a diagnostic dead-letter copy. Retire
+     * every copy of this exact remote identity with its intent. Must run inside
+     * the transaction that retires the intent.
+     */
+    private async deleteDeadIndexCleanupCopies(job: Pick<BackgroundJobInput, 'zoteroKey' | 'payload'>): Promise<void> {
+        await this.queryAsync(`DELETE FROM background_jobs_dead
+            WHERE job_type = 'fulltext_untag' AND zotero_key = ?
+              AND json_extract(payload_json, '$.index_account_id') IS ?
+              AND json_extract(payload_json, '$.index_scope_ref') IS ?
+              AND json_extract(payload_json, '$.index_local_id') IS ?
+              AND json_extract(payload_json, '$.doc_hash') IS ?`,
+            [job.zoteroKey, job.payload?.index_account_id ?? null, job.payload?.index_scope_ref ?? null,
+                job.payload?.index_local_id ?? null, job.payload?.doc_hash ?? null]);
     }
 
     /**
@@ -4829,6 +5024,80 @@ export class BeaverDB {
         return { exists: true, promoted: true };
     }
 
+    /** Mark a claimed upsert as waiting for this account's cached document. */
+    public async beginFulltextCacheRecovery(
+        job: BackgroundJobRecord,
+        accountId: string,
+        documentHash: string,
+        extractionSource: string | null,
+    ): Promise<boolean> {
+        const marker = JSON.stringify({ account_id: accountId, doc_hash: documentHash,
+            extraction_source: extractionSource, state: 'active' });
+        return this.executeChangedRow(`UPDATE background_jobs
+            SET payload_json = json_set(payload_json, '$.cache_recovery', json(?))
+            WHERE id = ? AND job_type = 'fulltext_upsert' AND payload_kind = 'structured'
+              AND library_id = ? AND zotero_key = ? AND available_at = ?
+              AND json_extract(payload_json, '$.cache_recovery') IS NULL`,
+        [marker, job.id, job.libraryId, job.zoteroKey, job.availableAt]);
+    }
+
+    /** Complete the active-to-deferred handoff after a payload cache miss. */
+    public async deferFulltextCacheRecovery(id: number, claimedAvailableAt: number, now: number): Promise<boolean> {
+        let woken = false;
+        await this.conn.executeTransaction(async () => {
+            woken = await this.executeChangedRow(`UPDATE background_jobs
+                SET available_at = ?, payload_json = json_remove(payload_json, '$.cache_recovery')
+                WHERE id = ? AND job_type = 'fulltext_upsert' AND available_at = ?
+                  AND json_extract(payload_json, '$.cache_recovery.state') = 'ready'`,
+            [now, id, claimedAvailableAt]);
+            if (!woken) {
+                await this.queryAsync(`UPDATE background_jobs
+                    SET payload_json = json_set(payload_json, '$.cache_recovery.state', 'deferred')
+                    WHERE id = ? AND job_type = 'fulltext_upsert' AND available_at = ?
+                      AND json_extract(payload_json, '$.cache_recovery.state') = 'active'`,
+                [id, claimedAvailableAt]);
+            }
+        });
+        return woken;
+    }
+
+    /** Wake only the upsert parked for the cache that extraction just rebuilt. */
+    public async finishFulltextCacheRecovery(input: {
+        libraryId: number; zoteroKey: string; accountId: string;
+        documentHash: string; extractionSource: string | null; now: number;
+    }): Promise<boolean> {
+        const match = `job_type = 'fulltext_upsert' AND payload_kind = 'structured'
+            AND library_id = ? AND zotero_key = ? AND available_at > ?
+            AND json_extract(payload_json, '$.cache_recovery.account_id') = ?
+            AND json_extract(payload_json, '$.cache_recovery.doc_hash') = ?
+            AND json_extract(payload_json, '$.cache_recovery.extraction_source') IS ?`;
+        const params = [input.libraryId, input.zoteroKey, input.now, input.accountId,
+            input.documentHash, input.extractionSource];
+        let woken = false;
+        await this.conn.executeTransaction(async () => {
+            woken = await this.executeChangedRow(`UPDATE background_jobs
+                SET available_at = ?, payload_json = json_remove(payload_json, '$.cache_recovery')
+                WHERE ${match} AND json_extract(payload_json, '$.cache_recovery.state') = 'deferred'`,
+            [input.now, ...params]);
+            if (!woken) {
+                await this.queryAsync(`UPDATE background_jobs
+                    SET payload_json = json_set(payload_json, '$.cache_recovery.state', 'ready')
+                    WHERE ${match} AND json_extract(payload_json, '$.cache_recovery.state') = 'active'`,
+                params);
+            }
+        });
+        return woken;
+    }
+
+    /** Remove a wait marker when the recovery enqueue itself failed. */
+    public async cancelFulltextCacheRecovery(id: number, claimedAvailableAt: number): Promise<void> {
+        await this.queryAsync(`UPDATE background_jobs
+            SET payload_json = json_remove(payload_json, '$.cache_recovery')
+            WHERE id = ? AND job_type = 'fulltext_upsert' AND available_at = ?
+              AND json_extract(payload_json, '$.cache_recovery') IS NOT NULL`,
+        [id, claimedAvailableAt]);
+    }
+
     /**
      * Claim the next visible job (pgmq-style): pick lowest-priority, then
      * oldest-available row whose `available_at <= now`, then bump its
@@ -4861,7 +5130,9 @@ export class BeaverDB {
             params.push(...jobTypes);
         }
         const claimed = await this.selectBackgroundJobs(
-            `UPDATE background_jobs SET available_at = ?
+            `UPDATE background_jobs SET available_at = ?,
+                payload_json = CASE WHEN job_type = 'fulltext_upsert'
+                    THEN json_remove(payload_json, '$.cache_recovery') ELSE payload_json END
              WHERE id = (
                  SELECT id FROM background_jobs
                  WHERE available_at <= ?${priorityClause}${jobTypesClause}
@@ -4994,6 +5265,18 @@ export class BeaverDB {
      * pushes `available_at` forward — so this covers available, deferred and
      * in-flight work, and survives a restart.
      */
+    /** True while an upsert for this attachment is queued, parked or in flight. */
+    public async hasPendingFulltextUpsert(libraryId: number, zoteroKey: string): Promise<boolean> {
+        let pending = false;
+        await this.queryAsync(
+            `SELECT 1 FROM background_jobs
+             WHERE job_type = 'fulltext_upsert' AND library_id = ? AND zotero_key = ? LIMIT 1`,
+            [libraryId, zoteroKey],
+            { onRow: () => { pending = true; } },
+        );
+        return pending;
+    }
+
     public async getPendingFulltextUpsertKeys(): Promise<Set<string>> {
         const keys = new Set<string>();
         await this.queryAsync(

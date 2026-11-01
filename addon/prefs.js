@@ -5,7 +5,6 @@ pref("userId", "");
 pref("userEmail", "");
 pref("currentPlanId", "");
 pref("installedVersion", "");
-pref("showIndexingCompleteMessage", false);
 pref("showHighTokenUsageWarningMessage", true);
 pref("authMethod", "otp");
 
@@ -36,6 +35,12 @@ pref("readerExplainPrompt", "Explain the selected passage or annotation(s) from 
 // Sogou Pinyin from discarding committed text). Kill-switch in case an IME
 // interacts badly with the deferral.
 pref("imeCompositionOrderFix", true);
+// Chat composer IME handling (opt-in): on Windows, stop the editor from
+// inserting its own marker character when a composition starts at a plain
+// caret. Keeps some IMEs (e.g. Shouxin) from placing their candidate window at
+// the screen's top-left corner. Only for users of such IMEs: with others it can
+// leave a commit selected or disturb the composition display, so off by default.
+pref("imeSuppressCompositionStartChar", false);
 // Verbose IME event tracing in the chat composer, for diagnosing composition
 // issues from debug output.
 pref("debugImeTrace", false);
@@ -49,7 +54,6 @@ pref("dataProviderEnabled", false);
 
 // Agent actions
 pref("autoApplyAnnotations", true);
-pref("autoCreateNotes", true);
 pref("autoImportItems", false);
 pref("confirmExtractionCosts", true);
 pref("confirmExternalSearchCosts", true);
@@ -137,6 +141,12 @@ pref("onboardingSignInTextShown", false);
 // cleared by the "chat interrupted" popup on the next start.
 pref("interruptedThread", "");
 
+// Beaver tabs open when Beaver last closed them for a restart, a plugin
+// reload or the last main window closing (JSON). Reopened and cleared when a
+// main window that can host them next loads; never written to Zotero's
+// session.
+pref("beaverTabsToRestore", "");
+
 // Throttle for the automatic pre-sync thread claim: the
 // `${beaverUserId}:${zoteroUserId}:${localUserKey}` combination that was
 // last claimed successfully. Empty = never claimed (or cleared after
@@ -151,6 +161,9 @@ pref("mcpCreateNoteToolEnabled", false);
 
 // Background extractor kill-switch (drains the background_jobs queue)
 pref("backgroundExtractorEnabled", true);
+// Kill switch: a PDF request that would queue behind the busy interactive
+// MuPDF worker may run on the idle background worker instead.
+pref("pdf.backgroundOverflow", true);
 // Whole-library producers are an explicit opt-in. The dispatcher above remains
 // enabled so user-initiated extraction jobs still work when this is off.
 pref("backgroundProcessingEnabled", false);
@@ -158,10 +171,7 @@ pref("backgroundProcessingSearchInitialized", false);
 pref("backgroundProcessingWelcomeAck", false);
 pref("backgroundProcessingWelcomeDeferred", false);
 
-// Flags to show notifications, run consistency check and collection sync on upgrade
-pref("runConsistencyCheck", false);
-pref("runCollectionSync", false);
-pref("runWebDAVSync", false);
+// Upgrade flags and pending version notifications
 pref("runEmbeddingFullDiff", false);
 pref("pendingVersionNotifications", "[]");
 
@@ -190,5 +200,9 @@ pref("maxAttachmentFileSizeMB", 100);
 // the user library. Never overrides a library the user excluded in Beaver
 // preferences — see resolveTableLibrary().
 pref("tables.defaultLibraryID", 0);
+// How long a chat's `fill_table` waits for a small fill before answering that
+// it runs on in the background, in seconds; stays under the backend's
+// ten-minute ceiling on a request.
+pref("tables.fillWaitSeconds", 480);
 
 pref("cloudPreparationConsent", "");

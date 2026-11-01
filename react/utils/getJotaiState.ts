@@ -1,12 +1,10 @@
 import { citationsAtom, citationMapAtom, citationsByRunIdAtom } from "@beaver/agent-core/citations/atoms"
-import { userAtom, isAuthenticatedAtom, isWaitingForProfileAtom, authLoadingAtom } from "../atoms/auth"
-import { fileStatusAtom, errorCodeStatsAtom, errorCodeStatsIsLoadingAtom, errorCodeStatsErrorAtom, lastFetchedErrorCountsAtom, aggregatedErrorMessagesForFailedFilesAtom, aggregatedErrorMessagesForSkippedFilesAtom, fileStatusSummaryAtom, isUploadProcessedAtom } from "../atoms/files"
+import { userAtom, isAuthenticatedAtom, isWaitingForProfileAtom, authLoadingAtom, sessionRestoreAtom } from "../atoms/auth"
 import { readerTextSelectionAtom, currentMessageContentAtom, currentReaderAttachmentAtom, currentReaderAttachmentKeyAtom, currentNoteTabItemKeyAtom } from "../atoms/messageComposition"
 import { supportedModelsAtom, selectedModelAtom, availableModelsAtom } from "../atoms/models"
-import { profileWithPlanAtom, isProfileLoadedAtom, syncedLibraryIdsAtom, updateRequiredAtom, minimumFrontendVersionAtom, planFeaturesAtom, isDatabaseSyncSupportedAtom, processingModeAtom, isBackendIndexingCompleteAtom, profileBalanceAtom, hasAuthorizedAccessAtom, hasAuthorizedProAccessAtom, hasAuthorizedFreeAccessAtom, hasCompletedOnboardingAtom, syncWithZoteroAtom } from "../atoms/profile"
-import { syncStatusAtom, syncingAtom, syncErrorAtom, syncStatusSummaryAtom, overallSyncStatusAtom } from "../atoms/sync"
+import { profileWithPlanAtom, isProfileLoadedAtom, updateRequiredAtom, minimumFrontendVersionAtom, processingModeAtom, profileBalanceAtom, hasAuthorizedAccessAtom, hasAuthorizedFreeAccessAtom, syncWithZoteroAtom } from "../atoms/profile"
 import { recentThreadsAtom, currentThreadIdAtom } from "../atoms/threads"
-import { isSidebarVisibleAtom, isLibraryTabAtom, isPreferencePageVisibleAtom, showFileStatusDetailsAtom, userScrolledAtom, popupMessagesAtom } from "../atoms/ui"
+import { isSidebarVisibleAtom, isLibraryTabAtom, isPreferencePageVisibleAtom, userScrolledAtom, popupMessagesAtom } from "../atoms/ui"
 import { store } from "../store"
 import { flushPendingPartEvents } from "./streamingPartQueue"
 
@@ -21,6 +19,7 @@ export const atomRegistry = {
     isWaitingForProfile: isWaitingForProfileAtom,
     user: userAtom,
     authLoading: authLoadingAtom,
+    sessionRestore: sessionRestoreAtom,
 
     // Agent Runs
     threadRuns: threadRunsAtom,
@@ -48,17 +47,6 @@ export const atomRegistry = {
     citationMetadataView: citationMapAtom,
     citationsByRunId: citationsByRunIdAtom,
 
-    // Files
-    fileStatus: fileStatusAtom,
-    errorCodeStats: errorCodeStatsAtom,
-    errorCodeStatsIsLoading: errorCodeStatsIsLoadingAtom,
-    errorCodeStatsError: errorCodeStatsErrorAtom,
-    lastFetchedErrorCounts: lastFetchedErrorCountsAtom,
-    aggregatedErrorMessagesForFailedFiles: aggregatedErrorMessagesForFailedFilesAtom,
-    aggregatedErrorMessagesForPlanLimitFiles: aggregatedErrorMessagesForSkippedFilesAtom,
-    fileStatusSummary: fileStatusSummaryAtom,
-    isUploadProcessed: isUploadProcessedAtom,
-
     // Input
     currentMessageContent: currentMessageContentAtom,
     currentReaderAttachment: currentReaderAttachmentAtom,
@@ -74,26 +62,13 @@ export const atomRegistry = {
     // Profile
     isProfileLoaded: isProfileLoadedAtom,
     profileWithPlan: profileWithPlanAtom,
-    syncedLibraryIds: syncedLibraryIdsAtom,
-    isDatabaseSyncSupported: isDatabaseSyncSupportedAtom,
-    isBackendIndexingCompleteAtom: isBackendIndexingCompleteAtom,
     processingModeAtom: processingModeAtom,
-    planFeatures: planFeaturesAtom,
     updateRequired: updateRequiredAtom,
     minimumFrontendVersion: minimumFrontendVersionAtom,
     profileBalance: profileBalanceAtom,
     hasAuthorizedAccess: hasAuthorizedAccessAtom,
-    hasAuthorizedProAccess: hasAuthorizedProAccessAtom,
     hasAuthorizedFreeAccess: hasAuthorizedFreeAccessAtom,
-    hasCompletedOnboarding: hasCompletedOnboardingAtom,
     syncWithZotero: syncWithZoteroAtom,
-
-    // Sync
-    syncStatus: syncStatusAtom,
-    syncing: syncingAtom,
-    syncError: syncErrorAtom,
-    syncStatusSummary: syncStatusSummaryAtom,
-    overallSyncStatus: overallSyncStatusAtom,
 
     // Threads
     recentThreads: recentThreadsAtom,
@@ -103,7 +78,6 @@ export const atomRegistry = {
     isSidebarVisible: isSidebarVisibleAtom,
     isLibraryTab: isLibraryTabAtom,
     isPreferencePageVisible: isPreferencePageVisibleAtom,
-    showFileStatusDetails: showFileStatusDetailsAtom,
     userScrolled: userScrolledAtom,
     popupMessages: popupMessagesAtom,
 }

@@ -23,9 +23,10 @@ vi.mock('../../../../react/host/zotero/components/agentActionViewHelpers', () =>
 vi.mock('../../../../react/components/ui/buttons/RunPermissionButton', () => ({ default: () => null }));
 vi.mock('@beaver/agent-ui/chat/AskUserQuestionCard', () => ({ default: () => null }));
 vi.mock('@beaver/agent-ui/chat/BatchApprovalCard', () => ({
-    default: ({ approval, onSubmit }: any) => React.createElement(
+    default: ({ approval, onSubmit, disabled, onStop }: any) => React.createElement(
         'div', { className: 'batch-card', 'data-approval': approval.approvalId },
-        React.createElement('button', { type: 'button', onClick: () => onSubmit({ approved: true, mode: 'ask_each_time', user_instructions: null }) }, approval.approveLabel),
+        React.createElement('button', { type: 'button', disabled, onClick: () => onSubmit({ approved: true, mode: 'ask_each_time', user_instructions: null }) }, approval.approveLabel),
+        disabled && onStop && React.createElement('button', { type: 'button', onClick: onStop }, 'Stop'),
     ),
 }));
 // The panel's stamp reading is its own test's business; here it draws a
@@ -116,6 +117,13 @@ describe('RunStatusPopup keyboard decisions', () => {
         expect(mocks.card.onDecide).not.toHaveBeenCalled();
         expect(mocks.card.onOpen).not.toHaveBeenCalled();
     });
+    it('holds the decision back while the run reconnects, and says why', () => {
+        mocks.card = { ...mocks.card, decideDisabled: true, reconnectingLine: 'Reconnecting…' };
+        render();
+        expect(container.querySelector('.beaver-run-status-popup__reconnecting')?.textContent).toContain('Reconnecting…');
+        const buttons = Array.from(container.querySelectorAll<HTMLButtonElement>('.beaver-run-status-popup__footer button'));
+        expect(buttons.map(button => [button.textContent, button.disabled])).toEqual([['Reject', true], ['Approve', true]]);
+    });
     it('leaves keyboard events on child controls to those controls', () => {
         render();
         press(Array.from(container.querySelectorAll('button')).find(button => button.textContent === 'Reject')!);
@@ -147,6 +155,14 @@ describe('RunStatusPopup batch approval', () => {
         act(() => card.querySelector('button')!.click());
         expect(mocks.card.onSubmit).toHaveBeenCalledWith({ approved: true, mode: 'ask_each_time', user_instructions: null });
         expect(mocks.card.onOpen).toHaveBeenCalledTimes(1);
+    });
+    it('offers Stop in place of the held-back answers while the run reconnects', () => {
+        mocks.card = { ...mocks.card, disabled: true, onStop: vi.fn() };
+        render();
+        const buttons = Array.from(container.querySelectorAll<HTMLButtonElement>('.batch-card button'));
+        expect(buttons[0].disabled).toBe(true);
+        act(() => buttons.find(button => button.textContent === 'Stop')!.click());
+        expect(mocks.card.onStop).toHaveBeenCalledOnce();
     });
 });
 

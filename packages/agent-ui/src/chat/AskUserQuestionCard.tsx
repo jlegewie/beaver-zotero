@@ -38,6 +38,13 @@ export interface AskUserQuestionCardProps {
      * business stopping the run — the corner popup — and the button with it.
      */
     onStop?: () => void;
+    /**
+     * Hold the answer back for now (the run's connection is being recovered).
+     * The user can still work through the questions and stop the run.
+     */
+    disabled?: boolean;
+    /** Why the answer is held back, shown above the footer while `disabled`. */
+    heldCaption?: string;
 }
 
 /**
@@ -62,6 +69,8 @@ export const AskUserQuestionCard: React.FC<AskUserQuestionCardProps> = ({
     pendingQuestion,
     onSubmit,
     onStop,
+    disabled = false,
+    heldCaption,
 }) => {
     const questions = pendingQuestion.questions;
     const total = questions.length;
@@ -112,11 +121,11 @@ export const AskUserQuestionCard: React.FC<AskUserQuestionCardProps> = ({
     };
 
     const submitAnswers = useCallback((answers: AskUserQuestionAnswer[]) => {
-        if (hasSubmittedRef.current) return;
+        if (hasSubmittedRef.current || disabled) return;
         hasSubmittedRef.current = true;
         setIsSubmitted(true);
         onSubmit(answers);
-    }, [onSubmit]);
+    }, [onSubmit, disabled]);
 
     const submitAll = useCallback(() => {
         submitAnswers(buildAnswers(questions, draft));
@@ -296,6 +305,12 @@ export const AskUserQuestionCard: React.FC<AskUserQuestionCardProps> = ({
                     </div>
                 </div>
 
+                {disabled && heldCaption && (
+                    <div className="text-sm font-color-secondary pt-2" role="status">
+                        {heldCaption}
+                    </div>
+                )}
+
                 {/* Footer: Stop ... Skip Next/Submit */}
                 <div className="display-flex flex-row items-center pt-2 gap-2">
                     {onStop && (
@@ -316,7 +331,8 @@ export const AskUserQuestionCard: React.FC<AskUserQuestionCardProps> = ({
                         variant="ghost"
                         ariaLabel={isLast ? 'Skip this question and submit' : 'Skip this question'}
                         onClick={handleSkip}
-                        disabled={isSubmitted}
+                        disabled={isSubmitted || (isLast && disabled)}
+                        title={isLast && disabled ? heldCaption : undefined}
                     >
                         Skip
                     </Button>
@@ -325,7 +341,8 @@ export const AskUserQuestionCard: React.FC<AskUserQuestionCardProps> = ({
                         ariaLabel={isLast ? 'Submit answers' : 'Next question'}
                         style={{ padding: '2px 5px' }}
                         onClick={handleNext}
-                        disabled={!isQuestionAnswered(question, draft) || isSubmitted}
+                        disabled={!isQuestionAnswered(question, draft) || isSubmitted || (isLast && disabled)}
+                        title={isLast && disabled ? heldCaption : undefined}
                     >
                         {isLast
                             ? (<span>Submit <span className="opacity-50">⏎</span></span>)

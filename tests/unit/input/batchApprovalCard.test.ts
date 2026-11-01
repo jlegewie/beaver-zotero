@@ -568,37 +568,54 @@ describe('a read-only batch', () => {
     });
 });
 
-describe('table batch approval', () => {
-    const table = {
-        reference: { kind: 'table' as const, key: 'u-ABCDEFGH', title: 'Study comparison' },
-        schema_id: 'schema-1', population_id: 'population-1', population_count: 40,
-        columns: [{ id: 'design', question: 'What is the study design?' }], cost_estimate: '8 credits',
-    };
-    beforeEach(() => { hookState.slots = []; hookState.index = 0; });
-    it('renders the plan read-only and identifies the cost as an estimate', () => {
-        const tree = render(vi.fn(), { table });
-        const text = renderedText(tree).join(' ');
-        expect(text).toContain('Study comparison');
-        expect(text).toContain('What is the study design?');
-        expect(text).toContain('Estimated cost:');
-        expect(text).toContain('Final charges depend on work executed');
-        expect(text).toContain('cancel this proposal');
-        expect(findAll(tree, el => el.type === 'input')).toHaveLength(0);
+describe('BatchApprovalCard while the run reconnects', () => {
+    beforeEach(() => {
+        hookState.slots = [];
+        hookState.index = 0;
     });
-    it('echoes the approved immutable identity', () => {
-        const submit = vi.fn();
-        findOne(render(submit, { table }), byAriaLabel('Approve batch job')).props.onClick();
-        expect(submit).toHaveBeenCalledWith(expect.objectContaining({ approved: true,
-            table: { key: 'u-ABCDEFGH', schema_id: 'schema-1', population_id: 'population-1' },
-        }));
+
+    function renderHeld(onSubmit: (response: BatchApprovalDecision) => void, onStop: () => void, disabled: boolean, heldCaption?: string) {
+        hookState.index = 0;
+        return BatchApprovalCard({ approval: approval(), onSubmit, onStop, disabled, heldCaption }) as React.ReactNode;
+    }
+
+    it('says why the answers are held back', () => {
+        const caption = 'You can answer as soon as Beaver reconnects.';
+        const tree = renderHeld(vi.fn(), vi.fn(), true, caption);
+
+        expect(findAll(tree, (el) => el.props.role === 'status')).toHaveLength(1);
+        expect(renderedText(tree)).toContain(caption);
+        expect(findOne(tree, byAriaLabel('Approve batch job')).props.title).toBe(caption);
+        expect(findOne(tree, byAriaLabel('Cancel batch job')).props.title).toBe(caption);
     });
-    it('requires cancellation when the user requests changes to a table plan', () => {
-        const submit = vi.fn();
-        const tree = renderWithInstructions(submit, { table });
-        findOne(tree, isTextarea).props.onChange({ target: { value: 'Replace the question with sample size' } });
-        const changed = render(submit, { table });
-        expect(findOne(changed, byAriaLabel('Approve batch job')).props.disabled).toBe(true);
-        findOne(changed, byAriaLabel('Cancel batch job and send instructions')).props.onClick();
-        expect(submit).toHaveBeenCalledWith(expect.objectContaining({ approved: false, user_instructions: 'Replace the question with sample size' }));
+
+    it('shows no caption once the answers are available again', () => {
+        const caption = 'You can answer as soon as Beaver reconnects.';
+        const tree = renderHeld(vi.fn(), vi.fn(), false, caption);
+
+        expect(renderedText(tree)).not.toContain(caption);
+        expect(findOne(tree, byAriaLabel('Approve batch job')).props.title).toBeUndefined();
+    });
+
+    it('holds both answers back and offers Stop instead', () => {
+        const onSubmit = vi.fn();
+        const onStop = vi.fn();
+        const tree = renderHeld(onSubmit, onStop, true);
+
+        expect(findOne(tree, byAriaLabel('Approve batch job')).props.disabled).toBe(true);
+        expect(findOne(tree, byAriaLabel('Cancel batch job')).props.disabled).toBe(true);
+        findOne(tree, byAriaLabel('Approve batch job')).props.onClick();
+        expect(onSubmit).not.toHaveBeenCalled();
+
+        const stop = findOne(tree, byAriaLabel('Stop generating'));
+        expect(stop.props.disabled).toBeFalsy();
+        stop.props.onClick();
+        expect(onStop).toHaveBeenCalledTimes(1);
+    });
+
+    it('offers no Stop while both answers are available', () => {
+        const tree = renderHeld(vi.fn(), vi.fn(), false);
+
+        expect(findAll(tree, byAriaLabel('Stop generating'))).toHaveLength(0);
     });
 });

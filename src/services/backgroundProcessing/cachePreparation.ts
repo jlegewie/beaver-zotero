@@ -16,6 +16,7 @@ export async function getUncachedCandidates(stats: DocumentCacheStats, firstOnly
         libraryIds: (Zotero.Beaver?.searchableLibraryIds ?? []).filter(isBackgroundProcessingLibraryEnabled),
         hasOcrAccess: Zotero.Beaver?.hasOcrAccess === true,
         firstOnly,
+        protectedVersions: Zotero.Beaver?.documentCache?.pdfCompatibilityVersions(),
     });
     return candidates.filter((candidate) => isBackgroundProcessingLibraryEnabled(candidate.libraryId));
 }

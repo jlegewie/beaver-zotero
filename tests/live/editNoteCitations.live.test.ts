@@ -305,10 +305,12 @@ describe('edit_note execute — structural locator resolved to a page', () => {
         expect(readBack.error).toBeFalsy();
         const decoded = decodeURIComponent(readBack.saved_html);
         // A native page locator was stored (not dropped).
-        expect(decoded).toMatch(/"locator":"\d+","label":"page"/);
+        expect(decoded).toMatch(/"locator":"\d+"/);
+        // No CSL label: Zotero then shows the standard "p." form.
+        expect(decoded).not.toContain('"label":');
     });
 
-    it('re-reads the resolved sentence locator as a loc="pageN" tag', async () => {
+    it('re-reads the citation with the sentence locator it was written with', async () => {
         const ref = await seedNote('<p>Body to edit.</p>');
 
         const exec = await executeEditNote({
@@ -321,9 +323,10 @@ describe('edit_note execute — structural locator resolved to a page', () => {
         expect(exec.success, exec.error ?? '').toBe(true);
 
         const simplified = await readSimplified(`${ref.library_id}-${ref.zotero_key}`);
-        // The stored locator round-trips as a page locator, never a sentence one.
-        expect(simplified).toMatch(/loc="page\d+"/);
-        expect(simplified).not.toMatch(/loc="s\d+"/);
+        // The CSL citation shows the page; Beaver's private metadata keeps the
+        // sentence locator, so the citation reads back as it was written.
+        expect(simplified).toContain(`<citation id="${LIBRARY_PREFIX}-${NORMAL_PDF.zotero_key}" loc="s200"`);
+        expect(simplified).not.toMatch(/loc="page\d+"/);
     });
 
     it('resolves a structural locator on a legacy att_id citation', async () => {
@@ -347,7 +350,9 @@ describe('edit_note execute — structural locator resolved to a page', () => {
             { library_id: ref.library_id, zotero_key: ref.zotero_key },
         );
         const decoded = decodeURIComponent(readBack.saved_html);
-        expect(decoded).toMatch(/"locator":"\d+","label":"page"/);
+        expect(decoded).toMatch(/"locator":"\d+"/);
+        // No CSL label: Zotero then shows the standard "p." form.
+        expect(decoded).not.toContain('"label":');
     });
 
     it('resolves a structural locator on a regular parent item via its child PDF', async () => {
@@ -372,14 +377,17 @@ describe('edit_note execute — structural locator resolved to a page', () => {
             { library_id: ref.library_id, zotero_key: ref.zotero_key },
         );
         const decoded = decodeURIComponent(readBack.saved_html);
-        expect(decoded).toMatch(/"locator":"\d+","label":"page"/);
+        expect(decoded).toMatch(/"locator":"\d+"/);
+        // No CSL label: Zotero then shows the standard "p." form.
+        expect(decoded).not.toContain('"label":');
     });
 
     it('warns and drops the locator when a structural locator cannot be resolved', async () => {
         const ref = await seedNote('<p>Body to edit.</p>');
 
-        // A sentence index far beyond the document is not in the citation
-        // index, so it can't be mapped to a page (option A: drop + warn).
+        // A sentence index far beyond the document is not in its extraction,
+        // so the citation shows no page and the warning says the locator is
+        // not in the document.
         const res = await executeEditNote({
             library_id: ref.library_id,
             zotero_key: ref.zotero_key,
@@ -390,7 +398,7 @@ describe('edit_note execute — structural locator resolved to a page', () => {
         expect(res.success, res.error ?? '').toBe(true);
 
         const warnings = res.result_data?.warnings ?? [];
-        const locatorWarning = warnings.find((w) => /could not be mapped to a page/i.test(w));
+        const locatorWarning = warnings.find((w) => /not in the cited document/i.test(w));
         expect(locatorWarning).toBeTruthy();
         expect(locatorWarning).toContain('loc="s999999"');
 

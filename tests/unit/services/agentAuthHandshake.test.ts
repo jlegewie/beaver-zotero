@@ -121,6 +121,25 @@ describe('AgentService auth handshake envelope', () => {
         expect('client_type' in auth).toBe(false);
         expect('client_features' in auth).toBe(false);
         expect('zotero_instance' in auth).toBe(false);
+        expect('extract_schema_versions' in auth).toBe(false);
+    });
+
+    it('declares extraction schema versions when the client serves documents', async () => {
+        const service = new AgentService('https://api.example.com');
+        const extractSchemaVersions = { pdf: { current: '4', producible: ['4'] } };
+        const auth = await captureAuthMessage(service, () =>
+            service.connect(
+                { type: 'chat' } as AgentRunRequest,
+                createCallbacks(),
+                '0.25.0',
+                'zotero-plugin',
+                [],
+                undefined,
+                undefined,
+                extractSchemaVersions,
+            ),
+        );
+        expect(auth.extract_schema_versions).toEqual(extractSchemaVersions);
     });
 
     it('call with frontendVersion only includes it (current Zotero plugin)', async () => {

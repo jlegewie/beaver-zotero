@@ -17,62 +17,32 @@ vi.mock('@beaver/agent-core/citations/externalReferences', () => ({
 
 vi.mock('../../../react/utils/pageLabels', () => ({
     getCitationPreloadFilePath: vi.fn(),
+    preloadPageLabelsForCitations: vi.fn().mockResolvedValue({}),
     preloadPageLabelsForContent: vi.fn().mockResolvedValue({}),
 }));
 
 import {
     buildLocalCitationDataMapForContent,
+    loadCitedLibraries,
     prepareCitationRenderContext,
     resolveExternalFileCitations,
 } from '../../../react/utils/citationRenderContext';
 import {
     getCitationPreloadFilePath,
+    preloadPageLabelsForCitations,
     preloadPageLabelsForContent,
 } from '../../../react/utils/pageLabels';
+import { structuredResultWithCitablePages } from '../../helpers/structuredDocuments';
 
 const mockGetCitationPreloadFilePath = vi.mocked(getCitationPreloadFilePath);
 const mockPreloadPageLabelsForContent = vi.mocked(preloadPageLabelsForContent);
 
 function structuredResult() {
-    return {
-        mode: 'structured',
-        document: {
-            pageCount: 5,
-            pages: [],
-            citationIndex: {
-                s25: {
-                    id: 's25',
-                    kind: 'sentence',
-                    pageIndex: 2,
-                    pageLabel: '7',
-                    itemId: 'p4',
-                    sentenceId: 's25',
-                },
-                s26: {
-                    id: 's26',
-                    kind: 'sentence',
-                    pageIndex: 2,
-                    pageLabel: '7',
-                    itemId: 'p4',
-                    sentenceId: 's26',
-                },
-                p12: {
-                    id: 'p12',
-                    kind: 'item',
-                    pageIndex: 1,
-                    pageLabel: '6',
-                    itemId: 'p12',
-                },
-                table3: {
-                    id: 'table3',
-                    kind: 'item',
-                    pageIndex: 4,
-                    pageLabel: '12',
-                    itemId: 'table3',
-                },
-            },
-        },
-    };
+    return structuredResultWithCitablePages(5, [
+        { index: 1, label: '6', items: [{ id: 'p12' }] },
+        { index: 2, label: '7', items: [{ id: 'p4', sentences: ['s25', 's26'] }] },
+        { index: 4, label: '12', items: [{ id: 'table3' }] },
+    ]);
 }
 
 describe('citation render context', () => {
@@ -86,6 +56,8 @@ describe('citation render context', () => {
             id: 42,
             key: 'ATTACH01',
             libraryID: 1,
+            isAttachment: () => true,
+            attachmentContentType: '',
         };
         cache = {
             getResult: vi.fn().mockResolvedValue(structuredResult()),
@@ -95,7 +67,11 @@ describe('citation render context', () => {
             ...(globalThis as any).Zotero,
             Beaver: { documentCache: cache },
             Items: {
-                getByLibraryAndKey: vi.fn(() => attachment),
+                // The sync lookup throws as it does for a library Zotero has not loaded.
+                getByLibraryAndKey: vi.fn(() => {
+                    throw new Error('Item 42 not yet loaded');
+                }),
+                getByLibraryAndKeyAsync: vi.fn(async () => attachment),
             },
         };
 
@@ -105,6 +81,7 @@ describe('citation render context', () => {
             isRemoteOnly: false,
         });
         mockPreloadPageLabelsForContent.mockResolvedValue({});
+        vi.mocked(preloadPageLabelsForCitations).mockResolvedValue({});
     });
 
     it('builds local page metadata for sentence locators from the structured cache', async () => {
@@ -132,6 +109,73 @@ describe('citation render context', () => {
         });
     });
 
+    it('labels local page metadata with printed labels for file exports', async () => {
+        const result = structuredResult();
+        (result.document as any).derivedPageLabels = { '2': '1207' };
+        cache.getResult.mockResolvedValue(result);
+
+        const content = 'Claim <citation id="1-ATTACH01" loc="s25-s26"/>';
+        const printed = await buildLocalCitationDataMapForContent(content, 'printed');
+        expect(printed['local:zotero:1-ATTACH01:s25-s26'].page_labels).toEqual({ 2: '1207' });
+
+        const locator = await buildLocalCitationDataMapForContent(content);
+        expect(locator['local:zotero:1-ATTACH01:s25-s26'].page_labels).toEqual({ 2: '1207' });
+    });
+
+    it('labels Zotero locator metadata with the declared label where the page prints none', async () => {
+        const result = structuredResult();
+        (result.document as any).derivedPageLabels = null;
+        cache.getResult.mockResolvedValue(result);
+
+        const content = 'Claim <citation id="1-ATTACH01" loc="s25-s26"/>';
+        const locator = await buildLocalCitationDataMapForContent(content);
+        expect(locator['local:zotero:1-ATTACH01:s25-s26'].page_labels).toEqual({ 2: '7' });
+        const printed = await buildLocalCitationDataMapForContent(content, 'printed');
+        expect(printed['local:zotero:1-ATTACH01:s25-s26'].page_labels).toBeUndefined();
+    });
+
+    it('preloads Zotero locator labels for note export and printed labels when asked', async () => {
+        await prepareCitationRenderContext('Claim <citation id="1-ATTACH01" loc="page6"/>', {});
+        expect(mockPreloadPageLabelsForContent).toHaveBeenLastCalledWith(expect.any(String), 'locator');
+
+        await prepareCitationRenderContext('Claim <citation id="1-ATTACH01" loc="page6"/>', {}, 'printed');
+        expect(mockPreloadPageLabelsForContent).toHaveBeenLastCalledWith(expect.any(String), 'printed');
+    });
+
+    it('preloads labels for the attachment a citation resolved to, in the export namespace', async () => {
+        const resolved = {
+            citation_id: 'c1',
+            run_id: 'r1',
+            requested_ref: { kind: 'zotero', library_id: 1, zotero_key: 'ATTACH01', loc: { kind: 'page', value: '5', raw: 'page5' } },
+            resolved_ref: { kind: 'zotero', library_id: 1, zotero_key: 'OTHERPDF', loc: { kind: 'page', value: '5', raw: 'page5' } },
+            pages: [5],
+            locations: [],
+        } as any;
+        vi.mocked(preloadPageLabelsForCitations).mockResolvedValue({ 77: { 4: '1' } });
+
+        const context = await prepareCitationRenderContext(
+            'Claim <citation id="1-ATTACH01" loc="page5"/>',
+            { citationDataMap: { c1: resolved } },
+        );
+
+        expect(preloadPageLabelsForCitations).toHaveBeenCalledWith([resolved], 'locator');
+        expect(context?.pageLabelsByAttachmentId).toEqual({ 77: { 4: '1' } });
+    });
+
+    it('preloads resolved-target labels only after the content preload settles', async () => {
+        let resolveContent!: (labels: Record<number, Record<number, string>>) => void;
+        mockPreloadPageLabelsForContent.mockReturnValue(new Promise(resolve => { resolveContent = resolve; }));
+
+        const pending = prepareCitationRenderContext('Claim <citation id="1-ATTACH01" loc="page6"/>', {});
+        await new Promise(resolve => setTimeout(resolve, 0));
+        expect(preloadPageLabelsForCitations).not.toHaveBeenCalled();
+
+        resolveContent({ 42: { 5: '6' } });
+        const context = await pending;
+        expect(preloadPageLabelsForCitations).toHaveBeenCalledTimes(1);
+        expect(context?.pageLabelsByAttachmentId).toEqual({ 42: { 5: '6' } });
+    });
+
     it('resolves a cited standalone attachment file so link rendering knows it is reachable', async () => {
         // Note creation renders citations synchronously; a standalone
         // attachment link only opens the file when this preload has confirmed
@@ -139,6 +183,7 @@ describe('citation render context', () => {
         attachment.parentID = false;
         attachment.isAttachment = () => true;
         attachment.getFilePathAsync = vi.fn().mockResolvedValue('/storage/ATTACH01/file.pdf');
+        (Zotero as any).Items.getByLibraryAndKey = vi.fn(() => attachment);
         (Zotero as any).Items.loadDataTypes = vi.fn().mockResolvedValue(undefined);
 
         await prepareCitationRenderContext('Claim <citation id="1-ATTACH01" loc="page6"/>', {});
@@ -316,6 +361,48 @@ describe('citation render context', () => {
                 'local:extfile:AB12CD34',
                 'local:extfile:AB12CD34:page2',
             ]);
+        });
+    });
+
+    describe('loadCitedLibraries', () => {
+        let libraries: Record<number, { getDataLoaded: ReturnType<typeof vi.fn>; waitForDataLoad: ReturnType<typeof vi.fn> }>;
+
+        beforeEach(() => {
+            libraries = {};
+            for (const id of [1, 5, 7, 9]) {
+                libraries[id] = {
+                    getDataLoaded: vi.fn(() => id === 1),
+                    waitForDataLoad: vi.fn().mockResolvedValue(undefined),
+                };
+            }
+            (globalThis as any).Zotero.Libraries = {
+                exists: vi.fn((id: number) => id in libraries),
+                get: vi.fn((id: number) => libraries[id]),
+            };
+        });
+
+        it('loads unloaded libraries of cited items, resolved refs and mapped external references', async () => {
+            await loadCitedLibraries(
+                'A <citation id="5-ITEM0001"/> B <citation id="1-ITEM0002"/> C <citation external_id="ext1"/>',
+                [{
+                    citation_id: 'c1',
+                    requested_ref: { kind: 'zotero', library_id: 1, zotero_key: 'ITEM0002' },
+                    resolved_ref: { kind: 'zotero', library_id: 7, zotero_key: 'ITEM0003' },
+                } as any],
+                { ext1: { library_id: 9, zotero_key: 'ITEM0004' } },
+            );
+
+            expect(libraries[5].waitForDataLoad).toHaveBeenCalledWith('item');
+            expect(libraries[7].waitForDataLoad).toHaveBeenCalledWith('item');
+            expect(libraries[9].waitForDataLoad).toHaveBeenCalledWith('item');
+            // Already loaded: nothing to do.
+            expect(libraries[1].waitForDataLoad).not.toHaveBeenCalled();
+        });
+
+        it('loads cited libraries before note export renders', async () => {
+            await prepareCitationRenderContext('Claim <citation id="5-ATTACH01" loc="page6"/>', {});
+
+            expect(libraries[5].waitForDataLoad).toHaveBeenCalledWith('item');
         });
     });
 });

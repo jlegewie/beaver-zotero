@@ -13,8 +13,10 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+    getWorkerCompiledWasm,
     getWorkerUrls,
     isWorkerConfigured,
+    setWorkerCompiledWasm,
     setWorkerUrls,
 } from '../../../src/beaver-extract/worker/config';
 
@@ -66,5 +68,16 @@ describe('worker/config', () => {
             sentencexWasmBinaryUrl: 'b://sentencex.wasm',
         });
         expect(getWorkerUrls().mupdfWasmFactoryUrl).toBe('b://factory.mjs');
+    });
+
+    it('keeps only compiled modules from the configure frame', () => {
+        const module = new WebAssembly.Module(
+            new Uint8Array([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]),
+        );
+        setWorkerCompiledWasm({ mupdf: module, sentencex: new Uint8Array(8) });
+        expect(getWorkerCompiledWasm()).toEqual({ mupdf: module, sentencex: undefined });
+
+        setWorkerCompiledWasm(undefined);
+        expect(getWorkerCompiledWasm()).toEqual({ mupdf: undefined, sentencex: undefined });
     });
 });

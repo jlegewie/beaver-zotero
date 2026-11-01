@@ -6,6 +6,7 @@ import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import { toolExpandedAtom, setToolExpandedAtom } from '../../../../atoms/messageUIState';
 import { useTableDisplay } from '../../../../hooks/useTableDisplay';
+import { useSurfaceWindow } from '../../../../runtime/SurfaceWindowContext';
 import { TableResultView } from '../../../../components/agentRuns/toolResultViews/TableResultView';
 import {
     ArrowDownIcon,
@@ -49,16 +50,17 @@ export const TableArtifactRow: React.FC<TableArtifactRowProps> = ({ row }) => {
         || 'Untitled table';
     const label = row.created ? 'Created Table' : 'Updated Table';
 
+    const surfaceWindow = useSurfaceWindow();
     const handleOpen = useCallback(async () => {
         const open = getHost().navigation?.openTable;
         if (!open) {
             setOpenMessage('Table provider unavailable.');
             return;
         }
-        const outcome = await open(record.reference.key)
+        const outcome = await open(record.reference.key, surfaceWindow)
             .catch(() => ({ error: 'Table provider unavailable.' }));
         setOpenMessage('error' in outcome ? outcome.error : (outcome.warning ?? ''));
-    }, [record.reference.key]);
+    }, [record.reference.key, surfaceWindow]);
 
     const headerIcon = isHovered ? (isExpanded ? ArrowDownIcon : ArrowRightIcon) : TableIcon;
 

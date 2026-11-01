@@ -56,6 +56,13 @@
     min-height: 560px;
 }
 
+/* Menus and tooltips use the overlay surface, which is tuned against the
+ * sidepane; on the preferences window's plain background it reads as a dark
+ * block. Match the separate window and lift overlays to the background. */
+#beaver-pane-preferences {
+    --beaver-surface-overlay: var(--material-background);
+}
+
 /* Preferences window: two-column shell. The sidebar keeps the window's
  * sidepane material; the settings column sits on the plain background so the
  * cards read against it the way they do in Zotero's own settings. */
@@ -404,6 +411,14 @@
 .beaver-run-status-popup .beaver-run-status-popup__footer > button {
     flex: 0 0 auto;
     white-space: nowrap;
+}
+
+/* Stands in for the permission menu while the run reconnects, and gives
+ * way the same way. */
+.beaver-run-status-popup__reconnecting {
+    flex: 0 1 auto;
+    min-width: 0;
+    font-size: 0.875rem;
 }
 
 /* The permission menu gives way first: its label truncates before a
@@ -780,6 +795,252 @@
 .beaver-showcase__send--pressed {
     transform: scale(0.85);
     transition: transform 120ms ease;
+}
+
+/* The export tip's visual (featureTips/NoteExportTipShowcase): the end of a
+ * response with the note's row and its export menu, then the document in Word, cross-fading in one slot
+ * sized for the open menu, with a pointer that walks through the clicks.
+ * Decorative only. */
+.beaver-export-tip {
+    width: 100%;
+    margin-top: -2px;
+    pointer-events: none;
+    user-select: none;
+}
+
+.beaver-export-tip__stage {
+    position: relative;
+    height: 196px;
+    overflow: hidden;
+    /* Room for the cards' shadows and the menu's. */
+    padding: 2px;
+    margin: -2px;
+}
+
+.beaver-export-tip__layer {
+    position: absolute;
+    inset: 2px;
+    transition: opacity 360ms ease, transform 360ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.beaver-export-tip__layer--document {
+    transform-origin: 50% 0;
+}
+
+.beaver-export-tip__layer--hidden {
+    opacity: 0;
+    transform: scale(0.97);
+}
+
+.beaver-export-tip__layer--document.beaver-export-tip__layer--hidden {
+    transform: translateY(8px) scale(0.98);
+}
+
+.beaver-export-tip__row {
+    cursor: default;
+}
+
+/* The response runs on above the slot: its tail, faded in from the top. */
+.beaver-export-tip__run-end {
+    justify-content: flex-end;
+    height: 100%;
+}
+
+.beaver-export-tip .beaver-export-tip__response {
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    mask-image: linear-gradient(to bottom, transparent 0%, black 65%);
+}
+
+.beaver-export-tip .beaver-export-tip__response p {
+    margin: 0;
+}
+
+.beaver-export-tip__anchor {
+    position: relative;
+    display: flex;
+}
+
+.beaver-export-tip__button {
+    transition: background-color 120ms ease, transform 90ms ease;
+}
+
+.beaver-export-tip__button--active {
+    background: var(--fill-quinary);
+}
+
+.beaver-export-tip__button--pressed,
+.beaver-export-tip__item--pressed {
+    transform: scale(0.92);
+}
+
+.beaver-export-tip__menu {
+    position: absolute;
+    bottom: calc(100% + 4px);
+    right: 0;
+    z-index: 1;
+    width: 132px;
+    animation: beaverExportTipMenuIn 140ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.beaver-export-tip__menu .beaver-menu-item {
+    transition: background-color 120ms ease, transform 90ms ease;
+}
+
+@keyframes beaverExportTipMenuIn {
+    from {
+        opacity: 0;
+        transform: translateY(4px);
+    }
+
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+/* Word, in its own colors in either theme. */
+.beaver-export-tip__word {
+    height: 100%;
+    overflow: hidden;
+    /* The page runs on below the slot. */
+    mask-image: linear-gradient(to bottom, black 86%, transparent 100%);
+    border: 1px solid var(--beaver-border-default);
+    border-radius: var(--beaver-radius-card);
+    background: #f3f3f3;
+    color: #1f1f1f;
+    font-family: "Aptos", "Calibri", "Segoe UI", -apple-system, sans-serif;
+}
+
+.beaver-export-tip__word-titlebar {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    height: 26px;
+    padding: 0 10px;
+    background: #185abd;
+    color: #fff;
+    font-size: 11.5px;
+}
+
+.beaver-export-tip__word-logo {
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    width: 15px;
+    height: 15px;
+    border-radius: 3px;
+    background: #fff;
+    color: #185abd;
+    font-size: 10.5px;
+    font-weight: 700;
+}
+
+.beaver-export-tip__word-ribbon {
+    display: flex;
+    gap: 14px;
+    height: 24px;
+    align-items: center;
+    padding: 0 12px;
+    overflow: hidden;
+    border-bottom: 1px solid #e1e1e1;
+    background: #fff;
+    color: #424242;
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+.beaver-export-tip__word-tab--zotero {
+    align-self: stretch;
+    display: inline-flex;
+    align-items: center;
+    border-bottom: 2px solid #185abd;
+    color: #185abd;
+    font-weight: 600;
+}
+
+.beaver-export-tip__word-canvas {
+    padding: 12px 18px 0 18px;
+}
+
+.beaver-export-tip__word-page {
+    padding: 16px 22px;
+    background: #fff;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.12);
+    font-size: 11px;
+    line-height: 1.5;
+}
+
+.beaver-export-tip__word-page p {
+    margin: 0 0 10px 0;
+}
+
+.beaver-export-tip__word-heading {
+    margin-bottom: 4px;
+    color: #0f4761;
+    font-size: 14px;
+}
+
+.beaver-export-tip__word-heading--minor {
+    font-size: 12px;
+}
+
+.beaver-export-tip__word-citation {
+    border-radius: 1px;
+    transition: background-color 120ms ease;
+}
+
+/* Word's shading of a field — here, Zotero's citation field — under the caret. */
+.beaver-export-tip__word-citation--field {
+    background: #d9d9d9;
+}
+
+.beaver-export-tip__word-bibliography {
+    padding-left: 2em;
+    text-indent: -2em;
+}
+
+.beaver-export-tip__pointer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 2;
+    transition: transform 560ms cubic-bezier(0.45, 0, 0.2, 1), opacity 200ms ease;
+    filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.25));
+}
+
+.beaver-export-tip__pointer--hidden {
+    opacity: 0;
+}
+
+.beaver-export-tip__pointer-glyph {
+    display: flex;
+    transform-origin: 0 0;
+    transition: transform 90ms ease;
+}
+
+/* The I-beam's hotspot is its middle, not its top-left. */
+.beaver-export-tip__pointer-glyph--text {
+    margin: -9px 0 0 -5px;
+    transform-origin: 50% 50%;
+}
+
+.beaver-export-tip__pointer-glyph--pressed {
+    transform: scale(0.86);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .beaver-export-tip__layer,
+    .beaver-export-tip__pointer,
+    .beaver-export-tip__menu {
+        transition: none;
+        animation: none;
+    }
 }
 
 /* A working run: a dot with a ring that keeps expanding out of it and fading. */
@@ -3861,4 +4122,1362 @@
 
 #beaver-pane-window #beaver-prompt.beaver-content-column {
     --beaver-column-pad: 0.75rem;
+}
+
+/* The popup overlay is positioned against the prompt's padding box, so it takes
+ * the prompt's padding (gutter included) to stay as wide as the composer. */
+#beaver-pane-window #beaver-prompt > .beaver-popup-overlay {
+    padding-left: inherit;
+    padding-right: inherit;
+}
+
+/* ── Duplicate review: find_duplicates results ──
+ * Records are referred to by neutral letter badges so the field comparison can
+ * point back at them. */
+.beaver-root .duplicate-member-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    box-sizing: border-box;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 3px;
+    margin-top: 1px;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    line-height: 1;
+    color: var(--fill-secondary);
+    background: var(--fill-quinary);
+    border: 1px solid var(--fill-quarternary);
+}
+
+.beaver-root .duplicate-group-title {
+    font-size: 0.925rem;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+}
+
+/* Aligns record rows, warnings and differences under the group title text. */
+.beaver-root .duplicate-group-body {
+    padding-left: 24px;
+}
+
+.beaver-root .duplicate-member-row:hover {
+    background: var(--fill-quinary);
+}
+
+.beaver-root .duplicate-member-row:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: -2px;
+}
+
+.beaver-root .duplicate-differences-toggle {
+    background: none;
+    border: 0;
+    padding: 2px 0;
+    margin: 0;
+    min-width: 0;
+    text-align: left;
+    cursor: pointer;
+}
+
+.beaver-root .duplicate-differences-toggle:hover {
+    color: var(--fill-primary);
+}
+
+.beaver-root .duplicate-differences {
+    padding: 2px 0 4px 18px;
+}
+
+.beaver-root .duplicate-field-value {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+/* ── Duplicate review: merge_items approval ──
+ * Accent color marks selection only (native radios); secondary information
+ * uses the secondary text color so it stays readable. */
+.beaver-root .merge-section-label {
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--fill-primary);
+    padding: 0 8px 2px;
+}
+
+.beaver-root .merge-record {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    border: 1px solid transparent;
+}
+
+.beaver-root .merge-record-choice {
+    cursor: pointer;
+}
+
+.beaver-root .merge-record-choice:not(.merge-record-disabled):hover {
+    background: var(--fill-quinary);
+}
+
+.beaver-root .merge-record-kept {
+    background: var(--fill-quinary);
+    border-color: var(--fill-quarternary);
+}
+
+.beaver-root .merge-record-disabled {
+    cursor: default;
+}
+
+.beaver-root .merge-radio {
+    flex-shrink: 0;
+    margin: 3px 0 0;
+    accent-color: var(--accent-blue);
+}
+
+.beaver-root .merge-field {
+    display: grid;
+    grid-template-columns: 96px minmax(0, 1fr) 18px;
+    column-gap: 8px;
+    align-items: start;
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 0.875rem;
+}
+
+.beaver-root .merge-field-label {
+    color: var(--fill-secondary);
+    overflow-wrap: anywhere;
+}
+
+.beaver-root .merge-field-value {
+    min-width: 0;
+    color: var(--fill-primary);
+}
+
+.beaver-root .merge-field-button {
+    display: block;
+    width: 100%;
+    padding: 0;
+    margin: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.beaver-root .merge-field-choosable:hover {
+    background: var(--fill-quinary);
+}
+
+.beaver-root .merge-field-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    margin: 0;
+    border: 0;
+    border-radius: 4px;
+    background: none;
+    color: var(--fill-secondary);
+    cursor: pointer;
+}
+
+.beaver-root .merge-field-toggle:hover {
+    color: var(--fill-primary);
+}
+
+.beaver-root .merge-field-button:focus-visible,
+.beaver-root .merge-field-toggle:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: 1px;
+    border-radius: 4px;
+}
+
+.beaver-root .merge-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    cursor: pointer;
+}
+
+/* Import items card (create_items): expandable rows */
+
+.beaver-root .import-item-header {
+    cursor: pointer;
+}
+
+.beaver-root .import-item-icon {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    /* Centered on the title's first line. */
+    height: 1.34em;
+    height: 1lh;
+}
+
+.beaver-root .import-item-reveal {
+    display: inline-flex;
+    vertical-align: middle;
+    color: var(--fill-secondary);
+    cursor: pointer;
+}
+
+.beaver-root .import-item-reveal:hover {
+    color: var(--fill-primary);
+}
+
+.beaver-root .import-item-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    margin: 0;
+    border: 0;
+    border-radius: 4px;
+    background: none;
+    color: var(--fill-secondary);
+    cursor: pointer;
+}
+
+.beaver-root .import-item-header:hover .import-item-toggle,
+.beaver-root .import-item-toggle:hover {
+    color: var(--fill-primary);
+}
+
+.beaver-root .import-item-toggle:focus-visible,
+.beaver-root .import-item-link:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: 1px;
+}
+
+.beaver-root .import-item-details {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin: 6px 0 2px 24px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: var(--fill-quinary);
+    font-size: 0.875rem;
+    cursor: auto;
+    user-select: text;
+}
+
+.beaver-root .import-item-fields {
+    display: grid;
+    grid-template-columns: minmax(72px, max-content) minmax(0, 1fr);
+    column-gap: 12px;
+    row-gap: 4px;
+}
+
+.beaver-root .import-item-field-label,
+.beaver-root .import-item-section-label {
+    color: var(--fill-secondary);
+}
+
+.beaver-root .import-item-field-label {
+    white-space: nowrap;
+}
+
+.beaver-root .import-item-field-value {
+    min-width: 0;
+    color: var(--fill-primary);
+    overflow-wrap: anywhere;
+}
+
+.beaver-root .import-item-link {
+    padding: 0;
+    margin: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    color: var(--accent-blue);
+    text-align: left;
+    overflow-wrap: anywhere;
+    cursor: pointer;
+}
+
+.beaver-root .import-item-link:hover {
+    text-decoration: underline;
+}
+
+.beaver-root .import-item-abstract {
+    color: var(--fill-primary);
+    line-height: 1.45;
+    white-space: pre-wrap;
+}
+
+.beaver-root .import-item-abstract-clamped {
+    display: -webkit-box;
+    -webkit-line-clamp: 6;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.beaver-root .import-item-notes {
+    margin: 0;
+    padding-inline-start: 1.2em;
+    color: var(--fill-secondary);
+}
+
+/* Import items card: destination breadcrumb and tags */
+
+.beaver-root .import-destination {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    column-gap: 10px;
+    row-gap: 4px;
+    margin-bottom: 8px;
+    font-size: 0.875rem;
+}
+
+.beaver-root .import-crumbs {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.beaver-root .import-crumb {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    max-width: 100%;
+    padding: 1px 4px;
+    margin: 0;
+    border: 0;
+    border-radius: 4px;
+    background: none;
+    font: inherit;
+    color: var(--fill-secondary);
+    cursor: pointer;
+}
+
+/* The first crumb's icon lines up with the item icons below it. */
+.beaver-root .import-crumb:first-child {
+    margin-left: -4px;
+}
+
+.beaver-root .import-crumb:last-child {
+    color: var(--fill-primary);
+}
+
+.beaver-root .import-crumb:not(:disabled):hover {
+    background: var(--fill-quinary);
+    color: var(--fill-primary);
+}
+
+.beaver-root .import-crumb:disabled {
+    cursor: default;
+}
+
+.beaver-root .import-crumb:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: 1px;
+}
+
+.beaver-root .import-crumb-icon,
+.beaver-root .import-tag-icon {
+    flex-shrink: 0;
+    transform: scale(0.85);
+}
+
+.beaver-root .import-crumb-separator {
+    flex-shrink: 0;
+    color: var(--fill-secondary);
+    transform: scale(0.9);
+}
+
+.beaver-root .import-destination-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    min-width: 0;
+}
+
+.beaver-root .import-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    max-width: 100%;
+    padding: 0 6px 0 3px;
+    border-radius: 10px;
+    background: var(--fill-quinary);
+    color: var(--fill-secondary);
+    font-size: 0.8125rem;
+    line-height: 1.5;
+}
+
+/* ───── Table card (create_table) ───── */
+
+/* The card: the title row and the footer stay put, and everything between
+ * them scrolls in one area, so the card never nests a scroll inside another. */
+[id^="beaver-pane-"] .user-message-display.table-card {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    max-height: 70vh;
+    padding: 0;
+    overflow: hidden;
+}
+
+[id^="beaver-pane-"] .table-card-top {
+    flex: none;
+    padding: 0.8rem 0.8rem 0.4rem;
+    border-bottom: 1px solid transparent;
+    transition: border-color 0.15s ease;
+}
+
+/* Once the body scrolls under it, a rule separates the title row. */
+[id^="beaver-pane-"] .table-card-top-scrolled {
+    border-bottom-color: var(--fill-quinary);
+}
+
+[id^="beaver-pane-"] .table-card-body {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    min-width: 0;
+    overflow-y: auto;
+    padding: 0.2rem 0.8rem 0.75rem;
+}
+
+[id^="beaver-pane-"] .table-card-footer {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    flex: none;
+    min-width: 0;
+    padding: 0.6rem 0.8rem 0.7rem;
+    border-top: 1px solid var(--fill-quinary);
+}
+
+/* Above the footer's buttons: why Create is disabled, as the same warning the
+ * Sources step shows, or a quiet line while a count is in flight. */
+[id^="beaver-pane-"] .table-card-notice {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.45rem;
+    flex: 1 0 100%;
+    min-width: 0;
+    margin-bottom: 0.1rem;
+    font-size: 0.875rem;
+    line-height: 1.35;
+}
+
+[id^="beaver-pane-"] .table-card-notice-pending {
+    color: var(--fill-secondary);
+}
+
+[id^="beaver-pane-"] .table-card-notice-text {
+    min-width: 0;
+    flex: 1;
+}
+
+[id^="beaver-pane-"] .table-card-footer-warning {
+    flex: 1 0 100%;
+    min-width: 0;
+    box-sizing: border-box;
+}
+
+/* The way to the fix, inside the warning: its own color, underlined on hover. */
+[id^="beaver-pane-"] .table-card-warning-action {
+    flex: none;
+    align-self: center;
+    padding: 0 2px;
+    border: 0;
+    border-radius: 3px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    /* font-weight: 600; */
+    text-decoration: none;
+    text-underline-offset: 2px;
+    cursor: pointer;
+}
+
+[id^="beaver-pane-"] .table-card-warning-action:hover {
+    text-decoration: underline;
+}
+
+[id^="beaver-pane-"] .table-card-warning-action:focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: 1px;
+}
+
+/* The row-cap warning, under the Sources heading. */
+[id^="beaver-pane-"] .table-card-warning {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 0.45rem;
+    padding: 0.45rem 0.6rem;
+    border: 1px solid var(--tag-orange-tertiary);
+    border-radius: 6px;
+    background: var(--tag-orange-quinary);
+    color: var(--tag-orange-secondary);
+    font-size: 0.875rem;
+    line-height: 1.4;
+}
+
+[id^="beaver-pane-"] .table-card-warning-icon {
+    flex: none;
+    width: 15px;
+    height: 15px;
+    margin-top: 1px;
+}
+
+/* Header: title and description read as text; a pencil at the end edits them. */
+[id^="beaver-pane-"] .table-card-header {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    min-width: 0;
+}
+
+[id^="beaver-pane-"] .table-card-header-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    min-width: 0;
+    /* Align with the title text, past the table icon and its gap. */
+    padding-inline-start: calc(16px + 0.45rem);
+}
+
+[id^="beaver-pane-"] .table-card-title-icon {
+    width: 16px;
+    height: 16px;
+    margin-top: 0.15rem;
+}
+
+[id^="beaver-pane-"] .table-card-title {
+    font-size: 1.05rem;
+    font-weight: 600;
+    line-height: 1.3;
+    color: var(--fill-primary);
+}
+
+[id^="beaver-pane-"] .table-card-description {
+    font-size: 0.95rem;
+    line-height: 1.4;
+    color: var(--fill-secondary);
+}
+
+[id^="beaver-pane-"] .table-card-inline {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+[id^="beaver-pane-"] .table-card-inline-text {
+    cursor: text;
+}
+
+[id^="beaver-pane-"] .table-card-inline-disabled .table-card-inline-text {
+    cursor: default;
+}
+
+/* The pencil flows after the last word, so it marks the end of the text. */
+[id^="beaver-pane-"] .table-card-inline-edit {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    vertical-align: baseline;
+    margin-inline-start: 0.3rem;
+    padding: 2px;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--fill-secondary);
+    font-size: 0.8em;
+    line-height: 1;
+    cursor: pointer;
+    position: relative;
+    top: 0.1em;
+}
+
+[id^="beaver-pane-"] .table-card-inline-edit:hover,
+[id^="beaver-pane-"] .table-card-inline-edit:focus-visible {
+    color: var(--fill-primary);
+    background: var(--beaver-fill-hover);
+}
+
+[id^="beaver-pane-"] .table-card-inline-edit:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: 0;
+}
+
+/* The field keeps the text's typography and position: a hairline and a little
+ * inset (cancelled by the negative margin) are the only change. */
+[id^="beaver-pane-"] .table-card-inline-field {
+    display: block;
+    width: calc(100% + 10px);
+    margin: -3px -5px;
+    padding: 2px 4px;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    background: transparent;
+    font-family: inherit;
+    outline: none;
+    box-sizing: border-box;
+    -moz-appearance: none;
+    appearance: none;
+}
+
+[id^="beaver-pane-"] .table-card-inline-field:focus {
+    border-color: var(--fill-quarternary);
+}
+
+/* Editing: the field takes the text's place, with discard / save after it. */
+[id^="beaver-pane-"] .table-card-inline-editing {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-end;
+    gap: 0.35rem;
+    flex: 1;
+    min-width: 0;
+    font-size: 0.95rem !important;
+}
+
+[id^="beaver-pane-"] .table-card-inline-editing .table-card-inline-field {
+    flex: 1;
+    width: auto;
+    min-width: 0;
+    margin: -3px 0 -3px -5px;
+}
+
+[id^="beaver-pane-"] .table-card-inline-actions {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.5rem;
+    flex: none;
+    margin-top: -1px;
+}
+
+[id^="beaver-pane-"] .table-card-destination {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.35rem;
+    min-width: 0;
+    font-size: 0.875rem;
+    color: var(--fill-secondary);
+}
+
+[id^="beaver-pane-"] .table-card-destination-icon {
+    flex: none;
+    width: 14px;
+    height: 14px;
+}
+
+[id^="beaver-pane-"] .table-card-destination-path {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* A breadcrumb segment that selects its library or collection in Zotero. */
+[id^="beaver-pane-"] .table-card-crumb {
+    display: inline;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+
+[id^="beaver-pane-"] .table-card-crumb:hover {
+    color: var(--fill-primary);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+[id^="beaver-pane-"] .table-card-crumb:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: 1px;
+    border-radius: 2px;
+}
+
+[id^="beaver-pane-"] .table-card-source-icon {
+    width: 16px;
+    height: 16px;
+    color: var(--fill-secondary);
+}
+
+/* "Add source" / "Add column": a quiet action at the end of the step heading,
+ * in the secondary color like the "Edit" link of a completed step. */
+[id^="beaver-pane-"] .table-card-head-action {
+    display: inline-flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.3rem;
+    flex: none;
+    margin-inline-end: -6px;
+    padding: 2px 6px;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--fill-secondary);
+    font-size: 0.925rem;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+[id^="beaver-pane-"] .table-card-head-action:hover:not(:disabled),
+[id^="beaver-pane-"] .table-card-head-action[aria-expanded="true"] {
+    background: var(--beaver-fill-hover);
+    color: var(--fill-primary);
+}
+
+[id^="beaver-pane-"] .table-card-head-action:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: 0;
+}
+
+/* The credit chip, at the right under the title row, worded and drawn as the
+ * batch card's. */
+[id^="beaver-pane-"] .table-card-credit-row {
+    display: flex;
+    flex-direction: row;
+    justify-content: flex-end;
+    margin-top: 0.3rem;
+}
+
+[id^="beaver-pane-"] .table-card-credit-chip {
+    border: 1px solid var(--fill-quarternary);
+    border-radius: 6px;
+    padding: 2px 7px;
+    white-space: nowrap;
+}
+
+/* The row line under the columns: what the run would fill and how. */
+[id^="beaver-pane-"] .table-card-cost {
+    padding-top: 0.15rem;
+}
+
+[id^="beaver-pane-"] .table-card-head-action:disabled {
+    cursor: default;
+    opacity: 0.6;
+}
+
+/* Drop overlay: over the whole card while a drag is over it. */
+[id^="beaver-pane-"] .table-card-drop-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1.5px dashed var(--accent-blue);
+    border-radius: var(--beaver-radius-card, 8px);
+    background: color-mix(in srgb, var(--material-background, var(--color-background)) 88%, transparent);
+    pointer-events: none;
+    transition: opacity 0.15s ease;
+}
+
+[id^="beaver-pane-"] .table-card-drop-overlay-error {
+    border-color: var(--tag-red-tertiary, var(--fill-tertiary));
+}
+
+[id^="beaver-pane-"] .table-card-drop-message {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0 1rem;
+    font-size: 1rem;
+    font-weight: 500;
+    color: var(--fill-primary);
+    text-align: center;
+}
+
+[id^="beaver-pane-"] .table-card-drop-icon {
+    width: 18px;
+    height: 18px;
+    flex: none;
+}
+
+/* Steps: one part at a time, completed ones folded into a line above. */
+[id^="beaver-pane-"] .table-card-step {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    min-width: 0;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--fill-quinary);
+}
+
+[id^="beaver-pane-"] .table-card-step-head {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.45rem;
+    min-width: 0;
+}
+
+/* The stepper at the end of the title row: numbered circles joined by a line,
+ * centred on the title's first line. The current step is the only filled
+ * circle; completed steps are a blue outline with a check, steps to come a
+ * grey outline with their number. */
+[id^="beaver-pane-"] .table-card-stepper {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    flex: none;
+    height: calc(1.05rem * 1.3);
+    margin-inline-start: 0.25rem;
+}
+
+/* The tooltip's anchor wraps each circle; keep it from adding line height. */
+[id^="beaver-pane-"] .table-card-stepper > span {
+    display: inline-flex;
+}
+
+[id^="beaver-pane-"] .table-card-stepper-step {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border-radius: 50%;
+    box-sizing: border-box;
+    font-size: 0.8rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+}
+
+[id^="beaver-pane-"] .table-card-stepper-step-current {
+    background: var(--accent-blue);
+    color: #fff;
+}
+
+[id^="beaver-pane-"] .table-card-stepper-step-todo {
+    border: 1.5px solid var(--fill-tertiary);
+    color: var(--fill-secondary);
+}
+
+[id^="beaver-pane-"] .table-card-stepper-step-done {
+    border: 1.5px solid var(--accent-blue);
+    background: transparent;
+    color: var(--accent-blue);
+    font-size: 0.75rem;
+    cursor: pointer;
+}
+
+/* The check is a filled glyph, thin at this size; a matching stroke gives it
+ * the weight of the step numbers. */
+[id^="beaver-pane-"] .table-card-stepper-step-done svg path {
+    stroke: currentColor;
+    stroke-width: 1.5;
+    stroke-linejoin: round;
+}
+
+/* A light fill on hover marks the completed step as the way back. */
+[id^="beaver-pane-"] .table-card-stepper-step-done:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--accent-blue) 16%, transparent);
+}
+
+[id^="beaver-pane-"] .table-card-stepper-step-done:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: 2px;
+}
+
+[id^="beaver-pane-"] .table-card-stepper-step-done:disabled {
+    cursor: default;
+}
+
+[id^="beaver-pane-"] .table-card-stepper-line {
+    width: 12px;
+    height: 1.5px;
+    margin: 0 3px;
+    border-radius: 1px;
+    background: var(--fill-quarternary);
+}
+
+[id^="beaver-pane-"] .table-card-stepper-line-done {
+    background: var(--accent-blue);
+}
+
+[id^="beaver-pane-"] .table-card-step-done {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.45rem;
+    min-width: 0;
+    width: 100%;
+    padding: 5px 8px;
+    border: 1px solid var(--fill-quarternary);
+    border-radius: 6px;
+    background: transparent;
+    font-size: 0.95rem;
+    text-align: start;
+    cursor: pointer;
+}
+
+[id^="beaver-pane-"] .table-card-step-done:hover:not(:disabled) {
+    background: var(--beaver-fill-hover);
+}
+
+[id^="beaver-pane-"] .table-card-step-done:disabled {
+    cursor: default;
+}
+
+[id^="beaver-pane-"] .table-card-step-done-icon {
+    color: var(--accent-blue);
+}
+
+[id^="beaver-pane-"] .table-card-step-edit {
+    color: var(--accent-blue);
+    /* font-weight: 500; */
+}
+
+[id^="beaver-pane-"] .table-card-count {
+    display: inline-flex;
+    align-items: center;
+    padding: 0 6px;
+    border-radius: 9px;
+    background: var(--fill-quinary);
+    color: var(--fill-secondary);
+    font-size: 0.8125rem;
+    line-height: 1.45;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+/* Sources */
+/* A source that alone holds more papers than a table. */
+[id^="beaver-pane-"] .table-card-count-warning {
+    background: var(--tag-orange-quinary);
+    color: var(--tag-orange-secondary);
+    box-shadow: inset 0 0 0 1px var(--tag-orange-tertiary);
+}
+
+[id^="beaver-pane-"] .table-card-source {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    border: 1px solid var(--fill-quarternary);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+[id^="beaver-pane-"] .table-card-source-head {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.25rem;
+    min-width: 0;
+    padding: 0.35rem 0.4rem 0.35rem 0;
+}
+
+[id^="beaver-pane-"] .table-card-source-toggle {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.5rem;
+    flex: 1;
+    min-width: 0;
+    padding: 0.1rem 0.25rem 0.1rem 0.55rem;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    text-align: start;
+    cursor: pointer;
+}
+
+[id^="beaver-pane-"] .table-card-source-head:hover {
+    background: var(--beaver-fill-hover);
+}
+
+[id^="beaver-pane-"] .table-card-source-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    min-width: 0;
+    padding: 0.4rem 0.4rem 0.45rem;
+    border-top: 1px solid var(--fill-quinary);
+}
+
+[id^="beaver-pane-"] .table-card-item-list {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+/* Pages a long item list instead of giving it a scroll area of its own. */
+[id^="beaver-pane-"] .table-card-show-more {
+    align-self: flex-start;
+    margin-top: 2px;
+    padding: 3px 6px;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--fill-primary);
+    font-size: 0.8125rem;
+    cursor: pointer;
+}
+
+[id^="beaver-pane-"] .table-card-show-more:hover {
+    background: var(--beaver-fill-hover);
+}
+
+[id^="beaver-pane-"] .table-card-show-more:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: -2px;
+}
+
+[id^="beaver-pane-"] .table-card-item {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+    padding: 3px 6px;
+    border-radius: 5px;
+}
+
+[id^="beaver-pane-"] .table-card-item-icon {
+    align-self: flex-start;
+    margin-top: 1px;
+}
+
+[id^="beaver-pane-"] .table-card-item-link {
+    cursor: pointer;
+}
+
+[id^="beaver-pane-"] .table-card-item-link:hover {
+    background: var(--beaver-fill-hover);
+}
+
+[id^="beaver-pane-"] .table-card-item-link:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: -2px;
+}
+
+[id^="beaver-pane-"] .table-card-chip {
+    padding: 0 5px;
+    border: 1px solid var(--fill-quarternary);
+    border-radius: 4px;
+    color: var(--fill-secondary);
+    font-size: 0.75rem;
+    line-height: 1.45;
+    white-space: nowrap;
+}
+
+/* Columns: a summary card that opens into its editor. */
+[id^="beaver-pane-"] .table-card-column {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    min-width: 0;
+    padding: 0.5rem 0.6rem;
+    border: 1px solid var(--fill-quarternary);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+[id^="beaver-pane-"] .table-card-column:hover:not(.table-card-column-editing):not(.table-card-column-disabled) {
+    background: var(--beaver-fill-hover);
+}
+
+[id^="beaver-pane-"] .table-card-column:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: -2px;
+}
+
+[id^="beaver-pane-"] .table-card-column-disabled {
+    cursor: default;
+}
+
+[id^="beaver-pane-"] .table-card-column-editing {
+    gap: 0.6rem;
+    padding: 0.6rem 0.65rem 0.5rem;
+    border-color: var(--fill-tertiary);
+    cursor: default;
+}
+
+[id^="beaver-pane-"] .table-card-column-question {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+}
+
+[id^="beaver-pane-"] .table-card-empty {
+    font-style: italic;
+}
+
+[id^="beaver-pane-"] .table-card-type-tag-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* A long unit must not crowd out the column name. */
+[id^="beaver-pane-"] .table-card-type-tag {
+    max-width: 11rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: var(--fill-quinary);
+    color: var(--fill-secondary);
+    font-size: 0.75rem;
+    line-height: 1.45;
+    white-space: nowrap;
+}
+
+[id^="beaver-pane-"] .table-card-options {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    margin-top: 0.15rem;
+    overflow: hidden;
+}
+
+[id^="beaver-pane-"] .table-card-option {
+    flex: none;
+    max-width: 10rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 0 6px;
+    border: 1px solid var(--fill-quarternary);
+    border-radius: 9px;
+    color: var(--fill-secondary);
+    font-size: 0.85rem;
+    line-height: 1.45;
+}
+
+/* The options editor: one bordered list, a row per category. The label and
+   its definition are borderless fields; the row shows focus instead, and its
+   controls fade in on hover or focus without taking room. */
+[id^="beaver-pane-"] .table-card-option-list {
+    display: flex;
+    flex-direction: column;
+    align-self: stretch;
+    min-width: 0;
+    border: 1px solid var(--fill-quarternary);
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+[id^="beaver-pane-"] .table-card-option-row {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    padding: 3px 3px 3px 8px;
+    transition: background-color 0.12s ease;
+}
+
+[id^="beaver-pane-"] .table-card-option-row + .table-card-option-row {
+    border-top: 1px solid var(--fill-quinary);
+}
+
+[id^="beaver-pane-"] .table-card-option-row:focus-within {
+    background: var(--beaver-fill-hover);
+}
+
+[id^="beaver-pane-"] .table-card-option-line {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 2px;
+    min-width: 0;
+    min-height: 22px;
+}
+
+[id^="beaver-pane-"] .table-card-option-label,
+[id^="beaver-pane-"] .table-card-option-definition {
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: none;
+    outline: none;
+    background: transparent;
+    font-family: inherit;
+    box-sizing: border-box;
+    -moz-appearance: none;
+    appearance: none;
+}
+
+[id^="beaver-pane-"] .table-card-option-label {
+    flex: 1;
+    font-size: 0.875rem;
+    line-height: 1.35;
+    color: var(--fill-primary);
+}
+
+[id^="beaver-pane-"] .table-card-option-definition {
+    width: 100%;
+    padding: 0 26px 2px 0;
+    font-size: 0.8125rem;
+    color: var(--fill-secondary);
+}
+
+[id^="beaver-pane-"] .table-card-option-label::placeholder,
+[id^="beaver-pane-"] .table-card-option-definition::placeholder {
+    color: var(--fill-tertiary);
+}
+
+[id^="beaver-pane-"] .table-card-option-action {
+    flex: none;
+    opacity: 0;
+    transition: opacity 0.12s ease;
+}
+
+[id^="beaver-pane-"] .table-card-option-row:hover .table-card-option-action,
+[id^="beaver-pane-"] .table-card-option-row:focus-within .table-card-option-action {
+    opacity: 1;
+}
+
+[id^="beaver-pane-"] .table-card-badge-warning {
+    padding: 0 5px;
+    border: 1px solid var(--tag-orange-tertiary);
+    border-radius: 4px;
+    background: var(--tag-orange-quinary);
+    color: var(--tag-orange-secondary);
+    font-size: 0.75rem;
+    line-height: 1.45;
+    white-space: nowrap;
+}
+
+/* Table tool card body: the recorded table in sections — description, then
+   sources and question columns as divided lists with the create card's icons
+   and type tags, then the counts. */
+[id^="beaver-pane-"] .table-record {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    padding: 0.6rem 0.75rem 0.5rem;
+    line-height: 1.4;
+}
+
+[id^="beaver-pane-"] .table-record-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    min-width: 0;
+}
+
+[id^="beaver-pane-"] .table-record-label {
+    color: var(--fill-primary);
+    font-weight: 500;
+}
+
+[id^="beaver-pane-"] .table-record-list {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    border: 1px solid var(--fill-quarternary);
+    border-radius: 8px;
+}
+
+[id^="beaver-pane-"] .table-record-row {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    min-width: 0;
+    padding: 0.45rem 0.6rem;
+}
+
+[id^="beaver-pane-"] .table-record-row + .table-record-row {
+    border-top: 1px solid var(--fill-quarternary);
+}
+
+[id^="beaver-pane-"] .table-card-problem {
+    color: var(--tag-orange-secondary);
+}
+
+[id^="beaver-pane-"] .table-card-label {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+
+[id^="beaver-pane-"] .table-card-label > span:first-child {
+    font-size: 0.8125rem;
+    color: var(--fill-secondary);
+}
+
+[id^="beaver-pane-"] .table-card-field {
+    width: 100%;
+    min-width: 0;
+    margin: 0;
+    padding: 3px 6px;
+    font-size: 0.875rem;
+    line-height: 1.35;
+    border: 1px solid var(--fill-quarternary);
+    border-radius: 5px;
+    background: transparent;
+    color: var(--fill-primary);
+    font-family: inherit;
+    outline: none;
+    box-sizing: border-box;
+    -moz-appearance: none;
+    appearance: none;
+}
+
+/* Zotero paints its own fill on focused and hovered inputs; these fields stay
+ * on the card's surface in every state. */
+[id^="beaver-pane-"] .table-card-field,
+[id^="beaver-pane-"] .table-card-field:hover,
+[id^="beaver-pane-"] .table-card-field:focus,
+[id^="beaver-pane-"] .table-card-inline-field,
+[id^="beaver-pane-"] .table-card-inline-field:hover,
+[id^="beaver-pane-"] .table-card-inline-field:focus,
+[id^="beaver-pane-"] .table-card-option-label,
+[id^="beaver-pane-"] .table-card-option-label:hover,
+[id^="beaver-pane-"] .table-card-option-label:focus,
+[id^="beaver-pane-"] .table-card-option-definition,
+[id^="beaver-pane-"] .table-card-option-definition:hover,
+[id^="beaver-pane-"] .table-card-option-definition:focus {
+    background-color: transparent !important;
+    background-image: none !important;
+}
+
+[id^="beaver-pane-"] .table-card-field:focus {
+    border-color: var(--fill-tertiary);
+}
+
+[id^="beaver-pane-"] .table-card-field::placeholder,
+[id^="beaver-pane-"] .table-card-inline-field::placeholder {
+    color: var(--fill-secondary);
+    opacity: 0.8;
 }

@@ -1,0 +1,366 @@
+{
+    "name": "add_columns refuses to grow past 30 question columns; system columns do not count",
+    "before": {
+        "id": "t1",
+        "spec_version": 2,
+        "title": "Sampling methods",
+        "description": "How the papers sampled their respondents.",
+        "anchor_column_id": "_reference",
+        "sources": [
+            {
+                "id": "s1",
+                "type": "items",
+                "ids": [
+                    "u-AAA",
+                    "u-BBB",
+                    "u-CCC"
+                ]
+            }
+        ],
+        "columns": [
+            {
+                "id": "_reference",
+                "header": "Reference",
+                "type": "reference",
+                "system": true
+            },
+            {
+                "id": "_year",
+                "header": "Year",
+                "type": "date",
+                "system": true,
+                "priority": "secondary"
+            },
+            {
+                "id": "_identifier",
+                "header": "Identifier",
+                "type": "link",
+                "system": true,
+                "priority": "secondary"
+            },
+            {
+                "id": "method",
+                "header": "Method",
+                "type": "text",
+                "description": "What method does the paper use?"
+            }
+        ],
+        "rows": [
+            {
+                "id": "r1",
+                "ref": {
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "AAA",
+                    "library_id": 1
+                },
+                "documents": [
+                    "u-AAAPDF"
+                ],
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Alpha 2020",
+                            "title": "Sampling hard-to-reach groups",
+                            "item_type": "journalArticle"
+                        }
+                    },
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "date",
+                            "value": "2020"
+                        }
+                    },
+                    "_identifier": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "link",
+                            "url": "https://doi.org/10.1000/alpha",
+                            "label": "10.1000/alpha"
+                        }
+                    },
+                    "method": {
+                        "outcome": "answered",
+                        "provenance": "model",
+                        "value": {
+                            "kind": "text",
+                            "text": "Telephone survey"
+                        },
+                        "documents": [
+                            "u-AAAPDF"
+                        ],
+                        "evidence": [
+                            {
+                                "document": "u-AAAPDF",
+                                "locator": "s12-s13",
+                                "quote": "Respondents were sampled by random digit dialing.",
+                                "page": 3,
+                                "boxes": [
+                                    [
+                                        72,
+                                        410,
+                                        523,
+                                        436
+                                    ]
+                                ]
+                            }
+                        ]
+                    }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
+            },
+            {
+                "id": "r2",
+                "ref": {
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "BBB",
+                    "library_id": 1
+                },
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Beta 2019",
+                            "title": "Mail surveys revisited",
+                            "item_type": "journalArticle"
+                        }
+                    },
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "date",
+                            "value": "2019"
+                        }
+                    },
+                    "method": {
+                        "outcome": "answered",
+                        "provenance": "model",
+                        "value": {
+                            "kind": "text",
+                            "text": "Mail survey"
+                        }
+                    }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
+            },
+            {
+                "id": "r3",
+                "ref": {
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "CCC",
+                    "library_id": 1
+                },
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Gamma 2021",
+                            "title": "Register studies in practice",
+                            "item_type": "journalArticle"
+                        }
+                    },
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "date",
+                            "value": "2021"
+                        }
+                    }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
+            }
+        ]
+    },
+    "mutations": [
+        {
+            "op": "add_columns",
+            "columns": [
+                {
+                    "id": "q1",
+                    "header": "Q1",
+                    "type": "text"
+                },
+                {
+                    "id": "q2",
+                    "header": "Q2",
+                    "type": "text"
+                },
+                {
+                    "id": "q3",
+                    "header": "Q3",
+                    "type": "text"
+                },
+                {
+                    "id": "q4",
+                    "header": "Q4",
+                    "type": "text"
+                },
+                {
+                    "id": "q5",
+                    "header": "Q5",
+                    "type": "text"
+                },
+                {
+                    "id": "q6",
+                    "header": "Q6",
+                    "type": "text"
+                },
+                {
+                    "id": "q7",
+                    "header": "Q7",
+                    "type": "text"
+                },
+                {
+                    "id": "q8",
+                    "header": "Q8",
+                    "type": "text"
+                },
+                {
+                    "id": "q9",
+                    "header": "Q9",
+                    "type": "text"
+                },
+                {
+                    "id": "q10",
+                    "header": "Q10",
+                    "type": "text"
+                },
+                {
+                    "id": "q11",
+                    "header": "Q11",
+                    "type": "text"
+                },
+                {
+                    "id": "q12",
+                    "header": "Q12",
+                    "type": "text"
+                },
+                {
+                    "id": "q13",
+                    "header": "Q13",
+                    "type": "text"
+                },
+                {
+                    "id": "q14",
+                    "header": "Q14",
+                    "type": "text"
+                },
+                {
+                    "id": "q15",
+                    "header": "Q15",
+                    "type": "text"
+                },
+                {
+                    "id": "q16",
+                    "header": "Q16",
+                    "type": "text"
+                },
+                {
+                    "id": "q17",
+                    "header": "Q17",
+                    "type": "text"
+                },
+                {
+                    "id": "q18",
+                    "header": "Q18",
+                    "type": "text"
+                },
+                {
+                    "id": "q19",
+                    "header": "Q19",
+                    "type": "text"
+                },
+                {
+                    "id": "q20",
+                    "header": "Q20",
+                    "type": "text"
+                },
+                {
+                    "id": "q21",
+                    "header": "Q21",
+                    "type": "text"
+                },
+                {
+                    "id": "q22",
+                    "header": "Q22",
+                    "type": "text"
+                },
+                {
+                    "id": "q23",
+                    "header": "Q23",
+                    "type": "text"
+                },
+                {
+                    "id": "q24",
+                    "header": "Q24",
+                    "type": "text"
+                },
+                {
+                    "id": "q25",
+                    "header": "Q25",
+                    "type": "text"
+                },
+                {
+                    "id": "q26",
+                    "header": "Q26",
+                    "type": "text"
+                },
+                {
+                    "id": "q27",
+                    "header": "Q27",
+                    "type": "text"
+                },
+                {
+                    "id": "q28",
+                    "header": "Q28",
+                    "type": "text"
+                },
+                {
+                    "id": "q29",
+                    "header": "Q29",
+                    "type": "text"
+                },
+                {
+                    "id": "q30",
+                    "header": "Q30",
+                    "type": "text"
+                }
+            ]
+        }
+    ],
+    "error": {
+        "code": "too_large"
+    }
+}

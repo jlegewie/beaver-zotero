@@ -1,5 +1,6 @@
 import { getReadableContentKind } from '../services/documentExtraction/attachmentResolution';
 import type { ReadableContentKind } from '@beaver/agent-core/extract/document/shared/contentKinds';
+import { isPdfDocument } from './attachmentFiles';
 
 /**
  * Find the best PDF attachment for a regular Zotero item.
@@ -11,7 +12,7 @@ export function getBestPDFAttachment(item: any): any {
         if (!attachmentIDs || attachmentIDs.length === 0) return null;
         for (const attID of attachmentIDs) {
             const att = Zotero.Items.get(attID);
-            if (att && att.attachmentContentType === 'application/pdf') return att;
+            if (att && isPdfDocument(att)) return att;
         }
         return Zotero.Items.get(attachmentIDs[0]) || null;
     } catch {
@@ -37,10 +38,7 @@ export async function getBestPDFAttachmentAsync(item: any): Promise<any> {
         const attachments = Array.isArray(loaded) ? loaded.filter(Boolean) : (loaded ? [loaded] : []);
         if (attachments.length === 0) return null;
 
-        return attachments.find((att: any) => (
-            att?.isPDFAttachment?.() ||
-            att?.attachmentContentType === 'application/pdf'
-        )) ?? attachments[0];
+        return attachments.find((att: any) => att && isPdfDocument(att)) ?? attachments[0];
     } catch {
         return null;
     }

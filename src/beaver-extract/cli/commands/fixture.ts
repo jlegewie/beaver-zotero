@@ -25,6 +25,9 @@ import {
     loadJsonFile,
     parseAnalysisWindow,
     parsePagesList,
+    parsePresetOverrides,
+    parseSchemaVersion,
+    PRESET_OPTION_HELP,
 } from "../options";
 import {
     DEFAULT_ANALYSIS_SCOPE,
@@ -56,6 +59,7 @@ import {
     type ExpectedExtraction,
     FixtureValidationError,
     type FixtureConfig,
+    fixturePdfSchemaVersion,
     validateConfig,
     validateFixture,
     validateTolerance,
@@ -73,11 +77,13 @@ import type {
     InternalProcessedPage,
 } from "@beaver/agent-core/extract/types";
 import type {
+    PresetOverrides,
     StructuredExtractResult,
     StructuredPage,
 } from "../../schema";
 import type { ParagraphDetectionSettings } from "../../ParagraphDetector";
 import type { SentenceSplitterConfig } from "../../sentenceTypes";
+import { SCHEMA_VERSION } from "@beaver/agent-core/extract/schema";
 import { join, resolve as resolvePath } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 
@@ -146,6 +152,10 @@ function buildCaptureCommand(deps: CliDeps): Command {
             "path to JSON file with ParagraphDetectionSettings",
         )
         .option("--bbox-tolerance <pt>", "stored tolerance in points (default 0.5)")
+        .option(
+            "--schema-version <v>",
+            "PDF schema version (extraction preset) to capture under; default current",
+        )
         .option(
             "--update",
             "allow replacing an existing fixture (config-changing path)",
@@ -300,6 +310,7 @@ interface CaptureOpts {
     graphicsLayerMode?: string;
     paragraphSettings?: string;
     bboxTolerance?: string;
+    schemaVersion?: string;
     update?: boolean;
     allowOcr?: boolean;
     preview?: boolean;
@@ -332,6 +343,7 @@ async function buildConfigFromCaptureOpts(opts: CaptureOpts): Promise<FixtureCon
         splitterConfig,
         settings,
         paragraphSettings,
+        schemaVersion: opts.schemaVersion ? parseSchemaVersion(opts.schemaVersion) : SCHEMA_VERSION,
     };
 }
 
@@ -367,6 +379,7 @@ function buildEvaluateCommand(deps: CliDeps): Command {
             defaultRootHelp(),
         )
         .option("--bbox-tolerance <pt>", "override stored tolerance")
+        .option("--preset <switches>", `${PRESET_OPTION_HELP}; diffs the result against the captured snapshot`)
         .option("--verbose", "surface git-SHA fingerprint mismatches")
         .option("--json", "emit a structured JSON envelope")
         .option("--pretty", "pretty-print JSON output (only with --json)")
@@ -383,7 +396,8 @@ function buildEvaluateCommand(deps: CliDeps): Command {
                         ? parsePositiveFloat("--bbox-tolerance", opts.bboxTolerance)
                         : fixture.tolerance.bboxAbsPt;
 
-                const actual = await captureExpected(deps, pdfBytes, fixture.config);
+                const presetOverrides = opts.preset ? parsePresetOverrides(opts.preset) : undefined;
+                const actual = await captureExpected(deps, pdfBytes, fixture.config, presetOverrides);
                 const structuredDiffs = prefixDiffs(
                     "structured.",
                     diffStructuredPages(
@@ -410,7 +424,7 @@ function buildEvaluateCommand(deps: CliDeps): Command {
                     const envelope = {
                         ok,
                         input: { fixtureId: id, root },
-                        options: { bboxAbsPt: tol, verbose: !!opts.verbose },
+                        options: { bboxAbsPt: tol, verbose: !!opts.verbose, ...(presetOverrides ? { presetOverrides } : {}) },
                         result: {
                             id,
                             diffCount: diffs.length,
@@ -435,6 +449,7 @@ function buildEvaluateCommand(deps: CliDeps): Command {
 interface EvaluateOpts {
     root?: string;
     bboxTolerance?: string;
+    preset?: string;
     verbose?: boolean;
     json?: boolean;
     pretty?: boolean;
@@ -446,11 +461,17 @@ interface EvaluateOpts {
 
 function buildUpdateCommand(deps: CliDeps): Command {
     const cmd = new Command("update");
-    cmd.description("Rebaseline a fixture's expected snapshot. Preserves the stored config.")
+    cmd.description(
+        "Rebaseline a fixture's expected snapshot. Preserves the stored config unless --schema-version is given.",
+    )
         .argument("<id>", "fixture id (folder name)")
         .option(
             "--root <dir>",
             defaultRootHelp(),
+        )
+        .option(
+            "--schema-version <v>",
+            "re-extract under this PDF schema version and store it in the config",
         )
         .option(
             "--preview",
@@ -467,7 +488,10 @@ function buildUpdateCommand(deps: CliDeps): Command {
             try {
                 const previous = readFixture(root, id);
                 const pdfBytes = readSharedPdf(root, previous.pdfSha256);
-                const captured = await captureExpected(deps, pdfBytes, previous.config);
+                const config: FixtureConfig = opts.schemaVersion
+                    ? { ...previous.config, schemaVersion: parseSchemaVersion(opts.schemaVersion) }
+                    : previous.config;
+                const captured = await captureExpected(deps, pdfBytes, config);
                 const expected = captured.expected;
                 const fingerprints = captureFingerprints();
 
@@ -475,6 +499,7 @@ function buildUpdateCommand(deps: CliDeps): Command {
                 const candidate: CapturedFixture = {
                     ...previous,
                     schema: FIXTURE_SCHEMA_VERSION,
+                    config,
                     expected,
                     fingerprints,
                     updatedAt: now,
@@ -518,6 +543,7 @@ function buildUpdateCommand(deps: CliDeps): Command {
 
 interface UpdateOpts {
     root?: string;
+    schemaVersion?: string;
     preview?: boolean;
     json?: boolean;
     pretty?: boolean;
@@ -682,8 +708,12 @@ async function captureExpected(
     deps: CliDeps,
     pdfBytes: Uint8Array,
     config: FixtureConfig,
+    presetOverrides?: PresetOverrides,
 ): Promise<{ expected: ExpectedExtraction; structured: StructuredExtractResult }> {
-    const structured = await deps.api.extractPdf(buildStructuredExtractInput(pdfBytes, config));
+    const structured = await deps.api.extractPdf({
+        ...buildStructuredExtractInput(pdfBytes, config),
+        ...(presetOverrides ? { presetOverrides } : {}),
+    });
     if (structured.mode !== "structured") {
         throw new Error("fixture extraction expected a structured result");
     }
@@ -692,7 +722,10 @@ async function captureExpected(
         config.pageIndices,
     );
 
-    const markdown = await deps.api.extractPdf(buildMarkdownExtractInput(pdfBytes, config));
+    const markdown = await deps.api.extractPdf({
+        ...buildMarkdownExtractInput(pdfBytes, config),
+        ...(presetOverrides ? { presetOverrides } : {}),
+    });
     if (markdown.mode !== "markdown") {
         throw new Error("fixture extraction expected a markdown result");
     }
@@ -786,6 +819,7 @@ function buildStructuredExtractInput(pdfBytes: Uint8Array, config: FixtureConfig
         settings: config.settings,
         paragraphSettings: config.paragraphSettings,
         structured: { splitterConfig: config.splitterConfig },
+        schemaVersion: fixturePdfSchemaVersion(config),
     };
 }
 
@@ -797,6 +831,7 @@ function buildMarkdownExtractInput(pdfBytes: Uint8Array, config: FixtureConfig):
         pageIndices: config.pageIndices,
         settings: config.settings,
         paragraphSettings: config.paragraphSettings,
+        schemaVersion: fixturePdfSchemaVersion(config),
     };
 }
 

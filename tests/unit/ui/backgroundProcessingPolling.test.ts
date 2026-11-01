@@ -5,10 +5,17 @@ import { createStore, Provider } from 'jotai';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { backgroundProcessingStatusAtom } from '../../../react/atoms/backgroundProcessing';
 import { useBackgroundProcessingStatus } from '../../../react/hooks/useBackgroundProcessingStatus';
-const { collect, coverage, runtime, subscribe } = vi.hoisted(() => ({
-    collect: vi.fn(), coverage: vi.fn(), runtime: {}, subscribe: vi.fn(() => vi.fn()),
+const { collect, coverage, runtime, subscribe, surface } = vi.hoisted(() => {
+    const document = Object.assign(new EventTarget(), { hidden: false });
+    return {
+        collect: vi.fn(), coverage: vi.fn(), runtime: {}, subscribe: vi.fn(() => vi.fn()),
+        surface: { document },
+    };
+});
+vi.mock('../../../react/runtime/windowRuntime', () => ({
+    tryGetWindowRuntime: () => runtime,
+    getHostWindow: () => surface,
 }));
-vi.mock('../../../react/runtime/windowRuntime', () => ({ tryGetWindowRuntime: () => runtime }));
 vi.mock('../../../src/services/backgroundProcessing/statusSnapshot', () => ({ collectProcessingStatus: collect }));
 vi.mock('../../../react/atoms/profile', async () => {
     const { atom } = await import('jotai');
@@ -22,7 +29,14 @@ function GeneralStatusConsumer() {
     useBackgroundProcessingStatus({ includeFailures: false, pollIntervalMs: 60_000 });
     return null;
 }
-beforeEach(() => { vi.clearAllMocks(); collect.mockReset(); coverage.mockReset(); });
+function setHidden(hidden: boolean) {
+    surface.document.hidden = hidden;
+    surface.document.dispatchEvent(new Event('visibilitychange'));
+}
+beforeEach(() => {
+    vi.clearAllMocks(); collect.mockReset(); coverage.mockReset();
+    surface.document.hidden = false;
+});
 it('updates local progress while coverage is slow and preserves coverage after its own failure', async () => {
     vi.useFakeTimers();
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
@@ -136,5 +150,51 @@ it('coalesces activity during a slow local read and ignores results after unmoun
     } finally {
         if (!unmounted) act(() => root.unmount());
         Zotero.Beaver = previous;
+    }
+});
+
+it('pauses local and coverage polling while the surface is hidden and resumes on the coverage cadence', async () => {
+    vi.useFakeTimers();
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    const previous = Zotero.Beaver;
+    (Zotero as any).Beaver = { db: {}, background: { collectStatus: collect, collectCoverage: coverage }, runtime: { subscribeWindow: subscribe } };
+    const store = createStore();
+    collect.mockResolvedValue({ ...store.get(backgroundProcessingStatusAtom), documentCache: null });
+    coverage.mockResolvedValue({ namespace_exists: true, approx_row_count: 1, documents: [] });
+    const root = createRoot(document.createElement('div'));
+    try {
+        await act(async () => root.render(React.createElement(Provider, { store }, React.createElement(Consumer))));
+        expect(collect).toHaveBeenCalledTimes(1);
+        expect(coverage).toHaveBeenCalledTimes(1);
+        const unsubscribe = subscribe.mock.results[0].value;
+
+        await act(async () => setHidden(true));
+        expect(unsubscribe).toHaveBeenCalledOnce();
+        await act(async () => vi.advanceTimersByTimeAsync(10 * 60_000));
+        expect(collect).toHaveBeenCalledTimes(1);
+        expect(coverage).toHaveBeenCalledTimes(1);
+
+        // Repeated events without a state change neither poll nor resubscribe.
+        await act(async () => setHidden(true));
+        expect(subscribe).toHaveBeenCalledOnce();
+
+        await act(async () => setHidden(false));
+        expect(collect).toHaveBeenCalledTimes(2);
+        expect(subscribe).toHaveBeenCalledTimes(2);
+        expect(coverage).toHaveBeenCalledTimes(2);
+
+        // Showing again shortly after a coverage request waits out its interval.
+        await act(async () => vi.advanceTimersByTimeAsync(20_000));
+        await act(async () => setHidden(true));
+        await act(async () => setHidden(false));
+        expect(coverage).toHaveBeenCalledTimes(2);
+        await act(async () => vi.advanceTimersByTimeAsync(39_000));
+        expect(coverage).toHaveBeenCalledTimes(2);
+        await act(async () => vi.advanceTimersByTimeAsync(1_000));
+        expect(coverage).toHaveBeenCalledTimes(3);
+    } finally {
+        act(() => root.unmount());
+        Zotero.Beaver = previous;
+        vi.useRealTimers();
     }
 });

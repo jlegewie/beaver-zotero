@@ -1,0 +1,326 @@
+{
+    "name": "a fill that names its rows fills every cell of them but user cells, blocked or not",
+    "spec": {
+        "id": "t1",
+        "spec_version": 2,
+        "anchor_column_id": "_reference",
+        "columns": [
+            {
+                "id": "_reference",
+                "header": "Reference",
+                "type": "reference",
+                "system": true
+            },
+            {
+                "id": "method",
+                "header": "Method",
+                "type": "text",
+                "description": "What method does the paper use?"
+            },
+            {
+                "id": "n",
+                "header": "Sample",
+                "type": "text",
+                "description": "How many participants?"
+            },
+            {
+                "id": "costs",
+                "header": "Costs",
+                "type": "boolean",
+                "description": "Does the study report monetary costs?"
+            }
+        ],
+        "rows": [
+            {
+                "id": "r1",
+                "ref": {
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "AAA"
+                },
+                "documents": [
+                    "u-PDF1"
+                ],
+                "failure": {
+                    "code": "encrypted",
+                    "message": "The PDF is password-protected."
+                },
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "AAA"
+                        }
+                    }
+                }
+            },
+            {
+                "id": "r2",
+                "ref": {
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "BBB"
+                },
+                "documents": [
+                    "u-PDF2"
+                ],
+                "failure": {
+                    "code": "deadline",
+                    "message": "Ran out of time before this was answered."
+                },
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "BBB"
+                        }
+                    },
+                    "method": {
+                        "outcome": "answered",
+                        "provenance": "model",
+                        "value": {
+                            "kind": "text",
+                            "text": "Survey"
+                        },
+                        "documents": [
+                            "u-PDF2"
+                        ],
+                        "evidence": [
+                            {
+                                "document": "u-PDF2",
+                                "locator": "s1",
+                                "quote": "A quote."
+                            }
+                        ]
+                    }
+                }
+            },
+            {
+                "id": "r3",
+                "ref": {
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "CCC"
+                },
+                "failure": {
+                    "code": "no_source",
+                    "message": "There is no document or abstract to read."
+                },
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "CCC"
+                        }
+                    }
+                }
+            },
+            {
+                "id": "r4",
+                "ref": {
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "DDD"
+                },
+                "documents": [
+                    "u-PDF4"
+                ],
+                "failure": {
+                    "code": "no_text_layer",
+                    "message": "The PDF has no text layer. It may be a scan."
+                },
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "DDD"
+                        }
+                    }
+                }
+            },
+            {
+                "id": "r5",
+                "ref": {
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "EEE"
+                },
+                "documents": [
+                    "u-PDF5"
+                ],
+                "failure": {
+                    "code": "made_up_code",
+                    "message": "Something went wrong."
+                },
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "EEE"
+                        }
+                    }
+                }
+            },
+            {
+                "id": "r6",
+                "ref": {
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "FFF"
+                },
+                "documents": [
+                    "u-PDF6"
+                ],
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "FFF"
+                        }
+                    },
+                    "method": {
+                        "outcome": "answered",
+                        "provenance": "model",
+                        "value": {
+                            "kind": "text",
+                            "text": "Register"
+                        }
+                    },
+                    "n": {
+                        "outcome": "failed",
+                        "provenance": "model",
+                        "error_code": "no_answer",
+                        "error": "No answer could be produced."
+                    },
+                    "costs": {
+                        "outcome": "answered",
+                        "provenance": "user",
+                        "value": {
+                            "kind": "boolean",
+                            "value": true
+                        }
+                    }
+                }
+            },
+            {
+                "id": "r7",
+                "ref": {
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "GGG"
+                },
+                "documents": [
+                    "u-PDF7"
+                ],
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "GGG"
+                        }
+                    },
+                    "method": {
+                        "outcome": "answered",
+                        "provenance": "model",
+                        "value": {
+                            "kind": "text",
+                            "text": "Panel"
+                        },
+                        "documents": [
+                            "u-PDF7"
+                        ],
+                        "evidence": [
+                            {
+                                "document": "u-PDF7",
+                                "locator": "s1",
+                                "quote": "A quote."
+                            }
+                        ]
+                    },
+                    "n": {
+                        "outcome": "not_reported",
+                        "provenance": "model",
+                        "documents": [
+                            "u-PDF7"
+                        ]
+                    },
+                    "costs": {
+                        "outcome": "answered",
+                        "provenance": "model",
+                        "value": {
+                            "kind": "boolean",
+                            "value": false
+                        },
+                        "documents": [
+                            "u-PDF7"
+                        ],
+                        "evidence": [
+                            {
+                                "document": "u-PDF7",
+                                "locator": "s1",
+                                "quote": "A quote."
+                            }
+                        ],
+                        "reasoning": "Never mentions costs."
+                    }
+                }
+            }
+        ]
+    },
+    "rows": [
+        "r1",
+        "r6",
+        "r7"
+    ],
+    "blocked": [
+        "r1"
+    ],
+    "cells": [
+        [
+            "r1",
+            "method"
+        ],
+        [
+            "r1",
+            "n"
+        ],
+        [
+            "r1",
+            "costs"
+        ],
+        [
+            "r6",
+            "method"
+        ],
+        [
+            "r6",
+            "n"
+        ],
+        [
+            "r7",
+            "method"
+        ],
+        [
+            "r7",
+            "n"
+        ],
+        [
+            "r7",
+            "costs"
+        ]
+    ]
+}

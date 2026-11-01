@@ -226,15 +226,19 @@ function showNotification(title: string, body: string, name: string): void {
             },
         };
 
-        alertsService.showAlertNotification(
+        // `showAlert` + `nsIAlertNotification` works on every supported Zotero;
+        // the older `showAlertNotification` shorthand is gone in Firefox 153.
+        const alert = (Components.classes as any)["@mozilla.org/alert-notification;1"]
+            .createInstance(Components.interfaces.nsIAlertNotification);
+        alert.init(
+            name, // shared name so notifications replace, never stack
             NOTIFICATION_ICON,
             title,
             body,
             true, // text clickable
             "", // cookie (unused — the click handler always focuses Beaver)
-            listener,
-            name, // shared name so notifications replace, never stack
         );
+        alertsService.showAlert(alert, listener);
     } catch (error) {
         // System notifications are best-effort; the in-sidebar UI remains the
         // source of truth.

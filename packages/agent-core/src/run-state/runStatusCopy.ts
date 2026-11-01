@@ -23,6 +23,56 @@
 
 import type { ReconnectState, RetryState } from "./atoms";
 
+/** A reattach shorter than this is never shown: a blip stays invisible. */
+export const RECONNECT_SHOW_AFTER_MS = 1000;
+
+/** After this long, the reconnect copy says how long the server holds the run. */
+export const RECONNECT_ESCALATE_AFTER_MS = 30_000;
+
+/**
+ * How far along a reconnect is, for what to show: nothing yet (`hidden`), a
+ * quiet "Reconnecting…", or the escalated `still` copy. A connect retry
+ * carries no start time and is shown as soon as it is reported.
+ */
+export type ReconnectPhase = "hidden" | "reconnecting" | "still";
+
+export function reconnectPhase(state: ReconnectState, now: number): ReconnectPhase {
+    if (state.since === undefined) return "reconnecting";
+    const elapsed = now - state.since;
+    if (elapsed < RECONNECT_SHOW_AFTER_MS) return "hidden";
+    return elapsed < RECONNECT_ESCALATE_AFTER_MS ? "reconnecting" : "still";
+}
+
+/** Milliseconds until `reconnectPhase` changes, or null when it no longer will. */
+export function msUntilReconnectPhaseChange(state: ReconnectState, now: number): number | null {
+    if (state.since === undefined) return null;
+    const elapsed = now - state.since;
+    if (elapsed < RECONNECT_SHOW_AFTER_MS) return RECONNECT_SHOW_AFTER_MS - elapsed;
+    if (elapsed < RECONNECT_ESCALATE_AFTER_MS) return RECONNECT_ESCALATE_AFTER_MS - elapsed;
+    return null;
+}
+
+/**
+ * The grace period as the user reads it. Rounded down, so "up to" never
+ * promises more time than the server gives.
+ */
+function graceText(graceMs: number | undefined): string | null {
+    if (!graceMs || graceMs <= 0) return null;
+    if (graceMs >= 60_000) {
+        const minutes = Math.floor(graceMs / 60_000);
+        return `${minutes} min`;
+    }
+    return `${Math.floor(graceMs / 1000)} s`;
+}
+
+/** The copy for a reconnect that has gone on for a while. */
+export function stillReconnectingText(graceMs: number | undefined): string {
+    const grace = graceText(graceMs);
+    return grace
+        ? `Still reconnecting… (up to ${grace})`
+        : "Still reconnecting…";
+}
+
 /**
  * What to show on a status line for a run that is waiting.
  *
@@ -50,8 +100,24 @@ export function runStatusText(state: {
      * bare spinner starts to look stuck.
      */
     elapsedSeconds?: number | null;
+    /**
+     * The time to judge a reattach's phase by (default: now). A reattach that
+     * is still `hidden` reads as no reconnect at all; a caller showing this
+     * text re-renders when the phase changes (see `msUntilReconnectPhaseChange`).
+     */
+    now?: number;
+    /** Leave the grace period out of the escalated copy, for a line that clips. */
+    compact?: boolean;
 }): string {
-    if (state.reconnect) {
+    const phase = state.reconnect
+        ? reconnectPhase(state.reconnect, state.now ?? Date.now())
+        : null;
+    if (state.reconnect && phase === "still") {
+        return state.compact
+            ? stillReconnectingText(undefined)
+            : stillReconnectingText(state.reconnect.graceMs);
+    }
+    if (state.reconnect && phase === "reconnecting") {
         // The shared connect-retry loop reports the attempt it is *about* to
         // make, so its first report is already attempt 2 and the numberless
         // branch below is never taken from it. That branch is for a caller that

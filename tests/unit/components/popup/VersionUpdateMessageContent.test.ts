@@ -67,7 +67,6 @@ describe('VersionUpdateMessageContent', () => {
         [null, 'Try now', true],
         ['signed-out', 'Sign in to try', false],
         ['onboarding', 'Open Beaver', false],
-        ['upgrade-consent', 'Open Beaver', false],
         ['connecting', 'Open Beaver', false],
     ])('routes the quick prompt action when the gate is %s', (gate, label, opensPrompt) => {
         mocks.gate = gate as string | null;

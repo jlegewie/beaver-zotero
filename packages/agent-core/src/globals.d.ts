@@ -80,6 +80,8 @@ declare interface Response {
   readonly ok: boolean;
   readonly status: number;
   readonly statusText: string;
+  /** Read by the token-refresh guard to tell an auth-server answer from a proxy page. */
+  readonly headers: { get(name: string): string | null };
   text(): Promise<string>;
 }
 
@@ -89,6 +91,8 @@ declare interface RequestInit {
   /** `Uint8Array` for a pre-encoded body — see `ApiService.postRaw`. */
   body?: string | Uint8Array;
   signal?: AbortSignal;
+  /** `no-store` for a probe whose answer must come from the network. */
+  cache?: "no-store";
 }
 
 declare function fetch(url: string, init?: RequestInit): Promise<Response>;
@@ -116,6 +120,8 @@ declare class WebSocket {
   static readonly CLOSED: number;
   constructor(url: string);
   readonly readyState: number;
+  /** Bytes queued by `send()` but not yet written; the heartbeat treats a draining upload as activity. */
+  readonly bufferedAmount: number;
   /** Negotiated on open; logged to tell proxy interference apart. */
   readonly extensions: string;
   readonly protocol: string;

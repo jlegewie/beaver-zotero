@@ -112,6 +112,10 @@ const BLOCKED_COPY: Record<ChatAccessGate, { title: string; detail: string }> = 
         title: 'Beaver is still loading',
         detail: 'The chat opens here on its own as soon as Beaver is ready.',
     },
+    restoring: {
+        title: 'Beaver is still connecting',
+        detail: 'The chat opens here on its own as soon as Beaver has restored your sign-in.',
+    },
     connecting: {
         title: 'Beaver is still loading',
         detail: 'The chat opens here on its own as soon as Beaver is ready.',
@@ -128,17 +132,13 @@ const BLOCKED_COPY: Record<ChatAccessGate, { title: string; detail: string }> = 
         title: 'Your plan has changed',
         detail: 'Open Beaver to review what changed before starting a chat.',
     },
-    'upgrade-consent': {
-        title: 'Review your new plan',
-        detail: 'Your account moved to a plan that syncs data with Beaver. Open Beaver to review and agree before starting a chat.',
-    },
     onboarding: {
         title: 'Finish setting up Beaver',
         detail: 'Open Beaver to complete setup before starting a chat.',
     },
 };
 
-const LOADING_GATES: ReadonlySet<ChatAccessGate> = new Set(['loading', 'connecting']);
+const LOADING_GATES: ReadonlySet<ChatAccessGate> = new Set(['loading', 'restoring', 'connecting']);
 
 /** Shown instead of the composer while the account cannot start a chat. */
 const BlockedNotice: React.FC<{ reason: ChatAccessGate; onClose: () => void }> = ({ reason, onClose }) => {

@@ -1,0 +1,453 @@
+{
+    "name": "removing a source drops the rows it alone added and prunes it from shared rows",
+    "before": {
+        "id": "t1",
+        "spec_version": 2,
+        "title": "Sampling methods",
+        "description": "How the papers sampled their respondents.",
+        "anchor_column_id": "_reference",
+        "sources": [
+            {
+                "id": "s1",
+                "type": "items",
+                "ids": [
+                    "u-AAA",
+                    "u-BBB",
+                    "u-CCC"
+                ]
+            },
+            {
+                "id": "s2",
+                "type": "library",
+                "scope": {
+                    "kind": "collection",
+                    "library_ref": "u",
+                    "key": "COLL1234",
+                    "name": "Surveys"
+                }
+            }
+        ],
+        "columns": [
+            {
+                "id": "_reference",
+                "header": "Reference",
+                "type": "reference",
+                "system": true
+            },
+            {
+                "id": "_year",
+                "header": "Year",
+                "type": "date",
+                "system": true,
+                "priority": "secondary"
+            },
+            {
+                "id": "_identifier",
+                "header": "Identifier",
+                "type": "link",
+                "system": true,
+                "priority": "secondary"
+            },
+            {
+                "id": "method",
+                "header": "Method",
+                "type": "text",
+                "description": "What method does the paper use?"
+            }
+        ],
+        "rows": [
+            {
+                "id": "r1",
+                "ref": {
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "AAA",
+                    "library_id": 1
+                },
+                "documents": [
+                    "u-AAAPDF"
+                ],
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Alpha 2020",
+                            "title": "Sampling hard-to-reach groups",
+                            "item_type": "journalArticle"
+                        }
+                    },
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "date",
+                            "value": "2020"
+                        }
+                    },
+                    "_identifier": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "link",
+                            "url": "https://doi.org/10.1000/alpha",
+                            "label": "10.1000/alpha"
+                        }
+                    },
+                    "method": {
+                        "outcome": "answered",
+                        "provenance": "model",
+                        "value": {
+                            "kind": "text",
+                            "text": "Telephone survey"
+                        },
+                        "documents": [
+                            "u-AAAPDF"
+                        ],
+                        "evidence": [
+                            {
+                                "document": "u-AAAPDF",
+                                "locator": "s12-s13",
+                                "quote": "Respondents were sampled by random digit dialing.",
+                                "page": 3,
+                                "boxes": [
+                                    [
+                                        72,
+                                        410,
+                                        523,
+                                        436
+                                    ]
+                                ]
+                            }
+                        ]
+                    }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    },
+                    {
+                        "source": "s2",
+                        "date": "2026-10-21"
+                    }
+                ]
+            },
+            {
+                "id": "r2",
+                "ref": {
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "BBB",
+                    "library_id": 1
+                },
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Beta 2019",
+                            "title": "Mail surveys revisited",
+                            "item_type": "journalArticle"
+                        }
+                    },
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "date",
+                            "value": "2019"
+                        }
+                    },
+                    "method": {
+                        "outcome": "answered",
+                        "provenance": "model",
+                        "value": {
+                            "kind": "text",
+                            "text": "Mail survey"
+                        }
+                    }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
+            },
+            {
+                "id": "r3",
+                "ref": {
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "CCC",
+                    "library_id": 1
+                },
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Gamma 2021",
+                            "title": "Register studies in practice",
+                            "item_type": "journalArticle"
+                        }
+                    },
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "date",
+                            "value": "2021"
+                        }
+                    }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s2",
+                        "date": "2026-10-21"
+                    }
+                ]
+            },
+            {
+                "id": "r4",
+                "ref": {
+                    "kind": "external",
+                    "source": "openalex",
+                    "source_id": "W123"
+                },
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Delta 2018",
+                            "title": "Panel attrition",
+                            "item_type": "journalArticle"
+                        }
+                    },
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "date",
+                            "value": "2018"
+                        }
+                    }
+                },
+                "in_library": false
+            }
+        ]
+    },
+    "mutations": [
+        {
+            "op": "remove_sources",
+            "sources": [
+                "s2"
+            ]
+        }
+    ],
+    "after": {
+        "id": "t1",
+        "spec_version": 2,
+        "title": "Sampling methods",
+        "description": "How the papers sampled their respondents.",
+        "anchor_column_id": "_reference",
+        "sources": [
+            {
+                "id": "s1",
+                "type": "items",
+                "ids": [
+                    "u-AAA",
+                    "u-BBB",
+                    "u-CCC"
+                ]
+            }
+        ],
+        "columns": [
+            {
+                "id": "_reference",
+                "header": "Reference",
+                "type": "reference",
+                "system": true
+            },
+            {
+                "id": "_year",
+                "header": "Year",
+                "type": "date",
+                "system": true,
+                "priority": "secondary"
+            },
+            {
+                "id": "_identifier",
+                "header": "Identifier",
+                "type": "link",
+                "system": true,
+                "priority": "secondary"
+            },
+            {
+                "id": "method",
+                "header": "Method",
+                "type": "text",
+                "description": "What method does the paper use?"
+            }
+        ],
+        "rows": [
+            {
+                "id": "r1",
+                "ref": {
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "AAA",
+                    "library_id": 1
+                },
+                "documents": [
+                    "u-AAAPDF"
+                ],
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Alpha 2020",
+                            "title": "Sampling hard-to-reach groups",
+                            "item_type": "journalArticle"
+                        }
+                    },
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "date",
+                            "value": "2020"
+                        }
+                    },
+                    "_identifier": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "link",
+                            "url": "https://doi.org/10.1000/alpha",
+                            "label": "10.1000/alpha"
+                        }
+                    },
+                    "method": {
+                        "outcome": "answered",
+                        "provenance": "model",
+                        "value": {
+                            "kind": "text",
+                            "text": "Telephone survey"
+                        },
+                        "documents": [
+                            "u-AAAPDF"
+                        ],
+                        "evidence": [
+                            {
+                                "document": "u-AAAPDF",
+                                "locator": "s12-s13",
+                                "quote": "Respondents were sampled by random digit dialing.",
+                                "page": 3,
+                                "boxes": [
+                                    [
+                                        72,
+                                        410,
+                                        523,
+                                        436
+                                    ]
+                                ]
+                            }
+                        ]
+                    }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
+            },
+            {
+                "id": "r2",
+                "ref": {
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "BBB",
+                    "library_id": 1
+                },
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Beta 2019",
+                            "title": "Mail surveys revisited",
+                            "item_type": "journalArticle"
+                        }
+                    },
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "date",
+                            "value": "2019"
+                        }
+                    },
+                    "method": {
+                        "outcome": "answered",
+                        "provenance": "model",
+                        "value": {
+                            "kind": "text",
+                            "text": "Mail survey"
+                        }
+                    }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
+            },
+            {
+                "id": "r4",
+                "ref": {
+                    "kind": "external",
+                    "source": "openalex",
+                    "source_id": "W123"
+                },
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Delta 2018",
+                            "title": "Panel attrition",
+                            "item_type": "journalArticle"
+                        }
+                    },
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "date",
+                            "value": "2018"
+                        }
+                    }
+                },
+                "in_library": false
+            }
+        ]
+    }
+}

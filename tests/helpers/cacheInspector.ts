@@ -24,6 +24,15 @@ export interface PingResponse {
     ok: boolean;
     cache_available: boolean;
     db_available: boolean;
+    platform?: {
+        zoteroVersion: string;
+        /** Gecko major version: 140 on Zotero 10, 153 on Zotero 11. */
+        platformMajorVersion: number;
+        prefs: {
+            allowUnsafeSubscriptLoads: boolean | null;
+            chromeBaselineCsp: boolean | null;
+        };
+    };
 }
 
 export interface CachedPageGeometry {

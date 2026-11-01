@@ -5,9 +5,9 @@
  * What only a real instance can show: that creation seeds the log at version 1
  * and seals it, that a run's writes collapse onto one version while the created
  * version survives underneath them, that the write protocol produces the storage
- * layout it claims (`beaver/history.json` plus one `v<N>.json` per version,
- * beside the rendered `.html`), that the document round-trips back through the
- * parse path, that a revert moves forward rather than back — including all the
+ * layout it claims (`table.json`, `beaver/history.json` plus one `v<N>.json`
+ * per version, beside the rendered `.html`), that the table reads back from
+ * `table.json`, that a revert moves forward rather than back — including all the
  * way to version 1 — and that a write leaves the attachment marked `to_upload`,
  * the one step whose omission is silent and costly because the new bytes then
  * sit locally with nothing to tell Zotero they changed.
@@ -108,8 +108,9 @@ function spec(title: string, note: string) {
                 id: 'r1',
                 cells: {
                     note: {
+                        outcome: 'answered' as const,
                         value: { kind: 'text' as const, text: note },
-                        provenance: 'asserted' as const,
+                        provenance: 'model' as const,
                     },
                 },
             },
@@ -221,7 +222,7 @@ describe('writing versions', () => {
         }
     });
 
-    it('reads the newest spec back through the document parse path', async () => {
+    it('reads the newest spec back from table.json', async () => {
         const read = await post<ReadResponse>('/beaver/test/table-read', {
             key: table!.key,
             libraryID: table!.libraryID,
@@ -384,14 +385,14 @@ describe('the trash', () => {
     });
 });
 
-describe('remote retry and conversation rewind', () => {
+describe('create retry and conversation rewind', () => {
     const tables: Table[] = [];
     beforeEach((ctx) => skipIfNoZotero(ctx, available));
     afterAll(async () => {
         for (const table of tables) await dropTable(table);
     });
 
-    it('deduplicates creates, guards collapsed content, replays writes and preserves a user boundary', async () => {
+    it('deduplicates creates and trims back to a user boundary', async () => {
         const operationId = `live-create-${Date.now()}`;
         const createRequest = {
             spec: spec('Live remote contract', 'One'),
@@ -413,7 +414,7 @@ describe('remote retry and conversation rewind', () => {
         expect(replayedCreate).toMatchObject({ ok: true, key: table.key, replayed: true });
         expect(created.filename).toBe('live-remote-contract.html');
         expect(replayedCreate.filename).toBe(created.filename);
-        expect(replayedCreate.operation).toEqual(created.operation);
+        expect(replayedCreate.sha256).toBe(created.sha256);
         expect(
             await post<any>('/beaver/test/table-create', {
                 ...createRequest,
@@ -428,35 +429,6 @@ describe('remote retry and conversation rewind', () => {
             ...owner,
             spec: spec('Live remote contract', 'Base'),
         });
-        const base = await post<any>('/beaver/test/table-open', at);
-        expect(base.sha256).toMatch(/^[a-f0-9]{64}$/);
-        const request = {
-            ...at,
-            ...owner,
-            expectedVersion: base.version,
-            expected_sha256: base.sha256,
-            spec: spec('Live remote contract', 'Winner'),
-            operation_id: 'first',
-        };
-        const [first, second] = await Promise.all([
-            post<any>('/beaver/test/table-write', request),
-            post<any>('/beaver/test/table-write', {
-                ...request,
-                operation_id: 'second',
-                spec: spec('Live remote contract', 'Loser'),
-            }),
-        ]);
-        const winner = first.ok ? first : second;
-        const loser = first.ok ? second : first;
-        expect(winner).toMatchObject({ ok: true, collapsed: true, version: base.version });
-        expect(loser).toMatchObject({ ok: false, conflict: true, version: base.version });
-        const winningRequest = first.ok
-            ? request
-            : { ...request, operation_id: 'second', spec: spec('Live remote contract', 'Loser') };
-        const replay = await post<any>('/beaver/test/table-write', winningRequest);
-        expect(replay).toMatchObject({ ok: true, replayed: true });
-        expect(replay.operation).toEqual(winner.operation);
-
         await post('/beaver/test/table-write', {
             ...at,
             ...owner,
@@ -479,12 +451,6 @@ describe('remote retry and conversation rewind', () => {
         expect(opened.conflict).toBeNull();
         expect(opened.recovered).toEqual([]);
         expect(existsSync(sidecar(table, 'v4.json'))).toBe(false);
-        expect(await post<any>('/beaver/test/table-write', winningRequest)).toMatchObject({
-            ok: true,
-            replayed: true,
-            version: 3,
-            operation: winner.operation,
-        });
     });
 
     it('finishes creation bookkeeping when the stamped import has no history seed', async () => {
@@ -641,40 +607,6 @@ describe('trim boundaries and stored citation cleanup', () => {
         expect((await post<any>('/beaver/test/table-open', at)).recovered).toEqual([]);
     });
 
-    it('reports versions pruned while replay repairs history left behind its receipt', async () => {
-        const table = await makeTable('Live replay retention');
-        tables.push(table);
-        const at = { key: table.key, libraryID: table.libraryID };
-        for (let version = 2; version <= 20; version++) {
-            expect(await post<any>('/beaver/test/table-write', {
-                ...at, actor: 'user', spec: spec('Live replay retention', String(version)),
-            })).toMatchObject({ ok: true, version });
-        }
-        const historyPath = sidecar(table, 'history.json');
-        const historyBefore = await readFile(historyPath, 'utf8');
-        const oldestPath = sidecar(table, 'v1.json');
-        const oldestBefore = await readFile(oldestPath, 'utf8');
-        const base = await post<any>('/beaver/test/table-open', at);
-        const request = {
-            ...at, actor: 'agent', run_id: 'retention-run', thread_id: 'thread',
-            operation_id: 'retention-replay', expectedVersion: base.version,
-            expected_sha256: base.sha256, spec: spec('Live replay retention', 'New'),
-        };
-        expect(await post<any>('/beaver/test/table-write', request))
-            .toMatchObject({ ok: true, version: 21, pruned: [1] });
-        // Restore the sidecars an interruption before history commit would leave.
-        await writeFile(historyPath, historyBefore);
-        await writeFile(oldestPath, oldestBefore);
-        expect(await post<any>('/beaver/test/table-write', request))
-            .toMatchObject({ ok: true, replayed: true, saved: true, pruned: [1] });
-        expect(existsSync(oldestPath)).toBe(false);
-        const listed = await post<any>('/beaver/test/table-versions', at);
-        expect(listed.versions.map((entry: { version: number }) => entry.version))
-            .toEqual(Array.from({ length: 20 }, (_, i) => i + 2));
-        expect(await post<any>('/beaver/test/table-write', request))
-            .toMatchObject({ ok: true, replayed: true, pruned: [] });
-    });
-
     it('reports retention exhaustion while preserving the oldest retained version', async () => {
         const table = await makeTable('Live retention exhaustion');
         tables.push(table);
@@ -711,48 +643,5 @@ describe('trim boundaries and stored citation cleanup', () => {
         expect(opened.version).toBe(oldest);
         expect(opened.conflict).toBeNull();
         expect(opened.history).toHaveLength(1);
-    });
-
-    it('prunes a cleared stored citation while retaining a shared citation and its parent metadata', async () => {
-        const table = await makeTable('Live citation pruning');
-        tables.push(table);
-        const at = { key: table.key, libraryID: table.libraryID };
-        const tag = '<citation id="1-CHILD001"/>';
-        const cited = spec('Live citation pruning', `Evidence ${tag}`);
-        cited.rows.push({ ...cited.rows[0], id: 'r2' });
-        const parent_ref = { kind: 'zotero', library_id: 1, zotero_key: 'PARENT01' };
-        await post('/beaver/test/table-write', {
-            ...at,
-            actor: 'user',
-            spec: {
-                ...cited,
-                citations: [
-                    { citation_id: 'live-citation', raw_tag: tag, parent_ref },
-                    { citation_id: 'unused', raw_tag: '<citation id="1-UNUSED01"/>' },
-                ],
-            },
-        });
-        const edit = (rows: string[]) =>
-            post('/beaver/test/table-edit', {
-                ...at,
-                actor: 'user',
-                mutations: [
-                    {
-                        op: 'set_cells',
-                        cells: rows.map((row) => ({ row, column: 'note', cell: {} })),
-                    },
-                ],
-            });
-        await edit(['r1']);
-        const shared = await post<any>('/beaver/test/table-open', at);
-        expect(shared.spec.citations).toEqual([
-            { citation_id: 'live-citation', raw_tag: tag, parent_ref },
-        ]);
-        await edit(['r2']);
-        const cleared = await post<any>('/beaver/test/table-open', at);
-        expect(cleared.spec.citations).toEqual([]);
-        expect(
-            JSON.parse(await readFile(sidecar(table, `v${cleared.version}.json`), 'utf8')).citations
-        ).toEqual([]);
     });
 });

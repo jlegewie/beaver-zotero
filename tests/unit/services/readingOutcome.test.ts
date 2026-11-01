@@ -28,6 +28,31 @@ describe('reading outcomes shared by on-demand and background extraction', () =>
         ]);
         expect(await db.getProcessingIssueRefs(entitled, 'file_unavailable')).toEqual([{ libraryId: 1, zoteroKey: item.key }]);
     });
+    it('lists a permission-denied read under its own actionable reason', async () => {
+        await recordReadingOutcome(item, 'pdf', { kind: 'response_error', code: 'file_permission_denied' }, 100);
+        expect(await db.getProcessingIssueCounts(entitled)).toEqual([{ reason: 'permission_denied', count: 1 }]);
+        expect(await db.getProcessingIssueRefs(entitled, 'permission_denied')).toEqual([{ libraryId: 1, zoteroKey: item.key }]);
+    });
+    it('lists a dead-lettered permission denial under its own reason', async () => {
+        await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: item.key, contentKind: 'pdf' });
+        await db.markAttachmentExtractFailure({
+            libraryId: 1, zoteroKey: item.key, status: 'failed', attemptedAt: 100,
+            error: 'file_permission_denied: Zotero does not have permission to read the PDF file for 1-READTEST.',
+        });
+        expect(await db.getProcessingIssueCounts(entitled)).toEqual([{ reason: 'permission_denied', count: 1 }]);
+    });
+    it('lists OCR permission denials under their own reason, from the ledger or a dead letter', async () => {
+        await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: item.key, contentKind: 'pdf' });
+        await connection.queryAsync(`UPDATE attachment_processing_state SET extract_status='done', ocr_status='failed',
+            last_error='ocr_local_read_failed: file_permission_denied'`);
+        expect(await db.getProcessingIssueCounts(entitled)).toEqual([{ reason: 'permission_denied', count: 1 }]);
+
+        await connection.queryAsync(`UPDATE attachment_processing_state SET ocr_status='needed', last_error=NULL`);
+        await connection.queryAsync(`INSERT INTO background_jobs_dead
+            (job_type, library_id, zotero_key, content_kind, payload_kind, enqueued_at, died_at, attempt_count, last_error)
+            VALUES ('document_ocr', 1, 'READTEST', 'pdf', 'structured', 0, 1, 3, 'ocr_local_read_failed: file_permission_denied')`);
+        expect(await db.getProcessingIssueCounts(entitled)).toEqual([{ reason: 'permission_denied', count: 1 }]);
+    });
     it('successful reading clears an old reading failure and its dead letter but retains index failures', async () => {
         await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: item.key, contentKind: 'pdf' });
         await connection.queryAsync(`UPDATE attachment_processing_state SET extract_status='failed', upsert_status='failed', last_error='file_missing'`);

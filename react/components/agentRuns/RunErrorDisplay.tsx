@@ -119,6 +119,7 @@ export const RunErrorDisplay: React.FC<RunErrorDisplayProps> = ({ runId, error, 
         <div className="px-4 user-select-text" ref={contentRef} onContextMenu={handleContextMenu}>
              <div
                 id={`run-error-${runId}`}
+                role="alert"
                 className={`
                     rounded-md flex flex-col min-w-0 border-error
                     ${isExpanded ? 'mb-2' : ''}

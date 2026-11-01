@@ -1,0 +1,609 @@
+import { resolveCollection, type ResolvedCollection } from '../collections/collectionIdentity';
+import { recheckExistingCollections } from '../collections/collectionMutations';
+import { logger } from '@beaver/agent-core/platform/logger';
+import { CreateItemProposedAction, CreateItemProposedData, CreateItemResultData } from '@beaver/agent-core/types/agentActions/items';
+import { ExternalReference, NormalizedPublicationType } from '@beaver/agent-core/types/externalReferences';
+import { isPdfFetchInProgress } from '../../utils/backgroundTasks';
+import { libraryRefForLibraryID, resolveLibraryRef } from '../../utils/libraryIdentity';
+import { createProvenanceNote } from '../../utils/noteProvenance';
+import { getPref } from '../../utils/prefs';
+import { TimingAccumulator } from '../../utils/timing';
+import type { AttachmentResolvedPayload } from '../attachmentResolved';
+import { filterPdfAttachments, schedulePdfFetchTask } from './pdfFetch';
+import { stampBeaverProvenanceExtra } from './provenance';
+
+const SAVE_ATTACHMENTS_WITH_TRANSLATORS = false;
+
+
+function trackWith<T>(timing: TimingAccumulator | undefined, name: string, fn: () => Promise<T>): Promise<T> {
+    return timing ? timing.track(name, fn) : fn();
+}
+
+/** Options for importing items */
+export interface ImportItemOptions {
+    onAttachmentResolved?: (payload: AttachmentResolvedPayload) => void;
+    /** Explicit target library ID, resolved by the caller before import */
+    libraryId?: number;
+    /** Collection to add the item to */
+    collectionId?: number;
+    /** Whether to select the item after import */
+    selectAfterImport?: boolean;
+    /**
+     * Skip scheduling background PDF fetch.
+     * Set to true when the caller will handle PDF fetching separately (e.g., applyCreateItemData).
+     * Default: false (PDF fetch is scheduled)
+     */
+    skipBackgroundPdfFetch?: boolean;
+    /**
+     * Skip URL-based translation via HiddenBrowser.
+     * URL translation can block for 15–30s+ on slow publisher sites, so it is
+     * disabled on latency-bounded paths (e.g., the agent WebSocket executor).
+     * Identifier translation (DOI/ISBN/PMID/arXiv) is still attempted.
+     * Default: false.
+     */
+    skipUrlTranslation?: boolean;
+    /**
+     * Optional timing accumulator. When provided, createZoteroItem records
+     * per-phase durations (library resolution, identifier translation, manual
+     * creation, collection attach, PDF check) so callers can surface them.
+     */
+    timing?: TimingAccumulator;
+    /** Agent action ID */
+    actionId?: string;
+    /** Run ID */
+    runId?: string;
+    /** Thread ID */
+    threadId?: string;
+}
+
+/**
+ * Validates the resolved import target against current access and editability.
+ * Explicit unavailable targets are rejected so imports cannot change libraries silently.
+ */
+async function resolveImportTarget(options?: ImportItemOptions): Promise<{
+    libraryId: number;
+    collectionId: number | null;
+}> {
+    const libraryId = options?.libraryId;
+    const collectionId = options?.collectionId ?? null;
+    
+    if (libraryId === undefined) throw new Error('An explicit import library is required');
+    if (!Zotero.Beaver.libraryScopeInitialized || !Zotero.Beaver.searchableLibraryIds?.includes(libraryId)) {
+        throw new Error('Library is excluded or unavailable');
+    }
+    // Check if library is editable
+    const library = Zotero.Libraries.get(libraryId);
+    if (!library || !library.editable) {
+        throw new Error('Target library is not editable');
+    }
+    
+    if (collectionId != null) resolveCollection(collectionId, { libraryID: libraryId });
+    return { libraryId, collectionId };
+}
+
+// Helper to map publication types
+function mapPublicationType(types: NormalizedPublicationType[] | undefined): string {
+    if (!types || types.length === 0) return 'journalArticle';
+    
+    const type = types[0];
+    switch (type) {
+        case 'journal_article': return 'journalArticle';
+        case 'conference_paper': return 'conferencePaper';
+        case 'book': return 'book';
+        case 'book_chapter': return 'bookSection';
+        case 'review': return 'journalArticle';
+        case 'meta_analysis': return 'journalArticle';
+        case 'editorial': return 'newsArticle';
+        case 'case_report': return 'report';
+        case 'clinical_trial': return 'journalArticle';
+        case 'dissertation': return 'thesis';
+        case 'preprint': return 'preprint';
+        case 'dataset': return 'dataset';
+        case 'report': return 'report';
+        case 'news': return 'newsArticle';
+        default: return 'document';
+    }
+}
+
+/**
+ * ATTEMPT 1: Use Zotero's Translation Architecture
+ * This is preferred because it handles metadata fetching automatically.
+ * PDF fetching is handled separately by schedulePdfFetchTask() to avoid
+ * Zotero opening a visible browser window for CAPTCHA challenges.
+ */
+async function tryImportFromIdentifiers(identifiers: any, libraryId: number): Promise<Zotero.Item | null> {
+    const translate = new (Zotero as any).Translate.Search();
+    
+    // Determine which identifier to use (DOI is usually best)
+    const identifier: Record<string, string> = {};
+    if (identifiers.doi) identifier.DOI = identifiers.doi;
+    else if (identifiers.isbn) identifier.ISBN = identifiers.isbn;
+    else if (identifiers.pmid) identifier.PMID = identifiers.pmid;
+    else if (identifiers.arXivID) identifier.arXiv = identifiers.arXivID;
+    else return null;
+
+    translate.setIdentifier(identifier);
+
+    // Get valid translators for this identifier
+    const translators = await translate.getTranslators();
+    if (!translators.length) return null;
+
+    translate.setTranslator(translators);
+
+    // Execute translation
+    // Returns an array of Zotero.Item objects
+    // saveAttachments: false to prevent Zotero from opening a visible browser window
+    // when it encounters a CAPTCHA during PDF download (e.g., ScienceDirect).
+    // PDF fetching is handled separately by schedulePdfFetchTask().
+    const newItems = await translate.translate({
+        libraryID: libraryId,
+        saveAttachments: SAVE_ATTACHMENTS_WITH_TRANSLATORS
+    });
+
+    return newItems.length ? newItems[0] : null;
+}
+
+/**
+ * Import an item from a URL using Zotero's RemoteTranslate and HiddenBrowser.
+ * @param url - The URL to import the item from.
+ * @param libraryId - Target library ID.
+ * @returns A Promise that resolves to the imported Zotero.Item or null if the import fails.
+ */
+async function importFromUrl(url: string, libraryId: number): Promise<Zotero.Item | null> {
+    if (!url) return null;
+
+    // Dynamic import for Zotero modules
+    // const { RemoteTranslate } = ChromeUtils.import_("chrome://zotero/content/RemoteTranslate.jsm");
+    // const { HiddenBrowser } = ChromeUtils.import_("chrome://zotero/content/HiddenBrowser.jsm");
+    const { RemoteTranslate } = ChromeUtils.importESModule("chrome://zotero/content/RemoteTranslate.mjs");
+    const { HiddenBrowser } = ChromeUtils.importESModule("chrome://zotero/content/HiddenBrowser.mjs");
+
+    const browser = new HiddenBrowser();
+    const translate = new RemoteTranslate();
+    
+    try {
+        logger(`importFromUrl: Attempting import from URL: ${url}`, 2);
+        await browser.load(url);
+        await translate.setBrowser(browser);
+        
+        const translators = await translate.detect();
+        if (!translators || translators.length === 0) return null;
+
+        // saveAttachments: false to prevent Zotero from opening a visible browser
+        // window when it encounters a CAPTCHA during PDF download.
+        // PDF fetching is handled separately by schedulePdfFetchTask().
+        const newItems = await translate.translate({
+            libraryID: libraryId,
+            saveAttachments: SAVE_ATTACHMENTS_WITH_TRANSLATORS
+        });
+
+        return newItems && newItems.length ? newItems[0] : null;
+    } catch (e) {
+        logger(`importFromUrl: URL import failed: ${e}`, 1);
+        return null;
+    } finally {
+        browser.destroy();
+    }
+}
+
+
+
+/**
+ * ATTEMPT 2: Manual Creation
+ * Manually maps ExternalReference fields to a new Zotero Item.
+ */
+async function createItemManually(itemData: ExternalReference, libraryId: number): Promise<Zotero.Item> {
+    // 1. Determine Item Type
+    let itemType = mapPublicationType(itemData.publication_types);
+    
+    // Validate item type existence, fallback to document if invalid
+    const typeID = Zotero.ItemTypes.getID(itemType);
+    if (!typeID || !Zotero.ItemTypes.getName(typeID)) {
+        logger(`createItemManually: Invalid item type ${itemType}, falling back to document`, 1);
+        itemType = 'document';
+    }
+
+    const item = new Zotero.Item(itemType as any);
+    item.libraryID = libraryId;
+
+    // 2. Set Core Fields
+    if (itemData.title) item.setField('title', itemData.title);
+    if (itemData.publication_date) {
+        item.setField('date', itemData.publication_date);
+    } else if (itemData.year) {
+        item.setField('date', itemData.year.toString());
+    }
+    
+    if (itemData.url && Zotero.ItemFields.isValidForType('url', item.itemTypeID)) {
+        item.setField('url', itemData.url);
+    }
+    
+    if (itemData.abstract && Zotero.ItemFields.isValidForType('abstractNote', item.itemTypeID)) {
+        item.setField('abstractNote', itemData.abstract);
+    }
+    
+    // Handle publication title from journal object or venue
+    const pubTitle = itemData.journal?.name || itemData.venue;
+    if (pubTitle) {
+        if (itemType === 'journalArticle') {
+            if (Zotero.ItemFields.isValidForType('publicationTitle', item.itemTypeID)) item.setField('publicationTitle', pubTitle);
+        } else if (itemType === 'conferencePaper') {
+            if (Zotero.ItemFields.isValidForType('proceedingsTitle', item.itemTypeID)) item.setField('proceedingsTitle', pubTitle);
+        } else if (Zotero.ItemFields.isValidForType('publicationTitle', item.itemTypeID)) {
+            item.setField('publicationTitle', pubTitle);
+        }
+    }
+    
+    // Handle additional journal metadata
+    if (itemData.journal) {
+        if (itemData.journal.volume && Zotero.ItemFields.isValidForType('volume', item.itemTypeID)) {
+            item.setField('volume', itemData.journal.volume);
+        }
+        if (itemData.journal.issue && Zotero.ItemFields.isValidForType('issue', item.itemTypeID)) {
+            item.setField('issue', itemData.journal.issue);
+        }
+        if (itemData.journal.pages && Zotero.ItemFields.isValidForType('pages', item.itemTypeID)) {
+            item.setField('pages', itemData.journal.pages);
+        }
+    }
+    
+    // 3. Identifiers (stored in specific fields or 'extra')
+    if (itemData.identifiers?.doi && Zotero.ItemFields.isValidForType('DOI', item.itemTypeID)) {
+        item.setField('DOI', itemData.identifiers.doi);
+    }
+    if (itemData.identifiers?.isbn && Zotero.ItemFields.isValidForType('ISBN', item.itemTypeID)) {
+        item.setField('ISBN', itemData.identifiers.isbn);
+    }
+    
+    // 4. Handle Authors
+    // Zotero expects: { firstName: "...", lastName: "...", creatorType: "..." }
+    if (itemData.authors && itemData.authors.length > 0) {
+        const creators = itemData.authors.map(authorName => {
+            // Use Zotero's utility to parse "Last, First" or "First Last"
+            return (Zotero.Utilities as any).cleanAuthor(authorName, "author");
+        });
+        item.setCreators(creators);
+    }
+
+    // 5. Save the Item
+    await item.saveTx();
+
+    // Note: PDF attachment is handled via background task in createZoteroItem (or applyCreateItemData).
+    // This keeps item creation fast and non-blocking.
+
+    return item;
+}
+
+/**
+ * Creates a Zotero item from a ExternalReference object.
+ * Tries to use Zotero's built-in translation (via DOI/Identifiers) first.
+ * Falls back to manual creation if translation fails.
+ * After item creation, uses Zotero's "Find Full Text" logic to find PDFs.
+ * 
+ * Note: We don't use timeouts on import methods because Zotero's translation
+ * system cannot be canceled. A timed-out import could still complete and create
+ * a duplicate item after we've fallen back to manual creation.
+ * 
+ * @param reference - External reference data to import
+ * @param options - Import options including target library and collection
+ */
+export async function createZoteroItem(reference: ExternalReference, options?: ImportItemOptions): Promise<Zotero.Item> {
+    const target = await trackWith(options?.timing, 'resolve_target_ms', () => resolveImportTarget(options));
+    return importZoteroItem(reference, options, target);
+}
+
+/** Import into a target already validated by the public entry point. */
+async function importZoteroItem(
+    reference: ExternalReference,
+    options: ImportItemOptions | undefined,
+    { libraryId, collectionId }: Awaited<ReturnType<typeof resolveImportTarget>>,
+): Promise<Zotero.Item> {
+    const timing = options?.timing;
+
+    let item: Zotero.Item | null = null;
+
+    // 1. Try to import using identifiers (DOI, arXiv, ISBN, etc.)
+    // No timeout here - let Zotero's translation complete or fail naturally
+    // to avoid duplicate items if the translation completes after timeout
+    if (reference.identifiers) {
+        try {
+            item = await trackWith(timing, 'identifier_translation_ms', () =>
+                tryImportFromIdentifiers(reference.identifiers, libraryId)
+            );
+            if (item) {
+                logger("createZoteroItem: Successfully imported item via identifiers", 2);
+            }
+        } catch (e: any) {
+            logger(`createZoteroItem: Failed to import via identifier: ${e?.message || e}`, 1);
+        }
+    }
+
+    // 2. Try URL Translation (Semantic Scholar / Article Page).
+    // Skipped on latency-bounded paths: HiddenBrowser page loads on publisher
+    // sites routinely take 15–30s+ and blow the WebSocket executor budget.
+    if (!item && reference.url && !options?.skipUrlTranslation) {
+        try {
+            item = await trackWith(timing, 'url_translation_ms', () => importFromUrl(reference.url!, libraryId));
+            if (item) {
+                logger("createZoteroItem: Successfully imported item via URL", 2);
+            }
+        } catch (e: any) {
+            logger(`createZoteroItem: Failed to import via URL: ${e?.message || e}`, 1);
+        }
+    }
+
+    // 3. Fallback: Create item manually from available metadata
+    if (!item) {
+        logger("createZoteroItem: Falling back to manual item creation", 2);
+        item = await trackWith(timing, 'manual_creation_ms', () => createItemManually(reference, libraryId));
+    }
+
+    try {
+        return await finishZoteroItemImport(item, reference, options, collectionId);
+    } catch (error) {
+        await cleanupFailedImport(item);
+        throw error;
+    }
+}
+
+/** Attach context membership and schedule optional PDF discovery for a new item. */
+async function finishZoteroItemImport(
+    item: Zotero.Item,
+    reference: ExternalReference,
+    options: ImportItemOptions | undefined,
+    collectionId: number | null,
+): Promise<Zotero.Item> {
+    const libraryId = item.libraryID;
+    const timing = options?.timing;
+
+    // 4. Add to collection if specified
+    if (collectionId) {
+        const collection = resolveCollection(collectionId, { libraryID: libraryId }).collection;
+        await trackWith(timing, 'add_to_collection_ms', () =>
+            Zotero.DB.executeTransaction(async () => {
+                await collection.addItem(item.id);
+            })
+        );
+        logger(`createZoteroItem: Added item to collection ${collection.name}`, 2);
+    }
+
+    // 5. Schedule background PDF fetch (unless caller handles it separately)
+    if (!options?.skipBackgroundPdfFetch) {
+        // Check if item already has a PDF (may have been added by translation)
+        const existingAttachments = await item.getAttachments();
+        const existingPdfAttachments = await filterPdfAttachments(existingAttachments);
+
+        if (existingPdfAttachments.length === 0 && !isPdfFetchInProgress(libraryId, item.key)) {
+            schedulePdfFetchTask(libraryId, item.key, {
+                openAccessUrl: reference.open_access_url,
+                fallbackUrl: reference.url,
+                fileAvailable: reference.is_open_access,
+                actionId: options?.actionId,
+                runId: options?.runId,
+                threadId: options?.threadId,
+                onAttachmentResolved: options?.onAttachmentResolved,
+            });
+        }
+    }
+
+    return item;
+}
+
+/**
+ * Creates a Zotero item from CreateItemProposedData with full post-processing.
+ * Handles extra fields, collections, tags, and schedules PDF fetching as background task.
+ * 
+ * Performance optimizations:
+ * - Consolidates all field modifications into a single saveTx() call
+ * - PDF fetching runs as a background task (non-blocking)
+ * - Returns immediately after item creation with core fields
+ * 
+ * @param proposedData - The proposed item data from the agent
+ * @param options - Import options including target library and collection
+ */
+export async function applyCreateItemData(
+    proposedData: CreateItemProposedData,
+    options?: ImportItemOptions
+): Promise<CreateItemResultData> {
+    const itemData = proposedData.item;
+    const timing = options?.timing;
+
+    const target = await trackWith(timing, 'resolve_target_ms', () => resolveImportTarget(options));
+    // A requested collection that no longer exists (deleted after approval, or
+    // recreated under a new key by a redo) is skipped; the item is still created.
+    const memberships = recheckExistingCollections(proposedData.collection_ids ?? proposedData.collection_keys ?? [], target.libraryId);
+
+    // Create or Import the item (handles library/collection resolution internally)
+    // Skip background PDF fetch here - we'll schedule it below with more context
+    const item = await trackWith(timing, 'create_zotero_item_ms', () =>
+        importZoteroItem(itemData, {
+            ...options,
+            skipBackgroundPdfFetch: true,
+        }, target)
+    );
+    
+    try {
+        return await finishCreateItemData(item, proposedData, options, memberships);
+    } catch (error) {
+        await cleanupFailedImport(item);
+        throw error;
+    }
+}
+
+/** Apply requested metadata and memberships to an item just created by this import. */
+async function finishCreateItemData(
+    item: Zotero.Item,
+    proposedData: CreateItemProposedData,
+    options: ImportItemOptions | undefined,
+    memberships: ResolvedCollection[],
+): Promise<CreateItemResultData> {
+    const itemData = proposedData.item;
+    const libraryId = item.libraryID;
+    const itemKey = item.key;
+    const timing = options?.timing;
+
+    // Track if we need to save (consolidate all modifications)
+    let needsSave = false;
+
+    // Post-processing (Things that apply regardless of how item was created)
+
+    // 1. Add Extra fields (Identifiers that aren't standard fields, Beaver provenance)
+    const extraLines: string[] = [];
+    const identifiers = itemData.identifiers;
+
+    if (identifiers) {
+        const currentExtra = item.getField('extra') as string || '';
+        if (identifiers.arXivID && !currentExtra.includes(identifiers.arXivID)) {
+            extraLines.push(`arXiv: ${identifiers.arXivID}`);
+        }
+        if (identifiers.pmid && !currentExtra.includes(identifiers.pmid)) {
+            extraLines.push(`PMID: ${identifiers.pmid}`);
+        }
+        if (identifiers.pmcid && !currentExtra.includes(identifiers.pmcid)) {
+            extraLines.push(`PMCID: ${identifiers.pmcid}`);
+        }
+    }
+
+    if (extraLines.length > 0) {
+        const currentExtra = item.getField('extra') as string;
+        item.setField('extra', currentExtra ? `${currentExtra}\n${extraLines.join('\n')}` : extraLines.join('\n'));
+        needsSave = true;
+    }
+
+    needsSave = stampBeaverProvenanceExtra(item, { reason: proposedData.reason }) || needsSave;
+
+    // 2. Collections (from proposed data, in addition to context collection)
+    if (memberships.length > 0) {
+        const collectionIds = recheckExistingCollections(memberships.map(entry => entry.collectionId), libraryId)
+            .map(entry => entry.collection.id);
+        if (collectionIds.length > 0) {
+            // Append to existing collections if any (from translation or context)
+            const currentCollections = item.getCollections();
+            const newCollections = [...new Set([...currentCollections, ...collectionIds])];
+            item.setCollections(newCollections);
+            needsSave = true;
+        }
+    }
+
+    // 3. Tags
+    if (proposedData.suggested_tags && proposedData.suggested_tags.length > 0) {
+        for (const tag of proposedData.suggested_tags) {
+            item.addTag(tag);
+        }
+        needsSave = true;
+    }
+
+    // Single consolidated save for all modifications
+    if (needsSave) {
+        await trackWith(timing, 'post_save_ms', () => item.saveTx());
+        logger(`applyCreateItemData: Saved item with extra fields, collections, and tags`, 2);
+    }
+
+    if (getPref('addBeaverProvenanceNote') === true) {
+        await createProvenanceNote(
+            {
+                library_id: libraryId,
+                zotero_key: itemKey,
+                library_ref: libraryRefForLibraryID(libraryId) ?? undefined,
+            },
+            {
+                reason: proposedData.reason,
+                threadId: options?.threadId,
+                runId: options?.runId,
+            },
+        );
+    }
+
+    // Check for existing PDF attachments (may have been added by translation)
+    const pdfCheckStart = Date.now();
+    const existingAttachments = item.getAttachments();
+    const existingPdfAttachments = await filterPdfAttachments(existingAttachments);
+    timing?.record('pdf_check_ms', Date.now() - pdfCheckStart);
+
+    // Schedule PDF fetching as background task (non-blocking)
+    // Only if no PDF exists and we have potential sources
+    let didScheduleBgFetch = false;
+    let fetchAlreadyInProgress = false;
+    if (existingPdfAttachments.length === 0) {
+        if (isPdfFetchInProgress(libraryId, itemKey)) {
+            fetchAlreadyInProgress = true;
+        } else {
+            const pdfUrl = itemData.open_access_url || proposedData.downloaded_url;
+            schedulePdfFetchTask(libraryId, itemKey, {
+                pdfCandidates: proposedData.pdf_candidates,
+                openAccessUrl: pdfUrl,
+                fallbackUrl: itemData.url,
+                fileAvailable: proposedData.file_available,
+                actionId: options?.actionId,
+                runId: options?.runId,
+                threadId: options?.threadId,
+                onAttachmentResolved: options?.onAttachmentResolved,
+            });
+            didScheduleBgFetch = true;
+        }
+    }
+
+    // Compute initial attachment_status
+    let attachmentStatus: CreateItemResultData['attachment_status'];
+    let attachmentKey: string | undefined;
+    if (existingPdfAttachments.length > 0) {
+        attachmentStatus = 'available';
+        attachmentKey = `${libraryId}-${existingPdfAttachments[0].key}`;
+    } else if (didScheduleBgFetch || fetchAlreadyInProgress) {
+        attachmentStatus = 'pending';
+    } else {
+        attachmentStatus = 'none';
+    }
+
+    return {
+        library_id: libraryId,
+        zotero_key: itemKey,
+        library_ref: libraryRefForLibraryID(libraryId) ?? undefined,
+        collection_ids: memberships.map(entry => entry.collectionId),
+        collection_keys: memberships.map(entry => entry.key),
+        attachment_status: attachmentStatus,
+        attachment_key: attachmentKey,
+    };
+}
+
+/** Remove an item owned by an import that failed after persistence. */
+async function cleanupFailedImport(item: Zotero.Item): Promise<void> {
+    try {
+        // Erasing the parent also removes any translated attachments or provenance notes.
+        await item.eraseTx();
+    } catch (error) {
+        logger(`Failed to clean up imported item ${item.libraryID}-${item.key}: ${error}`, 1);
+    }
+}
+
+/**
+ * @deprecated Use applyCreateItemData instead
+ */
+export async function applyCreateItem(action: CreateItemProposedAction): Promise<CreateItemResultData> {
+    return applyCreateItemData(action.proposed_data);
+}
+
+export async function deleteAddedItem(action: CreateItemProposedAction): Promise<void> {
+    if (!action.result_data?.zotero_key) {
+        throw new Error('Item key missing for deletion');
+    }
+
+    const libraryID = resolveLibraryRef({
+        library_ref: action.result_data.library_ref,
+        library_id: action.result_data.library_id,
+    });
+    if (!libraryID) {
+        logger(`deleteAddedItem: Library unavailable for ${action.result_data.library_ref || action.result_data.library_id}-${action.result_data.zotero_key}`, 1);
+        return;
+    }
+
+    const item = await Zotero.Items.getByLibraryAndKeyAsync(
+        libraryID,
+        action.result_data.zotero_key
+    );
+
+    if (item) {
+        // Erase the item
+        await item.eraseTx();
+    }
+}

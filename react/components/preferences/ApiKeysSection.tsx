@@ -1,14 +1,13 @@
 import React, { useState, useCallback } from "react";
 import Button from "@beaver/agent-ui/primitives/Button";
-import {SettingsGroup, SettingsRow, SectionLabel, DocLink, ExternalLink, SectionDescription, INTELLIGENCE_INDEX_URL} from "./components/SettingsElements";
+import {SettingsGroup, SectionLabel, DocLink, ExternalLink, SectionDescription, INTELLIGENCE_INDEX_URL} from "./components/SettingsElements";
 import ApiKeyInput from "./ApiKeyInput";
 import CustomProviderCard from "./CustomProviderCard";
+import PlusToolsSection from "./PlusToolsSection";
 import PlusSignIcon from "@beaver/agent-ui/icons/PlusSignIcon";
 import { Icon, AlertIcon } from "../icons/icons";
-import { getPref, setPref } from "../../../src/utils/prefs";
+import { getPref } from "../../../src/utils/prefs";
 import { handlePrefSave } from "./utils";
-import { activePreferencePageTabAtom, requestPlusToolsAtom } from "../../atoms/ui";
-import { remainingBeaverCreditsAtom } from "../../atoms/profile";
 import { refreshCustomModelsAtom } from "../../atoms/models";
 import {
     CustomChatModel,
@@ -16,7 +15,7 @@ import {
     saveCustomChatModelsToPreferences,
     OPENROUTER_API_BASE,
 } from "../../types/settings";
-import { useAtom, useAtomValue, useSetAtom } from "jotai";
+import { useSetAtom } from "jotai";
 
 /** Editor entry: a custom model plus a stable key for React list rendering. */
 interface CustomProviderEntry {
@@ -37,17 +36,12 @@ const emptyCustomModel = (): CustomChatModel => ({
 });
 
 const ApiKeysSection: React.FC = () => {
-    const setActiveTab = useSetAtom(activePreferencePageTabAtom);
     const refreshCustomModels = useSetAtom(refreshCustomModelsAtom);
 
     // --- Atoms: API Keys ---
     const [geminiKey, setGeminiKey] = useState(() => getPref('googleGenerativeAiApiKey'));
     const [openaiKey, setOpenaiKey] = useState(() => getPref('openAiApiKey'));
     const [anthropicKey, setAnthropicKey] = useState(() => getPref('anthropicApiKey'));
-
-    // --- Atoms: Request Plus Tools ---
-    const [requestPlusTools, setRequestPlusTools] = useAtom(requestPlusToolsAtom);
-    const remainingBeaverCredits = useAtomValue(remainingBeaverCreditsAtom);
 
     // --- State: Custom Providers ---
     const [customProviders, setCustomProviders] = useState<CustomProviderEntry[]>(() =>
@@ -116,13 +110,6 @@ const ApiKeysSection: React.FC = () => {
         setExpandedProviderId((current) => (current === id ? null : id));
     }, []);
 
-    // --- Handlers: Toggle Request Plus Tools ---
-    const handleRequestPlusToolsToggle = useCallback(() => {
-        const newValue = !requestPlusTools;
-        setPref('requestPlusTools', newValue);
-        setRequestPlusTools(newValue);
-    }, [requestPlusTools]);
-
     return (
         <>
             <SectionDescription>
@@ -170,6 +157,8 @@ const ApiKeysSection: React.FC = () => {
                     />
                 </div>
             </SettingsGroup>
+
+            <PlusToolsSection />
 
             {/* Custom Providers */}
             <div>
@@ -229,138 +218,6 @@ const ApiKeysSection: React.FC = () => {
                     </div>
                 )}
             </div>
-
-            {/* Plus Tools */}
-            <div className="display-flex flex-row gap-2">
-                <SectionLabel>Plus Tools</SectionLabel>
-                {requestPlusTools ? (
-                    remainingBeaverCredits > 0 ? (
-                        <span
-                            className="text-sm font-color-secondary px-15 py-05 rounded-md bg-quinary border-quinary"
-                            style={{
-                                marginTop: '20px', marginBottom: '6px',
-                                backgroundColor: 'var(--tag-green-quinary)',
-                                color: 'var(--tag-green-secondary)',
-                                borderColor: 'var(--tag-green-tertiary)',
-                            }}
-                        >
-                            Active
-                        </span>
-                    ) : (
-                        <span
-                            className="text-sm font-color-secondary px-15 py-05 rounded-md bg-quinary border-quinary"
-                            style={{
-                                marginTop: '20px', marginBottom: '6px',
-                                backgroundColor: 'var(--tag-orange-quinary)',
-                                color: 'var(--tag-orange-secondary)',
-                                borderColor: 'var(--tag-orange-tertiary)',
-                            }}
-                        >
-                            Paused &middot; No credits
-                        </span>
-                    )
-                ) : (
-                    <span
-                        className="text-sm font-color-secondary px-15 py-05 rounded-md bg-quinary border-quinary"
-                        style={{ marginTop: '20px', marginBottom: '6px' }}
-                    >
-                        Inactive
-                    </span>
-                )}
-            </div>
-            <SettingsGroup className="bg-senary">
-                {requestPlusTools && remainingBeaverCredits > 0 ? (
-                    /* State 1: Enabled + has credits */
-                    <SettingsRow
-                        className="items-start"
-                        title="Use Plus Tools with your API key"
-                        description={
-                            <>
-                                Plus tools include external search, batch extraction, and AI ranking with your own key for improved performance.
-                                {/* <DocLink path="credits">See the benchmarks</DocLink> */}
-                                {' '}<DocLink path="credits">Learn more</DocLink>
-                                <br /><br />
-                                <span className="font-semibold font-color-primary text-lg">{remainingBeaverCredits.toLocaleString()}</span>
-                                {' '}<span className="font-color-primary text-base">credits left</span> 
-                                <br />
-                                <span className="font-color-secondary text-sm">
-                                    Just 0.25 credits per message. Some actions cost extra.
-                                </span>
-                            </>
-                        }
-                        control={
-                            <Button variant="outline" className="mt-1" onClick={handleRequestPlusToolsToggle} style={{ padding: '4px 6px' }}>
-                                Disable
-                            </Button>
-                        }
-                    />
-                ) : requestPlusTools && remainingBeaverCredits <= 0 ? (
-                    /* State 2: Enabled + no credits */
-                    <SettingsRow
-                        className="items-start"
-                        title="Use Plus Tools with your API key"
-                        description={
-                            <>
-                                You're out of credits, so Plus tools are paused. Your API key still works for basic chat.
-                                Add credits for external search, batch extraction, and AI ranking.
-                                <br />
-                                <br />
-                                <Button variant="outline" className="mt-1" onClick={handleRequestPlusToolsToggle} style={{ padding: '4px 6px' }}>
-                                    Disable Plus Tools
-                                </Button>
-                            </>
-                        }
-                        control={
-                            <Button variant="solid" className="mt-1" onClick={() => setActiveTab('billing')} style={{ padding: '4px 6px' }}>
-                                Get credits &rarr;
-                            </Button>
-                        }
-                    />
-                ) : !requestPlusTools && remainingBeaverCredits > 0 ? (
-                    /* State 3: Disabled + has credits */
-                    <SettingsRow
-                        className="items-start"
-                        title="Use Plus Tools with your API key"
-                        description={
-                            <>
-                                Plus tools include external search, batch extraction, and AI ranking with your own key for improved performance.
-                                {/* <DocLink path="credits">See the benchmarks</DocLink> */}
-                                {' '}<DocLink path="credits">Learn more</DocLink>
-                                <br /><br />
-                                <span className="font-semibold font-color-primary text-lg">{remainingBeaverCredits.toLocaleString()}</span>
-                                {' '}<span className="font-color-primary text-base">credits ready to use</span> 
-                                <br />
-                                <span className="font-color-secondary text-sm">
-                                    Just 0.25 credits per message. Some actions cost extra.
-                                </span>
-                            </>
-                        }
-                        control={
-                            <Button variant="solid" className="mt-1" onClick={handleRequestPlusToolsToggle} style={{ padding: '4px 6px' }}>
-                                Enable
-                            </Button>
-                        }
-                    />
-                ) : (
-                    /* State 4: Disabled + no credits */
-                    <SettingsRow
-                        className="items-start"
-                        title="Use Plus Tools with your API key"
-                        description={
-                            <>
-                                Plus tools include external search, batch extraction, and AI ranking with your own key for improved performance.
-                                Costs 0.25 credits per message. Some actions cost extra.{' '}
-                                <DocLink path="credits">Learn more</DocLink>
-                            </>
-                        }
-                        control={
-                            <Button variant="solid" className="mt-1" onClick={() => {handleRequestPlusToolsToggle(); setActiveTab('billing')}} style={{ padding: '4px 6px' }}>
-                                Get credits &rarr;
-                            </Button>
-                        }
-                    />
-                )}
-            </SettingsGroup>
 
         </>
     );

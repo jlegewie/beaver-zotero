@@ -239,3 +239,12 @@ it.each(["active", "expired", "idle"])(
         });
     },
 );
+
+it('hydrates collection attachments at the history boundary without mutating the transport data', async () => {
+    const attachment = { type: 'collection', collection_id: 'g12345-SAMEKEY1', name: 'Inbox' };
+    const source = makeRun('run-1', { user_prompt: { content: '', attachments: [attachment] } as any });
+    const { runs } = await loadThreadRuns('thread-1', { history: { runs: [source], agent_actions: null } as any });
+    expect(runs[0].user_prompt.attachments?.[0]).toMatchObject({ library_ref: 'g12345', zotero_key: 'SAMEKEY1' });
+    expect(source.user_prompt.attachments?.[0]).toBe(attachment);
+    expect(attachment).not.toHaveProperty('zotero_key');
+});

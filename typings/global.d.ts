@@ -75,6 +75,18 @@ declare namespace Zotero {
      * See `src/services/artifacts/tablesApi.ts`.
      */
     let __beaverTableWriteLocks: Map<string, Promise<unknown>> | undefined;
+    /**
+     * Identifies this run of Zotero. Set once per process and kept across
+     * plugin reloads, so a saved record can tell a reload from a restart.
+     * See `src/ui/tableTab.ts`.
+     */
+    let __beaverAppSessionID: string | undefined;
+    /**
+     * The Beaver tabs (every kind), published by the esbuild bundle while it
+     * runs. A window renderer closes its window's tabs through this before it
+     * goes away. See `src/ui/beaverTabs.ts`.
+     */
+    let __beaverTabs: { closeForWindow(win: Window): number } | undefined;
 
     namespace Beaver {
         let localEndpoints: import("../src/services/instanceLocalEndpoints").InstanceLocalEndpoints | undefined;
@@ -84,11 +96,17 @@ declare namespace Zotero {
         let documents: import("../src/services/instanceDocuments").InstanceDocuments | undefined;
         let notePreviews: import("../src/services/notePreviews").NotePreviews;
         let libraryOperations: import("../src/services/libraryOperations").LibraryOperations;
+        const deferredCommits: import("../src/services/committedTransaction").DeferredCommits | undefined;
+        const transactionWatch: import("../src/services/openTransaction").OpenTransactionWatch | undefined;
+        let itemImport: import("../src/services/itemImport/service").ItemImportService;
+        let exporter: import("../src/services/export/instanceExport").InstanceExport;
         let backgroundTasks: import("../src/utils/backgroundTasks").BackgroundTaskSource;
         let mutations: import("../src/services/libraryMutations").LibraryMutations;
         let syncPause: ReturnType<typeof import("../src/services/syncPause").createSyncPauseService>;
         const preferences: import("../src/services/instancePreferences").InstancePreferences | undefined;
         const account: import("../src/services/instanceAccount").InstanceAccount | undefined;
+        /** Table fill plans and jobs; plugin realm, reached from renderers through this slot. */
+        const tableFills: import("../src/services/tableFills/service").InstanceTableFills | undefined;
         const runtime: import("../src/runtime/instance").BeaverInstance;
         const voiceNative: import("../src/services/voice/nativeVoice").NativeVoice | undefined;
         const voice: import("../src/services/voice/voiceService").VoiceService | undefined;
@@ -172,13 +190,6 @@ declare namespace Zotero {
             // --- Sync Logs Methods ---
 
             /**
-             * Insert a new sync log record.
-             * @param syncLog The sync log data to insert (without id, which will be generated)
-             * @returns The complete SyncLogsRecord with generated id
-             */
-            insertSyncLog(syncLog: Omit<import("../src/services/database").SyncLogsRecord, 'id' | 'timestamp'>): Promise<import("../src/services/database").SyncLogsRecord>;
-
-            /**
              * Get sync log record for library_id and user_id with the highest library_version.
              * @param user_id The user_id to filter by
              * @param library_id The library_id to filter by
@@ -193,46 +204,6 @@ declare namespace Zotero {
              * @returns The SyncLogsRecord with most recent library_date_modified, or null if not found
              */
             getSyncLogWithMostRecentDate(user_id: string, library_id: number): Promise<import("../src/services/database").SyncLogsRecord | null>;
-
-            /**
-             * Get all sync log records for specific library_id and user_id.
-             * @param user_id The user_id to filter by
-             * @param library_id The library_id to filter by
-             * @param orderBy Optional ordering field ('timestamp', 'library_version', 'library_date_modified')
-             * @param orderDirection Optional order direction ('ASC' or 'DESC')
-             * @returns Array of SyncLogsRecord objects
-             */
-            getAllSyncLogsForLibrary(
-                user_id: string, 
-                library_id: number,
-                orderBy?: 'timestamp' | 'library_version' | 'library_date_modified',
-                orderDirection?: 'ASC' | 'DESC'
-            ): Promise<import("../src/services/database").SyncLogsRecord[]>;
-
-            /**
-             * Get the most recent sync log record for specific library_ids and user_id.
-             * @param user_id The user_id to filter by
-             * @param library_ids The library_ids to filter by
-             * @returns The SyncLogsRecord with most recent timestamp, or null if not found
-             */
-            getMostRecentSyncLogForLibraries(
-                user_id: string,
-                library_ids: number[]
-            ): Promise<import("../src/services/database").SyncLogsRecord | null>;
-
-            /**
-             * Deletes all sync log records for a specific library.
-             * @param user_id The user_id to filter by
-             * @param library_id The library_id to delete logs for
-             */
-            deleteSyncLogsForLibraryIds(user_id: string, library_ids: number[]): Promise<void>;
-
-            /**
-             * Deletes all sync log records for a user.
-             * Used during onboarding to ensure fresh sync state (e.g., after plan transitions).
-             * @param user_id The user_id to delete logs for
-             */
-            deleteAllSyncLogsForUser(user_id: string): Promise<void>;
 
             // --- Embedding Methods ---
 
@@ -407,6 +378,11 @@ declare namespace Zotero {
                 preparationPayload?: import("../src/services/database").BackgroundJobPayload,
             ): Promise<{ exists: boolean; promoted: boolean }>;
 
+            beginFulltextCacheRecovery: import('../src/services/database').BeaverDB['beginFulltextCacheRecovery'];
+            deferFulltextCacheRecovery: import('../src/services/database').BeaverDB['deferFulltextCacheRecovery'];
+            finishFulltextCacheRecovery: import('../src/services/database').BeaverDB['finishFulltextCacheRecovery'];
+            cancelFulltextCacheRecovery: import('../src/services/database').BeaverDB['cancelFulltextCacheRecovery'];
+
             completeBackgroundJob(id: number): Promise<void>;
             completeBackgroundPreparationJob(id: number, now: number): Promise<boolean>;
 
@@ -476,6 +452,11 @@ declare namespace Zotero {
             deleteBackgroundJobsByLibrary(libraryId: number): Promise<void>;
             restoreIndexCleanup(accountId: string): Promise<number>;
             acknowledgeIndexCleanup(job: import('../src/services/database').BackgroundJobRecord): Promise<void>;
+            markIndexCleanupReacquireAttempted: import('../src/services/database').BeaverDB['markIndexCleanupReacquireAttempted'];
+            retireAttachmentProcessingStates: import('../src/services/database').BeaverDB['retireAttachmentProcessingStates'];
+            hasPendingFulltextUpsert: import('../src/services/database').BeaverDB['hasPendingFulltextUpsert'];
+            replaceAttachmentExtractionSource: import('../src/services/database').BeaverDB['replaceAttachmentExtractionSource'];
+            relocateAttachmentExtractionSource: import('../src/services/database').BeaverDB['relocateAttachmentExtractionSource'];
             adoptAttachmentExtractionSource(input: {
                 libraryId: number; zoteroKey: string; source: string;
                 contentKind: import("../src/services/database").AttachmentProcessingStateRecord['contentKind'];
@@ -494,6 +475,7 @@ declare namespace Zotero {
                 extractSchemaVersion: string; ocrStatus: 'na' | 'needed';
                 extractionSource?: string | null;
             }): Promise<boolean>;
+            markAttachmentExtractedForOcrRestore: import('../src/services/database').BeaverDB['markAttachmentExtractedForOcrRestore'];
             markAttachmentExtractFailure(input: {
                 libraryId: number; zoteroKey: string; status: 'failed' | 'skipped'; error: string;
                 attemptedAt: number; extractionSource?: string | null;
@@ -510,15 +492,10 @@ declare namespace Zotero {
             markAttachmentOcrFailed(libraryId: number, zoteroKey: string, fileHash: string, error: string): Promise<void>;
             markAttachmentOcrUnavailable(libraryId: number, zoteroKey: string, fileHash: string, error: string): Promise<boolean>;
             clearAttachmentOcrUnavailable(libraryId: number, zoteroKey: string, fileHash: string): Promise<boolean>;
+            touchAttachmentOcrUnavailable(libraryId: number, zoteroKey: string): Promise<void>;
+            getOcrUnavailableAttachments(libraryIds: number[]): Promise<Array<{ libraryId: number; zoteroKey: string; ticketed: boolean }>>;
             recordAttachmentIndexIdentity: import('../src/services/database').BeaverDB['recordAttachmentIndexIdentity'];
-            markAttachmentUpsertDone(input: {
-                libraryId: number; zoteroKey: string; structuredDocumentHash: string;
-                upsertIndexVersion: string;
-                remoteIdentity?: import('../src/services/database').AttachmentProcessingStateRecord['upsertRemoteIdentity'];
-                expectedUpsertStatus?: import("../src/services/database").AttachmentUpsertStatus;
-                expectedUpsertIndexVersion?: string | null;
-                expectedExtractStatus?: import("../src/services/database").AttachmentExtractStatus;
-            }): Promise<boolean>;
+            markAttachmentUpsertDone: import('../src/services/database').BeaverDB['markAttachmentUpsertDone'];
             markAttachmentUpsertFailed(libraryId: number, zoteroKey: string, structuredDocumentHash: string, error: string): Promise<void>;
             getSearchPreparationRows: import('../src/services/database').BeaverDB['getSearchPreparationRows'];
             getPendingFulltextUpsertKeys: import('../src/services/database').BeaverDB['getPendingFulltextUpsertKeys'];
@@ -611,6 +588,12 @@ declare namespace Zotero {
         let libraryScopeInitialized: boolean | undefined;
 
         /**
+         * Incremented whenever a library leaves `searchableLibraryIds`, so work
+         * that outlives a scope check can tell whether access was revoked since.
+         */
+        let libraryRevocations: number | undefined;
+
+        /**
          * Citation object for CSL formatting
          */
         type Citation = {
@@ -651,6 +634,12 @@ declare namespace Zotero {
              */
             formatBibliography(items: Zotero.Item | Zotero.Item[], format?: "text" | "html"): string;
 
+            /** Format a whole document's citations as one sequence (export). */
+            formatCitationSequence: import("../src/services/CitationService").CitationService["formatCitationSequence"];
+
+            /** The installed style and locale an export formats with. */
+            resolveStyle: import("../src/services/CitationService").CitationService["resolveStyle"];
+
             /**
              * Force recreation of the CSL engine on next use
              * Call this when preferences change
@@ -672,6 +661,17 @@ declare namespace Zotero {
          * @return {Boolean}
          */
         isInTrash(): boolean;
+
+        /**
+         * Zotero 9+ returns child annotation IDs for a file attachment without
+         * consulting the object cache; the array is Zotero's internal cache.
+         * Zotero 7 and 8 ignore `asIDs` and return items. Use
+         * `getAnnotationIDs()` from `src/utils/zoteroDataLoading.ts` instead.
+         */
+        getAnnotations(
+            includeTrashed: boolean | undefined,
+            asIDs: true,
+        ): readonly number[] | Zotero.Item[];
     }
 
     interface Utilities {

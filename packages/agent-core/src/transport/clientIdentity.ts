@@ -17,7 +17,7 @@
  * `setClientIdentityProvider`.
  */
 
-import type { ZoteroInstanceWire } from '../protocol/agentProtocol';
+import type { ExtractSchemaVersionsWire, ZoteroInstanceWire } from '../protocol/agentProtocol';
 
 /** Handshake identity fields resolved fresh for each connect attempt. */
 export interface ClientIdentity {
@@ -32,6 +32,11 @@ export interface ClientIdentity {
      * clients (e.g. the Word add-in) have no Zotero install to identify.
      */
     zoteroInstance?: ZoteroInstanceWire;
+    /**
+     * Sent as `WSAuthMessage.extract_schema_versions`. Optional because only
+     * clients that serve document requests produce extractions.
+     */
+    extractSchemaVersions?: ExtractSchemaVersionsWire;
 }
 
 /** Resolves the current client identity. Called fresh on every connect attempt. */

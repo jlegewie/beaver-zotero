@@ -1,5 +1,5 @@
-import { DEMO_ROW_LIMIT, TABLES_API_MISSING, OpenTableRequest, DemoItem, collectDemoItems, yearOf, citationTag, sentence, textCell, typeColumn, typeLabelFor, typeCell, buildDemoTable, referenceRow, buildSearchDemo, buildExtractionDemo, selectLabelFor, TableCreateRequest, handleTestTableCreateHttpRequest, TableReadRequest, handleTestTableReadHttpRequest, handleTestTableListHttpRequest, errorResponse, TableStoreRequest, tableRefFrom, writeMetaFrom, MISSING_KEY, writeResponse, TableWriteRequest, handleTestTableWriteHttpRequest, TableEditRequest, handleTestTableEditHttpRequest, handleTestTableVersionsHttpRequest, TableRevertRequest, handleTestTableRevertHttpRequest, TableDeleteRequest, handleTestTableDeleteHttpRequest, handleTestTableOpenHttpRequest, TableCorruptRequest, handleTestTableCorruptHttpRequest, rollBackWholeDirectory, handleTestTableShadowHttpRequest, handleTestTableRestoreShadowHttpRequest, handleTestTableViewStateHttpRequest, handleTestTableItemPaneHttpRequest, handleTestTableTrimHttpRequest } from '../../../src/services/localEndpoints/handlers/testTableHandlers';
-export { handleTestTableCreateHttpRequest, handleTestTableReadHttpRequest, handleTestTableListHttpRequest, handleTestTableWriteHttpRequest, handleTestTableEditHttpRequest, handleTestTableVersionsHttpRequest, handleTestTableRevertHttpRequest, handleTestTableDeleteHttpRequest, handleTestTableOpenHttpRequest, handleTestTableCorruptHttpRequest, handleTestTableShadowHttpRequest, handleTestTableRestoreShadowHttpRequest, handleTestTableTrimHttpRequest, handleTestTableViewStateHttpRequest, handleTestTableItemPaneHttpRequest } from '../../../src/services/localEndpoints/handlers/testTableHandlers';
+import { DEMO_ROW_LIMIT, TABLES_API_MISSING, OpenTableRequest, DemoItem, collectDemoItems, yearOf, evidenceFor, sentence, textCell, typeColumn, typeLabelFor, typeCell, buildDemoTable, referenceRow, buildSearchDemo, buildExtractionDemo, selectLabelFor, TableCreateRequest, handleTestTableCreateHttpRequest, TableReadRequest, handleTestTableReadHttpRequest, handleTestTableListHttpRequest, errorResponse, TableStoreRequest, tableRefFrom, writeMetaFrom, MISSING_KEY, writeResponse, TableWriteRequest, handleTestTableWriteHttpRequest, TableEditRequest, handleTestTableEditHttpRequest, handleTestTableVersionsHttpRequest, TableRevertRequest, handleTestTableRevertHttpRequest, TableDeleteRequest, handleTestTableDeleteHttpRequest, handleTestTableOpenHttpRequest, TableCorruptRequest, handleTestTableCorruptHttpRequest, rollBackWholeDirectory, handleTestTableShadowHttpRequest, handleTestTableRestoreShadowHttpRequest, handleTestTableItemPaneHttpRequest, handleTestTableTrimHttpRequest } from '../../../src/services/localEndpoints/handlers/testTableHandlers';
+export { handleTestTableCreateHttpRequest, handleTestTableReadHttpRequest, handleTestTableListHttpRequest, handleTestTableWriteHttpRequest, handleTestTableEditHttpRequest, handleTestTableVersionsHttpRequest, handleTestTableRevertHttpRequest, handleTestTableDeleteHttpRequest, handleTestTableOpenHttpRequest, handleTestTableCorruptHttpRequest, handleTestTableShadowHttpRequest, handleTestTableRestoreShadowHttpRequest, handleTestTableTrimHttpRequest, handleTestTableItemPaneHttpRequest } from '../../../src/services/localEndpoints/handlers/testTableHandlers';
 import { isTableItemError } from '../../../src/services/artifacts/tableItemIdentity';
 /**
  * Dev-only HTTP handlers for looking at the table renderer.
@@ -47,7 +47,6 @@ import type {
     TableSpec,
 } from '@beaver/agent-core/layouts/table';
 import {
-    rowIdFor,
     validateTableSpec,
     type RowRef,
 } from '@beaver/agent-core/layouts/table';
@@ -58,6 +57,8 @@ import {
 import { BeaverUIFactory } from '../../../src/ui/ui';
 import { showTableInWindowAtom, windowSurfaceAtom } from '../../atoms/windowSurface';
 import { store } from '../../store';
+import { tryGetWindowRuntime } from '../../runtime/windowRuntime';
+import { getHost } from '@beaver/agent-ui/host';
 import { openBeaverWindow } from '../../ui/openBeaverWindow';
 // The reader views and the item-pane section keep module state and are compiled
 // into the *esbuild* bundle by `src/hooks.ts`. Importing them here would give
@@ -142,14 +143,12 @@ export async function handleTestOpenTableHttpRequest(
 }
 
 /**
- * `openTable` itself: the product path the item-pane button takes.
- *
- * A stored table has one surface — Zotero's reader — so this reports only
- * whether it got there. `-open-reader` is the richer probe: it waits for the
- * enhancement and describes which of the enhancer's seams attached.
+ * `openTable` itself: the product path the item-pane button takes, from this
+ * renderer's window. Reports the Beaver tab it landed in;
+ * `/beaver/test/table-tab` inspects the tab.
  */
 export async function handleTestOpenStoredTableHttpRequest(
-    request: { key?: string; libraryID?: number } = {}
+    request: { key?: string; libraryID?: number; via?: 'api' | 'card' } = {}
 ): Promise<any> {
     if (!request.key) return MISSING_KEY;
     const api = getTablesApi();
@@ -158,7 +157,15 @@ export async function handleTestOpenStoredTableHttpRequest(
         libraryID: request.libraryID ?? Zotero.Libraries.userLibraryID,
         key: request.key,
     };
-    const outcome = await api.openTable(ref);
+    // `card`: the host navigation the chat cards and table chips call, with
+    // the item reference they carry and this renderer's window as the origin.
+    const open = getHost().navigation?.openTable;
+    const origin = tryGetWindowRuntime()?.hostWindow ?? null;
+    const outcome = request.via === 'card'
+        ? open
+            ? await open(`${ref.libraryID}-${ref.key}`, origin)
+            : { error: 'Host navigation has no openTable.' }
+        : await api.openTable(ref, { window: origin });
     if ('error' in outcome) {
         return { ok: false, key: ref.key, library_id: ref.libraryID, error: outcome.error };
     }
@@ -166,7 +173,10 @@ export async function handleTestOpenStoredTableHttpRequest(
         ok: true,
         key: ref.key,
         library_id: ref.libraryID,
-        views: api.listViews(),
+        // The host contract does not name the tab; `openTable` returns it.
+        tab_id: (outcome as { tabID?: string }).tabID ?? null,
+        reused: (outcome as { reused?: boolean }).reused ?? null,
+        ...(outcome.warning ? { warning: outcome.warning } : {}),
     };
 }
 
@@ -174,72 +184,4 @@ export async function handleTestOpenStoredTableHttpRequest(
 export async function handleTestCloseTableHttpRequest(): Promise<any> {
     await BeaverUIFactory.commandBeaverWindow("show-chat");
     return { ok: true, window_open: !!BeaverUIFactory.findBeaverWindow() };
-}
-
-// ---------------------------------------------------------------------------
-// The reader host (dev-only)
-// ---------------------------------------------------------------------------
-
-/**
- * Opens a stored table in the reader and reports what the enhancer attached.
- *
- * The report is deliberately literal: every step has its own field, and
- * `failures` names the ones that did not come up. A table that renders as a
- * plain static page is a supported outcome, so `ok: true` here means "the
- * attempt ran", not "everything attached" — read `enhanced`. `tab_id` is null
- * for a table opened in a reader *window* rather than a tab.
- */
-export async function handleTestTableOpenReaderHttpRequest(
-    request: { key?: string; libraryID?: number; timeoutMs?: number } = {}
-): Promise<any> {
-    if (!request.key) return MISSING_KEY;
-    const api = getTablesApi();
-    if (!api) return TABLES_API_MISSING;
-
-    const libraryID = request.libraryID ?? Zotero.Libraries.userLibraryID;
-    const item = Zotero.Items.getByLibraryAndKey(libraryID, request.key) as
-        | Zotero.Item
-        | false;
-    if (!item) {
-        return {
-            ok: false,
-            code: 'not_found',
-            error: `No item ${request.key} in library ${libraryID}`,
-        };
-    }
-    await loadTableItemFields([item]);
-    if (!isTableItem(item)) {
-        return {
-            ok: false,
-            code: 'not_a_table',
-            error: `Item ${request.key} is not a Beaver table.`,
-        };
-    }
-
-    const report = await api.openInReader(item, { timeoutMs: request.timeoutMs });
-    return {
-        ok: true,
-        key: report.itemKey,
-        library_id: report.libraryID,
-        enhanced: report.enhanced,
-        reader_type: report.readerType,
-        tab_id: report.tabID,
-        is_table_item: report.isTableItem,
-        // The document's own mark, carrying the format version it was written
-        // with; null means the document was not one of ours (or not found).
-        data_beaver_table: report.beaverTableAttribute,
-        internal_reader_found: report.internalReaderFound,
-        primary_view_found: report.primaryViewFound,
-        view_initialized: report.viewInitialized,
-        document_found: report.documentFound,
-        card_mounted: report.cardMounted,
-        listeners_attached: report.listenersAttached,
-        // False can mean either "already read-only" or "this build has no
-        // setReadOnly"; `failures` says which.
-        annotations_disabled: report.annotationsDisabled,
-        markers: report.markers,
-        links: report.links,
-        failures: report.failures,
-        views: api.listViews(),
-    };
 }

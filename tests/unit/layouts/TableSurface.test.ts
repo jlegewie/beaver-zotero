@@ -3,20 +3,33 @@
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { TableSpec } from "@beaver/agent-core/layouts/table";
+import type {
+    Cell,
+    CellValue,
+    TableSpec,
+} from "@beaver/agent-core/layouts/table";
 import { setHost } from "@beaver/agent-ui/host";
 import { TableSurface } from "@beaver/agent-ui/layouts/chrome/TableSurface";
 import { SearchResultsTable } from "@beaver/agent-ui/layouts/surfaces/SearchResultsTable";
 import { ExtractionTable } from "@beaver/agent-ui/layouts/surfaces/ExtractionTable";
 
+function system(value: CellValue): Cell {
+    return { outcome: "answered", provenance: "system", value };
+}
+
+/** An answer the producer filled, which carries no marks. */
+function answered(value: CellValue): Cell {
+    return { outcome: "answered", provenance: "system", value };
+}
+
 const spec: TableSpec = {
     id: "t",
     title: "Working from home",
-    caption: "OpenAlex · 3 results",
+    description: "OpenAlex · 3 results",
     anchor_column_id: "ref",
     columns: [
         { id: "ref", header: "Item", type: "reference" },
-        { id: "year", header: "Year", type: "number" },
+        { id: "year", header: "Year", type: "text" },
         {
             id: "type",
             header: "Type",
@@ -34,28 +47,33 @@ const spec: TableSpec = {
         {
             id: "r1",
             cells: {
-                ref: { value: { kind: "reference", display_name: "Alpha" } },
-                year: { value: { kind: "number", value: 2020 } },
-                type: { value: { kind: "select", label: "Article" } },
-                notes: { value: { kind: "text", text: "First" } },
+                ref: system({ kind: "reference", display_name: "Alpha" }),
+                year: answered({ kind: "text", text: "2020" }),
+                type: answered({ kind: "select", label: "Article" }),
+                notes: answered({ kind: "text", text: "First" }),
             },
         },
         {
             id: "r2",
             cells: {
-                ref: { value: { kind: "reference", display_name: "Beta" } },
-                year: { value: { kind: "number", value: 2021 } },
-                type: { value: { kind: "select", label: "Book" } },
+                ref: system({ kind: "reference", display_name: "Beta" }),
+                year: answered({ kind: "text", text: "2021" }),
+                type: answered({ kind: "select", label: "Book" }),
                 // `notes` absent — unattempted.
             },
         },
         {
             id: "r3",
             cells: {
-                ref: { value: { kind: "reference", display_name: "Gamma" } },
-                year: { value: { kind: "number", value: 2022 } },
-                type: { value: { kind: "select", label: "Article" } },
-                notes: { status: "error", error: "Extraction failed" },
+                ref: system({ kind: "reference", display_name: "Gamma" }),
+                year: answered({ kind: "text", text: "2022" }),
+                type: answered({ kind: "select", label: "Article" }),
+                notes: {
+                    outcome: "failed",
+                    provenance: "model",
+                    error_code: "no_locator",
+                    error: "Extraction failed",
+                },
             },
         },
     ],
@@ -90,7 +108,7 @@ describe("table chrome", () => {
         vi.clearAllMocks();
     });
 
-    it("takes its title and subtitle from the spec unless overridden", () => {
+    it("takes its title and subtitle (the description) from the spec unless overridden", () => {
         mount(React.createElement(TableSurface, { table: spec }));
         expect(text(".bt-title")).toBe("Working from home");
         expect(text(".bt-subtitle")).toBe("OpenAlex · 3 results");
@@ -116,6 +134,52 @@ describe("table chrome", () => {
         expect(footer).not.toContain("not reported");
         // …and the failed cell is reported separately from them.
         expect(footer).toContain("1 failed");
+        expect(footer).not.toContain("title and abstract");
+    });
+
+    it("counts not-reported and title-and-abstract cells and unreadable papers in the footer, and never a review count", () => {
+        mount(
+            React.createElement(TableSurface, {
+                table: {
+                    ...spec,
+                    rows: spec.rows.map((row) =>
+                        row.id === "r2"
+                            ? {
+                                  ...row,
+                                  documents: ["u-DOC2"],
+                                  cells: {
+                                      ...row.cells,
+                                      type: {
+                                          outcome: "answered",
+                                          provenance: "model",
+                                          value: { kind: "select", label: "Book" },
+                                          documents: ["u-DOC2"],
+                                          confidence: "medium",
+                                      },
+                                      // From title and abstract.
+                                      notes: {
+                                          outcome: "not_reported",
+                                          provenance: "model",
+                                          confidence: "low",
+                                      },
+                                  },
+                              }
+                            : row.id === "r1"
+                              ? { ...row, failure: { code: "encrypted", message: "Locked." } }
+                              : row,
+                    ),
+                },
+            }),
+        );
+        const footer = text(".bt-footer");
+        expect(footer).toContain("1 not reported");
+        expect(footer).toContain("1 failed");
+        // A finding is not an answer: only answers count as from title and
+        // abstract, as the table's summary counts them.
+        expect(footer).not.toContain("from title and abstract");
+        expect(footer).not.toContain("to review");
+        expect(footer).toContain("1 paper could not be read");
+        expect(footer).not.toContain("incomplete");
     });
 
     it("offers the columns menu whenever a column starts hidden, so it can be brought back", () => {
@@ -222,7 +286,11 @@ describe("table chrome", () => {
         );
 
         const csv: string = onExport.mock.calls[0][0];
-        expect(csv.split("\r\n")[0]).toBe("Item,Item — evidence,Item — sources,Item — state,Year,Year — evidence,Year — sources,Year — state,Type,Type — evidence,Type — sources,Type — state,Notes,Notes — evidence,Notes — sources,Notes — state");
+        // Evidence and reasoning companions are empty in every exported row, so
+        // they are left out; every written cell names its provenance in state.
+        expect(csv.split("\r\n")[0]).toBe(
+            "Item,Item — state,Year,Year — state,Type,Type — state,Notes,Notes — state",
+        );
         expect(csv).toContain("Alpha");
         expect(csv).toContain("Gamma");
         expect(csv).not.toContain("Beta"); // filtered out of the view

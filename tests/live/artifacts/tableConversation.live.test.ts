@@ -21,8 +21,15 @@ const provider = (op: string, fields: Record<string, unknown> = {}) =>
         ...fields,
     });
 
+let paper: string;
+
 beforeAll(async () => {
     available = await isZoteroAvailable();
+    if (!available) return;
+    const libraries = await post<any>("/beaver/library/libraries", {});
+    const library = (libraries.libraries ?? []).find((l: any) => l.library_ref === libraryRef);
+    const listed = library ? await post<any>("/beaver/library/list", { library_id: library.library_id, limit: 1 }) : null;
+    paper = listed?.items?.[0]?.item_id;
 });
 afterAll(async () => {
     if (!available || !key) return;
@@ -44,12 +51,8 @@ describe("table composer state with the real Zotero provider", () => {
             title: "Table conversation test",
             operation_id: operation,
             meta: { actor: "user" },
-            spec: {
-                id: operation,
-                title: "Table conversation test",
-                columns: [{ id: "answer", header: "Answer", type: "text" }],
-                rows: [],
-            },
+            sources: [{ id: "s1", type: "items", ids: [paper] }],
+            columns: [{ header: "Answer", type: "text", description: "What is reported?" }],
         });
         expect(created.ok).toBe(true);
         expect(created.zotero_item.library_ref).toBe(libraryRef);

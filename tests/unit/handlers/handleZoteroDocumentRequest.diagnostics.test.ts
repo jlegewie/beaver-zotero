@@ -183,7 +183,12 @@ describe('handleZoteroDocumentRequest attachment diagnostics', () => {
             parentItemID: 9,
             loadAllData: vi.fn().mockResolvedValue(undefined),
             loadDataType: vi.fn().mockResolvedValue(undefined),
-            getAnnotations: vi.fn(() => [{}, {}]),
+            // Mirrors Zotero for a library whose items are not loaded: looking
+            // up annotation items throws, counting the child rows does not.
+            getAnnotations: vi.fn(() => {
+                throw new Error('UnloadedDataException: Item 21 not yet loaded');
+            }),
+            numAnnotations: vi.fn(() => 2),
             isAttachment: vi.fn(() => true),
             isPDFAttachment: vi.fn(() => false),
             attachmentContentType: 'text/plain',
@@ -246,7 +251,7 @@ describe('handleZoteroDocumentRequest attachment diagnostics', () => {
     });
 
     it('skips the best-attachment query for standalone attachments', async () => {
-        serveText(textItem({ parentItemID: false, getAnnotations: vi.fn(() => []) }));
+        serveText(textItem({ parentItemID: false, numAnnotations: vi.fn(() => 0) }));
 
         const response = await handleZoteroDocumentRequest(TEXT_REQUEST);
 

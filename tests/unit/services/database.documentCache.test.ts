@@ -115,6 +115,40 @@ describe('BeaverDB document cache methods', () => {
         expect(await candidates()).toEqual([]);
     });
 
+    it('offers a processed scan for preparation once its retained OCR preparation is incompatible', async () => {
+        const versions = { metadata: 1, payload: 1, pdf: '4' };
+        const scanCandidates = () => db.getUncachedProcessingCandidates({
+            libraryIds: [1], hasOcrAccess: true, protectedVersions: versions,
+        });
+        await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: 'ABCD1234', contentKind: 'pdf' });
+        await conn.queryAsync("UPDATE attachment_processing_state SET extract_status = 'done', ocr_status = 'done'");
+        const { metadata } = await db.upsertDocumentCacheMetadata(makeMetadata());
+        await db.upsertDocumentCachePayload(makePayload({ metadataId: metadata.id, extractionSource: 'ocr' }));
+        expect(await scanCandidates()).toEqual([]);
+        expect(await db.getIncompatibleProtectedDocumentKeys(1, versions)).toEqual([]);
+
+        await conn.queryAsync('UPDATE document_cache_payloads SET cache_format_version = 0');
+        expect(await scanCandidates()).toEqual([{ libraryId: 1, zoteroKey: 'ABCD1234' }]);
+        expect(await db.getIncompatibleProtectedDocumentKeys(1, versions)).toEqual(['ABCD1234']);
+        expect(await db.getIncompatibleProtectedDocumentKeys(2, versions)).toEqual([]);
+        // Without OCR access a processed scan cannot be prepared again.
+        expect(await db.getUncachedProcessingCandidates({
+            libraryIds: [1], hasOcrAccess: false, protectedVersions: versions,
+        })).toEqual([]);
+    });
+
+    it('does not treat an incompatible native payload as a retained OCR preparation', async () => {
+        const versions = { metadata: 1, payload: 1, pdf: '4' };
+        await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: 'ABCD1234', contentKind: 'pdf' });
+        await conn.queryAsync("UPDATE attachment_processing_state SET extract_status = 'done', ocr_status = 'na'");
+        const { metadata } = await db.upsertDocumentCacheMetadata(makeMetadata());
+        await db.upsertDocumentCachePayload(makePayload({ metadataId: metadata.id, cacheFormatVersion: 0 }));
+        expect(await db.getUncachedProcessingCandidates({
+            libraryIds: [1], hasOcrAccess: true, protectedVersions: versions,
+        })).toEqual([]);
+        expect(await db.getIncompatibleProtectedDocumentKeys(1, versions)).toEqual([]);
+    });
+
     it('upserts and reads metadata by library/key', async () => {
         await db.upsertDocumentCacheMetadata(makeMetadata());
 
@@ -201,6 +235,19 @@ describe('BeaverDB document cache methods', () => {
         await db.resetLocalProcessingState();
         await db.initDatabase('0.99.0');
         expect((await db.getDocumentCachePayload(1, 'ABCD1234', 'structured'))?.extractionSource).toBe('ocr');
+    });
+
+    it('adds the OCR source md5 column to an existing cache without discarding its rows', async () => {
+        const { metadata } = await db.upsertDocumentCacheMetadata(makeMetadata());
+        await db.upsertDocumentCachePayload(makePayload({ metadataId: metadata.id, extractionSource: 'ocr' }));
+        conn.getRawDB().exec('ALTER TABLE document_cache_payloads DROP COLUMN source_md5');
+
+        await db.initDatabase('0.99.0');
+
+        expect(await db.getDocumentCachePayload(1, 'ABCD1234', 'structured'))
+            .toMatchObject({ extractionSource: 'ocr', sourceMd5: null });
+        await db.upsertDocumentCachePayload(makePayload({ metadataId: metadata.id, extractionSource: 'ocr', sourceMd5: 'scan-md5' }));
+        expect((await db.getDocumentCachePayload(1, 'ABCD1234', 'structured'))?.sourceMd5).toBe('scan-md5');
     });
 
     it('does not evict a candidate whose provenance became OCR after inspection', async () => {

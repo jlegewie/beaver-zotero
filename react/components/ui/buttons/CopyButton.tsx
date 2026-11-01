@@ -11,7 +11,7 @@ interface CopyButtonProps {
     /** Optional callback when copy is successful */
     onCopySuccess?: () => void;
     /** Convert content to a different format before copying */
-    formatContent?: (content: string) => string;
+    formatContent?: (content: string) => string | Promise<string>;
     /** Optional title for the button */
     title?: string;
     /** Accessible label for the button */
@@ -39,7 +39,7 @@ const CopyButton: React.FC<CopyButtonProps> = ({
         e.stopPropagation();
         
         const raw = typeof content === 'function' ? await content() : content;
-        const formattedContent = formatContent(raw);
+        const formattedContent = await formatContent(raw);
         
         await copyToClipboard(formattedContent, {
             onSuccess: () => {

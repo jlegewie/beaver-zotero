@@ -43,6 +43,16 @@ const FRAGMENTED_TEXT_MIN_LINES = 50;
 const FRAGMENTED_TEXT_MAX_MEAN_LEN = 1.5;
 
 /**
+ * Minimum number of characters (after whitespace removal and leader-run
+ * collapse) before `low_alphanumeric_ratio` may judge a page that carries no
+ * image. Below this, the ratio measures a handful of symbols, not a text
+ * layer: a vector plot whose data points are glyphs, a decorative page, or a
+ * page of bullet markers. A scan cannot hide here (it has an image), and a
+ * page of unmapped glyphs is still caught by `invalid_characters`.
+ */
+const LOW_ALPHANUM_MIN_SAMPLE_WITHOUT_IMAGES = 20;
+
+/**
  * Per-page issues that mean a page carries no *usable* text — either none at
  * all (`no_text_blocks` / `no_body_text`) or characters that never resolve
  * into readable words (`invalid_characters`, `low_alphanumeric_ratio`,
@@ -79,6 +89,7 @@ export interface RawPageProvider {
  */
 function analyzeTextQuality(
     text: string,
+    hasImages: boolean,
     opts: Required<OCRDetectionOptions>
 ): OCRIssueReason[] {
     const issues: OCRIssueReason[] = [];
@@ -127,7 +138,24 @@ function analyzeTextQuality(
     const alphanumMatches = leaderCollapsed.match(/[\p{L}\p{N}]/gu);
     const alphanumCount = alphanumMatches ? alphanumMatches.length : 0;
     const ratioChars = leaderCollapsed.length;
-    if (ratioChars > 0) {
+
+    // Replacement/NUL characters mark glyphs with no Unicode mapping.
+    const invalidChars = ["\uFFFD", "\u0000"];
+    let invalidCount = 0;
+    for (const char of text) {
+        if (invalidChars.includes(char)) {
+            invalidCount++;
+        }
+    }
+
+    // A page without images whose sample is only a few symbols is sparse,
+    // not garbled; see LOW_ALPHANUM_MIN_SAMPLE_WITHOUT_IMAGES. Unmapped
+    // glyphs keep the ratio check, since the collapse also folds U+FFFD runs.
+    const tooFewCharsToJudge =
+        !hasImages &&
+        invalidCount === 0 &&
+        ratioChars < LOW_ALPHANUM_MIN_SAMPLE_WITHOUT_IMAGES;
+    if (ratioChars > 0 && !tooFewCharsToJudge) {
         const alphanumRatio = alphanumCount / ratioChars;
         // Flag only when BOTH hold: the ratio is below threshold AND the page
         // lacks enough real alphanumeric content to stand on its own. The
@@ -145,14 +173,6 @@ function analyzeTextQuality(
     // Check for replacement/invalid characters
     // Only flag if: (1) invalid ratio is high AND (2) valid text is insufficient
     // This allows pages with lots of valid text to pass even if they have some garbled sections
-    const invalidChars = ["\uFFFD", "�", "\u0000"];
-    let invalidCount = 0;
-    for (const char of text) {
-        if (invalidChars.includes(char)) {
-            invalidCount++;
-        }
-    }
-
     if (invalidCount > 0 && contentChars > 0) {
         const invalidRatio = invalidCount / contentChars;
         const validChars = contentChars - invalidCount;
@@ -474,7 +494,7 @@ function analyzePage(
 
     // Check 5: Text quality analysis (applies regardless of images)
     if (textLength > 0) {
-        const textQualityIssues = analyzeTextQuality(pageText, opts);
+        const textQualityIssues = analyzeTextQuality(pageText, hasImages, opts);
         issues.push(...textQualityIssues);
     }
 

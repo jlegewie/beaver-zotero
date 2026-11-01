@@ -77,12 +77,13 @@ function creationTool(highlight: boolean) {
             'For PDFs, copy exact page_locations or note_position from read_attachment with include_annotation_locations=true; never guess coordinates. ' +
             'The same read option returns EPUB section and text/anchor locators; snapshots use text or anchor_id. ' +
             'Writes immediately after validation; the MCP client handles approval. Returns created annotation IDs and per-item failures. ' +
-            'A multi-page highlight creates one annotation per page. Retrying successful items creates duplicates; retry only failed items.',
+            'A highlight covers at most two consecutive pages and is always one annotation. Retrying successful items creates duplicates; retry only failed items.',
         inputSchema: {
             type: 'object', additionalProperties: false, required: ['attachment_id', 'items'],
             properties: {
                 attachment_id: { ...string, description: 'Attachment ID from search or get_item_details, e.g. u-ABC12345.' },
                 tags: { type: 'array', maxItems: 100, items: string },
+                ...(highlight ? { style: { type: 'string', enum: ['highlight', 'underline'], default: 'highlight', description: "Use 'underline' only when the user asks for underlines." } } : {}),
                 items: {
                     type: 'array', minItems: 1, maxItems: 50,
                     items: {
@@ -92,7 +93,7 @@ function creationTool(highlight: boolean) {
                             comment: { type: 'string', ...(highlight ? {} : { minLength: 1 }) },
                             color: { type: 'string', enum: colors, default: 'yellow' },
                             page_label: string,
-                            ...(highlight ? { page_locations: { type: 'array', minItems: 1, maxItems: 30, items: locationSchema } }
+                            ...(highlight ? { page_locations: { type: 'array', minItems: 1, maxItems: 30, items: locationSchema, description: 'Boxes to highlight, on one page or two consecutive pages.' } }
                                 : { note_position: notePositionSchema, reading_order_offset: pageIndex }),
                             section_href: string,
                             section_ordinal: { type: 'integer', minimum: 1 },
@@ -160,6 +161,7 @@ async function createAnnotations(args: any, highlight: boolean): Promise<any> {
         const actionType = highlight ? 'create_highlight_annotations' : 'create_note_annotations';
         const data = {
             requested_ref: ref, resolved_ref: ref, tags: args.tags,
+            ...(highlight && args.style === 'underline' ? { style: 'underline' } : {}),
             items: args.items.map((item: any, index: number) => ({
                 ...item, index, client_item_id: String(index), title: '', loc_raw: '',
                 loc: { kind: 'unknown', value: '', raw: '' }, color: item.color ?? 'yellow',

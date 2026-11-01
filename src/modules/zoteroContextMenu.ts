@@ -27,8 +27,10 @@ import {
 } from '@beaver/agent-core/types/actions';
 import { ALL_BUILTIN_ACTIONS } from '../../react/types/builtinActions';
 import { getPref } from '../utils/prefs';
+import { isCollectionTargetViewType } from '../utils/zoteroSelection';
 import { openPreferencesWindow } from '../ui/openPreferencesWindow';
 import { agentItemFilter, isAgentSupportedItem } from '../utils/agentItemSupport';
+import { exportNoteWithProgress, NOTE_EXPORT_FORMATS } from './noteExportCommand';
 import config from '../../package.json';
 
 // ---------------------------------------------------------------------------
@@ -73,20 +75,33 @@ function readCollectionTreeRows(context: any): any[] {
 }
 
 /**
- * The collection rows a collection action should act on: every selected row,
- * but only when they are all collections.
+ * The rows a collection action should act on: every selected row, but only
+ * when they are all collections, saved searches, or the special views listed
+ * in `COLLECTION_TARGET_VIEW_TYPES` (never a library root). Mirrors
+ * `collectionTargetSelection` in the React bundle.
  */
-function pureCollectionRows(context: any): any[] {
+function collectionTargetRows(context: any): any[] {
     const rows = readCollectionTreeRows(context);
     if (rows.length === 0) return [];
-    const allCollections = rows.every((row) => {
+    const allTargets = rows.every((row) => {
         try {
-            return row?.isCollection?.() === true;
+            return row?.isCollection?.() === true || isCollectionTargetViewType(row?.type);
         } catch {
             return false;
         }
     });
-    return allCollections ? rows : [];
+    return allTargets ? rows : [];
+}
+
+/** A collections-tree row's display name, e.g. "Unfiled Items" or a saved search's name. */
+function readRowName(row: any): string {
+    try {
+        const name = row?.getName?.();
+        if (typeof name === 'string' && name) return name;
+    } catch {
+        // fall through
+    }
+    return typeof row?.ref?.name === 'string' ? row.ref.name : '';
 }
 
 // ---------------------------------------------------------------------------
@@ -138,6 +153,7 @@ function hasEligibleItems(action: Action, c: SelectionComposition): boolean {
 
 const ITEM_MENU_ID = 'beaver-item-context-menu';
 const COLLECTION_MENU_ID = 'beaver-collection-context-menu';
+const NOTE_EXPORT_MENU_ID = 'beaver-note-export-menu';
 const PLUGIN_ID = config.config.addonID;
 
 // Store the namespaced keys returned by MenuManager.registerMenu().
@@ -146,6 +162,7 @@ const PLUGIN_ID = config.config.addonID;
 // unregisterMenu() requires that namespaced key, not the raw menuID.
 let registeredItemKey: string | null = null;
 let registeredCollectionKey: string | null = null;
+let registeredNoteExportKey: string | null = null;
 let prefObserverSymbol: symbol | null = null;
 
 // ---------------------------------------------------------------------------
@@ -277,6 +294,10 @@ function unregisterMenus(): void {
         try { MenuManager.unregisterMenu(registeredCollectionKey); } catch (_e) { /* ignore */ }
         registeredCollectionKey = null;
     }
+    if (registeredNoteExportKey) {
+        try { MenuManager.unregisterMenu(registeredNoteExportKey); } catch (_e) { /* ignore */ }
+        registeredNoteExportKey = null;
+    }
 }
 
 function registerMenus(): void {
@@ -344,14 +365,50 @@ function registerMenus(): void {
             l10nID: 'beaver-context-menu-submenu',
             onShowing: safeOnShowing('collection-submenu', (_event: any, context: any) => {
                 const { setVisible } = context;
-                setVisible(pureCollectionRows(context).length > 0);
+                setVisible(collectionTargetRows(context).length > 0);
             }),
             menus: buildCollectionMenuItems(collectionActions),
         }],
     });
     if (collectionKey) registeredCollectionKey = collectionKey;
 
+    // --- Note export (any note, whoever wrote it) ---
+    const noteExportKey = MenuManager.registerMenu({
+        menuID: NOTE_EXPORT_MENU_ID,
+        pluginID: PLUGIN_ID,
+        target: 'main/library/item',
+        menus: [{
+            menuType: 'submenu' as const,
+            l10nID: 'beaver-note-export-submenu',
+            onShowing: safeOnShowing('note-export-submenu', (_event: any, context: any) => {
+                context.setVisible(singleSelectedNote(context) !== null);
+            }),
+            menus: NOTE_EXPORT_FORMATS.map(({ format, name }) => ({
+                menuType: 'menuitem' as const,
+                l10nID: 'beaver-note-export-format',
+                l10nArgs: JSON.stringify({ format: name }),
+                onCommand: (event: any, context: any) => {
+                    const note = singleSelectedNote(context);
+                    const win = event?.target?.ownerDocument?.defaultView ?? context?.window;
+                    if (note && win) void exportNoteWithProgress(note, null, format, name, win, 'item_menu');
+                },
+            })),
+        }],
+    });
+    if (noteExportKey) registeredNoteExportKey = noteExportKey;
+
     ztoolkit.log(`zoteroContextMenu: Registered menus (${itemActions.length} item actions, ${collectionActions.length} collection actions)`);
+}
+
+/** The selected note when the selection is exactly one note. */
+function singleSelectedNote(context: any): Zotero.Item | null {
+    const items: any[] = context?.items ?? [];
+    if (items.length !== 1) return null;
+    try {
+        return items[0]?.isNote?.() ? items[0] : null;
+    } catch {
+        return null;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -390,7 +447,7 @@ function buildItemMenuItems(itemActions: Action[]): any[] {
                 filterItemAction(action, context);
             }),
             onCommand: (_event: any, context: any) => {
-                void dispatchAction(action, context, _event?.target?.ownerDocument?.defaultView).catch(Zotero.logError);
+                void dispatchAction(action, context, 'item', _event?.target?.ownerDocument?.defaultView).catch(Zotero.logError);
             },
         });
     }
@@ -419,7 +476,7 @@ function buildCollectionMenuItems(collectionActions: Action[]): any[] {
             filterCollectionAction(action, context);
         }),
         onCommand: (_event: any, context: any) => {
-            void dispatchAction(action, context, _event?.target?.ownerDocument?.defaultView).catch(Zotero.logError);
+            void dispatchAction(action, context, 'collection', _event?.target?.ownerDocument?.defaultView).catch(Zotero.logError);
         },
     }));
 
@@ -455,14 +512,19 @@ function filterItemAction(action: Action, context: any): void {
 
 function filterCollectionAction(_action: Action, context: any): void {
     const { setVisible } = context;
-    setVisible(pureCollectionRows(context).length > 0);
+    setVisible(collectionTargetRows(context).length > 0);
 }
 
 // ---------------------------------------------------------------------------
 // Event dispatch (onCommand handler)
 // ---------------------------------------------------------------------------
 
-async function dispatchAction(action: Action, context: any, origin?: Window): Promise<void> {
+/**
+ * `menu` is the context menu the command came from. The item menu's context
+ * also carries the collections-tree selection, so only a collection-menu
+ * command binds to the selected collections and views.
+ */
+async function dispatchAction(action: Action, context: any, menu: 'item' | 'collection', origin?: Window): Promise<void> {
     const win = await resolveChatWindow(origin ?? context.window);
     const eventBus = win?.__beaverEventBus;
     if (!eventBus) return;
@@ -483,23 +545,29 @@ async function dispatchAction(action: Action, context: any, origin?: Window): Pr
 
     const itemIds: number[] = filteredItems.map((i: any) => i.id);
 
-    // Carry each collection's library alongside its ID: the receiver gates on
-    // library exclusion, and both are already in hand here.
-    const collections = pureCollectionRows(context)
+    // Carry each row's library alongside it: the receiver gates on library
+    // exclusion, and both are already in hand here.
+    const targetRows = menu === 'collection' ? collectionTargetRows(context) : [];
+    const collections = targetRows
+        .filter((row: any) => row?.type === 'collection')
         .map((row: any) => ({ libraryId: row?.ref?.libraryID, collectionId: row?.ref?.id }))
         .filter((c: any) => typeof c.libraryId === 'number' && typeof c.collectionId === 'number');
+    const views = targetRows
+        .filter((row: any) => isCollectionTargetViewType(row?.type))
+        .map((row: any) => ({
+            libraryId: row?.ref?.libraryID,
+            type: row.type,
+            name: readRowName(row),
+            ...(row.type === 'search' && typeof row.ref?.key === 'string' ? { key: row.ref.key } : {}),
+        }))
+        .filter((v: any) => typeof v.libraryId === 'number');
 
-    // Resolve the single wire target type. An action binds to the collection
-    // whenever it accepts a 'collection' target and the selection is
-    // collections; otherwise it binds to the first item-menu kind the action
-    // accepts that is actually present in what we attach.
-    //
-    // Note that the item menu context also carries the collection selection,
-    // so collections can be non-empty for an item-menu dispatch. That stays
-    // unambiguous because no target preset pairs 'collection' with an item
-    // kind (see TARGET_PRESETS) — an action reaching both menus would need an
-    // explicit menu-origin signal to route correctly.
-    const resolvedTarget = (collections.length > 0 && action.targets.includes('collection'))
+    // Resolve the single wire target type. A collection-menu command binds to
+    // the selected collections and views; an item-menu command binds to the
+    // first item-menu kind the action accepts that is actually present in
+    // what we attach. Actions such as `fix-metadata` reach both menus, so the
+    // menu, not the action's targets, decides.
+    const resolvedTarget = ((collections.length > 0 || views.length > 0) && action.targets.includes('collection'))
         ? 'collection'
         : ITEM_MENU_KINDS.find(t =>
             action.targets.includes(t) && filteredItems.some((i: any) =>
@@ -514,6 +582,7 @@ async function dispatchAction(action: Action, context: any, origin?: Window): Pr
             targetType: resolvedTarget,
             itemIds,
             collections,
+            views,
         },
     }));
 }
@@ -531,7 +600,9 @@ function removeStaleMenuDOM(): void {
         for (const win of Zotero.getMainWindows()) {
             if (!win?.document || win.closed) continue;
 
-            const selector = `.${CUSTOM_MENU_CLASS}[data-l10n-id^="beaver-context-menu-"]`;
+            const selector = ['beaver-context-menu-', 'beaver-note-export-']
+                .map((prefix) => `.${CUSTOM_MENU_CLASS}[data-l10n-id^="${prefix}"]`)
+                .join(', ');
             for (const popupId of ['zotero-itemmenu', 'zotero-collectionmenu']) {
                 const popup = win.document.getElementById(popupId);
                 if (!popup) continue;

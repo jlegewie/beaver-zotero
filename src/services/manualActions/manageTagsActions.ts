@@ -29,6 +29,7 @@ import {
     parseItemReference,
     resolveWriteTargetLibrary,
 } from '../../utils/libraryIdentity';
+import { removeTagFromLibrary } from '../../utils/zoteroTags';
 
 const MAX_SNAPSHOT_ITEMS = 5000;
 
@@ -103,9 +104,10 @@ export async function executeManageTagsAction(
         if (tagID === false || tagID == null) {
             logger(`executeManageTagsAction: Tag '${name}' not found; treating as already deleted`, 1);
         } else {
-            // onProgress and types are optional at runtime despite zotero-types .d.ts
-            await (Zotero.Tags.removeFromLibrary as any)(resolvedLibraryID, [tagID]);
-            logger(`executeManageTagsAction: Deleted '${name}' from library ${resolvedLibraryID}`, 1);
+            const removed = await removeTagFromLibrary(resolvedLibraryID, tagID, name);
+            logger(removed
+                ? `executeManageTagsAction: Deleted '${name}' from library ${resolvedLibraryID}`
+                : `executeManageTagsAction: Tag '${name}' has no items in library ${resolvedLibraryID}; nothing to delete`, 1);
         }
     } else {
         throw new Error(`Unsupported manage_tags action: ${op}`);

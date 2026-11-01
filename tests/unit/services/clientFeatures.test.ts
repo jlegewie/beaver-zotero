@@ -54,6 +54,7 @@ const VERSION_GATES: { feature: string; minVersion: string; op: Op }[] = [
 // event a client only answers if it has the handler: a build that predates it
 // drops the unknown event silently, so the backend refuses the op up front
 // rather than letting the caller wait out the request timeout.
+// list_items_nested_children, list_items_special_collections,
 // list_collections_recursive, list_tags_name_query and list_tags_types are
 // declaration-only for the same reason as list_items_include_children: they
 // gate request fields a client only honors if its handler implements them, and
@@ -87,12 +88,36 @@ const VERSION_GATES: { feature: string; minVersion: string; op: Op }[] = [
 // markdown renderer does with object-id hrefs; a client that predates it would
 // treat `[Smith 2004](u-KEY)` as a broken relative link, so the backend only
 // tells the model to write those when this feature is declared.
+// zotero_duplicates is declaration-only because it gates an inbound
+// duplicates_request and the merge_items action: a build that predates them
+// drops the unknown event and never answers, so the backend withholds the
+// duplicate tools instead of inferring support from a version.
+// item_import_v2 is declaration-only because it gates the import_item action
+// type: an older build cannot resolve, render or write it.
+// book_chapters is declaration-only because it gates a deferred capability
+// whose chapter imports rely on the duplicate check matching ISBNs only
+// between books; a build that predates it would report new chapters as their
+// book.
+// two_page_highlights is declaration-only because it gates a relocation shape
+// the client must apply: a build that predates it refuses a two-page highlight
+// destination, so the backend keeps rejecting those unless it is declared.
+// underline_annotations is declaration-only because a build that predates it
+// ignores `style` and writes highlights where the user asked for underlines.
+// run_reattach is declaration-only because it commits the client to answering a
+// re-sent request or prompt id from memory after a reattach: a build that
+// predates it would run a re-sent action a second time.
+// undelivered_action_ack is declaration-only because it makes the backend store
+// actions as unconfirmed before executing them: a build that predates it never
+// completes those records and would offer to retry a change already made.
 const DECLARATION_ONLY_FEATURES = [
     'external_files',
     'pdf_candidates',
     'ask_user_question',
     'portable_ids',
+    'collection_ids',
     'list_items_include_children',
+    'list_items_nested_children',
+    'list_items_special_collections',
     'create_note_tags_collections',
     'edit_note_batch',
     'edit_annotations',
@@ -109,6 +134,13 @@ const DECLARATION_ONLY_FEATURES = [
     'batch_item_display',
     'item_links',
     'continuation_new_run',
+    'zotero_duplicates',
+    'two_page_highlights',
+    'underline_annotations',
+    'item_import_v2',
+    'book_chapters',
+    'run_reattach',
+    'undelivered_action_ack',
 ];
 
 // The full backend feature vocabulary (ALL_FEATURES in version_gates.py): every
@@ -181,7 +213,7 @@ describe('client feature declaration (Lane C)', () => {
         expect(ZOTERO_PLUGIN_CLIENT_TYPE).toBe('zotero-plugin');
     });
 
-    it('feature vocabulary matches the backend FEAT_* string values exactly', () => {
+    it('feature vocabulary includes the negotiated declaration-only contracts', () => {
         expect(Object.values(CLIENT_FEATURES).slice().sort()).toEqual(ALL_BACKEND_FEATURES);
     });
 

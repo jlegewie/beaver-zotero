@@ -13,13 +13,13 @@ import {
     lastRunSummaryAtom,
     resumeChainAtom,
     toolResultsMapAtom,
-    wsReconnectingAtom,
     wsRetryAtom,
 } from '@beaver/agent-core/run-state/atoms';
 import { getToolCallLabel, type ToolCallLabelEnrich } from '@beaver/agent-core/run-state/toolLabels';
 import { runStatusText } from '@beaver/agent-core/run-state/runStatusCopy';
 import { getRunErrorTitle, stripRunErrorTypePrefix } from '@beaver/agent-core/run-state/runErrorCopy';
 import { pendingBatchApprovalsAtom } from '@beaver/agent-core/run-state/pendingBatchApprovals';
+import { pendingTableCardsAtom } from '@beaver/agent-core/run-state/pendingTableCards';
 import {
     pendingCreditConfirmationsAtom,
     type PendingCreditConfirmation,
@@ -28,11 +28,16 @@ import { pendingQuestionsAtom, type PendingQuestion } from '@beaver/agent-core/r
 import type { AskUserQuestionAnswer } from '@beaver/agent-core/protocol/agentProtocol';
 import type { PendingApproval } from '@beaver/agent-ui/host';
 import { pendingApprovalsAtom } from '../../agents/agentActions';
+import { useStopRun } from '../../hooks/useStopRun';
+import { useVisibleReconnect } from '../../hooks/useVisibleReconnect';
+import { useReattachResolutionView } from '../agentRuns/RunResolutionNotices';
+import { REATTACH_CHECKING_SHORT, REATTACH_STILL_RUNNING_SHORT } from '@beaver/agent-core/transport/connectionFailure';
 import {
     answerPendingApprovalsAtom,
     approvalVerdictInFlightAtom,
     autoReplacementPendingRunIdsAtom,
     beginApprovalVerdictAtom,
+    isRunReconnectingAtom,
     releaseApprovalVerdictAtom,
     sendAskUserQuestionResponseAtom,
     sendCreditConfirmationResponseAtom,
@@ -145,7 +150,7 @@ function useToolCallLabelEnrich(part: ToolCallPart | null): ToolCallLabelEnrich 
 function useRunStatusLine(run: AgentRun | null): string {
     const toolResults = useAtomValue(toolResultsMapAtom);
     const retry = useAtomValue(wsRetryAtom);
-    const reconnect = useAtomValue(wsReconnectingAtom);
+    const reconnect = useVisibleReconnect();
     const activity = run ? deriveRunActivity(run, toolResults) : null;
     const toolPart = activity?.kind === 'tool' ? activity.part : null;
     const enrich = useToolCallLabelEnrich(toolPart);
@@ -160,6 +165,7 @@ function useRunStatusLine(run: AgentRun | null): string {
         reconnect,
         backendRetry: retry && run && retry.runId === run.id ? retry : null,
         idleLabel,
+        compact: true,
     });
 }
 
@@ -221,6 +227,7 @@ interface ApprovalControls {
 function useApprovalControls(runId: string | null, approvals: readonly PendingApproval[]): ApprovalControls {
     const policy = useAtomValue(runApprovalPolicyAtom);
     const isVerdictInFlight = useAtomValue(approvalVerdictInFlightAtom);
+    const isReconnecting = useAtomValue(isRunReconnectingAtom);
     const beginVerdict = useSetAtom(beginApprovalVerdictAtom);
     const releaseVerdict = useSetAtom(releaseApprovalVerdictAtom);
     const answerPendingApprovals = useSetAtom(answerPendingApprovalsAtom);
@@ -233,7 +240,7 @@ function useApprovalControls(runId: string | null, approvals: readonly PendingAp
     );
 
     const onDecide = useCallback((approved: boolean) => {
-        if (approvals.length === 0) return;
+        if (approvals.length === 0 || isReconnecting) return;
         if (!beginVerdict()) return;
         // Taken now: an approval arriving while the preview is torn down was
         // not on the card the user answered.
@@ -246,7 +253,7 @@ function useApprovalControls(runId: string | null, approvals: readonly PendingAp
                 releaseVerdict();
             }
         })();
-    }, [approvals, beginVerdict, releaseVerdict, answerPendingApprovals]);
+    }, [approvals, isReconnecting, beginVerdict, releaseVerdict, answerPendingApprovals]);
 
     const onPermissionChange = useCallback(async (next: RunPermissionMode) => {
         if (!runId) return;
@@ -263,7 +270,14 @@ function useApprovalControls(runId: string | null, approvals: readonly PendingAp
         }
     }, [runId, setRunPermissionMode]);
 
-    return { mode, pendingCoveredCount, onDecide, onPermissionChange, decideDisabled: isVerdictInFlight };
+    return {
+        mode,
+        pendingCoveredCount,
+        onDecide,
+        onPermissionChange,
+        // A verdict sent while the run reconnects would wait for the new socket.
+        decideDisabled: isVerdictInFlight || isReconnecting,
+    };
 }
 
 /** The question card's answers, sent the way the composer panel sends them. */
@@ -280,14 +294,15 @@ function useQuestionControls(question: PendingQuestion | null) {
 /** The credit card's decision, one-shot per confirmation like the composer panel's. */
 function useCreditControls(confirmation: PendingCreditConfirmation | null) {
     const sendResponse = useSetAtom(sendCreditConfirmationResponseAtom);
+    const isReconnecting = useAtomValue(isRunReconnectingAtom);
     const [decidedId, setDecidedId] = useState<string | null>(null);
     const confirmationId = confirmation?.confirmationId ?? null;
     const onDecide = useCallback((approved: boolean) => {
-        if (!confirmationId || decidedId === confirmationId) return;
+        if (!confirmationId || decidedId === confirmationId || isReconnecting) return;
         setDecidedId(confirmationId);
         sendResponse({ confirmationId, approved });
-    }, [confirmationId, decidedId, sendResponse]);
-    return { onDecide, decideDisabled: confirmationId !== null && decidedId === confirmationId };
+    }, [confirmationId, decidedId, isReconnecting, sendResponse]);
+    return { onDecide, decideDisabled: (confirmationId !== null && decidedId === confirmationId) || isReconnecting };
 }
 
 /** The row's label and title, worded as the sidebar's artifacts list words them. */
@@ -375,6 +390,7 @@ function useLiveCard(): RunStatusPopupCard | null {
     const threadName = useAtomValue(currentThreadNameAtom);
     const pendingApprovals = useAtomValue(pendingApprovalsAtom);
     const batchApprovals = useAtomValue(pendingBatchApprovalsAtom);
+    const tableCards = useAtomValue(pendingTableCardsAtom);
     const creditConfirmations = useAtomValue(pendingCreditConfirmationsAtom);
     const questions = useAtomValue(pendingQuestionsAtom);
     const completion = useAtomValue(runStatusPopupCompletionAtom);
@@ -388,16 +404,30 @@ function useLiveCard(): RunStatusPopupCard | null {
     const liveRun = isLive ? activeRun : null;
     const approvals = useMemo(() => [...pendingApprovals.values()], [pendingApprovals]);
     const batch = batchApprovals.values().next().value ?? null;
+    const tableCard = tableCards.values().next().value ?? null;
     const credit = creditConfirmations.values().next().value ?? null;
     const question = questions.values().next().value ?? null;
 
     const statusLine = useRunStatusLine(liveRun);
+    // Decision cards stay up while the run's connection is recovered, held
+    // back the way the composer's are, and say why.
+    // The cards are held at once; the line appears once the reconnect has
+    // outlasted a blip.
+    const isReconnecting = useAtomValue(isRunReconnectingAtom);
+    const reconnect = useVisibleReconnect();
+    const reconnectingLine = isReconnecting && reconnect
+        ? runStatusText({ reconnect, backendRetry: null, idleLabel: '', compact: true })
+        : null;
+    const onStop = useStopRun('RunStatusPopup');
     const singleTitle = useSingleApprovalTitle(approvals.length === 1 ? approvals[0] : null);
     const approvalControls = useApprovalControls(liveRun?.id ?? null, approvals);
     const creditControls = useCreditControls(credit);
     const onSubmitQuestion = useQuestionControls(question);
     const onSubmitBatch = useBatchApprovalSubmit(batch?.approvalId ?? null);
     const completed = useCompletedDetails(isLive ? null : completion?.runId ?? null);
+    // A run whose reattach failed is reported as still being checked, the
+    // way the sidebar shows it, rather than as failed.
+    const resolutionView = useReattachResolutionView(completion?.runId ?? '', !isLive && completion !== null);
     const setPanelState = useSetAtom(setAnnotationPanelStateAtom);
     // The changes card keys its expansion by the answer's last run, so the
     // card is open by the time the sidebar draws it.
@@ -414,18 +444,24 @@ function useLiveCard(): RunStatusPopupCard | null {
     // What the card is about, so closing it hides exactly that: the working
     // state of this run, this set of approvals, this confirmation. Anything
     // else the run has to say afterwards gets a fresh card.
+    // A failed reattach still being checked is a passing state of its own:
+    // closing it keeps the completion record, so the outcome still gets a card.
+    const resolving = !liveRun && completion !== null
+        && completed.run?.status === 'error' && resolutionView !== null;
     const signature = liveRun
         ? approvals.length > 0
             ? `approval:${approvals.map((approval) => approval.actionId).sort().join(',')}`
             : batch ? `batch:${batch.approvalId}`
+                : tableCard ? `table:${tableCard.card_id}`
                 : credit ? `credit:${credit.confirmationId}`
                     : question ? `question:${question.questionId}`
                         : `running:${liveRun.id}`
-        : completion ? `completed:${completion.runId}` : null;
+        : resolving ? `resolving:${completion.runId}`
+            : completion ? `completed:${completion.runId}` : null;
     if (signature && dismissed.has(signature)) return null;
     const onDismiss = () => {
         if (signature) dismiss(signature);
-        if (!liveRun) setCompletion(null);
+        if (!liveRun && !resolving) setCompletion(null);
     };
 
     if (liveRun) {
@@ -450,10 +486,19 @@ function useLiveCard(): RunStatusPopupCard | null {
                 rejectLabel: plural ? 'Reject All' : 'Reject',
                 onDecide: approvalControls.onDecide,
                 decideDisabled: approvalControls.decideDisabled,
+                reconnectingLine,
             };
         }
         if (batch) {
-            return { ...base, kind: 'batch', approval: batch, onSubmit: onSubmitBatch };
+            return { ...base, kind: 'batch', approval: batch, onSubmit: onSubmitBatch, disabled: isReconnecting, onStop };
+        }
+        if (tableCard) {
+            // The card is edited in the sidebar; the popup only points there.
+            return {
+                ...base,
+                kind: 'running',
+                statusLine: tableCard.scope === 'fill' ? 'Review the proposed fill' : 'Review the proposed table',
+            };
         }
         if (credit) {
             return {
@@ -465,16 +510,28 @@ function useLiveCard(): RunStatusPopupCard | null {
                 declineLabel: credit.declineLabel,
                 onDecide: creditControls.onDecide,
                 decideDisabled: creditControls.decideDisabled,
+                reconnectingLine,
             };
         }
         if (question) {
-            return { ...base, kind: 'question', question, onSubmit: onSubmitQuestion };
+            return { ...base, kind: 'question', question, onSubmit: onSubmitQuestion, disabled: isReconnecting };
         }
         return { ...base, kind: 'running', statusLine: isAutoRetrying ? 'Retrying' : statusLine };
     }
 
     if (completion && completed.run) {
         const run = completed.run;
+        if (resolving) {
+            return {
+                runId: run.id,
+                threadName: threadDisplayName(threadName, run),
+                stackDepth: 0,
+                onOpen: openBeaver,
+                onDismiss,
+                kind: 'running',
+                statusLine: resolutionView === 'still_running' ? REATTACH_STILL_RUNNING_SHORT : REATTACH_CHECKING_SHORT,
+            };
+        }
         const outcome = run.status === 'error' ? 'error' : run.status === 'canceled' ? 'canceled' : 'completed';
         return {
             runId: run.id,

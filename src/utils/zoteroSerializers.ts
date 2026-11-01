@@ -1,3 +1,4 @@
+import { serializeCollectionReadIdentity } from '../services/collections/collectionIdentity';
 import type { ContentKind } from '@beaver/agent-core/extract/document/shared/contentKinds';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { AnnotationResultItem, NoteResultItem } from '@beaver/agent-core/protocol/agentProtocol';
@@ -14,6 +15,7 @@ import { syncingItemFilterAsync } from './itemSyncStatus';
 import { libraryRefForLibraryID, modelObjectId } from './libraryIdentity';
 import { cleanMetadataUrl } from './metadataUrl';
 import { isAttachmentOnServer } from './webAPI';
+import { safeIsInTrashAsync } from './zoteroItemUtils';
 import { getCitationKeyFromItem, getCollectionClientDateModifiedAsISOString, getMimeType, safeFileExists, safeIsInTrash } from './zoteroUtils';
 
 export interface FileData {
@@ -47,8 +49,6 @@ export function getCollectionKeysFromItem(item: Zotero.Item): string[] | null {
 export function getCollectionSummariesFromItem(item: Zotero.Item): CollectionSummary[] | null {
     const collectionIds = item.getCollections();
     if (collectionIds.length === 0) return null;
-    // Constant across all of this item's collections; computed once.
-    const libraryRef = libraryRefForLibraryID(item.libraryID) ?? undefined;
     const summaries = collectionIds
         .map(id => {
             const collection = Zotero.Collections.get(id);
@@ -59,8 +59,7 @@ export function getCollectionSummariesFromItem(item: Zotero.Item): CollectionSum
             return {
                 library_id: item.libraryID,
                 zotero_key: collection.key,
-                library_ref: libraryRef,
-                name: collection.name,
+                ...serializeCollectionReadIdentity(collection),
             } as CollectionSummary;
         })
         .filter((s): s is CollectionSummary => s !== null);
@@ -125,8 +124,6 @@ export function formatZoteroCreatorsString(creators: ZoteroCreator[] | null | un
  * @returns Array of collections
  */
 async function getCollectionsFromItem(item: Zotero.Item): Promise<ZoteroCollection[] | null> {
-    // Constant across all of this item's collections; computed once.
-    const libraryRef = libraryRefForLibraryID(item.libraryID) ?? undefined;
     const collectionPromises = item.getCollections()
         .map(async (collection_id) => {
             const col = Zotero.Collections.get(collection_id);
@@ -138,8 +135,7 @@ async function getCollectionsFromItem(item: Zotero.Item): Promise<ZoteroCollecti
             return {
                 library_id: item.libraryID,
                 zotero_key: collection.key,
-                library_ref: libraryRef,
-                name: collection.name,
+                ...serializeCollectionReadIdentity(col),
                 zotero_version: collection.version,
                 date_modified: await getCollectionClientDateModifiedAsISOString(collection_id),
                 parent_collection: collection.parentCollection || null,
@@ -271,8 +267,7 @@ export async function serializeCollection(
     return {
         library_id: collection.libraryID,
         zotero_key: collection.key,
-        library_ref: libraryRefForLibraryID(collection.libraryID) ?? undefined,
-        name: collection.name,
+        ...serializeCollectionReadIdentity(collection),
         zotero_version: collection.version,
         date_modified: finalDateModified,
         parent_collection: collectionJSON.parentCollection || null,
@@ -309,8 +304,8 @@ export async function serializeItem(item: Zotero.Item, clientDateModified: strin
         identifiers: getIdentifiersFromItem(item),
         language: item.getField('language'),
         formatted_citation: formatItemReference(item),
-        deleted: (() => {
-            const trashState = safeIsInTrash(item);
+        deleted: await (async () => {
+            const trashState = await safeIsInTrashAsync(item);
             if (trashState === null) {
                 logger(
                     `serializeItem: Item missing isInTrash, marking deleted. id=${item?.id ?? "unknown"} key=${item?.key ?? "unknown"} library=${item?.libraryID ?? "unknown"} type=${item?.itemType ?? "unknown"}`,
@@ -418,7 +413,15 @@ export function itemSearchResultFromZoteroItem(item: Zotero.Item): ItemSearchRes
         library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
         item_type: item.itemType,
         // @ts-ignore - Add proper types later
-        deleted: typeof item.isInTrash === 'function' ? item.isInTrash() : (item.deleted ?? false),
+        deleted: (() => {
+            if (typeof item.isInTrash !== 'function') return item.deleted ?? false;
+            // Child items in an unloaded library throw; fall back to the item's own flag.
+            try {
+                return item.isInTrash();
+            } catch {
+                return item.deleted ?? false;
+            }
+        })(),
         title: item.getField('title', false, true),
         year: getYearFromItem(item),
         rank: 0,
@@ -558,8 +561,8 @@ export async function serializeAttachment(
         link_mode: item.attachmentLinkMode,
         tags: item.getTags().length > 0 ? item.getTags() : null,
         collections: getCollectionKeysFromItem(item),
-        deleted: (() => {
-            const trashState = safeIsInTrash(item);
+        deleted: await (async () => {
+            const trashState = await safeIsInTrashAsync(item);
             if (trashState === null) {
                 logger(
                     `serializeAttachment: Attachment missing isInTrash, marking deleted. id=${item?.id ?? "unknown"} key=${item?.key ?? "unknown"} library=${item?.libraryID ?? "unknown"}`,
@@ -615,7 +618,7 @@ export async function serializeAttachment(
 
     if (includeAnnotationsCount) {
         await item.loadDataType("childItems");
-        attachmentData.annotations_count = item.isFileAttachment?.() ? item.getAnnotations().length : 0;
+        attachmentData.annotations_count = item.isFileAttachment?.() ? item.numAnnotations() : 0;
     }
 
     return attachmentData;
@@ -637,89 +640,6 @@ export function serializeZoteroLibrary(library: _ZoteroTypes.Library.LibraryLike
         type_id: library.libraryTypeID,
         read_only: !library.editable || !library.filesEditable,
     } as ZoteroLibrary;
-}
-
-/**
- * Result of serializing an item with its attachments
- */
-export interface SerializedItemWithAttachments {
-    item_data?: ItemData;
-    attachment_data: AttachmentDataWithMimeType[];
-}
-
-/**
- * Serializes a Zotero item along with all its PDF attachments.
- * Used for immediate sync of newly imported items.
- * 
- * @param libraryId Library ID
- * @param zoteroKey Zotero key of the item
- * @returns Promise resolving to serialized item and attachment data
- */
-export async function serializeItemWithAttachments(
-    libraryId: number,
-    zoteroKey: string
-): Promise<SerializedItemWithAttachments> {
-    const result: SerializedItemWithAttachments = {
-        attachment_data: []
-    };
-    
-    // Get the Zotero item
-    const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, zoteroKey);
-    if (!item) {
-        logger(`serializeItemWithAttachments: Item ${libraryId}-${zoteroKey} not found`, 2);
-        return result;
-    }
-    
-    // Ensure item data is loaded
-    try {
-        await item.loadAllData();
-    } catch (e) {
-        // Ignore benign "already loaded" errors
-    }
-    
-    // Serialize the main item (if it's a regular item)
-    if (item.isRegularItem()) {
-        try {
-            result.item_data = await serializeItem(item, undefined);
-        } catch (e: any) {
-            logger(`serializeItemWithAttachments: Failed to serialize item ${zoteroKey}: ${e.message}`, 1);
-        }
-        
-        // Get and serialize all PDF attachments
-        const attachmentIds = await item.getAttachments();
-        for (const attachmentId of attachmentIds) {
-            try {
-                const attachment = await Zotero.Items.getAsync(attachmentId);
-                if (attachment && attachment.isPDFAttachment() && !attachment.deleted) {
-                    // Ensure attachment data is loaded
-                    try {
-                        await attachment.loadAllData();
-                    } catch (e) {
-                        // Ignore benign "already loaded" errors
-                    }
-                    
-                    const attachmentData = await serializeAttachment(attachment, undefined);
-                    if (attachmentData) {
-                        result.attachment_data.push(attachmentData);
-                    }
-                }
-            } catch (e: any) {
-                logger(`serializeItemWithAttachments: Failed to serialize attachment ${attachmentId}: ${e.message}`, 2);
-            }
-        }
-    } else if (item.isAttachment() && item.isPDFAttachment()) {
-        // Item is itself an attachment
-        try {
-            const attachmentData = await serializeAttachment(item, undefined);
-            if (attachmentData) {
-                result.attachment_data.push(attachmentData);
-            }
-        } catch (e: any) {
-            logger(`serializeItemWithAttachments: Failed to serialize attachment ${zoteroKey}: ${e.message}`, 1);
-        }
-    }
-    
-    return result;
 }
 
 /**

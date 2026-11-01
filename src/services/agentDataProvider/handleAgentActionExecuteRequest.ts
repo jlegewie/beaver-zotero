@@ -1,9 +1,11 @@
+import { executeMergeItemsRequest } from '../duplicates/merge';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { WSAgentActionExecuteResponse } from '@beaver/agent-core/protocol/agentProtocol';
 import type { AgentDataRequestContext } from '@beaver/agent-core/transport/agentDataDispatch';
 import { executeCreateCollectionAction } from './actions/createCollection';
 import { executeCreateHighlightAnnotationsAction } from './actions/createHighlightAnnotations';
 import { executeCreateItemAction } from './actions/createItems';
+import { executeImportItemAction } from './actions/importItems';
 import { executeCreateNoteAction } from './actions/createNote';
 import { executeCreateNoteAnnotationsAction } from './actions/createNoteAnnotations';
 import { executeEditAnnotationsAction } from './actions/editAnnotations';
@@ -16,6 +18,9 @@ import { executeOrganizeItemsAction } from './actions/organizeItems';
 import type { ActionExecuteRequest } from './operationContext';
 import { prepareOperationRendering } from './prepareOperationRendering';
 import { DEFAULT_TIMEOUT_SECONDS, TimeoutContext, TimeoutError } from './timeout';
+
+/** Keepalive phase while an execute waits for another library write to finish. */
+export const QUEUED_BEHIND_WRITE_PHASE = 'queued_behind_write';
 
 /** Socket receipt is optional: direct/MCP callers never stamped one. */
 type ExecuteContext = Omit<AgentDataRequestContext, 'receivedAt'> & { receivedAt?: number };
@@ -82,7 +87,9 @@ export async function executeRequest(
 
         let result: WSAgentActionExecuteResponse;
 
-        if (request.action_type === 'edit_metadata') {
+        if (request.action_type === 'merge_items') {
+            result = await executeMergeItemsRequest(request, ctx);
+        } else if (request.action_type === 'edit_metadata') {
             result = await executeEditMetadataAction(request, ctx);
         } else if (request.action_type === 'create_collection') {
             result = await executeCreateCollectionAction(request, ctx);
@@ -90,6 +97,8 @@ export async function executeRequest(
             result = await executeOrganizeItemsAction(request, ctx);
         } else if (request.action_type === 'create_item') {
             result = await executeCreateItemAction(request, ctx);
+        } else if (request.action_type === 'import_item') {
+            result = await executeImportItemAction(request, ctx);
         } else if (request.action_type === 'edit_note') {
             result = await executeEditNoteAction(request, ctx);
         } else if (request.action_type === 'edit_note_batch') {
@@ -143,8 +152,8 @@ export async function executeRequest(
             type: 'agent_action_execute_response',
             request_id: request.request_id,
             success: false,
-            error: String(error),
-            error_code: 'execution_failed',
+            error: typeof (error as Error)?.message === 'string' ? (error as Error).message : String(error),
+            error_code: (error as { code?: string }).code ?? 'execution_failed',
             result_data: {
                 started_at: startTime,
                 elapsed_ms: elapsedMs,
@@ -169,20 +178,28 @@ export async function handleAgentActionExecuteRequest(
     };
     try {
         const operation = await prepareOperationRendering(request.action_type, request.action_data, request.operation);
+        const reportPhase = context?.reportPhase ?? (() => {});
         const executeContext: ExecuteContext = {
             ...context,
             assertCurrent,
-            reportPhase: context?.reportPhase ?? (() => {}),
+            reportPhase,
         };
+        // Tell the backend when this write is waiting behind another one, so a
+        // stalled write ahead of it is not mistaken for this request's own work.
+        const queue = Zotero.Beaver.mutations?.getSnapshot();
+        if (queue && (queue.active !== null || queue.pending > 0)) {
+            reportPhase(QUEUED_BEHIND_WRITE_PHASE);
+        }
         return await Zotero.Beaver.libraryOperations.run('executeRequest', [{ ...request, operation }, executeContext], {
             signal: context?.signal,
             owner: context?.owner,
             assertCurrent,
+            onStart: () => reportPhase('running'),
         });
     } catch (error) {
         return {
             type: 'agent_action_execute_response', request_id: request.request_id,
-            success: false, error: String(error),
+            success: false, error: typeof (error as Error)?.message === 'string' ? (error as Error).message : String(error),
             error_code: (error as { code?: string }).code ?? 'execution_failed',
         };
     }

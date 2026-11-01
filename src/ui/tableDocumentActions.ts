@@ -1,7 +1,12 @@
 /** Local snapshot actions. Store callbacks cross the bundle seam; dialogs use this document. */
 import { toCsv } from "@beaver/agent-core/layouts/table";
-import { getTablesApi } from "../services/artifacts/tablesApi";
-import type { TableRef } from "../services/artifacts/tableItemIdentity";
+import { getTablesApi, type TableLocalCommands } from "../services/artifacts/tablesApi";
+import {
+    TABLE_REPAIR_SKIPPED,
+    tableFilesEditable,
+    tableRepairAllowed,
+    type TableRef,
+} from "../services/artifacts/tableItemIdentity";
 
 import { excludedLibraryUserMessage } from "../utils/libraryMessages";
 
@@ -14,9 +19,41 @@ export function tableActionErrorMessage(error: unknown, ref: TableRef): string {
     return String(failure?.message ?? failure?.error ?? error);
 }
 
+/**
+ * Asks where to save and writes the table as CSV, with its evidence and reasoning
+ * columns. Reads the table again after the picker closes, so a write that lands
+ * while it is open is exported rather than the version the user first saw.
+ * Resolves the file's name, or null when the user cancelled.
+ */
+export async function exportTableCsv(
+    win: Window,
+    ref: TableRef,
+    commands: () => TableLocalCommands,
+): Promise<string | null> {
+    const current = await commands().read(ref);
+    const { FilePicker } = ChromeUtils.importESModule(
+        "chrome://zotero/content/modules/filePicker.mjs",
+    );
+    const picker = new FilePicker();
+    picker.init(win, "Export table", picker.modeSave);
+    picker.defaultString = `${(current.spec.title || "Table").replace(/[\\/:*?"<>|]/g, "_")}.csv`;
+    picker.appendFilter("CSV", "*.csv");
+    if ((await picker.show()) === picker.returnCancel) return null;
+    const latest = await commands().read(ref);
+    await IOUtils.writeUTF8(picker.file, toCsv(latest.spec));
+    return PathUtils.filename(picker.file);
+}
+
+/**
+ * The table's local actions: Export CSV, Version history (the retained
+ * versions, and restoring one), and Check / repair. `historyOnly` renders the
+ * version history alone and loads it at once, for the table tab's Version
+ * history panel.
+ */
 export function renderTableDocumentActions(
     doc: Document,
     ref: TableRef,
+    options: { historyOnly?: boolean } = {},
 ): HTMLElement {
     const root = doc.createElement("div");
     const status = doc.createElement("div");
@@ -67,23 +104,14 @@ export function renderTableDocumentActions(
         return button;
     };
     const exportButton = action("export-csv", "Export CSV", async () => {
-        const current = await commands().read(ref);
-        const { FilePicker } = ChromeUtils.importESModule(
-            "chrome://zotero/content/modules/filePicker.mjs",
-        );
-        const picker = new FilePicker();
-        picker.init(win, "Export table", picker.modeSave);
-        picker.defaultString = `${(current.spec.title || "Table").replace(/[\\/:*?"<>|]/g, "_")}.csv`;
-        picker.appendFilter("CSV", "*.csv");
-        if ((await picker.show()) === picker.returnCancel) return;
-        const latest = await commands().read(ref);
-        await IOUtils.writeUTF8(picker.file, toCsv(latest.spec));
-        status.textContent = "CSV exported with source and evidence columns.";
+        if (!win) throw new Error("The originating window is closed.");
+        if (!(await exportTableCsv(win, ref, commands))) return;
+        status.textContent = "CSV exported with evidence and reasoning columns.";
     });
     const versions = doc.createElement("select");
     versions.setAttribute("aria-label", "Retained version");
     versions.hidden = true;
-    const history = action("history", "Version history", async () => {
+    const loadHistory = async () => {
         const entries = await commands().history(ref);
         versions.replaceChildren();
         const choose = doc.createElement("option");
@@ -97,11 +125,16 @@ export function renderTableDocumentActions(
             versions.append(option);
         }
         versions.hidden = false;
-        restore.hidden = false;
-        status.textContent = entries.length
-            ? "Restoring a retained version creates a new current version."
-            : "No retained versions are available.";
-    });
+        // A revert writes a new version, which a read-only library refuses.
+        const writable = tableFilesEditable(Zotero.Libraries.get(ref.libraryID));
+        restore.hidden = !writable;
+        status.textContent = !entries.length
+            ? "No retained versions are available."
+            : writable
+              ? "Restoring a retained version creates a new current version."
+              : "This library is read-only, so a retained version cannot be restored here.";
+    };
+    const history = action("history", "Version history", loadHistory);
     const restore = action(
         "restore-version",
         "Restore selected version",
@@ -130,10 +163,17 @@ export function renderTableDocumentActions(
     });
     const repair = action("repair", "Check / repair table", async () => {
         const current = await commands().read(ref);
-        status.textContent = current.recovered?.some((entry) => entry.kind === 'bookkeeping_pending')
-            ? "Content is committed, but local bookkeeping still needs repair. Try again after resolving storage or sync errors."
-            : "Table bookkeeping is up to date.";
+        status.textContent = !current.recovered?.some((entry) => entry.kind === 'bookkeeping_pending')
+            ? "Table bookkeeping is up to date."
+            : tableRepairAllowed(ref.libraryID)
+              ? "Content is committed, but local bookkeeping still needs repair. Try again after resolving storage or sync errors."
+              : TABLE_REPAIR_SKIPPED;
     });
+    if (options.historyOnly) {
+        root.append(versions, restore, status);
+        void run(loadHistory);
+        return root;
+    }
     root.append(exportButton, history, versions, restore, repair, status);
     return root;
 }

@@ -10,6 +10,12 @@ import { describe, it, expect, test } from "vitest";
 import {
     MarginFilter,
     getEffectiveRepeatThreshold,
+    isPageCounter,
+    normalizeDigits,
+    pageNumberObservations,
+    parseCounter,
+    parsePrefixedFolio,
+    spacedRowNumber,
 } from "../../../src/beaver-extract/MarginFilter";
 import {
     bboxFromXYWH,
@@ -762,6 +768,187 @@ describe("page-number-sequence distinct-page guard", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Page-number runs: a page number advances with the page index, so stray
+// numerals in the same zone or a numbering restart must not hide it.
+// ---------------------------------------------------------------------------
+
+/** Build a MarginAnalysis from explicit `[pageIndex, text, position]` entries. */
+function textsOnPages(
+    entries: [number, string, MarginPosition?][],
+): MarginAnalysis {
+    const elements = new Map<MarginPosition, MarginElement[]>([
+        ["top", []],
+        ["bottom", []],
+        ["left", []],
+        ["right", []],
+    ]);
+    for (const [pageIndex, text, position = "bottom"] of entries) {
+        const line = makeLine(text, 100, position === "bottom" ? PAGE_H - 30 : 30);
+        elements.get(position)!.push({ text, position, bbox: line.bbox, pageIndex, line });
+    }
+    const counts = {
+        top: elements.get("top")!.length,
+        bottom: elements.get("bottom")!.length,
+        left: elements.get("left")!.length,
+        right: elements.get("right")!.length,
+    };
+    return { elements, counts };
+}
+
+/** Footer page numbers `first..first+count-1` on pages `startPage..`. */
+function footerNumbers(startPage: number, first: number, count: number): [number, string][] {
+    return Array.from({ length: count }, (_, k) => [startPage + k, String(first + k)]);
+}
+
+function pageNumberRemovals(out: MarginRemovalResult, pageIndex: number): string[] {
+    return Array.from(out.removalsByPage.get(pageIndex) ?? []).sort();
+}
+
+describe("page-number runs that advance with the page index", () => {
+    it("removes footer page numbers when stray numerals elsewhere in the zone break the sequence", () => {
+        // Footer numbers 1..20 on pages 2..21; a reference list reaching the
+        // footer zone on later pages leaves a wrapped DOI tail and a
+        // "1177/1098611116658875" fragment that parses as an "X/Y" page
+        // range. Their values are not increasing in page order.
+        const out = MarginFilter.identifyElementsToRemove(
+            textsOnPages([
+                ...footerNumbers(2, 1, 20),
+                [30, "1078087418774641"],
+                [31, "1177/1098611116658875"],
+            ]),
+            3,
+            true,
+        );
+        expect(pageNumberRemovals(out, 2)).toEqual(["1"]);
+        expect(pageNumberRemovals(out, 21)).toEqual(["20"]);
+        expect(out.removalsByPage.has(30)).toBe(false);
+        expect(out.removalsByPage.has(31)).toBe(false);
+    });
+
+    it("removes both runs when page numbering restarts", () => {
+        // A compiled thesis: the frame numbered 1..6, then a reprinted part
+        // with its own pagination 1..6.
+        const out = MarginFilter.identifyElementsToRemove(
+            textsOnPages([...footerNumbers(0, 1, 6), ...footerNumbers(8, 1, 6)]),
+            3,
+            true,
+        );
+        for (const pageIndex of [0, 5, 8, 13]) {
+            expect(out.removalsByPage.get(pageIndex)?.size).toBe(1);
+        }
+    });
+
+    it("keeps a stray numeral that shares a page with a run's page number", () => {
+        const out = MarginFilter.identifyElementsToRemove(
+            textsOnPages([...footerNumbers(0, 1, 8), [3, "1999"], [9, "2"]]),
+            3,
+            true,
+        );
+        expect(pageNumberRemovals(out, 3)).toEqual(["4"]);
+    });
+
+    it("does not treat numerals that do not track the page index as page numbers", () => {
+        const out = MarginFilter.identifyElementsToRemove(
+            textsOnPages([[0, "17"], [1, "3"], [2, "42"], [3, "8"], [4, "25"], [5, "11"]]),
+            3,
+            true,
+        );
+        expect(out.candidates.some((c) => c.reason === "page_number")).toBe(false);
+    });
+
+    it("needs three pages for a run even under the short-document threshold", () => {
+        // [5, 6] tracks the page index on two pages; the leading "9" breaks
+        // the whole-zone sequence, so only a run could match.
+        const out = MarginFilter.identifyElementsToRemove(
+            textsOnPages([[0, "9"], [1, "5"], [2, "6"]]),
+            { topBottom: 2, leftRight: 3 },
+            true,
+        );
+        expect(out.candidates.some((c) => c.reason === "page_number")).toBe(false);
+    });
+
+    it("finds footer page numbers whose texts a header sequence elsewhere already removed", () => {
+        // Footer numbers 1..8 on pages 0..7; a reprinted article later in the
+        // document carries its own header numbers 2..5 on pages 20..23.
+        const analysis = textsOnPages([
+            ...footerNumbers(0, 1, 8),
+            ...([[20, "2"], [21, "3"], [22, "4"], [23, "5"]] as [number, string][]).map(
+                ([pageIndex, text]): [number, string, MarginPosition] => [pageIndex, text, "top"],
+            ),
+        ]);
+        const out = MarginFilter.identifyElementsToRemove(analysis, 3, true);
+        expect(pageNumberRemovals(out, 1)).toEqual(["2"]);
+        expect(pageNumberRemovals(out, 4)).toEqual(["5"]);
+        expect(pageNumberRemovals(out, 20)).toEqual(["2"]);
+    });
+
+    it("keeps chapter numbers that do not advance with the page index", () => {
+        // Header page numbers 1..30 on pages 0..29; chapter-opening pages
+        // carry a large chapter number in the right zone. The header
+        // sequence already accounts for the texts "1", "2", "3", which
+        // keeps them out of the right zone's increasing-sequence check,
+        // and they form no run.
+        const analysis = textsOnPages([
+            ...Array.from({ length: 30 }, (_, k): [number, string, MarginPosition] => [k, String(k + 1), "top"]),
+            [0, "1", "right"],
+            [9, "2", "right"],
+            [21, "3", "right"],
+        ]);
+        const out = MarginFilter.identifyElementsToRemove(analysis, 3, true);
+        expect(pageNumberRemovals(out, 9)).toEqual(["10"]);
+        expect(pageNumberRemovals(out, 21)).toEqual(["22"]);
+    });
+
+    it("does not read side-zone numerals that advance one per page as page numbers", () => {
+        // Footnote markers at the left text edge, one footnote per page,
+        // numbered 2, 3, 4, … at varying heights; a stray "17" keeps the
+        // whole-zone sequence check from matching.
+        const elements = new Map<MarginPosition, MarginElement[]>([
+            ["top", []],
+            ["bottom", []],
+            ["left", []],
+            ["right", []],
+        ]);
+        const markers: [number, string, number][] = [[0, "17", 300], [4, "2", 450], [5, "3", 210], [6, "4", 380]];
+        for (const [pageIndex, text, y] of markers) {
+            const line = makeLine(text, 20, y);
+            elements.get("left")!.push({ text, position: "left", bbox: line.bbox, pageIndex, line });
+        }
+        const out = MarginFilter.identifyElementsToRemove(
+            { elements, counts: { top: 0, bottom: 0, left: markers.length, right: 0 } },
+            3,
+            true,
+        );
+        expect(out.candidates.some((c) => c.reason === "page_number")).toBe(false);
+    });
+
+    describe("schema 4 (pageNumberRuns off)", () => {
+        it("keeps the whole-zone sequence check all-or-nothing", () => {
+            const out = MarginFilter.identifyElementsToRemove(
+                textsOnPages([...footerNumbers(2, 1, 20), [30, "1078087418774641"], [31, "1177/1098611116658875"]]),
+                3,
+                true,
+                false,
+            );
+            expect(out.candidates.some((c) => c.reason === "page_number")).toBe(false);
+        });
+
+        it("skips texts any zone already removed", () => {
+            const analysis = textsOnPages([
+                ...footerNumbers(0, 1, 8),
+                ...([[20, "2"], [21, "3"], [22, "4"], [23, "5"]] as [number, string][]).map(
+                    ([pageIndex, text]): [number, string, MarginPosition] => [pageIndex, text, "top"],
+                ),
+            ]);
+            const out = MarginFilter.identifyElementsToRemove(analysis, 3, true, false);
+            expect(pageNumberRemovals(out, 0)).toEqual(["1"]);
+            expect(out.removalsByPage.has(1)).toBe(false);
+            expect(pageNumberRemovals(out, 5)).toEqual(["6"]);
+        });
+    });
+});
+
+// ---------------------------------------------------------------------------
 // Fix 4: end-to-end split-line alternating recto/verso headers
 // ---------------------------------------------------------------------------
 
@@ -1498,5 +1685,1047 @@ describe("filterPageByMargins — body-style spare", () => {
             BODY_STYLE,
         ]);
         expect(withBody.blocks).toHaveLength(1);
+    });
+});
+
+describe("smart removal on word-split rows", () => {
+    // Some PDFs draw text word by word, so MuPDF emits every word as its own
+    // line. Smart removal joins them back into rows: a running head repeats
+    // as a whole, while common words of body rows that reach into a margin
+    // zone do not count on their own.
+    const margins = { left: 25, top: 40, right: 25, bottom: 40 };
+    const zone = { left: 60, top: 80, right: 60, bottom: 80 };
+
+    /** One line per word, glued left to right starting at `x`. */
+    function row(words: string[], x: number, y: number): RawLine[] {
+        let cursor = x;
+        return words.map((word) => {
+            const w = word.trim().length * 5 + (word.startsWith(" ") ? 2 : 0);
+            const line = makeStyledLine(word, cursor, y, w, "Times-Roman", 9);
+            cursor += w;
+            return line;
+        });
+    }
+
+    function buildPages(): RawPageData[] {
+        const animals = ["lion", "tiger", "zebra", "otter"];
+        return animals.map((animal, pageIndex) => ({
+            ...makePageWithLines([
+                // Running head, alone on its row.
+                ...row(["Journal", " and", " Things"], 200, 48),
+                // A body row inside the top zone; most of its words recur on
+                // every page, one does not.
+                ...row(["the", " quick", ` ${animal}`, " and", " the"], 100, 64),
+                // A body row whose opening word sits in the left zone.
+                ...row(["and", " in", " subjects", " under", " stress"], 45, 300),
+            ]),
+            pageIndex,
+            pageNumber: pageIndex + 1,
+        }));
+    }
+
+    function analyze(pages: RawPageData[]): MarginRemovalResult {
+        return MarginFilter.identifyElementsToRemove(
+            MarginFilter.collectMarginElements(pages, zone),
+            3,
+        );
+    }
+
+    function keptText(page: RawPageData, removal: MarginRemovalResult): string[] {
+        const filtered = MarginFilter.filterPageWithSmartRemoval(page, margins, zone, removal);
+        return filtered.blocks.flatMap((b) => (b.lines ?? []).map((l) => l.text.trim()));
+    }
+
+    it("removes a running head split into one line per word", () => {
+        const pages = buildPages();
+        const removal = analyze(pages);
+        expect(removal.candidates.map((c) => c.text)).toEqual(["journal and things"]);
+        const kept = keptText(pages[1], removal);
+        expect(kept).not.toContain("Journal");
+        expect(kept).not.toContain("Things");
+    });
+
+    it("keeps body words that recur in the margin zone or match running-head words", () => {
+        const pages = buildPages();
+        const removal = analyze(pages);
+        const kept = keptText(pages[2], removal);
+        expect(kept.filter((t) => t === "and")).toHaveLength(2);
+        expect(kept.filter((t) => t === "the")).toHaveLength(2);
+        expect(kept).toEqual(expect.arrayContaining(["quick", "zebra", "in", "subjects"]));
+    });
+
+    it("matches a running head joined to its page number, digits aside", () => {
+        const pages = buildPages();
+        pages.forEach((page, pageIndex) => {
+            page.blocks.push({
+                type: "text",
+                bbox: bboxFromXYWH(300, 735, 120, 9, "top-left"),
+                lines: [
+                    makeStyledLine(`${166 + pageIndex}`, 300, 735, 15, "Times-Roman", 9),
+                    makeStyledLine("| Elegies of Diaspora", 317, 735, 100, "Times-Roman", 9),
+                ],
+            });
+        });
+        const removal = analyze(pages);
+        const kept = keptText(pages[2], removal);
+        expect(kept).not.toContain("168");
+        expect(kept).not.toContain("| Elegies of Diaspora");
+    });
+
+    it("matches the parts of a corner row that spans two zones one by one", () => {
+        // The running head sits in the top zone; its page number, set a word
+        // space away, reaches below the top zone into the right zone.
+        const pages = buildPages();
+        pages.forEach((page, pageIndex) => {
+            page.blocks.push({
+                type: "text",
+                bbox: bboxFromXYWH(400, 68, 190, 16, "top-left"),
+                lines: [
+                    makeStyledLine("Med Ultrason 2020; 22(2): 203-210", 400, 70, 150, "Times-Roman", 9),
+                    { ...makeStyledLine(`${205 + 2 * pageIndex}`, 552, 68, 18, "Times-Roman", 9),
+                        bbox: bboxFromXYWH(552, 68, 18, 16, "top-left") },
+                ],
+            });
+        });
+        const removal = analyze(pages);
+        const kept = keptText(pages[1], removal);
+        expect(kept).not.toContain("Med Ultrason 2020; 22(2): 203-210");
+        expect(kept).not.toContain("207");
+    });
+
+    it("removes a running head that shares its row with other text", () => {
+        const pages = buildPages();
+        // On the last page a photo credit is set right before the running head.
+        const credit = makeStyledLine("[Courtesy F. Vitart]", 140, 48, 58, "Times-Roman", 9);
+        pages[3].blocks[0].lines!.push(credit);
+        const removal = analyze(pages);
+        const kept = keptText(pages[3], removal);
+        expect(kept).toContain("[Courtesy F. Vitart]");
+        expect(kept).not.toContain("Journal");
+        expect(kept).not.toContain("Things");
+    });
+
+    it("matches the end of a row only against running heads of the same zone", () => {
+        const pages = buildPages();
+        // A footer opens with the running head's words.
+        pages[2].blocks.push({
+            type: "text",
+            bbox: bboxFromXYWH(100, 735, 300, 9, "top-left"),
+            lines: row(["Journal", " and", " Things", " Division,", " an", " American", " Company"], 100, 735),
+        });
+        const removal = analyze(pages);
+        const kept = keptText(pages[2], removal);
+        expect(kept).toEqual(expect.arrayContaining(["Journal", "Things", "Division,"]));
+    });
+
+    it("matches line by line with text rows off (PDF schema 4)", () => {
+        const pages = buildPages();
+        const removal = MarginFilter.identifyElementsToRemove(
+            MarginFilter.collectMarginElements(pages, zone, false),
+            3,
+        );
+        expect(removal.candidates.map((c) => c.text)).toEqual(
+            expect.arrayContaining(["journal", "things"]),
+        );
+        const kept = MarginFilter.filterPageWithSmartRemoval(
+            pages[1], margins, zone, removal, undefined, undefined, false,
+        ).blocks.flatMap((b) => (b.lines ?? []).map((l) => l.text.trim()));
+        expect(kept).not.toContain("Journal");
+    });
+
+    it("spares a heading-sized joined row whose running head differs only by digits", () => {
+        const pages = [0, 1, 2, 3].map((pageIndex) => {
+            const size = pageIndex === 2 ? 17 : 9;
+            let x = 200;
+            const lines = ["Chapter", ` ${pageIndex + 1}`, " Results"].map((word) => {
+                const w = word.trim().length * (size / 2) + 2;
+                const line = makeStyledLine(word, x, 48, w, "Times-Roman", size);
+                x += w;
+                return line;
+            });
+            return { ...makePageWithLines(lines), pageIndex, pageNumber: pageIndex + 1 };
+        });
+        const removal = analyze(pages);
+        const primaryBody: TextStyle = { size: 9, font: "Times-Roman", bold: false, italic: false };
+        const keep = (page: RawPageData) =>
+            MarginFilter.filterPageWithSmartRemoval(page, margins, zone, removal, undefined, primaryBody)
+                .blocks.flatMap((b) => (b.lines ?? []).map((l) => l.text.trim()));
+        expect(keep(pages[1])).not.toContain("Results");
+        expect(keep(pages[2])).toEqual(["Chapter", "3", "Results"]);
+    });
+
+    it("counts a running head emitted as one line on some pages and as several on others together", () => {
+        const pages = [0, 1, 2, 3].map((pageIndex) => ({
+            ...makePageWithLines(
+                pageIndex < 2
+                    ? [makeStyledLine("Journal of Things", 200, 48, 85, "Times-Roman", 9)]
+                    : row(["Journal", " of", " Things"], 200, 48),
+            ),
+            pageIndex,
+            pageNumber: pageIndex + 1,
+        }));
+        const removal = analyze(pages);
+        expect(removal.candidates.map((c) => c.text)).toEqual(["journal of things"]);
+        expect(removal.candidates[0].pageIndices).toEqual([0, 1, 2, 3]);
+        for (const page of pages) expect(keptText(page, removal)).toEqual([]);
+    });
+
+    it("finds a page-number sequence set beside a running head that changes per page", () => {
+        const titles = ["Introduction", "Methods", "Results", "Discussion"];
+        const pages = titles.map((title, pageIndex) => ({
+            ...makePageWithLines(row([`${pageIndex + 1}`, ` ${title}`], 60, 48)),
+            pageIndex,
+            pageNumber: pageIndex + 1,
+        }));
+        const removal = analyze(pages);
+        expect(
+            removal.candidates.filter((c) => c.reason === "page_number").map((c) => c.text),
+        ).toEqual(["1", "2", "3", "4"]);
+        expect(keptText(pages[1], removal)).toEqual(["Methods"]);
+    });
+
+    it("counts standalone page numbers toward a run that also sits beside running heads", () => {
+        // Pages 0 and 1 set the number apart from the head; pages 2 and 3
+        // set it a word space away from section titles that change.
+        const titles = ["Introduction", "Methods", "Results", "Discussion"];
+        const pages = titles.map((title, pageIndex) => ({
+            ...makePageWithLines(
+                pageIndex < 2
+                    ? [
+                        makeStyledLine(`${pageIndex + 1}`, 60, 48, 6, "Times-Roman", 9),
+                        makeStyledLine(title, 120, 48, 60, "Times-Roman", 9),
+                    ]
+                    : row([`${pageIndex + 1}`, ` ${title}`], 60, 48),
+            ),
+            pageIndex,
+            pageNumber: pageIndex + 1,
+        }));
+        const removal = analyze(pages);
+        expect(
+            removal.candidates.filter((c) => c.reason === "page_number").map((c) => c.text).sort(),
+        ).toEqual(["1", "2", "3", "4"]);
+        for (const [i, page] of pages.entries()) {
+            expect(keptText(page, removal)).toEqual([titles[i]]);
+        }
+    });
+
+    it("keeps rows of bare numbers whose values differ from page to page", () => {
+        const values = [["12", "80", "37"], ["99", "4", "63"], ["8", "26", "51"]];
+        const pages = values.map((cells, pageIndex) => ({
+            ...makePageWithLines(row([cells[0], ` ${cells[1]}`, ` ${cells[2]}`], 200, 735)),
+            pageIndex,
+            pageNumber: pageIndex + 1,
+        }));
+        const removal = analyze(pages);
+        expect(removal.candidates).toEqual([]);
+        expect(keptText(pages[1], removal)).toEqual(["99", "4", "63"]);
+    });
+
+    it("still removes a page number split from its ornament", () => {
+        // "-119-" emitted as "-119" and "-", one word space apart.
+        const pages = [0, 1, 2].map((pageIndex) => ({
+            ...makePageWithLines(row([`-${119 + pageIndex}`, "-"], 500, 735)),
+            pageIndex,
+            pageNumber: pageIndex + 1,
+        }));
+        const removal = analyze(pages);
+        expect(keptText(pages[1], removal)).toEqual([]);
+    });
+
+    it("counts page numbers the sequence already removes toward a run beside running heads", () => {
+        // Three pages set the number apart, which the page-number sequence
+        // removes; the last two set it a word space from changing titles.
+        const titles = ["Introduction", "Data", "Methods", "Results", "Discussion"];
+        const pages = titles.map((title, pageIndex) => ({
+            ...makePageWithLines(
+                pageIndex < 3
+                    ? [
+                        makeStyledLine(`${pageIndex + 1}`, 60, 48, 6, "Times-Roman", 9),
+                        makeStyledLine(title, 120, 48, 60, "Times-Roman", 9),
+                    ]
+                    : row([`${pageIndex + 1}`, ` ${title}`], 60, 48),
+            ),
+            pageIndex,
+            pageNumber: pageIndex + 1,
+        }));
+        const removal = analyze(pages);
+        for (const [i, page] of pages.entries()) {
+            expect(keptText(page, removal)).toEqual([titles[i]]);
+        }
+        const numbers = removal.candidates.filter((c) => c.reason === "page_number").map((c) => c.text);
+        expect([...numbers].sort()).toEqual(["1", "2", "3", "4", "5"]);
+    });
+
+    it("ignores standalone numbers on pages crowded with them, such as figure ticks", () => {
+        // Joined-row numbers step with the pages on two pages only; the other
+        // pages' stepping numbers sit among many tick labels.
+        const titles = ["Introduction", "Methods", "Results", "Discussion"];
+        const pages = titles.map((title, pageIndex) => ({
+            ...makePageWithLines(
+                pageIndex < 2
+                    ? row([`${pageIndex + 1}`, ` ${title}`], 60, 48)
+                    : [0, 1, 2, 3, 4].map((k) =>
+                        makeStyledLine(`${pageIndex + 1 - 2 + k}`, 300 + 30 * k, 30 + 20 * (k % 2) + 18, 6, "Times-Roman", 9),
+                    ),
+            ),
+            pageIndex,
+            pageNumber: pageIndex + 1,
+        }));
+        const removal = analyze(pages);
+        expect(removal.candidates.filter((c) => c.reason === "page_number")).toEqual([]);
+    });
+
+    it("leaves numbers that end running text unless they step with the pages", () => {
+        const values = [3, 7, 8, 15];
+        const nouns = ["lions", "tigers", "zebras", "otters"];
+        const pages = values.map((value, pageIndex) => ({
+            ...makePageWithLines(row(["the", ` ${nouns[pageIndex]}`, " grow", " with", ` ${value}`], 100, 735)),
+            pageIndex,
+            pageNumber: pageIndex + 1,
+        }));
+        const removal = analyze(pages);
+        expect(removal.candidates.filter((c) => c.reason === "page_number")).toEqual([]);
+        expect(keptText(pages[2], removal)).toContain("8");
+    });
+
+    it("still matches lines that stand alone on their row", () => {
+        const pages = buildPages();
+        for (const page of pages) {
+            page.blocks.push({
+                type: "text",
+                bbox: bboxFromXYWH(300, 735, 40, 9, "top-left"),
+                lines: [makeStyledLine("Working Paper", 300, 735, 40, "Times-Roman", 9)],
+            });
+        }
+        const removal = analyze(pages);
+        expect(keptText(pages[3], removal)).not.toContain("Working Paper");
+    });
+});
+
+describe("pageNumberObservations — margin numerals that may be printed page numbers", () => {
+    function analysisOf(entries: { pageIndex: number; text: string; position?: MarginPosition; x?: number; width?: number; rowEndNumber?: boolean; lineCount?: number }[]): MarginAnalysis {
+        const elements = new Map<MarginPosition, MarginElement[]>([
+            ["top", []], ["bottom", []], ["left", []], ["right", []],
+        ]);
+        for (const { pageIndex, text, position = "top", x = 100, width, rowEndNumber, lineCount } of entries) {
+            const line = makeLine(text, x, position === "bottom" ? PAGE_H - 30 : 30);
+            const bbox = width ? bboxFromXYWH(x, line.bbox.t, width, 10, "top-left") : line.bbox;
+            elements.get(position)!.push({
+                text, position, bbox, pageIndex, line,
+                ...(rowEndNumber ? { rowEndNumber } : {}),
+                ...(lineCount ? { lineCount } : {}),
+            });
+        }
+        const counts = {
+            top: elements.get("top")!.length,
+            bottom: elements.get("bottom")!.length,
+            left: elements.get("left")!.length,
+            right: elements.get("right")!.length,
+        };
+        return { elements, counts };
+    }
+    /** Observations after removal, with `pages` for footnote markers. */
+    const observe = (analysis: MarginAnalysis, pages: readonly RawPageData[] = []) =>
+        pageNumberObservations(
+            analysis,
+            MarginFilter.identifyElementsToRemove(analysis, 3, true).removalsByPage,
+            new Map(pages.map((page) => [page.pageIndex, page])),
+        );
+    const values = (out: ReturnType<typeof observe>) =>
+        out.map((o) => [o.pageIndex, o.value, o.edge ?? false]);
+
+    it("reports removed page numbers with their values", () => {
+        const out = observe(oneTextPerPage(["1", "2", "3", "4"], "bottom"));
+        expect(values(out)).toEqual([[0, 1, false], [1, 2, false], [2, 3, false], [3, 4, false]]);
+    });
+
+    it("reports bare numbers the repeat pass removed", () => {
+        // A numbering that restarts: "1".."3" recur on enough pages to be
+        // removed as repeats before the page-number passes see them.
+        const texts = ["1", "2", "3", "1", "2", "3", "1", "2", "3"];
+        const out = observe(oneTextPerPage(texts, "bottom"));
+        expect(out.map((o) => o.value)).toEqual([1, 2, 3, 1, 2, 3, 1, 2, 3]);
+    });
+
+    it("reports the page number at either end of a running head as an edge word", () => {
+        const analysis = analysisOf([
+            { pageIndex: 0, text: "644 R. Allen and A. Vignoles" },
+            { pageIndex: 1, text: "Index of school segregation 645" },
+        ]);
+        const out = observe(analysis);
+        expect(values(out)).toEqual([[0, 644, true], [1, 645, true]]);
+    });
+
+    it("reads letter-spaced digits as one number and drops their row-end digits", () => {
+        const entries = [0, 1, 2, 3].flatMap((pageIndex) => {
+            const digits = String(21 + pageIndex).split("");
+            return [
+                { pageIndex, text: digits.join(" "), lineCount: 2, width: 14 },
+                { pageIndex, text: digits[1], rowEndNumber: true },
+            ];
+        });
+        const out = observe(analysisOf(entries));
+        expect(values(out)).toEqual([[0, 21, true], [1, 22, true], [2, 23, true], [3, 24, true]]);
+    });
+
+    it("keeps a removed page number's evidence when the same number is also an edge word", () => {
+        // A footer row ("1 Journal of Things") and its standalone number, which
+        // the page-number sequence removes.
+        const entries = [0, 1, 2, 3].flatMap((pageIndex) => [
+            { pageIndex, text: `${pageIndex + 1} Journal of Things`, position: "bottom" as const, x: 100, lineCount: 2 },
+            { pageIndex, text: String(pageIndex + 1), position: "bottom" as const, x: 300 },
+        ]);
+        const out = observe(analysisOf(entries));
+        expect(values(out)).toEqual([[0, 1, false], [1, 2, false], [2, 3, false], [3, 4, false]]);
+    });
+
+    it("reports page numbers set between dashes without removing them", () => {
+        const analysis = oneTextPerPage(["- 1 -", "-2-", "— 3 —"], "bottom");
+        expect(observe(analysis).map((o) => o.value)).toEqual([1, 2, 3]);
+        const removal = MarginFilter.identifyElementsToRemove(analysis, 3, true);
+        expect(removal.candidates.some((c) => c.reason === "page_number")).toBe(false);
+    });
+
+    it("reads letter-spaced digits between middle dots or dashes as one number", () => {
+        // Full-width digits set glyph by glyph between two marks ("· ９ ３ ·",
+        // "— １ ０ ０ —"), and the same in ASCII. The marks and their gaps make
+        // the row about two ems wider than its digits.
+        const rows = [
+            ["· ９ ３ ·", "・ ９ ４ ・", "— ９ ５ —", "－ ９ ６ －", "— １ ０ ０ —"],
+            ["· 9 3 ·", "‧ 9 4 ‧", "- 9 5 -", "– 9 6 –", "- 1 0 0 -"],
+        ];
+        for (const texts of rows) {
+            const entries = texts.flatMap((text, pageIndex) => {
+                const digits = normalizeDigits(text).replace(/\D/gu, "");
+                return [
+                    { pageIndex, text, position: "bottom" as const, lineCount: digits.length + 2, width: (digits.length + 2.2) * 8 },
+                    { pageIndex, text: digits[digits.length - 1], position: "bottom" as const, rowEndNumber: true },
+                ];
+            });
+            const out = observe(analysisOf(entries));
+            expect(values(out)).toEqual([[0, 93, true], [1, 94, true], [2, 95, true], [3, 96, true], [4, 100, true]]);
+            expect(out.every((o) => o.spaced)).toBe(true);
+            // Read as the same folio set solid: "·93·", "—100—".
+            expect(out[0].text).toMatch(/^.93.$/u);
+        }
+    });
+
+    it("does not read a wrapped spaced number wider than its digits and marks", () => {
+        const entries = ["· ９ ３ ·", "— １ ０ ０ —"].map((text, pageIndex) => (
+            { pageIndex, text, position: "bottom" as const, lineCount: 4, width: 41 + 8 * pageIndex }
+        ));
+        expect(observe(analysisOf(entries))).toEqual([]);
+    });
+
+    it("does not read spaced digits with a mark on one side only as one number", () => {
+        const texts = ["· ９ ３", "９ ３ ·", "— １ ０ ０", "１ ０ ０ —", "· ９ ３ —"];
+        const entries = texts.map((text, pageIndex) => (
+            { pageIndex, text, position: "bottom" as const, lineCount: 4, width: 32 }
+        ));
+        const out = observe(analysisOf(entries));
+        expect(out.some((o) => o.value > 10 || o.spaced)).toBe(false);
+    });
+
+    it("does not join the same digit printed at both ends of a row between marks", () => {
+        const entries = [4, 5, 6].map((n, pageIndex) => (
+            { pageIndex, text: `· ${n} ${n} ·`, lineCount: 4, width: 400 }
+        ));
+        const out = observe(analysisOf(entries));
+        expect(out.some((o) => o.value > 10)).toBe(false);
+    });
+
+    it("leaves margin removal of wrapped spaced numbers as it was", () => {
+        // Label derivation alone reads them: removal sees text that matches
+        // no page-number pattern, whatever its width.
+        const analysis = analysisOf(["· ９ ３ ·", "· ９ ４ ·", "· ９ ５ ·", "· ９ ６ ·"].map((text, pageIndex) => (
+            { pageIndex, text, position: "bottom" as const, lineCount: 4, width: 32 }
+        )));
+        const removal = MarginFilter.identifyElementsToRemove(analysis, 3, true);
+        expect(removal.candidates.some((c) => c.reason === "page_number")).toBe(false);
+        expect(observe(analysis).map((o) => o.value)).toEqual([93, 94, 95, 96]);
+    });
+
+    it("reports prefixed folios at a row's end with their prefix", () => {
+        const analysis = analysisOf([
+            { pageIndex: 0, text: "Cell Reports 40, 111280, August 23, 2022 e1", position: "bottom" },
+            { pageIndex: 1, text: "S2 | Nature | Supplement", position: "bottom" },
+            { pageIndex: 2, text: "Phys. Rev. B 96, 014105 (2017) 014105-3" },
+            { pageIndex: 3, text: "212:4 F. Trujillo-Romero" },
+        ]);
+        const out = observe(analysis);
+        expect(out.map((o) => [o.pageIndex, o.prefix, o.value])).toEqual([
+            [0, "e", 1], [1, "S", 2], [2, "014105-", 3], [3, "212:", 4],
+        ]);
+    });
+
+    it("does not read a year and month as a prefixed folio", () => {
+        for (const pad of [true, false]) {
+            const analysis = analysisOf([0, 1, 2].map((pageIndex) => ({
+                pageIndex,
+                text: `Issued: 2024-${pad ? "0" : ""}${pageIndex + 1}`,
+                position: "bottom" as const,
+            })));
+            const out = observe(analysis);
+            expect(out.filter((o) => o.prefix)).toEqual([]);
+        }
+        expect(parsePrefixedFolio("2024-3")).toBeNull();
+        expect(parsePrefixedFolio("1043-5")).toEqual({ value: 5, prefix: "1043-" });
+    });
+
+    it("reads a prefixed folio after a bar but not after a caption's word", () => {
+        const analysis = analysisOf([
+            { pageIndex: 0, text: "Supplementary Information | S1", position: "bottom" },
+            { pageIndex: 1, text: "see Figure S2", position: "bottom" },
+        ]);
+        const out = observe(analysis);
+        expect(out.map((o) => [o.pageIndex, o.prefix, o.value])).toEqual([
+            [0, "S", 1],
+        ]);
+    });
+
+    it("splits a header's words at U+FFFD", () => {
+        const analysis = analysisOf([
+            { pageIndex: 0, text: "x�ACKNOWLEDGMENTS" },
+            { pageIndex: 1, text: "-�2�-", position: "bottom" },
+        ]);
+        const out = observe(analysis);
+        expect(values(out)).toEqual([[0, 10, true], [1, 2, true]]);
+    });
+
+    it("reads letter-spaced digits with wider gaps as one number", () => {
+        const entries = [0, 1, 2, 3].map((pageIndex) => (
+            { pageIndex, text: String(21 + pageIndex).split("").join("  "), lineCount: 2, width: 14 }
+        ));
+        const out = observe(analysisOf(entries));
+        expect(out.map((o) => o.value)).toEqual([21, 22, 23, 24]);
+    });
+
+    it("does not join the same digit printed at both ends of a row", () => {
+        const entries = [4, 5, 6].map((n, pageIndex) => (
+            { pageIndex, text: `${n} ${n}`, lineCount: 2, width: 400 }
+        ));
+        const out = observe(analysisOf(entries));
+        expect(out.some((o) => o.value > 10)).toBe(false);
+    });
+
+    it("counts a numeral printed twice on a page", () => {
+        // A fixed volume number 16 in every footer, and page numbers 16-17.
+        const analysis = analysisOf([
+            { pageIndex: 0, text: "16", position: "bottom", x: 60 },
+            { pageIndex: 0, text: "16", position: "bottom", x: 500 },
+            { pageIndex: 1, text: "16", position: "bottom", x: 60 },
+            { pageIndex: 1, text: "17", position: "bottom", x: 500 },
+            { pageIndex: 2, text: "16 Journal of Things 16", position: "bottom", lineCount: 3 },
+        ]);
+        const out = observe(analysis);
+        const counts = out.filter((o) => o.text === "16").map((o) => [o.pageIndex, o.occurrences ?? 1]);
+        expect(counts).toEqual([[0, 2], [1, 1], [2, 2]]);
+    });
+
+    it("counts the characters of broken-up text once", () => {
+        const analysis = analysisOf([{ pageIndex: 0, text: "2 1 0 7 i 2", position: "bottom", lineCount: 6 }]);
+        const out = observe(analysis);
+        expect(out.map((o) => [o.text, o.occurrences ?? 1])).toEqual([["2", 1]]);
+    });
+
+    it("does not report footnote markers as page numbers", () => {
+        // Each page's footnote area opens with a small marker beside larger
+        // text: "1", "2", "3" step one per page like page numbers.
+        const sized = (text: string, x: number, size: number): RawLine => {
+            const line = makeLine(text, x, PAGE_H - 40);
+            return { ...line, bbox: bboxFromXYWH(x, PAGE_H - 40, Math.max(1, text.length * 0.6 * size), size, "top-left"), font: { ...line.font, size } };
+        };
+        const pages: RawPageData[] = [0, 1, 2, 3].map((pageIndex) => ({
+            pageIndex,
+            pageNumber: pageIndex + 1,
+            width: PAGE_W,
+            height: PAGE_H,
+            viewBox: [0, 0, PAGE_W, PAGE_H],
+            rotation: 0,
+            blocks: [{
+                type: "text",
+                bbox: bboxFromXYWH(0, 0, PAGE_W, PAGE_H, "top-left"),
+                lines: [sized(String(pageIndex + 1), 100, 5), sized("See the appendix for details.", 104, 9)],
+            }],
+        }));
+        const analysis = MarginFilter.collectMarginElements(pages, { left: 60, top: 80, right: 60, bottom: 80 });
+        expect(observe(analysis, pages)).toEqual([]);
+    });
+});
+
+describe("spacedRowNumber", () => {
+    it("reads bare letter-spaced digits as narrow as their digits", () => {
+        expect(spacedRowNumber("2 1", 16, 8)).toBe("21");
+        expect(spacedRowNumber("２ １", 16, 8)).toBe("21");
+        expect(spacedRowNumber("2 1", 17, 8)).toBeNull();
+    });
+
+    it("sets a number between marks solid, keeping its marks", () => {
+        expect(spacedRowNumber("· ９ ３ ·", 35.9, 9)).toBe("·93·");
+        expect(spacedRowNumber("・ ９ ３ ・", 35.9, 9)).toBe("・93・");
+        expect(spacedRowNumber("－ ９ ３ －", 35.9, 9)).toBe("-93-");
+        expect(spacedRowNumber("— １ ０ ０ —", 47, 10)).toBe("—100—");
+    });
+
+    it("allows three ems for a mark on each side", () => {
+        expect(spacedRowNumber("— ９ ９ —", 41.7, 10)).toBe("—99—");
+        expect(spacedRowNumber("· ９ ３ ·", 45, 9)).toBe("·93·");
+        expect(spacedRowNumber("· ９ ３ ·", 45.1, 9)).toBeNull();
+        expect(spacedRowNumber("— １ ０ ０ —", 60.1, 10)).toBeNull();
+    });
+
+    it("reads U+FFFD as a space between the marks only", () => {
+        expect(spacedRowNumber("-\uFFFD9\uFFFD3\uFFFD-", 30, 8)).toBe("-93-");
+        expect(spacedRowNumber("9\uFFFD3", 16, 8)).toBeNull();
+    });
+
+    it("rejects one-sided, mismatched or non-mark wrappers and unspaced numbers", () => {
+        for (const text of ["· 9 3", "9 3 ·", "· 9 3 —", "• 9 3 •", "( 9 3 )", "· 93 ·", "— 100 —", "· 9 ·"]) {
+            expect(spacedRowNumber(text, 30, 8)).toBeNull();
+        }
+    });
+});
+
+describe("normalizeDigits", () => {
+    it("returns ASCII text as it is", () => {
+        const text = "Page 12 of 30 | S1 - 7 -";
+        expect(normalizeDigits(text)).toBe(text);
+    });
+
+    it("folds compatibility and non-Latin digits to ASCII", () => {
+        expect(normalizeDigits("\uFF11\uFF12")).toBe("12");
+        expect(normalizeDigits("\u0663\u0664")).toBe("34");
+        expect(normalizeDigits("Seite \u0967\u0968")).toBe("Seite 12");
+        expect(normalizeDigits("p. \u00B2")).toBe("p. 2");
+    });
+});
+
+describe("parseCounter — page counters", () => {
+    it("reads the page and total of bare and page-word counters", () => {
+        expect(parseCounter("3 of 12")).toEqual({ page: 3, total: 12 });
+        expect(parseCounter("3/12")).toEqual({ page: 3, total: 12 });
+        expect(parseCounter("Page 3 of 12")).toEqual({ page: 3, total: 12 });
+        expect(parseCounter("Seite \uFF13 von \uFF13")).toEqual({ page: 3, total: 3 });
+        expect(parseCounter("Page 3")).toBeNull();
+        expect(parseCounter("2024-05")).toBeNull();
+    });
+
+    it("counts a bare counter only when the page is within the total", () => {
+        expect(isPageCounter("3 из 12")).toBe(true);
+        expect(isPageCounter("12 of 3")).toBe(false);
+    });
+});
+
+describe("justified prose rows split word by word (PDF schema 5)", () => {
+    // A justified line stretches its word spaces, and some PDFs come out of
+    // MuPDF with each word as a line of its own, too far apart to join into a
+    // row. Common words of such rows in a margin zone recur like a running
+    // head would.
+    const margins = { left: 25, top: 40, right: 25, bottom: 40 };
+    const zone = { left: 60, top: 80, right: 60, bottom: 80 };
+
+    /** Words two em (18pt at 9pt) apart, starting at `x`. */
+    function justified(words: string[], x: number, y: number): RawLine[] {
+        let cursor = x;
+        return words.map((word) => {
+            const w = word.length * 5;
+            const line = makeStyledLine(word, cursor, y, w, "Times-Roman", 9);
+            cursor += w + 18;
+            return line;
+        });
+    }
+
+    function buildPages(): RawPageData[] {
+        const subjects = ["climate", "water", "heat", "health"];
+        return subjects.map((subject, pageIndex) => ({
+            ...makePageWithLines([
+                makeStyledLine("Review", 280, 30, 30, "Times-Roman", 9),
+                ...justified(["how", subject, "is", "impacting", "the"], 100, 60),
+                // A row with a single word, as the last line of a paragraph.
+                makeStyledLine("the", 100, 72, 15, "Times-Roman", 9),
+            ]),
+            pageIndex,
+            pageNumber: pageIndex + 1,
+        }));
+    }
+
+    function keptText(page: RawPageData, removal: MarginRemovalResult, proseRows: boolean): string[] {
+        return MarginFilter.filterPageWithSmartRemoval(page, margins, zone, removal, undefined, undefined, true, proseRows)
+            .blocks.flatMap((b) => (b.lines ?? []).map((l) => l.text.trim()));
+    }
+
+    it("does not count the words of a justified prose row as margin elements", () => {
+        const removal = MarginFilter.identifyElementsToRemove(MarginFilter.collectMarginElements(buildPages(), zone), 3);
+        expect(removal.candidates.map((c) => c.text)).toEqual(["review"]);
+    });
+
+    it("keeps the words of a justified prose row and removes the running head", () => {
+        const pages = buildPages();
+        const removal = MarginFilter.identifyElementsToRemove(MarginFilter.collectMarginElements(pages, zone), 3);
+        const kept = keptText(pages[1], removal, true);
+        expect(kept).not.toContain("Review");
+        expect(kept).toEqual(["how", "water", "is", "impacting", "the", "the"]);
+    });
+
+    it("spares a prose word that matches a running head elsewhere", () => {
+        const pages = buildPages();
+        // "is" is a repeat candidate from the other pages' single-word rows.
+        const removal: MarginRemovalResult = {
+            candidates: [{ text: "is", originalText: "is", pageIndices: [0, 2, 3], reason: "repeat", position: "top" }],
+            textsToRemove: new Set(["is"]),
+            removalsByPage: new Map([[1, new Set(["is"])]]),
+        };
+        expect(keptText(pages[1], removal, true)).toContain("is");
+    });
+
+    it("removes a running head whose narrow word gaps join some of its words into one row", () => {
+        // "journal of" join into one row; "social" and "psychology" stand apart.
+        const head = (): RawLine[] => [
+            makeStyledLine("journal", 300, 45, 35, "Times-Roman", 9),
+            makeStyledLine("of", 337, 45, 10, "Times-Roman", 9),
+            ...justified(["social", "psychology"], 365, 45),
+        ];
+        const pages = buildPages().map((page) => ({
+            ...page,
+            blocks: [...page.blocks, { type: "text" as const, bbox: bboxFromXYWH(300, 45, 200, 9, "top-left"), lines: head() }],
+        }));
+        const removal = MarginFilter.identifyElementsToRemove(MarginFilter.collectMarginElements(pages, zone), 3);
+        expect(removal.candidates.map((c) => c.text)).toContain("journal of");
+        const kept = keptText(pages[1], removal, true);
+        for (const word of ["journal", "of", "social", "psychology"]) expect(kept).not.toContain(word);
+        expect(kept).toContain("impacting");
+    });
+
+    it("spares a body row's word that a running head repeats when the row's other lines are not removals", () => {
+        const page = {
+            ...makePageWithLines([
+                ...justified(["in these examples binaural", "inhibition", "was observed in neurons"], 100, 60),
+                makeStyledLine("the", 100, 72, 15, "Times-Roman", 9),
+            ]),
+            pageIndex: 1,
+            pageNumber: 2,
+        };
+        const removal: MarginRemovalResult = {
+            candidates: [{ text: "inhibition", originalText: "Inhibition", pageIndices: [0, 2, 3], reason: "repeat", position: "top" }],
+            textsToRemove: new Set(["inhibition"]),
+            removalsByPage: new Map([[1, new Set(["inhibition"])]]),
+        };
+        expect(keptText(page, removal, true)).toContain("inhibition");
+    });
+
+    it("still removes a lowercase running head set in a block of its own", () => {
+        const pages = buildPages().map((page) => ({
+            ...page,
+            blocks: [
+                ...page.blocks,
+                { type: "text" as const, bbox: bboxFromXYWH(500, 30, 30, 9, "top-left"), lines: [makeStyledLine("nature", 500, 30, 30, "Times-Roman", 9)] },
+            ],
+        }));
+        const removal = MarginFilter.identifyElementsToRemove(MarginFilter.collectMarginElements(pages, zone), 3);
+        expect(removal.candidates.map((c) => c.text)).toContain("nature");
+        expect(keptText(pages[1], removal, true)).not.toContain("nature");
+    });
+
+    it("removes a lowercase running head that MuPDF put in a paragraph's block", () => {
+        const pages = ["climate", "water", "heat", "health"].map((subject, pageIndex) => ({
+            ...makePageWithLines([
+                makeStyledLine("nature", 280, 45, 30, "Times-Roman", 9),
+                ...[`how ${subject} is changing the`, "rows of a paragraph set in", "the body of the page"].map((text, k) =>
+                    makeStyledLine(text, 100, 300 + 12 * k, 300, "Times-Roman", 9),
+                ),
+            ]),
+            pageIndex,
+            pageNumber: pageIndex + 1,
+        }));
+        const removal = MarginFilter.identifyElementsToRemove(MarginFilter.collectMarginElements(pages, zone), 3);
+        expect(removal.candidates.map((c) => c.text)).toContain("nature");
+        expect(keptText(pages[1], removal, true)).not.toContain("nature");
+    });
+
+    it("removes a lowercase running head with wide word spaces set in a block of its own", () => {
+        const pages = buildPages().map((page) => ({
+            ...page,
+            blocks: [
+                ...page.blocks,
+                {
+                    type: "text" as const,
+                    bbox: bboxFromXYWH(300, 45, 200, 9, "top-left"),
+                    lines: justified(["journal", "of", "social", "psychology"], 300, 45),
+                },
+            ],
+        }));
+        const removal = MarginFilter.identifyElementsToRemove(MarginFilter.collectMarginElements(pages, zone), 3);
+        const kept = keptText(pages[1], removal, true);
+        for (const word of ["journal", "of", "social", "psychology"]) expect(kept).not.toContain(word);
+        expect(kept).toContain("impacting");
+    });
+
+    it("leaves single-line matching as it was with text rows off (PDF schema 4)", () => {
+        const removal = MarginFilter.identifyElementsToRemove(
+            MarginFilter.collectMarginElements(buildPages(), zone, false),
+            3,
+        );
+        expect(removal.candidates.map((c) => c.text)).toEqual(expect.arrayContaining(["the", "is", "how"]));
+    });
+});
+
+describe("Roman page numbers in a paragraph block (PDF schema 5)", () => {
+    // MuPDF can put the page number in the block of the body rows above it;
+    // the number is collected even though it reads as a lone lowercase word.
+    const zone = { left: 60, top: 80, right: 60, bottom: 80 };
+
+    it("removes the Roman page-number sequence", () => {
+        const numerals = ["iii", "iv", "v", "vi"];
+        const pages = numerals.map((numeral, pageIndex) => ({
+            ...makePageWithLines([
+                ...["the preface goes on with", "an account of sources", "and methods for"].map((text, k) =>
+                    makeStyledLine(`${text} ${["maps", "towns", "rivers", "roads"][pageIndex]}`, 100, PAGE_H - 76 + 12 * k, 300, "Times-Roman", 9),
+                ),
+                makeStyledLine(numeral, 300, PAGE_H - 40, 10, "Times-Roman", 9),
+            ]),
+            pageIndex,
+            pageNumber: pageIndex + 3,
+        }));
+        const removal = MarginFilter.identifyElementsToRemove(MarginFilter.collectMarginElements(pages, zone), 3, true, true);
+        expect(numerals.map((_, pageIndex) => [...(removal.removalsByPage.get(pageIndex) ?? [])])).toEqual(
+            numerals.map((numeral) => [numeral]),
+        );
+    });
+});
+
+describe("manuscript line numbers in the left margin (PDF schema 5)", () => {
+    const zone = { left: 60, top: 80, right: 60, bottom: 80 };
+
+    it("removes line numbers that run on from page to page", () => {
+        let next = 1;
+        const pages = [0, 1, 2].map((pageIndex) => ({
+            ...makePageWithLines(
+                Array.from({ length: 20 }, (_, k) => [
+                    makeStyledLine(`${next++}`, 40, 100 + 28 * k, 10, "Times-Roman", 9),
+                    makeStyledLine(`body text row ${k} on page ${pageIndex}`, 100, 100 + 28 * k, 400, "Times-Roman", 9),
+                ]).flat(),
+            ),
+            pageIndex,
+            pageNumber: pageIndex + 1,
+        }));
+        const removal = MarginFilter.identifyElementsToRemove(MarginFilter.collectMarginElements(pages, zone), 3, true, true);
+        expect(removal.removalsByPage.get(1)?.size).toBe(20);
+        expect(removal.removalsByPage.get(1)?.has("21")).toBe(true);
+    });
+
+    it("removes line numbers that start below a title page's front matter", () => {
+        let next = 1;
+        const pages = [0, 1, 2].map((pageIndex) => ({
+            ...makePageWithLines([
+                ...(pageIndex === 0
+                    ? ["A Title", "An Author", "A University", "Key words: lines"].map((text, k) =>
+                        makeStyledLine(text, 100, 100 + 28 * k, 200, "Times-Roman", 9))
+                    : []),
+                ...Array.from({ length: pageIndex === 0 ? 12 : 20 }, (_, k) => {
+                    const y = (pageIndex === 0 ? 224 : 100) + 28 * k;
+                    return [
+                        makeStyledLine(`${next++}`, 40, y, 10, "Times-Roman", 9),
+                        makeStyledLine(`body text row ${k} on page ${pageIndex}`, 100, y, 400, "Times-Roman", 9),
+                    ];
+                }).flat(),
+            ]),
+            pageIndex,
+            pageNumber: pageIndex + 1,
+        }));
+        const removal = MarginFilter.identifyElementsToRemove(MarginFilter.collectMarginElements(pages, zone), 3, true, true);
+        expect(removal.removalsByPage.get(0)?.size).toBe(12);
+        expect(removal.removalsByPage.get(2)?.size).toBe(20);
+    });
+
+    it("removes the line numbers of rows in the header and footer zones", () => {
+        // 24 rows from y=70: each page's first row is in the header zone and
+        // its last in the footer zone, so their numbers sit in the corners.
+        let next = 1;
+        const pages = [0, 1, 2].map((pageIndex) => ({
+            ...makePageWithLines([
+                // A page number in the top-left corner continues no line numbers.
+                makeStyledLine(`${101 + pageIndex}`, 40, 30, 15, "Times-Roman", 9),
+                ...Array.from({ length: 24 }, (_, k) => [
+                    makeStyledLine(`${next++}`, 40, 70 + 28 * k, 10, "Times-Roman", 9),
+                    makeStyledLine(`body text row ${k} on page ${pageIndex}`, 100, 70 + 28 * k, 400, "Times-Roman", 9),
+                ]).flat(),
+            ]),
+            pageIndex,
+            pageNumber: pageIndex + 1,
+        }));
+        const removal = MarginFilter.identifyElementsToRemove(MarginFilter.collectMarginElements(pages, zone), 3, true, true);
+        for (const pageIndex of [0, 1, 2]) {
+            const removed = removal.removalsByPage.get(pageIndex) ?? new Set();
+            for (let n = 24 * pageIndex + 1; n <= 24 * (pageIndex + 1); n++) expect(removed.has(`${n}`)).toBe(true);
+        }
+    });
+
+    it("removes line numbers on analysed pages that skip pages between them", () => {
+        // Pages 0, 2 and 4 of a manuscript numbering 20 rows a page.
+        const pages = [0, 2, 4].map((pageIndex) => ({
+            ...makePageWithLines(
+                Array.from({ length: 20 }, (_, k) => [
+                    makeStyledLine(`${20 * pageIndex + k + 1}`, 40, 100 + 28 * k, 10, "Times-Roman", 9),
+                    makeStyledLine(`body text row ${k} on page ${pageIndex}`, 100, 100 + 28 * k, 400, "Times-Roman", 9),
+                ]).flat(),
+            ),
+            pageIndex,
+            pageNumber: pageIndex + 1,
+        }));
+        const removal = MarginFilter.identifyElementsToRemove(MarginFilter.collectMarginElements(pages, zone), 3, true, true);
+        expect(removal.removalsByPage.get(2)?.has("41")).toBe(true);
+        expect(removal.removalsByPage.get(4)?.size).toBe(20);
+    });
+
+    it("keeps numbers that go back down on a later analysed page", () => {
+        const pages = [0, 2].map((pageIndex) => ({
+            ...makePageWithLines(
+                Array.from({ length: 20 }, (_, k) => [
+                    makeStyledLine(`${k + 1}`, 40, 100 + 28 * k, 10, "Times-Roman", 9),
+                    makeStyledLine(`item ${k} on page ${pageIndex}`, 100, 100 + 28 * k, 400, "Times-Roman", 9),
+                ]).flat(),
+            ),
+            pageIndex,
+            pageNumber: pageIndex + 1,
+        }));
+        const removal = MarginFilter.identifyElementsToRemove(MarginFilter.collectMarginElements(pages, zone), 3, true, true);
+        expect([...removal.removalsByPage.values()].flatMap((texts) => [...texts])).toEqual([]);
+    });
+
+    /** Pages of left-margin numbers 1, 2, … running on across pages, one per body row. */
+    function numberedPages(pageCount: number, perPage: number, extra: (pageIndex: number) => RawLine[] = () => []): RawPageData[] {
+        let next = 1;
+        return Array.from({ length: pageCount }, (_, pageIndex) => ({
+            ...makePageWithLines([
+                ...Array.from({ length: perPage }, (_, k) => [
+                    makeStyledLine(`${next++}`, 40, 100 + 28 * k, 10, "Times-Roman", 9),
+                    makeStyledLine(`row ${k} on page ${pageIndex}`, 100, 100 + 28 * k, 400, "Times-Roman", 9),
+                ]).flat(),
+                ...extra(pageIndex),
+            ]),
+            pageIndex,
+            pageNumber: pageIndex + 1,
+        }));
+    }
+    const removedTexts = (removal: MarginRemovalResult) => [...removal.removalsByPage.values()].flatMap((texts) => [...texts]);
+
+    it("counts pages without margin text toward the pages a numbering must cover", () => {
+        const prosePages = Array.from({ length: 7 }, (_, k) => ({
+            ...makePageWithLines([makeStyledLine(`a page of prose ${k}`, 100, 300, 400, "Times-Roman", 9)]),
+            pageIndex: 3 + k,
+            pageNumber: 4 + k,
+        }));
+        const removal = MarginFilter.identifyElementsToRemove(
+            MarginFilter.collectMarginElements([...numberedPages(3, 10), ...prosePages], zone),
+            3,
+            true,
+            true,
+        );
+        expect(removedTexts(removal)).toEqual([]);
+    });
+
+    it("reads no line numbers without text rows", () => {
+        const removal = MarginFilter.identifyElementsToRemove(MarginFilter.collectMarginElements(numberedPages(3, 20), zone, false), 3, true, true);
+        expect(removedTexts(removal)).toEqual([]);
+    });
+
+    it("removes line numbers that another zone's page numbers repeat", () => {
+        const pages = numberedPages(3, 20, (pageIndex) => [makeStyledLine(`${pageIndex + 1}`, 300, PAGE_H - 40, 10, "Times-Roman", 9)]);
+        const removal = MarginFilter.identifyElementsToRemove(MarginFilter.collectMarginElements(pages, zone), 3, true, true);
+        expect(removal.removalsByPage.get(0)?.size).toBe(20);
+        expect(removal.removalsByPage.get(2)?.has("3")).toBe(true);
+    });
+
+    it("keeps the numbers of a list set between paragraphs", () => {
+        let next = 1;
+        const prose = (pageIndex: number, y: number) =>
+            Array.from({ length: 3 }, (_, k) => makeStyledLine(`prose row ${k} at ${y} on page ${pageIndex}`, 100, y + 28 * k, 400, "Times-Roman", 9));
+        const pages = [0, 1, 2].map((pageIndex) => ({
+            ...makePageWithLines([
+                ...prose(pageIndex, 100),
+                ...Array.from({ length: 10 }, (_, k) => [
+                    makeStyledLine(`${next++}`, 40, 184 + 28 * k, 10, "Times-Roman", 9),
+                    makeStyledLine(`item ${k} on page ${pageIndex}`, 100, 184 + 28 * k, 300, "Times-Roman", 9),
+                ]).flat(),
+                ...prose(pageIndex, 464),
+            ]),
+            pageIndex,
+            pageNumber: pageIndex + 1,
+        }));
+        const removal = MarginFilter.identifyElementsToRemove(MarginFilter.collectMarginElements(pages, zone), 3, true, true);
+        expect([...removal.removalsByPage.values()].flatMap((texts) => [...texts])).toEqual([]);
+    });
+
+    it("keeps the numbers of a list whose items wrap", () => {
+        let next = 1;
+        const pages = [0, 1, 2].map((pageIndex) => ({
+            ...makePageWithLines(
+                Array.from({ length: 10 }, (_, k) => [
+                    makeStyledLine(`${next++}`, 40, 100 + 56 * k, 10, "Times-Roman", 9),
+                    makeStyledLine(`item ${k} on page ${pageIndex} starts here and`, 100, 100 + 56 * k, 400, "Times-Roman", 9),
+                    makeStyledLine(`wraps onto a second row`, 100, 128 + 56 * k, 200, "Times-Roman", 9),
+                ]).flat(),
+            ),
+            pageIndex,
+            pageNumber: pageIndex + 1,
+        }));
+        const removal = MarginFilter.identifyElementsToRemove(MarginFilter.collectMarginElements(pages, zone), 3, true, true);
+        expect([...removal.removalsByPage.values()].flatMap((texts) => [...texts])).toEqual([]);
+    });
+
+    it("keeps contents references to consecutive pages", () => {
+        for (const perPage of [5, 10]) {
+            const contents = [0, 1, 2].map((pageIndex) => ({
+                ...makePageWithLines(
+                    Array.from({ length: perPage }, (_, k) => [
+                        makeStyledLine(`Section ${pageIndex}.${k} title`, 100, 100 + 28 * k, 300, "Times-Roman", 9),
+                        makeStyledLine(`${100 + perPage * pageIndex + k}`, PAGE_W - 40, 100 + 28 * k, 15, "Times-Roman", 9),
+                    ]).flat(),
+                ),
+                pageIndex,
+                pageNumber: pageIndex + 1,
+            }));
+            const removal = MarginFilter.identifyElementsToRemove(MarginFilter.collectMarginElements(contents, zone), 3, true, true);
+            expect([...removal.removalsByPage.values()].flatMap((texts) => [...texts])).toEqual([]);
+        }
+    });
+});
+
+describe("page numbers that advance with the pages (PDF schema 5)", () => {
+    // A contents page lists page references in its margin; they increase
+    // from page to page too, but by far more than one per page.
+    const zone = { left: 60, top: 80, right: 60, bottom: 80 };
+
+    function buildPages(): RawPageData[] {
+        const references = [[15, 19, 22], [95, 102, 137], [255, 260, 264], [351, 352, 358]];
+        return references.map((refs, pageIndex) => ({
+            ...makePageWithLines([
+                makeStyledLine(`${pageIndex + 8}`, 20, 20, 10, "Times-Roman", 9),
+                // A contents entry high on the page, its page reference in the top zone.
+                makeStyledLine(["Introduction", "Methods", "Results", "Discussion"][pageIndex], 100, 50, 60, "Times-Roman", 9),
+                makeStyledLine(`${refs[0] - 2}`, 300, 50, 12, "Times-Roman", 9),
+                ...refs.map((ref, k) => makeStyledLine(`${ref}`, PAGE_W - 40, 200 + 20 * k, 15, "Times-Roman", 9)),
+            ]),
+            pageIndex,
+            pageNumber: pageIndex + 1,
+        }));
+    }
+
+    function removed(pageNumberRuns: boolean): string[] {
+        const removal = MarginFilter.identifyElementsToRemove(
+            MarginFilter.collectMarginElements(buildPages(), zone),
+            3,
+            true,
+            pageNumberRuns,
+        );
+        return [...(removal.removalsByPage.get(1) ?? [])].sort();
+    }
+
+    it("removes each page's own number and keeps the contents page references", () => {
+        expect(removed(true)).toEqual(["9"]);
+    });
+
+    it("removes every number of the zone with page-number runs off (PDF schema 4)", () => {
+        expect(removed(false)).toEqual(["102", "137", "9", "93", "95"]);
     });
 });

@@ -507,6 +507,17 @@ describe("instance account ownership", () => {
         pending.resolve({});
         await write;
     });
+    it("counts every revocation of library access, and nothing else", async () => {
+        await load();
+        const before = Zotero.Beaver.libraryRevocations ?? 0;
+        await account.updateExcludedLibraries([{ type: "user" }]);
+        expect(Zotero.Beaver.libraryRevocations).toBe(before + 1);
+        // Restoring access is not a revocation.
+        await account.updateExcludedLibraries([]);
+        expect(Zotero.Beaver.libraryRevocations).toBe(before + 1);
+        await account.updateExcludedLibraries([{ type: "user" }]);
+        expect(Zotero.Beaver.libraryRevocations).toBe(before + 2);
+    });
     it("cannot restore excluded scope from a profile fetch started before the write", async () => {
         await load();
         const pending = deferred<any>();
@@ -622,5 +633,225 @@ describe("instance account ownership", () => {
         await refresh;
         expect(account.getSnapshot().data).toBeNull();
         expect(sdk.removeAllChannels).toHaveBeenCalledTimes(1);
+    });
+    describe("restoring a saved session", () => {
+        const retryable = () =>
+            Object.assign(new Error("NetworkError when attempting to fetch resource."), {
+                name: "AuthRetryableFetchError",
+                status: 0,
+            });
+        const failOnce = () =>
+            sdk.auth.getSession.mockResolvedValueOnce({
+                data: { session: null },
+                error: retryable(),
+            });
+        const network = () =>
+            vi.mocked(Services.obs.addObserver).mock.calls[0][0] as unknown as {
+                observe(subject: unknown, topic: string, state: string): void;
+            };
+        const failedRestore = async () => {
+            failOnce();
+            event("INITIAL_SESSION", null);
+            await vi.advanceTimersByTimeAsync(0);
+        };
+
+        it("keeps a saved session that could not be refreshed instead of signing out", async () => {
+            await failedRestore();
+            const snapshot = account.getSnapshot();
+            expect(snapshot.initialized).toBe(false);
+            expect(snapshot.session).toBeNull();
+            expect(snapshot.restore).toMatchObject({ attempt: 1, offline: false });
+            expect(sdk.auth.signOut).not.toHaveBeenCalled();
+        });
+
+        it("signs in once a retry restores the session, and loads the profile", async () => {
+            await failedRestore();
+            await vi.advanceTimersByTimeAsync(5_000);
+            // The profile load is scheduled once the session is accepted.
+            await vi.advanceTimersByTimeAsync(10);
+            const snapshot = account.getSnapshot();
+            expect(snapshot.initialized).toBe(true);
+            expect(snapshot.session?.user.id).toBe("a");
+            expect(snapshot.restore).toBeNull();
+            expect(mocks.profile).toHaveBeenCalled();
+        });
+
+        it("shows sign-in at once when nothing is saved", async () => {
+            sdk.auth.getSession.mockResolvedValueOnce({ data: { session: null }, error: null });
+            event("INITIAL_SESSION", null);
+            await vi.advanceTimersByTimeAsync(0);
+            const snapshot = account.getSnapshot();
+            expect(snapshot.initialized).toBe(true);
+            expect(snapshot.session).toBeNull();
+            expect(snapshot.restore).toBeNull();
+        });
+
+        it("treats a throwing session read as transient", async () => {
+            sdk.auth.getSession.mockRejectedValueOnce(new Error("Storage unavailable"));
+            event("INITIAL_SESSION", null);
+            await vi.advanceTimersByTimeAsync(0);
+            expect(account.getSnapshot()).toMatchObject({
+                initialized: false,
+                restore: { attempt: 1 },
+            });
+        });
+
+        it("backs off between attempts", async () => {
+            sdk.auth.getSession.mockResolvedValue({ data: { session: null }, error: retryable() });
+            event("INITIAL_SESSION", null);
+            await vi.advanceTimersByTimeAsync(0);
+            const attempts = () => sdk.auth.getSession.mock.calls.length;
+            expect(attempts()).toBe(1);
+            await vi.advanceTimersByTimeAsync(4_999);
+            expect(attempts()).toBe(1);
+            await vi.advanceTimersByTimeAsync(1);
+            expect(attempts()).toBe(2);
+            await vi.advanceTimersByTimeAsync(15_000);
+            expect(attempts()).toBe(3);
+            await vi.advanceTimersByTimeAsync(45_000);
+            expect(attempts()).toBe(4);
+            await vi.advanceTimersByTimeAsync(60_000);
+            expect(attempts()).toBe(5);
+            await vi.advanceTimersByTimeAsync(60_000);
+            expect(attempts()).toBe(6);
+            expect(account.getSnapshot().restore?.attempt).toBe(6);
+        });
+
+        it("waits for the network while offline and retries when it returns", async () => {
+            await failedRestore();
+            (Services as any).io.offline = true;
+            network().observe(null, "network:offline-status-changed", "offline");
+            expect(account.getSnapshot().restore?.offline).toBe(true);
+            await vi.advanceTimersByTimeAsync(120_000);
+            expect(sdk.auth.getSession).toHaveBeenCalledTimes(1);
+            (Services as any).io.offline = false;
+            network().observe(null, "network:offline-status-changed", "online");
+            await vi.advanceTimersByTimeAsync(0);
+            expect(sdk.auth.getSession).toHaveBeenCalledTimes(2);
+            expect(account.getSnapshot().session?.user.id).toBe("a");
+        });
+
+        it("accepts a session the SDK restores on its own and stops retrying", async () => {
+            await failedRestore();
+            event("TOKEN_REFRESHED", session());
+            expect(account.getSnapshot()).toMatchObject({ initialized: true, restore: null });
+            await vi.advanceTimersByTimeAsync(120_000);
+            expect(sdk.auth.getSession).toHaveBeenCalledTimes(1);
+        });
+
+        it("signs out when the SDK discards the session and ignores the late attempt", async () => {
+            const pending = deferred<any>();
+            sdk.auth.getSession.mockReturnValueOnce(pending.promise);
+            event("INITIAL_SESSION", null);
+            event("SIGNED_OUT", null);
+            expect(account.getSnapshot()).toMatchObject({ initialized: true, session: null });
+            pending.resolve({ data: { session: null }, error: retryable() });
+            await vi.advanceTimersByTimeAsync(120_000);
+            expect(account.getSnapshot().restore).toBeNull();
+            expect(sdk.auth.getSession).toHaveBeenCalledTimes(1);
+        });
+
+        it("retries immediately on request and coalesces repeated requests", async () => {
+            await failedRestore();
+            const pending = deferred<any>();
+            sdk.auth.getSession.mockReturnValueOnce(pending.promise);
+            const first = account.retrySessionRestore();
+            const second = account.retrySessionRestore();
+            expect(sdk.auth.getSession).toHaveBeenCalledTimes(2);
+            pending.resolve({ data: { session: session() }, error: null });
+            await Promise.all([first, second]);
+            expect(account.getSnapshot().session?.user.id).toBe("a");
+        });
+
+        it("offers sign-in when the first restore runs long, without asking the SDK again", async () => {
+            await vi.advanceTimersByTimeAsync(14_999);
+            expect(account.getSnapshot().restore).toBeNull();
+            await vi.advanceTimersByTimeAsync(1);
+            expect(account.getSnapshot()).toMatchObject({
+                initialized: false,
+                restore: { attempt: 0 },
+            });
+            await account.retrySessionRestore();
+            expect(sdk.auth.getSession).not.toHaveBeenCalled();
+            event("INITIAL_SESSION", session());
+            expect(account.getSnapshot()).toMatchObject({ initialized: true, restore: null });
+        });
+
+        it("shows sign-in on request but still accepts a later SDK restore", async () => {
+            await failedRestore();
+            account.abandonSessionRestore();
+            expect(account.getSnapshot()).toMatchObject({
+                initialized: true,
+                session: null,
+                restore: null,
+            });
+            await vi.advanceTimersByTimeAsync(120_000);
+            expect(sdk.auth.getSession).toHaveBeenCalledTimes(1);
+            event("TOKEN_REFRESHED", session());
+            expect(account.getSnapshot().session?.user.id).toBe("a");
+        });
+
+        it("records a restore the SDK completes on its own", async () => {
+            await failedRestore();
+            event("TOKEN_REFRESHED", session());
+            expect(account.getAuthDiagnostics().at(-1)).toMatchObject({
+                event: "restore_succeeded",
+                detail: "after 1 failed attempts",
+            });
+        });
+
+        it("records a session the SDK restores after the user chose to sign in", async () => {
+            await failedRestore();
+            account.abandonSessionRestore();
+            event("TOKEN_REFRESHED", session());
+            expect(account.getAuthDiagnostics().at(-1)).toMatchObject({
+                event: "restore_succeeded",
+                detail: "after the user chose to sign in",
+            });
+        });
+
+        it("does not record a fresh sign-in after giving up on the restore as a restore", async () => {
+            await failedRestore();
+            account.abandonSessionRestore();
+            const before = account.getAuthDiagnostics().length;
+            sdk.auth.verifyOtp = vi.fn().mockResolvedValue({ data: { session: session("b") }, error: null });
+            sdk.auth.getSession.mockResolvedValue({ data: { session: session("b") }, error: null });
+            await account.auth.verifyOtp({ email: "b@example.test", token: "123456", type: "email" });
+            expect(account.getSnapshot().session?.user.id).toBe("b");
+            expect(
+                account.getAuthDiagnostics().slice(before).map((entry) => entry.event),
+            ).not.toContain("restore_succeeded");
+        });
+
+        it("labels sign-outs by who asked for them", async () => {
+            await load();
+            sdk.auth.signOut.mockImplementation(async () => {
+                event("SIGNED_OUT", null);
+                return { error: null };
+            });
+            await account.auth.signOut();
+            expect(
+                account.getAuthDiagnostics().filter((entry) => entry.event === "signed_out").at(-1)?.detail,
+            ).toBe("sign-out command");
+            event("SIGNED_OUT", null);
+            expect(account.getAuthDiagnostics().at(-1)?.detail).toBe("session discarded by the SDK");
+        });
+
+        it("records how the restore went for error reports", async () => {
+            await failedRestore();
+            await vi.advanceTimersByTimeAsync(5_000);
+            const events = account.getAuthDiagnostics().map((entry) => entry.event);
+            expect(events).toEqual(
+                expect.arrayContaining([
+                    "initial_session_empty",
+                    "restore_failed",
+                    "restore_succeeded",
+                ]),
+            );
+            const failure = account
+                .getAuthDiagnostics()
+                .find((entry) => entry.event === "restore_failed");
+            expect(failure?.detail).toContain("AuthRetryableFetchError");
+        });
     });
 });

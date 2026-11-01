@@ -5,6 +5,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // Module Mocks (must be before imports)
 // =============================================================================
 
+// The save-stabilization and editor-refresh loops poll with real delays; the
+// note HTML here changes synchronously, so the waits only cost wall time.
+vi.mock('../../../src/utils/systemTimers', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('../../../src/utils/systemTimers')>()),
+    systemDelay: () => Promise.resolve(),
+}));
+
 // Mock createCitationHTML — same pattern as noteHtmlSimplifier.test.ts
 vi.mock('../../../src/utils/zoteroUtils', () => ({
     createCitationHTML: vi.fn(
@@ -73,7 +80,6 @@ import {
 import { captureValidatedEditTargetContext } from '../../../src/utils/editNoteRawPosition';
 import {
     expandToRawHtml,
-    normalizePageLocator,
 } from '../../../src/utils/noteCitationExpand';
 import {
     stripDataCitationItems,
@@ -648,7 +654,9 @@ describe('edit + undo roundtrip', () => {
         // The new citation should have been built
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'NEWKEY' }),
-            undefined
+            undefined,
+            undefined,
+            undefined,
         );
 
         // expandedOld should be raw HTML of existing citation
@@ -2028,53 +2036,11 @@ describe('edge cases', () => {
 
 
 // =============================================================================
-// Section 7: Page Locator Normalization
+// Section 7: Page Locators in Citation Expansion
 // =============================================================================
 
-describe('normalizePageLocator', () => {
-    it('single page number passes through unchanged', () => {
-        expect(normalizePageLocator('42')).toBe('42');
-    });
-
-    it('page range extracts first page', () => {
-        expect(normalizePageLocator('241-243')).toBe('241');
-    });
-
-    it('en-dash range extracts first page', () => {
-        expect(normalizePageLocator('241–243')).toBe('241');
-    });
-
-    it('comma-separated pages extracts first page', () => {
-        expect(normalizePageLocator('222, 237-238')).toBe('222');
-    });
-
-    it('comma-separated single pages extracts first', () => {
-        expect(normalizePageLocator('10, 15, 20')).toBe('10');
-    });
-
-    it('non-numeric locator without separators passes through', () => {
-        expect(normalizePageLocator('§3.2')).toBe('§3.2');
-        expect(normalizePageLocator('fn. 5')).toBe('fn. 5');
-        expect(normalizePageLocator('xii')).toBe('xii');
-    });
-
-    it('non-numeric locator with dash passes through (no leading digits)', () => {
-        // "xii-xv" has a dash but no leading digits → pass through
-        expect(normalizePageLocator('xii-xv')).toBe('xii-xv');
-    });
-
-    it('leading whitespace is handled', () => {
-        expect(normalizePageLocator(' 42-45')).toBe('42');
-    });
-
-    it('empty string passes through', () => {
-        expect(normalizePageLocator('')).toBe('');
-    });
-});
-
-
-describe('page locator normalization in citation expansion', () => {
-    it('new citation with page range: locator is normalized to first page', () => {
+describe('page locators in citation expansion', () => {
+    it('new citation with a page list and range keeps every page', () => {
         const html = wrap(`<p>Some text ${rawCitation('EX1', 1, '10', 'Author, 2024, p. 10')}</p>`);
         const { metadata } = simplifyNoteHtml(html, 1);
 
@@ -2082,10 +2048,11 @@ describe('page locator normalization in citation expansion', () => {
         const input = '<citation id="1-NEWITEM" loc="page222, 237-238"/>';
         const expanded = expandToRawHtml(input, metadata, 'new');
 
-        // createCitationHTML should have been called with the normalized single page
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'NEWITEM' }),
-            '222'
+            '222, 237-238',
+            undefined,
+            { v: 1, loc: 'page222, 237-238' },
         );
         expect(expanded).toContain('data-citation=');
     });
@@ -2099,11 +2066,13 @@ describe('page locator normalization in citation expansion', () => {
 
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'LEGACYITEM' }),
-            '222'
+            '222, 237-238',
+            undefined,
+            { v: 1, loc: 'page222, 237-238' },
         );
     });
 
-    it('new citation with en-dash range: locator is normalized to first page', () => {
+    it('new citation with an en-dash range keeps the range, written with a hyphen', () => {
         const html = wrap(`<p>Text ${rawCitation('EX1', 1, '', 'Author, 2024')}</p>`);
         const { metadata } = simplifyNoteHtml(html, 1);
 
@@ -2112,7 +2081,9 @@ describe('page locator normalization in citation expansion', () => {
 
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'RANGEITEM' }),
-            '100'
+            '100-105',
+            undefined,
+            { v: 1, loc: 'page100–105' },
         );
     });
 
@@ -2125,7 +2096,9 @@ describe('page locator normalization in citation expansion', () => {
 
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'SINGLEITEM' }),
-            '42'
+            '42',
+            undefined,
+            { v: 1, loc: 'page42' },
         );
     });
 
@@ -2138,11 +2111,13 @@ describe('page locator normalization in citation expansion', () => {
 
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'SECITEM' }),
-            '§3.2'
+            '§3.2',
+            undefined,
+            { v: 1, loc: 'page§3.2' },
         );
     });
 
-    it('existing citation with changed page range: normalized to first page', () => {
+    it('existing citation changed to a page range keeps the range', () => {
         // Citation originally has loc="page10"
         const cit = rawCitation('PGCHG', 1, '10', 'Author, 2024, p. 10');
         const html = wrap(`<p>Text ${cit}</p>`);
@@ -2154,10 +2129,11 @@ describe('page locator normalization in citation expansion', () => {
         const modified = tag!.replace('loc="page10"', 'loc="page10, 15-18"');
         const expanded = expandToRawHtml(modified, metadata, 'new');
 
-        // Should have been called with normalized page
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'PGCHG' }),
-            '10'
+            '10, 15-18',
+            undefined,
+            undefined,
         );
         expect(expanded).toContain('data-citation=');
     });
@@ -2181,7 +2157,7 @@ describe('page locator normalization in citation expansion', () => {
         expect(expanded).toBe(pmCit);
     });
 
-    it('edit + undo roundtrip: new citation with page range normalizes then undoes correctly', () => {
+    it('edit + undo roundtrip: new citation with page range keeps the range and undoes correctly', () => {
         const existingCit = rawCitation('EXIST', 1, '', 'Author, 2024');
         const html = wrap(`<p>Text ${existingCit} here.</p>`);
         const { simplified, metadata } = simplifyNoteHtml(html, 1);
@@ -2197,10 +2173,11 @@ describe('page locator normalization in citation expansion', () => {
         const expandedOld = expandToRawHtml(oldStr, metadata, 'old');
         const expandedNew = expandToRawHtml(newStr, metadata, 'new');
 
-        // Verify normalization happened
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'NEWCIT' }),
-            '50' // normalized from "50-55"
+            '50-55',
+            undefined,
+            { v: 1, loc: 'page50-55' },
         );
 
         // Apply the edit
@@ -2213,7 +2190,7 @@ describe('page locator normalization in citation expansion', () => {
         expect(undone).toBe(stripped);
     });
 
-    it('new citation via att_id with page range: normalized to first page', () => {
+    it('new citation via att_id with page range keeps the range', () => {
         const html = wrap(`<p>Text ${rawCitation('EX1', 1, '', 'Author, 2024')}</p>`);
         const { metadata } = simplifyNoteHtml(html, 1);
 
@@ -2223,6 +2200,7 @@ describe('page locator normalization in citation expansion', () => {
             key: 'ATTKEY',
             libraryID: 1,
             isAttachment: vi.fn(() => true),
+            attachmentContentType: 'application/pdf',
             isRegularItem: vi.fn(() => false),
             parentID: 999,
             getField: vi.fn(() => ''),
@@ -2255,10 +2233,11 @@ describe('page locator normalization in citation expansion', () => {
         const input = '<citation att_id="1-ATTKEY" page="30-35"/>';
         expandToRawHtml(input, metadata, 'new');
 
-        // createCitationHTML should have been called with normalized page
         expect(createCitationHTML).toHaveBeenCalledWith(
             mockAttItem,
-            '30' // normalized from "30-35"
+            '30-35',
+            undefined,
+            { v: 1, loc: 'page30-35', att: 'ATTKEY' },
         );
     });
 });
@@ -2287,6 +2266,7 @@ describe('Page label translation during citation expansion', () => {
             libraryID: 1,
             getField: vi.fn(() => 'Test Paper'),
             isAttachment: vi.fn(() => true),
+            attachmentContentType: 'application/pdf',
             parentID: 999,
             isRegularItem: vi.fn(() => false),
             parentItem: { id: 999, isRegularItem: () => true },
@@ -2301,7 +2281,7 @@ describe('Page label translation during citation expansion', () => {
         expandToRawHtml(input, metadata, 'new', undefined, pageLabels);
 
         // Page 15 → pageLabels[14] = "352"
-        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '352');
+        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '352', undefined, { v: 1, loc: 'page15', att: 'ABC123' });
     });
 
     it('translates to same value for sequential labels (identity case)', () => {
@@ -2315,6 +2295,7 @@ describe('Page label translation during citation expansion', () => {
             libraryID: 1,
             getField: vi.fn(() => 'Test Paper'),
             isAttachment: vi.fn(() => true),
+            attachmentContentType: 'application/pdf',
             parentID: 999,
             isRegularItem: vi.fn(() => false),
             parentItem: { id: 999, isRegularItem: () => true },
@@ -2329,7 +2310,7 @@ describe('Page label translation during citation expansion', () => {
         expandToRawHtml(input, metadata, 'new', undefined, pageLabels);
 
         // Page 15 → pageLabels[14] = "15" (identity)
-        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '15');
+        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '15', undefined, { v: 1, loc: 'page15', att: 'DEF456' });
     });
 
     it('passes through page when no labels are cached', () => {
@@ -2341,6 +2322,7 @@ describe('Page label translation during citation expansion', () => {
             libraryID: 1,
             getField: vi.fn(() => 'Test Paper'),
             isAttachment: vi.fn(() => true),
+            attachmentContentType: 'application/pdf',
             parentID: 999,
             isRegularItem: vi.fn(() => false),
             parentItem: { id: 999, isRegularItem: () => true },
@@ -2354,7 +2336,7 @@ describe('Page label translation during citation expansion', () => {
         const input = '<citation att_id="1-GHI789" page="15"/>';
         expandToRawHtml(input, metadata, 'new', undefined, pageLabels);
 
-        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '15');
+        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '15', undefined, { v: 1, loc: 'page15', att: 'GHI789' });
     });
 
     it('preserves existing citation rawHtml when not edited', () => {
@@ -2385,6 +2367,7 @@ describe('Page label translation during citation expansion', () => {
             libraryID: 1,
             getField: vi.fn(() => 'New Paper'),
             isAttachment: vi.fn(() => true),
+            attachmentContentType: 'application/pdf',
             parentID: 999,
             isRegularItem: vi.fn(() => false),
             getAttachments: vi.fn(() => []),
@@ -2399,7 +2382,7 @@ describe('Page label translation during citation expansion', () => {
         const editedSimplified = simplified.replace(/id="1-ITEMKEY"/, 'id="1-NEWKEY"');
         expandToRawHtml(editedSimplified, metadata, 'new', undefined, pageLabels);
 
-        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, 'ii');
+        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, 'ii', undefined, { v: 1, loc: 'page2', att: 'NEWKEY' });
     });
 
     it('does not translate unchanged cold-cache label when only the citation target changes', () => {
@@ -2416,6 +2399,7 @@ describe('Page label translation during citation expansion', () => {
             libraryID: 1,
             getField: vi.fn(() => 'New Paper'),
             isAttachment: vi.fn(() => true),
+            attachmentContentType: 'application/pdf',
             parentID: 999,
             isRegularItem: vi.fn(() => false),
             getAttachments: vi.fn(() => []),
@@ -2426,7 +2410,7 @@ describe('Page label translation during citation expansion', () => {
         const editedSimplified = simplified.replace(/id="1-ITEMKEY"/, 'id="1-NEWKEY"');
         expandToRawHtml(editedSimplified, metadata, 'new', undefined, pageLabels);
 
-        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '100');
+        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '100', undefined, { v: 1, att: 'NEWKEY' });
     });
 
     it('does not translate numeric non-page locators on edited existing citations', () => {
@@ -2449,6 +2433,7 @@ describe('Page label translation during citation expansion', () => {
             libraryID: 1,
             getField: vi.fn(() => 'Paper'),
             isAttachment: vi.fn(() => true),
+            attachmentContentType: 'application/pdf',
             parentID: 999,
             isRegularItem: vi.fn(() => false),
             parentItem: { id: 999, isRegularItem: () => true },
@@ -2462,7 +2447,8 @@ describe('Page label translation during citation expansion', () => {
         const editedSimplified = simplified.replace(/loc="page3"/, 'loc="page4"');
         expandToRawHtml(editedSimplified, metadata, 'new', undefined, pageLabels);
 
-        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '4');
+        // The locator moves; the citation keeps its non-page CSL label.
+        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, '4', { label: 'chapter' }, { v: 1, att: 'ITEMKEY' });
     });
 
     it('restores unchanged label-backed citations verbatim when labels are supplied', () => {
@@ -2498,6 +2484,7 @@ describe('Page label translation during citation expansion', () => {
             libraryID: 1,
             getField: vi.fn(() => 'Paper'),
             isAttachment: vi.fn(() => true),
+            attachmentContentType: 'application/pdf',
             parentID: 999,
             isRegularItem: vi.fn(() => false),
             parentItem: { id: 999, isRegularItem: () => true },
@@ -2512,7 +2499,7 @@ describe('Page label translation during citation expansion', () => {
         const editedSimplified = simplified.replace(/loc="page14"/, 'loc="page15"');
         expandToRawHtml(editedSimplified, metadata, 'new', undefined, pageLabels);
 
-        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, 'xv');
+        expect(createCitationHTML).toHaveBeenCalledWith(mockItem, 'xv', undefined, { v: 1, loc: 'page15', att: 'ITEMKEY' });
     });
 });
 

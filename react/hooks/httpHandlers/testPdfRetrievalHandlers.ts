@@ -6,7 +6,7 @@
  * of strategies until one attaches a PDF, report what happened and how long
  * each step took, then erase the item and its files again.
  *
- * The strategies mirror `schedulePdfFetchTask` in `react/utils/addItemActions.ts`
+ * The strategies mirror `schedulePdfFetchTask` in `src/services/itemImport/pdfFetch.ts`
  * one for one (`importFromURL` with `contentType: 'application/pdf'`, then
  * `addAvailableFile`), so a measurement taken here is a measurement of the code
  * users run. `add_file_from_urls` is the same `Zotero.Attachments` entry point
@@ -26,6 +26,7 @@
 
 import { logger } from '@beaver/agent-core/platform/logger';
 import { refuseCaptchaChallengeUrls } from '../../utils/pdfChallengeUrls';
+import { createPdfFetchDiagnostics, type PdfFetchDiagnostics } from '../../../src/services/pdfFetchDiagnostics';
 
 interface ItemSpec {
     item_type?: string;
@@ -58,6 +59,10 @@ interface AttemptResult {
     timed_out: boolean;
     error?: string;
     access_method?: string;
+    /** Why an `add_file_from_urls` strategy failed; same vocabulary as the `attachment_resolved` event. */
+    failure_reason?: string;
+    /** Per-entry trail of an `add_file_from_urls` strategy. */
+    attempts?: { access_method?: string; host?: string; outcome: string; status?: number }[];
 }
 
 /** One URL the resolver cascade tried, in the order it tried them. */
@@ -223,7 +228,8 @@ async function runStrategy(
     item: Zotero.Item,
     libraryID: number,
     strategy: StrategySpec,
-    attemptedUrls: AttemptedUrl[]
+    attemptedUrls: AttemptedUrl[],
+    diagnostics: PdfFetchDiagnostics
 ): Promise<{ attachment: Zotero.Item | null; accessMethod?: string }> {
     const timeout = strategy.timeout_ms ?? DEFAULT_STRATEGY_TIMEOUT_MS;
 
@@ -261,6 +267,7 @@ async function runStrategy(
         // list says directly which caps would still have found it.
         const startedAt = Date.now();
         const onBeforeRequest = (url: string) => {
+            diagnostics.onBeforeRequest(url);
             const record: AttemptedUrl = { url, ms: Date.now() - startedAt, skipped: false };
             attemptedUrls.push(record);
             if (strategy.budget_ms && Date.now() - startedAt > strategy.budget_ms) {
@@ -287,12 +294,15 @@ async function runStrategy(
             (Zotero.Attachments as any).addFileFromURLs(item, resolvers, {
                 onAccessMethodStart: (method: string) => {
                     accessMethod = method;
+                    diagnostics.onAccessMethodStart(method);
                 },
                 onBeforeRequest,
+                onRequestError: diagnostics.onRequestError,
             }),
             timeout,
             'addFileFromURLs'
         );
+        if (attachment) diagnostics.markSucceeded();
         return { attachment: (attachment as Zotero.Item) || null, accessMethod };
     }
 
@@ -369,9 +379,11 @@ export async function handleTestPdfRetrievalHttpRequest(request: any) {
                 ms: 0,
                 timed_out: false,
             };
+            const diagnostics = createPdfFetchDiagnostics();
+            let threw = false;
             try {
                 const { attachment, accessMethod } = await runStrategy(
-                    item, libraryID, strategy, attemptedUrls
+                    item, libraryID, strategy, attemptedUrls, diagnostics
                 );
                 attempt.access_method = accessMethod;
                 if (attachment) {
@@ -382,6 +394,20 @@ export async function handleTestPdfRetrievalHttpRequest(request: any) {
                 const message: string = e?.message || String(e);
                 attempt.error = message;
                 attempt.timed_out = message.includes('timed out');
+                threw = true;
+                if (attempt.timed_out) diagnostics.markTimeout();
+            }
+            if (strategy.kind === 'add_file_from_urls') {
+                const trail = diagnostics.attempts();
+                if (!attempt.ok) attempt.failure_reason = diagnostics.failureReason({ threw });
+                if (trail.length) {
+                    attempt.attempts = trail.map((entry) => ({
+                        access_method: entry.accessMethod,
+                        host: entry.host,
+                        outcome: entry.outcome,
+                        status: entry.status,
+                    }));
+                }
             }
             attempt.ms = Date.now() - start;
             attempts.push(attempt);

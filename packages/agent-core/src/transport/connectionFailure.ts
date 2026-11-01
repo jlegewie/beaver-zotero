@@ -309,6 +309,50 @@ function standardCloseDetails(code: number): string | null {
     }
 }
 
+/**
+ * The headline for a run whose connection was lost and could not be picked up
+ * again. The details still describe the original loss.
+ */
+export const REATTACH_FAILED_MESSAGE =
+    'The connection was lost and Beaver could not reconnect to the response.';
+
+/** Tooltip on a control that is unavailable while the run reconnects. */
+export const RECONNECT_UNAVAILABLE_TOOLTIP = 'Available once Beaver reconnects';
+
+/** Tooltip on a control held while the server reports how a run that lost its connection ended. */
+export const RESOLVING_UNAVAILABLE_TOOLTIP = 'Available once Beaver reports how this response ended';
+
+/** Caption on a decision card held while the run reconnects. */
+export const RECONNECT_HELD_CAPTION = 'You can answer as soon as Beaver reconnects.';
+
+/** Caption on a decision the user made that waits for the run to reconnect. */
+export const RECONNECT_SENDING_CAPTION = 'Sending when reconnected…';
+
+/** A run whose reattach failed, while the server is asked how it ended. */
+export const REATTACH_CHECKING_MESSAGE = "Couldn't reconnect. Checking whether Beaver finished this response…";
+
+/** A run whose reattach failed, while the server reports it still running. */
+export const REATTACH_STILL_RUNNING_MESSAGE =
+    "Couldn't reconnect. Beaver is still working on this response and will show it here when it finishes.";
+
+/** `REATTACH_CHECKING_MESSAGE` for a line that clips. */
+export const REATTACH_CHECKING_SHORT = 'Checking whether Beaver finished…';
+
+/** `REATTACH_STILL_RUNNING_MESSAGE` for a line that clips. */
+export const REATTACH_STILL_RUNNING_SHORT = 'Still running on Beaver';
+
+/** A run shown as failed after a lost connection, which the server completed. */
+export const RUN_FINISHED_WHILE_DISCONNECTED_NOTE = 'Beaver finished this response while you were disconnected.';
+
+/** A run the user stopped, which the server completed before the stop arrived. */
+export const RUN_FINISHED_BEFORE_STOP_NOTE = 'Beaver finished this response before your stop reached it.';
+
+/** A run the user stopped, whose saved copy runs past what was shown when they stopped it. */
+export const RUN_CONTINUED_UNTIL_STOP_NOTE = 'Beaver kept writing until your stop reached it.';
+
+/** Under the partial text of a response that was cut off. */
+export const PARTIAL_RESPONSE_NOTE = 'The response above may be incomplete.';
+
 /** Build truthful, actionable copy from the evidence currently available. */
 export function presentConnectionFailure(
     evidence: ConnectionFailureEvidence,

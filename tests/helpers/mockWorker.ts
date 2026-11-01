@@ -32,7 +32,9 @@ export class MockWorker {
                 return;
             }
             // Ack the configure handshake so the client releases ops.
-            this.onmessage?.({ data: { kind: "configured" } });
+            this.onmessage?.({
+                data: { kind: "configured", compiledWasm: message.compiledWasm !== undefined },
+            });
             return;
         }
         this.posted.push({ message, transfer });

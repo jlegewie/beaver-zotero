@@ -333,6 +333,23 @@ await Zotero.DB.queryAsync(sql, params, {
 
 This applies to every query, including simple `COUNT`s. See `src/utils/sync.ts`.
 
+### Firefox 153 (Zotero 11) platform rules
+
+Code must run on Zotero 7–10 and Zotero 11. Prefer feature detection; if you must branch,
+use `Zotero.platformMajorVersion` (140 on Zotero 10, 153 on Zotero 11), never `Zotero.version`.
+
+- **Boolean XUL attributes** (`hidden`, `collapsed`, `selected`, `disabled`, `checked`) are
+  presence-based: `setAttribute(x, 'false')` turns them *on*. Use `removeAttribute` /
+  `toggleAttribute`.
+- **No inline handlers** in chrome documents (`on*=` attributes, `setAttribute('on…')`,
+  inline `<script>`); the chrome CSP blocks them. Use `addEventListener`.
+- **Load plugin scripts via `chrome://beaver/…`**, not `rootURI` (`jar:`/`file:`), which
+  `loadSubScript` refuses.
+- **`ownerGlobal` reads as undefined**; use `ownerDocument.defaultView`.
+
+Lint enforces the first, second and fourth. Testing against a Zotero 11 build is described
+in `tests/README.md`.
+
 ## Library exclusions (enforce in every data / write / index path)
 
 Users can exclude Zotero libraries in Beaver Preferences. Exclusion is an access-control
@@ -478,7 +495,9 @@ scripts/worktree/setup-worktree.sh --lite /path/to/worktree
   checkout's version — and edits to them mutate that version. `.env` is a real copy,
   since full setup rewrites it with this worktree's profile path and ports.
 - The instruction-file links are also created by `scripts/worktree/hooks/post-checkout`,
-  which the bootstrap installs into the shared hook directory. It fires on every
+  which the bootstrap installs into the shared hook directory. The hook also links the
+  git-ignored skills directory (`.claude/skills`, and `.agents/skills` if main has one),
+  so every worktree shares the main checkout's skills. It fires on every
   `git worktree add`, so worktrees created by other tooling get them without running any
   setup. It never replaces an existing file and always exits 0. If a worktree has no
   `CLAUDE.local.md`, the hook is not installed on this machine — run the `--lite`
@@ -567,15 +586,18 @@ source Zotero). `fix-db` applies the same treatment to an already-created clone.
   compare against previous versions of the code ("pre-refactor, this used to…"), or mention
   internal planning documents. This repository is public — comments must not leak internal or
   development-only details.
+- **Keyboard handlers in text fields**: a custom `onKeyDown` that acts on Enter, Escape, Tab or
+  arrow keys must first return when `isImeKeyEvent(e.nativeEvent)`
+  (`@beaver/agent-ui/primitives/ime`). While an IME composes text (Chinese, Japanese, Korean),
+  it owns those keys; acting on them or calling `preventDefault()` cancels the composition or
+  closes the field mid-word. Cover it with a test that dispatches the key with
+  `isComposing: true`.
 
 ## Deprecated — do not build on
 
-These paths are inert and should not be extended or used as a pattern:
-
-- `isDatabaseSyncSupportedAtom` and everything gated behind it: database sync
-  (`useZoteroSync.ts`, `sync.ts`), file upload (`FileUploader.ts`), file status reporting
-  (`FileStatusDisplay.tsx`).
-- `profile.plan` and derived atoms such as `PlanFeatures`. (`profile.credit_plan` is current.)
+- The backend still attaches a frozen legacy `plan` object to the profile for older
+  clients. This client neither types nor reads it: use `profile.credit_plan` and the
+  backend-computed entitlements (`has_ocr_access`, `has_search_index_access`).
 
 
 ### Independent chat windows and admission

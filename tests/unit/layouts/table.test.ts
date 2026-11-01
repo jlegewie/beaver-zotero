@@ -1,40 +1,50 @@
 import { describe, expect, it } from "vitest";
-import type { Citation } from "@beaver/agent-core/types/citations";
 import type { ExternalReference } from "@beaver/agent-core/types/externalReferences";
 import {
+    allocateRowId,
     anchorColumn,
     annotationComment,
     annotationTitle,
     cellExpandedFields,
     cellIdFor,
+    cellInvariantError,
     cellSortKey,
+    compareSortKeys,
     cellValueText,
-    citationKeysInTable,
-    citationKeysInText,
-    citationsByKey,
     columnAlign,
+    evidenceHeading,
+    isUncitedAnswer,
     defaultHiddenColumnIds,
     filterRows,
-    hasFixedVocabulary,
     isCellEmpty,
     isColumnSortable,
+    isExtractionColumn,
+    isFillableColumn,
+    isStale,
+    isTitleAbstractOnly,
+    needsReview,
     isRowInLibrary,
     normalizeSelectLabel,
     readSpec,
-    stripCitationTags,
-    summarizeCoverage,
     rowActionTarget,
     rowActions,
-    rowIdFor,
+    rowDecision,
+    rowInvariantError,
+    rowInScope,
     rowPrimaryAction,
     rowTypeLabel,
     selectLabelsInColumn,
     sortRows,
+    staleReason,
+    stripCitationTags,
+    summarizeCoverage,
     TABLE_SPEC_VERSION,
     toCsv,
+    toPlainText,
     validateTableSpec,
-    type Column,
     type Cell,
+    type CellValue,
+    type Column,
     type Row,
     type TableSpec,
 } from "@beaver/agent-core/layouts/table";
@@ -43,26 +53,12 @@ function row(id: string, cells: Row["cells"]): Row {
     return { id, cells };
 }
 
-/**
- * The same spec with every filled cell attributed. A value without provenance
- * is itself an issue, so specs written for other checks say where they came
- * from rather than repeating that one everywhere.
- */
-function attributed(spec: TableSpec): TableSpec {
-    return {
-        ...spec,
-        rows: spec.rows.map((r) => ({
-            ...r,
-            cells: Object.fromEntries(
-                Object.entries(r.cells).map(([id, cell]) => [
-                    id,
-                    cell.value
-                        ? { ...cell, provenance: "extracted" as const }
-                        : cell,
-                ]),
-            ),
-        })),
-    };
+/** An answered cell; the producer filled it unless told otherwise. */
+function answered(
+    value: CellValue,
+    provenance: Cell["provenance"] = "system",
+): Cell {
+    return { outcome: "answered", provenance, value } as Cell;
 }
 
 const spec: TableSpec = {
@@ -70,7 +66,7 @@ const spec: TableSpec = {
     columns: [
         { id: "ref", header: "Reference", type: "reference" },
         { id: "year", header: "Year", type: "date" },
-        { id: "cites", header: "Citations", type: "number" },
+        { id: "cites", header: "Citations", type: "text" },
         {
             id: "type",
             header: "Type",
@@ -82,101 +78,101 @@ const spec: TableSpec = {
     ],
     rows: [
         row("a", {
-            ref: {
-                value: {
+            ref: answered(
+                {
                     kind: "reference",
                     display_name: "Smith 2020",
                     subtitle: "Alpha",
                 },
-            },
-            year: { value: { kind: "date", value: "2020" } },
-            cites: { value: { kind: "number", value: 120 } },
-            type: { value: { kind: "select", label: "Article" } },
-            oa: { value: { kind: "boolean", value: true } },
-            methods: { value: { kind: "text", text: "Survey, n = 1,200" } },
+                "system",
+            ),
+            year: answered({ kind: "date", value: "2020" }, "system"),
+            cites: answered({ kind: "text", text: "120" }),
+            type: answered({ kind: "select", label: "Article" }),
+            oa: answered({ kind: "boolean", value: true }),
+            methods: answered({ kind: "text", text: "Survey, n = 1,200" }),
         }),
         row("b", {
-            ref: { value: { kind: "reference", display_name: "Jones 2018" } },
-            year: { value: { kind: "date", value: "2018-05" } },
-            cites: { value: { kind: "number", value: 7 } },
-            type: { value: { kind: "select", label: "Book" } },
-            oa: { value: { kind: "boolean", value: false } },
+            ref: answered(
+                { kind: "reference", display_name: "Jones 2018" },
+                "system",
+            ),
+            year: answered({ kind: "date", value: "2018-05" }, "system"),
+            cites: answered({ kind: "text", text: "7" }),
+            type: answered({ kind: "select", label: "Book" }),
+            oa: answered({ kind: "boolean", value: false }),
         }),
         row("c", {
-            ref: { value: { kind: "reference", display_name: "adams 2022" } },
-            year: { value: { kind: "date", value: "2022-01-15" } },
-            type: { value: { kind: "select", label: "Article" } },
-            methods: { value: { kind: "text", text: "Interviews" } },
+            ref: answered(
+                { kind: "reference", display_name: "adams 2022" },
+                "system",
+            ),
+            year: answered({ kind: "date", value: "2022-01-15" }, "system"),
+            type: answered({ kind: "select", label: "Article" }),
+            methods: answered({ kind: "text", text: "Interviews" }),
         }),
     ],
 };
 
 describe("ids", () => {
-    it("derives stable row ids from the reference", () => {
-        expect(
-            rowIdFor({
-                kind: "item",
-                library_id: 1,
-                zotero_key: "ABCD1234",
-                library_ref: "u",
-            }),
-        ).toBe("item:u:ABCD1234");
-        expect(
-            rowIdFor({ kind: "item", library_id: 3, zotero_key: "ABCD1234" }),
-        ).toBe("item:3:ABCD1234");
-        // A Zotero key is the identity whatever the object is, so an
-        // attachment or annotation row shares the scheme.
-        expect(
-            rowIdFor({
-                kind: "annotation",
-                library_id: 3,
-                zotero_key: "ANNO1234",
-                attachment: { library_id: 3, zotero_key: "ABCD1234" },
-            }),
-        ).toBe("item:3:ANNO1234");
-        expect(
-            rowIdFor({
-                kind: "external",
-                source: "openalex",
-                source_id: "W123",
-            }),
-        ).toBe("ext:openalex:W123");
-        expect(cellIdFor("ext:openalex:W123", "year")).toBe(
-            "ext:openalex:W123/year",
-        );
+    it("allocates opaque row ids that avoid the ones taken", () => {
+        const first = allocateRowId();
+        expect(first).toMatch(/^r[0-9a-f]{10}$/);
+        const taken = new Set([first]);
+        for (let i = 0; i < 20; i += 1) {
+            const next = allocateRowId(taken);
+            expect(taken.has(next)).toBe(false);
+            taken.add(next);
+        }
     });
 
-    it("identifies a context-file row by its external key", () => {
-        expect(
-            rowIdFor({ kind: "file", ext_key: "AB12CD34", label: "notes.pdf" }),
-        ).toBe("file:AB12CD34");
+    it("addresses a cell by row and column id", () => {
+        expect(cellIdFor("r1a2b3c4d5e", "year")).toBe("r1a2b3c4d5e/year");
     });
 });
 
 describe("readSpec", () => {
+    it("reads a table without a version as the first format, and a corrupt file as invalid", () => {
+        expect(readSpec({ id: "t1", columns: [], rows: [] })).toEqual({
+            ok: false,
+            reason: "unsupported_version",
+            specVersion: 1,
+        });
+        expect(readSpec({ broken: true })).toMatchObject({ ok: false, reason: "invalid" });
+        expect(readSpec({ id: "t1", spec_version: 1, columns: [], rows: [] })).toMatchObject({
+            reason: "unsupported_version",
+        });
+    });
+
     const stored = {
         id: "t1",
+        spec_version: TABLE_SPEC_VERSION,
         columns: [{ id: "a", header: "A", type: "text" }],
         rows: [{ id: "r", cells: {} }],
     };
 
-    it("opens a spec written without a version and one written by this build", () => {
+    it("opens a spec written by this build", () => {
         expect(readSpec(stored)).toEqual({ ok: true, spec: stored });
-        const versioned = { ...stored, spec_version: TABLE_SPEC_VERSION };
-        expect(readSpec(versioned)).toEqual({ ok: true, spec: versioned });
     });
 
-    it("refuses a spec from a newer format and reports the version it saw", () => {
-        expect(
-            readSpec({ ...stored, spec_version: TABLE_SPEC_VERSION + 1 }),
-        ).toEqual({
+    it("refuses a spec of an older or newer format and reports the version it saw", () => {
+        // No version means the first format, which this build has no reader for.
+        const { spec_version: _version, ...unversioned } = stored;
+        expect(readSpec(unversioned)).toEqual({
             ok: false,
             reason: "unsupported_version",
-            specVersion: TABLE_SPEC_VERSION + 1,
+            specVersion: 1,
         });
+        for (const specVersion of [1, TABLE_SPEC_VERSION + 1]) {
+            expect(readSpec({ ...stored, spec_version: specVersion })).toEqual({
+                ok: false,
+                reason: "unsupported_version",
+                specVersion,
+            });
+        }
     });
 
-    it("keeps a role, flag or provenance it does not recognise", () => {
+    it("keeps a role, outcome or provenance it does not recognise", () => {
         const future = {
             ...stored,
             columns: [
@@ -187,9 +183,9 @@ describe("readSpec", () => {
                     id: "r",
                     cells: {
                         a: {
-                            value: { kind: "text", text: "x" },
-                            flag: "disputed",
+                            outcome: "disputed",
                             provenance: "delegated",
+                            value: { kind: "text", text: "x" },
                         },
                     },
                 },
@@ -197,7 +193,7 @@ describe("readSpec", () => {
         };
         const result = readSpec(future);
         expect(result.ok).toBe(true);
-        // The spec comes back byte-for-byte, so an old client can hand a stored
+        // The spec comes back unchanged, so an old client can hand a stored
         // table on without flattening what it did not understand.
         expect(result.ok && result.spec).toEqual(future);
     });
@@ -235,28 +231,6 @@ describe("readSpec", () => {
 });
 
 describe("column vocabulary", () => {
-    it("fixes the option set of a screening decision and no other role", () => {
-        expect(
-            hasFixedVocabulary({
-                id: "d",
-                header: "Decision",
-                type: "select",
-                role: "screening_decision",
-            }),
-        ).toBe(true);
-        expect(
-            hasFixedVocabulary({
-                id: "q",
-                header: "Quality",
-                type: "select",
-                role: "quality",
-            }),
-        ).toBe(false);
-        expect(
-            hasFixedVocabulary({ id: "t", header: "T", type: "select" }),
-        ).toBe(false);
-    });
-
     it("reads case, spacing and trailing punctuation as one option", () => {
         const key = normalizeSelectLabel("Quasi-experiment");
         expect(key).toBe("quasi experiment");
@@ -288,6 +262,92 @@ describe("column vocabulary", () => {
     });
 });
 
+describe("scope", () => {
+    const columns: Column[] = [
+        { id: "ref", header: "Item", type: "reference" },
+        {
+            id: "decision",
+            header: "Decision",
+            type: "select",
+            role: "decision",
+        },
+        { id: "sample", header: "Sample", type: "text" },
+    ];
+    const decided = (cell: Cell | undefined): Row =>
+        row("r", cell ? { decision: cell } : {});
+
+    it("keeps every row in scope when the table has no decision column", () => {
+        const plain: TableSpec = {
+            id: "t",
+            columns: [columns[0], columns[2]],
+            rows: [row("r", {})],
+        };
+        expect(rowDecision(plain, plain.rows[0])).toBeUndefined();
+        expect(rowInScope(plain, plain.rows[0])).toBe(true);
+    });
+
+    it("scopes rows by the user's decision, matched under the select key", () => {
+        const table: TableSpec = { id: "t", columns, rows: [] };
+        const include = decided({
+            outcome: "answered",
+            provenance: "user",
+            value: { kind: "select", label: "Include." },
+        });
+        expect(rowDecision(table, include)).toBe("include");
+        expect(rowInScope(table, include)).toBe(true);
+        const exclude = decided({
+            outcome: "answered",
+            provenance: "user",
+            value: { kind: "select", label: "Exclude" },
+        });
+        expect(rowInScope(table, exclude)).toBe(false);
+        // Only a user decision is an override; an undecided row is out of scope.
+        const filled = decided(
+            answered({ kind: "select", label: "Include" }, "document"),
+        );
+        expect(rowDecision(table, filled)).toBeUndefined();
+        expect(rowInScope(table, filled)).toBe(false);
+        expect(rowInScope(table, decided(undefined))).toBe(false);
+    });
+});
+
+describe("column roles", () => {
+    const column = (role?: string, extra: Partial<Column> = {}): Column => ({
+        id: "c",
+        header: "C",
+        type: "select",
+        ...(role !== undefined ? { role } : {}),
+        ...extra,
+    });
+
+    it("fills extraction and criterion columns, and scopes only extraction columns", () => {
+        expect(isExtractionColumn(column())).toBe(true);
+        expect(isFillableColumn(column())).toBe(true);
+        expect(isExtractionColumn(column("criterion"))).toBe(false);
+        expect(isFillableColumn(column("criterion"))).toBe(true);
+        expect(isExtractionColumn(column("decision"))).toBe(false);
+        expect(isFillableColumn(column("decision"))).toBe(false);
+        expect(isFillableColumn(column(undefined, { system: true }))).toBe(false);
+    });
+
+    it("ignores a role this version does not know", () => {
+        const future = column("some_future_role");
+        expect(isExtractionColumn(future)).toBe(false);
+        expect(isFillableColumn(future)).toBe(false);
+    });
+
+    it("keeps an unknown role through readSpec", () => {
+        const raw = {
+            id: "t",
+            spec_version: TABLE_SPEC_VERSION,
+            columns: [column("some_future_role")],
+            rows: [],
+        };
+        const read = readSpec(structuredClone(raw));
+        expect(read.ok && read.spec.columns[0].role).toBe("some_future_role");
+    });
+});
+
 describe("defaults", () => {
     it("treats every column as sortable unless it opts out", () => {
         expect(
@@ -304,13 +364,13 @@ describe("defaults", () => {
                 sortable: false,
             }),
         ).toBe(false);
-        expect(isColumnSortable({ id: "n", header: "", type: "number" })).toBe(
+        expect(isColumnSortable({ id: "n", header: "", type: "text" })).toBe(
             true,
         );
     });
 
-    it("right-aligns numbers and dates by default", () => {
-        expect(columnAlign({ id: "n", header: "", type: "number" })).toBe(
+    it("right-aligns dates by default", () => {
+        expect(columnAlign({ id: "d", header: "", type: "date" })).toBe(
             "end",
         );
         expect(columnAlign({ id: "t", header: "", type: "text" })).toBe(
@@ -320,23 +380,36 @@ describe("defaults", () => {
             columnAlign({
                 id: "n",
                 header: "",
-                type: "number",
+                type: "date",
                 align: "start",
             }),
         ).toBe("start");
     });
 
-    it("reads a missing value as an empty cell", () => {
+    it("reads an unattempted, failed or cleared cell as empty and a finding as not", () => {
         expect(isCellEmpty(undefined)).toBe(true);
-        expect(isCellEmpty({ status: "pending" })).toBe(true);
-        expect(isCellEmpty({ value: { kind: "boolean", value: false } })).toBe(
+        expect(
+            isCellEmpty({
+                outcome: "failed",
+                provenance: "model",
+                error_code: "no_locator",
+                error: "The answer cited no passage.",
+            }),
+        ).toBe(true);
+        expect(isCellEmpty({ outcome: "cleared", provenance: "user" })).toBe(
+            true,
+        );
+        expect(
+            isCellEmpty({ outcome: "not_reported", provenance: "model" }),
+        ).toBe(false);
+        expect(isCellEmpty(answered({ kind: "boolean", value: false }))).toBe(
             false,
         );
     });
 });
 
 describe("sortRows", () => {
-    it("sorts numbers numerically and puts empty cells last in both directions", () => {
+    it("sorts a quantity column numerically and puts empty cells last in both directions", () => {
         expect(
             sortRows(spec, { column_id: "cites", direction: "asc" }).map(
                 (r) => r.id,
@@ -349,6 +422,46 @@ describe("sortRows", () => {
         ).toEqual(["a", "b", "c"]);
     });
 
+    it("sorts every text column numeric-aware, worded answers with the words", () => {
+        const order = (texts: string[]) =>
+            texts
+                .map((text) => answered({ kind: "text", text }))
+                .map((cell) => ({ cell, key: cellSortKey(cell) }))
+                .sort((a, b) => compareSortKeys(a.key, b.key))
+                .map(({ cell }) => (cell.value as { text: string }).text);
+        expect(order(["120", "9", "over 100", "about 4", "10–20", "21.9", "about 12"])).toEqual([
+            "9", "10–20", "21.9", "120", "about 4", "about 12", "over 100",
+        ]);
+        // Thousands groups and decimals compare as numbers.
+        expect(order(["1,200", "950", "12,000,000", "12,500", "1.5", "1.25", "815,383"])).toEqual([
+            "1.25", "1.5", "950", "1,200", "12,500", "815,383", "12,000,000",
+        ]);
+        expect(order(["1", "0.5", ".1", ".05", "+2", "-3", "−4"])).toEqual([
+            "−4", "-3", ".05", ".1", "0.5", "1", "+2",
+        ]);
+        // A total order: answers that open with a number first, by it, then
+        // the rest; every arrival order of the same answers sorts alike.
+        const mixed = ["+10", "<2", "2", "about 4", "≥3", "1,200", "Kenya", ".5"];
+        const expected = [".5", "2", "+10", "1,200", "<2", "≥3", "about 4", "Kenya"];
+        for (let shift = 0; shift < mixed.length; shift++) {
+            const rotated = [...mixed.slice(shift), ...mixed.slice(0, shift)];
+            expect(order(rotated)).toEqual(expected);
+            expect(order([...rotated].reverse())).toEqual(expected);
+        }
+        expect(order(["+10", "<2", "2"])).toEqual(["2", "+10", "<2"]);
+        // Case and accents aside, digit runs as numbers.
+        expect(order(["Study 10", "study 9", "Étude 2", "etude 1"])).toEqual([
+            "etude 1", "Étude 2", "study 9", "Study 10",
+        ]);
+        expect(cellSortKey(answered({ kind: "text", text: "Over 100" }))).toEqual({
+            text: "over 100",
+        });
+        expect(cellSortKey(answered({ kind: "text", text: "1,200" }))).toEqual({
+            text: "1,200",
+            lead: 1200,
+        });
+    });
+
     it("sorts ISO dates of mixed precision lexically", () => {
         expect(
             sortRows(spec, { column_id: "year", direction: "asc" }).map(
@@ -357,9 +470,26 @@ describe("sortRows", () => {
         ).toEqual(["b", "a", "c"]);
     });
 
+    it("sorts a reference by the title it shows, else its short label", () => {
+        expect(
+            cellSortKey(
+                answered({
+                    kind: "reference",
+                    display_name: "Adams 2020",
+                    title: "Zeta title",
+                }),
+            ),
+        ).toBe("zeta title");
+        expect(
+            cellSortKey(
+                answered({ kind: "reference", display_name: "Adams 2020" }),
+            ),
+        ).toBe("adams 2020");
+    });
+
     it("sorts text case-insensitively", () => {
         expect(
-            cellSortKey({ value: { kind: "reference", display_name: "Zed" } }),
+            cellSortKey(answered({ kind: "reference", display_name: "Zed" })),
         ).toBe("zed");
         expect(
             sortRows(spec, { column_id: "ref", direction: "asc" }).map(
@@ -398,12 +528,18 @@ describe("filterRows", () => {
         ).toEqual(["a"]);
     });
 
-    it("applies inclusive ranges to numbers and dates, excluding empty cells", () => {
+    it("filters a quantity column as text, and ranges only dates", () => {
+        expect(
+            filterRows(spec, [
+                { column_id: "cites", kind: "contains", text: "12" },
+            ]).map((r) => r.id),
+        ).toEqual(["a"]);
+        // A range is for dates: a quantity's text is not compared as a number.
         expect(
             filterRows(spec, [
                 { column_id: "cites", kind: "range", min: 7, max: 119 },
             ]).map((r) => r.id),
-        ).toEqual(["b"]);
+        ).toEqual([]);
         expect(
             filterRows(spec, [
                 { column_id: "year", kind: "range", min: "2020" },
@@ -452,71 +588,9 @@ describe("filterRows", () => {
     });
 });
 
-describe("citations", () => {
-    const citation: Citation = {
-        citation_id: "c1",
-        requested_ref: {
-            kind: "zotero",
-            library_id: 1,
-            zotero_key: "ABCD1234",
-            loc: { kind: "sentence", raw: "s12", value: "12" } as any,
-        },
-        resolved_ref: {
-            kind: "zotero",
-            library_id: 1,
-            zotero_key: "ABCD1234",
-            library_ref: "u",
-            loc: { kind: "sentence", raw: "s12", value: "12" } as any,
-        },
-        raw_tag: '<citation id="1-ABCD1234" loc="s12"/>',
-    };
-
-    it("finds citation keys in text", () => {
-        expect(
-            citationKeysInText(
-                'Surveys <citation id="1-ABCD1234" loc="s12"/> and <citation external_id="W1"/>.',
-            ),
-        ).toEqual(["zotero:1-ABCD1234:s12", "external:W1"]);
-        expect(citationKeysInText("no tags")).toEqual([]);
-    });
-
-    it("collects keys from values and details, de-duplicated", () => {
-        const withCites: TableSpec = {
-            ...spec,
-            rows: [
-                row("a", {
-                    methods: {
-                        value: {
-                            kind: "text",
-                            text: 'x <citation id="1-ABCD1234" loc="s12"/>',
-                        },
-                        details: {
-                            kind: "list",
-                            items: [
-                                'y <citation id="1-ABCD1234" loc="s12"/>',
-                                'z <citation external_id="W1"/>',
-                            ],
-                        },
-                    },
-                }),
-            ],
-        };
-        expect(citationKeysInTable(withCites)).toEqual([
-            "zotero:1-ABCD1234:s12",
-            "external:W1",
-        ]);
-    });
-
-    it("indexes citation metadata under requested, resolved and raw-tag keys", () => {
-        const byKey = citationsByKey([citation]);
-        expect(byKey["zotero:1-ABCD1234:s12"]).toBe(citation);
-        expect(byKey["zotero:u-ABCD1234:s12"]).toBe(citation);
-    });
-});
-
 describe("validateTableSpec", () => {
     it("accepts a well-formed spec", () => {
-        expect(validateTableSpec(attributed(spec))).toEqual([]);
+        expect(validateTableSpec(spec)).toEqual([]);
     });
 
     it("reports duplicate ids, unknown columns and sort columns", () => {
@@ -526,7 +600,10 @@ describe("validateTableSpec", () => {
                 { id: "a", header: "A", type: "text" },
                 { id: "a", header: "A2", type: "text" },
             ],
-            rows: [row("r", { zzz: {} }), row("r", {})],
+            rows: [
+                row("r", { zzz: answered({ kind: "text", text: "x" }) }),
+                row("r", {}),
+            ],
             sort: { column_id: "missing", direction: "asc" },
         };
         expect(validateTableSpec(bad).map((i) => i.code)).toEqual([
@@ -540,15 +617,8 @@ describe("validateTableSpec", () => {
     it("reports a value kind that disagrees with the column type", () => {
         const bad: TableSpec = {
             id: "t",
-            columns: [{ id: "n", header: "N", type: "number" }],
-            rows: [
-                row("r", {
-                    n: {
-                        value: { kind: "text", text: "12" },
-                        provenance: "extracted",
-                    },
-                }),
-            ],
+            columns: [{ id: "n", header: "N", type: "date" }],
+            rows: [row("r", { n: answered({ kind: "text", text: "12" }) })],
         };
         expect(validateTableSpec(bad)).toMatchObject([
             { code: "value_kind_mismatch", row_id: "r", column_id: "n" },
@@ -560,10 +630,7 @@ describe("validateTableSpec", () => {
             ...spec,
             rows: [
                 row("r", {
-                    type: {
-                        value: { kind: "select", label: "Preprint" },
-                        provenance: "asserted",
-                    },
+                    type: answered({ kind: "select", label: "Preprint" }),
                 }),
             ],
         };
@@ -576,190 +643,185 @@ describe("validateTableSpec", () => {
             columns: [{ id: "type", header: "T", type: "select" }],
             rows: [
                 row("r", {
-                    type: {
-                        value: { kind: "select", label: "Preprint" },
-                        provenance: "asserted",
-                    },
+                    type: answered({ kind: "select", label: "Preprint" }),
                 }),
             ],
         };
         expect(validateTableSpec(free)).toEqual([]);
     });
 
-    it("tells a fixed-vocabulary violation apart from an open select's new label", () => {
-        const columns: Column[] = [
-            {
-                id: "decision",
-                header: "Decision",
-                type: "select",
-                role: "screening_decision",
-                options: [{ label: "Include" }, { label: "Exclude" }],
+    it("reports a cell that breaks an outcome or provenance invariant", () => {
+        const text = { kind: "text", text: "Survey" } as const;
+        const filler = { outcome: "answered", provenance: "model", value: text } as const;
+        const broken = {
+            answeredWithoutValue: { outcome: "answered", provenance: "model" },
+            notReportedWithValue: { outcome: "not_reported", provenance: "model", value: text },
+            failedWithoutError: { outcome: "failed", provenance: "model" },
+            failedWithoutCode: { outcome: "failed", provenance: "model", error: "x" },
+            errorOnAnswer: { ...answered(text), error: "x" },
+            errorCodeOnNotReported: { outcome: "not_reported", provenance: "model", error_code: "deadline" },
+            reasoningOnFailure: {
+                outcome: "failed",
+                provenance: "model",
+                error_code: "no_locator",
+                error: "x",
+                reasoning: "why",
             },
-        ];
-        const decided = (label: string): TableSpec => ({
+            evidenceOnUserCell: {
+                ...answered(text, "user"),
+                evidence: [{ document: "u-D", locator: "s1", quote: "Survey" }],
+            },
+            documentsOnSystemCell: { ...answered(text), documents: ["u-D"] },
+            evidenceOutsideItsDocuments: {
+                ...filler,
+                documents: ["u-D"],
+                evidence: [{ document: "u-E", locator: "s1", quote: "Survey" }],
+            },
+            evidenceWithoutLocator: {
+                ...filler,
+                documents: ["u-D"],
+                evidence: [{ document: "u-D", quote: "Survey" }],
+            },
+            unknownConfidence: { ...filler, confidence: "certain" },
+            clearedByFiller: { outcome: "cleared", provenance: "model" },
+            unknownOutcome: { outcome: "pending", provenance: "model" },
+            unknownProvenance: { ...answered(text), provenance: "extracted" },
+        } as unknown as Record<string, Cell>;
+        const bad: TableSpec = {
             id: "t",
-            columns,
-            rows: [
-                row("r", {
-                    decision: {
-                        value: { kind: "select", label },
-                        provenance: "asserted",
-                        details: { kind: "text", text: "Wrong population" },
-                    },
-                }),
-            ],
-        });
-        expect(validateTableSpec(decided("Maybe"))).toMatchObject([
-            {
-                code: "fixed_vocabulary_violation",
-                row_id: "r",
-                column_id: "decision",
-            },
-        ]);
-        expect(validateTableSpec(decided("Exclude"))).toEqual([]);
+            columns: [{ id: "m", header: "M", type: "text" }],
+            rows: Object.entries(broken).map(([id, cell]) =>
+                row(id, { m: cell }),
+            ),
+        };
+        expect(
+            validateTableSpec(bad)
+                .filter((i) => i.code === "invalid_cell")
+                .map((i) => [i.code, i.row_id, i.column_id]),
+        ).toEqual(Object.keys(broken).map((id) => ["invalid_cell", id, "m"]));
+        expect(cellInvariantError(broken.failedWithoutError)).toMatch(
+            /error and an error code exactly when its outcome is failed/,
+        );
+        expect(cellInvariantError(broken.errorCodeOnNotReported)).toMatch(
+            /error and an error code exactly when its outcome is failed/,
+        );
+        expect(cellInvariantError(broken.evidenceOutsideItsDocuments)).toMatch(
+            /names one of the cell's documents/,
+        );
     });
 
-    it("reports a screening decision that carries no reason", () => {
-        const columns: Column[] = [
-            {
-                id: "decision",
-                header: "Decision",
-                type: "select",
-                role: "screening_decision",
-            },
-        ];
-        const bare: TableSpec = {
-            id: "t",
-            columns,
-            rows: [
-                row("r", {
-                    decision: {
-                        value: { kind: "select", label: "Exclude" },
-                        provenance: "asserted",
-                    },
-                }),
-            ],
-        };
-        expect(validateTableSpec(bare)).toMatchObject([
-            {
-                code: "missing_decision_details",
-                row_id: "r",
-                column_id: "decision",
-            },
+    it("reports a row whose documents or failure are malformed", () => {
+        const rows = [
+            { id: "documents", documents: [""], cells: {} },
+            { id: "failure", failure: { code: "encrypted" }, cells: {} },
+        ] as unknown as Row[];
+        expect(rowInvariantError(rows[0])).toMatch(/list of document ids/);
+        expect(
+            validateTableSpec({ id: "t", columns: [], rows }).map((i) => [i.code, i.row_id]),
+        ).toEqual([
+            ["invalid_row", "documents"],
+            ["invalid_row", "failure"],
         ]);
         expect(
-            validateTableSpec({
-                ...bare,
-                rows: [
-                    row("r", {
-                        decision: {
-                            value: { kind: "select", label: "Exclude" },
-                            provenance: "asserted",
-                            details: { kind: "text", text: "Not a trial" },
-                        },
-                    }),
-                ],
-            }),
-        ).toEqual([]);
+            rowInvariantError({ id: "ok", documents: ["u-D"], failure: { code: "encrypted", message: "Locked." }, cells: {} }),
+        ).toBeUndefined();
     });
 
-    it("reports a value that does not say where it came from", () => {
-        const unattributed: TableSpec = {
+    it("accepts every well-formed outcome", () => {
+        const good: TableSpec = {
             id: "t",
             columns: [{ id: "m", header: "M", type: "text" }],
             rows: [
-                row("r1", { m: { value: { kind: "text", text: "Survey" } } }),
-                // An empty and a pending cell have nothing to attribute.
-                row("r2", { m: {} }),
-                row("r3", { m: { status: "pending" } }),
-            ],
-        };
-        expect(validateTableSpec(unattributed)).toMatchObject([
-            { code: "missing_provenance", row_id: "r1", column_id: "m" },
-        ]);
-        expect(validateTableSpec(attributed(unattributed))).toEqual([]);
-    });
-
-    it("reports citation tags without matching metadata", () => {
-        const cited: TableSpec = {
-            id: "t",
-            columns: [{ id: "m", header: "M", type: "text" }],
-            rows: [
-                row("r", {
+                row("doc", {
                     m: {
-                        value: {
-                            kind: "text",
-                            text: 'see <citation external_id="W9"/>',
-                        },
-                        provenance: "extracted",
+                        outcome: "answered",
+                        provenance: "model",
+                        value: { kind: "text", text: "Survey" },
+                        documents: ["u-D"],
+                        evidence: [
+                            { document: "u-D", locator: "s1", quote: "A survey", page: 0, context: "Table 1. Methods" },
+                        ],
+                        reasoning: "Stated in the methods.",
+                        confidence: "low",
+                        stale: true,
                     },
                 }),
+                // A key this build does not know is kept and ignored.
+                row("unknownKey", {
+                    m: {
+                        outcome: "answered",
+                        provenance: "model",
+                        value: { kind: "text", text: "Not discussed" },
+                        documents: ["u-D"],
+                        absent: true,
+                        reasoning: "No section on it.",
+                    } as unknown as Cell,
+                }),
+                row("meta", {
+                    m: {
+                        outcome: "not_reported",
+                        provenance: "model",
+                        reasoning: "The abstract gives no method.",
+                    },
+                }),
+                row("failed", {
+                    m: {
+                        outcome: "failed",
+                        provenance: "model",
+                        error: "The answer cited no passage.",
+                        error_code: "no_locator",
+                    },
+                }),
+                row("cleared", {
+                    m: { outcome: "cleared", provenance: "user" },
+                }),
+                row("unattempted", {}),
             ],
         };
-        expect(validateTableSpec(cited)).toMatchObject([
-            { code: "unresolved_citation", row_id: "r", column_id: "m" },
-        ]);
-        expect(
-            validateTableSpec({
-                ...cited,
-                citations: [
-                    {
-                        citation_id: "x",
-                        requested_ref: { kind: "external", external_id: "W9" },
-                    } as Citation,
-                ],
-            }),
-        ).toEqual([]);
+        expect(validateTableSpec(good)).toEqual([]);
     });
 
-    it("checks the citations behind a non-text cell, which live in its details", () => {
-        const evidence: TableSpec = {
+    it("reports duplicate sources, a second items source and an unknown row origin", () => {
+        const sourced: TableSpec = {
             id: "t",
-            columns: [{ id: "n", header: "Sample", type: "number" }],
+            columns: [{ id: "m", header: "M", type: "text" }],
+            sources: [
+                { id: "s1", type: "items", ids: ["u-AAAA1111"] },
+                {
+                    id: "s1",
+                    type: "library",
+                    scope: { kind: "tag", library_ref: "u", tag: "x" },
+                },
+                { id: "s2", type: "items", ids: ["u-BBBB2222"] },
+            ],
             rows: [
-                row("r", {
-                    n: {
-                        value: { kind: "number", value: 1200 },
-                        provenance: "extracted",
-                        details: {
-                            kind: "text",
-                            text: 'reported in <citation external_id="W9"/>',
-                        },
-                    },
-                }),
+                {
+                    id: "r",
+                    cells: {},
+                    origin: [
+                        { source: "s2", date: "2026-10-01" },
+                        { source: "s9", date: "2026-10-01" },
+                    ],
+                },
             ],
         };
-        expect(validateTableSpec(evidence)).toMatchObject([
-            { code: "unresolved_citation", row_id: "r", column_id: "n" },
-        ]);
         expect(
-            validateTableSpec({
-                ...evidence,
-                citations: [
-                    {
-                        citation_id: "x",
-                        requested_ref: { kind: "external", external_id: "W9" },
-                    } as Citation,
-                ],
-            }),
-        ).toEqual([]);
+            validateTableSpec(sourced).map((i) => [i.code, i.row_id]),
+        ).toEqual([
+            ["duplicate_source_id", undefined],
+            ["multiple_items_sources", undefined],
+            ["unknown_origin_source", "r"],
+        ]);
     });
 });
 
 describe("plain text", () => {
     const cited =
-        'Survey of 1,200 adults <citation id="1-ABCD1234" loc="s12"/> in 2019.';
+        'Survey of 1,200 adults <citation id="u-ABCD1234" loc="s12"/> in 2019.';
     const citedSpec: TableSpec = {
         id: "t",
         columns: [{ id: "m", header: "Methods", type: "text" }],
-        rows: [
-            row("a", {
-                m: {
-                    value: { kind: "text", text: cited },
-                    provenance: "extracted",
-                },
-            }),
-        ],
+        rows: [row("a", { m: answered({ kind: "text", text: cited }) })],
     };
 
     it("leaves citation markup out of the text form of a value", () => {
@@ -771,13 +833,13 @@ describe("plain text", () => {
 
     it("sorts on the prose rather than on the markup in front of it", () => {
         expect(
-            cellSortKey({
-                value: {
+            cellSortKey(
+                answered({
                     kind: "text",
                     text: '<citation external_id="W1"/>Zeta',
-                },
-            }),
-        ).toBe("zeta");
+                }),
+            ),
+        ).toEqual({ text: "zeta" });
     });
 
     it("does not let a text filter match the citation tags", () => {
@@ -795,7 +857,7 @@ describe("plain text", () => {
 
     it("exports a CSV cell without the tags", () => {
         expect(toCsv(citedSpec)).toBe(
-            'Methods,Methods — evidence,Methods — sources,Methods — state\r\n"Survey of 1,200 adults in 2019.",,zotero:1-ABCD1234:s12,extracted',
+            'Methods,Methods — state\r\n"Survey of 1,200 adults in 2019.",system',
         );
     });
 });
@@ -807,18 +869,101 @@ describe("toCsv", () => {
             sortRows(spec, { column_id: "cites", direction: "desc" }),
         );
         expect(csv.split("\r\n")).toEqual([
-            "Reference,Reference — evidence,Reference — sources,Reference — state,Year,Year — evidence,Year — sources,Year — state,Citations,Citations — evidence,Citations — sources,Citations — state,Type,Type — evidence,Type — sources,Type — state,Open access,Open access — evidence,Open access — sources,Open access — state,Methods,Methods — evidence,Methods — sources,Methods — state",
-            'Smith 2020 — Alpha,,,,2020,,,,120,,,,Article,,,,true,,,,"Survey, n = 1,200",,,',
-            "Jones 2018,,,,2018-05,,,,7,,,,Book,,,,false,,,,,,,",
-            "adams 2022,,,,2022-01-15,,,,,,,,Article,,,,,,,,Interviews,,,",
+            "Reference,Reference — state,Year,Year — state,Citations,Citations — state,Type,Type — state,Open access,Open access — state,Methods,Methods — state",
+            'Smith 2020 — Alpha,system,2020,system,120,system,Article,system,true,system,"Survey, n = 1,200",system',
+            "Jones 2018,system,2018-05,system,7,system,Book,system,false,system,,",
+            "adams 2022,system,2022-01-15,system,,,Article,system,,,Interviews,system",
         ]);
     });
+
+    it("writes evidence, reasoning and state beside the value, never confidence, escaping formula-like text", () => {
+        const table: TableSpec = {
+            id: "outcomes",
+            columns: [{ id: "a", header: "=Header", type: "text" }],
+            rows: [
+                { id: "unattempted", cells: {} },
+                {
+                    id: "finding",
+                    cells: {
+                        a: {
+                            outcome: "not_reported",
+                            provenance: "model",
+                            reasoning: "=Nothing on sample size",
+                        },
+                    },
+                },
+                {
+                    id: "answer",
+                    documents: ["u-DOC1"],
+                    cells: {
+                        a: {
+                            outcome: "answered",
+                            provenance: "model",
+                            value: { kind: "text", text: "120 adults" },
+                            documents: ["u-DOC1"],
+                            confidence: "low",
+                            stale: true,
+                            evidence: [
+                                {
+                                    document: "u-DOC1",
+                                    locator: "s1",
+                                    page: 3,
+                                    quote: 'The study enrolled "120" participants.',
+                                    context: "Table 1. Sample",
+                                },
+                                { document: "u-DOC1", locator: "s9", quote: "120 adults" },
+                            ],
+                        },
+                    },
+                },
+                {
+                    id: "silent",
+                    documents: ["u-DOC1"],
+                    cells: {
+                        a: {
+                            outcome: "answered",
+                            provenance: "model",
+                            value: { kind: "text", text: "Not discussed" },
+                            documents: ["u-DOC1"],
+                            confidence: "high",
+                        },
+                    },
+                },
+                {
+                    id: "failed",
+                    cells: {
+                        a: {
+                            outcome: "failed",
+                            provenance: "model",
+                            error_code: "no_locator",
+                            error: "no passage",
+                        },
+                    },
+                },
+            ],
+        };
+        const lines = toCsv(table).split("\r\n");
+        expect(lines[0]).toBe(
+            "'=Header,'=Header — evidence,'=Header — reasoning,'=Header — state",
+        );
+        expect(lines[1]).toBe(",,,");
+        expect(lines[2]).toBe(
+            "Not reported,,'=Nothing on sample size,not_reported; title and abstract; model",
+        );
+        expect(lines[3]).toBe(
+            '120 adults,"u-DOC1 s1: The study enrolled ""120"" participants. [Table 1. Sample]\nu-DOC1 s9: 120 adults",,stale; model',
+        );
+        expect(lines[4]).toBe("Not discussed,,,model");
+        expect(lines[5]).toBe(",,,failed; no passage; model");
+        expect(toCsv(table)).not.toMatch(/confidence|\blow\b|\bhigh\b/);
+    });
+
 });
 
 describe("anchor column", () => {
     it("prefers the declared anchor, then the first reference column, then the first column", () => {
         const columns: Column[] = [
-            { id: "year", header: "Year", type: "number" },
+            { id: "year", header: "Year", type: "date" },
             { id: "item", header: "Item", type: "reference" },
         ];
         const base: TableSpec = { id: "t", columns, rows: [] };
@@ -848,6 +993,8 @@ describe("row actions", () => {
         return { id: "r", cells: {}, ...partial };
     }
 
+    const item = { library_ref: "u", library_id: 1, zotero_key: "K" };
+    const file = { library_ref: "u", library_id: 1, zotero_key: "F" };
     const libraryCopy = { library_id: 1, zotero_key: "K" };
     const externalRef: ExternalReference = {
         source: "openalex",
@@ -857,13 +1004,9 @@ describe("row actions", () => {
     };
 
     it("treats a Zotero object, an explicit flag and an external reference with a library copy as in-library", () => {
-        expect(
-            isRowInLibrary(
-                mkRow({
-                    ref: { kind: "item", library_id: 1, zotero_key: "K" },
-                }),
-            ),
-        ).toBe(true);
+        expect(isRowInLibrary(mkRow({ ref: { kind: "item", ...item } }))).toBe(
+            true,
+        );
         expect(isRowInLibrary(mkRow({}))).toBe(false);
         expect(isRowInLibrary(mkRow({ in_library: true }))).toBe(true);
         expect(
@@ -942,30 +1085,40 @@ describe("row actions", () => {
     });
 
     it("opens a library item's named file, and lets the host pick one otherwise", () => {
-        const attachment = { library_id: 1, zotero_key: "F" };
         const withFile = mkRow({
-            ref: { kind: "item", library_id: 1, zotero_key: "K", attachment },
+            ref: { kind: "item", ...item },
+            documents: ["u-F"],
         });
         expect(rowActions(spec, withFile)).toEqual(["reveal", "open"]);
+        // The document id names its library portably; the item's rowid
+        // stands for it in the same library.
         expect(rowActionTarget(withFile, "open")).toEqual({
             kind: "open_file",
-            ref: attachment,
+            ref: { library_ref: "u", library_id: 1, zotero_key: "F" },
         });
-        const withoutFile = mkRow({
-            ref: { kind: "item", library_id: 1, zotero_key: "K" },
-        });
+        const withoutFile = mkRow({ ref: { kind: "item", ...item } });
         expect(rowActionTarget(withoutFile, "open")).toEqual({
             kind: "open_item",
-            ref: { library_id: 1, zotero_key: "K", library_ref: undefined },
+            ref: item,
         });
         expect(rowActionTarget(withFile, "import")).toBeUndefined();
+    });
+
+    it("targets a ref from another device by its library_ref, with the unresolved rowid", () => {
+        const travelled = mkRow({
+            ref: { kind: "item", library_ref: "g42", zotero_key: "K" },
+        });
+        expect(rowActionTarget(travelled, "reveal")).toEqual({
+            kind: "reveal_item",
+            ref: { library_ref: "g42", library_id: 0, zotero_key: "K" },
+        });
     });
 
     it("withdraws a Zotero row's verbs when the producer marks it out of the library", () => {
         // `in_library: false` is the producer knowing better — the item was
         // deleted or is out of reach — so reveal and open go with it.
         const gone = mkRow({
-            ref: { kind: "item", library_id: 1, zotero_key: "K" },
+            ref: { kind: "item", ...item },
             in_library: false,
         });
         expect(rowActions(spec, gone)).toEqual([]);
@@ -975,9 +1128,10 @@ describe("row actions", () => {
                 mkRow({
                     ref: {
                         kind: "annotation",
+                        library_ref: "u",
                         library_id: 1,
                         zotero_key: "A",
-                        attachment: { library_id: 1, zotero_key: "F" },
+                        attachment: file,
                     },
                     in_library: false,
                 }),
@@ -987,12 +1141,7 @@ describe("row actions", () => {
 
     it("opens an attachment row itself and reveals it in the library", () => {
         const row = mkRow({
-            ref: {
-                kind: "attachment",
-                library_id: 1,
-                zotero_key: "F",
-                parent_item: { library_id: 1, zotero_key: "K" },
-            },
+            ref: { kind: "attachment", ...file, parent_item: item },
         });
         expect(rowActions(spec, row)).toEqual(["reveal", "open"]);
         expect(rowActionTarget(row, "open")?.kind).toBe("open_file");
@@ -1000,56 +1149,49 @@ describe("row actions", () => {
     });
 
     it("opens an annotation in the reader and reveals its bibliographic item", () => {
-        const attachment = { library_id: 1, zotero_key: "F" };
-        const parent = { library_id: 1, zotero_key: "K" };
+        const annotation = { library_ref: "u", library_id: 1, zotero_key: "A" };
         const row = mkRow({
             ref: {
                 kind: "annotation",
-                library_id: 1,
-                zotero_key: "A",
-                attachment,
-                parent_item: parent,
+                ...annotation,
+                attachment: file,
+                parent_item: item,
             },
         });
         expect(rowPrimaryAction(row)).toBe("open");
         expect(rowActionTarget(row, "open")).toEqual({
             kind: "open_annotation",
-            ref: { library_id: 1, zotero_key: "A", library_ref: undefined },
-            attachment,
+            ref: annotation,
+            attachment: file,
         });
         expect(rowActionTarget(row, "reveal")).toEqual({
             kind: "reveal_item",
-            ref: parent,
+            ref: item,
         });
         // Without a bibliographic item, the attachment is what there is to reveal.
         const standalone = mkRow({
-            ref: {
-                kind: "annotation",
-                library_id: 1,
-                zotero_key: "A",
-                attachment,
-            },
+            ref: { kind: "annotation", ...annotation, attachment: file },
         });
-        expect(rowActionTarget(standalone, "reveal")?.ref).toEqual(attachment);
+        expect(rowActionTarget(standalone, "reveal")?.ref).toEqual(file);
     });
 
     it("offers a context-file row only its file: neither in the library nor importable", () => {
-        const file = mkRow({
+        const contextFile = mkRow({
             id: "file",
             ref: { kind: "file", ext_key: "AB12CD34", label: "notes.pdf" },
         });
-        expect(isRowInLibrary(file)).toBe(false);
-        expect(rowActions(spec, file)).toEqual(["open"]);
-        expect(rowActionTarget(file, "open")).toEqual({
+        expect(isRowInLibrary(contextFile)).toBe(false);
+        expect(rowActions(spec, contextFile)).toEqual(["open"]);
+        expect(rowActionTarget(contextFile, "open")).toEqual({
             kind: "open_external_file",
             ext_key: "AB12CD34",
         });
-        expect(rowPrimaryAction(file)).toBe("open");
+        expect(rowPrimaryAction(contextFile)).toBe("open");
     });
 
     it("lets a row narrow the table's verbs, and offers none without a ref", () => {
         const inLib = mkRow({
-            ref: { kind: "item", library_id: 1, zotero_key: "K" },
+            ref: { kind: "item", ...item },
             actions: ["reveal"],
         });
         expect(rowActions(spec, inLib)).toEqual(["reveal"]);
@@ -1068,16 +1210,17 @@ describe("row types and expanded fields", () => {
     };
     const item = (id: string): Row => ({
         id,
-        ref: { kind: "item", library_id: 1, zotero_key: id },
+        ref: { kind: "item", library_ref: "u", library_id: 1, zotero_key: id },
         cells: {},
     });
     const annotation: Row = {
         id: "a",
         ref: {
             kind: "annotation",
+            library_ref: "u",
             library_id: 1,
             zotero_key: "A",
-            attachment: { library_id: 1, zotero_key: "F" },
+            attachment: { library_ref: "u", library_id: 1, zotero_key: "F" },
         },
         cells: {},
     };
@@ -1111,6 +1254,7 @@ describe("row types and expanded fields", () => {
                     id: "f",
                     ref: {
                         kind: "attachment",
+                        library_ref: "u",
                         library_id: 1,
                         zotero_key: "F",
                     },
@@ -1208,33 +1352,25 @@ describe("row types and expanded fields", () => {
         ).toBe("Figure 2");
     });
 
-    it("lists a labelled detail and an annotation's parts as fields of their own", () => {
-        // The label names the field and is stripped from the details, so a
-        // renderer never prints it twice.
+    it("lists an annotation's parts as fields of their own and nothing for other cells", () => {
         expect(
-            cellExpandedFields({
-                value: { kind: "reference", display_name: "x" },
-                details: { kind: "text", label: "Abstract", text: "…" },
-            }),
-        ).toEqual([
-            { label: "Abstract", details: { kind: "text", text: "…" } },
-        ]);
-        // An unlabelled detail stays with its cell.
-        expect(
-            cellExpandedFields({
-                value: { kind: "text", text: "x" },
-                details: { kind: "list", items: ["a"] },
-            }),
+            cellExpandedFields(
+                answered({ kind: "reference", display_name: "x" }, "system"),
+            ),
         ).toEqual([]);
+        expect(cellExpandedFields(undefined)).toEqual([]);
         expect(
-            cellExpandedFields({
-                value: {
-                    kind: "annotation",
-                    annotation_type: "highlight",
-                    text: "A passage",
-                    comment: "A note",
-                },
-            }).map((f) => [
+            cellExpandedFields(
+                answered(
+                    {
+                        kind: "annotation",
+                        annotation_type: "highlight",
+                        text: "A passage",
+                        comment: "A note",
+                    },
+                    "system",
+                ),
+            ).map((f) => [
                 f.label,
                 f.details.kind === "text" && f.details.text,
             ]),
@@ -1246,34 +1382,38 @@ describe("row types and expanded fields", () => {
 });
 
 describe("anchor cells and row kinds", () => {
+    const passage = answered(
+        { kind: "annotation", text: "A passage" },
+        "system",
+    );
     const spec: TableSpec = {
         id: "t",
         columns: [{ id: "item", header: "Item", type: "reference" }],
         rows: [
             {
-                id: "item:1:K",
-                ref: { kind: "item", library_id: 1, zotero_key: "K" },
-                cells: {
-                    item: {
-                        value: { kind: "annotation", text: "A passage" },
-                        provenance: "imported",
-                    },
+                id: "rK",
+                ref: {
+                    kind: "item",
+                    library_ref: "u",
+                    library_id: 1,
+                    zotero_key: "K",
                 },
+                cells: { item: passage },
             },
             {
-                id: "item:1:A",
+                id: "rA",
                 ref: {
                     kind: "annotation",
+                    library_ref: "u",
                     library_id: 1,
                     zotero_key: "A",
-                    attachment: { library_id: 1, zotero_key: "F" },
-                },
-                cells: {
-                    item: {
-                        value: { kind: "annotation", text: "A passage" },
-                        provenance: "imported",
+                    attachment: {
+                        library_ref: "u",
+                        library_id: 1,
+                        zotero_key: "F",
                     },
                 },
+                cells: { item: passage },
             },
         ],
     };
@@ -1281,26 +1421,50 @@ describe("anchor cells and row kinds", () => {
     it("accepts an annotation value in a reference column only under an annotation ref", () => {
         const issues = validateTableSpec(spec);
         expect(issues.map((i) => [i.code, i.row_id])).toEqual([
-            ["anchor_kind_mismatch", "item:1:K"],
+            ["anchor_kind_mismatch", "rK"],
         ]);
     });
 
     it("sorts, filters and exports an annotation by its passage", () => {
-        const cell: Cell = {
-            value: {
+        const cell = answered(
+            {
                 kind: "annotation",
                 text: "Bold claim",
                 comment: "Check this",
             },
-        };
+            "system",
+        );
         expect(cellSortKey(cell)).toBe("bold claim");
         expect(cellValueText(cell.value)).toBe("Bold claim — Check this");
+    });
+
+    it("includes a reference's title in its text, for search and export", () => {
         expect(
-            cellSortKey({
-                value: { kind: "annotation", comment: "Only a note" },
+            cellValueText({
+                kind: "reference",
+                display_name: "Alpha 2020",
+                title: "Sampling hard-to-reach groups",
+                subtitle: "Alpha, A.",
             }),
+        ).toBe("Alpha 2020 — Sampling hard-to-reach groups — Alpha, A.");
+        expect(
+            cellValueText({
+                kind: "reference",
+                display_name: "Same",
+                title: "Same",
+            }),
+        ).toBe("Same");
+        expect(
+            cellSortKey(
+                answered(
+                    { kind: "annotation", comment: "Only a note" },
+                    "system",
+                ),
+            ),
         ).toBe("only a note");
-        expect(cellSortKey({ value: { kind: "annotation" } })).toBeNull();
+        expect(
+            cellSortKey(answered({ kind: "annotation" }, "system")),
+        ).toBeNull();
     });
 });
 
@@ -1328,8 +1492,42 @@ describe("column progress validation", () => {
     });
 });
 
+describe("column types", () => {
+    it("have no number type: a column of one is not a supported definition", () => {
+        const spec: TableSpec = {
+            id: "t",
+            columns: [{ id: "n", header: "N", type: "number" as never }],
+            rows: [],
+        };
+        expect(validateTableSpec(spec).map((i) => i.code)).toEqual(["invalid_column_definition"]);
+    });
+});
+
+describe("evidence heading and uncited answers", () => {
+    const base = { provenance: "model", documents: ["u-D"] } as const;
+
+    it("heads passages by outcome alone", () => {
+        expect(evidenceHeading({ ...base, outcome: "not_reported" } as Cell)).toBe("Closest passages");
+        for (const value of [
+            { kind: "boolean", value: false },
+            { kind: "select", label: "Not discussed" },
+            { kind: "text", text: "12" },
+        ])
+            expect(evidenceHeading({ ...base, outcome: "answered", value } as Cell)).toBe("Evidence");
+    });
+
+    it("tells a document answer without passages apart", () => {
+        const answer = { ...base, outcome: "answered", value: { kind: "boolean", value: false } } as Cell;
+        expect(isUncitedAnswer(answer)).toBe(true);
+        expect(isUncitedAnswer({ ...answer, evidence: [{ document: "u-D", locator: "s1", quote: "q" }] })).toBe(false);
+        expect(isUncitedAnswer({ ...answer, documents: undefined })).toBe(false);
+        expect(isUncitedAnswer({ ...answer, provenance: "user", documents: undefined })).toBe(false);
+        expect(isUncitedAnswer({ ...base, outcome: "not_reported" } as Cell)).toBe(false);
+    });
+});
+
 describe("coverage", () => {
-    it("separates filled, not-reported, pending and failed cells", () => {
+    it("separates filled, not-reported, failed and title-and-abstract cells, and counts no review mark", () => {
         const spec: TableSpec = {
             id: "t",
             columns: [
@@ -1340,38 +1538,95 @@ describe("coverage", () => {
                     type: "text",
                     description: "What is B?",
                 },
-                // A system column: its empties are gaps, not findings.
                 { id: "_year", header: "Year", type: "date", system: true },
             ],
             rows: [
                 {
                     id: "r1",
+                    documents: ["u-D1"],
                     cells: {
-                        a: { value: { kind: "text", text: "x" } },
-                        b: {},
+                        a: answered({ kind: "text", text: "x" }),
+                        b: { outcome: "not_reported", provenance: "model", documents: ["u-D1"], confidence: "low" },
                     },
                 },
                 {
                     id: "r2",
-                    status: "error",
+                    failure: { code: "encrypted", message: "Locked." },
                     cells: {
-                        a: { status: "pending" },
-                        b: { status: "error", error: "no text layer" },
+                        a: {
+                            outcome: "failed",
+                            provenance: "model",
+                            error_code: "no_locator",
+                            error: "no passage",
+                        },
+                        b: answered({ kind: "text", text: "2" }, "model"),
                     },
+                },
+                {
+                    id: "r3",
+                    cells: { a: { outcome: "cleared", provenance: "user" } },
                 },
             ],
         };
         expect(summarizeCoverage(spec)).toEqual({
-            rows: 2,
-            cells: 6,
-            filled: 1,
-            empty: 3,
-            // Empty legacy answers do not establish completed inspection.
-            notReported: 0,
-            pending: 1,
+            rows: 3,
+            cells: 9,
+            filled: 2,
+            empty: 7,
+            notReported: 1,
             error: 1,
             errorRows: 1,
+            titleAbstractOnly: 1,
         });
+        expect(isTitleAbstractOnly(spec.rows[1].cells.b)).toBe(true);
+        expect(isTitleAbstractOnly(spec.rows[0].cells.a)).toBe(false);
+    });
+
+    it("says why a cell is stale: the question, or the row's documents, never for a user's cell", () => {
+        const read = (documents?: string[], extra: Record<string, unknown> = {}) =>
+            ({
+                outcome: "answered",
+                provenance: "model",
+                value: { kind: "text", text: "x" },
+                ...(documents ? { documents } : {}),
+                ...extra,
+            }) as Cell;
+        const named = { documents: ["u-A"] };
+        expect(staleReason(named, read(["u-A"]))).toBeUndefined();
+        expect(staleReason(named, read(["u-A"], { stale: true }))).toBe("question");
+        // a) another attachment; b) a second one; c) a title/abstract row gains one.
+        expect(staleReason({ documents: ["u-B"] }, read(["u-A"]))).toBe("document");
+        expect(staleReason({ documents: ["u-A", "u-B"] }, read(["u-A"]))).toBe("document");
+        expect(staleReason(named, read())).toBe("document");
+        expect(isStale({}, read())).toBe(false);
+        expect(isStale(named, answered({ kind: "text", text: "x" }, "user"))).toBe(false);
+        expect(
+            isStale(named, { outcome: "failed", provenance: "model", error_code: "x", error: "x" }),
+        ).toBe(false);
+    });
+
+    it("computes the review mark (kept for evaluation) on a filler answer or blank read from a document, below high confidence, outside text columns", () => {
+        const cell = (confidence: string, extra: Record<string, unknown> = {}) =>
+            ({
+                outcome: "answered",
+                provenance: "model",
+                value: { kind: "boolean", value: false },
+                documents: ["u-D"],
+                confidence,
+                ...extra,
+            }) as Cell;
+        expect(needsReview({ type: "boolean" }, cell("medium"))).toBe(true);
+        expect(needsReview({ type: "select" }, cell("low"))).toBe(true);
+        expect(needsReview({ type: "date" }, cell("high"))).toBe(false);
+        expect(needsReview({ type: "text" }, cell("low"))).toBe(false);
+        // From title and abstract.
+        expect(needsReview({ type: "boolean" }, cell("low", { documents: undefined }))).toBe(false);
+        expect(needsReview({ type: "boolean" }, cell("low", { documents: [] }))).toBe(false);
+        expect(
+            needsReview({ type: "date" }, cell("medium", { outcome: "not_reported", value: undefined })),
+        ).toBe(true);
+        expect(needsReview({ type: "boolean" }, cell("low", { provenance: "user", documents: undefined }))).toBe(false);
+        expect(needsReview({ type: "boolean" }, undefined)).toBe(false);
     });
 
     it("counts only the rows it is given, so a footer can report the filtered view", () => {
@@ -1381,7 +1636,7 @@ describe("coverage", () => {
             rows: [
                 {
                     id: "r1",
-                    cells: { a: { value: { kind: "text", text: "x" } } },
+                    cells: { a: answered({ kind: "text", text: "x" }) },
                 },
                 { id: "r2", cells: {} },
             ],
@@ -1393,43 +1648,4 @@ describe("coverage", () => {
             empty: 0,
         });
     });
-});
-
-it("keeps optional citation parentage without making it a citation lookup identity", () => {
-    const citation: Citation = {
-        citation_id: "with-parent",
-        resolved_ref: { kind: "zotero", library_id: 1, zotero_key: "CHILD001" },
-        parent_ref: { kind: "zotero", library_id: 1, zotero_key: "PARENT01" },
-    };
-    const index = citationsByKey([citation]);
-    expect(index[citationKeysInText('<citation id="1-CHILD001"/>')[0]]).toBe(citation);
-    expect(index[citationKeysInText('<citation id="1-PARENT01"/>')[0]]).toBeUndefined();
-    expect(JSON.parse(JSON.stringify(citation)).parent_ref).toEqual(citation.parent_ref);
-});
-
-it('keeps completed outcomes separate from unattempted values and safely exports evidence', () => {
-    const spec: TableSpec = { id: 'outcomes', columns: [{ id: 'a', header: '=Header', type: 'text' }], rows: [
-        { id: 'empty', cells: {} },
-        { id: 'completed', cells: { a: { outcome: 'not_reported', provenance: 'extracted', details: { kind: 'text', text: '=Evidence, "quoted"\nnext line <citation item_id="u-ABCDEFGH" loc="s1"/>' } } } },
-        { id: 'blank', cells: { a: { provenance: 'user' } } },
-    ] };
-    expect(summarizeCoverage(spec).notReported).toBe(1);
-    expect(isCellEmpty(spec.rows[1].cells.a)).toBe(false);
-    expect(isCellEmpty(spec.rows[0].cells.a)).toBe(true);
-    const csv = toCsv(spec);
-    expect(csv).toContain("'=Header");
-    expect(csv).toContain('Not reported');
-    expect(csv).toContain('"\'=Evidence, ""quoted""\nnext line"');
-    expect(csv).toContain('s1');
-    expect(csv).not.toContain('<citation');
-});
-
-
-it("exports self-contained source labels and passage evidence", () => {
-    const tag = '<citation item_id="u-ABCDEFGH" loc="s1"/>';
-    const spec: TableSpec = { id: "cited", columns: [{ id: "n", header: "Size", type: "number" }], rows: [{ id: "r", cells: { n: { value: { kind: "number", value: 120 }, provenance: "extracted", details: { kind: "text", text: tag } } } }], citations: [{ citation_id: "source", raw_tag: tag, formatted_citation: "Author. 2025. Study title.", preview: "The study enrolled 120 participants." }] };
-    const csv = toCsv(spec);
-    expect(csv).toContain("Author. 2025. Study title.");
-    expect(csv).toContain("The study enrolled 120 participants.");
-    expect(csv).toContain("u-ABCDEFGH:s1");
 });

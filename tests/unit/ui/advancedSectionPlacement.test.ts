@@ -23,10 +23,6 @@ vi.mock('../../../src/services/externalFiles', () => ({
     getExternalFilesStats: vi.fn(async () => ({ count: 0, totalBytes: 0 })),
     revealExternalFilesDir: vi.fn(),
 }));
-vi.mock('../../../react/atoms/profile', async () => {
-    const { atom } = await import('jotai');
-    return { isMcpServerSupportedAtom: atom(false) };
-});
 vi.mock('../../../src/utils/prefs', () => ({ getPref: vi.fn(), setPref: vi.fn() }));
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;

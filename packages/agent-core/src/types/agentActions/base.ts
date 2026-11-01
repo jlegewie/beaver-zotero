@@ -1,3 +1,4 @@
+import type { MergeItemsProposedData, MergeItemsResultData } from '../../protocol/duplicates';
 import type {
     AnnotationProposedData,
     AnnotationResultData
@@ -6,6 +7,7 @@ import type {
     CreateItemProposedData,
     CreateItemResultData
 } from './items';
+import type { ImportItemProposedData, ImportItemResultData } from '../itemImport';
 import type {
     EditNoteProposedData,
     EditNoteResultData
@@ -142,6 +144,7 @@ export interface CreateCollectionProposedData {
     /** Name of the collection to create */
     name: string;
     /** Parent collection key (optional, for subcollections) */
+    parent_collection_id?: string | null;
     parent_key?: string | null;
     /** Item IDs to add to the collection after creation (optional) */
     item_ids?: string[];
@@ -156,6 +159,7 @@ export interface CreateCollectionResultData {
     /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
     library_ref?: string;
     /** Zotero key of the created collection */
+    collection_id?: string;
     collection_key: string;
     /** Number of items added to the collection (if any were requested) */
     items_added?: number;
@@ -206,6 +210,9 @@ export interface OrganizeItemsProposedData {
  * Result data after applying an organize items action
  */
 export interface OrganizeItemsResultData {
+    collection_ids_added?: string[];
+    collection_ids_removed?: string[];
+    current_state?: Record<string, { tags: string[]; collections: string[] }>;
     /** Number of items that were successfully modified */
     items_modified: number;
     /** Tags that were added */
@@ -292,9 +299,11 @@ export interface ManageCollectionsProposedData {
     /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
     library_ref?: string;
     action: 'rename' | 'move' | 'delete';
+    collection_id?: string;
     collection_key: string;
     new_name?: string | null;
     /** Target parent key for move; null means top-level */
+    new_parent_collection_id?: string | null;
     new_parent_key?: string | null;
 }
 
@@ -310,14 +319,17 @@ export interface ManageCollectionsResultData {
     /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
     library_ref?: string;
     action: 'rename' | 'move' | 'delete';
+    collection_id?: string;
     collection_key: string;
     new_name?: string | null;
+    new_parent_collection_id?: string | null;
     new_parent_key?: string | null;
     /** Items in the collection at apply time (delete only, for preview display) */
     items_affected?: number | null;
     /** Collection name immediately before the execute op (undo + rejected-preview fallback) */
     old_name?: string | null;
     /** Parent key immediately before the execute op (undo) */
+    old_parent_collection_id?: string | null;
     old_parent_key?: string | null;
 }
 
@@ -364,38 +376,16 @@ export interface ConfirmExternalSearchProposedData {
 /**
  * Types of actions that can be proposed by the AI
  */
-export type ActionType = 'highlight_annotation' | 'note_annotation' | 'create_highlight_annotations' | 'create_note_annotations' | 'edit_annotations' | 'zotero_note' | 'create_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'manage_tags' | 'manage_collections' | 'confirm_extraction' | 'confirm_external_search' | 'edit_note' | 'edit_note_batch' | 'create_note';
+export type ActionType = 'highlight_annotation' | 'note_annotation' | 'create_highlight_annotations' | 'create_note_annotations' | 'edit_annotations' | 'create_item' | 'import_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'manage_tags' | 'merge_items' | 'manage_collections' | 'confirm_extraction' | 'confirm_external_search' | 'edit_note' | 'edit_note_batch' | 'create_note';
 
 /**
  * Union type for all proposed data types
  */
-export interface NoteProposedData {
-    title: string;
-    content?: string | null;
-    library_id?: number | null;
-    zotero_key?: string | null;
-    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
-    library_ref?: string;
-    /** Library name or ID string (resolved by frontend via getLibraryByIdOrName) */
-    library?: string | null;
-    /** Collection name or key (resolved by frontend via getCollectionByIdOrName) */
-    collection?: string | null;
-    /** Raw tag from LLM output - used for matching during streaming */
-    raw_tag?: string;
-}
-
-export interface NoteResultData {
-    library_id: number;
-    zotero_key: string;
-    /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
-    library_ref?: string;
-    parent_key?: string;
-}
-
 export type ProposedData =
+    MergeItemsProposedData |
     AnnotationProposedData |
-    NoteProposedData |
     CreateItemProposedData |
+    ImportItemProposedData |
     EditMetadataProposedData |
     CreateCollectionProposedData |
     OrganizeItemsProposedData |
@@ -411,9 +401,10 @@ export type ProposedData =
  * Type of result data after applying an action
  */
 export type ActionResultDataType =
+    MergeItemsResultData |
     AnnotationResultData |
-    NoteResultData |
     CreateItemResultData |
+    ImportItemResultData |
     CreateCollectionResultData |
     OrganizeItemsResultData |
     ManageTagsResultData |

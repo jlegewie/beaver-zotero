@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
     getBusyContext,
     stopBusyContextHeartbeat,
@@ -45,6 +45,21 @@ describe('getBusyContext extraction stats', () => {
         });
     });
 
+    it('reports hot calls waiting in the work queue and the hot worker heap', () => {
+        (Zotero as any).__beaverMuPDFWorkerClient_hot = {
+            inFlight: 1,
+            queued: 4,
+            heapBytes: 150.6 * 1024 * 1024,
+            oldestInFlightStartedAt: Date.now(),
+        };
+
+        expect(getBusyContext()).toMatchObject({
+            extracting_hot_pending: 1,
+            extracting_hot_queued: 4,
+            extracting_hot_heap_mb: 151,
+        });
+    });
+
     it('returns zero ages when both workers are idle', () => {
         (Zotero as any).__beaverMuPDFWorkerClient_hot = {
             inFlight: 0,
@@ -67,12 +82,54 @@ describe('getBusyContext extraction stats', () => {
         };
 
         expect(getBusyContext()).toMatchObject({
+            extracting_hot_queued: 0,
+            extracting_hot_heap_mb: 0,
             extracting_hot_has_worker: 0,
             extracting_hot_spawn_count: 0,
             extracting_hot_lease_reap_count: 0,
             extracting_background_has_worker: 0,
             extracting_background_spawn_count: 0,
             extracting_background_lease_reap_count: 0,
+        });
+    });
+});
+
+describe('getBusyContext write queue', () => {
+    let previousBeaver: unknown;
+
+    beforeEach(() => {
+        previousBeaver = (Zotero as any).Beaver;
+        (Zotero as any).Beaver = {};
+    });
+
+    afterEach(() => {
+        stopBusyContextHeartbeat();
+        (Zotero as any).Beaver = previousBeaver;
+        vi.useRealTimers();
+    });
+
+    it('reports a write holding the queue, its age, the writes behind it and the sync pause', () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(700_000);
+        (Zotero as any).Beaver.mutations = {
+            getSnapshot: () => ({ active: 'mutation:1', activeStartedAt: 100_000, pending: 2, closing: false }),
+        };
+        (Zotero as any).Beaver.syncPause = { isSyncPaused: () => true };
+
+        expect(getBusyContext()).toMatchObject({
+            mutation_active: 1,
+            mutation_active_ms: 600_000,
+            mutation_pending: 2,
+            sync_paused: 1,
+        });
+    });
+
+    it('reads zero when the queue is idle or the services are missing', () => {
+        expect(getBusyContext()).toMatchObject({
+            mutation_active: 0,
+            mutation_active_ms: 0,
+            mutation_pending: 0,
+            sync_paused: 0,
         });
     });
 });

@@ -2,6 +2,7 @@ import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
 import { getSelectedCollection, getSelectedLibraryId } from '../../src/utils/zoteroSelection';
 import { getContextWindow } from '../runtime/windowRuntime';
+import { selectedTableTabItemID } from '../../src/ui/tableTabContextPane';
 
 
 function makeZoteroItemReference(libraryID: number, zoteroKey: string): ZoteroItemReference {
@@ -10,6 +11,26 @@ function makeZoteroItemReference(libraryID: number, zoteroKey: string): ZoteroIt
         zotero_key: zoteroKey,
         library_ref: libraryRefForLibraryID(libraryID) ?? undefined,
     };
+}
+
+
+/**
+ * Whether the library tab is the selected tab. A reader or a Beaver tab is
+ * its own context: the library pane's selection stays behind it, hidden.
+ */
+export function isLibraryTabSelected(win = getContextWindow()): boolean {
+    const type = win?.Zotero_Tabs?.selectedType;
+    return !type || type === 'library';
+}
+
+/**
+ * The collection shown in the library tab, for new items to be filed in, or
+ * null when another tab is selected and that collection is not what the user
+ * is looking at.
+ */
+export function getLibraryViewCollection(win = getContextWindow()): Zotero.Collection | null {
+    if (!win || win.closed || !isLibraryTabSelected(win)) return null;
+    return getSelectedCollection(win.ZoteroPane) ?? null;
 }
 
 
@@ -51,6 +72,14 @@ export async function getZoteroTargetContext(win = getContextWindow()): Promise<
                 return { targetLibraryId, parentReference, collectionToAddTo };
             }
         }
+    }
+
+    // A Beaver tab targets its table's library, with no parent: the table is a
+    // standalone item, and the library pane's hidden selection is not context.
+    const tableItemID = selectedTableTabItemID(win);
+    if (tableItemID) {
+        const table = await Zotero.Items.getAsync(tableItemID);
+        if (table) return { targetLibraryId: table.libraryID, parentReference: null, collectionToAddTo };
     }
 
     // Library view
@@ -112,6 +141,13 @@ export function getZoteroTargetContextSync(win = getContextWindow()): ZoteroTarg
                 return { targetLibraryId, parentReference, collectionToAddTo };
             }
         }
+    }
+
+    // A Beaver tab: see `getZoteroTargetContext`.
+    const tableItemID = selectedTableTabItemID(win);
+    if (tableItemID) {
+        const table = Zotero.Items.get(tableItemID);
+        if (table) return { targetLibraryId: table.libraryID, parentReference: null, collectionToAddTo };
     }
 
     // Library view
@@ -204,6 +240,13 @@ export function getCurrentLibrary(win = getContextWindow()): _ZoteroTypes.Librar
 			}
 		}
 		return null;
+	}
+
+	// A Beaver tab: its table's library.
+	const tableItemID = selectedTableTabItemID(win);
+	if (tableItemID) {
+		const table = Zotero.Items.get(tableItemID);
+		return (table && Zotero.Libraries.get(table.libraryID)) || null;
 	}
 	
 	// Otherwise, get library from library view

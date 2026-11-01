@@ -1,6 +1,7 @@
 import { atom } from 'jotai';
 import { isLibraryTabAtom } from './ui';
 import { currentReaderAttachmentAtom } from './messageComposition';
+import type { CollectionTargetViewType } from '../../src/utils/zoteroSelection';
 
 // --- Selected Items (library view) ---
 // Capped at first 10 items for display; full count tracked separately
@@ -33,6 +34,19 @@ export interface SelectedCollectionInfo {
 }
 
 /**
+ * A saved-search or special-view row (Unfiled Items, …) within the
+ * collections-tree selection that a collection-targeted action can act on.
+ */
+export interface SelectedViewInfo {
+    type: CollectionTargetViewType;
+    /** Name as the collections pane shows it. */
+    name: string;
+    libraryId: number;
+    /** Search key, for saved searches. */
+    key?: string;
+}
+
+/**
  * The collections-tree selection.
  */
 export interface LibraryViewInfo {
@@ -47,6 +61,8 @@ export interface LibraryViewInfo {
     selectedRowCount: number;
     /** Every selected collection row, in collections-list order. */
     selectedCollections: SelectedCollectionInfo[];
+    /** Every selected row of a `COLLECTION_TARGET_VIEW_TYPES` kind, in collections-list order. */
+    selectedViews: SelectedViewInfo[];
     /** Distinct library IDs spanned by the selection, in collections-list order. */
     selectedLibraryIds: number[];
 }
@@ -61,6 +77,7 @@ export const emptyLibraryView: LibraryViewInfo = {
     searchName: null,
     selectedRowCount: 0,
     selectedCollections: [],
+    selectedViews: [],
     selectedLibraryIds: [],
 };
 
@@ -73,6 +90,7 @@ const defaultLibraryView: LibraryViewInfo = {
     searchName: null,
     selectedRowCount: 1,
     selectedCollections: [],
+    selectedViews: [],
     selectedLibraryIds: [1],
 };
 

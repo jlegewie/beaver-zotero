@@ -1,3 +1,4 @@
+import type { DuplicatesResultView } from '../protocol/duplicates';
 import type { BatchProgressEntry } from "./batchProgress";
 import type { TableRecord } from "../protocol/artifactProtocol";
 export { tableResultMessages } from './tableResults';
@@ -107,12 +108,13 @@ export interface AnnotationRowView {
 export type ItemListRow = ItemRowView | AnnotationRowView;
 
 export interface CollectionRowView {
+    collection_id?: string;
     /** Used by the reveal click. */
-    library_id: number;
+    library_id?: number;
     /** Device-portable library identity ("u" | "g<groupID>"). */
     library_ref?: string;
     /** Collection key (NOT an item key); the frontend maps it to a CollectionReference. */
-    collection_key: string;
+    collection_key?: string;
     name: string;
 }
 
@@ -319,6 +321,7 @@ export interface TableView {
 }
 
 export type ToolResultView =
+    | DuplicatesResultView
     | TableView
     | ItemListView
     | AnnotationListView
@@ -347,6 +350,7 @@ export function isToolResultView(value: unknown): value is ToolResultView {
             && !!record.summary && typeof record.summary === 'object';
     }
     return (
+        viewType === "duplicates" ||
         viewType === "item_list" ||
         viewType === "annotation_list" ||
         viewType === "external_reference_list" ||
@@ -409,6 +413,7 @@ export function isAnnotationRow(row: ItemListRow): row is AnnotationRowView {
  */
 export function getToolResultRenderableCount(view: ToolResultView): number | null {
     switch (view.view_type) {
+        case "duplicates": return view.groups.length;
         case "item_list":
             return view.items.length;
         case "annotation_list":

@@ -151,6 +151,92 @@ describe('handleZoteroDocumentRequest (external files)', () => {
         expect(args.resolvedKey).toBe(`ext-${EXT_KEY}`);
     });
 
+    it('sends the plugin timings of a PDF request in wire form', async () => {
+        vi.mocked(resolveExternalFile).mockResolvedValue({ ok: true, record: baseRecord });
+        vi.mocked(extractAndCacheResolvedPdfDocument).mockResolvedValue({
+            kind: 'ok',
+            cached: false,
+            result: { mode: 'markdown', schema_version: 'x', document: { pageCount: 12, pages: [] } } as any,
+            totalPages: 12,
+            resolvedAttachment: { libraryId: -1, zoteroKey: EXT_KEY },
+            contentType: 'application/pdf',
+            timings: {
+                source: 'extracted',
+                resolveMs: 1,
+                cacheLookupMs: 2,
+                fileReadMs: 3,
+                pageCountMs: 4,
+                extractMs: 250,
+                clientQueueMs: 105,
+                workerStartMs: 0,
+                workerQueueMs: 12.4,
+                workerOpMs: 230.6,
+                workerState: 'warmed',
+                workerSlot: 'background',
+                workerHeapMb: 96,
+                workerPeakHeapMb: 310,
+                cacheWriteMs: 15,
+            },
+        });
+
+        const response = await handleZoteroDocumentRequest(baseRequest());
+
+        expect(response.timings).toMatchObject({
+            source: 'extracted',
+            resolve_ms: 1,
+            cache_lookup_ms: 2,
+            file_read_ms: 3,
+            page_count_ms: 4,
+            extract_ms: 250,
+            client_queue_ms: 105,
+            worker_start_ms: 0,
+            worker_queue_ms: 12,
+            worker_op_ms: 231,
+            worker_state: 'warmed',
+            worker_slot: 'background',
+            worker_heap_mb: 96,
+            worker_peak_heap_mb: 310,
+            cache_write_ms: 15,
+        });
+        expect(response.timings?.total_ms).toBeGreaterThanOrEqual(0);
+        // External files carry no attachment diagnostics, so there is no wait to report.
+        expect(response.timings).not.toHaveProperty('diagnostics_wait_ms');
+        expect(response.timings).not.toHaveProperty('overflow_skip');
+    });
+
+    it('reports why a request stayed on the busy hot worker', async () => {
+        vi.mocked(resolveExternalFile).mockResolvedValue({ ok: true, record: baseRecord });
+        vi.mocked(extractAndCacheResolvedPdfDocument).mockResolvedValue({
+            kind: 'ok',
+            cached: false,
+            result: { mode: 'markdown', schema_version: 'x', document: { pageCount: 12, pages: [] } } as any,
+            totalPages: 12,
+            resolvedAttachment: { libraryId: -1, zoteroKey: EXT_KEY },
+            contentType: 'application/pdf',
+            timings: { source: 'extracted', workerSlot: 'hot', overflowSkip: 'lane_busy' },
+        });
+
+        const response = await handleZoteroDocumentRequest(baseRequest());
+
+        expect(response.timings).toMatchObject({ worker_slot: 'hot', overflow_skip: 'lane_busy' });
+    });
+
+    it('omits timings when the extraction core reports none', async () => {
+        vi.mocked(resolveExternalFile).mockResolvedValue({ ok: true, record: baseRecord });
+        vi.mocked(extractAndCacheResolvedPdfDocument).mockResolvedValue({
+            kind: 'ok',
+            cached: true,
+            result: { mode: 'markdown', schema_version: 'x', document: { pageCount: 12, pages: [] } } as any,
+            totalPages: 12,
+            resolvedAttachment: { libraryId: -1, zoteroKey: EXT_KEY },
+            contentType: 'application/pdf',
+        });
+
+        const response = await handleZoteroDocumentRequest(baseRequest());
+
+        expect(response).not.toHaveProperty('timings');
+    });
+
     it('routes EPUBs through the EPUB extraction core', async () => {
         const record = {
             ...baseRecord,

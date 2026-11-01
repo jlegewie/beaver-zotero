@@ -12,12 +12,13 @@ import {
 import {
     baseCitationKey,
     CitationRef,
+    getRequestedRef,
     getResolvedRef,
     LocatorKind,
     requestedCitationKey,
 } from '@beaver/agent-core/citations/citationGrammar';
-import { formatNumberRanges, formatPageRangesWithLabels } from '../utils/pageRanges';
-import { resolvePageLabelFromLabels } from '../utils/pageLabels';
+import { formatPageRangesWithLabels } from '../utils/pageRanges';
+import { formatCitedPages, hasPageLabels, resolvePageLabelFromLabels, type PageLabelMap } from '../utils/pageLabels';
 import { explicitPageLabel } from '../utils/locationDisplay';
 import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { getHost } from '../host';
@@ -62,6 +63,19 @@ function propBool(props: Record<string, unknown>, camel: string, kebab: string):
  *   <citation external_id="..."/>                - external reference
  * Legacy item_id/att_id/page attrs are still accepted by preprocessing.
  */
+function directCitation(value: unknown): Citation | undefined {
+    return value && typeof value === 'object' && typeof (value as Citation).citation_id === 'string'
+        ? (value as Citation)
+        : undefined;
+}
+
+/** The identity model of an assembled citation, as its tag would have parsed. */
+function propsFromCitation(citation: Citation): CitationPropsModel {
+    const ref = getRequestedRef(citation) ?? getResolvedRef(citation);
+    if (!ref) return { ok: false, requestedKey: '', consecutive: false, adjacent: false };
+    return { ok: true, ref, requestedKey: requestedCitationKey(ref), consecutive: false, adjacent: false };
+}
+
 export function readCitationProps(props: Record<string, unknown>): CitationPropsModel {
     const consecutive = propBool(props, 'dataConsecutive', 'data-consecutive');
     const adjacent = propBool(props, 'dataAdjacent', 'data-adjacent');
@@ -163,7 +177,13 @@ export interface CitationViewModel {
     previewText: string;
     /** Page labels for display (raw page numbers when labels unavailable). */
     pageLabels: string[];
-    pagesDisplay: string;
+    /**
+     * Inline page locator with its prefix ("p.12", "PDF p.5"); "" when the
+     * citation shows no page.
+     */
+    locatorDisplay: string;
+    /** The cited pages for prose ("page 12", "PDF page 5"); "" without pages. */
+    pageReference: string;
     pages: number[];
 }
 
@@ -179,7 +199,14 @@ export interface CitationViewModel {
  * host-agnostic.
  */
 export function useCitationViewModel(props: Record<string, unknown>): CitationViewModel {
-    const parsedProps = useMemo(() => readCitationProps(props), [props]);
+    // A caller holding the assembled citation (a table's evidence) passes it as
+    // `citation`: it identifies itself and is its own metadata, so it never
+    // depends on the thread's store or on a tag naming it uniquely.
+    const direct = directCitation(props.citation);
+    const parsedProps = useMemo(
+        () => (direct ? propsFromCitation(direct) : readCitationProps(props)),
+        [props, direct],
+    );
 
     const citationDataByCitationKey = useAtomValue(citationByKeyAtom);
     const externalReferenceToZoteroItem = useAtomValue(externalReferenceItemMappingAtom);
@@ -201,9 +228,9 @@ export function useCitationViewModel(props: Record<string, unknown>): CitationVi
     const identity = useMemo(() => {
         const citationKey = parsedProps.requestedKey || '';
 
-        let metadata = citationKey
+        let metadata = direct ?? (citationKey
             ? citationDataByCitationKey[citationKey]
-            : undefined;
+            : undefined);
 
         if (!metadata && parsedProps.ok) {
             metadata = citationDataByCitationKey[baseCitationKey(parsedProps.ref)];
@@ -270,7 +297,7 @@ export function useCitationViewModel(props: Record<string, unknown>): CitationVi
             resolvedRef,
             externalSourceId,
         };
-    }, [parsedProps, citationDataByCitationKey]);
+    }, [parsedProps, citationDataByCitationKey, direct]);
 
     const {
         metadata,
@@ -348,15 +375,16 @@ export function useCitationViewModel(props: Record<string, unknown>): CitationVi
     // subscribed `labelsByAttachmentId` (from the active store) to the host so
     // it resolves correctly under the isolated store used for note export, and
     // so the recompute fires once the async page-label preload populates it.
-    const { pageLabels, pagesDisplay, pages } = useMemo(() => {
+    const { pageLabels, locatorDisplay, pageReference, pages } = useMemo(() => {
         let pageLabels: string[] = rawPages.map((p) => String(p));
         const contentKind = getContentKind(metadata);
+        const noPages = { locatorDisplay: '', pageReference: '' };
 
         if (contentKind === 'snapshot') {
             // Synthetic page numbers are a logical coordinate only; the snapshot
             // reader is a continuous scroll view, so a "page N" badge would
             // mislead. Keep the raw pages for navigation but show no page label.
-            return { pageLabels, pagesDisplay: '', pages: rawPages };
+            return { pageLabels, ...noPages, pages: rawPages };
         }
 
         if (contentKind === 'epub') {
@@ -364,34 +392,41 @@ export function useCitationViewModel(props: Record<string, unknown>): CitationVi
             pageLabels = rawPages.map((p) => explicitPageLabel(backendLabels, p));
             const labelledPages = rawPages.filter((page) => explicitPageLabel(backendLabels, page));
             const labelledPageLabels = labelledPages.map((page) => explicitPageLabel(backendLabels, page));
+            const display = labelledPages.length > 0
+                ? formatPageRangesWithLabels(labelledPages, labelledPageLabels)
+                : '';
             return {
                 pageLabels,
-                pagesDisplay: labelledPages.length > 0
-                    ? formatPageRangesWithLabels(labelledPages, labelledPageLabels)
-                    : '',
+                locatorDisplay: display ? `p.${display}` : '',
+                pageReference: display ? `page ${display}` : '',
                 pages: rawPages,
             };
         }
 
+        // Printed labels: the ones persisted with the citation win, so history
+        // keeps the labels it was created with; the host's preloaded labels
+        // cover history that has none.
+        let labels: PageLabelMap | null = null;
         if (usePageLabels && rawPages.length > 0) {
             const backendLabels = metadata?.page_labels;
-            if (backendLabels && Object.keys(backendLabels).length > 0) {
-                pageLabels = rawPages.map((p) => resolvePageLabelFromLabels(backendLabels, p));
+            if (hasPageLabels(backendLabels)) {
+                labels = backendLabels;
             } else if (resolvedRef) {
-                const hostLabels = getHost().itemData?.resolvePageLabels(resolvedRef, labelsByAttachmentId) ?? null;
-                if (hostLabels) {
-                    pageLabels = rawPages.map((p) => resolvePageLabelFromLabels(hostLabels, p));
-                }
+                labels = getHost().itemData?.resolvePageLabels(resolvedRef, labelsByAttachmentId) ?? null;
             }
         }
+        if (labels) {
+            const resolved = labels;
+            pageLabels = rawPages.map((p) => resolvePageLabelFromLabels(resolved, p));
+        }
 
-        const pagesDisplay = rawPages.length === 0
-            ? ''
-            : usePageLabels
-                ? formatPageRangesWithLabels(rawPages, pageLabels)
-                : formatNumberRanges(rawPages);
-
-        return { pageLabels, pagesDisplay, pages: rawPages };
+        const display = formatCitedPages(rawPages, labels, usePageLabels);
+        return {
+            pageLabels,
+            locatorDisplay: display.locator,
+            pageReference: display.reference,
+            pages: rawPages,
+        };
     }, [rawPages, usePageLabels, resolvedRef, labelsByAttachmentId, metadata]);
 
     return {
@@ -419,7 +454,8 @@ export function useCitationViewModel(props: Record<string, unknown>): CitationVi
         citation,
         previewText,
         pageLabels,
-        pagesDisplay,
+        locatorDisplay,
+        pageReference,
         pages,
     };
 }

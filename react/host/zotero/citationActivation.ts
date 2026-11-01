@@ -1,5 +1,5 @@
 import { getContextWindow } from '../../runtime/windowRuntime';
-import { openNote, openReader } from '../../runtime/navigation';
+import { AttachmentFileUnavailableError, openNote, openReader } from '../../runtime/navigation';
 import { store } from '../../store';
 import { pageLabelsByAttachmentIdAtom } from '@beaver/agent-core/citations/atoms';
 import { externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
@@ -12,6 +12,8 @@ import {
     getCitationBoundingBoxes,
     getContentKind,
     getSymbolicLocation,
+    type Citation,
+    type SymbolicLocation,
 } from '@beaver/agent-core/types/citations';
 import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { revealSource } from '../../utils/sourceUtils';
@@ -39,6 +41,10 @@ import {
 } from '../../../src/utils/zoteroItemHelpers';
 import { BEAVER_CITATION_ANNOTATION_AUTHOR } from '../../../src/constants/annotations';
 import { libraryRefForLibraryID, resolveItemReference } from '../../../src/utils/libraryIdentity';
+import { getParentItemAsync } from '../../../src/utils/zoteroDataLoading';
+import { isPdfDocument } from '../../../src/utils/attachmentFiles';
+import { getReadableContentKind } from '../../../src/services/documentExtraction/attachmentResolution';
+import { extractAndCacheEpubDocument } from '../../../src/services/documentExtractionCore';
 import type { CitationActivation } from '@beaver/agent-ui/host/types';
 
 /**
@@ -72,6 +78,41 @@ function revealInLibrary(libraryID: number, zoteroKey: string): void {
         zotero_key: zoteroKey,
         library_ref: libraryRefForLibraryID(libraryID) ?? undefined,
     } as ZoteroItemReference);
+}
+
+/**
+ * The section and anchor of an EPUB citation that names only an extraction id
+ * (a table's evidence stores `s44-s49`, not where it is): looked up in the
+ * EPUB's extraction, from the document cache when it has one. Undefined when
+ * the citation names no id, the item is not an EPUB attachment, or the id is
+ * not in the extraction; the navigation then falls back to the passage text.
+ */
+async function epubLocationOfPart(
+    item: Zotero.Item,
+    metadata: Citation | undefined,
+): Promise<SymbolicLocation | undefined> {
+    const partId = metadata?.locations?.[0]?.part_id?.split('-')[0];
+    if (!partId || !item.isAttachment()) return undefined;
+    try {
+        const extracted = await extractAndCacheEpubDocument({
+            source: { kind: 'zotero', item },
+            resolvedKey: `${item.libraryID}-${item.key}`,
+            contentType: item.attachmentContentType,
+            maxPages: null,
+        });
+        if (extracted.kind !== 'ok') return undefined;
+        const entry = extracted.document.citationIndex?.[partId];
+        const section = entry ? extracted.document.sections.find((candidate) => candidate.index === entry.sectionIndex) : undefined;
+        if (!entry || !section) return undefined;
+        return {
+            content_kind: 'epub',
+            section_href: section.rawHref,
+            ...(entry.anchorId ? { anchor_id: entry.anchorId } : {}),
+        };
+    } catch (error) {
+        logger(`Citation activation: EPUB part lookup failed: ${error}`, 1);
+        return undefined;
+    }
 }
 
 /**
@@ -155,7 +196,11 @@ export async function activateCitation(activation: CitationActivation): Promise<
         return;
     }
 
-    const contentKind = getContentKind(metadata);
+    // A citation that names no kind reads as a PDF. When it points at an
+    // attachment, the attachment says what it is: a table's evidence stores no
+    // kind, and an EPUB or snapshot passage must open in its own reader.
+    const attachmentKind = !metadata?.content_kind && item.isAttachment() ? getReadableContentKind(item) : null;
+    const contentKind = attachmentKind && attachmentKind !== 'image' ? attachmentKind : getContentKind(metadata);
     const symbolicLocation = getSymbolicLocation(metadata);
 
     // Handle note links using Zotero.Notes.open()
@@ -172,7 +217,7 @@ export async function activateCitation(activation: CitationActivation): Promise<
     // Handle annotation citations: open the parent attachment in the
     // reader and navigate via annotationID
     if (item.isAnnotation()) {
-        const parentAttachment = item.parentItem;
+        const parentAttachment = await getParentItemAsync(item);
         if (!parentAttachment || !parentAttachment.isAttachment()) {
             logger(`Citation activation: Annotation ${item.id} has no parent attachment`);
             return;
@@ -240,7 +285,7 @@ export async function activateCitation(activation: CitationActivation): Promise<
 
         const outcome = await navigateToEpubCitation({
             item,
-            symbolicLocation: epubSymbolicLocation,
+            symbolicLocation: epubSymbolicLocation ?? (await epubLocationOfPart(item, metadata)),
             sectionOrdinal: sectionOrdinals[0],
             searchText: metadata?.preview || undefined,
             previewText,
@@ -316,10 +361,7 @@ export async function activateCitation(activation: CitationActivation): Promise<
     if (item.isRegularItem()) {
         if (hasPdfLocator) {
             const attachment = await getBestPDFAttachmentAsync(item);
-            const isPdfAttachment = !!attachment && (
-                attachment.isPDFAttachment?.() ||
-                attachment.attachmentContentType === 'application/pdf'
-            );
+            const isPdfAttachment = !!attachment && isPdfDocument(attachment);
             if (isPdfAttachment) {
                 logger(`Citation activation: Regular item locator resolved to PDF attachment (${attachment.id})`);
                 pdfItem = attachment;
@@ -421,6 +463,8 @@ export async function activateCitation(activation: CitationActivation): Promise<
 
     } catch (error) {
         logger('Citation activation: Failed to handle citation click: ' + error);
+        // Zotero already told the user the file is unavailable.
+        if (error instanceof AttachmentFileUnavailableError) return;
 
         // Fallback: try the URI-based approach from the loaded item
         try {
@@ -432,4 +476,52 @@ export async function activateCitation(activation: CitationActivation): Promise<
             // No usable fallback URI; nothing else to do.
         }
     }
+}
+
+/**
+ * Activates a citation stored in a table document, which carries no chat view
+ * model: identity comes straight from the citation's own refs. Resolves false
+ * when the document's own link does better, so the caller follows it instead:
+ * an invalid citation, an unmapped external work, and a PDF attachment cited
+ * without a page or passage, which activation would only select in the
+ * library while the link opens the file.
+ */
+export async function activateStoredCitation(citation: Citation, ownerDocument: Document): Promise<boolean> {
+    if (citation.invalid) return false;
+    const ref = citation.resolved_ref ?? citation.requested_ref;
+    if (!ref || ref.kind === 'external') return false;
+    if (
+        citation.citation_type === 'attachment'
+        && getContentKind(citation) === 'pdf'
+        && getCitationPages(citation).length === 0
+        && getCitationBoundingBoxes(citation).length === 0
+    ) return false;
+    const previewText = (citation.preview ?? '').replace(/\s+/g, ' ').trim();
+    if (ref.kind === 'external_file') {
+        await activateCitation({
+            metadata: citation,
+            isExternal: false,
+            isExternalFile: true,
+            externalFileKey: ref.ext_key,
+            hasMappedItem: false,
+            effectiveLibraryID: 0,
+            effectiveItemKey: '',
+            previewText,
+            ownerDocument,
+        });
+        return true;
+    }
+    await activateCitation({
+        metadata: citation,
+        isExternal: false,
+        isExternalFile: false,
+        externalFileKey: null,
+        hasMappedItem: false,
+        effectiveLibraryID: ref.library_id,
+        effectiveItemKey: ref.zotero_key,
+        effectiveLibraryRef: ref.library_ref,
+        previewText,
+        ownerDocument,
+    });
+    return true;
 }

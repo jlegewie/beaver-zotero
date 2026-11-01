@@ -41,6 +41,8 @@ interface AnnotationResultRowProps {
     isHovered: boolean;
     onMouseEnter: () => void;
     onMouseLeave: () => void;
+    /** Right-click handler, typically `useItemContextMenu().openItemMenu` bound to the row. */
+    onContextMenu?: (event: React.MouseEvent) => void;
     footerLabel?: string;
 }
 
@@ -50,6 +52,7 @@ export const AnnotationResultRow: React.FC<AnnotationResultRowProps> = ({
     isHovered,
     onMouseEnter,
     onMouseLeave,
+    onContextMenu,
     footerLabel = 'Click to view in Zotero Reader',
 }) => {
     const placeholder = row.annotation_type
@@ -73,6 +76,7 @@ export const AnnotationResultRow: React.FC<AnnotationResultRowProps> = ({
         <div
             className={`display-flex flex-row items-start gap-25 p-2 ml-1 cursor-pointer rounded-sm transition user-select-none ${isHovered ? 'bg-quinary' : ''}`}
             onClick={handleClick}
+            onContextMenu={onContextMenu}
             onMouseEnter={onMouseEnter}
             onMouseLeave={onMouseLeave}
         >

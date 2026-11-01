@@ -92,8 +92,11 @@ export function describeStatus(
     const outstanding = status.progress?.pending ?? Math.max(remaining, queued);
     // Stop cancels the drain but never the job already running, so until that
     // job finishes the lane is busy while the gate is shut. Say so, or the
-    // click looks ignored for as long as a large PDF takes to read.
-    if (inFlight > 0 && !gateOpen && !draining) {
+    // click looks ignored for as long as a large PDF takes to read. Lanes that
+    // keep running while the user is active are not finishing up, so they
+    // read as ordinary progress below.
+    const activeInFlight = status.worker?.activeInFlight ?? 0;
+    if (inFlight > activeInFlight && !gateOpen && !draining) {
         const waitingAfter = Math.max(0, outstanding - (status.worker?.inFlightFiles ?? inFlight));
         return {
             tone: 'busy',
@@ -123,7 +126,10 @@ export function describeStatus(
                     ? `${plural(outstanding, 'file')} remaining`
                     : 'Reading text from your files.',
             outstanding,
-            processNow: false,
+            // Only lanes that run while the user is active can be busy behind a
+            // shut gate here, so starting the rest must stay one click away.
+            processNow: runnable > 0 && !gateOpen && !draining,
+            processNowBlocked: Boolean(blocker),
             stopDrain: draining,
         };
     }

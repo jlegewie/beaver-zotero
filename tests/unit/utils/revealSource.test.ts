@@ -46,7 +46,9 @@ beforeEach(() => {
             getIDFromLibraryAndKey: vi.fn(() => 42),
             getAsync: vi.fn(async () => ({ id: 42, libraryID: 1 })),
         },
+        Libraries: { userLibraryID: 1, getAll: () => [{ libraryID: 1 }] },
         Collections: {
+            getByLibraryAndKey: vi.fn(() => ({ id: 7, libraryID: 1, key: 'COLLKEY1', name: 'Inbox' })),
             getIDFromLibraryAndKey: vi.fn(() => 7),
             get: vi.fn(() => ({ id: 7 })),
         },
@@ -75,12 +77,12 @@ it('reopens the library and waits for its pane before revealing an item from a s
     expect(destination.Zotero_Tabs.select).toHaveBeenCalledWith('zotero-pane');
 });
 
-it('keeps the originating context and requested collection when another main window is active', async () => {
+it.each(['COLLKEY1', 'u-COLLKEY1'])('keeps the originating context and requested collection %s when another main window is active', async collection => {
     const destination = mainWindow();
     runtime.contextWindow = destination;
     vi.mocked(Zotero.getMainWindow).mockReturnValue(mainWindow() as any);
 
-    revealSource(source, 'COLLKEY1');
+    revealSource(source, collection);
 
     await vi.waitFor(() => expect(destination.ZoteroPane.selectItem).toHaveBeenCalledWith(42));
     expect(destination.ZoteroPane.collectionsView.selectCollection).toHaveBeenCalledWith(7);

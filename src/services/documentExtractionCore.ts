@@ -7,9 +7,14 @@
  *
  * Routing: `workerName` selects which MuPDF worker the call uses
  * (`"hot"` is the default; `"background"` is reserved for the queue
- * processor). The shared core calls `getMuPDFWorkerClient(workerName)`
- * directly for every MuPDF op — never via `BeaverExtractor`, which
- * always uses the default `"hot"` slot internally.
+ * processor). Interactive requests on the hot slot may instead run on the
+ * idle background worker when hot is busy (`PdfRequestWorker`, interactive
+ * overflow). Interactive rules — the request-timeout clamp, the shared
+ * extraction budget, single-flight scope and the cache write after
+ * responding — follow `interactive`, whichever worker runs the request.
+ * The shared core calls the routed `MuPDFWorkerClient` directly for every
+ * MuPDF op — never via `BeaverExtractor`, which always uses the default
+ * `"hot"` slot internally.
  */
 
 import type {
@@ -17,15 +22,18 @@ import type {
     SerializedBeaverExtractResult,
 } from '../beaver-extract/schema';
 import type { PageGeometry } from '@beaver/agent-core/extract/types';
+import { derivedPageLabelsForCache } from '../beaver-extract/pipeline/output';
 import {
     ExtractionError,
     ExtractionErrorCode,
     StaleWorkerError,
     WorkerAbortError,
     WorkerSpawnError,
-    getMuPDFWorkerClient,
     isWorkerDeadlineError,
+    type MuPDFWorkerClient,
     type PDFWorkerSlotName,
+    type WorkerCallTiming,
+    type WorkerState,
 } from '../beaver-extract';
 import {
     DEFAULT_PAGES_TIMEOUT_SECONDS,
@@ -47,6 +55,9 @@ import type {
 import { logger } from '@beaver/agent-core/platform/logger';
 import { effectiveMaxFileSizeMB, effectiveMaxPageCount, effectiveMaxSnapshotFileSizeMB } from '@beaver/agent-core/transport/attachmentLimits';
 import {
+    fileAccessDeniedMessage,
+    isFileAccessDeniedError,
+    isLocalFileReadDenied,
     loadAttachmentData,
     resolveAttachmentFileSource,
     resolveToReadableAttachment,
@@ -55,7 +66,13 @@ import {
     type AttachmentFileSource,
 } from './documentExtraction';
 import { readableToExtractKind, type ExtractContentKind } from '@beaver/agent-core/extract/document/shared/contentKinds';
+import {
+    isCurrentExtractionSchemaVersion,
+    unsupportedSchemaVersionMessage,
+} from './documentExtraction/shared/extractionSchemaVersions';
 import { recordReadingOutcome } from './documentExtraction/readingOutcome';
+import { PdfRequestWorker } from './documentExtraction/pdfRequestWorker';
+import type { OverflowSkipReason } from './backgroundQueue/interactiveOverflow';
 import {
     EpubStructureError,
     extractEpubDocumentFromFile,
@@ -70,13 +87,15 @@ import {
 } from './documentExtraction/snapshot';
 
 /**
- * Extra margin granted to a shared hot-slot extraction beyond the request's
+ * Extra margin granted to a shared interactive extraction beyond the request's
  * own deadline before the document cache aborts it (and the worker client
- * terminates the worker), freeing the interactive slot for the next read.
+ * terminates the worker), freeing the worker for the next read.
  * The request timeout plus this grace must stay below
  * DEFAULT_BUSY_LEASE_MS_HOT so the cache abort reclaims the slot before the
- * worker client's busy lease reaps the operation. Hot-slot request timeouts
- * are clamped to MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS to enforce this.
+ * worker client's busy lease reaps the operation. Interactive request timeouts
+ * are clamped to MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS to enforce this. The
+ * same budget bounds an interactive request that overflowed to the
+ * background worker, well inside that worker's longer lease.
  */
 export const HOT_SHARED_EXTRACTION_GRACE_MS = 2000;
 
@@ -174,6 +193,14 @@ export interface ExtractAndCacheArgs {
     /** Default `"hot"`. Background processor sets `"background"`. */
     workerName?: PDFWorkerSlotName;
     /**
+     * Interactive request (someone is waiting for it). Defaults to true unless
+     * `workerName` is `"background"`. Interactive requests are clamped to the
+     * interactive timeout, share single-flight extractions with each other on
+     * either worker, and write to the document cache after responding. On the
+     * hot slot they may overflow to an idle background worker.
+     */
+    interactive?: boolean;
+    /**
      * Caller-supplied abort signal. When it fires, the in-flight
      * extraction returns `{ kind: 'external_abort' }` so the caller can
      * release the work without counting it as a failure.
@@ -186,6 +213,12 @@ export interface ExtractAndCacheArgs {
     onRemoteDownloadFailure?: (error: unknown) => void;
     /** Carry explicit cache preparation through fresh no-text-layer detection. */
     prepareCache?: boolean;
+    /**
+     * PDF schema version to produce; absent means the current version. A
+     * producible non-current version is extracted without the document cache
+     * (no reads, no writes, no reading outcome), structured mode only.
+     */
+    schemaVersion?: string | null;
 }
 
 export interface ExtractAndCacheResolvedPdfArgs
@@ -267,6 +300,7 @@ export type ExtractAndCacheSnapshotResult =
 export function buildExtractedDocumentCacheMetadata(extracted: BeaverExtractResult): {
     pageCount: number;
     pageLabels: Record<string, string>;
+    derivedPageLabels?: Record<string, string> | null;
     pages: (PageGeometry | null)[];
 } {
     const doc = extracted.document;
@@ -286,9 +320,11 @@ export function buildExtractedDocumentCacheMetadata(extracted: BeaverExtractResu
             rotation: page.rotation,
         };
     }
+    const derivedPageLabels = derivedPageLabelsForCache(extracted);
     return {
         pageCount: doc.pageCount,
         pageLabels: extractedPageLabels,
+        ...(derivedPageLabels !== undefined ? { derivedPageLabels } : {}),
         pages,
     };
 }
@@ -305,9 +341,65 @@ function serializedWorkerResultToCacheResult(
         metadata: {
             pageCount: extracted.cacheMetadata.pageCount,
             pageLabels: extracted.cacheMetadata.pageLabels,
+            derivedPageLabels: extracted.cacheMetadata.derivedPageLabels,
             pages: extracted.cacheMetadata.pages,
         },
     };
+}
+
+/**
+ * Where a PDF document request spent its time in the plugin, ms (whole
+ * milliseconds). Stages that did not run are absent.
+ */
+export interface PdfDocumentTimings {
+    /**
+     * How the result was obtained: `cache` (the document cache had it),
+     * `extracted` (this request ran the extraction), or `shared` (another
+     * request's extraction of the same document, or a cache entry written
+     * meanwhile).
+     */
+    source: 'cache' | 'extracted' | 'shared';
+    /** Resolving the attachment's file (local path, size, remote availability). */
+    resolveMs?: number;
+    /** Document-cache lookups before extracting. */
+    cacheLookupMs?: number;
+    /** Reading (or downloading) the PDF bytes. */
+    fileReadMs?: number;
+    /** Page-count worker op on a cache miss without stored metadata (round trip). */
+    pageCountMs?: number;
+    /** Extraction worker op, round trip as seen by the plugin. */
+    extractMs?: number;
+    /**
+     * Waiting for other work, summed over this request's worker ops (page count
+     * and extraction; see `WorkerCallTiming`): in the client's work queue, for
+     * the worker to start, and in the worker behind a running op. The first
+     * (`clientQueueMs`) also includes waiting for a free worker before the
+     * request's first op (interactive routing).
+     */
+    clientQueueMs?: number;
+    workerStartMs?: number;
+    workerQueueMs?: number;
+    /** The worker running the extraction. */
+    workerOpMs?: number;
+    /** The worker when this request used it (see `WorkerCallTiming.workerState`). */
+    workerState?: WorkerState;
+    /**
+     * The worker slot this request's ops ran on: `background` when an
+     * interactive request overflowed from a busy hot worker.
+     */
+    workerSlot?: PDFWorkerSlotName;
+    /** Why a request that found the hot worker busy still queued on it. */
+    overflowSkip?: OverflowSkipReason;
+    /** The worker's WASM heap after this request's last worker op, MB. */
+    workerHeapMb?: number;
+    /** The largest WASM heap any worker of the slot has reported so far, MB. */
+    workerPeakHeapMb?: number;
+    /**
+     * Writing this request's extraction to the document cache. On the hot
+     * slot the write runs after the result is returned, so this is set only
+     * once it finishes (and is not part of the request's own time).
+     */
+    cacheWriteMs?: number;
 }
 
 export type ExtractAndCacheResult =
@@ -319,6 +411,8 @@ export type ExtractAndCacheResult =
           totalPages: number;
           resolvedAttachment: ResolvedAttachment;
           contentType: string;
+          /** Set by the PDF path. */
+          timings?: PdfDocumentTimings;
       }
     | {
           kind: 'ok';
@@ -328,6 +422,8 @@ export type ExtractAndCacheResult =
           totalPages: number;
           resolvedAttachment: ResolvedAttachment;
           contentType: string;
+          /** Set by the PDF path. */
+          timings?: PdfDocumentTimings;
       }
     | {
           kind: 'cached_error';
@@ -366,6 +462,8 @@ export type ExtractAndCacheResult =
            * the response never describes unrelated activity.
            */
           workerDispatched?: boolean;
+          /** The worker slot this request dispatched to, when it did. */
+          workerSlot?: PDFWorkerSlotName;
       }
     | {
           kind: 'external_abort';
@@ -374,6 +472,8 @@ export type ExtractAndCacheResult =
           resolvedAttachment: ResolvedAttachment | null;
           /** True when this request dispatched to the PDF worker before the external abort. */
           workerDispatched?: boolean;
+          /** The worker slot this request dispatched to, when it did. */
+          workerSlot?: PDFWorkerSlotName;
       };
 
 export type ExtractAndCacheEpubResult =
@@ -402,6 +502,11 @@ export type ExtractAndCacheEpubResult =
           contentKind?: ExtractContentKind;
       };
 
+/** See `ExtractAndCacheArgs.interactive`. */
+function isInteractive(args: Pick<ExtractAndCacheArgs, 'interactive' | 'workerName'>): boolean {
+    return args.interactive ?? (args.workerName ?? 'hot') !== 'background';
+}
+
 function isAbortError(error: unknown): boolean {
     return error instanceof Error && /abort/i.test(error.message);
 }
@@ -429,9 +534,7 @@ async function extractAndCacheDocumentOwned(
         args.timeoutSeconds,
         DEFAULT_PAGES_TIMEOUT_SECONDS,
         args.externalAbortSignal,
-        (args.workerName ?? 'hot') === 'hot'
-            ? MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS
-            : undefined,
+        isInteractive(args) ? MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS : undefined,
     );
     const { signal, timeoutSeconds, throwIfTimedOut, dispose } = timeout;
 
@@ -714,6 +817,16 @@ async function extractAndCacheEpubDocumentImpl(
                 contentKind: 'epub',
             };
         }
+        // The EPUB zip reader reports a denied open as a generic failure.
+        if (isFileAccessDeniedError(error) || await isLocalFileReadDenied(extractionFilePath)) {
+            return {
+                kind: 'response_error',
+                code: 'file_permission_denied',
+                message: fileAccessDeniedMessage('EPUB', requestKey),
+                resolvedAttachment,
+                contentKind: 'epub',
+            };
+        }
         return {
             kind: 'response_error',
             code: 'extraction_failed',
@@ -819,7 +932,7 @@ async function extractAndCacheSnapshotDocumentImpl(
             return {
                 kind: 'response_error',
                 code: 'no_text_layer',
-                message: `The snapshot file for ${requestKey} contains no extractable text.`,
+                message: `The snapshot file for ${requestKey} contains no extractable text: the saved page is empty, likely a placeholder (such as a browser PDF viewer or a loading page) rather than the article.`,
                 resolvedAttachment,
                 contentKind: 'snapshot',
             };
@@ -919,6 +1032,15 @@ async function extractAndCacheSnapshotDocumentImpl(
                 contentKind: 'snapshot',
             };
         }
+        if (isFileAccessDeniedError(error)) {
+            return {
+                kind: 'response_error',
+                code: 'file_permission_denied',
+                message: fileAccessDeniedMessage('snapshot', requestKey),
+                resolvedAttachment,
+                contentKind: 'snapshot',
+            };
+        }
         return {
             kind: 'response_error',
             code: 'extraction_failed',
@@ -939,11 +1061,20 @@ async function extractAndCacheResolvedPdfDocumentOwned(
     const attemptedAt = Date.now();
     const result = await extractAndCacheResolvedPdfDocumentImpl(args);
     if (args.source.kind === 'zotero' && !args.externalAbortSignal?.aborted
+        && uncachedPdfSchemaVersion(args.schemaVersion) === null
         && !(result.kind === 'response_error' && result.code === 'too_many_pages'
             && args.maxPages != null && args.maxPages < effectiveMaxPageCount())) {
         await recordReadingOutcome(args.source.item, 'pdf', result, attemptedAt);
     }
     return result;
+}
+
+/**
+ * The requested PDF schema version when it is not the current one, i.e. when
+ * the extraction must bypass the document cache; `null` for the current one.
+ */
+function uncachedPdfSchemaVersion(schemaVersion: string | null | undefined): string | null {
+    return isCurrentExtractionSchemaVersion('pdf', schemaVersion) ? null : schemaVersion ?? null;
 }
 
 async function extractAndCacheResolvedPdfDocumentImpl(
@@ -954,7 +1085,24 @@ async function extractAndCacheResolvedPdfDocumentImpl(
         externalAbortSignal,
     } = args;
     const workerName: PDFWorkerSlotName = args.workerName ?? 'hot';
+    const interactive = isInteractive(args);
+    // Interactive requests share single-flight extractions on either worker,
+    // so a hot request and an overflow request for one document run once.
+    const lockScope: PDFWorkerSlotName = interactive ? 'hot' : workerName;
     const requestKey = args.resolvedKey;
+    const uncachedSchemaVersion = uncachedPdfSchemaVersion(args.schemaVersion);
+    const unsupportedVersion = unsupportedSchemaVersionMessage('pdf', args.schemaVersion, mode);
+    if (unsupportedVersion) {
+        const cacheRef = args.source.kind === 'zotero' ? args.source.item : args.source.itemRef;
+        return {
+            kind: 'response_error',
+            code: 'unsupported_schema_version',
+            message: unsupportedVersion,
+            pageCount: null,
+            resolvedAttachment: { libraryId: cacheRef.libraryID, zoteroKey: cacheRef.key },
+            contentKind: 'pdf',
+        };
+    }
 
     const maxFileSizeMB = effectiveMaxFileSizeMB();
     const maxPages = effectiveMaxPageCount(args.maxPages);
@@ -964,21 +1112,71 @@ async function extractAndCacheResolvedPdfDocumentImpl(
         args.timeoutSeconds,
         DEFAULT_PAGES_TIMEOUT_SECONDS,
         externalAbortSignal,
-        workerName === 'hot' ? MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS : undefined,
+        interactive ? MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS : undefined,
     );
     const { signal, timeoutSeconds, throwIfTimedOut, dispose } = timeout;
 
-    const client = getMuPDFWorkerClient(workerName);
+    // Chooses the worker at the first op (waiting, within this request's
+    // deadline, while both workers are busy) and keeps it for every later op. An
+    // overflow op on the background worker is bounded by this request's
+    // interactive deadline (`signal` / `sharedTimeoutMs`), not that worker's
+    // longer lease; aborting it terminates the background worker, and the
+    // next use starts a fresh one.
+    const sourceRef = args.source.kind === 'zotero' ? args.source.item : args.source.itemRef;
+    const worker = new PdfRequestWorker({
+        interactive,
+        workerName,
+        signal,
+        affinityKey: `${sourceRef.libraryID}/${sourceRef.key}`,
+    });
+    const startedAt = Date.now();
+    const timings: PdfDocumentTimings = { source: 'extracted' };
+    const pageCountTiming: WorkerCallTiming = {};
+    const extractTiming: WorkerCallTiming = {};
+    /** Whether this request ran the extraction itself (`timings.source`). */
+    let extractedHere = false;
+    const elapsed = (from: number) => Date.now() - from;
+    const readFile = async (load: () => ReturnType<typeof loadAttachmentData>) => {
+        const t = Date.now();
+        try {
+            return await load();
+        } finally {
+            timings.fileReadMs = (timings.fileReadMs ?? 0) + elapsed(t);
+        }
+    };
+    /** The request's worker state: `starting` if any of its ops waited for the worker to start. */
+    const workerState = (): PdfDocumentTimings['workerState'] =>
+        pageCountTiming.workerState === 'starting' || extractTiming.workerState === 'starting'
+            ? 'starting'
+            : extractTiming.workerState ?? pageCountTiming.workerState;
+    const runExtraction = async <T>(run: () => Promise<T>): Promise<T> => {
+        const t = Date.now();
+        try {
+            return await run();
+        } finally {
+            extractedHere = true;
+            timings.extractMs = Date.now() - t;
+        }
+    };
+    // Interactive requests respond before their result is written to the
+    // document cache; requests that join meanwhile share the in-memory result.
+    const cacheWrite = {
+        writeAfterResolve: interactive,
+        onCacheWrite: (ms: number) => {
+            timings.cacheWriteMs = ms;
+        },
+    };
 
     // Budget for the shared (single-flight) extraction on the document cache.
-    // The hot slot serves interactive reads on the single interactive MuPDF
-    // worker: once every waiter has detached (request timed out), letting the
-    // shared extraction keep running up to MAX_PDF_TIMEOUT_SECONDS would
-    // head-of-line-block every subsequent interactive read. Cap it near this
-    // request's own deadline instead — the request's timeout path enqueues a
-    // background re-extraction, so the result is still produced and cached on
-    // the background slot. The background slot keeps the full ceiling.
-    const sharedTimeoutMs = workerName === 'hot'
+    // Interactive reads run on the hot worker (or an overflow background
+    // worker held exclusively for them): once every waiter has detached
+    // (request timed out), letting the shared extraction keep running up to
+    // MAX_PDF_TIMEOUT_SECONDS would head-of-line-block every subsequent
+    // interactive read. Cap it near this request's own deadline instead — the
+    // request's timeout path enqueues a background re-extraction, so the
+    // result is still produced and cached on the background slot. Background
+    // jobs keep the full ceiling.
+    const sharedTimeoutMs = interactive
         ? Math.round(timeoutSeconds * 1000) + HOT_SHARED_EXTRACTION_GRACE_MS
         : MAX_PDF_TIMEOUT_SECONDS * 1000;
 
@@ -990,6 +1188,9 @@ async function extractAndCacheResolvedPdfDocumentImpl(
     let totalPages: number | null = null;
     let loadedPdfData: Uint8Array | null = null;
     let workerDispatched = false;
+    // Dispatched *and* given a worker: a request that timed out waiting for a
+    // free worker never touched one, so its timeout carries no worker snapshot.
+    const reachedWorker = () => workerDispatched && worker.slot !== undefined;
 
     const aborted = (): ExtractAndCacheResult | null => {
         if (externalAbortSignal?.aborted) {
@@ -998,7 +1199,8 @@ async function extractAndCacheResolvedPdfDocumentImpl(
                 phase: 'external_pre_abort',
                 pageCount: totalPages,
                 resolvedAttachment,
-                workerDispatched,
+                workerDispatched: reachedWorker(),
+                workerSlot: worker.slot,
             };
         }
         return null;
@@ -1055,6 +1257,15 @@ async function extractAndCacheResolvedPdfDocumentImpl(
                         resolvedAttachment,
                     };
                 }
+                if (source.code === 'file_permission_denied') {
+                    return {
+                        kind: 'response_error',
+                        code: 'file_permission_denied',
+                        message: fileAccessDeniedMessage('PDF', resolvedKeyStr),
+                        pageCount: null,
+                        resolvedAttachment,
+                    };
+                }
                 return {
                     kind: 'response_error',
                     code: 'file_missing',
@@ -1070,11 +1281,16 @@ async function extractAndCacheResolvedPdfDocumentImpl(
         const effectiveFilePath = attachmentSource.filePath;
         const isRemoteOnly = attachmentSource.isRemoteOnly;
         resolvedFilePath = effectiveFilePath;
+        timings.resolveMs = elapsed(startedAt);
+        const cacheLookupStartedAt = Date.now();
 
-        const cache = Zotero.Beaver?.documentCache;
-        if (!cache) {
+        // A non-current schema version never touches the cache; the cache
+        // object only lends it single-flight for concurrent requests.
+        const documentCache = Zotero.Beaver?.documentCache;
+        if (!documentCache) {
             logger(`extractAndCacheDocument: document cache not available for ${requestKey}`, 1);
         }
+        const cache = uncachedSchemaVersion === null ? documentCache : undefined;
         const docRef = {
             libraryId: cacheItemRef.libraryID,
             zoteroKey: cacheItemRef.key,
@@ -1149,25 +1365,40 @@ async function extractAndCacheResolvedPdfDocumentImpl(
             ).catch(() => null)
             : null;
         throwIfTimedOut('payload_cache_lookup');
-        if (cachedResult) {
-            if (cachedResult.document.pageCount > maxPages) {
+        // An extraction that finished moments ago and is still being written
+        // to the cache: take its result instead of reading the file again.
+        const unwrittenResult = !cachedResult && cache && initialSourceIdentity
+            ? cache.getUnwrittenResult<SerializedDocumentCacheResult | BeaverExtractResult>({
+                item: cacheItemRef,
+                mode,
+                source: initialSourceIdentity,
+                serialized: args.serializedResult === true,
+                lockScope,
+            })
+            : null;
+        const availableResult = cachedResult ?? unwrittenResult;
+        timings.cacheLookupMs = elapsed(cacheLookupStartedAt);
+        if (availableResult) {
+            timings.source = cachedResult ? 'cache' : 'shared';
+            if (availableResult.document.pageCount > maxPages) {
                 return {
                     kind: 'response_error',
                     code: 'too_many_pages',
-                    message: `The PDF file for ${resolvedKeyStr} has ${cachedResult.document.pageCount} pages, which exceeds the ${maxPages}-page limit.`,
-                    pageCount: cachedResult.document.pageCount,
+                    message: `The PDF file for ${resolvedKeyStr} has ${availableResult.document.pageCount} pages, which exceeds the ${maxPages}-page limit.`,
+                    pageCount: availableResult.document.pageCount,
                     resolvedAttachment,
                 };
             }
             return {
                 kind: 'ok',
-                cached: true,
+                cached: cachedResult !== null,
                 ...(args.serializedResult
-                    ? { serializedResult: cachedResult as SerializedDocumentCacheResult }
-                    : { result: cachedResult as BeaverExtractResult }),
-                totalPages: cachedResult.document.pageCount,
+                    ? { serializedResult: availableResult as SerializedDocumentCacheResult }
+                    : { result: availableResult as BeaverExtractResult }),
+                totalPages: availableResult.document.pageCount,
                 resolvedAttachment,
                 contentType: zoteroItem?.attachmentContentType || cachedMeta?.contentType || args.contentType || 'application/pdf',
+                timings,
             };
         }
 
@@ -1178,13 +1409,13 @@ async function extractAndCacheResolvedPdfDocumentImpl(
         }
 
         if (totalPages == null) {
-            const loaded = await loadAttachmentData({
+            const loaded = await readFile(() => loadAttachmentData({
                 item: zoteroItem,
                 source: attachmentSource,
                 onRemoteDownloadFailure: args.onRemoteDownloadFailure,
                 signal,
                 throwIfTimedOut,
-            });
+            }));
             if (loaded.kind === 'error') {
                 if (aborted()) return aborted()!;
                 if (loaded.code === 'file_too_large') {
@@ -1192,6 +1423,15 @@ async function extractAndCacheResolvedPdfDocumentImpl(
                         kind: 'response_error',
                         code: 'file_too_large',
                         message: `The PDF file for ${resolvedKeyStr} has a file size of ${(loaded.sizeMB ?? 0).toFixed(1)}MB, which exceeds the ${loaded.maxMB}MB limit.`,
+                        pageCount: null,
+                        resolvedAttachment,
+                    };
+                }
+                if (loaded.code === 'file_permission_denied') {
+                    return {
+                        kind: 'response_error',
+                        code: 'file_permission_denied',
+                        message: fileAccessDeniedMessage('PDF', resolvedKeyStr),
                         pageCount: null,
                         resolvedAttachment,
                     };
@@ -1219,7 +1459,10 @@ async function extractAndCacheResolvedPdfDocumentImpl(
             throwIfTimedOut('pdf_data_load_for_page_count');
             loadedPdfData = pdfData;
             workerDispatched = true;
-            totalPages = await client.getPageCount(pdfData, signal);
+            const pageCountStartedAt = Date.now();
+            const pageCountData = pdfData;
+            totalPages = await worker.run((client) => client.getPageCount(pageCountData, signal, pageCountTiming));
+            timings.pageCountMs = elapsed(pageCountStartedAt);
             throwIfTimedOut('page_count_extraction');
         }
 
@@ -1244,13 +1487,13 @@ async function extractAndCacheResolvedPdfDocumentImpl(
         }
 
         if (!pdfData) {
-            const loaded = await loadAttachmentData({
+            const loaded = await readFile(() => loadAttachmentData({
                 item: zoteroItem,
                 source: attachmentSource,
                 onRemoteDownloadFailure: args.onRemoteDownloadFailure,
                 signal,
                 throwIfTimedOut,
-            });
+            }));
             if (loaded.kind === 'error') {
                 if (aborted()) return aborted()!;
                 if (loaded.code === 'file_too_large') {
@@ -1258,6 +1501,15 @@ async function extractAndCacheResolvedPdfDocumentImpl(
                         kind: 'response_error',
                         code: 'file_too_large',
                         message: `The PDF file for ${resolvedKeyStr} has a file size of ${(loaded.sizeMB ?? 0).toFixed(1)}MB, which exceeds the ${loaded.maxMB}MB limit.`,
+                        pageCount: totalPages,
+                        resolvedAttachment,
+                    };
+                }
+                if (loaded.code === 'file_permission_denied') {
+                    return {
+                        kind: 'response_error',
+                        code: 'file_permission_denied',
+                        message: fileAccessDeniedMessage('PDF', resolvedKeyStr),
                         pageCount: totalPages,
                         resolvedAttachment,
                     };
@@ -1287,14 +1539,18 @@ async function extractAndCacheResolvedPdfDocumentImpl(
         }
 
         logger(
-            `extractAndCacheDocument: full-document extract for ${requestKey} mode=${mode} worker=${workerName}`,
+            `extractAndCacheDocument: full-document extract for ${requestKey} mode=${mode} worker=${workerName}${interactive ? ' interactive' : ''}`,
             3,
         );
         const pdfBytes = pdfData;
         if (!pdfBytes) {
             throw new Error('PDF data was not loaded before extraction');
         }
-        const extractSettings = { checkTextLayer: true as const };
+        const extractArgs = {
+            mode,
+            settings: { checkTextLayer: true as const },
+            schemaVersion: uncachedSchemaVersion ?? undefined,
+        };
         const createSharedResult = async (extractSignal: AbortSignal) => {
             // Set only when this request's own extraction actually dispatches to the worker.
             // A timeout during cache pre-work (metadata/payload reads, decompression) or while
@@ -1302,29 +1558,38 @@ async function extractAndCacheResolvedPdfDocumentImpl(
             // state to this request; if a shared extraction wedges, the leader request's timeout
             // response carries the worker snapshot for that episode.
             workerDispatched = true;
+            // The shared extraction outlives its leader while other requests
+            // wait for it, so its wait for a worker follows the shared signal.
             return args.serializedResult
-                ? client.extractSerialized(pdfBytes, { mode, settings: extractSettings }, extractSignal)
-                : client.extract(pdfBytes, { mode, settings: extractSettings }, extractSignal);
+                ? runExtraction(() => worker.run(
+                    (client) => client.extractSerialized(pdfBytes, extractArgs, extractSignal, extractTiming),
+                    { signal: extractSignal },
+                ))
+                : runExtraction(() => worker.run(
+                    (client) => client.extract(pdfBytes, extractArgs, extractSignal, extractTiming),
+                    { signal: extractSignal },
+                ));
         };
 
         const createUnsharedResult = async () => {
             workerDispatched = true;
             const extracted = args.serializedResult
                 ? serializedWorkerResultToCacheResult(
-                    await client.extractSerialized(
-                        pdfBytes,
-                        { mode, settings: extractSettings },
-                        signal,
-                    ),
+                    await runExtraction(() => worker.run((client) => client.extractSerialized(pdfBytes, extractArgs, signal, extractTiming))),
                 )
-                : await client.extract(
-                    pdfBytes,
-                    { mode, settings: extractSettings },
-                    signal,
-                );
+                : await runExtraction(() => worker.run((client) => client.extract(pdfBytes, extractArgs, signal, extractTiming)));
             throwIfTimedOut('pdf_extract');
             return extracted;
         };
+
+        // Joining another request's extraction: nothing left to run here, so
+        // this request's worker is free for others (including that extraction).
+        const onJoin = () => worker.releaseWorker();
+
+        const createUncachedSharedResult = (extractSignal: AbortSignal) =>
+            createSharedResult(extractSignal).then((extracted) => args.serializedResult
+                ? serializedWorkerResultToCacheResult(extracted as SerializedBeaverExtractResult)
+                : extracted as BeaverExtractResult);
 
         const resultPromise = cache
             ? args.serializedResult
@@ -1335,11 +1600,13 @@ async function extractAndCacheResolvedPdfDocumentImpl(
                     sourceSizeBytes: isRemoteOnly ? pdfBytes.byteLength : 0,
                     contentType: zoteroItem?.attachmentContentType || args.contentType || 'application/pdf',
                     maxSourceSizeBytes,
-                    lockScope: workerName,
+                    lockScope,
                     sharedTimeoutMs,
                     abortSignal: signal,
                     expectedSourceIdentity: isRemoteOnly ? null : initialSourceIdentity,
-                    create: createSharedResult as (extractSignal: AbortSignal) => ReturnType<typeof client.extractSerialized>,
+                    create: createSharedResult as (extractSignal: AbortSignal) => ReturnType<MuPDFWorkerClient['extractSerialized']>,
+                    onJoin,
+                    ...cacheWrite,
                 })
                 : cache.getOrCreateResult({
                 item: cacheItemRef,
@@ -1348,18 +1615,66 @@ async function extractAndCacheResolvedPdfDocumentImpl(
                 sourceSizeBytes: isRemoteOnly ? pdfBytes.byteLength : 0,
                 contentType: zoteroItem?.attachmentContentType || args.contentType || 'application/pdf',
                 maxSourceSizeBytes,
-                lockScope: workerName,
+                lockScope,
                 sharedTimeoutMs,
                 abortSignal: signal,
                 expectedSourceIdentity: isRemoteOnly ? null : initialSourceIdentity,
                 create: createSharedResult as (extractSignal: AbortSignal) => Promise<BeaverExtractResult>,
                 metadata: buildExtractedDocumentCacheMetadata,
+                onJoin,
+                ...cacheWrite,
             })
-            : createUnsharedResult();
-        const result = cache
+            : uncachedSchemaVersion !== null && documentCache
+                ? documentCache.getOrCreateUncachedResult<SerializedDocumentCacheResult | BeaverExtractResult>({
+                    key: [
+                        cacheItemRef.libraryID,
+                        cacheItemRef.key,
+                        effectiveFilePath,
+                        mode,
+                        `schema:${uncachedSchemaVersion}`,
+                        args.serializedResult ? 'serialized' : 'object',
+                        `scope:${lockScope}`,
+                    ].join('/'),
+                    sharedTimeoutMs,
+                    abortSignal: signal,
+                    create: createUncachedSharedResult,
+                    onJoin,
+                })
+                : createUnsharedResult();
+        const result = documentCache
             ? await awaitWithRequestAbort(resultPromise, signal, throwIfTimedOut, 'pdf_extract')
             : await resultPromise;
         throwIfTimedOut('document_result_ready');
+        if (!extractedHere) timings.source = 'shared';
+        const waits = [pageCountTiming, extractTiming];
+        const sum = (part: 'clientQueueMs' | 'startMs' | 'queueMs') =>
+            waits.some((t) => t[part] !== undefined)
+                ? Math.round(waits.reduce((total, t) => total + (t[part] ?? 0), 0))
+                : undefined;
+        // Waiting for a worker before the first op is queue time too.
+        const opQueueMs = sum('clientQueueMs');
+        const clientQueueMs = opQueueMs === undefined && worker.routeWaitMs === 0
+            ? undefined
+            : Math.round((opQueueMs ?? 0) + worker.routeWaitMs);
+        const workerStartMs = sum('startMs');
+        const workerQueueMs = sum('queueMs');
+        if (clientQueueMs !== undefined) timings.clientQueueMs = clientQueueMs;
+        if (workerStartMs !== undefined) timings.workerStartMs = workerStartMs;
+        if (workerQueueMs !== undefined) timings.workerQueueMs = workerQueueMs;
+        if (extractTiming.opMs !== undefined) timings.workerOpMs = Math.round(extractTiming.opMs);
+        const heapTiming = extractTiming.heapBytes !== undefined ? extractTiming : pageCountTiming;
+        const toMb = (bytes: number) => Math.round(bytes / (1024 * 1024));
+        if (heapTiming.heapBytes !== undefined) timings.workerHeapMb = toMb(heapTiming.heapBytes);
+        if (heapTiming.peakHeapBytes !== undefined) timings.workerPeakHeapMb = toMb(heapTiming.peakHeapBytes);
+        const state = workerState();
+        if (state) timings.workerState = state;
+        if (worker.slot) timings.workerSlot = worker.slot;
+        if (worker.overflowSkip) timings.overflowSkip = worker.overflowSkip;
+
+        if (!result && uncachedSchemaVersion !== null) {
+            // The shared uncached extraction was aborted after it finished.
+            throw new WorkerAbortError();
+        }
 
         if (!result) {
             return {
@@ -1390,6 +1705,7 @@ async function extractAndCacheResolvedPdfDocumentImpl(
             totalPages: result.document.pageCount,
             resolvedAttachment,
             contentType: zoteroItem?.attachmentContentType || args.contentType || 'application/pdf',
+            timings,
         };
     } catch (error) {
         if (error instanceof ExternalAbortError) {
@@ -1398,7 +1714,8 @@ async function extractAndCacheResolvedPdfDocumentImpl(
                 phase: error.phase,
                 pageCount: totalPages,
                 resolvedAttachment,
-                workerDispatched,
+                workerDispatched: reachedWorker(),
+                workerSlot: worker.slot,
             };
         }
 
@@ -1416,7 +1733,8 @@ async function extractAndCacheResolvedPdfDocumentImpl(
                 phase: 'external_abort',
                 pageCount: totalPages,
                 resolvedAttachment,
-                workerDispatched,
+                workerDispatched: reachedWorker(),
+                workerSlot: worker.slot,
             };
         }
 
@@ -1426,7 +1744,7 @@ async function extractAndCacheResolvedPdfDocumentImpl(
             || error instanceof TimeoutError
             || isWorkerDeadlineError(error)
         ) {
-            logger(`extractAndCacheDocument[${workerName}]: Timed out after ${timeoutSeconds}s`, 1);
+            logger(`extractAndCacheDocument[${worker.slot ?? workerName}]: Timed out after ${timeoutSeconds}s`, 1);
             return {
                 kind: 'timeout',
                 phase: error instanceof TimeoutError ? error.phase : 'unknown',
@@ -1434,20 +1752,33 @@ async function extractAndCacheResolvedPdfDocumentImpl(
                 pageCount: totalPages,
                 resolvedAttachment,
                 leaseReaped: isWorkerDeadlineError(error),
-                workerDispatched,
+                workerDispatched: reachedWorker(),
+                workerSlot: worker.slot,
             };
         }
 
-        logger(`extractAndCacheDocument[${workerName}]: Extraction failed: ${error}`, 1);
+        logger(`extractAndCacheDocument[${worker.slot ?? workerName}]: Extraction failed: ${error}`, 1);
         const errorKey = resolvedAttachment
             ? `${resolvedAttachment.libraryId}-${resolvedAttachment.zoteroKey}`
             : requestKey;
 
         const extractionError = asExtractionError(error);
         if (extractionError) {
+            // A retained OCR preparation of this source is unservable after an
+            // extraction update; background processing prepares it again.
+            const repreparing = extractionError.code === ExtractionErrorCode.NO_TEXT_LAYER
+                && resolvedCacheRef !== null && resolvedFilePath !== null
+                && await Zotero.Beaver?.documentCache?.getProtectedRepreparation(
+                    { libraryId: resolvedCacheRef.libraryID, zoteroKey: resolvedCacheRef.key },
+                    resolvedFilePath,
+                ) != null;
+            const noTextLayerMessage = repreparing
+                ? `The PDF file for ${errorKey} is a prepared scan that must be prepared again after an extraction update. Its text is unavailable until background preparation finishes`
+                : `The PDF file for ${errorKey} is not prepared (no text layer). Cloud preparation may be turned off or temporarily unavailable; reading does not start OCR`;
             if (
                 resolvedCacheRef
                 && resolvedFilePath
+                && uncachedSchemaVersion === null
                 && (extractionError.code === ExtractionErrorCode.ENCRYPTED
                     || extractionError.code === ExtractionErrorCode.INVALID_PDF
                     || extractionError.code === ExtractionErrorCode.NO_TEXT_LAYER)
@@ -1482,7 +1813,7 @@ async function extractAndCacheResolvedPdfDocumentImpl(
                         ? `The PDF file for ${errorKey} is password-protected`
                         : cachedCode === 'invalid_pdf'
                             ? `The PDF file for ${errorKey} is invalid or corrupted`
-                            : `The PDF file for ${errorKey} is not prepared (no text layer). Cloud preparation may be turned off or temporarily unavailable; reading does not start OCR`,
+                            : noTextLayerMessage,
                     pageCount: extractionError.pageCount ?? totalPages,
                     resolvedAttachment,
                 };
@@ -1502,7 +1833,7 @@ async function extractAndCacheResolvedPdfDocumentImpl(
                     return {
                         kind: 'response_error',
                         code: 'no_text_layer',
-                        message: `The PDF file for ${errorKey} is not prepared (no text layer). Cloud preparation may be turned off or temporarily unavailable; reading does not start OCR`,
+                        message: noTextLayerMessage,
                         pageCount: totalPagesForError,
                         resolvedAttachment,
                     };
@@ -1563,7 +1894,7 @@ async function extractAndCacheResolvedPdfDocumentImpl(
         // ExtractionError (handled above) is never misreported here.
         if (isWorkerLifecycleError(error)) {
             logger(
-                `extractAndCacheDocument[${workerName}]: local PDF engine unavailable for ${errorKey}: ${error}`,
+                `extractAndCacheDocument[${worker.slot ?? workerName}]: local PDF engine unavailable for ${errorKey}: ${error}`,
                 1,
             );
             return {
@@ -1584,7 +1915,7 @@ async function extractAndCacheResolvedPdfDocumentImpl(
         const rawMessage = native ? native.message : String(error);
         const responseDetail = [
             native ? `${native.name}: ${native.message}` : rawMessage,
-            `(mode=${mode}, worker=${workerName}, pages=${totalPages ?? 'unknown'})`,
+            `(mode=${mode}, worker=${worker.slot ?? workerName}, pages=${totalPages ?? 'unknown'})`,
         ]
             .filter(Boolean)
             .join('\n');
@@ -1597,7 +1928,7 @@ async function extractAndCacheResolvedPdfDocumentImpl(
             .filter(Boolean)
             .join('\n');
         logger(
-            `extractAndCacheDocument[${workerName}]: Unexpected extraction failure for ${errorKey}\n${diagnosticDetail}`,
+            `extractAndCacheDocument[${worker.slot ?? workerName}]: Unexpected extraction failure for ${errorKey}\n${diagnosticDetail}`,
             1,
         );
 
@@ -1616,6 +1947,7 @@ async function extractAndCacheResolvedPdfDocumentImpl(
             resolvedAttachment,
         };
     } finally {
+        worker.close();
         if (ownsTimeout) {
             dispose();
         }

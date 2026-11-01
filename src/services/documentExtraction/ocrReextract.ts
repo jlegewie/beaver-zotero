@@ -29,6 +29,7 @@ import type { BeaverExtractResult } from '../../beaver-extract/schema';
 import type { PageGeometry } from '@beaver/agent-core/extract/types';
 import type { DocumentCacheExtractionMode } from '../database';
 import { buildExtractedDocumentCacheMetadata } from '../documentExtractionCore';
+import { getRemoteFileHash } from '../documentFileIdentity';
 import { logger } from '@beaver/agent-core/platform/logger';
 
 /** Extraction modes populated so neither read path re-extracts the original. */
@@ -121,7 +122,7 @@ export async function extractPdfBytesAndCacheAsOriginalAttachment(
     // artifact before allowing any old text to be stamped with that identity.
     const sourceStillMatches = async (): Promise<boolean> => {
         try {
-            const hash = args.isRemoteOnly ? item.attachmentSyncedHash : await item.attachmentHash;
+            const hash = args.isRemoteOnly ? await getRemoteFileHash(item) : await item.attachmentHash;
             return hash === args.expectedFileHash;
         } catch {
             return false;
@@ -202,7 +203,12 @@ export async function extractPdfBytesAndCacheAsOriginalAttachment(
                 item, filePath, mode, sourceSizeBytes,
                 contentType: item.attachmentContentType || 'application/pdf',
                 result: extracted,
-                metadata: { ...buildExtractedDocumentCacheMetadata(extracted), extractionSource: 'ocr' },
+                metadata: {
+                    ...buildExtractedDocumentCacheMetadata(extracted),
+                    extractionSource: 'ocr',
+                    // Lets a rename or touch be verified when no processing ledger row vouches for the bytes.
+                    sourceMd5: args.isRemoteOnly ? null : args.expectedFileHash,
+                },
                 expectedSourceIdentity: sourceIdentity,
             });
             if (abortSignal?.aborted) return { kind: 'aborted' };

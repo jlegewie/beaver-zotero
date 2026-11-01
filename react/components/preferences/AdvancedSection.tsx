@@ -4,8 +4,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import Button from "@beaver/agent-ui/primitives/Button";
 import {SettingsGroup, SettingsRow, DocLink} from "./components/SettingsElements";
 import { dataProviderEnabledAtom, mcpServerEnabledAtom, mcpWriteToolsEnabledAtom } from "../../atoms/ui";
-import { isMcpServerSupportedAtom } from "../../atoms/profile";
-import { useAtom, useAtomValue, useSetAtom } from "jotai";
+import { useAtom, useSetAtom } from "jotai";
 import { currentMessageExternalFilesAtom } from "../../atoms/messageComposition";
 import { ensureMcpBridgeScript } from "../../hooks/useMcpServer";
 import { copyToClipboard } from "../../utils/clipboard";
@@ -94,7 +93,6 @@ const AdvancedSection: React.FC = () => {
     const [mcpWriteToolsEnabled, setMcpWriteToolsEnabled] = useAtom(mcpWriteToolsEnabledAtom);
     const [mcpCopied, setMcpCopied] = useState(false);
     const [mcpHttpCopied, setMcpHttpCopied] = useState(false);
-    const isMcpServerSupported = useAtomValue(isMcpServerSupportedAtom);
 
     // --- MCP Server port ---
     const mcpServerPort = useMemo(() => {
@@ -148,18 +146,16 @@ const AdvancedSection: React.FC = () => {
 
     // --- Toggle MCP server enabled ---
     const handleMcpServerToggle = useCallback(() => {
-        if (!isMcpServerSupported) return;
         const newValue = !mcpServerEnabled;
         setPref('mcpServerEnabled', newValue);
         setMcpServerEnabled(newValue);
-    }, [mcpServerEnabled, isMcpServerSupported, setMcpServerEnabled]);
+    }, [mcpServerEnabled, setMcpServerEnabled]);
 
     const handleMcpWriteToolsToggle = useCallback(() => {
-        if (!isMcpServerSupported) return;
         const newValue = !mcpWriteToolsEnabled;
         setPref('mcpCreateNoteToolEnabled', newValue);
         setMcpWriteToolsEnabled(newValue);
-    }, [mcpWriteToolsEnabled, isMcpServerSupported, setMcpWriteToolsEnabled]);
+    }, [mcpWriteToolsEnabled, setMcpWriteToolsEnabled]);
 
     // --- Data provider (library access for other Beaver clients) ---
     const [dataProviderEnabled, setDataProviderEnabled] = useAtom(dataProviderEnabledAtom);
@@ -284,10 +280,7 @@ const AdvancedSection: React.FC = () => {
                     title="Enable MCP Server"
                     description={`Endpoint at localhost:${mcpServerPort}`}
                     onClick={handleMcpServerToggle}
-                    disabled={!isMcpServerSupported}
-                    tooltip={isMcpServerSupported
-                        ? 'Expose your Zotero library to MCP-compatible AI tools'
-                        : 'Only available with Beaver Pro'}
+                    tooltip="Expose your Zotero library to MCP-compatible AI tools"
                     control={
                         <div className="display-flex flex-row items-center gap-2">
                             <input
@@ -296,8 +289,7 @@ const AdvancedSection: React.FC = () => {
                                 checked={mcpServerEnabled}
                                 onChange={handleMcpServerToggle}
                                 onClick={(e) => e.stopPropagation()}
-                                disabled={!isMcpServerSupported}
-                                style={{ cursor: isMcpServerSupported ? 'pointer' : 'not-allowed', margin: 0 }}
+                                style={{ cursor: 'pointer', margin: 0 }}
                             />
                         </div>
                     }
@@ -307,10 +299,7 @@ const AdvancedSection: React.FC = () => {
                     description="Allow MCP clients to create Zotero notes, highlights, and sticky-note annotations. Changing setting requires reloading of the MCP server."
                     onClick={handleMcpWriteToolsToggle}
                     hasBorder
-                    disabled={!isMcpServerSupported}
-                    tooltip={isMcpServerSupported
-                        ? 'Advertise and allow the MCP tools that write to your library'
-                        : 'Only available with Beaver Pro'}
+                    tooltip="Advertise and allow the MCP tools that write to your library"
                     control={
                         <div className="display-flex flex-row items-center gap-2">
                             <input
@@ -319,8 +308,7 @@ const AdvancedSection: React.FC = () => {
                                 checked={mcpWriteToolsEnabled}
                                 onChange={handleMcpWriteToolsToggle}
                                 onClick={(e) => e.stopPropagation()}
-                                disabled={!isMcpServerSupported}
-                                style={{ cursor: isMcpServerSupported ? 'pointer' : 'not-allowed', margin: 0 }}
+                                style={{ cursor: 'pointer', margin: 0 }}
                             />
                         </div>
                     }

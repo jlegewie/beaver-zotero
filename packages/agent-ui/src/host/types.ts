@@ -5,8 +5,9 @@ import type { Citation, PartLocation } from '@beaver/agent-core/types/citations'
 import type { PageLabelsByAttachmentId } from '@beaver/agent-core/citations/atoms';
 import type { ExternalReference } from '@beaver/agent-core/types/externalReferences';
 import type { ToolCallPart, AgentRun, AgentRunStatus, MessageSearchFilters } from '@beaver/agent-core/agents/types';
-import type { MessageAttachment } from '@beaver/agent-core/types/attachments/apiTypes';
+import type { MessageAttachment, ViewAttachment } from '@beaver/agent-core/types/attachments/apiTypes';
 import type { MenuPosition, SearchMenuCloseReason } from '../primitives/SearchMenu';
+import type { MenuItem } from '../primitives/ContextMenu';
 import type { AddSourcesMenuHandle, AddSourcesQuerySource } from '../composer/useAddSourcesMenu';
 import type { AgentActionType } from '@beaver/agent-core/protocol/agentProtocol';
 import type { BatchOutcomeTarget } from '@beaver/agent-core/run-state/batchProgress';
@@ -100,7 +101,16 @@ export interface AttachmentMatchNavigation {
  * components consume the same slice.
  */
 export interface NavigationHost {
-    openTable?(key: string): Promise<{ ok: true; warning?: string } | { error: string }>;
+    /**
+     * Opens a stored table in the client's table view. `origin` is the window
+     * the interaction happened in — derive it from the clicked element's
+     * `ownerDocument` — so the table opens beside the surface the user is
+     * looking at rather than in whichever window is newest.
+     */
+    openTable?(
+        key: string,
+        origin?: Window | null,
+    ): Promise<{ ok: true; warning?: string } | { error: string }>;
     /** Reveal/select the referenced item in the library view. */
     revealInLibrary(ref: ZoteroItemReference): void;
     /** Reveal/select the referenced library in the library view. */
@@ -110,6 +120,12 @@ export interface NavigationHost {
      * `zotero_key` is the collection key (not an item key).
      */
     revealCollection(ref: ZoteroItemReference): void;
+    /**
+     * Reveal/select an attached saved search or built-in view (Unfiled Items,
+     * …) in the library view. Optional — clients without such views leave the
+     * chip inert.
+     */
+    revealView?(view: ViewAttachment): void | Promise<void>;
     /**
      * Reveal whatever `zotero_key` names in the referenced library: a regular
      * item, attachment, or note is selected in the library view, an annotation
@@ -151,6 +167,13 @@ export interface NavigationHost {
      * against the libraries it can see.
      */
     revealBatchOutcome?(target: BatchOutcomeTarget): void | Promise<void>;
+    /**
+     * Right-click menu entries for a library item: reveal it, open it (or its
+     * best attachment), show its file. Interaction-time, so the host may load the
+     * item live. Resolves to an empty list when the item is unavailable.
+     * Optional — clients without it leave item rows with no custom menu.
+     */
+    itemMenuItems?(ref: ZoteroItemReference): Promise<MenuItem[]>;
 }
 
 /**
@@ -305,6 +328,41 @@ export interface ExternalFileCitationExportRequest {
 }
 
 /**
+ * What the host needs to render a citation of an external work (found by
+ * search, not in the user's library) as a host-native citation.
+ */
+export interface ExternalReferenceCitationExportRequest {
+    /** External reference id the model cited. */
+    externalId: string;
+    /** The work's metadata from the thread's external reference cache. */
+    reference: ExternalReference;
+    /** Identity as cited by the model, for its locator. */
+    requestedRef: CitationRef | null;
+}
+
+/** File formats a response can be exported to. */
+export type FileExportFormat = 'docx' | 'pdf' | 'markdown' | 'latex';
+
+/** The final answer only, or the full response with the agent's tool activity. */
+export type FileExportContent = 'final' | 'full';
+
+/** Outcome of exporting to a file. `warnings` are user-facing sentences. */
+export type FileExportResult =
+    | {
+        status: 'saved';
+        /** The exported document. */
+        path: string;
+        /** Its file name. */
+        fileName: string;
+        /** The folder it was saved in, as shown to the user. */
+        folderName: string;
+        /** Names of files written beside it (a LaTeX export's .bib file). */
+        companionFileNames: string[];
+        warnings: string[];
+    }
+    | { status: 'canceled' };
+
+/**
  * Render content into the host's native document format. For Zotero this is a
  * note (CSL-formatted HTML); other clients format
  * differently. Clients that don't support document export omit this slice.
@@ -320,6 +378,29 @@ export interface DocumentExportHost {
      * external-file storage omit it.
      */
     renderExternalFileCitation?(request: ExternalFileCitationExportRequest): CitationExportRender | null;
+    /**
+     * Render a citation of an external work as a host-native citation. Returns
+     * null when the host cannot, in which case the render layer falls back to
+     * a link. Optional.
+     */
+    renderExternalReferenceCitation?(request: ExternalReferenceCitationExportRequest): CitationExportRender | null;
+    /**
+     * Export a response — the runs of its resume chain, in order — to a file
+     * the user chooses, with citations formatted by the host. Interaction-time:
+     * may read the client's global state. Optional; clients without file export
+     * omit it and the action is not offered.
+     */
+    exportResponseToFile?(request: { runs: AgentRun[]; format: FileExportFormat; content: FileExportContent }): Promise<FileExportResult>;
+    /**
+     * Export a whole thread — every run in order, with the user's prompts and
+     * the agent's tool activity — to a file the user chooses. Same contract as
+     * `exportResponseToFile`.
+     */
+    exportThreadToFile?(request: { runs: AgentRun[]; format: FileExportFormat }): Promise<FileExportResult>;
+    /** Show an exported file in the system file manager. Rejects when it is gone. */
+    revealExportedFile?(path: string): Promise<void>;
+    /** Open an exported file in the system's default application. Rejects when it is gone. */
+    openExportedFile?(path: string): Promise<void>;
 }
 
 export type NoteSaveFormat =
@@ -371,6 +452,11 @@ export interface NoteWriterHost {
     isCurrentLibraryEditable(): boolean;
     /** Render-time: whether the current Zotero context has a parent item target. */
     canSaveAsChildNote(): boolean;
+    /**
+     * Render-time: display title of the item a child note would be saved
+     * under, or null when there is none or it cannot be named.
+     */
+    childNoteParentTitle?(): string | null;
     /** Interaction-time: create a note in the host library and optionally reveal it. */
     saveNote(request: SaveNoteRequest): Promise<SavedNoteReference | null>;
 }
@@ -406,6 +492,16 @@ export interface ConfigHost {
      * leaves the workaround **enabled**.
      */
     isImeCompositionOrderFixEnabled?(): boolean;
+    /**
+     * Whether the composer stops Lexical from inserting its composition start
+     * character in Gecko on Windows, which sends some IMEs' candidate window to
+     * the top-left corner of the screen.
+     *
+     * Opt-in, because commits then rely more often on the composer's
+     * composition-end recovery: a host that omits it (or omits this whole
+     * slice) leaves the suppression **disabled**.
+     */
+    isImeCompositionStartCharSuppressionEnabled?(): boolean;
     /**
      * Whether the composer emits compact IME event traces to the log, for
      * diagnosing composition issues without a local reproduction. Diagnostic
@@ -705,7 +801,15 @@ export interface DialogsHost {
  * {@link setHost}. Slices are optional — check before use.
  */
 export type TableDisplay =
-    | { status: 'available'; title: string; rows: number; columns: number }
+    | {
+          status: 'available';
+          title: string;
+          rows: number;
+          /** Every column in the spec, system ones included. */
+          columns: number;
+          /** Content columns: every column except system metadata (year, DOI, row type). */
+          contentColumns?: number;
+      }
     | { status: 'unavailable'; reason: string };
 
 export interface ClientHost {

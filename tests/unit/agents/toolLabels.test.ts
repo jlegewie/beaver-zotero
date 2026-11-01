@@ -26,6 +26,7 @@ import type {
     BatchJobView,
 } from '@beaver/agent-core/run-state/toolResultViews';
 import type { ToolCallPart } from '@beaver/agent-core/agents/types';
+import type { DuplicatesResultView } from '@beaver/agent-core/protocol/duplicates';
 
 function tc(tool_name: string, args: Record<string, unknown> = {}): ToolCallPart {
     return { part_kind: 'tool-call', tool_name, args, tool_call_id: 't1' };
@@ -177,6 +178,21 @@ describe('getToolResultLabelSuffix', () => {
         expect(getToolResultLabelSuffix(view, 'find_in_attachments')).toBe(' (4 matches)');
     });
 
+    it('counts duplicate groups, as a range when the page is part of a larger set', () => {
+        const page = (shown: number, total: number, next_offset: number | null): DuplicatesResultView => ({
+            view_type: 'duplicates', mode: 'find', total_count: total, has_more: next_offset != null,
+            next_offset, snapshot_id: 's',
+            groups: Array.from({ length: shown }, (_, i) => ({
+                group_id: String(i), members: [], differing_fields: [], warnings: [],
+                mergeable: true, recommended_master_item_id: '',
+            })),
+        });
+        expect(getToolResultLabelSuffix(page(3, 3, null), 'find_duplicates')).toBe(' (3 groups)');
+        expect(getToolResultLabelSuffix(page(10, 54, 10), 'find_duplicates')).toBe(' (groups 1–10 of 54)');
+        expect(getToolResultLabelSuffix(page(4, 54, null), 'find_duplicates')).toBe(' (groups 51–54 of 54)');
+        expect(getToolResultLabelSuffix(page(0, 0, null), 'find_duplicates')).toBeNull();
+    });
+
     it('carries the batch population line for a running batch', () => {
         expect(getToolResultLabelSuffix(batchView(), 'batch_start')).toBe(' (23 items)');
     });
@@ -193,6 +209,15 @@ describe('getToolResultLabelSuffix', () => {
             view_type: 'external_reference_list', tool_name: 'lookup_work', references: [], found_count: 2,
         };
         expect(getToolResultLabelSuffix(view, 'lookup_work')).toBe(' (2 found)');
+    });
+
+    it('counts the chapters find_book_chapters found', () => {
+        const view = (found_count: number): ExternalReferenceListView => ({
+            view_type: 'external_reference_list', tool_name: 'find_book_chapters', references: [], found_count,
+        });
+        expect(getToolResultLabelSuffix(view(13), 'find_book_chapters')).toBe(' (13 chapters)');
+        expect(getToolResultLabelSuffix(view(1), 'find_book_chapters')).toBe(' (1 chapter)');
+        expect(getToolResultLabelSuffix(view(0), 'find_book_chapters')).toBeNull();
     });
 });
 

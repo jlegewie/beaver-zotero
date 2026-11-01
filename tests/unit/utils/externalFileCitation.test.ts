@@ -8,6 +8,7 @@ vi.mock('../../../src/services/agentDataProvider/utils', () => ({
 import { preloadExternalFileCitations } from '../../../src/utils/externalFileCitation';
 import { expandToRawHtml, preloadStructuralLocatorPages } from '../../../src/utils/noteCitationExpand';
 import { simplifyNoteHtml } from '../../../src/utils/noteHtmlSimplifier';
+import { structuredResultWithCitablePages } from '../../helpers/structuredDocuments';
 
 const tag = '<citation id="ext-MRDTFYHP" loc="page6"/>';
 const metadata = () => ({ elements: new Map() } as any);
@@ -59,10 +60,10 @@ describe('external file citations in notes', () => {
         ['s5', 'iv'],
         ['s5-s6', 'iv-v'],
     ])('resolves external locator %s to cached page labels', async (loc, label) => {
-        const getResult = vi.fn().mockResolvedValue({ mode: 'structured', document: { citationIndex: {
-            s5: { pageIndex: 5, pageLabel: 'iv' },
-            s6: { pageIndex: 6, pageLabel: 'v' },
-        } } });
+        const getResult = vi.fn().mockResolvedValue(structuredResultWithCitablePages(7, [
+            { index: 5, label: 'iv', items: [{ id: 'p1', sentences: ['s5'] }] },
+            { index: 6, label: 'v', items: [{ id: 'p2', sentences: ['s6'] }] },
+        ]));
         (Zotero as any).Beaver.documentCache = { getResult };
         const input = `<citation id="ext-MRDTFYHP" loc="${loc}"/>`;
         const { files } = await preloadExternalFileCitations(input);
@@ -71,6 +72,26 @@ describe('external file citations in notes', () => {
             { libraryId: -1, zoteroKey: 'MRDTFYHP' }, 'structured', '/stored/Report.pdf',
         );
         expect(resolved.unresolved).toEqual([]);
+        expect(expandToRawHtml(input, metadata(), 'new', context(files), undefined, resolved.pages))
+            .toBe(`(<a href="file:///stored/Report.pdf">Report.pdf</a>, p. ${label})`);
+    });
+
+    it.each([
+        ['s2.1,s9.1', '2, 9'],
+        ['s2.1,s3.1', '2-3'],
+        ['s2.1,s2.2', '2'],
+        ['s2.1-s9.1', '2-9'],
+    ])('labels sentence locator %s as p. %s', async (loc, label) => {
+        (Zotero as any).Beaver.documentCache = {
+            getResult: vi.fn().mockResolvedValue(structuredResultWithCitablePages(9, [
+                { index: 1, items: [{ id: 'p2.1', sentences: ['s2.1', 's2.2'] }] },
+                { index: 2, items: [{ id: 'p3.1', sentences: ['s3.1'] }] },
+                { index: 8, items: [{ id: 'p9.1', sentences: ['s9.1'] }] },
+            ])),
+        };
+        const input = `<citation id="ext-MRDTFYHP" loc="${loc}"/>`;
+        const { files } = await preloadExternalFileCitations(input);
+        const resolved = await preloadStructuralLocatorPages(input);
         expect(expandToRawHtml(input, metadata(), 'new', context(files), undefined, resolved.pages))
             .toBe(`(<a href="file:///stored/Report.pdf">Report.pdf</a>, p. ${label})`);
     });
@@ -125,11 +146,12 @@ describe('external file citations in notes', () => {
             .toThrow('Copy the existing link or text from read_note');
     });
 
-    it('keeps existing compound citations immutable', () => {
+    it('refuses to replace an existing compound citation with a file reference', () => {
         const meta = metadata();
         meta.elements.set('c_existing', { rawHtml: 'compound citation', isCompound: true });
-        expect(expandToRawHtml(tag.replace('id=', 'ref="c_existing" id='), meta, 'new'))
-            .toBe('compound citation');
+        expect(() => expandToRawHtml(tag.replace('id=', 'ref="c_existing" id='), meta, 'new'))
+            .toThrow('compound citation, which cannot be edited');
+        expect(expandToRawHtml('<citation ref="c_existing"/>', meta, 'new')).toBe('compound citation');
     });
 
     it('requires old_string to use the stored link, and round-trips that link', () => {

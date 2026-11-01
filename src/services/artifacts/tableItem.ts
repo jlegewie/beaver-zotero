@@ -4,10 +4,9 @@
  * A table is a snapshot attachment and nothing else: no database row, no server
  * copy. Zotero’s snapshot attachment APIs give us a `text/html` file
  * attachment that opens in the reader, is full-text indexed, can be annotated
- * and syncs like any other stored file. The document it holds is
- * {@link buildTableDocument}'s, which embeds the `TableSpec` it was rendered
- * from, so the file is both the table anyone can read and the only copy of the
- * table's state.
+ * and syncs like any other stored file — and syncs its whole storage
+ * directory, which is where `table.json`, the table itself, lives beside the
+ * rendered snapshot.
  *
  * **Creation only, and only from the webpack side.** Recognition, the storage
  * paths and reading live in `tableItemIdentity.ts` and are re-exported below.
@@ -24,7 +23,6 @@
  * disagree about where they live.
  */
 
-import { tableSpecHash } from './recoveryShadow';
 import { logger } from '@beaver/agent-core/platform/logger';
 import {
     TABLE_SPEC_VERSION,
@@ -35,11 +33,7 @@ import { safeAttachmentFilename } from '../../utils/attachmentFiles';
 import { getPref } from '../../utils/prefs';
 import { checkLibraryExcluded } from '../agentDataProvider/utils';
 import { CSS_RULE_BUDGET, countTopLevelCssRules } from '../../utils/html';
-import {
-    buildTableDocument,
-    type TableHtmlOptions,
-    type TableDocumentState,
-} from './tableDocument';
+import { buildTableDocument, type TableHtmlOptions } from './tableDocument';
 // Only Zotero knows whether a library id is the user library or a group, so the
 // row action links are built there. Imported rather than reimplemented: the
 // stored document, the tab rendering and the reader must offer the same links.
@@ -48,10 +42,14 @@ import {
     buildTableUrl,
     isTableItem,
     loadTableItemFields,
+    tableFilePath,
+    tableFilesEditable,
     tableStorageDirectory,
     TableItemError,
     TABLE_TAG,
     TABLE_EMOJI_TAG,
+    type TableCreationState,
+    type TableFile,
 } from './tableItemIdentity';
 
 // Recognition, paths and reading live next door and are re-exported here, so a
@@ -67,8 +65,10 @@ export {
     readTable,
     readTableHistory,
     readTableItemSpec,
-    readTableItemDocument,
+    readTableFileCreation,
+    parseTableFile,
     resolveTableItem,
+    tableFilePath,
     tableHistoryPath,
     tableReadError,
     tableSidecarDirectory,
@@ -77,12 +77,31 @@ export {
     EMPTY_TABLE_HISTORY,
     TableItemError,
     TABLE_EMOJI_TAG,
+    TABLE_FILE_NAME,
     TABLE_SIDECAR_DIR,
     TABLE_TAG,
     TABLE_URL_PREFIX,
 } from './tableItemIdentity';
+
+/**
+ * The format version a spec is stored under: always this build's. A spec that
+ * names another version is refused rather than restamped, since its fields
+ * would be read with this format's assumptions. A spec that names none was
+ * built in this process and is stamped with the current one.
+ */
+export function storedSpecVersion(spec: Pick<TableSpec, 'spec_version'>): number {
+    if (spec.spec_version !== undefined && spec.spec_version !== TABLE_SPEC_VERSION) {
+        throw new TableItemError(
+            `This build stores tables in format ${TABLE_SPEC_VERSION}, not ${String(spec.spec_version)}.`,
+            'unsupported_version'
+        );
+    }
+    return TABLE_SPEC_VERSION;
+}
 export type {
     ReadTableItemResult,
+    TableCreationState,
+    TableFile,
     TableActor,
     TableHistory,
     TableItemErrorCode,
@@ -128,7 +147,7 @@ function checkTableLibrary(libraryID: number): ResolvedTableLibrary {
     if (libraryID !== Zotero.Libraries.userLibraryID &&
         library.libraryType !== 'group')
         return { error: 'unsupported_library' };
-    if (!library.editable || library.filesEditable === false)
+    if (!tableFilesEditable(library))
         return { error: 'no_writable_library' };
     return { libraryID };
 }
@@ -190,7 +209,9 @@ export interface CreateTableItemOptions {
         operation_id: string;
         request_sha256: string;
         url: string;
-        meta: NonNullable<TableDocumentState['creation']>['meta'];
+        meta: TableCreationState['meta'];
+        /** The change list a creation from a request answered with. */
+        changes?: unknown[];
     };
     /** Where to file it. Resolved by {@link resolveTableLibrary} when absent. */
     libraryID?: number;
@@ -226,35 +247,29 @@ export interface CreatedTableItem {
  * Creates the library item for a table.
  *
  * **The item-layer primitive, not the entry point.** This imports the
- * attachment and writes the document; it knows nothing about versions, so a
+ * attachment and writes `table.json`; it knows nothing about versions, so a
  * table created through it directly has a version 1 with no log entry and no
  * `beaver/v1.json` — a state nobody can revert to. `tableStore.createTable` is
  * its only caller and seeds that; go through the store.
  *
- * ## Two writes, on purpose
+ * ## Two steps, on purpose
  *
  * `TableSpec.key` holds the **Zotero item key** of this attachment: there is no
  * separate artifact id, so a table's identity is the identity of the item that
- * holds it. That creates an ordering problem — the key does not exist until the
- * item does — which is why the file is written twice:
+ * holds it. The key does not exist until the item does, so:
  *
- * 1. Import the document rendered from the caller's spec. Zotero assigns the
- *    key here, and not before.
- * 2. Stamp `key` (and `version: 1`) into the spec and re-render, so the stored
- *    file is self-identifying: anything that later reads it — a reopen, an
- *    export, another device — learns which table it is from the file alone,
- *    without being told by whoever handed it over.
- *
- * The second write must go back through {@link buildTableDocument} rather than
- * patching the embedded JSON in the HTML. The document is a pure function of
- * the spec, and keeping it that way is what makes the round trip
- * (`buildTableDocument` → `parseTableDocument`) exact; a hand-patched file would
- * carry a spec the renderer never rendered.
+ * 1. Import a snapshot rendered from the caller's spec. Zotero assigns the key
+ *    here, and not before.
+ * 2. Stamp `key` (and `version: 1`) into the spec and write `table.json`. That
+ *    write is the commit point of the creation; the store's renderer then
+ *    replaces the imported snapshot with one rendered from the stamped spec.
  */
 export async function createTableItem(
     options: CreateTableItemOptions
 ): Promise<CreatedTableItem> {
     const { spec, collectionID } = options;
+    // Before anything is imported: a refused spec must leave no item behind.
+    const specVersion = storedSpecVersion(spec);
 
     const resolved = resolveTableLibrary(options.libraryID);
     if ('error' in resolved) {
@@ -282,20 +297,9 @@ export async function createTableItem(
     const linksFor = options.linksFor ?? zoteroLinksFor;
 
     const creation = options.creationOperation;
-    const storeState = creation
-        ? {
-              creation: {
-                  operation_id: creation.operation_id,
-                  request_sha256: creation.request_sha256,
-                  complete: false,
-                  meta: creation.meta,
-              },
-          }
-        : undefined;
     const first = buildTableDocument(named, {
         linksFor,
         citationScopeFor: zoteroLinkScope,
-        storeState,
     });
     if (first.cssRuleCount > CSS_RULE_BUDGET) {
         // Above the reader's threshold the snapshot loses its palette in dark mode.
@@ -335,59 +339,52 @@ export async function createTableItem(
             );
         }
 
-        // --- phase 2: the file learns which table it is
+        // --- step 2: the table, which knows which item it is
         const stored: TableSpec = {
             ...named,
-            spec_version: named.spec_version ?? TABLE_SPEC_VERSION,
+            spec_version: specVersion,
             key: item.key,
             // A fresh item is revision 1 whatever the incoming spec claimed; a spec
             // copied from an existing table starts its own history here.
             version: 1,
         };
-        const second = buildTableDocument(stored, {
-            linksFor,
-            citationScopeFor: zoteroLinkScope,
-            storeState: creation
-                ? {
-                      creation: { ...storeState!.creation, complete: true },
-                      operations: [
-                          {
-                              operation_id: creation.operation_id,
-                              request_sha256: creation.request_sha256,
-                              version: 1,
-                              sha256: await tableSpecHash(stored),
-                          },
-                      ],
-                  }
-                : undefined,
-        });
+        const file: TableFile = creation
+            ? {
+                  spec: stored,
+                  creation: {
+                      operation_id: creation.operation_id,
+                      request_sha256: creation.request_sha256,
+                      complete: true,
+                      meta: creation.meta,
+                      ...(creation.changes ? { changes: creation.changes } : {}),
+                  },
+              }
+            : { spec: stored };
 
-        const path = await item.getFilePathAsync();
+        const path = tableFilePath(item);
         if (!path) {
             throw new TableItemError(
-                `Table ${item.key} has no file on disk.`,
+                `Table ${item.key} has no storage directory.`,
                 'file_missing'
             );
         }
         const tempPath = `${path}.beaver-tmp`;
-        await IOUtils.writeUTF8(tempPath, second.html);
+        await IOUtils.writeUTF8(tempPath, JSON.stringify(file));
         requireTableLibrary(libraryID);
         options.accessGuard?.(stored);
         await IOUtils.move(tempPath, path);
 
-        // The stamped document is committed; bookkeeping failures cannot undo it.
+        // The table is committed; bookkeeping failures cannot undo it.
         let saved = true;
         try {
             item.addTag(TABLE_TAG, 1);
             item.addTag(TABLE_EMOJI_TAG, 1);
-            await queueTableFullText(item, true);
-            item.attachmentSyncState = Zotero.Sync.Storage.Local.SYNC_STATE_TO_UPLOAD;
             await item.saveTx();
         } catch (error) {
             saved = false;
             logger(`createTableItem: committed content needs local repair: ${String(error)}`, 1);
         }
-        return { ...describeTableItem(item, stored, second.html, second.cssRuleCount), saved };
+        return { ...describeTableItem(item, stored, first.html, first.cssRuleCount), saved };
 
     } catch (error) {
         if (!imported && error instanceof TableItemError &&
@@ -395,7 +392,7 @@ export async function createTableItem(
             throw error;
         }
         if (creation) throw new TableItemError(
-            'The import may exist but its document is not confirmed complete. Inspect it before creating another table.',
+            'The import may exist but its table is not confirmed complete. Inspect it before creating another table.',
             'operation_pending',
         );
         throw error;

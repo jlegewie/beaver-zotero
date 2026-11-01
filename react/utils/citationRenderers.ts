@@ -13,7 +13,9 @@ import { logger } from '@beaver/agent-core/platform/logger';
 import { ExternalReference } from '@beaver/agent-core/types/externalReferences';
 import { formatExternalCitation } from '@beaver/agent-core/citations/externalReferences';
 import { UNRESOLVED_LIBRARY_ID, libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
-import { hydrateItemLinkLibraryRefs } from './itemLinks';
+import { hydrateItemLinkLibraryRefs } from '@beaver/agent-core/identity/itemLinks';
+import { loadCitedLibraries } from './citationRenderContext';
+import { unwrapLegacyNoteTags } from './legacyNoteTags';
 import {
     baseCitationKey,
     getPageLocator,
@@ -24,22 +26,6 @@ import {
 
 // Regex for citation syntax - matches self-closing (/>) and non-self-closing (>) with or without closing tag
 const citationRegex = /<citation(?:\s+([^>]*?))?\s*(\/>|>(?:.*?<\/citation>)?)/g;
-const attributeRegex = /(\w+)\s*=\s*"([^"]*)"/g;
-
-/**
- * Parses attributes from a string
- * @param attrString String to parse attributes from
- * @returns Object containing parsed attributes
- */
-function parseAttributes(attrString: string) {
-    const attrs: Record<string, string> = {};
-    attrString.replace(attributeRegex, (fullMatch, attrName, attrValue) => {
-        attrs[attrName] = attrValue;
-        return fullMatch;
-    });
-    return attrs;
-}
-
 function getEarliestExistingMarker(markerMap: Record<string, string>, keys: string[]): string | undefined {
     const markers = keys
         .map((key) => markerMap[key])
@@ -55,22 +41,32 @@ function getEarliestExistingMarker(markerMap: Record<string, string>, keys: stri
 }
 
 /**
- * Preprocesses markdown content to replace note tags with headers and separators.
- * @param text Raw markdown text containing note tags
+ * Replace the legacy `<note>` sections of older threads with headers and
+ * separators, so a saved or copied response carries their body rather than the
+ * markup. Note creation itself moved to the `create_note` tool.
+ * @param text Raw markdown text that may contain legacy note tags
  * @returns Processed markdown with note tags replaced by headers/lines
  */
 export function preprocessNoteContent(text: string): string {
     // Clean up backticks around complete citations (handles both /> and > endings)
-    text = text.replace(/`(<citation[^>]*\/?>)`/g, '$1');
+    return unwrapLegacyNoteTags(text.replace(/`(<citation[^>]*\/?>)`/g, '$1'));
+}
 
-    // Remove note tags (keep content), add title as markdown header if present
-    return text.replace(/(\s*)<note\s+([^>]*?)>(\s*)/g, (match, before, attrString, after) => {
-        const attrs = parseAttributes(attrString);
-        if (attrs.title) {
-            return `\n\n---\n## ${attrs.title}\n\n`;
-        }
-        return before + '---\n' + after;
-    }).replace(/<\/note>/g, '\n---');
+/** Citation state the Markdown renderer reads from the current thread. */
+interface MarkdownCitationState {
+    citations: BeaverCitation[];
+    citationByKey: Record<string, BeaverCitation>;
+    externalReferenceMapping: Record<string, ExternalReference>;
+    externalItemMapping: Record<string, ZoteroItemReference | null>;
+}
+
+function readMarkdownCitationState(): MarkdownCitationState {
+    return {
+        citations: store.get(citationsAtom),
+        citationByKey: store.get(citationByKeyAtom),
+        externalReferenceMapping: store.get(externalReferenceMappingAtom),
+        externalItemMapping: store.get(externalReferenceItemMappingAtom),
+    };
 }
 
 /**
@@ -80,12 +76,11 @@ export function preprocessNoteContent(text: string): string {
  * @returns Formatted text
  */
 export function renderToMarkdown(
-    text: string
+    text: string,
+    citationState: MarkdownCitationState = readMarkdownCitationState(),
 ) : string {
 
-    const externalReferenceMapping = store.get(externalReferenceMappingAtom);
-    const externalItemMapping = store.get(externalReferenceItemMappingAtom);
-    const citationByKey = store.get(citationByKeyAtom);
+    const { externalReferenceMapping, externalItemMapping, citationByKey } = citationState;
 
     // Array of cited items
     const citedItems: Zotero.Item[] = [];
@@ -220,6 +215,19 @@ export function renderToMarkdown(
         : formattedContent;
 }
 
+/**
+ * {@link renderToMarkdown} after loading the libraries of the cited items, so
+ * citations to items in a library Zotero has not loaded yet are formatted
+ * rather than dropped. Prefer this from async callers.
+ */
+export async function renderToMarkdownAsync(text: string): Promise<string> {
+    // Snapshot before awaiting: switching chats meanwhile replaces the
+    // citation state this text was written against.
+    const citationState = readMarkdownCitationState();
+    await loadCitedLibraries(text, citationState.citations, citationState.externalItemMapping);
+    return renderToMarkdown(text, citationState);
+}
+
 export interface RenderContextData {
     citationDataMap?: Record<string, BeaverCitation>;
     externalMapping?: Record<string, ZoteroItemReference | null>;
@@ -339,7 +347,6 @@ export function renderToHTML(
         content,
         className,
         exportRendering: true,
-        enableNoteBlocks: false
     });
 
     // Wrap in Jotai Provider to share state

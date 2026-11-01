@@ -1,3 +1,4 @@
+import { recheckCollectionMemberships, recheckExistingCollections } from '../../collections/collectionMutations';
 import { collectionLibrariesMismatchError, resolveCollectionList } from '../../collections/collectionIdentity';
 import { logger } from '@beaver/agent-core/platform/logger';
 import {
@@ -17,13 +18,14 @@ import {
 import { preloadNotePageLabels } from '../../../utils/noteCitationExpand';
 import { getLatestNoteHtml } from '../../../utils/noteEditorIO';
 import { getOrSimplify } from '../../../utils/noteHtmlSimplifier';
-import { getBeaverNoteFooterHTML, wrapWithSchemaVersion } from '../../../utils/noteProvenance';
+import { getBeaverNoteFooterHTML } from '../../../utils/noteProvenance';
 import { TimingAccumulator } from '../../../utils/timing';
 import { lookupZoteroReferences, LookupZoteroReferencesResult } from '../lookupZoteroReferences';
 import type { ActionExecuteRequest, ActionValidateRequest } from '../operationContext';
 import { checkAborted, TimeoutContext } from '../timeout';
 import { checkLibraryExcluded, excludedLibraryMessage, getCollectionByIdOrName, getDeferredToolPreference, getLibraryByIdOrName } from '../utils';
 import { extractCitationReferences } from './extractCitationReferences';
+import { checkNoteMarkdownCitations, INVALID_NOTE_CITATION_CODE, renderNoteMarkdown, wrapNewNoteHtml } from './noteCitationRendering';
 import { resolveCreateNoteParent } from './resolveCreateNoteParent';
 
 
@@ -72,12 +74,15 @@ interface CreateNoteResultData {
     parent_key?: string;
     collection_key?: string;
     /** All collection keys the note was added to (create_note_tags_collections). */
+    collection_ids?: string[];
     collection_keys?: string[];
     /** Tags applied to the created note (create_note_tags_collections). */
     tags?: string[];
     note_content?: string;
     cited_items_data?: CitedItemsData;
     warning?: string;
+    /** Non-fatal citation notes (locators saved without a page, file links unavailable). */
+    warnings?: string[];
     related_item_key?: string;
 }
 
@@ -458,6 +463,22 @@ async function validateCreateNoteAction(
         });
     }
 
+    // Every citation must be storable: the write expands each one and fails
+    // on the first it cannot store, so report that before approval.
+    const citationCheck = await ta.track('citation_check_ms', () =>
+        checkNoteMarkdownCitations(content, request.operation));
+    if (citationCheck.error) {
+        return {
+            type: 'agent_action_validate_response',
+            request_id: request.request_id,
+            valid: false,
+            error: citationCheck.error,
+            error_code: INVALID_NOTE_CITATION_CODE,
+            preference: 'always_ask',
+            timing: buildTiming(),
+        };
+    }
+
     // Get user preference
     const preference = getDeferredToolPreference('create_note', undefined, request.operation);
 
@@ -481,6 +502,7 @@ async function validateCreateNoteAction(
         parent_key: parentKey,
         collection_key: resolvedCollectionKey,
         collection_keys: resolvedCollectionKeys,
+        collection_ids: recheckCollectionMemberships(resolvedCollectionKeys, resolvedLibraryId).map(entry => entry.collectionId),
         related_item_key: relatedItemKey,
         warning: combinedWarning,
     };
@@ -499,6 +521,7 @@ async function validateCreateNoteAction(
             tags: tagsInput,
         },
         normalized_action_data: normalizedActionData,
+        ...(citationCheck.warnings.length > 0 ? { warnings: citationCheck.warnings } : {}),
         preference,
         timing: buildTiming(),
     };
@@ -528,6 +551,7 @@ async function executeCreateNoteAction(
         library_ref?: string | null;  // resolved by validation
         parent_key?: string | null;  // resolved by validation
         collection_key?: string | null;  // resolved by validation
+        collection_ids?: string[] | null;
         collection_keys?: string[] | null;  // resolved by validation (create_note_tags_collections)
         tags?: string[] | null;  // create_note_tags_collections
         related_item_key?: string | null;  // set by validation when falling back to standalone
@@ -590,11 +614,9 @@ async function executeCreateNoteAction(
 
     try {
         const markdownContent = `<h1>${title}</h1>\n\n${content}`;
-        if (!request.operation?.renderMarkdown) {
-            throw Object.assign(new Error('Note rendering is unavailable'), { code: 'capability_unavailable' });
-        }
         const renderStart = Date.now();
-        let htmlContent = await request.operation.renderMarkdown(markdownContent.trim());
+        const rendered = await renderNoteMarkdown(markdownContent.trim(), request.operation);
+        let htmlContent = rendered.html;
         ta.record('render_html_ms', Date.now() - renderStart);
 
         // Add Beaver footer with thread/run link
@@ -615,7 +637,7 @@ async function executeCreateNoteAction(
         if (parentKey) {
             zoteroNote.parentKey = parentKey;
         }
-        zoteroNote.setNote(wrapWithSchemaVersion(htmlContent));
+        zoteroNote.setNote(wrapNewNoteHtml(htmlContent));
 
         // Resolve the related item (standalone-fallback target) up front so we
         // can attach the forward relation before the initial save.
@@ -638,19 +660,16 @@ async function executeCreateNoteAction(
         // Child notes (with parentKey) cannot be in collections — Zotero's
         // fki_collectionItems_itemID_parentItemID trigger aborts saveTx if we try.
         // Validation should already have dropped the keys in that case; guard anyway.
-        const collectionKeysToApply = (collectionKeys && collectionKeys.length > 0)
+        const collectionKeysToApply = actionData.collection_ids ?? ((collectionKeys && collectionKeys.length > 0)
             ? collectionKeys
-            : (collectionKey ? [collectionKey] : []);
+            : (collectionKey ? [collectionKey] : []));
         const appliedCollectionKeys: string[] = [];
+        // Collections deleted since validation are skipped; the note is still created.
+        const memberships = recheckExistingCollections(parentKey ? [] : collectionKeysToApply, targetLibraryId);
         if (collectionKeysToApply.length > 0 && !parentKey) {
-            for (const key of collectionKeysToApply) {
-                try {
-                    zoteroNote.addToCollection(key);
-                    appliedCollectionKeys.push(key);
-                } catch (collectionError: any) {
-                    logger(`executeCreateNoteAction: Failed to stage collection assignment for ${key}: ${collectionError.message}`, 1);
-                    // Don't fail the whole operation for a collection assignment failure
-                }
+            for (const entry of memberships) {
+                zoteroNote.addToCollection(entry.collection.id);
+                appliedCollectionKeys.push(entry.key);
             }
         } else if (collectionKeysToApply.length > 0 && parentKey) {
             logger(`executeCreateNoteAction: Skipping addToCollection(${collectionKeysToApply.join(', ')}) because note has parent_key ${parentKey} (child notes cannot be in collections directly)`, 1);
@@ -740,10 +759,11 @@ async function executeCreateNoteAction(
             library_ref: libraryRefForLibraryID(zoteroNote.libraryID) ?? undefined,
             ...(zoteroNote.parentKey ? { parent_key: zoteroNote.parentKey } : {}),
             ...(appliedCollectionKeys.length > 0 ? { collection_key: appliedCollectionKeys[0] } : {}),
-            ...(appliedCollectionKeys.length > 0 ? { collection_keys: appliedCollectionKeys } : {}),
+            ...(appliedCollectionKeys.length > 0 ? { collection_keys: appliedCollectionKeys, collection_ids: memberships.map(entry => entry.collectionId) } : {}),
             ...(appliedTags.length > 0 ? { tags: appliedTags } : {}),
             ...(noteContent ? { note_content: noteContent } : {}),
             ...(warning ? { warning } : {}),
+            ...(rendered.warnings.length > 0 ? { warnings: rendered.warnings } : {}),
             ...(relatedItemKey ? { related_item_key: relatedItemKey } : {}),
         };
 
@@ -777,7 +797,7 @@ async function executeCreateNoteAction(
             request_id: request.request_id,
             success: false,
             error: errorMsg,
-            error_code: 'create_failed',
+            error_code: error?.code ?? 'create_failed',
             timing: buildTiming(),
         };
     }

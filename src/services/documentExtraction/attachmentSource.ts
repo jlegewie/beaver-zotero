@@ -24,13 +24,14 @@ export type AttachmentSourceFailureCode =
     | 'file_missing'
     | 'file_too_large'
     | 'download_failed'
-    | 'read_failed';
+    | 'read_failed'
+    | 'file_permission_denied';
 
 export type AttachmentSourceResult =
     | { kind: 'ok'; source: AttachmentFileSource }
     | {
           kind: 'error';
-          code: Extract<AttachmentSourceFailureCode, 'file_missing' | 'file_too_large'>;
+          code: Extract<AttachmentSourceFailureCode, 'file_missing' | 'file_too_large' | 'file_permission_denied'>;
           remoteAvailable?: boolean;
           sizeMB?: number;
           maxMB?: number;
@@ -40,7 +41,10 @@ export type AttachmentDataResult =
     | { kind: 'ok'; data: Uint8Array }
     | {
           kind: 'error';
-          code: Extract<AttachmentSourceFailureCode, 'file_too_large' | 'download_failed' | 'read_failed'>;
+          code: Extract<
+              AttachmentSourceFailureCode,
+              'file_too_large' | 'download_failed' | 'read_failed' | 'file_permission_denied'
+          >;
           error?: unknown;
           /**
            * The server gave a definitive answer (missing file, no access), so
@@ -52,6 +56,72 @@ export type AttachmentDataResult =
           sizeMB?: number;
           maxMB?: number;
       };
+
+/**
+ * True when a local file access was refused by the operating system rather
+ * than failing on the file's contents: missing macOS Files & Folders / Full
+ * Disk Access, file-system permissions, or a file another program holds
+ * locked. `IOUtils` rejects these with a `NotAllowedError` DOMException; XPCOM
+ * calls throw with `NS_ERROR_FILE_ACCESS_DENIED` or `NS_ERROR_FILE_IS_LOCKED`;
+ * Zotero's `OS.File` shim errors set `becauseAccessDenied`.
+ */
+export function isFileAccessDeniedError(error: unknown): boolean {
+    if (!error || typeof error !== 'object') return false;
+    const { name, message, becauseAccessDenied } = error as {
+        name?: unknown; message?: unknown; becauseAccessDenied?: unknown;
+    };
+    return name === 'NotAllowedError'
+        || name === 'NS_ERROR_FILE_ACCESS_DENIED'
+        || name === 'NS_ERROR_FILE_IS_LOCKED'
+        || becauseAccessDenied === true
+        || (typeof message === 'string' && (message.includes('NS_ERROR_FILE_ACCESS_DENIED')
+            || message.includes('NS_ERROR_FILE_IS_LOCKED')));
+}
+
+/**
+ * A local file access the operating system refused, raised by
+ * `classifyFileAccess`. Handlers whose outer catch also sees decoding or
+ * rendering failures match this class rather than `isFileAccessDeniedError`,
+ * which would also accept an unrelated `NotAllowedError`.
+ */
+export class FileAccessDeniedError extends Error {
+    constructor(readonly original: unknown) {
+        super('Local file access was refused');
+        this.name = 'FileAccessDeniedError';
+    }
+}
+
+/** Await one file stat or read, rethrowing a refused access as `FileAccessDeniedError`. */
+export async function classifyFileAccess<T>(access: Promise<T>): Promise<T> {
+    try {
+        return await access;
+    } catch (error) {
+        if (isFileAccessDeniedError(error)) throw new FileAccessDeniedError(error);
+        throw error;
+    }
+}
+
+/** Agent-facing explanation for a `file_permission_denied` failure. */
+export function fileAccessDeniedMessage(fileKind: string, requestKey: string): string {
+    return `Zotero does not have permission to read the ${fileKind} file for ${requestKey}. `
+        + `The user needs to grant Zotero access to the folder containing the file `
+        + `(on macOS: System Settings > Privacy & Security > Files and Folders or Full Disk Access) `
+        + `or close any program that has the file locked.`;
+}
+
+/**
+ * Probe whether a local file refuses reads. For readers such as `nsIZipReader`
+ * that report a denied open only as a generic `NS_ERROR_FAILURE`; call it after
+ * such a read has already failed, never on the happy path.
+ */
+export async function isLocalFileReadDenied(filePath: string): Promise<boolean> {
+    try {
+        await IOUtils.read(filePath, { maxBytes: 1 });
+        return false;
+    } catch (error) {
+        return isFileAccessDeniedError(error);
+    }
+}
 
 function withDeadline<T>(
     promise: Promise<T>,
@@ -115,6 +185,8 @@ export async function resolveAttachmentFileSource(args: {
     const maxFileSizeMB = effectiveMaxFileSizeMB();
 
     throwIfTimedOut?.('file_path_lookup');
+    // Does not throw on refused access: Zotero's existence check reports a file
+    // in a folder it may not search as absent, so that case is `file_missing`.
     const rawFilePath = await withDeadline(
         item.getFilePathAsync(),
         'file_path_lookup',
@@ -150,13 +222,21 @@ export async function resolveAttachmentFileSource(args: {
     }
 
     if (!isRemoteFilePath(filePath)) {
-        const sizeBytes = await getLocalSizeBytes(
-            item,
-            filePath,
-            localSizeStrategy,
-            signal,
-            throwIfTimedOut,
-        );
+        let sizeBytes: number | null;
+        try {
+            sizeBytes = await getLocalSizeBytes(
+                item,
+                filePath,
+                localSizeStrategy,
+                signal,
+                throwIfTimedOut,
+            );
+        } catch (error) {
+            // A folder Zotero may not list or a file it may not stat is refused
+            // here, before any read; report it like a refused read.
+            if (isFileAccessDeniedError(error)) return { kind: 'error', code: 'file_permission_denied' };
+            throw error;
+        }
         if (sizeBytes != null) {
             const sizeMB = sizeBytes / 1024 / 1024;
             if (sizeMB > maxFileSizeMB) {
@@ -232,7 +312,9 @@ async function readRemoteAttachmentData(
     item: Zotero.Item,
     onRemoteFailure?: (error: unknown) => void,
 ): Promise<Uint8Array> {
-    const cacheKey = makeRemoteFilePath(item);
+    // The synced hash in the remote path can be stale for a file removed here before
+    // its server copy was replaced; the item version changes with that replacement.
+    const cacheKey = `${makeRemoteFilePath(item)}#v${item.version || 0}`;
     const itemRef = `${item.libraryID}-${item.key}`;
 
     const cached = remoteDataCache.get(cacheKey);
@@ -309,7 +391,11 @@ export async function loadAttachmentData(args: {
             if (error instanceof TimeoutError || error instanceof ExternalAbortError) {
                 throw error;
             }
-            return { kind: 'error', code: 'read_failed', error };
+            return {
+                kind: 'error',
+                code: isFileAccessDeniedError(error) ? 'file_permission_denied' : 'read_failed',
+                error,
+            };
         }
     } else {
         if (!item) {

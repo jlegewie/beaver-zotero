@@ -12,9 +12,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('@beaver/agent-core/platform/logger', () => ({
     logger: vi.fn(),
 }));
-vi.mock('../../../src/utils/sync', () => ({
-    syncingItemFilterAsync: vi.fn(),
-}));
 vi.mock('../../../src/utils/prefs', () => ({
     getPref: vi.fn(),
 }));

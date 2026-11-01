@@ -19,6 +19,7 @@ vi.mock('../../../react/atoms/messageComposition', async () => {
         currentMessageItemsAtom: atom<unknown[]>([]),
         currentMessageCollectionsAtom: atom<unknown[]>([]),
         pendingPillInsertsAtom: atom<unknown[]>([]),
+        messageItemDataRevisionAtom: atom(0),
     };
 });
 
@@ -92,6 +93,7 @@ function zoteroContext(
     selectedItems: any[],
     selectedCollections: any[] = [],
     selectedRowCount = selectedCollections.length,
+    selectedViews: any[] = [],
 ): any {
     return {
         type: 'items_selected',
@@ -107,8 +109,9 @@ function zoteroContext(
             searchName: null,
             selectedRowCount,
             selectedCollections,
+            selectedViews,
             selectedLibraryIds: [
-                ...new Set(selectedCollections.map((c: any) => c.libraryId)),
+                ...new Set([...selectedCollections, ...selectedViews].map((c: any) => c.libraryId)),
             ],
         },
         selectedTags: [],
@@ -118,10 +121,10 @@ function zoteroContext(
     };
 }
 
-/** Mirrors pureCollectionSelection's rule, to assert the invariant survives. */
+/** Mirrors collectionTargetSelection's rule, to assert the invariant survives. */
 function readsAsPureCollectionSelection(libraryView: any): boolean {
-    return libraryView.selectedCollections.length > 0
-        && libraryView.selectedCollections.length === libraryView.selectedRowCount;
+    const targetRows = libraryView.selectedCollections.length + libraryView.selectedViews.length;
+    return targetRows > 0 && targetRows === libraryView.selectedRowCount;
 }
 
 describe('actionContextAtom library exclusion', () => {
@@ -233,6 +236,28 @@ describe('actionContextAtom collection exclusion', () => {
 
         expect(libraryView.selectedRowCount).toBe(2);
         expect(readsAsPureCollectionSelection(libraryView)).toBe(false);
+    });
+
+    it('drops special views in excluded libraries', () => {
+        const unfiled = { type: 'unfiled', name: 'Unfiled Items', libraryId: 3 };
+        store.set(zoteroContextAtom, zoteroContext([], [], 1, [unfiled]));
+
+        const { libraryView } = store.get(actionContextAtom).zotero;
+
+        expect(libraryView.selectedViews).toEqual([]);
+        expect(readsAsPureCollectionSelection(libraryView)).toBe(false);
+    });
+
+    it('keeps a searchable view as the target when a selected collection is excluded', () => {
+        const unfiled = { type: 'unfiled', name: 'Unfiled Items', libraryId: 1 };
+        store.set(zoteroContextAtom, zoteroContext([], [collection(99, 3)], 2, [unfiled]));
+
+        const { libraryView } = store.get(actionContextAtom).zotero;
+
+        expect(libraryView.selectedCollections).toEqual([]);
+        expect(libraryView.selectedViews).toEqual([unfiled]);
+        expect(libraryView.selectedRowCount).toBe(1);
+        expect(readsAsPureCollectionSelection(libraryView)).toBe(true);
     });
 
     it('leaves a fully searchable collection selection untouched', () => {

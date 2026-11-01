@@ -7,8 +7,10 @@ vi.mock("../../../../src/services/agentDataProvider/utils", () => ({
 import {
   buildSortIndex,
   computeNoteRect,
+  buildHighlightPlacement,
   convertHighlightBoxesToRects,
-  highlightPartComment,
+  HighlightPageSpanError,
+  highlightPageSpan,
 } from "../../../../src/services/annotations/createAnnotation";
 import {
   CoordOrigin,
@@ -335,21 +337,128 @@ describe("createAnnotation geometry primitives", () => {
     });
   });
 
-  describe("highlightPartComment", () => {
-    it("leaves a single-page highlight's comment unchanged", () => {
-      expect(highlightPartComment("Key finding", 0, 1)).toBe("Key finding");
+  describe("highlightPageSpan", () => {
+    const box = (t: number): BoundingBox => ({
+      l: 10, t, r: 110, b: t + 20, coord_origin: CoordOrigin.TOPLEFT,
     });
 
-    it("numbers each part of a multi-page highlight", () => {
-      expect(highlightPartComment("Key finding", 0, 3)).toBe("Key finding (1/3)");
-      expect(highlightPartComment("Key finding", 2, 3)).toBe("Key finding (3/3)");
+    it("keeps a one-page highlight on its page with no continuation", () => {
+      const span = highlightPageSpan([{ page_idx: 4, boxes: [box(10)] }]);
+      expect(span.first.page_idx).toBe(4);
+      expect(span.next).toBeNull();
     });
 
-    it("does not invent a comment for blank input", () => {
-      expect(highlightPartComment("", 0, 3)).toBe("");
-      expect(highlightPartComment("   ", 0, 3)).toBe("   ");
-      expect(highlightPartComment(null, 0, 3)).toBe("");
-      expect(highlightPartComment(undefined, 1, 2)).toBe("");
+    it("splits two consecutive pages into the first page and its continuation", () => {
+      const span = highlightPageSpan([
+        { page_idx: 4, boxes: [box(500)], page_label: "iv", reading_order_offset: 900 },
+        { page_idx: 5, boxes: [box(10)], page_label: "v", reading_order_offset: 0 },
+      ]);
+      expect(span.first).toMatchObject({ page_idx: 4, page_label: "iv", reading_order_offset: 900 });
+      expect(span.next).toMatchObject({ page_idx: 5, boxes: [box(10)] });
+    });
+
+    it("merges locations on the same page, keeping the first one's label and offset", () => {
+      const span = highlightPageSpan([
+        { page_idx: 4, boxes: [box(10)], page_label: "iv", reading_order_offset: 12 },
+        { page_idx: 4, boxes: [box(40)], page_label: "x", reading_order_offset: 99 },
+      ]);
+      expect(span.first).toMatchObject({ page_label: "iv", reading_order_offset: 12 });
+      expect(span.first.boxes).toEqual([box(10), box(40)]);
+      expect(span.next).toBeNull();
+    });
+
+    it("rejects three pages", () => {
+      const call = () => highlightPageSpan([
+        { page_idx: 4, boxes: [box(10)] },
+        { page_idx: 5, boxes: [box(10)] },
+        { page_idx: 6, boxes: [box(10)] },
+      ]);
+      expect(call).toThrow(HighlightPageSpanError);
+      expect(call).toThrow(/at most two consecutive pages/);
+      try { call(); } catch (error: any) {
+        expect(error.code).toBe("highlight_spans_too_many_pages");
+      }
+    });
+
+    it("rejects two pages that are not consecutive", () => {
+      try {
+        highlightPageSpan([
+          { page_idx: 4, boxes: [box(10)] },
+          { page_idx: 6, boxes: [box(10)] },
+        ]);
+        expect.unreachable();
+      } catch (error: any) {
+        expect(error).toBeInstanceOf(HighlightPageSpanError);
+        expect(error.code).toBe("highlight_pages_not_consecutive");
+      }
+    });
+  });
+
+  describe("buildHighlightPlacement", () => {
+    const firstPageBox: BoundingBox = {
+      l: 10, t: 500, r: 110, b: 520, coord_origin: CoordOrigin.TOPLEFT,
+    };
+    const nextPageBox: BoundingBox = {
+      l: 10, t: 20, r: 110, b: 50, coord_origin: CoordOrigin.TOPLEFT,
+    };
+
+    it("writes only rects for a one-page highlight", () => {
+      const placement = buildHighlightPlacement(
+        { pageIndex: 3, boxes: [firstPageBox], text: "t", pageLabel: "4", readingOrderOffset: 7 },
+        baseGeometry,
+      );
+      expect(JSON.parse(placement.position)).toEqual({
+        pageIndex: 3,
+        rects: [[10, 80, 110, 100]],
+      });
+    });
+
+    it("writes nextPageRects in the next page's coordinates, with label and sort index from the first page", () => {
+      // The next page has a different viewBox offset, so a conversion that
+      // reused the first page's geometry would produce different rects.
+      const nextGeometry = geometry({ viewBox: [10, 20, 410, 620] });
+      const placement = buildHighlightPlacement(
+        {
+          pageIndex: 3,
+          boxes: [firstPageBox],
+          nextPageBoxes: [nextPageBox],
+          text: "full passage text",
+          pageLabel: "iv",
+          readingOrderOffset: 900,
+        },
+        baseGeometry,
+        nextGeometry,
+      );
+      expect(JSON.parse(placement.position)).toEqual({
+        pageIndex: 3,
+        rects: [[10, 80, 110, 100]],
+        nextPageRects: convertHighlightBoxesToRects([nextPageBox], nextGeometry),
+      });
+      expect(convertHighlightBoxesToRects([nextPageBox], nextGeometry)).toEqual([[20, 570, 120, 600]]);
+      expect(placement.pageLabel).toBe("iv");
+      expect(placement.sortIndex).toBe(
+        buildSortIndex({ pageIndex: 3, viewBox: baseGeometry.viewBox, rect: [10, 80, 110, 100], readingOrderOffset: 900 }),
+      );
+      expect(placement.sortIndex.startsWith("00003|000900|")).toBe(true);
+      expect(placement.text).toBe("full passage text");
+    });
+
+    it.each([
+      ["no boxes", []],
+      ["boxes outside the page", [{ l: 900, t: 900, r: 1000, b: 950, coord_origin: CoordOrigin.TOPLEFT }]],
+    ])("refuses a continuation with %s rather than dropping it", (_label, boxes) => {
+      expect(() => buildHighlightPlacement(
+        { pageIndex: 3, boxes: [firstPageBox], nextPageBoxes: boxes as BoundingBox[], text: "t" },
+        baseGeometry,
+        baseGeometry,
+      )).toThrow(/continuation on the next page produced no rects/);
+    });
+
+    it("refuses a continuation without the next page's geometry", () => {
+      expect(() => buildHighlightPlacement(
+        { pageIndex: 3, boxes: [firstPageBox], nextPageBoxes: [nextPageBox], text: "t" },
+        baseGeometry,
+      )).toThrow(/next page's geometry/);
     });
   });
 });

@@ -26,6 +26,7 @@ import {
     serializeAttachmentStub,
     serializeNote,
     serializeAnnotation,
+    itemSearchResultFromZoteroItem,
 } from '../../../src/utils/zoteroSerializers';
 
 /**
@@ -161,5 +162,17 @@ describe('zoteroSerializers portable id emission', () => {
             const result = serializeAnnotation(annotation as any);
             expect(result.annotation_id).toBe('99-ANNOT9999');
         });
+    });
+});
+
+describe('itemSearchResultFromZoteroItem trash state', () => {
+    it('falls back to the item flag when the ancestor chain is not loaded', () => {
+        const item = baseItem({
+            id: 5,
+            deleted: false,
+            isInTrash: vi.fn(() => { throw new Error('Item 1 not yet loaded'); }),
+        });
+        expect(() => itemSearchResultFromZoteroItem(item as any)).not.toThrow();
+        expect(itemSearchResultFromZoteroItem(item as any).deleted).toBe(false);
     });
 });

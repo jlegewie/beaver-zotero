@@ -84,6 +84,16 @@ export interface PDFWorkerUrls {
     sentencexWasmBinaryUrl: string;
 }
 
+/**
+ * WASM modules compiled once by the host and shared with every worker it
+ * spawns. A worker instantiates these instead of loading and compiling the
+ * binaries itself; the compiled code is shared, not copied.
+ */
+export interface PDFCompiledWasm {
+    mupdf: WebAssembly.Module;
+    sentencex?: WebAssembly.Module;
+}
+
 export interface PDFConfig {
     /** URL passed to `new Worker(url, { type: "module" })`. */
     workerUrl: string;
@@ -112,6 +122,16 @@ export interface PDFConfig {
 
     /** URLs forwarded to the worker via the configure message. */
     worker: PDFWorkerUrls;
+
+    /**
+     * Optional source of precompiled WASM modules (see `PDFCompiledWasm`),
+     * asked on every spawn, so it should cache. Return null (or resolve to
+     * null) when unavailable: the worker then loads the binaries from
+     * `worker` itself.
+     */
+    getCompiledWasm?: (
+        urls: PDFWorkerUrls,
+    ) => PDFCompiledWasm | null | Promise<PDFCompiledWasm | null>;
 }
 
 let _config: PDFConfig | null = null;

@@ -78,7 +78,9 @@ export async function purgeExcludedLibraries(
         if (uniqueJobs.length > 0) await db.enqueueBackgroundJobs(uniqueJobs);
 
         if (cancelled() || !isStillExcluded()) continue;
-        await Zotero.Beaver?.documentCache?.invalidateByLibrary(libraryId);
+        // OCR text stays on this device: exclusion governs what leaves it,
+        // and re-inclusion would otherwise need the OCR service again.
+        await Zotero.Beaver?.documentCache?.invalidateByLibrary(libraryId, { retainProtectedOcr: true });
         await db.deleteAttachmentProcessingStatesByLibrary(libraryId);
         await db.deleteProcessingIndexState(libraryId);
         Zotero.Beaver?.backgroundExtractor?.notify();

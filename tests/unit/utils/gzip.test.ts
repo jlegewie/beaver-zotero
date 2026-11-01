@@ -39,6 +39,15 @@ describe('gzip helpers', () => {
         expect(yieldToEventLoop).toHaveBeenCalled();
     });
 
+    it('round trips at the requested compression level', async () => {
+        const value = { pages: Array.from({ length: 200 }, (_, i) => ({ i, text: `sentence ${i % 7} `.repeat(40) })) };
+        const fastest = await gzipJsonValueChunked(value, { level: 1 });
+        const smallest = await gzipJsonValueChunked(value, { level: 9 });
+        expect(gunzipToString(fastest)).toBe(JSON.stringify(value));
+        expect(gunzipToString(smallest)).toBe(JSON.stringify(value));
+        expect(fastest.length).toBeGreaterThan(smallest.length);
+    });
+
     it('chunks large string fields before encoding', async () => {
         const value = {
             markdown: `${'large text '.repeat(200)}"quoted"\\path\nline\t\u0001\ud800`,

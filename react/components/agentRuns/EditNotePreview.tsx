@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { diffWords, diffLines, diffChars } from 'diff';
 import { getOrSimplify } from '../../../src/utils/noteHtmlSimplifier';
-import { preloadNotePageLabels } from '../../../src/utils/noteCitationExpand';
+import { ensureCitedLibrariesLoaded, preloadNotePageLabels } from '../../../src/utils/noteCitationExpand';
 import { getLatestNoteHtml } from '../../../src/utils/noteEditorIO';
 import type { EditNoteOperation } from '@beaver/agent-core/types/agentActions/editNote';
 import { getPageLocator, normalizeCitationTag, parseRawCitationAttributes } from '@beaver/agent-core/citations/citationGrammar';
@@ -241,6 +241,19 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
     //   - insert_before: new_string = new_string + old_string
     // so diffWords will naturally show old_string as context and the inserted
     // text as addition.
+
+    // Citation labels are recovered from cited items with synchronous lookups,
+    // which fail for libraries Zotero has not loaded yet. Load those libraries
+    // and re-render so the labels resolve.
+    const [, setCitedLibrariesLoaded] = useState(0);
+    useEffect(() => {
+        let cancelled = false;
+        ensureCitedLibrariesLoaded([effectiveOld, newString], [], { includeExcluded: true }).then((loaded) => {
+            if (!cancelled && loaded.length > 0) setCitedLibrariesLoaded((n) => n + 1);
+        });
+        return () => { cancelled = true; };
+    }, [effectiveOld, newString]);
+
     const strippedOld = normalizeForInlineDiff(stripHtmlPreserveFormatting(effectiveOld));
     const strippedNew = normalizeForInlineDiff(stripHtmlPreserveFormatting(newString));
 
@@ -272,6 +285,7 @@ export const EditNotePreview: React.FC<EditNotePreviewProps> = ({
                 const noteId = `${libraryId}-${zoteroKey}`;
                 const pageLabelsByItemId = await preloadNotePageLabels(rawHtml, libraryId);
                 const { simplified } = getOrSimplify(noteId, rawHtml, libraryId, pageLabelsByItemId);
+                await ensureCitedLibrariesLoaded([simplified], [], { includeExcluded: true });
 
                 // After the edit is applied, the note contains newString instead
                 // of oldString. Search for the appropriate string so we get

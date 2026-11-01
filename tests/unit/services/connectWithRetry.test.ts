@@ -21,7 +21,9 @@ import { setClientIdentityProvider } from '@beaver/agent-core/transport/clientId
 import type { ConnectionFailureEvidence } from '@beaver/agent-core/transport/connectionFailure';
 import {
     CONNECT_MAX_ATTEMPTS,
+    REACHABILITY_PROBES_PER_BLIND_ATTEMPT,
     connectWithRetry,
+    reattachWithRetry,
     type ConnectRetryProgress,
     type ConnectableAgentService,
 } from '@beaver/agent-core/transport/connectWithRetry';
@@ -310,5 +312,174 @@ describe('connectWithRetry', () => {
         expect(result.evidence.stage).toBe('opening');
         expect(result.evidence.errorName).toBe('TypeError');
         expect(h.connect).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe('connectWithRetry with a reachability probe', () => {
+    beforeEach(() => {
+        setClientIdentityProvider(() => ({
+            frontendVersion: '1.2.3',
+            clientType: 'test-client',
+            clientFeatures: [],
+        }));
+    });
+
+    /**
+     * A wait that yields a macrotask, so a probe answered "during" it settles
+     * first, as it would against a real one-second wait.
+     */
+    const yieldingSleep = (sleeps: number[]) => async (ms: number) => {
+        sleeps.push(ms);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+    };
+
+    /** A probe answering from a script, recording when it was asked. */
+    function scriptedProbe(answers: boolean[], log: string[]) {
+        let index = 0;
+        return vi.fn(async () => {
+            const answer = answers[Math.min(index, answers.length - 1)];
+            index += 1;
+            log.push(`probe:${answer}`);
+            return answer;
+        });
+    }
+
+    it('retries an attempt that never reached the server only once a probe gets through', async () => {
+        const log: string[] = [];
+        const h = harness([retryableFailure(), null]);
+        h.connect.mockImplementation(async () => {
+            log.push('connect');
+            if (h.connect.mock.calls.length === 1) throw retryableFailure();
+        });
+        const probeReachable = scriptedProbe([false, false, true], log);
+
+        const result = await h.run({ probeReachable, sleep: yieldingSleep(h.sleeps) });
+
+        expect(result).toEqual({ kind: 'connected', attemptsMade: 2 });
+        expect(log).toEqual(['connect', 'probe:false', 'probe:false', 'probe:true', 'connect']);
+        // The backoff comes first, then a probe about every second.
+        expect(h.sleeps).toEqual([125, 1000, 1000, 1000]);
+    });
+
+    it('keeps probing while an earlier probe hangs in a dead network', async () => {
+        const h = harness([retryableFailure(), null]);
+        const probeReachable = vi.fn()
+            .mockImplementationOnce(() => new Promise<boolean>(() => {}))
+            .mockResolvedValue(true);
+
+        const result = await h.run({ probeReachable, sleep: yieldingSleep(h.sleeps) });
+
+        expect(result.kind).toBe('connected');
+        expect(probeReachable).toHaveBeenCalledTimes(2);
+    });
+
+    it('retries without probing when the socket did reach the server', async () => {
+        const h = harness([timeoutFailure(), null]);
+        const probeReachable = vi.fn(async () => false);
+
+        const result = await h.run({ probeReachable });
+
+        expect(result.kind).toBe('connected');
+        expect(probeReachable).not.toHaveBeenCalled();
+    });
+
+    it('tries once anyway when no probe gets through for a long while', async () => {
+        const h = harness([retryableFailure(), null]);
+        const probeReachable = vi.fn(async () => false);
+
+        const result = await h.run({ probeReachable });
+
+        expect(result.kind).toBe('connected');
+        expect(probeReachable).toHaveBeenCalledTimes(REACHABILITY_PROBES_PER_BLIND_ATTEMPT);
+        expect(h.connect).toHaveBeenCalledTimes(2);
+    });
+
+    it('stops probing once the run is no longer wanted', async () => {
+        const h = harness([retryableFailure(), null]);
+        const probeReachable = vi.fn(async () => false);
+        let wanted = true;
+        probeReachable.mockImplementation(async () => {
+            if (probeReachable.mock.calls.length >= 3) wanted = false;
+            return false;
+        });
+
+        const result = await h.run({ probeReachable, isStillWanted: () => wanted });
+
+        expect(result).toEqual({ kind: 'abandoned', reason: 'superseded', attemptsMade: 1 });
+        expect(probeReachable).toHaveBeenCalledTimes(3);
+        expect(h.connect).toHaveBeenCalledTimes(1);
+        expect(h.retrying.at(-1)).toBeNull();
+    });
+});
+
+describe('reattachWithRetry', () => {
+    beforeEach(() => {
+        setClientIdentityProvider(() => ({
+            frontendVersion: '0.99.0',
+            clientType: 'zotero-plugin',
+            clientFeatures: [],
+        }));
+    });
+
+    function reattachService(isReattaching: () => boolean) {
+        return {
+            connect: vi.fn(async (..._args: unknown[]) => {
+                // Not retried by a bounded connect: the session check broke,
+                // as it does when the token cannot be refreshed offline.
+                throw new AgentConnectionError('offline', evidence({ stage: 'auth', closeCode: null }));
+            }),
+            close: vi.fn(),
+            probeReachable: vi.fn(async () => true),
+            isReattaching: vi.fn(isReattaching),
+            reattachAttempt: vi.fn(() => ({
+                request: {
+                    type: 'reattach' as const,
+                    run_id: 'run-1',
+                    reattach_token: 'token',
+                    last_seq: 4,
+                },
+                callbacks,
+            })),
+        };
+    }
+
+    it('keeps trying past the usual attempt budget for as long as the run waits', async () => {
+        const service = reattachService(() => service.connect.mock.calls.length < CONNECT_MAX_ATTEMPTS + 2);
+        const sleep = vi.fn(() => Promise.resolve());
+
+        const outcome = await reattachWithRetry({
+            service,
+            runId: 'run-1',
+            isStillWanted: () => true,
+            sleep,
+            random: () => 0,
+        });
+
+        expect(outcome).toBe('stopped');
+        expect(service.connect).toHaveBeenCalledTimes(CONNECT_MAX_ATTEMPTS + 2);
+        expect(service.connect.mock.calls[0][0]).toMatchObject({ type: 'reattach', last_seq: 4 });
+        // The backend sees one count across the whole wait.
+        expect(service.connect.mock.calls.map((call) => (call[6] as { connect_attempts: number }).connect_attempts))
+            .toEqual([1, 2, 3, 4, 5, 6]);
+        // A reattach attempt's teardown never gives up the run it is for.
+        for (const call of service.close.mock.calls) {
+            expect(call[2]).toMatchObject({ keepDetachedRun: true });
+        }
+        // Each failure that never reached the server waits for a probe.
+        expect(service.probeReachable.mock.calls.length).toBeGreaterThanOrEqual(CONNECT_MAX_ATTEMPTS + 1);
+    });
+
+    it('stops without connecting once the caller no longer wants the run', async () => {
+        const service = reattachService(() => true);
+
+        const outcome = await reattachWithRetry({
+            service,
+            runId: 'run-1',
+            isStillWanted: () => false,
+            sleep: () => Promise.resolve(),
+        });
+
+        expect(outcome).toBe('stopped');
+        expect(service.connect).not.toHaveBeenCalled();
     });
 });

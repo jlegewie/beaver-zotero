@@ -16,10 +16,11 @@ export class LibraryMutations {
     private closedOwners = new Set<string>();
     private sequence = 0;
     private active: string | null = null;
+    private activeStartedAt: number | null = null;
     private settlement: Promise<void> = Promise.resolve();
 
     getSnapshot() {
-        return { pending: this.queue.length, active: this.active, closing: this.closing };
+        return { pending: this.queue.length, active: this.active, activeStartedAt: this.activeStartedAt, closing: this.closing };
     }
 
     cancelOwner(owner: string): void {
@@ -49,8 +50,10 @@ export class LibraryMutations {
                 start: async () => {
                     cleanup();
                     this.active = token;
+                    this.activeStartedAt = Date.now();
                     try {
                         assertAvailable();
+                        options.onStart?.();
                         this.pause(token);
                         // An active save retains the queue until it commits or rolls
                         // back. Cancellation must never race this promise.
@@ -60,6 +63,7 @@ export class LibraryMutations {
                     } finally {
                         this.release(token);
                         this.active = null;
+                        this.activeStartedAt = null;
                     }
                 },
             };
@@ -88,6 +92,8 @@ export interface MutationOptions {
     owner?: string;
     signal?: AbortSignal;
     assertCurrent?: () => void;
+    /** Called once the operation leaves the queue and starts running. */
+    onStart?: () => void;
 }
 
 /** Call at the outer operation boundary, before acquiring a table-specific lock. */

@@ -39,5 +39,14 @@ export function emitAttachmentResolved(payload: AttachmentResolvedPayload): void
         attachment_key: payload.attachmentKey,
         access_method: payload.accessMethod,
         elapsed_ms: payload.elapsedMs,
+        failure_reason: payload.failureReason,
+        attempts: payload.attempts?.length
+            ? payload.attempts.map((attempt) => ({
+                access_method: attempt.accessMethod,
+                host: attempt.host,
+                outcome: attempt.outcome,
+                status: attempt.status,
+            }))
+            : undefined,
     });
 }

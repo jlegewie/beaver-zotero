@@ -27,6 +27,8 @@ export interface TableState {
     sort: TableSort | undefined;
     /** asc → desc → none on repeated calls for the same column. */
     toggleSort(columnId: string): void;
+    /** Replaces the sort; `undefined` restores the table's own order. */
+    setSort(sort: TableSort | undefined): void;
 
     density: TableDensity;
     setDensity(density: TableDensity): void;
@@ -43,6 +45,11 @@ export interface TableState {
     toggleSelectFilter(columnId: string, label: string): void;
     /** Toggle a boolean column's `equals` filter; passing the active value clears it. */
     toggleBooleanFilter(columnId: string, value: boolean): void;
+    /**
+     * Toggle a column's `empty` filter: rows without a value (`true`) or with
+     * one (`false`). Passing the active choice clears it.
+     */
+    toggleEmptyFilter(columnId: string, empty: boolean): void;
     /** True when anything narrows the view — what the Filter control lights up on. */
     hasFilters: boolean;
 
@@ -75,6 +82,11 @@ export interface TableState {
 export interface UseTableStateOptions {
     /** Initial density. The chrome's density control moves it from there. */
     density?: TableDensity;
+    /**
+     * Show only these rows, on top of the viewer's own filters — a surface
+     * pointing at a set of rows ("Show" the rows a fill could not read).
+     */
+    onlyRows?: ReadonlySet<string> | null;
 }
 
 /** The table a hidden-column set was seeded for. */
@@ -245,14 +257,31 @@ export function useTableState(
         [],
     );
 
+    const toggleEmptyFilter = useCallback(
+        (columnId: string, empty: boolean) => {
+            setFilters((current) => {
+                const existing = current.find((f) => f.column_id === columnId);
+                const rest = current.filter((f) => f.column_id !== columnId);
+                if (existing?.kind === "empty" && existing.empty === empty)
+                    return rest;
+                return [...rest, { column_id: columnId, kind: "empty", empty }];
+            });
+        },
+        [],
+    );
+
+    const onlyRows = options.onlyRows ?? null;
     const rows = useMemo(() => {
-        const filtered = filterRows(spec, filters);
+        const narrowed = onlyRows
+            ? { ...spec, rows: spec.rows.filter((row) => onlyRows.has(row.id)) }
+            : spec;
+        const filtered = filterRows(narrowed, filters);
         const quick = quickFilter.trim();
         const searched = quick
             ? filtered.filter((row) => matchesQuickFilter(spec, row, quick))
             : filtered;
         return sortRows({ ...spec, rows: searched }, sort);
-    }, [spec, filters, quickFilter, sort]);
+    }, [spec, filters, quickFilter, sort, onlyRows]);
 
     const toggleRow = useCallback(
         (rowId: string) => setExpandedRows((s) => toggleInSet(s, rowId)),
@@ -292,6 +321,7 @@ export function useTableState(
     return {
         sort,
         toggleSort,
+        setSort,
         density,
         setDensity,
         quickFilter,
@@ -302,6 +332,7 @@ export function useTableState(
         clearFilters,
         toggleSelectFilter,
         toggleBooleanFilter,
+        toggleEmptyFilter,
         hasFilters: filters.length > 0 || quickFilter.trim().length > 0,
         rows,
         hiddenColumns,

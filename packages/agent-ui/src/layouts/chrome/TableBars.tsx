@@ -1,9 +1,10 @@
-import React from "react";
-import type {
-    TableCoverage,
-    TableSpec,
+import React, { useEffect, useState } from "react";
+import {
+    toPlainText,
+    type TableCoverage,
+    type TableSpec,
 } from "@beaver/agent-core/layouts/table";
-import { DownloadIcon, Icon } from "../../icons";
+import { CopyIcon, DownloadIcon, Icon, TickIcon } from "../../icons";
 import Button from "../../primitives/Button";
 import { csvForCurrentView, type TableState } from "../useTableState";
 
@@ -58,23 +59,51 @@ export interface TableHeaderActionsProps {
     state: TableState;
     /** Receives the CSV of the current view. Absent ⇒ no export control. */
     onExport?: (csv: string, table: TableSpec) => void;
+    /**
+     * Receives the current view as tab-separated text — the rows in view, the
+     * columns not hidden. Absent ⇒ no copy control.
+     */
+    onCopy?: (text: string, table: TableSpec) => void;
     /** Reveals the table's own library item. Absent ⇒ no control. */
     onShowInLibrary?: (table: TableSpec) => void;
 }
 
 /**
- * Export of the current view, and reveal of the table's library item.
- * Either control is omitted when its callback is absent, rather than shown
- * disabled.
+ * Copy and export of the current view, and reveal of the table's library
+ * item. Each control is omitted when its callback is absent, rather than
+ * shown disabled.
  */
 export function TableHeaderActions({
     table,
     state,
     onExport,
+    onCopy,
     onShowInLibrary,
 }: TableHeaderActionsProps): React.ReactElement {
+    const [copied, setCopied] = useState(false);
+    useEffect(() => {
+        if (!copied) return;
+        const timer = setTimeout(() => setCopied(false), 1500);
+        return () => clearTimeout(timer);
+    }, [copied]);
+
     return (
         <>
+            {onCopy ? (
+                <Button
+                    variant="surface"
+                    icon={copied ? TickIcon : CopyIcon}
+                    onClick={() => {
+                        const columns = table.columns.filter(
+                            (c) => !state.hiddenColumns.has(c.id),
+                        );
+                        onCopy(toPlainText(table, state.rows, columns), table);
+                        setCopied(true);
+                    }}
+                >
+                    {copied ? "Copied" : "Copy"}
+                </Button>
+            ) : null}
             {onExport ? (
                 <Button
                     variant="surface"
@@ -155,13 +184,14 @@ export function TableFooter({
             : `${shown} of ${total} rows`,
     );
     if (sortLabel) parts.push(sortLabel);
-    if (coverage.pending > 0) parts.push(`${coverage.pending} filling`);
     if (coverage.notReported > 0)
         parts.push(`${coverage.notReported} not reported`);
     if (coverage.error > 0) parts.push(`${coverage.error} failed`);
+    if (coverage.titleAbstractOnly > 0)
+        parts.push(`${coverage.titleAbstractOnly} from title and abstract`);
     if (coverage.errorRows > 0)
         parts.push(
-            `${coverage.errorRows} ${coverage.errorRows === 1 ? "row" : "rows"} incomplete`,
+            `${coverage.errorRows} ${coverage.errorRows === 1 ? "paper" : "papers"} could not be read`,
         );
     if (note) parts.push(note);
 

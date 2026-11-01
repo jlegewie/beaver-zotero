@@ -2,9 +2,9 @@
  * Recognising and reading a stored table.
  *
  * The half of the stored-table surface that only needs Zotero: the marks that
- * identify one of ours, where its files live, and how to read the spec back out
- * of the document. Creation and every other write live in `tableItem.ts`, which
- * re-exports everything here so a caller that wants both has one import.
+ * identify one of ours, where its files live, and how to read `table.json`, the
+ * file that is the table. Creation and every other write live in `tableItem.ts`,
+ * which re-exports everything here so a caller that wants both has one import.
  *
  * **The split is load-bearing, not tidiness.** This module is reachable from
  * `src/hooks.ts`, so it is compiled into the *esbuild* bundle, where React, the
@@ -21,10 +21,10 @@
  * library.
  */
 
-import type { TableSpec } from '@beaver/agent-core/layouts/table';
+import { readSpec, type TableSpec } from '@beaver/agent-core/layouts/table';
 import type { TableSummary } from '@beaver/agent-core/layouts/tableMutations';
 import { logger } from '@beaver/agent-core/platform/logger';
-import { parseTableDocument } from './tableDocument';
+import { getTablesApi } from './tablesApi';
 
 // ---------------------------------------------------------------------------
 // Marks
@@ -55,6 +55,9 @@ export const TABLE_URL_PREFIX = 'beaver://table/';
 /** Directory inside the attachment's storage folder for Beaver's own sidecars. */
 export const TABLE_SIDECAR_DIR = 'beaver';
 
+/** The file that is the table, beside the rendered snapshot. */
+export const TABLE_FILE_NAME = 'table.json';
+
 // ---------------------------------------------------------------------------
 // Errors
 // ---------------------------------------------------------------------------
@@ -79,14 +82,20 @@ export type TableItemErrorCode =
     | 'not_found'
     /** The item exists but is not one of ours. */
     | 'not_a_table'
-    /** The file is there but carries no embedded spec. */
+    /** The item carries no readable table. */
     | 'no_spec'
-    /** Written by a newer format than this build can read. */
+    /** Written in a format this build does not read (older or newer). */
     | 'unsupported_version'
-    /** The embedded spec is not a readable table. */
+    /** `table.json` is not a readable table. */
     | 'invalid_spec'
+    /** `table.json` is gone beside a retained version history. */
+    | 'corrupt'
+    /** The write would grow the table past a limit. */
+    | 'too_large'
     /** A stored version's file disagrees with what the version log recorded. */
-    | 'version_corrupt';
+    | 'version_corrupt'
+    /** An `edit` whose `seq` is older than its session's last commit. */
+    | 'stale_seq';
 
 export class TableItemError extends Error {
     readonly code: TableItemErrorCode;
@@ -95,6 +104,48 @@ export class TableItemError extends Error {
         super(message);
         this.name = 'TableItemError';
         this.code = code;
+    }
+}
+
+/**
+ * Whether a library lets Beaver write a table's files: item edits and file
+ * edits, since a table is a stored file. Exclusion is checked separately.
+ */
+export function tableFilesEditable(library: { editable: boolean; filesEditable?: boolean } | false | null | undefined): boolean {
+    return !!library && !!library.editable && library.filesEditable !== false;
+}
+
+/**
+ * Whether the store's open repair runs for a table in this library: its files
+ * are editable and the library is not excluded (fail-closed until the library
+ * scope has loaded, as the store's exclusion check is).
+ */
+export function tableRepairAllowed(libraryID: number): boolean {
+    const beaver = Zotero.Beaver;
+    return tableFilesEditable(Zotero.Libraries.get(libraryID))
+        && !!beaver?.libraryScopeInitialized
+        && (beaver.searchableLibraryIds ?? []).includes(libraryID);
+}
+
+/** Why a table's bookkeeping stays unrepaired where {@link tableRepairAllowed} is false. */
+export const TABLE_REPAIR_SKIPPED =
+    'Local bookkeeping needs repair, but Beaver does not modify tables in a read-only library or one excluded from Beaver.';
+
+/** Where an unreadable table can be recovered: the item pane's restore. */
+export const UNREADABLE_TABLE_RECOVERY =
+    'Select the table in your library and use “Restore my version” in its Beaver Table section to write back the last version this device saved.';
+
+/**
+ * The recovery hint for an unreadable table, or '' when the item pane would
+ * not offer the restore (no usable copy on this device, or a read-only
+ * library). Never throws.
+ */
+export async function unreadableTableRecovery(ref: TableRef): Promise<string> {
+    try {
+        const outcome = await getTablesApi()?.shadow.check(ref);
+        return outcome === 'ok' ? UNREADABLE_TABLE_RECOVERY : '';
+    } catch {
+        return '';
     }
 }
 
@@ -198,6 +249,12 @@ export function tableSidecarDirectory(item: Zotero.Item): string | null {
     return dir ? PathUtils.join(dir, TABLE_SIDECAR_DIR) : null;
 }
 
+/** Where `table.json` lives: the storage directory, beside the snapshot. */
+export function tableFilePath(item: Zotero.Item): string | null {
+    const dir = tableStorageDirectory(item);
+    return dir ? PathUtils.join(dir, TABLE_FILE_NAME) : null;
+}
+
 /** Where the edit history goes. */
 export function tableHistoryPath(item: Zotero.Item): string | null {
     const dir = tableSidecarDirectory(item);
@@ -217,98 +274,158 @@ export function tableVersionPath(
 // Reading
 // ---------------------------------------------------------------------------
 
+/** The identity of a retriable creation, committed with the table. */
+export interface TableCreationState {
+    operation_id: string;
+    request_sha256: string;
+    complete: boolean;
+    meta?: { actor: 'agent' | 'user' | 'system'; run_id?: string; thread_id?: string; change?: string };
+    /** The change list a creation from a request answered with; a replay returns it. */
+    changes?: unknown[];
+}
+
+/**
+ * `table.json`: the spec, and the creation marker that has to commit
+ * atomically with it, kept beside the spec so the spec's own bytes, and
+ * therefore its hash, never include it. Fields written by older builds (a
+ * `receipts` list) are ignored and dropped by the next write.
+ */
+export interface TableFile {
+    spec: TableSpec;
+    creation?: TableCreationState;
+}
+
 export type ReadTableItemResult =
-    | { ok: true; spec: TableSpec }
+    | { ok: true; spec: TableSpec; file: TableFile }
     | {
           ok: false;
-          code: 'not_a_table' | 'no_file' | 'no_spec' | 'unsupported_version' | 'invalid';
+          code: 'not_a_table' | 'no_file' | 'no_spec' | 'unsupported_version' | 'invalid' | 'corrupt';
           message: string;
           specVersion?: number;
       };
 
+/** `table.json` text as a validated file for `item`, or why it is not one. */
+export function parseTableFile(item: Zotero.Item, text: string): ReadTableItemResult {
+    let raw: unknown;
+    try {
+        raw = JSON.parse(text);
+    } catch (error) {
+        return { ok: false, code: 'invalid', message: `Table ${item.key} is not readable JSON: ${String(error)}` };
+    }
+    return tableFileFrom(item, raw);
+}
+
+/** A parsed `table.json` value as a validated file for `item`, or why it is not one. */
+function tableFileFrom(item: Zotero.Item, raw: unknown): ReadTableItemResult {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+        return { ok: false, code: 'invalid', message: `Table ${item.key} is not a table file.` };
+    }
+    const creation = creationFrom(item, raw);
+    if (creation && 'error' in creation) return { ok: false, code: 'invalid', message: creation.error };
+    const read = specFor(item, (raw as Partial<TableFile>).spec);
+    if (!read.ok) return read;
+    return { ok: true, spec: read.spec, file: { spec: read.spec, ...(creation ? { creation } : {}) } };
+}
+
+/** A parsed `table.json` value's creation marker, checked apart from its spec. */
+function creationFrom(item: Zotero.Item, raw: object): TableCreationState | { error: string } | undefined {
+    const creation = (raw as Partial<TableFile>).creation;
+    if (creation === undefined) return undefined;
+    if (
+        !creation || typeof creation !== 'object' ||
+        typeof creation.operation_id !== 'string' ||
+        typeof creation.request_sha256 !== 'string' ||
+        typeof creation.complete !== 'boolean' ||
+        (creation.changes !== undefined && !Array.isArray(creation.changes))
+    ) {
+        return { error: `Table ${item.key} has an unreadable creation marker.` };
+    }
+    return creation;
+}
+
 /**
- * The spec stored in a table item's file.
+ * The creation marker `table.json` holds, read even when its spec is not, so a
+ * write that replaces an unreadable spec keeps it. Null when the file is
+ * missing, unparseable, or carries no readable marker.
+ */
+export async function readTableFileCreation(item: Zotero.Item): Promise<TableCreationState | null> {
+    const path = tableFilePath(item);
+    if (!path) return null;
+    try {
+        if (!(await IOUtils.exists(path))) return null;
+        const raw: unknown = JSON.parse(await IOUtils.readUTF8(path));
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+        const creation = creationFrom(item, raw);
+        return creation && !('error' in creation) ? creation : null;
+    } catch {
+        return null;
+    }
+}
+
+/** A spec that is readable and says it is this item's. */
+function specFor(item: Zotero.Item, raw: unknown): ReadTableItemResult {
+    const read = readSpec(raw);
+    if (!read.ok) {
+        return read.reason === 'unsupported_version'
+            ? {
+                  ok: false,
+                  code: 'unsupported_version',
+                  specVersion: read.specVersion,
+                  message: `Table ${item.key} was written in another format (spec_version ${read.specVersion}).`,
+              }
+            : { ok: false, code: 'invalid', message: read.detail };
+    }
+    if (read.spec.key !== item.key || !Number.isInteger(read.spec.version) || (read.spec.version ?? 0) < 1)
+        return { ok: false, code: 'invalid', message: 'The table identity does not match its attachment.' };
+    return { ok: true, spec: read.spec, file: { spec: read.spec } };
+}
+
+/**
+ * The stored table, from `table.json`.
  *
  * Reading is deliberately not gated on library exclusion: an existing table the
  * user opens is theirs to look at, and exclusion governs what leaves the
  * machine, not what the user can see.
  */
 export async function readTableItemSpec(item: Zotero.Item): Promise<ReadTableItemResult> {
-    return (await readTableItemDocument(item)).parsed;
-}
-
-/** Read once so callers can parse bookkeeping from the same document as its spec. */
-export async function readTableItemDocument(
-    item: Zotero.Item
-): Promise<{ html: string | null; parsed: ReadTableItemResult }> {
     await loadTableItemFields([item]);
     if (!isTableAttachment(item)) {
-        return {
-            html: null,
-            parsed: {
-                ok: false,
-                code: 'not_a_table',
-                message: `Item ${item.key} is not a Beaver table.`,
-            },
-        };
+        return { ok: false, code: 'not_a_table', message: `Item ${item.key} is not a Beaver table.` };
     }
-
-    const path = await item.getFilePathAsync();
+    const path = tableFilePath(item);
     if (!path) {
-        return {
-            html: null,
-            parsed: {
-                ok: false,
-                code: 'no_file',
-                message: `Table ${item.key} has no file on disk.`,
-            },
-        };
+        return { ok: false, code: 'no_file', message: `Table ${item.key} has no storage directory.` };
     }
-
-    let html: string;
+    let text: string;
     try {
-        html = (await Zotero.File.getContentsAsync(path)) as string;
+        if (!(await IOUtils.exists(path))) return missingTableFile(item);
+        text = await IOUtils.readUTF8(path);
     } catch (error) {
-        return {
-            html: null,
-            parsed: {
-                ok: false,
-                code: 'no_file',
-                message: `Table ${item.key} could not be read: ${String(error)}`,
-            },
-        };
+        return { ok: false, code: 'no_file', message: `Table ${item.key} could not be read: ${String(error)}` };
     }
-
-    return { html, parsed: parseTableItemSpec(item, html) };
+    return parseTableFile(item, text);
 }
 
-function parseTableItemSpec(item: Zotero.Item, html: string): ReadTableItemResult {
-    const parsed = parseTableDocument(html);
-    if (parsed.ok) {
-        if (parsed.spec.key !== item.key || !Number.isInteger(parsed.spec.version) || (parsed.spec.version ?? 0) < 1)
-            return { ok: false, code: 'invalid', message: 'The embedded table identity does not match its attachment.' };
-        return { ok: true, spec: parsed.spec };
-    }
-    if (parsed.reason === 'unsupported_version') {
+/**
+ * Why `table.json` is absent: a table whose files have not arrived on this
+ * device yet (`no_file`), a snapshot that carries no table (`no_spec`), or a
+ * table whose file is gone beside a retained history (`corrupt`). The file is
+ * written atomically and syncs with its history, so the last case is damage
+ * from outside; restoring a retained version writes a new `table.json`.
+ */
+async function missingTableFile(item: Zotero.Item): Promise<ReadTableItemResult> {
+    if ((await readTableHistory(item)).versions.length) {
         return {
             ok: false,
-            code: 'unsupported_version',
-            specVersion: parsed.specVersion,
-            message: `Table ${item.key} was written by a newer format (spec_version ${parsed.specVersion}).`,
+            code: 'corrupt',
+            message: `Table ${item.key} has no table.json; restore a retained version to repair it.`,
         };
     }
-    if (parsed.reason === 'no_spec') {
-        return {
-            ok: false,
-            code: 'no_spec',
-            message: `Table ${item.key} carries no embedded spec.`,
-        };
+    const snapshot = await item.getFilePathAsync();
+    if (snapshot && (await IOUtils.exists(snapshot))) {
+        return { ok: false, code: 'no_spec', message: `Table ${item.key} carries no table.` };
     }
-    return {
-        ok: false,
-        code: 'invalid',
-        message: parsed.detail ?? `Table ${item.key} has an unreadable spec.`,
-    };
+    return { ok: false, code: 'no_file', message: `Table ${item.key} has no file on disk.` };
 }
 
 // ---------------------------------------------------------------------------
@@ -328,6 +445,11 @@ export interface TableVersionEntry {
     actor: TableActor;
     run_id?: string;
     thread_id?: string;
+    /**
+     * The key consecutive writes collapse under (a fill's job id, a tab
+     * session); see the collapse rule in `tableStore.ts`.
+     */
+    collapse_key?: string;
     change?: string;
     /** ISO timestamp of the write. */
     at: string;
@@ -340,16 +462,25 @@ export interface TableVersionEntry {
      * refuses to revert to a version that fails it.
      */
     sha256: string;
+    /** Size of that file in bytes, for the byte-bounded retention. */
+    bytes?: number;
     /** `summarize()` of that spec, so listing tables never reads one. */
     summary: TableSummary;
     /**
-     * This version may never be overwritten in place — see the collapse rule on
-     * `writeTable`. Set on the version a table was created in, and on any
+     * This version may never be overwritten in place — see the collapse rule
+     * in `tableStore.ts`. Set on the version a table was created in, on a
+     * write that asked for it (a model edit, a destructive edit), and on any
      * version reconstructed from the file rather than written by a known author.
      */
     sealed?: true;
     /** Known creation, unlike a sealed entry reconstructed from lost history. */
     creation?: true;
+    /** The model edit that committed this version, so a repeat replays it. */
+    operation_id?: string;
+    /** Fingerprint of that edit's request; the same id with another one is refused. */
+    request_sha256?: string;
+    /** The change list that edit answered with, returned again on a replay. */
+    changes?: unknown[];
 }
 
 export interface TableHistory {
@@ -372,6 +503,7 @@ export function normalizeTableHistory(
               .sort((a, b) => a.version - b.version)
         : [];
     const tip = versions.length ? versions[versions.length - 1].version : 0;
+    // A `ledger` written by older builds is dropped here, and so on the next commit.
     return { tip: Math.max(tip, Number(history?.tip) || 0), versions };
 }
 
@@ -423,12 +555,12 @@ export interface TableRef {
  * to look at. The store's `requireWritable` is where the exclusion boundary is.
  */
 export async function resolveTableItem(ref: TableRef, allowTrashed = false): Promise<Zotero.Item> {
-    const item = Zotero.Items.getByLibraryAndKey(ref.libraryID, ref.key) as
+    const item = await Zotero.Items.getByLibraryAndKeyAsync(ref.libraryID, ref.key) as
         | Zotero.Item
         | false;
     if (!item || (item.deleted && !allowTrashed)) {
         throw new TableItemError(
-            `No item ${ref.key} in library ${ref.libraryID}.`,
+            item ? `Table ${ref.key} is in the trash.` : `No item ${ref.key} in library ${ref.libraryID}.`,
             'not_found'
         );
     }
@@ -444,7 +576,7 @@ export async function resolveTableItem(ref: TableRef, allowTrashed = false): Pro
 
 /** Maps a read refusal onto the shared {@link TableItemErrorCode} vocabulary. */
 export function tableReadError(
-    code: 'not_a_table' | 'no_file' | 'no_spec' | 'unsupported_version' | 'invalid',
+    code: 'not_a_table' | 'no_file' | 'no_spec' | 'unsupported_version' | 'invalid' | 'corrupt',
     message: string
 ): TableItemError {
     switch (code) {

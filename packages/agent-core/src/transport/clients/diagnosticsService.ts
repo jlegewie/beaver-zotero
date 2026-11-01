@@ -25,6 +25,7 @@ import {
     ConnectionDiagnosticResult,
     ConnectionFailureEvidence,
     presentConnectionFailure,
+    REATTACH_FAILED_MESSAGE,
 } from '../connectionFailure';
 
 const DIAGNOSTICS_ENDPOINT = '/api/v1/diagnostics/connection-failure';
@@ -48,6 +49,21 @@ export interface ConnectionFailureReport {
      * after retry report via the WebSocket auth handshake instead.
      */
     connect_attempts?: number | null;
+    /**
+     * For a mid-run loss of a run that could be reattached: `reattached`,
+     * `gave_up` (the client ran out of time), or `fallback:<reason>` (the
+     * reattach was refused or failed and the run ended as before).
+     */
+    reattach_outcome?: string | null;
+    /** Milliseconds between noticing the loss and that outcome. */
+    reattach_gap_ms?: number | null;
+    /** Sockets opened to reattach the run before that outcome. */
+    reattach_attempts?: number | null;
+    /**
+     * Sockets the run lost before that outcome, the first loss included. More
+     * than one means a socket opened to reattach was lost as well.
+     */
+    reattach_losses?: number | null;
 }
 
 /**
@@ -111,11 +127,15 @@ async function executeReport(
     // message depends on this report's own outcome, so it cannot be included.
     // Details are flattened to plain text: the renderer-facing markup (the
     // troubleshooting link) carries no telemetry value.
+    // A loss the client recovered from by reattaching showed the user nothing.
+    const shownToUser = report.reattach_outcome !== 'reattached';
     const presentation = presentConnectionFailure(evidence);
-    const userDetails = presentation.details
-        .replace(/<[^>]*>/g, '')
-        .replace(/\s+/g, ' ')
-        .trim();
+    const userDetails = shownToUser
+        ? presentation.details
+            .replace(/<[^>]*>/g, '')
+            .replace(/\s+/g, ' ')
+            .trim()
+        : '';
 
     const body: Record<string, unknown> = {
         // Preserve the original coarse fields for older backend deployments.
@@ -132,6 +152,10 @@ async function executeReport(
         ms_since_last_ws_message_ms: evidence.msSinceLastWsMessageMs ?? null,
         run_id: report.run_id ?? null,
         connect_attempts: report.connect_attempts ?? null,
+        reattach_outcome: report.reattach_outcome ?? null,
+        reattach_gap_ms: report.reattach_gap_ms ?? null,
+        reattach_attempts: report.reattach_attempts ?? null,
+        reattach_losses: report.reattach_losses ?? null,
         plugin_version: pluginVersion,
         zotero_version: zoteroVersion,
         platform: nav?.platform ?? '',
@@ -147,7 +171,9 @@ async function executeReport(
             ? Math.max(0, startedAt - priorSuccess.at)
             : null,
         client_time: new Date().toISOString(),
-        user_message: presentation.message.slice(0, 200),
+        user_message: !shownToUser
+            ? ''
+            : (report.reattach_outcome ? REATTACH_FAILED_MESSAGE : presentation.message).slice(0, 200),
         user_details: userDetails.slice(0, 600),
     };
 

@@ -5,11 +5,11 @@
  * this module builds the `zotero://` ones: a row's verbs become links here, and
  * `zoteroLinkScope` names a cited item's library.
  *
- * Stateless, and deliberately kept apart from the reader host: every bundle
- * that renders or stores a table needs these links, while
- * `view/readerTableView.ts`, which owns the enhanced-view registry, must exist
- * in the **esbuild bundle only**. A stateless helper living in a stateful
- * module is how a second copy of that registry gets created.
+ * Stateless, and deliberately kept apart from the reader redirect: every
+ * bundle that renders or stores a table needs these links, while
+ * `view/readerTableView.ts`, which owns a reader listener, must exist in the
+ * **esbuild bundle only**. A stateless helper living in a stateful module is
+ * how a second copy of that state gets created.
  *
  * **Best effort throughout.** `zoteroLinksFor` runs once per row inside
  * `buildTableDocument`, which every write goes through, so a lookup that throws
@@ -19,14 +19,13 @@
  * personal library.
  */
 
-import { logger } from '@beaver/agent-core/platform/logger';
 import {
     ROW_ACTIONS,
     rowActionTarget,
     type Row,
     type RowActionTarget,
 } from '@beaver/agent-core/layouts/table';
-import type { TableHtmlLinks } from '../tableDocument';
+import { zoteroScopeOf, type TableHtmlLinks } from '../tableDocument';
 import { getZoteroUriScope } from '../../../utils/zoteroUris';
 
 /**
@@ -45,13 +44,13 @@ export function zoteroLinkScope(libraryID: number): string {
 export function rowActionHref(target: RowActionTarget): string | null {
     switch (target.kind) {
         case 'reveal_item':
-            return `zotero://select/${zoteroLinkScope(target.ref.library_id)}/items/${target.ref.zotero_key}`;
+            return `zotero://select/${zoteroScopeOf(target.ref, zoteroLinkScope)}/items/${target.ref.zotero_key}`;
         case 'open_file':
-            return `zotero://open/${zoteroLinkScope(target.ref.library_id)}/items/${target.ref.zotero_key}`;
+            return `zotero://open/${zoteroScopeOf(target.ref, zoteroLinkScope)}/items/${target.ref.zotero_key}`;
         case 'open_annotation':
             // `zotero://open` accepts only a file attachment, and scrolls to the
             // annotation named in the query.
-            return `zotero://open/${zoteroLinkScope(target.attachment.library_id)}/items/${target.attachment.zotero_key}?annotation=${encodeURIComponent(target.ref.zotero_key)}`;
+            return `zotero://open/${zoteroScopeOf(target.attachment, zoteroLinkScope)}/items/${target.attachment.zotero_key}?annotation=${encodeURIComponent(target.ref.zotero_key)}`;
         // The host resolves these at click time (best attachment, local file
         // copy) or carries them through approval (import); no static link.
         case 'open_item':
@@ -70,27 +69,4 @@ export function zoteroLinksFor(row: Row): TableHtmlLinks {
         if (href) links[action] = href;
     }
     return links;
-}
-
-export function openTableLink(href: string): void {
-    try {
-        if (/^https:\/\//i.test(href)) {
-            Zotero.launchURL(href);
-            return;
-        }
-        if (/^zotero:\/\//i.test(href)) {
-            const pane = Zotero.getActiveZoteroPane();
-            if (!pane?.loadURI) {
-                logger(`openTableLink: no Zotero pane to open ${href}`, 2);
-                return;
-            }
-            pane.loadURI(href);
-            return;
-        }
-        // Never handed to the OS: a scheme the renderer does not emit is not
-        // one this plugin should launch on the user's behalf.
-        logger(`openTableLink: refusing to open ${href}`, 2);
-    } catch (error) {
-        logger(`openTableLink: could not open ${href}: ${error}`, 2);
-    }
 }

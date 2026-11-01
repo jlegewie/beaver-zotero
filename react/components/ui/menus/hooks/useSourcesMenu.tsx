@@ -29,6 +29,21 @@ interface UseSourcesMenuOptions {
     /** How many recently-modified items to read before filtering them down. */
     recentItemsLimit: number;
     verticalPosition?: 'above' | 'below';
+    /** Which action rows the target offers; every row when absent. */
+    entries?: SourcesMenuEntries;
+}
+
+/**
+ * The action rows a picker target offers. The composer offers all of them; a
+ * target that only takes items, collections and tags (the table card) hides
+ * the rest and names the scope rows for what a pick does.
+ */
+export interface SourcesMenuEntries {
+    libraries: boolean;
+    notes: boolean;
+    files: boolean;
+    /** How collection and tag rows are labelled: "Filter by Collections" or "Add Collection". */
+    scopeVerb: 'filter' | 'add';
 }
 
 interface UseSourcesMenuResult {
@@ -54,8 +69,11 @@ export const useSourcesMenu = ({
     onSelectFiles,
     getRecentItems,
     recentItemsLimit,
-    verticalPosition = 'above'
+    verticalPosition = 'above',
+    entries,
 }: UseSourcesMenuOptions): UseSourcesMenuResult => {
+    const collectionsLabel = entries?.scopeVerb === 'add' ? 'Add Collection' : 'Filter by Collections';
+    const tagsLabel = entries?.scopeVerb === 'add' ? 'Add Tag' : 'Filter by Tags';
     const [menuItems, setMenuItems] = useState<SearchMenuItem[]>([]);
 
     const getEffectiveLibraryId = (libraryId: number | null): number | null => {
@@ -86,6 +104,21 @@ export const useSourcesMenu = ({
         // "what's attached" affordance, so the menu lists only addable items.
         const notAlreadyAttached = (item: Zotero.Item) =>
             !sourceMenuItemContext.isAttached(item);
+        // The target may take only some kinds of item (the table card takes papers).
+        const addable = (item: Zotero.Item) =>
+            sourceMenuItemContext.canAdd?.(item) ?? true;
+        // The target may offer another item in a candidate's place (the table
+        // card offers a child attachment as its paper); rows are merged after.
+        const asOffered = (items: Zotero.Item[]): Zotero.Item[] => {
+            const map = sourceMenuItemContext.asSourceItem;
+            if (!map) return items;
+            const offered: Zotero.Item[] = [];
+            for (const item of items) {
+                const mapped = map(item);
+                if (mapped && !offered.some((other) => other.id === mapped.id)) offered.push(mapped);
+            }
+            return offered;
+        };
 
         // A group of item rows, optionally headed. 'above' menus display the
         // array reversed, so the header follows its rows there to land above
@@ -99,16 +132,19 @@ export const useSourcesMenu = ({
         /** The rows for a typed query: matching items, nothing else. */
         const buildSearchSections = async (): Promise<SearchMenuItem[]> => {
             const items: SearchMenuItem[] = [];
+            const seen = new Set<number>();
             for (const result of searchResults) {
                 // A portable library ref that couldn't be resolved on this device
                 // carries library_id 0, which throws synchronously if looked up.
                 if (result.library_id === UNRESOLVED_LIBRARY_ID) {
                     continue;
                 }
-                const item = await Zotero.Items.getByLibraryAndKeyAsync(result.library_id, result.zotero_key);
-                if (!item) {
+                const found = await Zotero.Items.getByLibraryAndKeyAsync(result.library_id, result.zotero_key);
+                const item = found ? asOffered([found])[0] : null;
+                if (!item || !addable(item) || seen.has(item.id)) {
                     continue;
                 }
+                seen.add(item.id);
                 items.push(await createSourceMenuItem(item, sourceMenuItemContext, searchQuery));
             }
             return itemSection('Search Results', items);
@@ -123,8 +159,9 @@ export const useSourcesMenu = ({
          * selected the menu falls back to recents, as before.
          */
         const buildDefaultSections = async (): Promise<SearchMenuItem[]> => {
-            const selectedItems = searchableOnly(selectedZoteroItems)
-                .filter((item) => item.isRegularItem() || item.isAttachment() || item.isNote())
+            const selectedItems = asOffered(searchableOnly(selectedZoteroItems)
+                .filter((item) => item.isRegularItem() || item.isAttachment() || item.isNote()))
+                .filter(addable)
                 .filter(notAlreadyAttached)
                 .slice(0, proposedItemsLimit);
             const hasSelection = selectedItems.length > 0;
@@ -180,7 +217,7 @@ export const useSourcesMenu = ({
             // below — see the return.
             const filterItems: SearchMenuItem[] = [];
 
-            if (searchableLibraryIds.length > 1) {
+            if (searchableLibraryIds.length > 1 && entries?.libraries !== false) {
                 filterItems.push({
                     label: '"Filter by Library"',
                     onClick: async () => {
@@ -200,7 +237,7 @@ export const useSourcesMenu = ({
             }
 
             filterItems.push({
-                label: '"Filter by Collections"',
+                label: `"${collectionsLabel}"`,
                 onClick: async () => {
                     const latestLibraryIdRaw = getActiveZoteroLibraryId();
                     const latestEffectiveLibraryId = getEffectiveLibraryId(latestLibraryIdRaw);
@@ -215,7 +252,7 @@ export const useSourcesMenu = ({
                         <div className="display-flex flex-col gap-05 min-w-0">
                             <div className="display-flex flex-row gap-2">
                                 <CSSIcon name="collection" className="icon-16 font-color-secondary scale-90" />
-                                <div>Filter by Collections</div>
+                                <div>{collectionsLabel}</div>
                             </div>
                         </div>
                         <div className="flex-1" />
@@ -225,7 +262,7 @@ export const useSourcesMenu = ({
             });
 
             filterItems.push({
-                label: '"Filter by Tags"',
+                label: `"${tagsLabel}"`,
                 onClick: async () => {
                     const latestLibraryIdRaw = getActiveZoteroLibraryId();
                     const latestEffectiveLibraryId = getEffectiveLibraryId(latestLibraryIdRaw);
@@ -243,7 +280,7 @@ export const useSourcesMenu = ({
                                     name="tag"
                                     className="icon-16 font-color-secondary scale-90 icon-tag"
                                 />
-                                <div>Filter by Tags</div>
+                                <div>{tagsLabel}</div>
                             </div>
                         </div>
                         <div className="flex-1" />
@@ -252,7 +289,7 @@ export const useSourcesMenu = ({
                 )
             });
 
-            filterItems.push({
+            if (entries?.notes !== false) filterItems.push({
                 label: '"Add Note"',
                 onClick: async () => {
                     onNavigateToNotes();
@@ -269,7 +306,7 @@ export const useSourcesMenu = ({
                 )
             });
 
-            filterItems.push({
+            if (entries?.files !== false) filterItems.push({
                 label: '"Add File"',
                 onClick: async () => {
                     onSelectFiles();
@@ -292,11 +329,12 @@ export const useSourcesMenu = ({
                     selectedItems.map((item) => createSourceMenuItem(item, sourceMenuItemContext))
                 ));
             } else {
-                const recentCandidates = [...recentItems, ...recentlyModifiedItems
+                const recentCandidates = asOffered([...recentItems, ...recentlyModifiedItems
                     .map((item) => (item.parentItem ? item.parentItem : item))
                     .filter((item): item is Zotero.Item => Boolean(item))
-                    .filter((item) => item.isRegularItem() || item.isAttachment() || item.isNote())]
+                    .filter((item) => item.isRegularItem() || item.isAttachment() || item.isNote())])
                     .filter((item, index, self) => index === self.findIndex((candidate) => candidate.id === item.id))
+                    .filter(addable)
                     .filter(notAlreadyAttached)
                     .slice(0, proposedItemsLimit);
 
@@ -349,7 +387,10 @@ export const useSourcesMenu = ({
         onSelectFiles,
         getRecentItems,
         recentItemsLimit,
-        verticalPosition
+        verticalPosition,
+        entries,
+        collectionsLabel,
+        tagsLabel,
     ]);
 
     return { menuItems };

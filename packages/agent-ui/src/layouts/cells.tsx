@@ -5,12 +5,15 @@ import {
     annotationTitle,
     annotationTypeLabel,
     columnWrap,
+    isTitleAbstractOnly,
+    selectOption,
+    staleReason,
     type Cell,
     type CellValue,
     type Column,
     type Details,
     type Row,
-    type SelectColor,
+    type RowFailure,
     type TableSpec,
 } from "@beaver/agent-core/layouts/table";
 import { itemTypeToIconName } from "@beaver/agent-core/types/citations";
@@ -36,18 +39,33 @@ import { type TextRenderer } from "./tableView";
  */
 export type CellVariant = "cell" | "detail";
 
+/** Why a cell is stale, as its marker's tooltip says it. */
+export const STALE_REASON_TEXT: Record<"question" | "document", string> = {
+    question: "The question changed",
+    document: "The paper's document changed",
+};
+
 /**
- * One cell, in four states that must not be confused with one another:
+ * What stopped a row, in a few words: a row with nothing to read (no document
+ * and no abstract) is told apart from one whose document could not be read.
+ */
+export function rowFailureLabel(failure: RowFailure): string {
+    return failure.code === "no_source" ? "Nothing to read" : "Could not be read";
+}
+
+/**
+ * One cell, in states that must not be confused with one another:
  *
- * - **pending** — a producer is still filling it. A shimmer block sized like
- *   the text that is coming, not a spinner: a filling column would otherwise
- *   strobe once it has more than a handful of rows.
- * - **error** — the reason in words, with the retry the caller supplies. Never
+ * - **failed** — the reason in words, with the retry the caller supplies. Never
  *   a red wash and never a dimmed row: dimming hides the data that did arrive.
- * - **empty** — an em dash. In an extraction table this is a finding ("the
- *   paper does not report this"), so it has to read as a value.
- * - **filled** — the value, clamped to the row height unless the column opts
- *   out with `wrap: "nowrap"`.
+ * - **not reported** — a finding ("the paper does not report this"), so it
+ *   reads as a value; unattempted and cleared cells show nothing.
+ * - **answered** — the value, clamped to the row height unless the column opts
+ *   out with `wrap: "nowrap"`, and marked when it was taken from title and
+ *   abstract only.
+ *
+ * Any of them may carry a stale marker whose tooltip says what changed
+ * ({@link staleReason}).
  */
 
 export interface CellViewProps {
@@ -74,25 +92,27 @@ export function CellView({
     onSelectClick,
     onRetry,
 }: CellViewProps): React.ReactElement {
+    const stale = staleReason(row, cell);
     const states = (
         <>
-            {cell?.flag ? (
-                <small>
+            {stale ? (
+                <small className="bt-stale" title={STALE_REASON_TEXT[stale]}>
                     {" "}
-                    · {cell.flag === "unsure" ? "Unsure" : "Unsourced"}
+                    · Stale
                 </small>
             ) : null}
-            {cell?.stale ? <small> · Stale</small> : null}
+            {isTitleAbstractOnly(cell) ? (
+                <small
+                    className="bt-title-abstract"
+                    title="Answered from the title and abstract; the paper itself was not read"
+                >
+                    {" "}
+                    · From title and abstract
+                </small>
+            ) : null}
         </>
     );
-    if (cell?.status === "pending")
-        return (
-            <span>
-                <PendingCell />
-                {states}
-            </span>
-        );
-    if (cell?.status === "error")
+    if (cell?.outcome === "failed")
         return (
             <span>
                 <ErrorCell message={cell.error} onRetry={onRetry} />
@@ -108,7 +128,11 @@ export function CellView({
             <span className="bt-empty">
                 {cell?.outcome === "not_reported" ? "Not reported" : ""}
                 {states}
-                {cell?.provenance === "user" ? " · Edited by you" : ""}
+                {cell?.outcome === "cleared"
+                    ? " · Cleared by you"
+                    : cell?.provenance === "user"
+                      ? " · Edited by you"
+                      : ""}
             </span>
         );
 
@@ -154,15 +178,6 @@ function overflowClass(value: CellValue, column: Column): string {
     if (value.kind === "text" || value.kind === "link")
         return columnWrap(column) === "clamp" ? "bt-clamp" : "bt-nowrap";
     return "bt-nowrap";
-}
-
-function PendingCell(): React.ReactElement {
-    return (
-        <span className="bt-pending" role="img" aria-label="Filling">
-            <span className="bt-skeleton" style={{ width: "92%" }} />
-            <span className="bt-skeleton" style={{ width: "68%" }} />
-        </span>
-    );
 }
 
 function ErrorCell({
@@ -226,34 +241,23 @@ export function CellValueView({
         case "text":
             return <>{renderText(value.text)}</>;
 
-        case "number":
-            return (
-                <span className="bt-number">
-                    {value.display ?? value.value.toLocaleString()}
-                    {column.unit && !value.display ? (
-                        <span className="bt-unit">{column.unit}</span>
-                    ) : null}
-                </span>
-            );
-
         case "date":
             return (
-                <span className="bt-number">
+                <span className="bt-number" title={value.display}>
                     {value.display ?? value.value}
                 </span>
             );
 
         case "boolean":
-            // A check or a short dash, never a checkbox glyph: a checkbox reads
-            // as editable, and false must not look like empty (an em dash).
-            // A check for true and nothing for false: the check is the signal,
-            // and a dash beside it only adds a second thing to read.
+            // A check for yes and the word "No" in muted text, never a
+            // checkbox glyph (it reads as editable) and never nothing: a blank
+            // no could not be told from a cell that was never answered.
             return value.value ? (
                 <span className="bt-bool-yes" role="img" aria-label="yes">
                     <Icon icon={TickIcon} size={14} />
                 </span>
             ) : (
-                <span className="bt-bool-no" role="img" aria-label="no" />
+                <span className="bt-bool-no">No</span>
             );
 
         case "select":
@@ -320,10 +324,6 @@ export function CellValueView({
     }
 }
 
-function selectColor(label: string, column: Column): SelectColor {
-    return column.options?.find((o) => o.label === label)?.color ?? "gray";
-}
-
 function SelectPill({
     label,
     column,
@@ -333,13 +333,25 @@ function SelectPill({
     column: Column;
     onClick?: (label: string) => void;
 }): React.ReactElement {
-    const className = `bt-pill bt-pill-${selectColor(label, column)}`;
-    if (!onClick) return <span className={className}>{label}</span>;
+    const option = selectOption(column, label);
+    const className = `bt-pill bt-pill-${option?.color ?? "gray"}`;
+    // A defined category explains itself on hover.
+    const definition = option?.description || undefined;
+    if (!onClick)
+        return (
+            <span className={className} title={definition}>
+                {label}
+            </span>
+        );
     return (
         <button
             type="button"
             className={`${className} bt-pill-button`}
-            title={`Filter by ${label}`}
+            title={
+                definition
+                    ? `${label}: ${definition}\n\nFilter by ${label}`
+                    : `Filter by ${label}`
+            }
             onClick={(e) => {
                 e.stopPropagation();
                 onClick(label);
@@ -383,7 +395,7 @@ function ReferenceValue({
                     <Icon icon={FileIcon} size={15} className="bt-ref-icon" />
                 )
             }
-            title={value.display_name}
+            title={value.title ?? value.display_name}
             meta={
                 value.subtitle || value.venue ? (
                     <>

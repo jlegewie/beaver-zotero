@@ -15,8 +15,9 @@ A tool card uses `metadata.view = { view_type: "table", record }`; `record` mirr
 `TableRecord` in the backend, with `reference`, `change`, `summary`, `changes`,
 `operation_id`, `version`, and `saved`. Its historical title and counts do not
 change when the document changes. Current local metadata is displayed separately
-and refreshed after item notifications and table writes. Opening always targets
-the current snapshot reader. No full table spec enters the chat view.
+and refreshed after item notifications and table writes. Opening goes through
+`openTable` to the Beaver tab of the card's own main window, which renders the
+committed `table.json`. No full table spec enters the chat view.
 
 Table writes (`create_table`, `edit_rows`, `edit_table`, `fill_table`) render as
 cards shaped like the note actions: the header names the tool and the table and

@@ -15,7 +15,7 @@
 
 import { getReadableContentKind } from '../services/documentExtraction/attachmentResolution';
 import { isLinkedUrlAttachment, safeFileExists } from './attachmentFiles';
-import { safeIsInTrash } from './zoteroItemUtils';
+import { safeIsInTrash, safeIsInTrashAsync } from './zoteroItemUtils';
 import { isAttachmentOnServer, isAttachmentAvailableRemotely } from './webAPI';
 import { getPref } from './prefs';
 import { logger } from '@beaver/agent-core/platform/logger';
@@ -43,7 +43,15 @@ export const isAgentSupportedItem = (item: Zotero.Item | false): boolean => {
 export const agentItemFilter = (item: Zotero.Item | false, collectionIds?: number[]): boolean => {
     if (!item) return false;
     if (!isAgentSupportedItem(item)) return false;
-    const trashState = safeIsInTrash(item);
+    return passesTrashAndCollections(item, safeIsInTrash(item), collectionIds);
+};
+
+/** Applies the trash and collection checks to a resolved trash state. */
+const passesTrashAndCollections = (
+    item: Zotero.Item,
+    trashState: boolean | null,
+    collectionIds?: number[]
+): boolean => {
     if (trashState === null) {
         logger(
             `agentItemFilter: Item missing isInTrash, skipping. id=${item?.id ?? 'unknown'} key=${item?.key ?? 'unknown'} library=${item?.libraryID ?? 'unknown'} type=${item?.itemType ?? 'unknown'}`,
@@ -72,7 +80,8 @@ export const agentItemFilterAsync = async (
     collectionIds?: number[]
 ): Promise<boolean> => {
     if (!item) return false;
-    if (!agentItemFilter(item, collectionIds)) return false;
+    if (!isAgentSupportedItem(item)) return false;
+    if (!passesTrashAndCollections(item, await safeIsInTrashAsync(item), collectionIds)) return false;
     if (item.isRegularItem()) return true;
     if (item.isAttachment()) {
         if (await safeFileExists(item)) return true;

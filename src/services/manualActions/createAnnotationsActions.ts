@@ -12,19 +12,19 @@ import {
     CreateNoteAnnotationsProposedData,
     CreateNoteAnnotationsResultData,
     FailedAnnotationResult,
+    textAnnotationStyle,
 } from '@beaver/agent-core/types/agentActions/createAnnotations';
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
-import { libraryRefForLibraryID, resolveItemReference } from '../../utils/libraryIdentity';
-import { getAttachmentFileStatus } from '../agentDataProvider/utils';
+import { libraryRefForLibraryID, resolveItemReference, resolveLibraryRef } from '../../utils/libraryIdentity';
+import { checkLibraryExcluded, excludedLibraryUserMessage, getAttachmentFileStatus } from '../agentDataProvider/utils';
 import {
     createEpubHighlightAnnotation,
     createEpubNoteAnnotation,
-    createHighlightAnnotation,
     createNoteAnnotation,
+    createPdfHighlightForItem,
     EpubAnnotationError,
-    highlightPartComment,
+    HighlightPageSpanError,
     MissingPageGeometryError,
-    resolvedAnnotationPageLabel,
 } from '../annotations/createAnnotation';
 import { getReadableContentKind } from '../documentExtraction/attachmentResolution';
 
@@ -36,15 +36,36 @@ function mapAnnotationErrorCode(error: unknown): string {
             ? 'page_extraction_failed'
             : 'page_geometry_unavailable';
     }
-    if (error instanceof EpubAnnotationError) {
+    if (error instanceof EpubAnnotationError || error instanceof HighlightPageSpanError) {
         return error.code;
     }
     return 'apply_failed';
 }
 
+type UserFacingError = Error & { userMessage?: string };
+
+/**
+ * Reject an annotation write or undo in a library excluded from Beaver.
+ *
+ * A library can be excluded after the action was proposed or applied, so the
+ * boundary is re-checked when the user applies or undoes it.
+ */
+function assertAnnotationLibraryNotExcluded(
+    ref: { library_id?: number | null; library_ref?: string | null },
+): void {
+    const libraryId = resolveLibraryRef(ref);
+    if (libraryId === null) return;
+    const exclusion = checkLibraryExcluded(libraryId);
+    if (!exclusion) return;
+    const error: UserFacingError = new Error(exclusion.message);
+    error.userMessage = excludedLibraryUserMessage(libraryId);
+    throw error;
+}
+
 async function getAnnotationAttachment(
     ref: ZoteroItemReference,
 ): Promise<{ attachment: Zotero.Item; contentKind: AnnotationContentKind }> {
+    assertAnnotationLibraryNotExcluded(ref);
     const resolved = await resolveItemReference(ref);
     if (resolved.status === 'library_unavailable') {
         throw new Error('Attachment library is not available on this computer');
@@ -70,6 +91,7 @@ export async function executeCreateHighlightAnnotationsAction(
 ): Promise<CreateHighlightAnnotationsResultData> {
     const data = action.proposed_data as CreateHighlightAnnotationsProposedData;
     const { requested_ref, resolved_ref, items, tags } = data;
+    const style = textAnnotationStyle(data.style);
     const { attachment, contentKind } = await getAnnotationAttachment(resolved_ref);
 
     await getAttachmentFileStatus(attachment, false);
@@ -86,9 +108,10 @@ export async function executeCreateHighlightAnnotationsAction(
                     anchorId: item.anchor_id ?? undefined,
                     text: item.text ?? '',
                     color: item.color,
-                    comment: item.comment ?? item.title,
+                    comment: item.comment ?? '',
                     pageLabel: item.page_label ?? null,
                     tags,
+                    style,
                 });
                 created.push({
                     client_item_id: item.client_item_id,
@@ -121,50 +144,16 @@ export async function executeCreateHighlightAnnotationsAction(
             continue;
         }
 
-        // The item-level label is only a valid fallback for single-page
-        // highlights; for a multi-page item it is the first page's label, so
-        // reusing it would mislabel later pages. Per-page labels come from
-        // each loc.page_label (or the cache) instead.
-        const itemPageLabelFallback = item.page_locations.length === 1
-            ? (item.page_label ?? null)
-            : null;
-
-        const partCount = item.page_locations.length;
-        for (let partIndex = 0; partIndex < partCount; partIndex++) {
-            const loc = item.page_locations[partIndex];
-            try {
-                const ref = await createHighlightAnnotation(attachment, {
-                    pageIndex: loc.page_idx,
-                    boxes: loc.boxes ?? [],
-                    text: item.text ?? '',
-                    color: item.color,
-                    comment: highlightPartComment(item.comment ?? item.title, partIndex, partCount),
-                    pageLabel: loc.page_label ?? itemPageLabelFallback,
-                    readingOrderOffset: loc.reading_order_offset ?? null,
-                    tags,
-                });
-                created.push({
-                    client_item_id: item.client_item_id,
-                    index: item.index,
-                    loc_raw: item.loc_raw,
-                    library_id: ref.library_id,
-                    zotero_key: ref.zotero_key,
-                    library_ref: libraryRefForLibraryID(ref.library_id) ?? undefined,
-                    page_idx: loc.page_idx,
-                    page_label: resolvedAnnotationPageLabel(
-                        loc.page_idx,
-                        loc.page_label ?? itemPageLabelFallback,
-                    ),
-                });
-            } catch (error: any) {
-                failed.push({
-                    client_item_id: item.client_item_id,
-                    index: item.index,
-                    loc_raw: item.loc_raw,
-                    error: error?.message ?? String(error),
-                    error_code: mapAnnotationErrorCode(error),
-                });
-            }
+        try {
+            created.push(await createPdfHighlightForItem(attachment, item, tags, style));
+        } catch (error: any) {
+            failed.push({
+                client_item_id: item.client_item_id,
+                index: item.index,
+                loc_raw: item.loc_raw,
+                error: error?.message ?? String(error),
+                error_code: mapAnnotationErrorCode(error),
+            });
         }
     }
 
@@ -267,6 +256,7 @@ export async function undoCreateAnnotationsAction(action: AgentAction): Promise<
         return;
     }
 
+    for (const ref of created) assertAnnotationLibraryNotExcluded(ref);
     for (const ref of created) {
         const resolved = await resolveItemReference(ref);
         if (resolved.status === 'library_unavailable') {

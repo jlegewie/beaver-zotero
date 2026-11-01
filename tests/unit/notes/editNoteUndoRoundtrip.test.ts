@@ -19,6 +19,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // Module Mocks (must be before imports)
 // =============================================================================
 
+// The save-stabilization and editor-refresh loops poll with real delays; the
+// note HTML here changes synchronously, so the waits only cost wall time.
+vi.mock('../../../src/utils/systemTimers', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('../../../src/utils/systemTimers')>()),
+    systemDelay: () => Promise.resolve(),
+}));
+
 vi.mock('../../../src/utils/zoteroUtils', () => ({
     createCitationHTML: vi.fn(
         (item: any, page?: string) => {
@@ -377,7 +384,7 @@ async function applyEdit(opts: {
         setupPMNormalizingEditor(item);
     }
 
-    (Zotero.Items.getByLibraryAndKeyAsync as any).mockResolvedValue(item);
+    resolveNoteAsync(item);
 
     const result = await executeEditNoteAction(action);
 
@@ -401,6 +408,15 @@ async function applyEdit(opts: {
 }
 
 /**
+ * Resolve the note by its key; other keys (cited items) fall through to the
+ * synchronous lookup mock, as in Zotero where both lookups see the same items.
+ */
+function resolveNoteAsync(item: ReturnType<typeof createMockNoteItem>): void {
+    (Zotero.Items.getByLibraryAndKeyAsync as any).mockImplementation(async (libraryID: number, key: string) =>
+        (key === item.key ? item : Zotero.Items.getByLibraryAndKey(libraryID, key)));
+}
+
+/**
  * Undo an edit via the real undoEditNoteAction.
  */
 async function undoEdit(
@@ -409,7 +425,7 @@ async function undoEdit(
     applyPMNormalization = false,
 ): Promise<string> {
     // Wire mock so undoEditNoteAction can find the item
-    (Zotero.Items.getByLibraryAndKeyAsync as any).mockResolvedValue(item);
+    resolveNoteAsync(item);
 
     await undoEditNoteAction(action);
 
@@ -1402,7 +1418,7 @@ describe('list editing edge cases', () => {
 // Section 11: Page Locator Normalization in Apply-Undo Cycle
 // =============================================================================
 
-describe('page locator normalization in apply-undo cycle', () => {
+describe('page ranges in apply-undo cycle', () => {
     it('insert new citation with page range: apply + undo restores original', async () => {
         const { item, action } = await applyEdit({
             noteHtml: NOTE_WITH_CITATION,
@@ -1410,11 +1426,12 @@ describe('page locator normalization in apply-undo cycle', () => {
             newString: 'the results are significant <citation id="1-RANGECIT" loc="page50-55"/>',
         });
 
-        // The citation should have been created with normalized page "50"
         const { createCitationHTML } = await import('../../../src/utils/zoteroUtils');
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'RANGECIT' }),
-            '50'
+            '50-55',
+            undefined,
+            { v: 1, loc: 'page50-55' },
         );
         expect(item._getHtml()).toContain('RANGECIT');
 
@@ -1434,7 +1451,9 @@ describe('page locator normalization in apply-undo cycle', () => {
         const { createCitationHTML } = await import('../../../src/utils/zoteroUtils');
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'COMMACIT' }),
-            '222'
+            '222, 237-238',
+            undefined,
+            { v: 1, loc: 'page222, 237-238' },
         );
 
         const restored = await undoEdit(item, action);
@@ -1471,7 +1490,7 @@ describe('page locator normalization in apply-undo cycle', () => {
         expect(stripDataCitationItems(item._getHtml())).toBe(stripDataCitationItems(original));
     });
 
-    it('existing citation page changed to range: normalized, apply + undo works', async () => {
+    it('existing citation page changed to range: range kept, apply + undo works', async () => {
         // Pre-normalize the note through ProseMirror so that item.getNote()
         // returns PM-canonical HTML, matching what simplifyNoteHtml produces
         // internally (normalizeNoteHtml is called inside simplifyNoteHtml).
@@ -1492,11 +1511,12 @@ describe('page locator normalization in apply-undo cycle', () => {
             noteHtml: pmNote, oldString: oldStr, newString: newStr,
         });
 
-        // Should have been called with normalized page "42" (same as original)
         const { createCitationHTML } = await import('../../../src/utils/zoteroUtils');
         expect(createCitationHTML).toHaveBeenCalledWith(
             expect.objectContaining({ key: 'CITE1' }),
-            '42'
+            '42-48',
+            undefined,
+            undefined,
         );
 
         // Undo should restore the PM-canonical version of the original note
@@ -2284,7 +2304,7 @@ describe('external-file citations through React apply and undo', () => {
         });
         expect(attachment.getFilePathAsync).toHaveBeenCalled();
         expect(item._getHtml()).toContain(
-            '<a href="zotero://select/library/items/ATTACH12" rel="noopener noreferrer nofollow">Report.pdf</a>, p. 6)');
+            '<a href="zotero://select/library/items/ATTACH12#beaver-pages=6" rel="noopener noreferrer nofollow">Report.pdf</a>, p. 6)');
     });
 
     it('applies a filename link and can undo without stored undo HTML', async () => {

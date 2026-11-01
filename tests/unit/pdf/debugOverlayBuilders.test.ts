@@ -196,6 +196,8 @@ describe('debug/overlayBuilders', () => {
                         index: 7,
                         bbox: bbox(50, 310, 300, 40),
                         columnIndex: 0,
+                        text: "a | b",
+                        lines: [{ bbox: bbox(50, 310, 300, 40), text: "a | b" }],
                     },
                     {
                         kind: "picture",
@@ -204,6 +206,8 @@ describe('debug/overlayBuilders', () => {
                         index: 8,
                         bbox: bbox(50, 360, 300, 80),
                         columnIndex: 0,
+                        text: "",
+                        lines: [],
                     },
                 ],
             };

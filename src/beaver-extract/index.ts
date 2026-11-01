@@ -6,7 +6,7 @@
  * Zotero UI thread
  */
 
-import { getMuPDFWorkerClient } from "./MuPDFWorkerClient";
+import { getMuPDFWorkerClient, type MuPDFWorkerClient } from "./MuPDFWorkerClient";
 import {
     ExtractionError,
     ExtractionErrorCode,
@@ -50,6 +50,7 @@ export {
     getExistingMuPDFWorkerClient,
     disposeMuPDFWorker,
 } from "./MuPDFWorkerClient";
+export type { WorkerCallTiming, WorkerState } from "./MuPDFWorkerClient";
 export { prewarmMuPDFWorker } from "./prewarm";
 export { DocumentAnalyzer } from "./DocumentAnalyzer";
 export { StyleAnalyzer } from "./StyleAnalyzer";
@@ -137,19 +138,23 @@ export type {
     FilteredParagraphContext,
     FilteredParagraphResult,
 } from "./FilteredParagraphPipeline";
-export type {
-    SentenceSplitterConfig,
-    WorkerSentenceDebugOptions,
-    SentenceTrace,
-    SentenceTraceResult,
-} from "./sentenceTypes";
+export type { SentenceSplitterConfig } from "./sentenceTypes";
+
+/**
+ * Runs worker ops for one request on the worker it was routed to (see
+ * `PdfRequestWorker`). Without one, `BeaverExtractor` uses the hot worker.
+ */
+export interface WorkerClientRunner {
+    run<T>(op: (client: MuPDFWorkerClient) => Promise<T>): Promise<T>;
+}
 
 /**
  * BeaverExtractor - High-level API for extracting text from PDFs.
  *
- * Every method delegates to the shared MuPDF worker (see
- * `getMuPDFWorkerClient()`) so the heavy WASM work runs off the Zotero UI
- * thread. This class is a thin worker facade.
+ * Every method delegates to the shared MuPDF worker (the hot one, see
+ * `getMuPDFWorkerClient()`, or the worker a `WorkerClientRunner` routes the
+ * request to) so the heavy WASM work runs off the Zotero UI thread. This
+ * class is a thin worker facade.
  *
  * Usage:
  * ```typescript
@@ -161,6 +166,12 @@ export type {
  * ```
  */
 export class BeaverExtractor {
+    constructor(private readonly worker?: WorkerClientRunner) {}
+
+    private call<T>(op: (client: MuPDFWorkerClient) => Promise<T>): Promise<T> {
+        return this.worker ? this.worker.run(op) : op(getMuPDFWorkerClient());
+    }
+
     /**
      * Strict, fused extract for handlers that have deferred range validation
      * to the worker. Returns an `InternalExtractionResult` with `analysis.pageCount`
@@ -251,7 +262,7 @@ export class BeaverExtractor {
             };
         }
 
-        return getMuPDFWorkerClient().extract(pdfData, {
+        return this.call((client) => client.extract(pdfData, {
             mode: args.mode,
             markdown: args.markdown,
             structured: workerStructured,
@@ -260,7 +271,7 @@ export class BeaverExtractor {
             pageIndices: args.pageIndices,
             pageRange: args.pageRange,
             analysisWindow: args.analysisWindow,
-        }, signal);
+        }, signal));
     }
 
     /**
@@ -304,7 +315,7 @@ export class BeaverExtractor {
             analysisWindow?: number;
         } = {},
     ): Promise<LayoutAnalysisResult> {
-        return getMuPDFWorkerClient().analyzeLayout(pdfData, args);
+        return this.call((client) => client.analyzeLayout(pdfData, args));
     }
 
     /**
@@ -328,7 +339,7 @@ export class BeaverExtractor {
         args: OCRDetectionOptions = {},
         signal?: AbortSignal,
     ): Promise<OCRDetectionResult> {
-        return getMuPDFWorkerClient().analyzeOCRNeeds(pdfData, args, signal);
+        return this.call((client) => client.analyzeOCRNeeds(pdfData, args, signal));
     }
 
     /**
@@ -338,7 +349,7 @@ export class BeaverExtractor {
         pdfData: Uint8Array | ArrayBuffer,
         signal?: AbortSignal,
     ): Promise<number> {
-        return getMuPDFWorkerClient().getPageCount(pdfData, signal);
+        return this.call((client) => client.getPageCount(pdfData, signal));
     }
 
     /**
@@ -354,7 +365,7 @@ export class BeaverExtractor {
         pdfData: Uint8Array | ArrayBuffer,
         signal?: AbortSignal,
     ): Promise<PDFMetadata> {
-        return getMuPDFWorkerClient().getMetadata(pdfData, signal);
+        return this.call((client) => client.getMetadata(pdfData, signal));
     }
 
     /**
@@ -379,7 +390,7 @@ export class BeaverExtractor {
         } = {},
         signal?: AbortSignal,
     ): Promise<{ pageCount: number; pageLabels: Record<number, string>; pages: PageImageResult[] }> {
-        return getMuPDFWorkerClient().renderPages(pdfData, args, signal);
+        return this.call((client) => client.renderPages(pdfData, args, signal));
     }
 
     /**
@@ -426,6 +437,6 @@ export class BeaverExtractor {
     ): Promise<PDFSearchResult> {
         const { maxPageCount, ...options } = args;
         // search + score within one worker round-trip.
-        return getMuPDFWorkerClient().search(pdfData, query, options, { maxPageCount }, signal);
+        return this.call((client) => client.search(pdfData, query, options, { maxPageCount }, signal));
     }
 }

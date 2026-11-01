@@ -26,14 +26,15 @@ import {
     resolveToImageAttachment,
     resolveToPdfAttachment,
 } from '../documentExtraction/attachmentResolution';
-import { isLinkedUrlAttachment } from '../../utils/attachmentFiles';
+import { isLinkedUrlAttachment, isPdfDocument } from '../../utils/attachmentFiles';
 import {
     preflightZoteroAttachmentRequest,
     validateZoteroItemReference,
 } from './utils';
 import { handleZoteroAttachmentPageImagesRequest } from './handleZoteroAttachmentPageImagesRequest';
 import { handleZoteroAttachmentImageRequest } from './handleZoteroAttachmentImageRequest';
-import { resolveExternalFile } from '../externalFiles';
+import { EXTERNAL_LIBRARY_ID, resolveExternalFile } from '../externalFiles';
+import { loadPageLabelsForMetadata } from '../documentExtraction/pageLabels';
 import {
     externalFileMissingMessage,
     getResolvedAttachmentParentStub,
@@ -46,6 +47,7 @@ import {
 } from '../../beaver-extract';
 import { effectiveMaxFileSizeMB, effectiveMaxPageCount } from '@beaver/agent-core/transport/attachmentLimits';
 import { createWorkerDispatchFlag, withWorkerDiagnostics } from './workerDiagnostics';
+import { PdfRequestWorker } from '../documentExtraction/pdfRequestWorker';
 import {
     DEFAULT_IMAGES_TIMEOUT_SECONDS,
     MAX_INTERACTIVE_PDF_TIMEOUT_SECONDS,
@@ -57,6 +59,7 @@ import {
     HARD_MAX_IMAGE_DIMENSION,
     ImageDecodeError,
     MAX_OUTPUT_IMAGE_BYTES,
+    MAX_PAGE_IMAGE_DIMENSION,
     UnsupportedImageFormatError,
     processImageBytes,
     uint8ToBase64,
@@ -135,7 +138,7 @@ async function resolveViewTarget(
         if (children.length > 0) {
             await Zotero.Items.loadDataTypes(children, ['itemData']);
         }
-        const hasPdf = children.some((a) => a.isPDFAttachment());
+        const hasPdf = children.some((a) => isPdfDocument(a));
         // Mirror resolveToImageAttachment's filter (linked URLs excluded) so
         // the pre-scan and the resolver agree on which children count.
         const hasImage = children.some(
@@ -524,6 +527,8 @@ async function handleExternalFileViewRequest(
     const { signal, timeoutSeconds, throwIfTimedOut, dispose } = timeout;
 
     const workerDispatched = createWorkerDispatchFlag();
+    // The worker this request's ops run on (interactive routing).
+    let requestWorker: PdfRequestWorker | null = null;
 
     try {
         // Size check against the hard cap (the copy is always local).
@@ -591,7 +596,13 @@ async function handleExternalFileViewRequest(
 
         // PDF: render the requested contiguous range via the MuPDF worker.
         resolvedKind = 'pdf';
-        const extractor = new BeaverExtractor();
+        requestWorker = new PdfRequestWorker({
+            interactive: true,
+            workerName: 'hot',
+            signal,
+            affinityKey: `${EXTERNAL_LIBRARY_ID}/${extKey}`,
+        });
+        const extractor = new BeaverExtractor(requestWorker);
         workerDispatched.mark();
         const totalPages = await extractor.getPageCount(fileBytes, signal);
         throwIfTimedOut('page_count_extraction');
@@ -628,11 +639,18 @@ async function handleExternalFileViewRequest(
                 dpi: dpi ?? 0,
                 format: format === 'jpeg' ? 'jpeg' : 'png',
                 jpegQuality: jpeg_quality ?? 85,
+                maxDimension: MAX_PAGE_IMAGE_DIMENSION,
             },
         }, signal);
         throwIfTimedOut('pdf_render');
 
-        const pageLabels = renderResult.pageLabels ?? {};
+        // Printed labels of an extracted copy; a file never extracted has none.
+        const cachedMeta = await Zotero.Beaver?.documentCache?.getMetadata(
+            { libraryId: EXTERNAL_LIBRARY_ID, zoteroKey: extKey },
+            record.storedPath,
+        ).catch(() => null);
+        const pageLabels = await loadPageLabelsForMetadata(cachedMeta, 'printed', record.storedPath) ?? {};
+        throwIfTimedOut('page_label_lookup');
         const images: WSViewImage[] = renderResult.pages.map((page) => ({
             image_data: uint8ToBase64(page.data),
             format: page.format,
@@ -660,7 +678,12 @@ async function handleExternalFileViewRequest(
         ) {
             return withWorkerDiagnostics(
                 errorResponse(`Rendering timed out after ${timeoutSeconds} seconds`, 'timeout'),
-                { workerDispatched: workerDispatched.value, leaseReaped: isWorkerDeadlineError(error) },
+                {
+                    // A request that timed out waiting for a free worker never reached one.
+                    workerDispatched: workerDispatched.value && requestWorker?.slot !== undefined,
+                    leaseReaped: isWorkerDeadlineError(error),
+                    slot: requestWorker?.slot,
+                },
             );
         }
         if (isExtractionError(error)) {
@@ -699,6 +722,7 @@ async function handleExternalFileViewRequest(
             'view_failed',
         );
     } finally {
+        requestWorker?.close();
         dispose();
     }
 }

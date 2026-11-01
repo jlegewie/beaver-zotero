@@ -1,3 +1,4 @@
+import { mergeItemsChoicesAtom } from './mergeItemsChoices';
 import { getSearchIndexState } from '../../src/services/searchIndexState';
 import { isThreadConflict } from "@beaver/agent-core/types/apiErrors";
 import {
@@ -8,10 +9,14 @@ import {
     readAdmissionHistory,
     setAdmission,
     reconcileThread,
+    keepLocalFailuresOnSettle,
+    type AdmissionWaitReason,
 } from "../runtime/threadAdmission";
+import { reattachResolutionAtom } from "@beaver/agent-core/run-state/runResolution";
 import { acquireWriter, assertWriter, bindWriter, currentWriter, ownsWriter, releaseWriter, type WriterLease } from '../runtime/threadWriter';
 import { viewedHistoryRevisionAtom } from '../runtime/threadProjection';
 import { getCredentialGeneration, assertCredentialGeneration } from '@beaver/agent-core/transport/credentials';
+import { getLibraryRevocations } from '../../src/services/agentDataProvider/utils';
 /**
  * WebSocket-based message generation atoms
  *
@@ -24,12 +29,13 @@ import { getHostWindow, tryGetWindowRuntime } from '../runtime/windowRuntime';
 import { atom, Getter, Setter } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
 import { agentService } from '@beaver/agent-core/transport/agentService';
-import { connectWithRetry } from '@beaver/agent-core/transport/connectWithRetry';
+import { CONNECT_MAX_ATTEMPTS, connectWithRetry, reattachWithRetry } from '@beaver/agent-core/transport/connectWithRetry';
 import { notifyBatchApproval, notifyCreditConfirmation, notifyRunComplete, notifyUserQuestion } from '../../src/services/systemNotifications';
 import { reportConnectionFailure } from '@beaver/agent-core/transport/clients/diagnosticsService';
 import {
     ConnectionFailureEvidence,
     presentConnectionFailure,
+    REATTACH_FAILED_MESSAGE,
 } from '@beaver/agent-core/transport/connectionFailure';
 import {
     WSCallbacks,
@@ -58,6 +64,10 @@ import {
     BatchApprovalMode,
     WSStreamingDoneEvent,
     WSThreadNameEvent,
+    WSReattachingInfo,
+    WSReattachedInfo,
+    WSReattachFailedInfo,
+    WSUndeliveredActionsInfo,
     ChargingPermissions,
 } from '@beaver/agent-core/protocol/agentProtocol';
 import { threadService } from '@beaver/agent-core/transport/threadService';
@@ -70,9 +80,7 @@ import type { ZoteroCollection } from '@beaver/agent-core/types/zotero';
 import { toMessageAttachment, toValidatedMessageAttachment, externalFileRecordToAttachment } from '../types/attachments/converters';
 import { promptEditDraftsAtom } from './promptEdits';
 import { serializeCollection, serializeZoteroLibrary } from '../../src/utils/zoteroSerializers';
-import { SubscriptionStatus, ProcessingMode } from '@beaver/agent-core/types/profile';
 import {
-    isDatabaseSyncSupportedAtom,
     profileSyncStatusAtom,
     searchableLibraryIdsAtom,
     syncWithZoteroAtom,
@@ -82,7 +90,7 @@ import {
     readComposerDraft,
     restoreMissingComposerDraft,
     currentMessageItemsAtom,
-    currentMessageCollectionsAtom,
+    currentMessageCollectionsAtom, currentMessageViewsAtom,
     currentMessageExternalFilesAtom,
     currentReaderAttachmentAtom,
     stagedReaderActionContextAtom,
@@ -91,7 +99,7 @@ import {
 } from './messageComposition';
 import { isWebSearchEnabledAtom, removePopupMessagesByTypeAtom, isWebSearchAllowedAtom } from './ui';
 import { currentNoteItemAtom } from './zoteroContext';
-import { isAnnotationAttachment, messageAttachmentKey, zoteroReferenceLookupKeys } from '@beaver/agent-core/types/attachments/apiTypes';
+import { isAnnotationAttachment, isViewAttachment, messageAttachmentKey, zoteroReferenceLookupKeys } from '@beaver/agent-core/types/attachments/apiTypes';
 import { getApplicationStateProvider } from './applicationState';
 import { uint8ArrayToBase64 } from '../utils/fileUtils';
 import { isAttachmentOnServer } from '../../src/utils/webAPI';
@@ -130,8 +138,10 @@ import {
     isAnnotationAgentAction,
     isEditAnnotationsAgentAction,
     isEditMetadataAgentAction,
-    isZoteroNoteAgentAction,
     isCreateItemAgentAction,
+    isImportItemAgentAction,
+    isItemCreatingAgentAction,
+    itemActionExternalId,
     isCreateCollectionAgentAction,
     isOrganizeItemsAgentAction,
     isManageTagsAgentAction,
@@ -150,6 +160,8 @@ import {
     removePendingApprovalsAtom,
     pendingApprovalsAtom,
     clearAllPendingApprovalsAtom,
+    recordUndeliveredActionsAtom,
+    retryUnrecordedActionsNow,
 } from '../agents/agentActions';
 import {
     addPendingQuestionAtom,
@@ -167,15 +179,27 @@ import {
     removePendingBatchApprovalAtom,
     clearAllPendingBatchApprovalsAtom,
 } from '@beaver/agent-core/run-state/pendingBatchApprovals';
+import {
+    addPendingTableCardAtom,
+    clearAllPendingTableCardsAtom,
+    removePendingTableCardAtom,
+    removePendingTableCardForToolCallAtom,
+} from '@beaver/agent-core/run-state/pendingTableCards';
+import { isCreateCard, isFillCard } from '@beaver/agent-core/protocol/tableCardProtocol';
+import type { WSTableCardRequest, WSTableCardResponse, WSTableCardStale } from '@beaver/agent-core/protocol/tableCardProtocol';
+import { tableRecordFromMetadata } from '@beaver/agent-core/run-state/tableResults';
+import { openStoredTable } from '../host/zotero/tables';
 import { readCreditThreshold } from '../utils/creditThreshold';
 import { flushPendingPartEvents, queuePartEvent } from '../utils/streamingPartQueue';
 import { getAppliedPdfAnnotationCount } from '../agents/agentActionCounts';
 import { undoEditMetadataAction } from '../utils/editMetadataActions';
 import { undoCreateItemAction } from '../utils/createItemActions';
+import { undoImportItemAction } from '../utils/importItemActions';
 import { undoCreateCollectionAction } from '../utils/createCollectionActions';
 import { undoOrganizeItemsAction } from '../utils/organizeItemsActions';
 import { undoManageTagsAction } from '../utils/manageTagsActions';
 import { undoManageCollectionsAction } from '../utils/manageCollectionsActions';
+import { undoMergeItemsAction } from '../utils/mergeItemsActions';
 import { undoEditNoteAction, undoEditNoteBatchAction } from '../utils/editNoteActions';
 import { undoCreateNoteAction } from '../utils/createNoteActions';
 import { undoCreateAnnotationsAction } from '../utils/createAnnotationsActions';
@@ -187,7 +211,7 @@ import { selectLiveBatchProgress } from '@beaver/agent-core/run-state/batchProgr
 import { addWarningAtom, clearWarningsAtom } from './warnings';
 import { backendHighTokenUsageRunsAtom } from './messageUIState';
 import { currentThreadNameAtom, loadThreadAtom, threadNavigationSeqAtom } from './threads';
-import { loadItemDataForAgentActions, autoApplyAnnotationAgentActions, autoCreateNoteAgentActions } from '../utils/agentActionUtils';
+import { loadItemDataForAgentActions, autoApplyAnnotationAgentActions } from '../utils/agentActionUtils';
 import { extractZoteroReferencesFromToolCall } from '@beaver/agent-core/run-state/toolLabels';
 import {
     clearRunApprovalPolicyAtom,
@@ -206,9 +230,9 @@ import { safeIsInTrash } from '../../src/utils/zoteroUtils';
 import { wasItemAddedBeforeLastSync } from '../utils/sourceUtils';
 import { libraryRefForLibraryID, resolveItemReference, resolveLibraryRef } from '../../src/utils/libraryIdentity';
 import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
-import { createZoteroItemReference } from '../utils/zoteroReferences';
+import { createZoteroItemReference, isTargetInLibraries } from '../utils/zoteroReferences';
 import { markExternalReferenceImportedAtom } from './externalReferences';
-import type { CreateItemProposedData, CreateItemResultData } from '@beaver/agent-core/types/agentActions/items';
+import type { CreateItemResultData } from '@beaver/agent-core/types/agentActions/items';
 import { appendRunIfMissing, continuationOfferFor, findResumeChainRoot, findRunForResume, hasOnlyThinkingParts, lingeringCompletedRun, resolveErrorRunId, toRunError } from '@beaver/agent-core/run-state/runResumeHelpers';
 import { prewarmMuPDFWorker } from '../../src/beaver-extract';
 import { BeaverTemporaryAnnotations } from '../utils/annotationUtils';
@@ -666,6 +690,11 @@ async function startContinuationRunOwned(
     // A resume overwriting the active slot mid-commit would be clobbered
     // when the retry installs its own replacement shell.
     if (retryCommitInFlight(get, options.logPrefix)) return;
+    // Nor may it take the slot of a run that is reconnecting.
+    if (get(isRunReconnectingAtom)) {
+        logger(`${options.logPrefix}: Blocked — the active run is reconnecting`, 1);
+        return;
+    }
 
     let newRunId: string | null = null;
 
@@ -993,7 +1022,7 @@ async function undoAppliedActionsInReverse(actions: AgentAction[]): Promise<void
             if (isCreateAnnotationsAgentAction(action)) {
                 return hasAppliedBulkAnnotations(action);
             }
-            if (isAnnotationAgentAction(action) || isZoteroNoteAgentAction(action)) {
+            if (isAnnotationAgentAction(action)) {
                 return hasAppliedZoteroItem(action);
             }
             return action.status === 'applied';
@@ -1016,7 +1045,7 @@ async function undoAppliedActionsInReverse(actions: AgentAction[]): Promise<void
                 // Preserve fields the user manually modified after apply, as
                 // the other edit-action retry paths do.
                 await undoEditAnnotationsAction(action, false);
-            } else if (isAnnotationAgentAction(action) || isZoteroNoteAgentAction(action)) {
+            } else if (isAnnotationAgentAction(action)) {
                 const ref = action.result_data as ZoteroItemReference | undefined;
                 if (!ref) continue;
                 const resolved = await resolveItemReference(ref);
@@ -1030,6 +1059,8 @@ async function undoAppliedActionsInReverse(actions: AgentAction[]): Promise<void
                 await undoEditNoteBatchAction(action);
             } else if (isCreateItemAgentAction(action)) {
                 await undoCreateItemAction(action);
+            } else if (isImportItemAgentAction(action)) {
+                await undoImportItemAction(action);
             } else if (isCreateCollectionAgentAction(action)) {
                 await undoCreateCollectionAction(action);
             } else if (isOrganizeItemsAgentAction(action)) {
@@ -1040,6 +1071,8 @@ async function undoAppliedActionsInReverse(actions: AgentAction[]): Promise<void
                 await undoManageCollectionsAction(action);
             } else if (isCreateNoteAgentAction(action)) {
                 await undoCreateNoteAction(action);
+            } else if (action.action_type === 'merge_items') {
+                await undoMergeItemsAction(action);
             }
         } catch (error) {
             logger(`undoAppliedActionsInReverse: Failed to undo action ${action.id} (${action.action_type}): ${error}`, 1);
@@ -1053,7 +1086,6 @@ async function undoAppliedActionsInReverse(actions: AgentAction[]): Promise<void
 interface ActionsToUndo {
     annotations: AgentAction[];
     annotationEdits: AgentAction[];
-    zoteroNotes: AgentAction[];
     metadataEdits: AgentAction[];
     noteEdits: AgentAction[];
     createItems: AgentAction[];
@@ -1062,6 +1094,7 @@ interface ActionsToUndo {
     manageTags: AgentAction[];
     manageCollections: AgentAction[];
     createNotes: AgentAction[];
+    mergeItems: AgentAction[];
 }
 
 type UndoConfirmResult = 'undo' | 'skip' | 'cancel';
@@ -1073,10 +1106,10 @@ type UndoConfirmResult = 'undo' | 'skip' | 'cancel';
  * or 'cancel' to abort regeneration entirely.
  */
 function confirmUndoAppliedActions(actions: ActionsToUndo, win: Window): UndoConfirmResult {
-    const { annotations, annotationEdits, zoteroNotes, metadataEdits, noteEdits, createItems, createCollections, organizeItems, manageTags, manageCollections, createNotes } = actions;
-    const totalActions = annotations.length + annotationEdits.length + zoteroNotes.length + metadataEdits.length +
+    const { annotations, annotationEdits, metadataEdits, noteEdits, createItems, createCollections, organizeItems, manageTags, manageCollections, createNotes, mergeItems } = actions;
+    const totalActions = annotations.length + annotationEdits.length + metadataEdits.length +
                          noteEdits.length + createItems.length + createCollections.length + organizeItems.length +
-                         manageTags.length + manageCollections.length + createNotes.length;
+                         manageTags.length + manageCollections.length + createNotes.length + mergeItems.length;
 
     if (totalActions === 0) return 'skip';
 
@@ -1102,9 +1135,6 @@ function confirmUndoAppliedActions(actions: ActionsToUndo, win: Window): UndoCon
         }, 0);
         changeLines.push(`• ${annotationCount} PDF annotation change${annotationCount === 1 ? '' : 's'}`);
     }
-    if (zoteroNotes.length > 0) {
-        changeLines.push(`• ${zoteroNotes.length} Zotero note${zoteroNotes.length === 1 ? '' : 's'}`);
-    }
     if (metadataEdits.length > 0) {
         changeLines.push(`• ${metadataEdits.length} metadata edit${metadataEdits.length === 1 ? '' : 's'}`);
     }
@@ -1128,6 +1158,9 @@ function confirmUndoAppliedActions(actions: ActionsToUndo, win: Window): UndoCon
     }
     if (createNotes.length > 0) {
         changeLines.push(`• ${createNotes.length} created note${createNotes.length === 1 ? '' : 's'}`);
+    }
+    if (mergeItems.length > 0) {
+        changeLines.push(`• ${mergeItems.length} duplicate merge${mergeItems.length === 1 ? '' : 's'}`);
     }
 
     const title = 'Retry?';
@@ -1351,6 +1384,33 @@ export const wsErrorAtom = atom<WSErrorEvent | null>(null);
 export const wsWarningAtom = atom<WSWarningEvent | null>(null);
 
 /**
+ * The active run lost its connection and is being picked up on a new one.
+ * Decision cards stay up but are disabled meanwhile; Stop still works.
+ */
+export const isRunReconnectingAtom = atom(
+    (get) => get(wsReconnectingAtom) !== null && isRunActive(get(activeRunAtom)),
+);
+
+/**
+ * A new run is waiting for the server to stop a run the user stopped while it
+ * was reconnecting (see `agentService.cancelHandoff`).
+ */
+export const stoppingPreviousRunAtom = atom(false);
+let cancelHandoffSeq = 0;
+
+/** Runs stopped while reconnecting, whose chat waits for the server from the stop on. */
+const heldStopRunIds = new Set<string>();
+
+/**
+ * Whether the open chat's run is reconnecting and can be left without being
+ * stopped: switching chats then leaves it to the server rather than stopping it.
+ */
+export function canLeaveReconnectingRun(get: Getter): boolean {
+    const run = get(activeRunAtom);
+    return !!run && isRunActive(run) && agentService.canLeaveRun(run.id);
+}
+
+/**
  * Runs whose automatic replacement — an auto-resume or an auto-retry — has been
  * scheduled and has not finished. Added when `onError` decides to replace the
  * run, removed once the replacement has started or given up.
@@ -1408,6 +1468,7 @@ export const prepareForNewRunAtom = atom(null, (_get, set) => {
     set(clearAllPendingQuestionsAtom);
     set(clearAllPendingCreditConfirmationsAtom);
     set(clearAllPendingBatchApprovalsAtom);
+    set(clearAllPendingTableCardsAtom);
     set(clearApprovalResponseIntentsAtom);
     set(clearStaleApprovalsAtom);
     set(clearRunApprovalPolicyAtom);
@@ -1434,16 +1495,79 @@ function findToolCallArgs(
     return null;
 }
 
+/** The tool a call in the run belongs to, or null when the call is not in it. */
+export function findToolCallName(run: AgentRun | null, toolCallId: string): string | null {
+    if (!run) return null;
+    for (const message of run.model_messages) {
+        if (message.kind !== 'response') continue;
+        for (const part of message.parts) {
+            if (part.part_kind === 'tool-call' && part.tool_call_id === toolCallId) return part.tool_name;
+        }
+    }
+    return null;
+}
+
+/** How a reattach after a lost connection ended, for the failure report. */
+interface ReattachOutcome {
+    /** `reattached`, `gave_up`, or `fallback:<reason>`. */
+    outcome: string;
+    gapMs: number;
+    /** Sockets opened to reattach the run. */
+    attempts: number;
+    /** Sockets the run lost, the first loss included. */
+    losses: number;
+    /** The server ended the run and saved what it had, so it can be continued. */
+    resumable?: boolean;
+}
+
+/** `gave_up` when the client ran out of time, `fallback:<reason>` otherwise. */
+function reattachFailureOutcome(info: WSReattachFailedInfo): ReattachOutcome {
+    return {
+        outcome: info.reason === 'gave_up' ? 'gave_up' : `fallback:${info.reason}`,
+        gapMs: info.gapMs,
+        attempts: info.attempts,
+        losses: info.losses,
+        // `expired` means the run ended on the server, which saves it the way
+        // any interrupted run is saved.
+        resumable: info.reason === 'expired',
+    };
+}
+
+/**
+ * Make the open chat wait for the server to finish with a run this window lost
+ * track of. Marking its admission unknown blocks new sends and starts the
+ * admission poller, which loads the saved history once the server is idle, so
+ * the run ends up shown as the server finished it (completed, or interrupted
+ * with Continue) rather than as this window last saw it.
+ */
+function awaitServerSettlement(set: Setter, reason: AdmissionWaitReason): void {
+    const threadId = store.get(currentThreadIdAtom);
+    if (!threadId) return;
+    const admission = store.get(threadAdmissionAtom);
+    const known = admission?.threadId === threadId ? admission : null;
+    // Failed and stopped requests the server never saved stay on screen.
+    keepLocalFailuresOnSettle(threadId);
+    // The run this window lost shows a neutral "checking" state rather than
+    // its connection error while the server is asked how it ended.
+    const runId = store.get(activeRunAtom)?.id;
+    if (reason === 'reattach_failed' && runId) {
+        set(reattachResolutionAtom, { threadId, runId, since: Date.now() });
+    }
+    setAdmission(set, threadId, known?.tailRunId ?? null, 'unknown', known?.unconfirmedRunId, reason);
+}
+
 function surfaceAndDiagnoseConnectionFailure(
     set: Setter,
     runId: string,
     evidence: ConnectionFailureEvidence,
     connectAttempts?: number,
+    reattach?: ReattachOutcome,
 ): void {
     const applyPresentation = (
         diagnostic?: Awaited<ReturnType<typeof reportConnectionFailure>>,
     ) => {
         const presentation = presentConnectionFailure(evidence, diagnostic);
+        const message = reattach ? REATTACH_FAILED_MESSAGE : presentation.message;
         // The diagnostic POST can take several seconds; if the user retried in
         // the meantime, this run is no longer active and the refined
         // presentation must not resurface its error over the new run's state.
@@ -1457,7 +1581,7 @@ function surfaceAndDiagnoseConnectionFailure(
                   : {
                         event: 'error',
                         type: 'connection_error',
-                        message: presentation.message,
+                        message,
                         run_id: runId,
                         is_retryable: true,
                     },
@@ -1472,9 +1596,10 @@ function surfaceAndDiagnoseConnectionFailure(
                       status: 'error',
                       error: {
                           type: 'connection_error',
-                          message: presentation.message,
+                          message,
                           user_facing_details: presentation.details,
                           is_retryable: true,
+                          ...(reattach?.resumable ? { is_resumable: true } : {}),
                       },
                   }
                 : prev,
@@ -1487,6 +1612,10 @@ function surfaceAndDiagnoseConnectionFailure(
         evidence,
         run_id: runId,
         connect_attempts: connectAttempts ?? null,
+        reattach_outcome: reattach?.outcome ?? null,
+        reattach_gap_ms: reattach?.gapMs ?? null,
+        reattach_attempts: reattach?.attempts ?? null,
+        reattach_losses: reattach?.losses ?? null,
     }).then((diagnostic) => applyPresentation(diagnostic));
 }
 
@@ -1517,9 +1646,16 @@ function applyRunCitations(
     // Preload PDF page labels for cited attachments so the rendering path can
     // resolve page numbers from explicit render state. Runs after metadata is
     // exposed to avoid blocking the UI on PDF extraction.
+    //
+    // The preload usually settles after the run, when this window no longer
+    // holds the thread writer and the callback setter drops writes. The labels
+    // are render state keyed by attachment, not thread history, so they go to
+    // this renderer's store directly (still scoped to the account).
+    const generation = getCredentialGeneration();
     preloadPageLabelsForCitations(citations)
         .then((labelsByAttachmentId) => {
-            set(mergePageLabelsByAttachmentIdAtom, labelsByAttachmentId);
+            if (generation !== getCredentialGeneration()) return;
+            store.set(mergePageLabelsByAttachmentIdAtom, labelsByAttachmentId);
         })
         .catch((err) =>
             logger(`WS: Failed to preload page labels: ${err}`, 1)
@@ -1553,6 +1689,134 @@ export function createWSCallbacks(
         if (!ownsWriter(writer) || callbackEpoch !== writerCallbackEpoch) return;
         return originalSet(...args);
     }) as Setter;
+    /**
+     * Retire the live state of a run whose connection is gone and, when the
+     * server never finished it, show the connection error. `reattach` carries
+     * how a failed reattach ended, for a run that tried one.
+     */
+    const endRunOnLostConnection = (
+        transportEvidence: ConnectionFailureEvidence | undefined,
+        hadReachedReady: boolean,
+        reattach?: ReattachOutcome,
+    ) => {
+        set(isWSConnectedAtom, false);
+        set(isWSReadyAtom, false);
+        // A retry commit in flight owns the pending flag: this close
+        // belongs to the failed run the retry is replacing (onError
+        // dispatched it before the server closed the socket), and
+        // clearing here would re-enable the composer mid-commit. The
+        // retry flow clears or re-asserts the flag on every exit.
+        if (!store.get(retryPendingRunIdAtom)) {
+            set(isWSChatPendingAtom, false);
+        }
+        // Clear streaming-done state (connection lost during post-processing)
+        set(streamingDoneRunIdsAtom, new Set<string>());
+        streamActivity.reset();
+        // Clear pending approvals and dismiss diff preview (connection lost)
+        set(clearAllPendingApprovalsAtom);
+        set(clearAllPendingQuestionsAtom);
+        set(clearAllPendingCreditConfirmationsAtom);
+        set(clearAllPendingBatchApprovalsAtom);
+        set(clearAllPendingTableCardsAtom);
+            set(clearRunApprovalPolicyAtom);
+
+        // A run that reached `completed` (run_complete processed) but whose
+        // terminal `done` never arrived — the socket closed while run_complete
+        // post-processing was still draining the message queue, so the queued
+        // `done` was skipped by the connection-generation guard — lingers in
+        // activeRunAtom. Finalize it the way onDone would, so the next send does
+        // not overwrite and drop it from local history. Idempotent: the normal
+        // path nulls activeRunAtom in onDone before close, making this a no-op.
+        set(activeRunAtom, (prev) => {
+            const finalRun = lingeringCompletedRun(prev);
+            if (finalRun) {
+                set(threadRunsAtom, (runs) => appendRunIfMissing(runs, finalRun));
+                return null;
+            }
+            return prev;
+        });
+
+        // A post-ready close that carries transport evidence came from the real
+        // socket (the client's own close()/cancel() paths notify without
+        // evidence). When it lands while the run is still nonterminal the server
+        // never delivered a terminal event — including a clean code-1000 close,
+        // which would otherwise leave the run spinning forever with no error and
+        // no retry. Connect-phase failures (before ready) are reported by
+        // executeWSRequest's catch, so gate on hadReachedReady to avoid
+        // double-reporting them.
+        if (hadReachedReady && transportEvidence) {
+            const activeRun = store.get(activeRunAtom);
+            if (
+                activeRun &&
+                (activeRun.status === 'in_progress' ||
+                    activeRun.status === 'awaiting_deferred')
+            ) {
+                surfaceAndDiagnoseConnectionFailure(
+                    set,
+                    activeRun.id,
+                    transportEvidence,
+                    connectAttempts() ?? undefined,
+                    reattach,
+                );
+            }
+        }
+    };
+
+    /**
+     * Report how a lost connection's reattach ended. A recovered drop is still
+     * a dropped connection and still counted as one; the outcome says the user
+     * never saw it. A failed reattach of the run this window still shows is
+     * reported by `endRunOnLostConnection` instead, which also refines the
+     * error card.
+     */
+    const reportReattachOutcome = (info: WSReattachedInfo | WSReattachFailedInfo) => {
+        const outcome: ReattachOutcome = 'reason' in info
+            ? reattachFailureOutcome(info)
+            : { outcome: 'reattached', gapMs: info.gapMs, attempts: info.attempts, losses: info.losses };
+        void reportConnectionFailure({
+            evidence: info.evidence,
+            run_id: info.runId,
+            connect_attempts: connectAttempts(),
+            reattach_outcome: outcome.outcome,
+            reattach_gap_ms: outcome.gapMs,
+            reattach_attempts: outcome.attempts,
+            reattach_losses: outcome.losses,
+        });
+    };
+
+    /**
+     * Pick up a run whose socket was lost on a new one. The loop belongs to
+     * the run, not to these callbacks: a run the user stops while it is
+     * reconnecting still has to be reached so the server can stop it.
+     */
+    const startReattach = (runId: string) => {
+        connectLoopsInFlight++;
+        void reattachWithRetry({
+            service: agentService,
+            runId,
+            isStillWanted: () => generation === getCredentialGeneration(),
+            logLabel: `run ${runId}`,
+        })
+            .then((outcome) => {
+                if (outcome === 'stopped') agentService.failReattach(runId, 'gave_up');
+            })
+            .catch((error) => {
+                logger(`WS reattach of run ${runId} failed: ${error}`, 1);
+                agentService.failReattach(runId, 'gave_up');
+            })
+            .finally(() => {
+                connectLoopsInFlight--;
+            });
+    };
+
+    // Applied in Zotero, but the result never reached the server: record it,
+    // whether or not this window still owns the run.
+    const revocationsAtRunStart = getLibraryRevocations();
+    const recordUndeliveredActions = (info: WSUndeliveredActionsInfo) => {
+        logger(`WS onUndeliveredActions: run ${info.runId}: ${info.actions.map((action) => action.actionId).join(', ')}`, 1);
+        void store.set(recordUndeliveredActionsAtom, info, revocationsAtRunStart);
+    };
+
     const callbacks = flushPartsBeforeOtherEvents({
         onReady: (data: WSReadyData) => {
             logger('WS onReady:', data, 1);
@@ -1566,20 +1830,8 @@ export function createWSCallbacks(
             if (store.get(profileSyncStatusAtom).kind !== 'ok') {
                 triggerProfileRefresh();
             }
-
-            // Show popup if subscription is active but using frontend processing
-            if (data.subscriptionStatus === SubscriptionStatus.ACTIVE &&
-                store.get(isDatabaseSyncSupportedAtom) &&
-                data.processingMode === ProcessingMode.FRONTEND
-            ) {
-                set(addPopupMessageAtom, {
-                    type: 'info',
-                    title: 'Indexing your library',
-                    text: 'We are processing your library to enable Beta features. You can use standard features in the meantime.',
-                    expire: true,
-                    duration: 10000
-                });
-            }
+            // So can an applied action's result that has yet to be recorded.
+            retryUnrecordedActionsNow();
         },
 
         onRequestAck: (data: WSRequestAckData) => {
@@ -1633,6 +1885,19 @@ export function createWSCallbacks(
             if (event.part.part_kind === "tool-return") {
                 await processToolReturnResults(event.part, set);
 
+                // A table the user just approved opens in its Beaver tab,
+                // behind the selected tab so the answer stays in view.
+                if (event.part.tool_name === "create_table") {
+                    const created = tableRecordFromMetadata(event.part.metadata);
+                    if (created) {
+                        void openStoredTable(created.reference.key, getHostWindow(), { background: true })
+                            .then((outcome) => {
+                                if ("error" in outcome) logger(`WS onToolReturn: opening the new table failed: ${outcome.error}`, 1);
+                            })
+                            .catch((error) => logger(`WS onToolReturn: opening the new table failed: ${String(error)}`, 1));
+                    }
+                }
+
                 // Safety net: the current backend ships a hydrated `metadata.view`
                 // on every tool return, but synthesize one from the legacy summary
                 // when it is missing OR malformed so the shared render layer always
@@ -1683,6 +1948,10 @@ export function createWSCallbacks(
                         break;
                     }
                 }
+
+                // Same for a table card: create_table returns on the backend's
+                // timeout too, and the card must not outlive its call.
+                set(removePendingTableCardForToolCallAtom, toolCallId);
             }
         },
 
@@ -1757,10 +2026,6 @@ export function createWSCallbacks(
                 );
                 // Auto-apply annotations if enabled
                 autoApplyAnnotationAgentActions(event.run_id, actions);
-                // Auto-create notes if enabled
-                await autoCreateNoteAgentActions(event.run_id, actions, set).catch(err =>
-                    logger(`WS onRunComplete: Failed to auto-create notes: ${err}`, 1)
-                );
             }
 
             // Surface an OS-native notification if the user can't currently see
@@ -1845,7 +2110,8 @@ export function createWSCallbacks(
             set(clearAllPendingQuestionsAtom);
             set(clearAllPendingCreditConfirmationsAtom);
             set(clearAllPendingBatchApprovalsAtom);
-            set(clearRunApprovalPolicyAtom);
+            set(clearAllPendingTableCardsAtom);
+                    set(clearRunApprovalPolicyAtom);
         },
 
         onError: (event: WSErrorEvent) => {
@@ -1872,6 +2138,8 @@ export function createWSCallbacks(
             // connection UI here while these callbacks still own the request.
             set(isWSConnectedAtom, false);
             set(isWSReadyAtom, false);
+            // Including a reattach this error ended.
+            set(wsReconnectingAtom, null);
             // Clear streaming-done state
             set(streamingDoneRunIdsAtom, new Set<string>());
             streamActivity.reset();
@@ -1899,7 +2167,8 @@ export function createWSCallbacks(
             set(clearAllPendingQuestionsAtom);
             set(clearAllPendingCreditConfirmationsAtom);
             set(clearAllPendingBatchApprovalsAtom);
-            set(clearRunApprovalPolicyAtom);
+            set(clearAllPendingTableCardsAtom);
+                    set(clearRunApprovalPolicyAtom);
 
             if (
                 !isThreadConflict(event) &&
@@ -1983,24 +2252,20 @@ export function createWSCallbacks(
             const actions = event.actions.map(toAgentAction);
             set(upsertAgentActionsAtom, actions);
 
-            // Mark external references as imported for applied create_items actions
+            // Mark external references as imported for applied item-creating actions
             // This handles cases where actions are applied via PendingActionsBar
             for (const action of actions) {
-                if (
-                    action.action_type === 'create_item' &&
-                    action.status === 'applied' &&
-                    action.result_data
-                ) {
-                    const proposedData = action.proposed_data as CreateItemProposedData;
+                if (isItemCreatingAgentAction(action) && action.status === 'applied' && action.result_data) {
+                    const externalId = itemActionExternalId(action);
                     const resultData = action.result_data as CreateItemResultData;
 
-                    if (proposedData?.item?.source_id && resultData.library_id && resultData.zotero_key) {
-                        set(markExternalReferenceImportedAtom, proposedData.item.source_id, {
+                    if (externalId && resultData.library_id && resultData.zotero_key) {
+                        set(markExternalReferenceImportedAtom, externalId, {
                             library_id: resultData.library_id,
                             zotero_key: resultData.zotero_key,
                             library_ref: resultData.library_ref,
                         });
-                        logger(`WS onAgentActions: Marked external reference ${proposedData.item.source_id} as imported`, 1);
+                        logger(`WS onAgentActions: Marked external reference ${externalId} as imported`, 1);
                     }
                 }
             }
@@ -2130,6 +2395,29 @@ export function createWSCallbacks(
             set(removePendingBatchApprovalAtom, event.approval_id);
         },
 
+        onTableCardRequest: (event: WSTableCardRequest) => {
+            logger('WS onTableCardRequest:', {
+                cardId: event.card_id,
+                runId: event.run_id,
+                toolcallId: event.toolcall_id,
+                scope: event.scope,
+                sources: event.sources.length,
+                columns: event.columns.length,
+            }, 1);
+            // A card this client cannot show is declined, as by a client
+            // without a table card handler: the run is not held for its timeout.
+            if (!isCreateCard(event) && !isFillCard(event)) {
+                agentService.sendTableCardResponse({ type: 'table_card_response', card_id: event.card_id, approved: false });
+                return;
+            }
+            set(addPendingTableCardAtom, event);
+        },
+
+        onTableCardStale: (event: WSTableCardStale) => {
+            logger('WS onTableCardStale:', { cardId: event.card_id, reason: event.reason }, 1);
+            set(removePendingTableCardAtom, event.card_id);
+        },
+
         onAskUserQuestionRequest: (event: WSAskUserQuestionRequest) => {
             logger('WS onAskUserQuestionRequest:', {
                 questionId: event.question_id,
@@ -2152,79 +2440,117 @@ export function createWSCallbacks(
         onClose: (code: number, reason: string, wasClean: boolean, transportEvidence) => {
             logger(`WS onClose: code=${code}, reason=${reason}, clean=${wasClean}`, 1);
             // Whether this connection had received the `ready` event, read
-            // before the flag is cleared below. Distinguishes a connect-phase
+            // before the flag is cleared. Distinguishes a connect-phase
             // failure (reported once by executeWSRequest's catch) from a
             // post-ready drop (handled here).
             const hadReachedReady = store.get(isWSReadyAtom);
-            // set(activeRunAtom, null);
+            endRunOnLostConnection(transportEvidence, hadReachedReady);
+        },
+
+        // The socket was lost but the run goes on on the server. Everything
+        // the run is showing stays — streamed text, approval and question
+        // cards, the pending flag and the writer — while a new socket picks
+        // it up; only the connection state changes.
+        onReattaching: (info: WSReattachingInfo) => {
+            logger(`WS onReattaching: run ${info.runId} lost its connection, reattaching`, 1);
             set(isWSConnectedAtom, false);
             set(isWSReadyAtom, false);
-            // A retry commit in flight owns the pending flag: this close
-            // belongs to the failed run the retry is replacing (onError
-            // dispatched it before the server closed the socket), and
-            // clearing here would re-enable the composer mid-commit. The
-            // retry flow clears or re-asserts the flag on every exit.
-            if (!store.get(retryPendingRunIdAtom)) {
-                set(isWSChatPendingAtom, false);
-            }
-            // Clear streaming-done state (connection lost during post-processing)
-            set(streamingDoneRunIdsAtom, new Set<string>());
+            // The wait is the connection's, not the model's.
             streamActivity.reset();
-            // Clear pending approvals and dismiss diff preview (connection lost)
-            set(clearAllPendingApprovalsAtom);
-            set(clearAllPendingQuestionsAtom);
-            set(clearAllPendingCreditConfirmationsAtom);
-            set(clearAllPendingBatchApprovalsAtom);
-            set(clearRunApprovalPolicyAtom);
-
-            // A run that reached `completed` (run_complete processed) but whose
-            // terminal `done` never arrived — the socket closed while run_complete
-            // post-processing was still draining the message queue, so the queued
-            // `done` was skipped by the connection-generation guard — lingers in
-            // activeRunAtom. Finalize it the way onDone would, so the next send does
-            // not overwrite and drop it from local history. Idempotent: the normal
-            // path nulls activeRunAtom in onDone before close, making this a no-op.
-            set(activeRunAtom, (prev) => {
-                const finalRun = lingeringCompletedRun(prev);
-                if (finalRun) {
-                    set(threadRunsAtom, (runs) => appendRunIfMissing(runs, finalRun));
-                    return null;
-                }
-                return prev;
+            // Attempt 1 renders as a plain "Reconnecting…": the reattach
+            // retries until the grace period ends, with no count to show. It
+            // stays hidden for a blip and escalates from when the loss began.
+            set(wsReconnectingAtom, {
+                attempt: 1,
+                maxAttempts: CONNECT_MAX_ATTEMPTS,
+                since: info.detachedAt,
+                graceMs: info.graceMs,
             });
+            startReattach(info.runId);
+        },
 
-            // A post-ready close that carries transport evidence came from the real
-            // socket (the client's own close()/cancel() paths notify without
-            // evidence). When it lands while the run is still nonterminal the server
-            // never delivered a terminal event — including a clean code-1000 close,
-            // which would otherwise leave the run spinning forever with no error and
-            // no retry. Connect-phase failures (before ready) are reported by
-            // executeWSRequest's catch, so gate on hadReachedReady to avoid
-            // double-reporting them.
-            if (hadReachedReady && transportEvidence) {
-                const activeRun = store.get(activeRunAtom);
-                if (
-                    activeRun &&
-                    (activeRun.status === 'in_progress' ||
-                        activeRun.status === 'awaiting_deferred')
-                ) {
-                    surfaceAndDiagnoseConnectionFailure(
-                        set,
-                        activeRun.id,
-                        transportEvidence,
-                        connectAttempts() ?? undefined,
-                    );
-                }
-            }
-        }
+        onReattached: (info: WSReattachedInfo) => {
+            logger(`WS onReattached: run ${info.runId} after ${info.gapMs}ms (${info.attempts} socket(s), ${info.losses} lost), ${info.replayed} event(s) replayed`, 1);
+            set(wsReconnectingAtom, null);
+            set(isWSConnectedAtom, true);
+            set(isWSReadyAtom, true);
+            reportReattachOutcome(info);
+        },
+
+        // The run could not be picked up again: it ends exactly as the
+        // original loss would have ended it without reattach.
+        // This request replaced a run the user stopped while it was
+        // reconnecting, before the stop got through.
+        onPreviousRunNotStopped: (runId: string) => {
+            logger(`WS onPreviousRunNotStopped: run ${runId}`, 1);
+            set(addPopupMessageAtom, {
+                type: 'warning',
+                title: 'Stop not confirmed',
+                text: 'Beaver could not confirm the stop of the previous response before sending this message. It may have finished in its chat and been charged.',
+                expire: false,
+            });
+        },
+
+        onReattachFailed: (info: WSReattachFailedInfo) => {
+            logger(`WS onReattachFailed: run ${info.runId} (${info.reason}) after ${info.gapMs}ms`, 1);
+            set(wsReconnectingAtom, null);
+            endRunOnLostConnection(info.evidence, true, reattachFailureOutcome(info));
+            // The server may still finish the run, or has saved it already.
+            if (navigation === store.get(threadNavigationSeqAtom)) awaitServerSettlement(set, 'reattach_failed');
+        },
+
+        onUndeliveredActions: (info: WSUndeliveredActionsInfo) => recordUndeliveredActions(info),
     });
+    /**
+     * A run the user stopped while it was reconnecting may still have finished
+     * on the server, or still be running there. Once the reattach is over, the
+     * chat still showing it waits for the server and loads what it saved.
+     */
+    const settleLeftRun = (runId: string) => {
+        // A stop made while reconnecting blocked the chat until the server
+        // was idle, so an idle chat has already loaded what the server saved.
+        const settledAfterHeldStop = heldStopRunIds.delete(runId)
+            && store.get(threadAdmissionAtom)?.activity.state === 'idle';
+        if (
+            navigation !== store.get(threadNavigationSeqAtom) ||
+            currentWriter() ||
+            isRunActive(store.get(activeRunAtom)) ||
+            !store.get(threadRunsAtom).some((run) => run.id === runId) ||
+            settledAfterHeldStop
+        ) return;
+        awaitServerSettlement(store.set, 'stop_unconfirmed');
+    };
+    // What still happens for a run this window has left, e.g. one the user
+    // stopped while it was reconnecting: it is still reattached, so the server
+    // hears the cancel, its connection loss is still reported once the
+    // outcome is known, and the chat waits for the server to settle it. None
+    // of its events reach this window.
+    const forLeftRun: Partial<WSCallbacks> = {
+        onUndeliveredActions: (info) => recordUndeliveredActions(info),
+        onReattaching: (info) => {
+            if (info.cancelRequested) startReattach(info.runId);
+        },
+        onReattached: (info) => {
+            reportReattachOutcome(info);
+            settleLeftRun(info.runId);
+        },
+        onReattachFailed: (info) => {
+            reportReattachOutcome(info);
+            settleLeftRun(info.runId);
+        },
+    };
     const guarded: Record<string, unknown> = { ...callbacks };
     for (const [name, callback] of Object.entries(callbacks)) {
         if (typeof callback !== 'function') continue;
         guarded[name] = (...args: unknown[]) => {
-            if (generation !== getCredentialGeneration() || !ownsWriter(writer) || callbackEpoch !== writerCallbackEpoch) return;
+            if (generation !== getCredentialGeneration()) return;
+            if (!ownsWriter(writer) || callbackEpoch !== writerCallbackEpoch) {
+                const left = forLeftRun[name as keyof WSCallbacks] as ((...leftArgs: unknown[]) => unknown) | undefined;
+                left?.(...args);
+                return;
+            }
             const result = (callback as (...callbackArgs: unknown[]) => unknown)(...args);
-            if (name === 'onDone' || name === 'onError' || name === 'onClose') {
+            if (name === 'onDone' || name === 'onError' || name === 'onClose' || name === 'onReattachFailed') {
                 if (result instanceof Promise) return result.finally(() => settleWriter(store.get, writer));
                 settleWriter(store.get, writer);
             }
@@ -2342,6 +2668,20 @@ async function executeWSRequest(
     delete request.search_index_state;
     if (searchIndexState) request.search_index_state = searchIndexState;
 
+    // A run stopped while it was reconnecting holds this one back until the
+    // server has its cancel; say so while the new message waits.
+    // Whether that stop got through is reported by `onPreviousRunNotStopped`
+    // once this request has actually replaced the run.
+    const handoff = agentService.cancelHandoff();
+    const handoffMark = handoff ? ++cancelHandoffSeq : null;
+    const endHandoff = () => {
+        if (handoffMark === cancelHandoffSeq) store.set(stoppingPreviousRunAtom, false);
+    };
+    if (handoff) {
+        store.set(stoppingPreviousRunAtom, true);
+        void handoff.then(endHandoff);
+    }
+
     connectLoopsInFlight++;
     const result = await connectWithRetry({
         service: agentService,
@@ -2379,6 +2719,8 @@ async function executeWSRequest(
         },
     }).finally(() => {
         connectLoopsInFlight--;
+        // Also when the request was abandoned during the wait.
+        endHandoff();
     });
 
     if (!ownsWriter(requestWriter)) return;
@@ -2568,6 +2910,8 @@ const sendWSMessage = async (
         for (const col of messageCollections) {
             attachments.push({
                 type: 'collection',
+                collection_id: col.collection_id,
+                parent_collection_id: col.parent_collection_id,
                 library_id: col.library_id,
                 zotero_key: col.zotero_key,
                 library_ref: col.library_ref,
@@ -2575,6 +2919,10 @@ const sendWSMessage = async (
                 parent_key: col.parent_key,
             });
         }
+
+        // Add saved-search and built-in-view attachments (Unfiled Items, …)
+        attachments.push(...get(currentMessageViewsAtom)
+            .filter(view => isTargetInLibraries(view, searchableLibraryIds)));
 
         // Add external file attachments (metadata only; content stays local and
         // is served on demand through the read/view request paths). Files whose
@@ -2600,10 +2948,14 @@ const sendWSMessage = async (
         // never auto-attach a reader source in a library the user excluded from
         // Beaver — this path bypasses the currentMessageItems gate above.
         const readerAttachment = submissionReaderAttachment;
+        // Set when the tab's table is dropped below, so the captured
+        // application state stops naming it as the open table.
+        let droppedTableContextKey: string | null = null;
         if (readerAttachment && searchableLibraryIds.includes(readerAttachment.libraryID)) {
             const allUserAttachmentKeys = get(allUserAttachmentKeysAtom);
             const existingKeys = new Set([
-                ...attachments.map(messageAttachmentKey),
+                // Saved-search keys share the item key format
+                ...attachments.filter(a => !isViewAttachment(a)).map(messageAttachmentKey),
                 ...allUserAttachmentKeys
             ]);
             logger(`sendWSMessageAtom: Handeling reader attachment - existingKeys: ${JSON.stringify(existingKeys)}`, 1);
@@ -2618,8 +2970,28 @@ const sendWSMessage = async (
                 if (readerAttachment.parentItem) {
                     await Zotero.Items.loadDataTypes([readerAttachment.parentItem], ['itemData', 'creators']);
                 }
-                const readerMessageAttachment = await toValidatedMessageAttachment(readerAttachment);
-                if (readerMessageAttachment) attachments.push(readerMessageAttachment);
+                // The tab context is attached automatically, so a table that
+                // stopped being sendable since it became the context (corrupt,
+                // write pending, newly cites an excluded library) is dropped
+                // with a notice instead of failing the whole send.
+                try {
+                    const readerMessageAttachment = await toValidatedMessageAttachment(readerAttachment);
+                    if (readerMessageAttachment) attachments.push(readerMessageAttachment);
+                } catch (error: any) {
+                    droppedTableContextKey = readerAttachment.key;
+                    logger(`sendWSMessageAtom: Dropping unavailable tab context ${readerKeys[0]}: ${error?.message ?? error}`, 1);
+                    // Stop offering it as context, so the next send does not
+                    // warn again; selecting the tab again re-checks it.
+                    if (get(currentReaderAttachmentAtom)?.id === readerAttachment.id) {
+                        set(currentReaderAttachmentAtom, null);
+                    }
+                    set(addPopupMessageAtom, {
+                        type: 'warning',
+                        title: 'Table not attached',
+                        text: 'The open table is unavailable and was not added to the message.',
+                        expire: true,
+                    });
+                }
             } else {
                 logger(`sendWSMessageAtom: Handeling reader attachment - Skipping reader attachment: ${readerKeys[0]}`, 1);
             }
@@ -2631,7 +3003,8 @@ const sendWSMessage = async (
         if (currentNoteTabItem && searchableLibraryIds.includes(currentNoteTabItem.libraryID)) {
             const allUserAttachmentKeys = get(allUserAttachmentKeysAtom);
             const existingKeys = new Set([
-                ...attachments.map(messageAttachmentKey),
+                // Saved-search keys share the item key format
+                ...attachments.filter(a => !isViewAttachment(a)).map(messageAttachmentKey),
                 ...allUserAttachmentKeys
             ]);
             const noteKeys = zoteroReferenceLookupKeys({
@@ -2686,7 +3059,11 @@ const sendWSMessage = async (
         // Application state (current view, reader/note state, library context,
         // indexing status). Built via the injectable provider so a non-Zotero
         // host can supply its own document state through the same slot.
-        const applicationState = await applicationStatePromise;
+        let applicationState = await applicationStatePromise;
+        if (droppedTableContextKey && applicationState?.table_state?.zotero_key === droppedTableContextKey) {
+            const { table_state: _dropped, ...rest } = applicationState;
+            applicationState = rest;
+        }
         // Build the message
         const userPrompt: BeaverAgentPrompt = {
             content: message,
@@ -2753,6 +3130,7 @@ const sendWSMessage = async (
             set(removePopupMessagesByTypeAtom, ['items_summary']);
             set(currentMessageItemsAtom, []);
             set(currentMessageCollectionsAtom, []);
+            set(currentMessageViewsAtom, []);
             set(currentMessageExternalFilesAtom, []);
 
             // Execute the WebSocket request
@@ -2817,6 +3195,12 @@ async function startRegenerateRunOwned(
     // One retry at a time: retry controls of other runs stay clickable while
     // a commit is in flight, and a second truncation would race the first.
     if (retryCommitInFlight(get, logPrefix)) return;
+    // Replacing a run that is reconnecting would stop it, and that stop is
+    // billed. The retry controls are disabled meanwhile; this covers the rest.
+    if (get(isRunReconnectingAtom)) {
+        logger(`${logPrefix}: Blocked — the active run is reconnecting`, 1);
+        return;
+    }
 
     // Dismiss any open diff preview before regenerating
     dismissDiffPreview();
@@ -2921,7 +3305,11 @@ async function startRegenerateRunOwned(
         const settlementThreadId =
             get(currentThreadIdAtom) || targetRun.thread_id;
         if (settlementThreadId && Zotero.Beaver?.presence) {
-            setAdmission(set, settlementThreadId, get(threadAdmissionAtom)?.tailRunId ?? null, 'unknown');
+            // A retry that stopped the running response says so while the
+            // server ends it; otherwise the retry control shows the wait.
+            const waitReason = activeRun ? 'stopping_previous' : undefined;
+            setAdmission(set, settlementThreadId, get(threadAdmissionAtom)?.tailRunId ?? null, 'unknown',
+                undefined, waitReason);
             const generation = getCredentialGeneration();
             const current = () =>
                 navSeqBeforeAwait === get(threadNavigationSeqAtom) &&
@@ -2933,7 +3321,7 @@ async function startRegenerateRunOwned(
             for (;;) {
                 const history = await readAdmissionHistory(settlementThreadId, true);
                 if (!current()) return;
-                setAdmission(set, settlementThreadId, history.tail_run_id, history.activity);
+                setAdmission(set, settlementThreadId, history.tail_run_id, history.activity, undefined, waitReason);
                 if (history.activity.state !== 'active') {
                     settledHistory = history;
                     break;
@@ -2982,7 +3370,26 @@ async function startRegenerateRunOwned(
                 set(threadConflictAtom, "thread_tail_mismatch");
                 return;
             }
+            const localTarget = targetRun;
             targetRun = threadRuns[runIndex];
+            // The server finished a response this window had shown as failed
+            // or stopped, e.g. after its connection was lost. The saved answer
+            // now shows in its place; retrying would discard what was paid for.
+            if (
+                !editedPrompt &&
+                activeRun?.id !== localTarget.id &&
+                (localTarget.status === 'error' || localTarget.status === 'canceled') &&
+                targetRun.status === 'completed'
+            ) {
+                logger(`${logPrefix}: Run ${targetRun.id} completed on the server; not retrying it`, 1);
+                set(addPopupMessageAtom, {
+                    type: 'info',
+                    title: 'Response finished',
+                    text: 'Beaver finished this response after all, so it was not retried.',
+                    expire: true,
+                });
+                return;
+            }
         }
 
         // If the target is a resume run, walk the resume chain back to the
@@ -3033,14 +3440,11 @@ async function startRegenerateRunOwned(
         const annotationEditsToUndo = actionsInRemovedRuns
             .filter(isEditAnnotationsAgentAction)
             .filter(a => a.status === 'applied');
-        const zoteroNotesToDelete = actionsInRemovedRuns
-            .filter(isZoteroNoteAgentAction)
-            .filter(hasAppliedZoteroItem);
         const metadataEditsToUndo = actionsInRemovedRuns
             .filter(isEditMetadataAgentAction)
             .filter(a => a.status === 'applied');
         const createItemsToUndo = actionsInRemovedRuns
-            .filter(isCreateItemAgentAction)
+            .filter(isItemCreatingAgentAction)
             .filter(a => a.status === 'applied');
         const createCollectionsToUndo = actionsInRemovedRuns
             .filter(isCreateCollectionAgentAction)
@@ -3060,6 +3464,8 @@ async function startRegenerateRunOwned(
         const createNotesToUndo = actionsInRemovedRuns
             .filter(isCreateNoteAgentAction)
             .filter(a => a.status === 'applied');
+        const mergeItemsToUndo = actionsInRemovedRuns
+            .filter(a => a.action_type === 'merge_items' && a.status === 'applied');
 
         // Prompt the user to confirm undoing applied actions. The dialog is
         // the consent and must precede the truncate POST: a user who cancels
@@ -3067,17 +3473,15 @@ async function startRegenerateRunOwned(
         // backend confirms, so a failed POST changes nothing.
         let confirmResult: UndoConfirmResult = 'skip';
         const hasActionsToUndo = annotationsToDelete.length > 0 || annotationEditsToUndo.length > 0 ||
-                                 zoteroNotesToDelete.length > 0 ||
                                  metadataEditsToUndo.length > 0 || noteEditsToUndo.length > 0 ||
                                  createItemsToUndo.length > 0 ||
                                  createCollectionsToUndo.length > 0 || organizeItemsToUndo.length > 0 ||
                                  manageTagsToUndo.length > 0 || manageCollectionsToUndo.length > 0 ||
-                                 createNotesToUndo.length > 0;
+                                 createNotesToUndo.length > 0 || mergeItemsToUndo.length > 0;
         if (hasActionsToUndo) {
             confirmResult = confirmUndoAppliedActions({
                 annotations: annotationsToDelete,
                 annotationEdits: annotationEditsToUndo,
-                zoteroNotes: zoteroNotesToDelete,
                 metadataEdits: metadataEditsToUndo,
                 noteEdits: noteEditsToUndo,
                 createItems: createItemsToUndo,
@@ -3086,6 +3490,7 @@ async function startRegenerateRunOwned(
                 manageTags: manageTagsToUndo,
                 manageCollections: manageCollectionsToUndo,
                 createNotes: createNotesToUndo,
+                mergeItems: mergeItemsToUndo,
             }, options.window ?? getHostWindow());
             if (confirmResult === 'cancel') {
                 return;
@@ -3387,6 +3792,7 @@ export const abandonActiveRunLocallyAtom = atom(null, (get, set) => {
     set(clearAllPendingQuestionsAtom);
     set(clearAllPendingCreditConfirmationsAtom);
     set(clearAllPendingBatchApprovalsAtom);
+    set(clearAllPendingTableCardsAtom);
     set(clearApprovalResponseIntentsAtom);
     set(clearRunApprovalPolicyAtom);
 
@@ -3415,14 +3821,25 @@ export const abandonActiveRunLocallyAtom = atom(null, (get, set) => {
     // Clear streaming-done state (abandoned during post-processing)
     set(streamingDoneRunIdsAtom, new Set<string>());
     streamActivity.reset();
+    // A run abandoned while reconnecting is no longer shown as reconnecting;
+    // its reattach goes on only to deliver the cancel.
+    set(wsReconnectingAtom, null);
 });
 
 /**
  * User-initiated close: cancel on the backend, then close.
  * Local bookkeeping is shared with shutdown via `abandonActiveRunLocallyAtom`.
  */
-export const closeWSConnectionAtom = atom(null, async (_get, set) => {
+export const closeWSConnectionAtom = atom(null, async (get, set) => {
+    // A run stopped while it reconnects is stopped once the server has it
+    // back. Until the server confirms, the chat waits for it.
+    const activeRun = get(activeRunAtom);
+    const stopIsHeld = !!activeRun && isRunActive(activeRun) && agentService.isReattaching(activeRun.id);
     set(abandonActiveRunLocallyAtom);
+    if (stopIsHeld) {
+        heldStopRunIds.add(activeRun.id);
+        awaitServerSettlement(set, 'stop_unconfirmed');
+    }
 
     // Send cancel message and close connection
     await agentService.cancel();
@@ -3502,6 +3919,7 @@ export const clearThreadAtom = atom(null, (_get, set) => {
     set(clearAllPendingQuestionsAtom);
     set(clearAllPendingCreditConfirmationsAtom);
     set(clearAllPendingBatchApprovalsAtom);
+    set(clearAllPendingTableCardsAtom);
     set(clearRunApprovalPolicyAtom);
 });
 
@@ -3585,7 +4003,7 @@ export const sendApprovalResponseAtom = atom(
             return next;
         });
         logger(`sendApprovalResponseAtom: Sending approval response for ${actionId}: ${approved}${userInstructions ? ' (with instructions)' : ''}`, 1);
-        const delivered = agentService.sendApprovalResponse(actionId, approved, userInstructions);
+        const delivered = agentService.sendApprovalResponse(actionId, approved, userInstructions, approved ? _get(mergeItemsChoicesAtom)[actionId] : undefined);
         if (!delivered) {
             logger(`sendApprovalResponseAtom: Approval response for ${actionId} was not sent; marking stale`, 1);
             set(markApprovalStaleAtom, actionId);
@@ -3800,9 +4218,8 @@ export const sendCreditConfirmationResponseAtom = atom(
  */
 export const sendBatchApprovalResponseAtom = atom(
     null,
-    (_get, set, { approvalId, approved, mode, userInstructions, table }: {
+    (_get, set, { approvalId, approved, mode, userInstructions }: {
         approvalId: string;
-        table?: import('@beaver/agent-core/protocol/artifactProtocol').TableApprovalIdentity;
         approved: boolean;
         mode: BatchApprovalMode;
         userInstructions?: string | null;
@@ -3814,12 +4231,29 @@ export const sendBatchApprovalResponseAtom = atom(
             approved,
             mode,
             userInstructions,
-            table,
         );
         if (!delivered) {
             logger(`sendBatchApprovalResponseAtom: Batch approval response for ${approvalId} was not sent`, 1);
         }
         set(removePendingBatchApprovalAtom, approvalId);
+    }
+);
+
+/**
+ * Send the answer to a table card and retire it.
+ *
+ * The card is removed even when the send fails: the answer can no longer
+ * reach the run, so leaving it up would strand the user on it.
+ */
+export const sendTableCardResponseAtom = atom(
+    null,
+    (_get, set, response: WSTableCardResponse) => {
+        if (!ownsWriter(currentWriter())) return;
+        const delivered = agentService.sendTableCardResponse(response);
+        if (!delivered) {
+            logger(`sendTableCardResponseAtom: Table card response for ${response.card_id} was not sent`, 1);
+        }
+        set(removePendingTableCardAtom, response.card_id);
     }
 );
 
@@ -3888,7 +4322,12 @@ export async function withThreadWriter<T>(get: Getter, set: Setter, operation: (
         return (set as any)(...args);
     }) as Setter;
     try {
-        if (
+        if (writer?.admission) {
+            // A second submission while the first is still reading admission
+            // (a repeated click or Enter) must not fall back to the cached
+            // tail: after a stopped or failed run that tail is stale.
+            if (!(await writer.admission.catch(() => false))) return;
+        } else if (
             presence &&
             id &&
             writer?.preparing === 1 &&
@@ -3896,22 +4335,31 @@ export async function withThreadWriter<T>(get: Getter, set: Setter, operation: (
                 !!get(threadAdmissionAtom)?.unconfirmedRunId)) &&
             !get(retryPendingRunIdAtom)
         ) {
-            const generation = getCredentialGeneration();
-            const snapshot = await readAdmission(id);
-            assertCredentialGeneration(generation);
-            assertWriter(writer);
-            if (nav !== get(threadNavigationSeqAtom)) return;
-            const previous = get(threadAdmissionAtom);
-            guardedSet(threadAdmissionAtom, snapshot);
-            if (
-                snapshot.activity.state === "active" ||
-                (previous?.threadId === id &&
-                    previous.tailRunId !== snapshot.tailRunId &&
-                    previous.unconfirmedRunId !== snapshot.tailRunId)
-            ) {
-                if (snapshot.activity.state !== "active")
-                    guardedSet(threadConflictAtom, "thread_tail_mismatch");
-                return;
+            const admission = (async () => {
+                const generation = getCredentialGeneration();
+                const snapshot = await readAdmission(id);
+                assertCredentialGeneration(generation);
+                assertWriter(writer);
+                if (nav !== get(threadNavigationSeqAtom)) return false;
+                const previous = get(threadAdmissionAtom);
+                guardedSet(threadAdmissionAtom, snapshot);
+                if (
+                    snapshot.activity.state === "active" ||
+                    (previous?.threadId === id &&
+                        previous.tailRunId !== snapshot.tailRunId &&
+                        previous.unconfirmedRunId !== snapshot.tailRunId)
+                ) {
+                    if (snapshot.activity.state !== "active")
+                        guardedSet(threadConflictAtom, "thread_tail_mismatch");
+                    return false;
+                }
+                return true;
+            })();
+            writer.admission = admission;
+            try {
+                if (!(await admission)) return;
+            } finally {
+                if (writer.admission === admission) writer.admission = undefined;
             }
         }
         return await operation(guardedSet);

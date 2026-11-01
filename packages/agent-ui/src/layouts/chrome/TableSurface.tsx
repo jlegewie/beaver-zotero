@@ -8,6 +8,7 @@ import {
 import type { MenuItem } from "../../primitives/ContextMenu";
 import { DataTable } from "../DataTable";
 import {
+    fitsToWidth,
     renderPlainText,
     type TableDensity,
     type TextRenderer,
@@ -56,11 +57,32 @@ export interface TableSurfaceProps {
     renderRowDetail?: (row: Row) => React.ReactNode;
     columnMenuItems?: (column: Column) => MenuItem[];
     onRetryCell?: (row: Row, column: Column) => void;
+    /** Rows marked "Can be improved" (`DataTableProps.improvableRows`). */
+    improvableRows?: ReadonlySet<string>;
 
     showSearch?: boolean;
     searchPlaceholder?: string;
+    /** See `TableToolbarProps.showSortMenu`. */
+    showSortMenu?: boolean;
+    /** See `TableToolbarProps.valueFilters`. */
+    valueFilters?: boolean;
     emptyText?: string;
     filteredEmptyText?: string;
+
+    /** Window the rows (`DataTableProps.virtualize`) — for a long table. */
+    virtualize?: boolean;
+    /** Never scroll sideways (`DataTableProps.fitWidth`). */
+    fitWidth?: boolean;
+    /**
+     * A status line between the toolbar and the grid — a warning about the
+     * table as a whole, which must stay in view however far the grid scrolls.
+     */
+    notice?: React.ReactNode;
+    /**
+     * A neutral line under the toolbar, for news about the table rather than
+     * a warning: the result of the last fill.
+     */
+    banner?: React.ReactNode;
     className?: string;
 }
 
@@ -95,10 +117,17 @@ export function TableSurface({
     renderRowDetail,
     columnMenuItems,
     onRetryCell,
+    improvableRows,
     showSearch,
     searchPlaceholder,
+    showSortMenu,
+    valueFilters,
     emptyText,
     filteredEmptyText,
+    virtualize,
+    fitWidth,
+    notice,
+    banner,
     className,
 }: TableSurfaceProps): React.ReactElement {
     const state = useOptionalTableState(table, externalState, { density });
@@ -129,10 +158,12 @@ export function TableSurface({
     const heading = title ?? table.title ?? "Table";
 
     return (
-        <section className={`bt-surface${className ? ` ${className}` : ""}`}>
+        <section
+            className={`bt-surface${fitsToWidth(table, !!fitWidth) ? " bt-surface-fit" : ""}${className ? ` ${className}` : ""}`}
+        >
             <TableTitleBar
                 title={heading}
-                subtitle={subtitle ?? table.caption}
+                subtitle={subtitle ?? table.description}
                 icon={icon}
                 actions={headerActions}
             />
@@ -153,8 +184,22 @@ export function TableSurface({
                     actions={toolbarActions}
                     showSearch={showSearch}
                     searchPlaceholder={searchPlaceholder}
+                    showSortMenu={showSortMenu}
+                    valueFilters={valueFilters}
                 />
             )}
+
+            {notice ? (
+                <div className="bt-notice" role="status">
+                    {notice}
+                </div>
+            ) : null}
+
+            {banner ? (
+                <div className="bt-banner" role="status">
+                    {banner}
+                </div>
+            ) : null}
 
             <div className="bt-scroll">
                 <DataTable
@@ -165,8 +210,11 @@ export function TableSurface({
                     renderRowDetail={renderRowDetail}
                     columnMenuItems={columnMenuItems}
                     onRetryCell={onRetryCell}
+                    improvableRows={improvableRows}
                     emptyText={emptyText}
                     filteredEmptyText={filteredEmptyText}
+                    virtualize={virtualize}
+                    fitWidth={fitWidth}
                 />
             </div>
 

@@ -31,7 +31,13 @@ import {
 import { enqueue } from "./opQueue";
 import { ensureApi } from "./wasmInit";
 import { getCachedLibMuPdf } from "./apiCache";
-import { isWorkerConfigured, setWorkerUrls, type WorkerUrls } from "./config";
+import {
+    getWorkerCompiledWasm,
+    isWorkerConfigured,
+    setWorkerCompiledWasm,
+    setWorkerUrls,
+    type WorkerUrls,
+} from "./config";
 import { setPDFLogger } from "../logging";
 import { ERROR_CODES, postLog } from "./errors";
 import { isFatalWasmError, isHeapExhaustionError } from "../wasmFatal";
@@ -50,12 +56,12 @@ import {
     opExtract,
     opExtractSerialized,
     opExtractRawPageDetailed,
-    opExtractSentenceDebug,
     opGetMetadata,
     opGetPageCount,
     opRenderPages,
     opSearch,
     opStructuredExtractWithDebug,
+    opWarmup,
     type OpReply,
 } from "./ops";
 import { requireWorkerSelf } from "./workerScope";
@@ -81,6 +87,8 @@ async function dispatch(op: string, args: Record<string, unknown> | undefined): 
         case "__init":
             await ensureApi();
             return { result: {} };
+        case "__warmup":
+            return await opWarmup(a as Parameters<typeof opWarmup>[0]);
         case "__cacheStats":
             return { result: getCacheStats() };
         case "__cacheClear": {
@@ -111,8 +119,6 @@ async function dispatch(op: string, args: Record<string, unknown> | undefined): 
             return await opAnalyzeOCRNeeds(a as Parameters<typeof opAnalyzeOCRNeeds>[0]);
         case "search":
             return await opSearch(a as Parameters<typeof opSearch>[0]);
-        case "extractSentenceDebug":
-            return await opExtractSentenceDebug(a as Parameters<typeof opExtractSentenceDebug>[0]);
         case "analyzeLayout":
             return await opAnalyzeLayout(a as Parameters<typeof opAnalyzeLayout>[0]);
         default:
@@ -129,6 +135,8 @@ interface IncomingOpMessage {
 interface IncomingConfigureMessage {
     kind: "configure";
     urls: WorkerUrls;
+    /** Precompiled WASM modules shared by the host (optional). */
+    compiledWasm?: unknown;
 }
 
 type IncomingMessage = IncomingOpMessage | IncomingConfigureMessage;
@@ -159,7 +167,13 @@ workerSelf.onmessage = (event: MessageEvent) => {
         const cfg = data as IncomingConfigureMessage;
         if (cfg.urls && typeof cfg.urls === "object") {
             setWorkerUrls(cfg.urls);
-            workerSelf.postMessage({ kind: "configured" });
+            setWorkerCompiledWasm(cfg.compiledWasm);
+            // Report whether usable modules arrived, so the client's stats
+            // reflect what the worker will instantiate.
+            workerSelf.postMessage({
+                kind: "configured",
+                compiledWasm: getWorkerCompiledWasm().mupdf !== undefined,
+            });
         }
         return;
     }
@@ -186,11 +200,18 @@ workerSelf.onmessage = (event: MessageEvent) => {
         return;
     }
 
+    // Replies report when the op started (epoch ms, comparable with the
+    // client's clock) and how long it ran, so the client can tell waiting from
+    // work (`WorkerCallTiming`). Waiting is measured on the client: a message
+    // reaches this handler only after the previous synchronous op returns.
     enqueue(async () => {
+        const startedAtEpoch = Date.now();
+        const startedAt = performance.now();
+        const timing = () => ({ startedAt: startedAtEpoch, opMs: performance.now() - startedAt });
         try {
             const { result, transfer } = await dispatch(op, args);
             workerSelf.postMessage(
-                { id, ok: true, result, heapBytes: currentHeapBytes() },
+                { id, ok: true, result, heapBytes: currentHeapBytes(), ...timing() },
                 transfer || [],
             );
         } catch (e: unknown) {
@@ -229,9 +250,17 @@ workerSelf.onmessage = (event: MessageEvent) => {
                 ok: false,
                 error,
                 heapBytes: currentHeapBytes(),
+                ...timing(),
             });
         }
     });
+};
+
+// A message that cannot be deserialized here (for example a configure frame
+// whose compiled WASM modules this platform cannot receive) never reaches
+// `onmessage`. Report it so the client can resend configure without them.
+workerSelf.onmessageerror = () => {
+    workerSelf.postMessage({ kind: "messageerror" });
 };
 
 workerSelf.postMessage({ kind: "ready" });

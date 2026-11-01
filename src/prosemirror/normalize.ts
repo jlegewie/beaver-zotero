@@ -18,7 +18,7 @@ import { buildToHTML } from './serializer';
 
 const LOCAL_HREF_SHIELD_PREFIX = 'https://zotero-cite.invalid/';
 
-function shieldLocalHrefAttributes(html: string): string {
+export function shieldLocalHrefAttributes(html: string): string {
     return html.replace(
         /href="((?:zotero|file):\/\/[^"]*)"/g,
         (_match, href) => `href="${LOCAL_HREF_SHIELD_PREFIX}${encodeURIComponent(href)}"`
@@ -36,6 +36,16 @@ function restoreLocalHrefAttributes(html: string): string {
             }
         }
     );
+}
+
+/** A shielded href back to the local link it stands for (unchanged otherwise). */
+export function restoreLocalHref(href: string): string {
+    if (!href.startsWith(LOCAL_HREF_SHIELD_PREFIX)) return href;
+    try {
+        return decodeURIComponent(href.slice(LOCAL_HREF_SHIELD_PREFIX.length));
+    } catch {
+        return href;
+    }
 }
 
 /**

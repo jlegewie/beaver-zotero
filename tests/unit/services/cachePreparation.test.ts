@@ -14,6 +14,7 @@ describe('explicit cache preparation', () => {
     let db: BeaverDB;
     const drain = vi.fn();
     const stats = { payload_budget_bytes: 1000, payload_total_bytes: 100 } as DocumentCacheStats;
+    const versions = { metadata: 1, payload: 1, pdf: '5' };
     beforeEach(async () => {
         vi.clearAllMocks();
         prefs.enabled = true;
@@ -22,7 +23,10 @@ describe('explicit cache preparation', () => {
         await db.initDatabase('0.99.0');
         (Zotero as any).Beaver = {
             db, libraryScopeInitialized: true, searchableLibraryIds: [1], hasOcrAccess: false,
-            documentCache: { getStats: async () => stats, runMaintenance: (work: () => Promise<void>) => work() },
+            documentCache: {
+                getStats: async () => stats, runMaintenance: (work: () => Promise<void>) => work(),
+                pdfCompatibilityVersions: () => versions,
+            },
             backgroundExtractor: { requestImmediateDrain: drain },
         };
         (Zotero as any).Items = {
@@ -71,6 +75,30 @@ describe('explicit cache preparation', () => {
         (Zotero.Beaver as any).libraryScopeInitialized = false;
         expect(await prepareUncachedFiles()).toBe(0);
         expect(drain).not.toHaveBeenCalled();
+    });
+    it('prepares a processed scan again when its retained OCR preparation is incompatible', async () => {
+        (Zotero.Beaver as any).hasOcrAccess = true;
+        await seed('SCANNED1', '2026-01-01', 1, 'done');
+        const { metadata } = await db.upsertDocumentCacheMetadata({
+            itemId: 1, libraryId: 1, zoteroKey: 'SCANNED1', contentKind: 'pdf', filePath: '/tmp/scan.pdf',
+            fileSignature: { mtime_ms: 1, size_bytes: 2 }, sourceSizeBytes: 2, contentType: 'application/pdf',
+            documentMetadata: null, errorCode: null, extractionSchemaVersion: '5', metadataFormatVersion: 1,
+        });
+        await db.upsertDocumentCachePayload({
+            metadataId: metadata.id, itemId: 1, libraryId: 1, zoteroKey: 'SCANNED1', payloadKind: 'structured',
+            contentKind: 'pdf', sourceFilePath: '/tmp/scan.pdf', sourceFileSignature: { mtime_ms: 1, size_bytes: 2 },
+            sourceSizeBytes: 2, payloadPath: '/cache/scan.json.gz', payloadSizeBytes: 10, payloadSha256: 'sha',
+            extractionSchemaVersion: '5', cacheFormatVersion: 1, extractionSource: 'ocr',
+        });
+        expect(await getUncachedCandidates(stats)).toEqual([]);
+
+        await conn.queryAsync('UPDATE document_cache_payloads SET cache_format_version = 0');
+        const before = await db.getAttachmentProcessingState(1, 'SCANNED1');
+        expect(await prepareUncachedFiles()).toBe(1);
+        expect(await db.claimNextBackgroundJob(Date.now() + 100, 60_000)).toMatchObject({
+            jobType: 'document_extract', zoteroKey: 'SCANNED1', payload: { prepare_cache: true },
+        });
+        expect(await db.getAttachmentProcessingState(1, 'SCANNED1')).toEqual(before);
     });
     it('leaves missing files eligible if enqueue fails', async () => {
         await seed('TARGET01', '2026-01-01');

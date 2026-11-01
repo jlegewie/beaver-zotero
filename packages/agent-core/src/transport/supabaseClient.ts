@@ -1,6 +1,7 @@
 import { createClient, AuthApiError, type SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseConfig, markSupabaseConfigInUse } from './config';
 import { logger } from '../platform/logger';
+import { guardTokenRefreshFetch } from './tokenRefreshFetch';
 
 /**
  * Storage backend Supabase persists the auth session into. Matches the subset of
@@ -391,8 +392,12 @@ function createSupabaseClient(): SupabaseClientInstance {
     // known at runtime can register it before the client is first used.
     const { url, anonKey } = getSupabaseConfig();
 
+    // Every request goes through the token-refresh guard, so a refresh failure
+    // that is not the auth server rejecting the token keeps the saved session.
+    const baseFetch: typeof fetch = fetchAdapter ?? ((input, init) => fetch(input, init));
+
     const client = createClient(url, anonKey, {
-        ...(fetchAdapter ? { global: { fetch: fetchAdapter } } : {}),
+        global: { fetch: guardTokenRefreshFetch(baseFetch) },
         auth: {
             persistSession: true,
             autoRefreshToken: true,

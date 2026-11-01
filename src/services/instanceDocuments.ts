@@ -1,5 +1,10 @@
 import { MuPDFWorkerClient } from "../beaver-extract/MuPDFWorkerClient";
-import type { PDFWorkerSlotName } from "../beaver-extract/config";
+import type {
+    PDFCompiledWasm,
+    PDFWorkerSlotName,
+    PDFWorkerUrls,
+} from "../beaver-extract/config";
+import { logger } from "@beaver/agent-core/platform/logger";
 import { documentImplementations } from "./documentExtractionCore";
 import { DocumentAccessRevokedError } from "./documentExtraction/accessRevoked";
 const {
@@ -9,10 +14,23 @@ const {
     extractAndCacheSnapshotDocument,
 } = documentImplementations;
 
+/** After a failed precompile, workers load the binaries themselves for this long. */
+const COMPILED_WASM_RETRY_MS = 60_000;
+
+async function compileWasm(url: string): Promise<WebAssembly.Module> {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`fetch ${url} failed with status ${response.status}`);
+    return WebAssembly.compile(await response.arrayBuffer());
+}
+
 /** Shared extraction closures, cancellation and worker clients live in the plugin realm. */
 export class InstanceDocuments {
     private closed = false;
     private active = new Set<AbortController>();
+    private compiledWasm: PDFCompiledWasm | null = null;
+    private compiledWasmLoad: Promise<PDFCompiledWasm | null> | null = null;
+    /** When the last precompile failed; another attempt waits for the retry delay. */
+    private compiledWasmFailedAt: number | null = null;
     readonly extractAndCacheDocument = (
         args: Parameters<typeof extractAndCacheDocument>[0],
     ) => this.run(args, extractAndCacheDocument);
@@ -78,6 +96,46 @@ export class InstanceDocuments {
         if (this.closed) throw new Error("Document runtime disposed");
         return new MuPDFWorkerClient({ slotName: name });
     }
+    /**
+     * Compile the document workers' WASM once and share it with every worker
+     * (both slots, every respawn), so a new worker instantiates it instead of
+     * loading and compiling ~12 MB of binaries. The compiled code (~13 MB)
+     * is held here until disposal (clients drop their reference once a worker
+     * is configured); live workers share it rather than holding their own
+     * copies. Returns null for a minute after a failure
+     * (the workers then load the binaries themselves), then tries again.
+     */
+    getCompiledWasm(
+        urls: PDFWorkerUrls,
+    ): PDFCompiledWasm | Promise<PDFCompiledWasm | null> | null {
+        if (this.closed) return null;
+        if (
+            this.compiledWasmFailedAt !== null
+            && Date.now() - this.compiledWasmFailedAt < COMPILED_WASM_RETRY_MS
+        ) {
+            return null;
+        }
+        if (this.compiledWasm) return this.compiledWasm;
+        this.compiledWasmLoad ??= Promise.all([
+            compileWasm(urls.mupdfWasmBinaryUrl),
+            compileWasm(urls.sentencexWasmBinaryUrl),
+        ]).then(
+            ([mupdf, sentencex]) => {
+                this.compiledWasmLoad = null;
+                this.compiledWasmFailedAt = null;
+                if (this.closed) return null;
+                this.compiledWasm = { mupdf, sentencex };
+                return this.compiledWasm;
+            },
+            (e) => {
+                this.compiledWasmLoad = null;
+                this.compiledWasmFailedAt = Date.now();
+                logger(`Document WASM precompile failed; workers will compile it themselves: ${e}`, 2);
+                return null;
+            },
+        );
+        return this.compiledWasmLoad;
+    }
     createWorker(url: string): Worker {
         if (this.closed) throw new Error("Document runtime disposed");
         const { createDocumentWorker } = ChromeUtils.importESModule(
@@ -87,6 +145,8 @@ export class InstanceDocuments {
     }
     dispose(): void {
         this.closed = true;
+        this.compiledWasm = null;
+        this.compiledWasmLoad = null;
         for (const controller of this.active) controller.abort();
     }
 }

@@ -18,7 +18,7 @@ import type {
     BackgroundJobRecord,
 } from '../database';
 import { observeAttachmentSource } from '../documentExtraction/sourceObservation';
-import { getFileSignature } from '../documentFileIdentity';
+import { getFileSignature, getRemoteFileHash } from '../documentFileIdentity';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { UNRESOLVED_LIBRARY_ID } from '../../utils/libraryIdentity';
 import { safeIsInTrash } from '../../utils/zoteroItemUtils';
@@ -118,6 +118,10 @@ export class DocumentExtractExecutor implements JobExecutor {
         const postObservation = this.checkScope(record);
         if (postObservation) return postObservation;
         const extractionSource = observation?.identity ?? null;
+        if (source.kind === 'error' && source.code === 'file_permission_denied') {
+            // Retried like a refused read: the same error reports a briefly locked file.
+            return { kind: 'retry', error: source.code, attemptedExtractionSource: extractionSource };
+        }
         if (source.kind === 'error') {
             await ctx.db.markAttachmentExtractFailure({
                 libraryId: item.libraryID,
@@ -171,7 +175,7 @@ export class DocumentExtractExecutor implements JobExecutor {
         let fileHash: string | null = null;
         try {
             fileHash = source.source.isRemoteOnly
-                ? item.attachmentSyncedHash || null
+                ? await getRemoteFileHash(item)
                 : await item.attachmentHash || null;
         } catch (error) {
             logger(`DocumentExtractExecutor: attachmentHash failed: ${error}`, 2);
@@ -192,14 +196,30 @@ export class DocumentExtractExecutor implements JobExecutor {
             return { kind: 'complete', reason: 'unsupported_schema_version' };
         }
 
-        // Detecting the original scan again must not discard its indexed OCR hash.
-        // The OCR completion compares the restored content with that retained hash.
-        const restoringOcr = record.payload?.prepare_cache === true
-            && previous.ocrStatus === 'done' && extracted.ocrStatus === 'needed'
+        // Detecting the original scan again must not discard its indexed OCR hash,
+        // whether cache preparation lost the prepared text or an extraction update
+        // made the retained preparation unservable. The document stays searchable
+        // under that hash; the OCR completion compares the restored content with
+        // it and replaces the membership only once the new identity is ready.
+        const restoringOcr = previous.ocrStatus === 'done' && extracted.ocrStatus === 'needed'
             && previous.fileMtimeMs === afterSignature.mtime_ms
             && previous.fileSizeBytes === afterSignature.size_bytes
-            && previous.fileHash === fileHash;
-        const applied = restoringOcr || await ctx.db.markAttachmentExtracted({
+            && previous.fileHash === fileHash
+            && (record.payload?.prepare_cache === true
+                || await Zotero.Beaver?.documentCache?.getProtectedRepreparation(
+                    { libraryId: item.libraryID, zoteroKey: item.key },
+                    source.source.filePath,
+                ) != null);
+        const applied = restoringOcr ? await ctx.db.markAttachmentExtractedForOcrRestore({
+            libraryId: item.libraryID,
+            zoteroKey: item.key,
+            expectedExtractStatus: previous.extractStatus,
+            fileMtimeMs: afterSignature.mtime_ms,
+            fileSizeBytes: afterSignature.size_bytes,
+            fileHash,
+            extractSchemaVersion: schemaVersion,
+            extractionSource,
+        }) : await ctx.db.markAttachmentExtracted({
             libraryId: item.libraryID,
             zoteroKey: item.key,
             expectedFileMtimeMs: previous.fileMtimeMs,
@@ -242,6 +262,20 @@ export class DocumentExtractExecutor implements JobExecutor {
         }
 
         const hashChanged = previous.structuredDocumentHash !== documentHash;
+        if (!hashChanged && documentHash && extracted.ocrStatus === 'na') {
+            const accountId = Zotero.Beaver?.account?.getSnapshot().session?.user.id;
+            if (accountId) {
+                const woken = await ctx.db.finishFulltextCacheRecovery({
+                    libraryId: item.libraryID,
+                    zoteroKey: item.key,
+                    accountId,
+                    documentHash,
+                    extractionSource,
+                    now: Date.now(),
+                });
+                if (woken) Zotero.Beaver?.backgroundExtractor?.notify();
+            }
+        }
         if (
             hashChanged
             && documentHash
@@ -595,11 +629,13 @@ export class DocumentExtractExecutor implements JobExecutor {
  * Codes worth another attempt. Deliberately a coarse guess: `extraction_failed`
  * covers both a transient extractor fault and a permanently unreadable file, so
  * an extractor that knows the difference says so via `permanent` on the result
- * and that answer wins over this table.
+ * and that answer wins over this table. A permission denial is retried because
+ * the same error also reports a file another program briefly holds locked.
  */
 function isTransientResponseError(code: string): boolean {
     return code === 'download_failed'
         || code === 'extraction_failed'
+        || code === 'file_permission_denied'
         || code === 'worker_unavailable';
 }
 

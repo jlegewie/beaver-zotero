@@ -119,6 +119,21 @@ describe('processing status sentence', () => {
         expect(describeStatus(snapshot)).toMatchObject({ headline: 'Processing files…', stopDrain: true });
     });
 
+    it('shows uploads that run while the user is active as progress, with Start now for the rest', () => {
+        const snapshot = status(0, 10);
+        snapshot.ledger.readable = 4;
+        snapshot.worker.inFlight = 2;
+        snapshot.worker.activeInFlight = 2;
+        snapshot.worker.available = 5;
+        snapshot.worker.backlogGateOpen = false;
+        expect(describeStatus(snapshot)).toMatchObject({
+            tone: 'busy', headline: 'Processing files…', processNow: true, stopDrain: false,
+        });
+        // An idle-gated job running beside them is still finishing up.
+        snapshot.worker.inFlight = 3;
+        expect(describeStatus(snapshot)).toMatchObject({ headline: 'Finishing current file…' });
+    });
+
     it('offers Stop during a Start now drain and not Start now', () => {
         const snapshot = status(0);
         snapshot.worker.available = 3;

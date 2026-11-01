@@ -3,7 +3,9 @@ import { getContextWindow, tryGetWindowRuntime } from '../runtime/windowRuntime'
 import { getSelectedCollections } from '../../src/utils/zoteroSelection';
 import { collectionToReference } from '../utils/zoteroReferences';
 import { atom, type Getter, type Setter } from "jotai";
-import { isTableAttachment } from '../../src/services/artifacts/tableItemIdentity';
+import { isTableAttachment, loadTableItemFields } from '../../src/services/artifacts/tableItemIdentity';
+import { selectedTableTabItemID } from '../../src/ui/tableTabContextPane';
+import { toValidatedMessageAttachment } from '../types/attachments/converters';
 import { truncateText } from "@beaver/agent-ui/utils/stringUtils";
 import { allUserAttachmentKeysAtom } from "@beaver/agent-core/run-state/atoms";
 import { createElement } from 'react';
@@ -16,12 +18,13 @@ import { toReadabilityInfo, summarizeRegularItemReadability } from '../utils/att
 import { InvalidItemsMessageContent } from '../components/ui/popup/InvalidItemsMessageContent';
 import { agentItemFilter } from "../../src/utils/agentItemSupport";
 import { getCurrentReader } from "../utils/readerUtils";
-import { TextSelection, zoteroReferenceLookupKeys } from "@beaver/agent-core/types/attachments/apiTypes";
+import { TextSelection, zoteroReferenceLookupKeys, messageAttachmentKey, type ViewAttachment } from "@beaver/agent-core/types/attachments/apiTypes";
 import { ZoteroTag, CollectionReference } from "@beaver/agent-core/types/zotero";
 import type { ExternalFileRecord } from "../../src/services/database";
 import { currentNoteItemAtom } from "./zoteroContext";
 import type { SlashCommandDescriptor } from "@beaver/agent-ui/composer/slashCommands";
 import { libraryRefForLibraryID } from "../../src/utils/libraryIdentity";
+import { hasUnloadedDisplayData, loadItemDisplayData } from "../../src/utils/zoteroDataLoading";
 
 
 /**
@@ -106,6 +109,13 @@ export const automaticMessageItemKeysAtom = atom<Set<string>>(new Set<string>())
 export const automaticMessageCollectionsAtom = atom<CollectionReference[]>([]);
 
 const messageItemsAtom = atom<Zotero.Item[]>([]);
+
+/**
+ * Bumped when attached items finish loading data their labels read. Label
+ * consumers subscribe to it to re-render; it is deliberately not part of the
+ * draft (`readComposerDraft`), because loading data does not edit the draft.
+ */
+export const messageItemDataRevisionAtom = atom(0);
 export const currentMessageItemsAtom = atom(
     get => get(messageItemsAtom),
     (get, set, update: Zotero.Item[] | ((previous: Zotero.Item[]) => Zotero.Item[])) => {
@@ -116,6 +126,18 @@ export const currentMessageItemsAtom = atom(
         const nextOrigins = new Set([...origins].filter(key => retained.has(key)));
         if (nextOrigins.size !== origins.size) set(automaticMessageItemKeysAtom, nextOrigins);
         set(messageItemsAtom, items);
+
+        // Items from a library not opened this session carry only primary
+        // data, so their labels render a placeholder until it is loaded.
+        // Bump the revision (not the item list) once loaded so labels pick up
+        // the real title without the draft reading as edited.
+        const unloaded = items.filter(hasUnloadedDisplayData);
+        if (unloaded.length > 0) {
+            void loadItemDisplayData(unloaded).then(() => {
+                const current = get(messageItemsAtom);
+                if (unloaded.some(item => current.includes(item))) set(messageItemDataRevisionAtom, revision => revision + 1);
+            });
+        }
     },
 );
 
@@ -125,6 +147,21 @@ export const currentMessageItemsAtom = atom(
  * Cleared after the message is sent.
  */
 export const currentMessageCollectionsAtom = atom<CollectionReference[]>([]);
+
+/**
+ * Saved searches and built-in views (Unfiled Items, …) attached to the current
+ * message. Set when a collection action is picked over one, the way a selected
+ * collection is attached; cleared after the message is sent.
+ */
+export const currentMessageViewsAtom = atom<ViewAttachment[]>([]);
+
+/** Attach views to the current message, skipping ones it already carries. */
+export const addViewsToCurrentMessageAtom = atom(null, (get, set, views: ViewAttachment[]) => {
+    const current = get(currentMessageViewsAtom);
+    const existing = new Set(current.map(messageAttachmentKey));
+    const added = views.filter(view => !existing.has(messageAttachmentKey(view)));
+    if (added.length > 0) set(currentMessageViewsAtom, [...current, ...added]);
+});
 
 /**
  * External files (files from disk, not Zotero items) attached to the current
@@ -222,6 +259,7 @@ export function readComposerDraft(get: Getter) {
         readerAction: get(readerActionContextAtom),
         items: get(currentMessageItemsAtom),
         collections: get(currentMessageCollectionsAtom),
+        views: get(currentMessageViewsAtom),
         files: get(currentMessageExternalFilesAtom),
         automaticItemKeys: get(automaticMessageItemKeysAtom),
         automaticCollections: get(automaticMessageCollectionsAtom),
@@ -238,7 +276,8 @@ export const hasComposerDraftAtom = atom(get => {
     return !!(draft.content.trim() || draft.pills.length || draft.pendingPills.length ||
         draft.pendingAttachments.includes(draft.resetToken) ||
         draft.items.some(item => !draft.automaticItemKeys.has(messageItemKey(item))) ||
-        (draft.collections.length && draft.collections !== draft.automaticCollections) || draft.files.length);
+        (draft.collections.length && draft.collections !== draft.automaticCollections) || draft.views.length ||
+        draft.files.length);
 });
 
 /** Restore rejected input without overwriting edits made while the request was pending. */
@@ -256,6 +295,7 @@ export function restoreMissingComposerDraft(get: Getter, set: Setter, draft: Ret
         set(currentMessageCollectionsAtom, draft.collections);
         set(automaticMessageCollectionsAtom, draft.automaticCollections);
     }
+    if (!get(currentMessageViewsAtom).length) set(currentMessageViewsAtom, draft.views);
     if (!get(currentMessageExternalFilesAtom).length) set(currentMessageExternalFilesAtom, draft.files);
 }
 
@@ -426,6 +466,7 @@ export const clearMessageContextAtom = atom(
         }
         set(currentMessageItemsAtom, []);
         set(currentMessageCollectionsAtom, []);
+        set(currentMessageViewsAtom, []);
         set(currentMessageExternalFilesAtom, []);
         set(currentMessageFiltersAtom, createDefaultMessageFilters());
         set(readerTextSelectionAtom, null);
@@ -828,6 +869,13 @@ export const updateReaderAttachmentAtom = atom(
         // Get current reader
         reader = reader || getCurrentReader();
         if (!reader) {
+            // A selected Beaver tab makes its table the context, as a reader's
+            // file is (a new chat refreshes the context through here).
+            const tableItemID = selectedTableTabItemID(getContextWindow());
+            if (tableItemID) {
+                await set(updateTableTabContextAtom, tableItemID);
+                return;
+            }
             set(currentReaderAttachmentAtom, null);
             return;
         }
@@ -856,6 +904,48 @@ export const updateReaderAttachmentAtom = atom(
             set(currentReaderAttachmentAtom, item);
             validateItemsInBackground(get, set, [item], true);
         }
+    }
+);
+
+/**
+ * Make the table open in a Beaver tab the current context, the way a reader
+ * tab makes its document the current context: it shows as the composer's
+ * context chip, is attached to a message when the thread does not have it
+ * yet, and is reported as the open table in application state. A table in a
+ * library the user excluded is never tracked.
+ */
+export const updateTableTabContextAtom = atom(
+    null,
+    async (get, set, itemID: number) => {
+        const generation = ++readerAttachmentGeneration;
+        set(removePopupMessageAtom, EXCLUDED_LIBRARY_READER_POPUP_ID);
+        const item = await Zotero.Items.getAsync(itemID);
+        if (generation !== readerAttachmentGeneration) return;
+        if (!item || !get(searchableLibraryIdsAtom).includes(item.libraryID)) {
+            set(currentReaderAttachmentAtom, null);
+            return;
+        }
+        await loadTableItemFields([item]);
+        if (generation !== readerAttachmentGeneration) return;
+        if (!isTableAttachment(item) || !get(searchableLibraryIdsAtom).includes(item.libraryID)) {
+            set(currentReaderAttachmentAtom, null);
+            return;
+        }
+        // Only a table that can be submitted becomes the context: table chat
+        // may be disabled in this build, and the provider refuses a table that
+        // is corrupt, pending a write, or cites an excluded library.
+        let sendable = false;
+        try {
+            sendable = (await toValidatedMessageAttachment(item)) !== null;
+        } catch (error: any) {
+            logger(`updateTableTabContextAtom: table ${item.key} is not sendable: ${error?.message ?? error}`, 2);
+        }
+        if (generation !== readerAttachmentGeneration) return;
+        if (!sendable || !get(searchableLibraryIdsAtom).includes(item.libraryID)) {
+            set(currentReaderAttachmentAtom, null);
+            return;
+        }
+        set(currentReaderAttachmentAtom, item);
     }
 );
 

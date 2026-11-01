@@ -41,9 +41,10 @@ async function countAnnotations(item: Zotero.Item): Promise<number> {
     const attachmentIDs = item.getAttachments();
     if (!attachmentIDs.length) return 0;
     const attachments = await Zotero.Items.getAsync(attachmentIDs);
+    await Zotero.Items.loadDataTypes(attachments, ['childItems']);
     for (const attachment of attachments) {
         try {
-            total += attachment.getAnnotations().length;
+            total += attachment.numAnnotations();
         } catch (e) {
             // Attachment types without an annotation store are simply skipped.
         }

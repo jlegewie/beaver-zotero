@@ -154,3 +154,79 @@ describe("DocumentAnalyzer low_alphanumeric_ratio false-positive defenses", () =
         expect(result.needsOCR).toBe(false);
     });
 });
+
+/** A text page that also carries an image block covering `coverage` of the page. */
+function withImage(page: RawPageData, coverage: number): RawPageData {
+    const side = Math.sqrt(coverage * page.width * page.height);
+    return {
+        ...page,
+        blocks: [
+            ...page.blocks,
+            { type: "image", bbox: { l: 0, t: 0, r: side, b: side, origin: "top-left" } },
+        ],
+    };
+}
+
+/** A vector plot: data points drawn as one glyph each, nothing else in the body. */
+const plotMarkerText = "!".repeat(92);
+
+describe("DocumentAnalyzer low_alphanumeric_ratio on sparse symbol pages", () => {
+    it("does not flag an image-free page whose body is only a few plot-marker glyphs", () => {
+        const analyzer = new DocumentAnalyzer(
+            makeProvider([
+                makeTextPage(0, plotMarkerText),
+                makeTextPage(1, plotMarkerText),
+            ]),
+        );
+        const result = analyzer.analyzeOCRNeeds();
+
+        expect(result.issueBreakdown.low_alphanumeric_ratio).toBe(0);
+        expect(result.needsOCR).toBe(false);
+    });
+
+    it("does not flag an image-free page of a few distinct symbols", () => {
+        const analyzer = new DocumentAnalyzer(
+            makeProvider([makeTextPage(0, "•➢•–•"), makeTextPage(1, "•➢•–•")]),
+        );
+        const result = analyzer.analyzeOCRNeeds();
+
+        expect(result.issueBreakdown.low_alphanumeric_ratio).toBe(0);
+    });
+
+    it("still flags the same sparse symbols on a page that carries an image", () => {
+        // Scanned pages can surface only a stray bullet or bracket as text;
+        // the image keeps them under the ratio check.
+        const analyzer = new DocumentAnalyzer(
+            makeProvider([
+                withImage(makeTextPage(0, plotMarkerText), 0.3),
+                withImage(makeTextPage(1, plotMarkerText), 0.3),
+            ]),
+        );
+        const result = analyzer.analyzeOCRNeeds();
+
+        expect(result.issueBreakdown.low_alphanumeric_ratio).toBe(2);
+    });
+
+    it("still flags a sparse image-free page of unmapped glyphs", () => {
+        // The leader collapse folds a U+FFFD run to one character, so the
+        // sample size alone would exempt it; unmapped glyphs keep the check.
+        const unmapped = "�".repeat(40);
+        const analyzer = new DocumentAnalyzer(
+            makeProvider([makeTextPage(0, unmapped), makeTextPage(1, unmapped)]),
+        );
+        const result = analyzer.analyzeOCRNeeds();
+
+        expect(result.issueBreakdown.low_alphanumeric_ratio).toBe(2);
+        expect(result.needsOCR).toBe(true);
+    });
+
+    it("still flags an image-free page once its symbol sample reaches the minimum", () => {
+        const varied = "%^&~|#@$*".repeat(3);
+        const analyzer = new DocumentAnalyzer(
+            makeProvider([makeTextPage(0, varied), makeTextPage(1, varied)]),
+        );
+        const result = analyzer.analyzeOCRNeeds();
+
+        expect(result.issueBreakdown.low_alphanumeric_ratio).toBe(2);
+    });
+});

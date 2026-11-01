@@ -4,7 +4,10 @@ import {
 } from '@beaver/agent-core/transport/agentDataDispatch';
 
 export const RELEASE_DEBOUNCE_MS = 1000;
+/** An owner's pause lapses this long after its most recent pause call. */
 export const SAFETY_IDLE_MS = 600_000;
+/** No continuous hold outlives this, however often its owners renew. */
+export const MAX_HOLD_MS = 1_800_000;
 
 /**
  * Seconds Zotero waits after an edit before auto-syncing (mirrors Zotero's
@@ -25,9 +28,11 @@ interface SyncRunner {
 
 export function createSyncPauseService() {
     let resumeSync: ResumeSync | null = null;
-    let safetyTimer: ReturnType<typeof setTimeout> | null = null;
+    let holdStartedAt: number | null = null;
+    let leaseTimer: ReturnType<typeof setTimeout> | null = null;
     const releaseDebounceTimers = new Map<SyncPauseOwner, ReturnType<typeof setTimeout>>();
-    const activeOwners = new Set<SyncPauseOwner>();
+    /** Owner -> time its lease expires. Renewed by every pause from that owner. */
+    const activeOwners = new Map<SyncPauseOwner, number>();
 
     /** The live Zotero sync runner, or null when Zotero is unavailable. */
     function getRunner(): SyncRunner | null {
@@ -88,27 +93,49 @@ export function createSyncPauseService() {
         releaseDebounceTimers.clear();
     }
 
-    /** Clear the idle safety timer, if one is armed. */
-    function clearSafetyTimer(): void {
-        if (safetyTimer !== null) {
-            clearTimeout(safetyTimer);
-            safetyTimer = null;
+    function clearLeaseTimer(): void {
+        if (leaseTimer !== null) {
+            clearTimeout(leaseTimer);
+            leaseTimer = null;
         }
     }
 
-    /** Re-arm the idle backstop that releases sync suppression after a dead run. */
-    function armSafetyTimer(): void {
-        clearSafetyTimer();
-        safetyTimer = setTimeout(() => {
-            logger(`syncPause: idle safety timer fired after ${SAFETY_IDLE_MS}ms, releasing`, 2);
-            // Backstop for a leaked pause: restore normal auto-sync without forcing a
-            // sync (a dead run is abnormal; let the next edit/idle trigger it).
-            if ([...activeOwners].some(owner => owner.startsWith("mutation:"))) {
-                armSafetyTimer();
-                return;
+    /**
+     * Arm one timer for the earliest deadline: the soonest owner lease or the
+     * hold cap. This backstop is what guarantees the pause ends even when an
+     * owner never settles — a write stuck inside Zotero, or a run whose window
+     * died before releasing it.
+     */
+    function armLeaseTimer(): void {
+        clearLeaseTimer();
+        if (holdStartedAt === null || activeOwners.size === 0) return;
+        const deadline = Math.min(...activeOwners.values(), holdStartedAt + MAX_HOLD_MS);
+        leaseTimer = setTimeout(expireLeases, Math.max(0, deadline - Date.now()));
+    }
+
+    function expireLeases(): void {
+        leaseTimer = null;
+        const now = Date.now();
+        if (holdStartedAt !== null && now >= holdStartedAt + MAX_HOLD_MS) {
+            logger(`syncPause: sync held for ${now - holdStartedAt}ms, forcing release`, 1);
+            // Push whatever the held run wrote; a still-active run re-acquires
+            // on its next write with a fresh hold.
+            resumeSyncNow(true);
+            return;
+        }
+        for (const [owner, expiresAt] of activeOwners) {
+            if (now >= expiresAt) {
+                logger(`syncPause: lease expired for ${owner}, releasing it`, 1);
+                clearReleaseDebounce(owner);
+                activeOwners.delete(owner);
             }
+        }
+        if (activeOwners.size === 0) {
+            // A lapsed lease is abnormal; let the next edit/idle trigger a sync.
             resumeSyncNow(false);
-        }, SAFETY_IDLE_MS);
+            return;
+        }
+        armLeaseTimer();
     }
 
     /** Pause Zotero sync before a mutating agent action can schedule auto-sync. */
@@ -120,20 +147,19 @@ export function createSyncPauseService() {
             }
 
             clearReleaseDebounce(owner);
-            activeOwners.add(owner);
-            armSafetyTimer();
+            activeOwners.set(owner, Date.now() + SAFETY_IDLE_MS);
 
             // Suppress the visible auto-sync spinner for edits made during the run.
             suppressAutoSync(runner);
 
-            if (resumeSync !== null) {
-                return;
+            if (resumeSync === null) {
+                // Hard guarantee that even a manual/in-flight sync can't push data
+                // mid-run; released once the run settles or its lease lapses.
+                resumeSync = runner.delayIndefinite();
+                holdStartedAt = Date.now();
+                logger('syncPause: paused Zotero sync for mutating run', 3);
             }
-
-            // Hard guarantee that even a manual/in-flight sync can't push data
-            // mid-run; released once the run settles.
-            resumeSync = runner.delayIndefinite();
-            logger('syncPause: paused Zotero sync for mutating run', 3);
+            armLeaseTimer();
         } catch (err) {
             logger('Zotero sync pause failed', { error: String(err) }, 1);
         }
@@ -162,6 +188,7 @@ export function createSyncPauseService() {
         clearReleaseDebounce(owner);
         activeOwners.delete(owner);
         if (activeOwners.size > 0) {
+            armLeaseTimer();
             return;
         }
         resumeSyncNow(reschedule);
@@ -176,8 +203,9 @@ export function createSyncPauseService() {
      */
     function resumeSyncNow(reschedule = false): void {
         clearAllReleaseDebounces();
-        clearSafetyTimer();
+        clearLeaseTimer();
         activeOwners.clear();
+        holdStartedAt = null;
 
         const resume = resumeSync;
         resumeSync = null;
@@ -209,7 +237,7 @@ export function createSyncPauseService() {
 
 
     function releaseWindow(windowId: string): void {
-        for (const owner of activeOwners) {
+        for (const owner of activeOwners.keys()) {
             if (owner.startsWith(`chat:${windowId}:`)) scheduleResumeAfterRun(owner);
         }
     }

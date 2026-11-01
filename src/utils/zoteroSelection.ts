@@ -170,3 +170,28 @@ export function getSelectedSavedSearches(zp: any): Zotero.Search[] {
         (search) => (search ? [search] : []),
     );
 }
+
+/**
+ * Collections-tree row types, besides collections, that a collection-targeted
+ * action can run on: saved searches and the special views the agent can list
+ * (Unfiled Items, My Publications, Retracted Items). They are attached to the
+ * message as `saved_search` / `special_collection` attachments.
+ *
+ * Library roots are deliberately left out — a library-wide run is what global
+ * actions are for — as are Duplicate Items and the Trash, which the agent
+ * cannot list.
+ */
+export const COLLECTION_TARGET_VIEW_TYPES = ['search', 'unfiled', 'publications', 'retracted'] as const;
+
+export type CollectionTargetViewType = typeof COLLECTION_TARGET_VIEW_TYPES[number];
+
+export function isCollectionTargetViewType(type: unknown): type is CollectionTargetViewType {
+    return (COLLECTION_TARGET_VIEW_TYPES as readonly unknown[]).includes(type);
+}
+
+/**
+ * Drag data type Beaver adds to collections-tree rows for the built-in views
+ * (see `src/modules/viewRowDrag.ts`). The value is a JSON
+ * `{ libraryID, type, name }` object.
+ */
+export const VIEW_ROW_DRAG_TYPE = 'beaver/zotero-view';

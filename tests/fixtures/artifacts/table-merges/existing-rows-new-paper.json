@@ -1,0 +1,178 @@
+{
+    "name": "a new paper is appended after the stored rows",
+    "existing": [
+        {
+            "id": "r1",
+            "ref": {
+                "kind": "item",
+                "library_ref": "u",
+                "zotero_key": "AAA"
+            },
+            "cells": {
+                "_reference": {
+                    "outcome": "answered",
+                    "provenance": "system",
+                    "value": {
+                        "kind": "reference",
+                        "display_name": "Sampling hard-to-reach groups online",
+                        "title": "Sampling hard-to-reach groups online",
+                        "item_type": "journalArticle"
+                    }
+                },
+                "_year": {
+                    "outcome": "answered",
+                    "provenance": "system",
+                    "value": {
+                        "kind": "date",
+                        "value": "2020"
+                    }
+                },
+                "_identifier": {
+                    "outcome": "answered",
+                    "provenance": "system",
+                    "value": {
+                        "kind": "link",
+                        "url": "https://doi.org/10.1000/alpha",
+                        "label": "10.1000/alpha"
+                    }
+                }
+            },
+            "in_library": true,
+            "origin": [
+                {
+                    "source": "s1",
+                    "date": "2026-10-20"
+                }
+            ]
+        }
+    ],
+    "incoming": [
+        {
+            "row": {
+                "id": "r9",
+                "ref": {
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "BBB"
+                },
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "A wholly different paper title",
+                            "title": "A wholly different paper title",
+                            "item_type": "journalArticle"
+                        }
+                    },
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "date",
+                            "value": "2020"
+                        }
+                    }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
+            },
+            "identifiers": {
+                "doi": "10.1000/beta"
+            }
+        }
+    ],
+    "after": {
+        "rows": [
+            {
+                "id": "r1",
+                "ref": {
+                    "library_ref": "u",
+                    "zotero_key": "AAA",
+                    "kind": "item"
+                },
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Sampling hard-to-reach groups online",
+                            "title": "Sampling hard-to-reach groups online",
+                            "item_type": "journalArticle"
+                        }
+                    },
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "date",
+                            "value": "2020"
+                        }
+                    },
+                    "_identifier": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "link",
+                            "url": "https://doi.org/10.1000/alpha",
+                            "label": "10.1000/alpha"
+                        }
+                    }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
+            },
+            {
+                "id": "r9",
+                "ref": {
+                    "library_ref": "u",
+                    "zotero_key": "BBB",
+                    "kind": "item"
+                },
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "A wholly different paper title",
+                            "title": "A wholly different paper title",
+                            "item_type": "journalArticle"
+                        }
+                    },
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "date",
+                            "value": "2020"
+                        }
+                    }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
+            }
+        ],
+        "added": [
+            "r9"
+        ],
+        "merged": 0
+    }
+}

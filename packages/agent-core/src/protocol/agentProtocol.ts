@@ -1,10 +1,11 @@
+export type { DuplicatesRequest, DuplicatesResponse } from './duplicates';
 export { validateArtifactRequest } from './artifactProtocol';
 import type { ArtifactRequest } from './artifactProtocol';
 import { SubscriptionStatus, ProcessingMode, ChargeType } from '../types/profile';
 import { TextPart, ThinkingPart, ToolCallPart, ToolReturnPart, RetryPromptPart, RunUsage } from '../agents/types';
 import { ZoteroItemReference } from '../types/zotero';
 import { ItemDataWithStatus, AttachmentDataWithStatus, ItemStub, ItemSummary, AttachmentInfo, AttachmentStub } from '../types/zotero';
-import { ReaderState, NoteState } from '../types/attachments/apiTypes';
+import { ReaderState, NoteState, TableState } from '../types/attachments/apiTypes';
 import { BeaverAgentPrompt } from '../agents/types';
 import type { RetryTrigger } from '../agents/types';
 import type { CustomChatModel } from '../types/customChatModel';
@@ -23,6 +24,12 @@ export { isRenderableMessage } from '../agents/messageVisibility';
 /** Base interface for all WebSocket events from the server */
 export interface WSBaseEvent {
     event: string;
+    /**
+     * Position of a run event in its run, on a backend that can reattach runs
+     * (see `WSReadyEvent.supports_run_reattach`). Requests and prompts, which
+     * are re-sent by id rather than replayed, carry none.
+     */
+    seq?: number;
 }
 
 /** Ready event sent after connection validation completes */
@@ -35,6 +42,78 @@ export interface WSReadyEvent extends WSBaseEvent {
     supports_request_acks?: boolean;
     /** Backend accepts `request_keepalive` messages for in-flight requests */
     supports_request_keepalive?: boolean;
+    /** Backend answers the client's `ping` heartbeat with a `pong` */
+    supports_heartbeat?: boolean;
+    /**
+     * A run whose socket is lost abnormally keeps going on the server for
+     * `reattach_grace_s` seconds, and a client that declared
+     * CLIENT_FEATURES.RUN_REATTACH can open a new socket and send
+     * `WSReattachRequest` to pick it up.
+     */
+    supports_run_reattach?: boolean;
+    reattach_grace_s?: number | null;
+}
+
+/**
+ * Connection heartbeat sent periodically after `ready`. The backend replies
+ * with a `pong`, so a silent socket means the connection is gone even when
+ * the browser has not noticed. Gated on `WSReadyEvent.supports_heartbeat`.
+ */
+export interface WSPingMessage {
+    type: 'ping';
+    /**
+     * Highest run-event `seq` this client has handled, sent to a backend that
+     * reattaches runs so it can stop holding those events for replay.
+     */
+    last_seq?: number;
+}
+
+/**
+ * Pick up a run that lost its socket, sent after `ready` instead of a chat
+ * request. Answered with `reattached` (then the events after `last_seq`, then
+ * every request still waiting on the client, with its original id) or with
+ * `reattach_unavailable`.
+ */
+export interface WSReattachRequest {
+    type: 'reattach';
+    run_id: string;
+    /** From the run's `request_ack`. */
+    reattach_token: string;
+    /** Highest `seq` handled for this run; 0 if none. */
+    last_seq: number;
+}
+
+/** The first message a connection sends after `ready`. */
+export type AgentConnectRequest = AgentRunRequest | WSReattachRequest;
+
+/** Whether a connect request picks up an existing run rather than starting one. */
+export function isReattachRequest(request: AgentConnectRequest): request is WSReattachRequest {
+    return request.type === 'reattach';
+}
+
+/** A `reattach` succeeded: the run continues on this socket. */
+export interface WSReattachedEvent extends WSBaseEvent {
+    event: 'reattached';
+    run_id: string;
+    /** Highest `seq` the run has produced so far. */
+    last_seq: number;
+    /** Number of buffered events about to be replayed. */
+    replayed: number;
+}
+
+/** Why the backend refused a `reattach`. */
+export type WSReattachUnavailableReason =
+    | 'not_found'
+    | 'expired'
+    | 'wrong_install'
+    | 'bad_token'
+    | 'unsupported';
+
+/** A `reattach` was refused; the client falls back to its usual error handling. */
+export interface WSReattachUnavailableEvent extends WSBaseEvent {
+    event: 'reattach_unavailable';
+    run_id: string;
+    reason: WSReattachUnavailableReason;
 }
 
 /**
@@ -77,6 +156,11 @@ export interface WSRequestAckEvent extends WSBaseEvent {
     model_id: string | null;
     model_name: string | null;
     charge_type: ChargeType;
+    /**
+     * Proof of ownership the client presents to reattach to this run after
+     * losing its socket. Only for runs the backend lets outlive their socket.
+     */
+    reattach_token?: string;
 }
 
 /** Part event for streaming content (text, thinking, tool calls) */
@@ -189,6 +273,11 @@ export interface WSRunCitationsEvent extends WSBaseEvent {
 /** Done event signaling the request is fully complete (after persistence, usage logging, etc.) */
 export interface WSDoneEvent extends WSBaseEvent {
     event: 'done';
+}
+
+/** Reply to a client `ping` (see WSPingMessage) */
+export interface WSPongEvent extends WSBaseEvent {
+    event: 'pong';
 }
 
 /** Streaming done event: all LLM tokens sent, post-processing (citations) still in progress */
@@ -340,6 +429,13 @@ export interface WSZoteroDocumentRequest extends WSBaseEvent {
     timeout_seconds?: number;
     /** Maximum uncompressed serialized size of payload. */
     max_payload_bytes?: number | null;
+    /**
+     * Extraction schema version to produce for the resolved content kind.
+     * Absent means the current version. A producible version that is not
+     * current is extracted on demand without the document cache (structured
+     * mode only); any other version fails with `unsupported_schema_version`.
+     */
+    schema_version?: string | null;
 }
 
 /** Request from backend to render attachment pages as images */
@@ -514,8 +610,8 @@ export interface ItemSearchFrontendResultItem {
  * Used for backend diagnostics to understand where time is spent during search operations.
  */
 export interface FrontendTimingMetadata {
-    /** Allow additional timing keys from TimingAccumulator */
-    [key: string]: number | undefined;
+    /** Allow additional timing keys from TimingAccumulator, plus string diagnostics such as `active_addons` */
+    [key: string]: number | string | undefined;
     /** Total operation time in milliseconds */
     total_ms?: number;
     /** Time spent in search/query phase */
@@ -577,6 +673,16 @@ export interface FrontendTimingMetadata {
     pdf_check_ms?: number;
     /** Total time inside applyCreateItemData (createZoteroItem + post-processing) */
     apply_ms?: number;
+
+    // Committed-transaction timings (summed over an action's writes)
+    /** Time from starting a write transaction to its commit */
+    tx_commit_ms?: number;
+    /** Time from the commit until the write returned (Notifier observers, capped by the grace period) */
+    post_commit_ms?: number;
+    /** Writes that returned while their Notifier observers were still running */
+    observers_deferred?: number;
+    /** Active non-system add-ons (`id@version`, comma separated), sent only when observers were slow */
+    active_addons?: string;
 
     // Reference check specific timings
     /** Time spent in phase 1: identifier (DOI/ISBN) lookup */
@@ -940,6 +1046,7 @@ export type ZoteroDocumentErrorCode =
     | 'is_linked_url'       // Attachment is a linked URL, not a stored file
     | 'file_missing'        // PDF file not available locally
     | 'file_too_large'      // PDF file exceeds size limit
+    | 'file_permission_denied' // The OS refused Zotero access to the local file (folder permissions, file lock)
     | 'encrypted'           // PDF is password-protected
     | 'no_text_layer'       // PDF needs OCR
     | 'invalid_pdf'         // Invalid/corrupted PDF
@@ -958,6 +1065,7 @@ export type ZoteroDocumentErrorCode =
     | 'document_too_large'  // Serialized extraction result exceeds the WebSocket transfer budget
     | 'beaver_table'        // The item is a Beaver table; `error` names its portable id so the backend can redirect to read_table
     | 'schema_version_mismatch'
+    | 'unsupported_schema_version' // Requested `schema_version` is not producible for this content kind and mode
     | 'mode_mismatch';
 
 /**
@@ -1007,6 +1115,78 @@ export interface ServedAttachmentDiagnostics {
 }
 
 /** Response to whole-document extraction request */
+/**
+ * Where a document request spent its time in the plugin, in whole
+ * milliseconds. Sent on PDF success responses so backend traces can split a
+ * fetch's latency between the plugin and the rest of the round trip. Stages
+ * that did not run are absent.
+ */
+export interface WSDocumentTimings {
+    /** From receiving the request to building the response. */
+    total_ms: number;
+    /**
+     * How the document was obtained: `cache` (the plugin's document cache had
+     * it), `extracted` (this request ran the extraction), or `shared` (another
+     * request's extraction of the same document, or a cache entry written
+     * meanwhile).
+     */
+    source: 'cache' | 'extracted' | 'shared';
+    /** Resolving the attachment's file (local path, size, remote availability). */
+    resolve_ms?: number;
+    /** Document-cache lookups before extracting. */
+    cache_lookup_ms?: number;
+    /** Reading (or downloading) the PDF bytes. */
+    file_read_ms?: number;
+    /** Page-count worker op, on a cache miss without stored metadata. */
+    page_count_ms?: number;
+    /** Extraction worker op, round trip as seen by the plugin. */
+    extract_ms?: number;
+    /**
+     * Waiting for other work, summed over the request's worker ops (page count
+     * and extraction, so part of `page_count_ms` and `extract_ms`): in the
+     * plugin's worker queue behind other requests' operations.
+     */
+    client_queue_ms?: number;
+    /** Likewise: waiting for the worker to start (spawn, MuPDF load, recycle). */
+    worker_start_ms?: number;
+    /** Likewise: sent to the worker, waiting while an earlier operation ran there. */
+    worker_queue_ms?: number;
+    /** Of `extract_ms`: the worker running the extraction. */
+    worker_op_ms?: number;
+    /**
+     * The worker when this request used it: `starting` (it waited for the
+     * worker to spawn and load), `first_extract` (no extraction had run on
+     * this worker yet, so its code was not yet optimised), `warmed` (no
+     * extraction had run yet, but the worker had run its warm-up extraction),
+     * or `warm`.
+     */
+    worker_state?: 'starting' | 'first_extract' | 'warmed' | 'warm';
+    /**
+     * The worker slot the request's operations ran on: `hot`, or `background`
+     * when the hot worker was busy and the request ran on the idle background
+     * worker instead.
+     */
+    worker_slot?: 'hot' | 'background';
+    /**
+     * Set when the hot worker was busy but the request still queued on it:
+     * `lane_busy` (the background worker was in use), `bg_not_warm` (it was
+     * not started and warmed up yet), or `disabled`.
+     */
+    overflow_skip?: 'lane_busy' | 'bg_not_warm' | 'disabled';
+    /** The worker's WASM heap after the request's last worker operation, MB. */
+    worker_heap_mb?: number;
+    /** The largest WASM heap a worker of this slot has reported so far, MB. */
+    worker_peak_heap_mb?: number;
+    /**
+     * Writing the extracted result to the document cache. The plugin writes
+     * after responding, so this is present only when the write had already
+     * finished when the response was built; it is not part of `total_ms`.
+     */
+    cache_write_ms?: number;
+    /** Waiting for `attachment_diagnostics` before responding. */
+    diagnostics_wait_ms?: number;
+}
+
 export interface WSZoteroDocumentResponse {
     type: 'zotero_document';
     request_id: string;
@@ -1034,6 +1214,8 @@ export interface WSZoteroDocumentResponse {
     error_code?: ZoteroDocumentErrorCode | null;
     /** Worker health snapshot, attached to timeout error responses. */
     worker_diagnostics?: WSWorkerDiagnostics | null;
+    /** Where the request spent its time in the plugin (PDF success responses). */
+    timings?: WSDocumentTimings | null;
 }
 
 /** Error codes for attachment page image rendering failures */
@@ -1045,6 +1227,7 @@ export type AttachmentPageImagesErrorCode =
     | 'is_linked_url'       // Attachment is a linked URL, not a stored file
     | 'file_missing'        // PDF file not available locally
     | 'file_too_large'      // PDF file exceeds size limit
+    | 'file_permission_denied' // The OS refused Zotero access to the local file (folder permissions, file lock)
     | 'encrypted'           // PDF is password-protected
     | 'invalid_pdf'         // Invalid/corrupted PDF
     | 'empty_document'      // PDF opened but has no readable pages
@@ -1086,6 +1269,7 @@ export type AttachmentImageErrorCode =
     | 'unsupported_image_format'   // Image format the runtime cannot decode (TIFF, HEIC, SVG, ...)
     | 'file_missing'               // Image file not available locally
     | 'file_too_large'             // Image file exceeds size limit
+    | 'file_permission_denied' // The OS refused Zotero access to the local file (folder permissions, file lock)
     | 'download_failed'            // Remote file download failed
     | 'decode_failed'              // Image could not be decoded (corrupt/truncated)
     | 'timeout'                    // Processing timed out
@@ -1197,6 +1381,7 @@ export type AttachmentSearchErrorCode =
     | 'not_pdf'             // Attachment is not a PDF
     | 'file_missing'        // PDF file not available locally
     | 'file_too_large'      // PDF file exceeds size limit
+    | 'file_permission_denied' // The OS refused Zotero access to the local file (folder permissions, file lock)
     | 'encrypted'           // PDF is password-protected
     | 'invalid_pdf'         // Invalid/corrupted PDF
     | 'empty_document'      // PDF opened but has no readable pages
@@ -1484,9 +1669,23 @@ export interface WSListItemsRequest extends WSBaseEvent {
     request_id: string;
     library_id?: number | string | null;
     collection_key?: string | null;
+    /**
+     * Built-in view to list instead of a collection. Typed as a string because
+     * the backend may send a view this client does not know; the handler
+     * rejects anything outside `ListableSpecialCollectionType`.
+     */
+    special_collection?: string | null;
     tag?: string | null;
     item_category: ZoteroItemCategory;
     include_children?: boolean;
+    /**
+     * With `include_children`: sort and page top-level items only and nest each
+     * item's children on its row (`attachments` / `notes`). Sent only to
+     * clients that declare `list_items_nested_children`.
+     */
+    nest_children?: boolean;
+    /** Add `abstract` to every regular row. */
+    include_abstract?: boolean;
     recursive: boolean;
     sort_by: string;
     sort_order: string;
@@ -1508,6 +1707,19 @@ export interface RegularListResultItem {
     year?: number | null;
     date_added?: string | null;
     date_modified?: string | null;
+    /**
+     * Set only for an `include_abstract` request: "" when the item has no
+     * abstract. Left out when it could not be read, which tells the backend to
+     * look it up another way.
+     */
+    abstract?: string;
+    /**
+     * Set only for a `nest_children` request: the item's attachments, primary
+     * first, then by title. Left out when its children could not be read.
+     */
+    attachments?: AttachmentRowResult[];
+    /** Set with `attachments`: the item's child notes, by title. */
+    notes?: NoteResultItem[];
 }
 
 /** Response to list_items request */
@@ -1595,6 +1807,15 @@ export interface WSResolvePopulationRequest extends WSBaseEvent {
     item_category: 'regular' | 'attachment';
     /** Include matching standalone attachments before exclusions and truncation. */
     include_standalone_attachments?: boolean;
+    /**
+     * Attachment populations only: leave out a web snapshot (`text/html`)
+     * whose parent item also has a PDF or EPUB attachment in the population.
+     * Applied before exclusions and truncation, so every tranche of a
+     * continued job sees the same population.
+     *
+     * A handler that applies this MUST set `sibling_snapshots_skipped`.
+     */
+    skip_sibling_snapshots?: boolean;
     /** Filter regular items by attachment presence; null = no filter. */
     has_attachments?: boolean | null;
     /**
@@ -1678,6 +1899,12 @@ export interface WSResolvePopulationResponse {
     /** Portable identities aligned with collection_names; legacy keys remain accepted. */
     collection_ids?: string[];
     /**
+     * Display names of the saved searches named by `savedSearch` conditions,
+     * keyed by the condition value as sent. The approval card names a saved
+     * search from these and falls back to its key.
+     */
+    saved_search_names?: Record<string, string> | null;
+    /**
      * The join mode actually applied to the request's `conditions`. Set on
      * every successful resolution, and absent from a failure.
      *
@@ -1699,6 +1926,12 @@ export interface WSResolvePopulationResponse {
     any_conditions_applied?: boolean | null;
     /** Confirms standalone attachments were included in resolution. */
     standalone_attachments_included?: boolean | null;
+    /**
+     * How many web snapshots `skip_sibling_snapshots` left out, counted before
+     * exclusions and truncation. Set (including 0) on every successful
+     * resolution of a request that asked for it; absent otherwise.
+     */
+    sibling_snapshots_skipped?: number | null;
     error?: string | null;
     error_code?: string | null;
     /** Available libraries (only included when error_code is 'library_not_found' or 'library_unavailable') */
@@ -1734,6 +1967,13 @@ export interface WSItemDisplayRequest extends WSBaseEvent {
      * most 1,000 items.
      */
     item_ids: string[];
+    /**
+     * Also report whether each regular item has a document a table row
+     * reads — a PDF, EPUB or HTML snapshot outside the trash (`has_pdf`).
+     * Attachment presence only; no file is opened. Asked by the table card's
+     * local lookups; the backend does not send it.
+     */
+    include_pdf?: boolean;
 }
 
 /** One item as a list draws it, computed by the client that owns the library. */
@@ -1752,6 +1992,8 @@ export interface ItemDisplayRow {
     subtitle?: string | null;
     /** Attachments only: the broad content kind, for the icon. */
     content_kind?: string | null;
+    /** Regular items, when the request asked: whether a PDF, EPUB or snapshot attachment exists. */
+    has_pdf?: boolean;
 }
 
 /**
@@ -2096,7 +2338,7 @@ export interface WSListLibrariesResponse {
 export type DeferredToolPreference = 'always_ask' | 'always_apply' | 'continue_without_applying';
 
 /** Agent action type for deferred tools */
-export type AgentActionType = 'highlight_annotation' | 'note_annotation' | 'create_highlight_annotations' | 'create_note_annotations' | 'edit_annotations' | 'zotero_note' | 'create_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'manage_tags' | 'manage_collections' | 'confirm_extraction' | 'confirm_external_search' | 'edit_note' | 'edit_note_batch' | 'create_note';
+export type AgentActionType = 'highlight_annotation' | 'note_annotation' | 'create_highlight_annotations' | 'create_note_annotations' | 'edit_annotations' | 'create_item' | 'import_item' | 'edit_metadata' | 'create_collection' | 'organize_items' | 'manage_tags' | 'merge_items' | 'manage_collections' | 'confirm_extraction' | 'confirm_external_search' | 'edit_note' | 'edit_note_batch' | 'create_note';
 
 /** Request from backend to validate an agent action */
 export interface WSAgentActionValidateRequest extends WSBaseEvent {
@@ -2195,6 +2437,8 @@ export interface WSAgentActionExecuteRequest extends WSBaseEvent {
     run_id?: string;
     /** Thread ID */
     thread_id?: string;
+    /** Tool call the action belongs to; absent from older backends. */
+    toolcall_id?: string;
 }
 
 /** Response to agent action execution request */
@@ -2230,6 +2474,7 @@ export interface WSDeferredApprovalRequest extends WSBaseEvent {
 
 /** Response to deferred approval request (user's decision) */
 export interface WSDeferredApprovalResponse {
+    action_changes?: import('./duplicates').MergeItemsChoices;
     type: 'deferred_approval_response';
     action_id: string;
     approved: boolean;
@@ -2363,7 +2608,6 @@ export type BatchApprovalMode = 'full_access' | 'ask_each_time';
  * nothing destructive, and the block is then hidden.
  */
 export interface WSBatchApprovalRequest extends WSBaseEvent {
-    table?: import('./artifactProtocol').TableBatchApproval | null;
     event: 'batch_approval_request';
     /** Correlation id for the response */
     approval_id: string;
@@ -2452,7 +2696,6 @@ export interface WSBatchApprovalRequest extends WSBaseEvent {
  * batch runs, on a decline they say what to do instead.
  */
 export interface WSBatchApprovalResponse {
-    table?: import('./artifactProtocol').TableApprovalIdentity;
     type: 'batch_approval_response';
     approval_id: string;
     /** Whether the user approved the batch */
@@ -2562,6 +2805,9 @@ export type WSEvent =
     | WSRunCitationsEvent
     | WSStreamingDoneEvent
     | WSDoneEvent
+    | WSPongEvent
+    | WSReattachedEvent
+    | WSReattachUnavailableEvent
     | WSThreadEvent
     | WSThreadNameEvent
     | WSErrorEvent
@@ -2590,6 +2836,7 @@ export type WSEvent =
     | WSListTagsRequest
     | WSGetMetadataRequest
     | WSGetAnnotationsRequest
+    | import('./duplicates').DuplicatesRequest
     | WSFindAnnotationsRequest
     | WSListLibrariesRequest
     // Note tools
@@ -2605,6 +2852,9 @@ export type WSEvent =
     // Run-level batch approval
     | WSBatchApprovalRequest
     | WSBatchApprovalStale
+    // Table card
+    | import('./tableCardProtocol').WSTableCardRequest
+    | import('./tableCardProtocol').WSTableCardStale
     // User interaction events
     | WSAskUserQuestionRequest;
 
@@ -2633,6 +2883,10 @@ export interface WSAuthMessage {
      * home both open) and show the user a recognizable label. Absent for
      * non-Zotero clients. */
     zotero_instance?: ZoteroInstanceWire;
+    /** Extraction schema versions this client serves document requests in.
+     * Absent for clients that serve no documents; the backend treats a missing
+     * PDF entry as current "4", producible ["4"]. */
+    extract_schema_versions?: ExtractSchemaVersionsWire;
     /** Provider-mode handshakes only: echo of the `wake_id` from the
      * provider-wake broadcast that triggered this connection. Absent for chat
      * connections and for provider connections opened without a wake. */
@@ -2657,6 +2911,19 @@ export interface WSAuthMessage {
         timed_out?: boolean;
     };
 }
+
+/** Extraction schema versions of one content kind a client can produce. */
+export interface ExtractSchemaVersionDeclaration {
+    /** Version served when a document request names none. */
+    current: string;
+    /** Every version a document request may name, including `current`. */
+    producible: string[];
+}
+
+/** Per-content-kind extraction schema versions, declared at connect. */
+export type ExtractSchemaVersionsWire = Partial<
+    Record<Exclude<ExtractContentKind, 'text'>, ExtractSchemaVersionDeclaration>
+>;
 
 /**
  * Wire shape (snake_case) identifying a Zotero install. `local_user_key` is always
@@ -2685,6 +2952,7 @@ export interface ZoteroInstanceWire {
  * values MUST match the backend's `FEAT_*` constants exactly.
  */
 export const CLIENT_FEATURES = {
+    ZOTERO_DUPLICATES: 'zotero_duplicates',
     LIBRARY_MANAGEMENT: 'library_management',
     MANAGE_LIBRARY_STRUCTURE: 'manage_library_structure',
     NOTE_SUPPORT: 'note_support',
@@ -2709,7 +2977,23 @@ export const CLIENT_FEATURES = {
     EXTERNAL_FILES: 'external_files',
     ASK_USER_QUESTION: 'ask_user_question',
     PORTABLE_IDS: 'portable_ids',
+    /** Scoped collection resolution, stable mutation targets, and portable result readers. */
+    COLLECTION_IDS: 'collection_ids',
     LIST_ITEMS_INCLUDE_CHILDREN: 'list_items_include_children',
+    /**
+     * `list_items` honors `nest_children`: an `include_children` listing pages
+     * top-level items only and nests their children on each row. A client
+     * without it returns children as rows of their own, sorted and paged with
+     * their parents.
+     */
+    LIST_ITEMS_NESTED_CHILDREN: 'list_items_nested_children',
+    /**
+     * `list_items` honors `special_collection`, listing a built-in view
+     * (Unfiled Items, My Publications, Retracted Items) instead of a
+     * collection. A client without it drops the field and lists the whole
+     * library, so the backend only sends it to declaring clients.
+     */
+    LIST_ITEMS_SPECIAL_COLLECTIONS: 'list_items_special_collections',
     CREATE_NOTE_TAGS_COLLECTIONS: 'create_note_tags_collections',
     /** Batch multi-edit note editing (edit_note_batch action type). */
     EDIT_NOTE_BATCH: 'edit_note_batch',
@@ -2793,12 +3077,57 @@ export const CLIENT_FEATURES = {
      */
     PDF_CANDIDATES: 'pdf_candidates',
     /**
+     * `create_items` v2: items are created from identifiers, URLs, attached
+     * files and model-written metadata. The client resolves every source to
+     * Zotero item JSON while validating an `import_item` action, renders and
+     * approves `import_item` actions, and writes the approved JSON on execute.
+     * Citation "Import" proposals arrive as unresolved `import_item` actions.
+     */
+    ITEM_IMPORT_V2: 'item_import_v2',
+    /**
+     * `book_chapters` capability (`find_book_chapters`), offered together with
+     * ITEM_IMPORT_V2. Declare it only while the import duplicate check matches
+     * ISBNs book-to-book: a chapter resolved from its DOI carries its book's
+     * ISBN.
+     */
+    BOOK_CHAPTERS: 'book_chapters',
+    /**
      * Chat markdown follows `[label](u-KEY)` (and `zotero://select/...`) as a
      * link that reveals the named library object. Without it those hrefs render
      * as ordinary relative links, so the backend must not instruct the model to
      * write them.
      */
     ITEM_LINKS: 'item_links',
+    /**
+     * A PDF highlight covering two consecutive pages is one annotation with
+     * `position.nextPageRects`, and `edit_annotations` can move a highlight to
+     * such a destination. Without it the backend keeps rejecting two-page
+     * relocation targets, which an older client refuses.
+     */
+    TWO_PAGE_HIGHLIGHTS: 'two_page_highlights',
+    /**
+     * `create_highlight_annotations` actions may carry `style: 'underline'`,
+     * written as Zotero underline annotations. Without it the backend never
+     * offers the style, since an older client would write highlights instead.
+     */
+    UNDERLINE_ANNOTATIONS: 'underline_annotations',
+    /**
+     * After an abnormal socket loss the client reconnects and sends
+     * `WSReattachRequest` to pick its run back up, reports `last_seq` on
+     * heartbeat pings, and ignores a run event whose `seq` it has handled.
+     * Declaring it commits the client to answering a re-sent request or prompt
+     * id from memory: a request whose reply was lost with the socket is sent
+     * again on reattach, and an action may already have been applied.
+     */
+    RUN_REATTACH: 'run_reattach',
+    /**
+     * The client records an action it applied whose result was lost with its
+     * connection (`/agent-actions/ack` with `only_undecided`), and renders an
+     * unconfirmed action (see `isUnconfirmedAction`) without Apply or Retry.
+     * With it, the backend stores each action as unconfirmed before sending
+     * its execute, so a lost result leaves a record to complete.
+     */
+    UNDELIVERED_ACTION_ACK: 'undelivered_action_ack',
 } as const;
 
 /** Client type identifier for the Zotero plugin. */
@@ -2851,6 +3180,8 @@ export interface CurrentLibrary {
 
 /** Current collection context for application state */
 export interface CurrentCollection {
+    collection_id?: string;
+    parent_collection_id?: string;
     /** Collection key */
     collection_key: string;
     /** Collection name */
@@ -2892,10 +3223,54 @@ export interface CurrentSavedSearch {
     search_key: string;
     /** Saved search name */
     name: string;
-    /** Library ID this saved search belongs to */
+    /**
+     * Device-portable library identity ("u" | "g<groupID>"). See
+     * `src/utils/libraryIdentity.ts`. Saved searches carry no device-local
+     * library id.
+     */
+    library_ref: string;
+}
+
+/**
+ * Zotero special collections Beaver reports in application state: built-in,
+ * per-library views in the collections pane rather than user-created
+ * collections. Values are Zotero's collection-tree row types.
+ *
+ * - `duplicates`: "Duplicate Items", Zotero's duplicate candidates.
+ * - `unfiled`: "Unfiled Items", items that belong to no collection.
+ * - `publications`: "My Publications", personal library only.
+ * - `retracted`: "Retracted Items", items Zotero flagged as retracted.
+ * - `trash`: "Trash". Reported so the agent can explain it cannot read it.
+ */
+export type SpecialCollectionType = 'duplicates' | 'unfiled' | 'publications' | 'retracted' | 'trash';
+
+/** Special collections `list_items` can list via `special_collection`. */
+export type ListableSpecialCollectionType = 'unfiled' | 'publications' | 'retracted';
+
+/** Zotero's English names for the listable special collections. */
+export const LISTABLE_SPECIAL_COLLECTION_NAMES: Readonly<Record<ListableSpecialCollectionType, string>> = {
+    unfiled: 'Unfiled Items',
+    publications: 'My Publications',
+    retracted: 'Retracted Items',
+};
+
+/**
+ * A special collection selected in the collections pane. Reported only for
+ * kinds the agent knows how to handle; other special views are left out.
+ */
+export interface CurrentSpecialCollection {
+    /** Which special collection is selected */
+    type: SpecialCollectionType;
+    /** Library ID the special collection belongs to */
     library_id: number;
     /** Device-portable library identity ("u" | "g<groupID>"). See `src/utils/libraryIdentity.ts`. */
     library_ref?: string;
+    /** Regular items in the view. Omitted for views that are not counted (Duplicate Items). */
+    item_count?: number;
+    /** Attachments in the view without a parent item. */
+    standalone_attachment_count?: number;
+    /** Notes in the view without a parent item. */
+    note_count?: number;
 }
 
 /**
@@ -2903,14 +3278,27 @@ export interface CurrentSavedSearch {
  * Contains current view state and reader state if in reader view.
  */
 export interface ApplicationStateInput {
-    /** Current application view ('library', 'file_reader', or 'note_editor') */
-    current_view: 'library' | 'file_reader' | 'note_editor';
+    /** Current application view ('library', 'file_reader', 'note_editor', or 'table') */
+    current_view: 'library' | 'file_reader' | 'note_editor' | 'table';
     /** Reader state when in reader view */
     reader_state?: ReaderState;
     /** Note state when in note editor view */
     note_state?: NoteState;
+    /** The stored table open in its Beaver tab (`current_view: 'table'`) */
+    table_state?: TableState;
     /** Current library context */
     current_library?: CurrentLibrary;
+    /**
+     * True when the library behind the open tab (the selected collections-pane
+     * row, or the open attachment or note) is one the user excluded from
+     * Beaver. Nothing else about that library is sent.
+     */
+    current_library_excluded?: boolean;
+    /**
+     * True when some selected collections-pane rows or items were left out
+     * because they belong to a library the user excluded from Beaver.
+     */
+    selection_partially_excluded?: boolean;
     /**
      * First selected collection.
      *
@@ -2927,11 +3315,23 @@ export interface ApplicationStateInput {
      */
     current_collections?: CurrentCollection[];
     /**
+     * Library rows (My Library, group libraries) in the current selection, in
+     * collections-list order. `current_library` names only the first selected
+     * library, so this list is what tells several selected libraries apart.
+     */
+    current_libraries?: CurrentLibrary[];
+    /**
      * Saved searches in the current selection, in selection order. A selection
      * can mix collections and saved searches, so this list is independent of
      * `current_collections`.
      */
     current_searches?: CurrentSavedSearch[];
+    /**
+     * Special collections in the current selection, in collections-list order.
+     * A selection can mix them with collections and saved searches, so this
+     * list is independent of `current_collections` and `current_searches`.
+     */
+    current_special_collections?: CurrentSpecialCollection[];
     /**
      * Currently selected library items, truncated to a client-defined maximum.
      */
@@ -2942,6 +3342,11 @@ export interface ApplicationStateInput {
     indexing_status?: IndexingStatus;
     /** Per-library summary stats (counts) for searchable libraries. */
     libraries?: LibrarySummary[];
+    /**
+     * Locale of the host application's user interface, as a BCP 47 tag
+     * (e.g. 'en-US', 'de', 'zh-CN'). Omitted when the host does not report one.
+     */
+    interface_language?: string;
 }
 
 /** Frontend embedding index status reported with each agent run. */
@@ -3075,6 +3480,90 @@ export interface WSRequestAckData {
     modelId: string | null;
     modelName: string | null;
     chargeType: ChargeType;
+}
+
+/** A run lost its socket and is waiting on the server to be reattached. */
+export interface WSReattachingInfo {
+    runId: string;
+    /**
+     * The user stopped the run while it was reattaching: the new socket only
+     * delivers the cancel, so the server stops the run instead of waiting out
+     * the grace period.
+     */
+    cancelRequested: boolean;
+    /** When the connection was first lost (epoch ms); the same for every attempt. */
+    detachedAt: number;
+    /** How long the server holds the run after losing its connection, in ms. */
+    graceMs: number;
+}
+
+/** A run was picked up on a new socket. */
+export interface WSReattachedInfo {
+    runId: string;
+    /** How the socket was lost. */
+    evidence: ConnectionFailureEvidence;
+    /** Milliseconds between noticing the loss and the server confirming the reattach. */
+    gapMs: number;
+    /** Events the server is replaying. */
+    replayed: number;
+    /** Sockets opened to reattach the run since the loss. */
+    attempts: number;
+    /**
+     * Sockets the run lost since it was last live, the first loss included.
+     * More than one means a socket opened to reattach was lost as well.
+     */
+    losses: number;
+}
+
+/**
+ * Why a run could not be reattached: a reason the server gave, or one of the
+ * client's own — it ran out of time (`gave_up`), the new socket closed before
+ * the server answered (`connection_closed`), or the server no longer offers
+ * reattach (`unsupported`).
+ */
+export type ReattachFailureReason =
+    | WSReattachUnavailableReason
+    | 'gave_up'
+    | 'connection_closed';
+
+/** A run could not be reattached; it ends the way any lost connection does. */
+export interface WSReattachFailedInfo {
+    runId: string;
+    reason: ReattachFailureReason;
+    /** How the socket was lost. */
+    evidence: ConnectionFailureEvidence;
+    /** Milliseconds spent trying. */
+    gapMs: number;
+    /** Sockets opened to reattach the run since the loss. */
+    attempts: number;
+    /** Sockets the run lost since it was last live, the first loss included. */
+    losses: number;
+}
+
+/** The action an `agent_action_execute` request applies, as the request describes it. */
+export interface ExecutedAction {
+    actionId: string;
+    actionType: AgentActionType;
+    actionData: Record<string, any>;
+    /** Null when the backend does not name the tool call. */
+    toolcallId: string | null;
+}
+
+/** An action a run applied whose result the server may not have received. */
+export interface UndeliveredActionResult {
+    actionId: string;
+    resultData: Record<string, any>;
+    /**
+     * The request that applied it. An action applied without asking reaches
+     * the client only with its result, so this is all the client has of one
+     * whose result was lost.
+     */
+    executed?: ExecutedAction;
+}
+
+export interface WSUndeliveredActionsInfo {
+    runId: string;
+    actions: UndeliveredActionResult[];
 }
 
 export interface WSCallbacks {
@@ -3239,6 +3728,16 @@ export interface WSCallbacks {
     onBatchApprovalStale?: (event: WSBatchApprovalStale) => void;
 
     /**
+     * Called when the backend shows the table card for a proposed table. The
+     * frontend renders the card and sends one WSTableCardResponse with the
+     * edited input or a decline.
+     */
+    onTableCardRequest?: (event: import('./tableCardProtocol').WSTableCardRequest) => void;
+
+    /** Called when a table card answer arrived after the backend stopped waiting. */
+    onTableCardStale?: (event: import('./tableCardProtocol').WSTableCardStale) => void;
+
+    /**
      * Called when the backend asks the user structured multiple-choice
      * question(s). The frontend should render the question card and send a
      * WSAskUserQuestionResponse when the user submits or skips.
@@ -3263,4 +3762,38 @@ export interface WSCallbacks {
         wasClean: boolean,
         evidence?: ConnectionFailureEvidence,
     ) => void;
+
+    /**
+     * Called instead of `onClose` when the socket was lost abnormally while
+     * the run can still be picked up on a new one. The run keeps going on the
+     * server; the client should keep its state, show that it is reconnecting
+     * and start `reattachWithRetry`. Without this callback a lost socket ends
+     * the run through `onClose`, as it always has.
+     */
+    onReattaching?: (info: WSReattachingInfo) => void;
+
+    /** Called when the server confirms the run continues on the new socket. */
+    onReattached?: (info: WSReattachedInfo) => void;
+
+    /**
+     * Called when a run that was being reattached cannot be. The client should
+     * end the run as `onClose` would have for the original loss.
+     */
+    onReattachFailed?: (info: WSReattachFailedInfo) => void;
+
+    /**
+     * Called after a run ended before finishing, with the actions it applied
+     * whose results the server may never have received. The server keeps
+     * those actions pending, so the client records them as applied itself.
+     * Called for a run the client has since left, too.
+     */
+    onUndeliveredActions?: (info: WSUndeliveredActionsInfo) => void;
+
+    /**
+     * Called on a new run's callbacks when it replaced a run the user stopped
+     * while that run was reconnecting, before the stop could be confirmed:
+     * the cancel was never sent and the server did not end the run, so it may
+     * still finish there and be charged.
+     */
+    onPreviousRunNotStopped?: (runId: string) => void;
 }

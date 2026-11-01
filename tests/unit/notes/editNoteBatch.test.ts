@@ -250,6 +250,7 @@ import {
     getOrSimplify,
     countOccurrences,
     invalidateSimplificationCache,
+    normalizeNoteHtml,
     simplifyNoteHtml,
 } from '../../../src/utils/noteHtmlSimplifier';
 import { validateNewString } from '../../../src/utils/editNoteValidation';
@@ -405,6 +406,7 @@ beforeEach(() => {
     vi.mocked(invalidateSimplificationCache).mockImplementation(() => {});
     vi.mocked(preloadPageLabelsForNewCitations).mockResolvedValue({});
     vi.mocked(checkLibraryExcluded).mockReturnValue(null);
+    vi.mocked(normalizeNoteHtml).mockImplementation((html: string) => html);
 
     installMutationInstance();
 });
@@ -510,6 +512,34 @@ describe('local edit_note_batch mutation guards', () => {
             '<div><p>foo targeted</p><p>bar unrelated</p></div>',
         );
         expect(item.saveTx).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+        ['insert_before', 'Inserted. '],
+        ['str_replace', 'BRAVO PASSAGE 2.'],
+    ] as const)('undoes a %s edit whose absent undo fields come back from the backend as null', async (operation, newString) => {
+        const item = useNote(NOTE_HTML);
+        const edits = [{ index: 0, operation, old_string: 'Bravo passage two.', new_string: newString }];
+        const response = await handleAgentActionExecuteRequest(makeExecuteRequest(edits));
+        expect(response.success).toBe(true);
+        item.getNote.mockReturnValue(item.setNote.mock.calls[0][0]);
+        const resultData = response.result_data as any;
+        const storedUndo = resultData.undo.map((record: any) => ({
+            client_item_id: null,
+            undo_before_context: null,
+            undo_after_context: null,
+            undo_occurrence_contexts: null,
+            ...JSON.parse(JSON.stringify(record)),
+        }));
+
+        await undoLocalEditNoteBatchAction({
+            id: `batch-local-null-undo-${operation}`,
+            action_type: 'edit_note_batch',
+            proposed_data: { library_id: 1, zotero_key: 'NOTE0001', edits },
+            result_data: { ...resultData, undo: storedUndo },
+        } as any);
+
+        expect(item.setNote).toHaveBeenLastCalledWith(NOTE_HTML);
     });
 });
 
@@ -1209,6 +1239,82 @@ describe('local single-edit citation recovery', () => {
             expect(findCandidateSnippets).not.toHaveBeenCalled();
         },
     );
+});
+
+
+describe('local apply against a note the editor would re-serialize', () => {
+    // The stored note carries a citation in a form the note editor rewrites on
+    // load. Expansion yields the editor's canonical form, so matching has to run
+    // against the normalized note, as the agent executor does.
+    const RAW_NOTE = '<div data-schema-version="9"><p>Next lecture <span class="citation" data-raw="1">(Smith)</span></p></div>';
+    const NORMALIZED_NOTE = '<div data-schema-version="9"><p>Next lecture <span class="citation">(Smith, p. 1)</span></p></div>';
+    const OLD_STRING = 'Next lecture <span class="citation">(Smith, p. 1)</span>';
+
+    beforeEach(() => {
+        vi.mocked(normalizeNoteHtml).mockImplementation((html: string) => (html === RAW_NOTE ? NORMALIZED_NOTE : html));
+    });
+
+    function useRawNote() {
+        const item = useNote(RAW_NOTE);
+        vi.mocked(getOrSimplify).mockReturnValue({
+            simplified: NORMALIZED_NOTE,
+            metadata: { elements: new Map() } as any,
+            isStale: false,
+        });
+        return item;
+    }
+
+    it('applies an edit whose old_string spans a re-serialized citation', async () => {
+        const item = useRawNote();
+        await executeLocalEditNoteBatchAction({
+            id: 'local-normalized-batch',
+            action_type: 'edit_note_batch',
+            proposed_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                edits: [{ index: 0, operation: 'str_replace', old_string: OLD_STRING, new_string: 'Progress so far' }],
+            },
+        } as any);
+
+        expect(item.setNote).toHaveBeenCalledTimes(1);
+        expect(item.setNote.mock.calls[0][0]).toContain('<p>Progress so far</p>');
+    });
+});
+
+
+describe('local batch apply failure codes', () => {
+    function localBatch(edits: EditNoteBatchEditItem[]) {
+        return {
+            id: 'local-batch-failure',
+            action_type: 'edit_note_batch',
+            proposed_data: { library_id: 1, zotero_key: 'NOTE0001', edits },
+        } as any;
+    }
+
+    it('tags an edit that no longer resolves with its error code', async () => {
+        const item = useNote(NOTE_HTML);
+        const error = await executeLocalEditNoteBatchAction(localBatch([
+            { index: 0, operation: 'str_replace', old_string: 'Alpha sentence one.', new_string: 'X.' },
+            { index: 1, operation: 'str_replace', old_string: 'DRIFTED AWAY TEXT', new_string: 'Y.' },
+        ])).catch((err: unknown) => err);
+
+        expect(error).toMatchObject({
+            code: 'old_string_not_found',
+            message: expect.stringContaining('no longer resolve against the current note'),
+        });
+        expect(item.setNote).not.toHaveBeenCalled();
+    });
+
+    it('tags edits that now overlap', async () => {
+        const item = useNote(NOTE_HTML);
+        const error = await executeLocalEditNoteBatchAction(localBatch([
+            { index: 0, operation: 'str_replace', old_string: 'Alpha sentence', new_string: 'A' },
+            { index: 1, operation: 'str_replace', old_string: 'sentence one.', new_string: 'B' },
+        ])).catch((err: unknown) => err);
+
+        expect(error).toMatchObject({ code: 'overlapping_edits' });
+        expect(item.setNote).not.toHaveBeenCalled();
+    });
 });
 
 

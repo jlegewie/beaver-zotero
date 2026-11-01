@@ -63,6 +63,7 @@ const EXPECTED_EVENTS = [
     'get_metadata_request',
     'get_annotations_request',
     'find_annotations_request',
+    'duplicates_request',
     'list_collections_request',
     'list_tags_request',
     'list_libraries_request',

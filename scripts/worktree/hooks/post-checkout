@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
+# beaver-worktree-hook (marks this file as safe for the bootstrap to update)
 #
-# Link the git-ignored agent instruction files into every worktree.
+# Link the git-ignored agent instruction files and skills into every worktree.
 #
 # Fires on `git worktree add` (whoever runs it: setup-worktree.sh, Claude Code,
 # t3code, Cursor, Codex, or by hand) and on ordinary checkouts, so an
@@ -24,5 +25,29 @@ for f in CLAUDE.local.md AGENTS.md; do
     [ -e "$here/$f" ] && continue   # already linked or a real file — leave it
     ln -s "$main/$f" "$here/$f" && echo "linked $f -> $main/$f"
 done
+
+# Skills directories are linked whole, so skills added from any checkout show
+# up everywhere. If the worktree already has a real directory there, link the
+# missing entries one by one.
+link_skills_dir() {
+    src="$main/$1"
+    dst="$here/$1"
+    [ -d "$src" ] || return 0
+    if [ ! -e "$dst" ] && [ ! -L "$dst" ]; then
+        mkdir -p "$(dirname "$dst")" && ln -s "$src" "$dst" && echo "linked $1 -> $src"
+        return 0
+    fi
+    { [ -d "$dst" ] && [ ! -L "$dst" ]; } || return 0
+    for entry in "$src"/*; do
+        [ -e "$entry" ] || [ -L "$entry" ] || continue   # empty glob
+        name="$(basename "$entry")"
+        if [ -e "$dst/$name" ] || [ -L "$dst/$name" ]; then continue; fi
+        ln -s "$entry" "$dst/$name" && echo "linked $1/$name -> $entry"
+    done
+}
+
+# .agents first: entries in .claude/skills may be relative links into it.
+link_skills_dir .agents/skills
+link_skills_dir .claude/skills
 
 exit 0

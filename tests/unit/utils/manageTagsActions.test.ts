@@ -107,6 +107,22 @@ describe("undoManageTagsAction", () => {
     expect(Zotero.Tags.getTagItems).toHaveBeenCalledWith(12, 33);
     expect(Zotero.Tags.removeFromLibrary).toHaveBeenCalledWith(12, [33]);
   });
+
+  it("treats a delete as a no-op when the tag has no items in the target library", async () => {
+    (Zotero.Tags.getTagItems as any).mockResolvedValue([]);
+
+    const result = await executeManageTagsAction({
+      proposed_data: {
+        library_id: 7,
+        library_ref: "g42",
+        action: "delete",
+        name: "reviewed",
+      },
+    } as any);
+
+    expect(result).toMatchObject({ items_affected: 0, affected_item_ids: [] });
+    expect(Zotero.Tags.removeFromLibrary).not.toHaveBeenCalled();
+  });
 });
 
 beforeEach(installMutationInstance);

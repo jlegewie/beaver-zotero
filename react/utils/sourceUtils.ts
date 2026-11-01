@@ -1,3 +1,4 @@
+import { resolveCollection } from '../../src/services/collections/collectionIdentity';
 import {
     getPageLocator,
     normalizeCitationTag,
@@ -23,6 +24,7 @@ import { safeFileExists } from '../../src/utils/zoteroUtils';
 import { userIdAtom } from '../atoms/auth';
 import { searchableLibraryIdsAtom } from '../atoms/profile';
 import { computeDiff, stripHtmlTags } from '../components/agentRuns/EditNotePreview';
+import { ensureCitedLibrariesLoaded } from '../../src/utils/noteCitationExpand';
 import { notifyReferenceUnavailable } from '../host/zotero/sourceActions';
 import { openNote, viewAttachment } from '../runtime/navigation';
 import { getContextWindow, tryGetWindowRuntime } from '../runtime/windowRuntime';
@@ -211,12 +213,12 @@ export function revealSource(source: ZoteroItemReference | SourceAttachment, col
         notifyReferenceUnavailable('item');
         return;
     }
-    // Convert collection key to collection ID if provided
     let collectionId: number | undefined;
     if (collectionKey) {
-        const id = Zotero.Collections.getIDFromLibraryAndKey(libraryID, collectionKey);
-        if (id !== false) {
-            collectionId = id;
+        try {
+            collectionId = resolveCollection(collectionKey, { libraryID, access: 'local' }).collection.id;
+        } catch {
+            // The item remains navigable when its historical collection is gone.
         }
     }
     // A standalone with no context lets navigation open and await a main window.
@@ -397,6 +399,14 @@ export async function openNoteAndSearchEdit(
         logger(`openNoteAndSearchEdit: waiting 500ms for new tab to settle`, 1);
         await new Promise(resolve => setTimeout(resolve, 500));
     }
+
+    // Search text is derived from citation labels resolved with synchronous
+    // item lookups; load the cited libraries first so those lookups succeed.
+    await ensureCitedLibrariesLoaded(
+        [oldString, newString, targetBeforeContext, targetAfterContext, undoBeforeContext, undoAfterContext],
+        [],
+        { includeExcluded: true },
+    );
 
     // Determine what to search for and what to select based on edit status.
     let searchText: string | null = null;
@@ -805,17 +815,22 @@ function formatCitationTextForSearch(citationItems: any[]): string | null {
 function lookupCitationItemForSearch(itemId: string, locator?: string): any | null {
     const ref = resolveObjectId(itemId);
     if (!ref || ref.library_id === UNRESOLVED_LIBRARY_ID) return null;
-    const item = Zotero.Items.getByLibraryAndKey(ref.library_id, ref.zotero_key);
-    if (!item || typeof item === 'boolean') return null;
-    const citeItem = item.isAttachment?.() && item.parentItemID
-        ? Zotero.Items.get(item.parentItemID)
-        : item;
-    if (!citeItem || typeof citeItem === 'boolean') return null;
-    return {
-        uris: [Zotero.URI.getItemURI(citeItem)],
-        itemData: Zotero.Utilities.Item.itemToCSLJSON(citeItem),
-        ...(locator ? { locator, label: 'page' } : {}),
-    };
+    try {
+        const item = Zotero.Items.getByLibraryAndKey(ref.library_id, ref.zotero_key);
+        if (!item || typeof item === 'boolean') return null;
+        const citeItem = item.isAttachment?.() && item.parentItemID
+            ? Zotero.Items.get(item.parentItemID)
+            : item;
+        if (!citeItem || typeof citeItem === 'boolean') return null;
+        return {
+            uris: [Zotero.URI.getItemURI(citeItem)],
+            itemData: Zotero.Utilities.Item.itemToCSLJSON(citeItem),
+            ...(locator ? { locator, label: 'page' } : {}),
+        };
+    } catch {
+        // Item not loaded (unopened library) or not formattable: no label.
+        return null;
+    }
 }
 
 function parseCompoundCitationItemForSearch(entry: string): { itemId: string; page?: string } {

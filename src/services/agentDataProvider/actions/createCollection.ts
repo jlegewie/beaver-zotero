@@ -1,3 +1,6 @@
+import { readCollectionActionData } from '@beaver/agent-core/identity/collectionActionData';
+import { CollectionResolutionError, resolveCollection, formatCollectionId, type ResolvedCollection } from '../../collections/collectionIdentity';
+import { assertLibraryWritable, collectionDeletedSinceValidationMessage, recheckCollection } from '../../collections/collectionMutations';
 import { logger } from '@beaver/agent-core/platform/logger';
 import {
     WSAgentActionExecuteResponse,
@@ -23,7 +26,7 @@ import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference
 async function validateCreateCollectionAction(
     request: ActionValidateRequest
 ): Promise<WSAgentActionValidateResponse> {
-    const { library_id: rawLibraryId, library_ref, library_name, name, parent_key, item_ids } = request.action_data as {
+    const { library_id: rawLibraryId, library_ref, library_name, name, parent_key, item_ids } = readCollectionActionData(request.action_data) as {
         library_id?: number | null;
         library_ref?: string | null;
         library_name?: string | null;
@@ -42,7 +45,26 @@ async function validateCreateCollectionAction(
             preference: 'always_ask',
         };
     }
-    const library_id = targetResolution.libraryID;
+    let library_id = targetResolution.libraryID;
+    let parent: ResolvedCollection | null = null;
+    if (parent_key) {
+        try {
+            parent = resolveCollection(parent_key, {
+                libraryID: library_ref || rawLibraryId || library_name ? library_id : undefined,
+            });
+        } catch (error) {
+            if (!(error instanceof CollectionResolutionError) || error.code !== 'collection_not_found') throw error;
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error: `Parent collection not found: ${parent_key}`,
+                error_code: 'parent_not_found',
+                preference: 'always_ask',
+            };
+        }
+        library_id = parent.libraryID;
+    }
 
     // Validate library exists
     const library = Zotero.Libraries.get(library_id);
@@ -92,21 +114,6 @@ async function validateCreateCollectionAction(
             error_code: 'invalid_name',
             preference: 'always_ask',
         };
-    }
-
-    // Validate parent collection if provided
-    if (parent_key) {
-        const parentCollection = await Zotero.Collections.getByLibraryAndKeyAsync(library_id, parent_key);
-        if (!parentCollection || parentCollection.deleted) {
-            return {
-                type: 'agent_action_validate_response',
-                request_id: request.request_id,
-                valid: false,
-                error: `Parent collection not found: ${parent_key}`,
-                error_code: 'parent_not_found',
-                preference: 'always_ask',
-            };
-        }
     }
 
     // Validate item IDs if provided. Accepts both the portable
@@ -172,7 +179,8 @@ async function validateCreateCollectionAction(
         library_id: library_id,
         library_ref: libraryRefForLibraryID(library_id) ?? undefined,
         library_name: library.name,
-        parent_key: parent_key || null,
+        parent_key: parent?.key ?? null,
+        parent_collection_id: parent?.collectionId,
         item_count: item_ids?.length || 0,
     };
 
@@ -181,6 +189,10 @@ async function validateCreateCollectionAction(
         request_id: request.request_id,
         valid: true,
         current_value: currentValue,
+        normalized_action_data: {
+            library_id, library_ref: libraryRefForLibraryID(library_id),
+            parent_key: parent?.key ?? null, parent_collection_id: parent?.collectionId,
+        },
         preference,
     };
 }
@@ -194,7 +206,7 @@ async function executeCreateCollectionAction(
     request: ActionExecuteRequest,
     ctx: TimeoutContext,
 ): Promise<WSAgentActionExecuteResponse> {
-    const { library_id: rawLibraryId, library_ref, library_name, name, parent_key, item_ids } = request.action_data as {
+    const { library_id: rawLibraryId, library_ref, library_name, name, parent_key, item_ids } = readCollectionActionData(request.action_data) as {
         library_id?: number | null;
         library_ref?: string | null;
         library_name?: string | null;
@@ -227,6 +239,8 @@ async function executeCreateCollectionAction(
         };
     }
 
+    assertLibraryWritable(library_id);
+
     // Build collection params
     const collectionParams: { name: string; libraryID: number; parentID?: number } = {
         name,
@@ -235,15 +249,20 @@ async function executeCreateCollectionAction(
 
     // Set parent if provided
     if (parent_key) {
-        const parentCollection = await Zotero.Collections.getByLibraryAndKeyAsync(library_id, parent_key);
-        if (parentCollection && !parentCollection.deleted) {
+        let parentCollection: Zotero.Collection | null = null;
+        try {
+            parentCollection = recheckCollection(parent_key, library_id).collection;
+        } catch (error) {
+            if (!(error instanceof CollectionResolutionError) || error.code !== 'collection_not_found') throw error;
+        }
+        if (parentCollection) {
             collectionParams.parentID = parentCollection.id;
         } else {
             return {
                 type: 'agent_action_execute_response',
                 request_id: request.request_id,
                 success: false,
-                error: `Parent collection not found: ${parent_key}`,
+                error: collectionDeletedSinceValidationMessage('Parent collection', parent_key),
                 error_code: 'parent_not_found',
             };
         }
@@ -289,7 +308,7 @@ async function executeCreateCollectionAction(
                         continue;
                     }
                     const item = resolved.item;
-                    if (!item.isAttachment() && !item.isNote() && !item.isAnnotation()) {
+                    if (item.libraryID === library_id && !item.isAttachment() && !item.isNote() && !item.isAnnotation()) {
                         itemIdsToAdd.push(item.id);
                     } else {
                         skippedItemIds.push(itemIdStr);
@@ -312,6 +331,7 @@ async function executeCreateCollectionAction(
                 library_id,
                 library_ref: libraryRefForLibraryID(library_id) ?? undefined,
                 collection_key: collection.key,
+                collection_id: formatCollectionId(collection.libraryID, collection.key),
                 items_added: itemsAdded,
                 skipped_item_ids: skippedItemIds,
             },

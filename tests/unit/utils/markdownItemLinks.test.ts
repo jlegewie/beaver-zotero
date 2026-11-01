@@ -15,10 +15,6 @@ vi.mock('@beaver/agent-ui/chat/Citation', () => ({
     default: () => null,
 }));
 
-vi.mock('../../../react/components/messages/NoteDisplay', () => ({
-    default: () => null,
-}));
-
 import { setHost } from '@beaver/agent-ui/host';
 import MarkdownRenderer from '../../../react/components/messages/MarkdownRenderer';
 import { renderToHTML } from '../../../react/utils/citationRenderers';

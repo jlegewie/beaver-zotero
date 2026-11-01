@@ -599,11 +599,11 @@ function rowFromGroup(group: BatchItemGroup): BatchOutcomeTally {
  * in no group. The appended rows are complete by construction: a hidden row
  * is only known through its group.
  */
-function joinRows(block: BatchOutcomeBlock, items?: BatchItemsRecord): OutcomeEntry[] {
+function joinRows(block: BatchOutcomeBlock, items?: BatchItemsRecord, operation?: string, libraryRef?: string): OutcomeEntry[] {
     const rows = block.rows ?? [];
     const entries: OutcomeEntry[] = rows.map((row) => ({
         row,
-        group: batchItemGroupFor(items, block, row),
+        group: batchItemGroupFor(items, block, row, operation === 'sort' ? libraryRef : undefined),
     }));
     const seen = new Set(entries.map((entry) => entry.group).filter(Boolean));
     for (const group of batchItemGroupsOfKind(items, block.kind)) {
@@ -631,7 +631,7 @@ function matchesFilter(entry: OutcomeEntry, filter: string, population?: BatchPo
 
 /** Rows a batch's blocks would list, for the filter threshold. */
 function countRows(batch: BatchProgressEntry, items?: BatchItemsRecord): number {
-    return (batch.blocks ?? []).reduce((sum, block) => sum + joinRows(block, items).length, 0);
+    return (batch.blocks ?? []).reduce((sum, block) => sum + joinRows(block, items, batch.operation, batch.library_ref).length, 0);
 }
 
 /**
@@ -672,7 +672,7 @@ export const BatchOutcomeBlockView: React.FC<{
     /** How the batch's items look, when the thread carries that record. */
     population?: BatchPopulationLookup;
 }> = ({ block, resolved = 0, operation, libraryRef, maxRows, items, filter, surface = 'live', population }) => {
-    const joined = joinRows(block, items);
+    const joined = joinRows(block, items, operation, libraryRef);
     if (joined.length === 0) return null;
     const filtered = filter ? joined.filter((entry) => matchesFilter(entry, filter, population)) : joined;
     if (filter && filtered.length === 0) return null;
@@ -786,7 +786,7 @@ const BatchFilteredBlocks: React.FC<{
     const nothingMatches =
         !!filter.trim()
         && !(batch.blocks ?? []).some((block) =>
-            joinRows(block, items).some((entry) => matchesFilter(entry, filter, population)),
+            joinRows(block, items, batch.operation, batch.library_ref).some((entry) => matchesFilter(entry, filter, population)),
         );
     return (
         <>

@@ -18,7 +18,7 @@ const settle = async () => {
 };
 beforeEach(() => {
     vi.stubGlobal("Zotero", { ...Zotero, logError: vi.fn() });
-    vi.stubGlobal("Cu", { now: Date.now });
+    vi.stubGlobal("ChromeUtils", { now: Date.now });
     let id = 0;
     Zotero.Utilities.randomString = () => `native-test-${++id}`;
     native = {

@@ -316,16 +316,61 @@ export interface RawFont {
 }
 
 /**
+ * A run of consecutive visible glyphs on a line that share one font and size.
+ */
+export interface RawStyleRun {
+    /** Font of the run; `font.size` is truncated like the line font's. */
+    font: RawFont;
+    /** Untruncated font size of the run's first glyph. */
+    exactSize?: number;
+    /** Visible (non-whitespace) glyphs in the run. */
+    chars: number;
+    /** Letter glyphs (`\p{L}`) in the run. */
+    letters: number;
+}
+
+/**
+ * Vertical metrics of a line's glyphs set in one size (`RawLine.glyphMetrics`).
+ * Positions are medians over the glyphs, on the axis across the line's
+ * writing direction (y for horizontal text), in the line's frame.
+ */
+export interface RawGlyphMetrics {
+    /** Font size to the half point, keyed like the style run sizes. */
+    size: number;
+    /** Visible glyphs set in this size. */
+    glyphs: number;
+    /** Glyph origin: the baseline. */
+    baseline: number;
+    /** Ascent edge of the glyph boxes (the font's ascender). */
+    top: number;
+    /** Descent edge of the glyph boxes (the font's descender). */
+    bottom: number;
+}
+
+/**
  * Raw line data from MuPDF structured text JSON.
- * Each line contains text with uniform styling.
  */
 export interface RawLine {
     /** Writing mode: 0 = horizontal, 1 = vertical */
     wmode: number;
     /** Bounding box */
     bbox: BoundingBox;
-    /** Font information */
+    /**
+     * Font information. MuPDF reports one font per line, taken from the
+     * line's first glyph, so a line that opens with a bold or italic word
+     * reads as bold or italic throughout. `styleRuns` has the full picture.
+     */
     font: RawFont;
+    /**
+     * Per-glyph style runs, in reading order. Populated only by the detailed
+     * (per-glyph) walk when the schema preset enables it; absent otherwise.
+     */
+    styleRuns?: RawStyleRun[];
+    /**
+     * Glyph metrics per size of the visible glyphs, recorded with `styleRuns`
+     * by the detailed walk; absent otherwise.
+     */
+    glyphMetrics?: RawGlyphMetrics[];
     /** Baseline X coordinate */
     x: number;
     /** Baseline Y coordinate */
@@ -413,6 +458,14 @@ export interface RawChar {
     bbox: BoundingBox;
 }
 
+/** A run of consecutive characters in one font at one size. */
+export interface RawFontSpan {
+    /** Index of the run's first character in the line's `chars`. */
+    start: number;
+    /** Font of the run; `size` is the exact (untruncated) font size. */
+    font: RawFont;
+}
+
 /** A line enriched with per-character quads. */
 export interface RawLineDetailed extends RawLine {
     /**
@@ -420,6 +473,11 @@ export interface RawLineDetailed extends RawLine {
      * INVARIANT: `text.length === chars.length` and `text[i] === chars[i].c`.
      */
     chars: RawChar[];
+    /**
+     * Font runs covering `chars` in order, present only when the walk was asked
+     * for them (region detection). The line-level `font` is the first run's.
+     */
+    spans?: RawFontSpan[];
 }
 
 /** A block enriched with detailed lines. */
@@ -471,8 +529,10 @@ export interface SentenceItem {
         bbox: BoundingBox;
     }>;
     /**
-     * Hint that this sentence is continued by the *next* sentence in reading
-     * order. Omitted means false.
+     * Hint that this sentence is continued by the first sentence of the next
+     * `text` item in reading order. Items of other kinds between the two
+     * (footnotes, captions, tables, figures, display equations) don't count.
+     * Omitted means false.
      */
     joinWithNext?: boolean;
 }
@@ -510,11 +570,19 @@ export interface FormulaItem extends TextBearingItem {
     kind: "formula";
 }
 
-export interface TableItem extends DocItemBase {
-    kind: "table";
+/** A reference-list entry (see the public `ReferenceItem`). */
+export interface ReferenceItem extends TextBearingItem {
+    kind: "reference";
 }
 
-export interface PictureItem extends DocItemBase {
+/** A table: one line and one sentence per row (see the public `TableItem`). */
+export interface TableItem extends TextBearingItem {
+    kind: "table";
+    sentences?: SentenceItem[];
+}
+
+/** A figure: `text` and `lines` hold its label rows, possibly none. */
+export interface PictureItem extends TextBearingItem {
     kind: "picture";
 }
 
@@ -527,7 +595,8 @@ export type DocItem =
     | MarginItem
     | FormulaItem
     | TableItem
-    | PictureItem;
+    | PictureItem
+    | ReferenceItem;
 
 export type DegradationReason =
     | "unmapped"
@@ -573,6 +642,17 @@ export interface TextStyle {
     bold: boolean;
     /** Is italic (from font style or name) */
     italic: boolean;
+    /**
+     * Untruncated size, when measured from per-glyph style runs. Set only on
+     * page-local copies of a body style (see `pageBodyExactSize` in the
+     * paragraph detector).
+     */
+    exactSize?: number;
+    /**
+     * The style is a page's own body style rather than one of the document's
+     * (see `pageBodyStyle` in the paragraph detector).
+     */
+    pageLocal?: boolean;
 }
 
 /** Create a unique key string for a TextStyle */
@@ -613,8 +693,35 @@ export interface MarginElement {
     bbox: BoundingBox;
     /** Page index where this appears */
     pageIndex: number;
-    /** Full line data for context */
+    /** Full line data for context (a joined row's first line) */
     line: RawLine;
+    /**
+     * Number of lines joined into the element when MuPDF split its text row
+     * into several lines; absent for a single line.
+     */
+    lineCount?: number;
+    /**
+     * A page-number-like line at either end of a joined row, collected on
+     * its own as well. Only a page-number sequence that steps with the page
+     * index removes it.
+     */
+    rowEndNumber?: boolean;
+    /**
+     * For a numeral in the left zone: body text rows between it and the
+     * numeral above it (or the top of the body, for a page's first numeral)
+     * that carry no numeral of their own. Manuscript line numbers number
+     * every row. Collected only with text rows on.
+     */
+    unnumberedRowsAbove?: number;
+    /** For a page's last numeral in the left zone: body text rows below it. */
+    unnumberedRowsBelow?: number;
+    /**
+     * A numeral of the header or footer zone that lies in the left zone too
+     * and continues the page's left-zone numbers by one: the line number of
+     * a body row that reaches into the header or footer zone. Read with the
+     * left zone's numerals for manuscript line numbering.
+     */
+    leftCorner?: boolean;
 }
 
 /**
@@ -625,6 +732,8 @@ export interface MarginAnalysis {
     elements: Map<MarginPosition, MarginElement[]>;
     /** Total elements found per zone */
     counts: Record<MarginPosition, number>;
+    /** Number of pages analysed, including pages with no margin elements. */
+    pageCount?: number;
 }
 
 /**
@@ -726,7 +835,7 @@ export interface DocumentAnalysis {
  * be normalized per 1k chars / per line / per item without a
  * second pass over the result.
  *
- * Only populated by the structured branch of `runExtractFromIndices`.
+ * Only populated by the structured engine of `runExtraction`.
  * Markdown branches leave `ExtractionTimings.perPagePhases` undefined.
  */
 export interface StructuredPagePhaseTimings {
@@ -760,6 +869,27 @@ export interface StructuredPagePhaseTimings {
     paragraphDetectMs: number;
     /** `extractPageSentences` — item-scoped sentence mapping. */
     sentenceMapMs: number;
+    /** Region detection and region items (schema presets with `regions`). */
+    regionsMs?: number;
+    /**
+     * Time spent splitting and joining this page's reference entries
+     * (presets with the `references` item pass).
+     */
+    referencesMs?: number;
+    /**
+     * This page's share of the item-type pass (presets with the `itemTypes`
+     * item pass), split across pages by item count. The parts below
+     * break it down; the rest is building the model input and relabeling.
+     */
+    itemTypesMs?: number;
+    /** Item-type features (part of `itemTypesMs`). */
+    itemTypeFeaturesMs?: number;
+    /** Item-type stage 1 (part of `itemTypesMs`). */
+    itemTypeStage1Ms?: number;
+    /** Item-type stage-2 context features (part of `itemTypesMs`). */
+    itemTypeContextMs?: number;
+    /** Item-type stage 2 (part of `itemTypesMs`). */
+    itemTypeStage2Ms?: number;
     /** Total character count on the target page (post-detailed-walk). */
     charCount: number;
     /** Total line count on the target page (post-detailed-walk). */
@@ -816,6 +946,11 @@ export interface InternalExtractionResult {
     fullText: string;
     /** Page labels for all pages in the document (0-indexed → label string). Only non-empty labels included. */
     pageLabels?: Record<number, string>;
+    /**
+     * Page numbers printed in the margins (0-indexed → label), from
+     * `derivePageLabels`. Set by full-document structured extraction only.
+     */
+    derivedPageLabels?: Record<number, string>;
     /** Extraction metadata */
     metadata: {
         extractedAt: string;
@@ -831,7 +966,7 @@ export interface InternalExtractionResult {
         engine?: "block" | "paragraph" | "structured";
         /**
          * Per-phase worker timings. Optional — populated by `opExtract` /
-         * `runExtractFromIndices`; absent on direct InternalExtractionResult literals
+         * `runExtraction`; absent on direct InternalExtractionResult literals
          * built in tests or fixtures.
          */
         timings?: ExtractionTimings;
@@ -1271,6 +1406,8 @@ export interface PageImageOptions {
     jpegQuality?: number;
     /** Upper bound on the rendered pixel count (width × height) of one page */
     maxPixels?: number;
+    /** Upper bound on the longer side of one rendered page, in pixels. 0 disables. */
+    maxDimension?: number;
 }
 
 /** Cap on the pixmap a single page render may allocate, in pixels. */
@@ -1285,6 +1422,7 @@ export const DEFAULT_PAGE_IMAGE_OPTIONS: Required<PageImageOptions> = {
     format: "png",
     jpegQuality: 85,
     maxPixels: DEFAULT_MAX_RENDER_PIXELS,
+    maxDimension: 0,
 };
 
 /** Result of rendering a page to an image */

@@ -26,6 +26,12 @@ import { prepareServiceRealm } from "../runtime/realm";
 import { getPref, setPref } from "../utils/prefs";
 import { libraryRefForLibraryID } from "../utils/libraryIdentity";
 import { clearUserScopedPrefs } from "../utils/clearUserScopedPrefs";
+import {
+    describeAuthError,
+    getAuthDiagnostics,
+    recordAuthDiagnostic,
+    type AuthDiagnosticEntry,
+} from "./authDiagnostics";
 
 type ProfileResponse = Awaited<
     ReturnType<typeof accountService.getProfileWithPlan>
@@ -41,6 +47,14 @@ export interface AccountSnapshot {
     libraries: ZoteroLibrary[];
     scopeReady: boolean;
     migrating: boolean;
+    /**
+     * Set while the saved session is still being restored and the first
+     * attempt has failed or is taking long. The session stays saved, the
+     * account stays uninitialized, and restoring retries until it succeeds,
+     * the auth server rejects the session, or the user chooses to sign in.
+     * `attempt` 0 means the first restore is still running.
+     */
+    restore: SessionRestoreState | null;
     status:
         | { kind: "ok" }
         | {
@@ -58,6 +72,17 @@ export interface AccountSnapshot {
               helpUrl?: string;
           };
 }
+export interface SessionRestoreState {
+    attempt: number;
+    offline: boolean;
+    /** Why the last attempt failed, for diagnostics. Empty while the first attempt runs. */
+    message: string;
+}
+/** How long the first restore may run before the UI offers to sign in instead. */
+const RESTORE_SLOW_MS = 15_000;
+/** Delay before restore attempt `attempt + 1`, after `attempt` failures. */
+const restoreRetryDelay = (attempt: number): number =>
+    Math.min(5_000 * 3 ** (attempt - 1), 60_000);
 /** Profile refresh cadence while a Beaver surface is showing in any window. */
 const VISIBLE_REFRESH_MS = 15 * 60 * 1000;
 /** Profile refresh cadence while Beaver is hidden everywhere; plan changes still land. */
@@ -83,6 +108,7 @@ export class InstanceAccount {
         libraries: [],
         scopeReady: false,
         migrating: false,
+        restore: null,
         status: { kind: "ok" },
     };
     private listeners = new Set<(snapshot: AccountSnapshot) => void>();
@@ -106,10 +132,24 @@ export class InstanceAccount {
     private nextSettingsOperation = 0;
     private signedOut = false;
     private tokenRefresh?: Promise<any>;
+    private restoreTimer?: ReturnType<typeof setTimeout>;
+    private slowRestoreTimer?: ReturnType<typeof setTimeout>;
+    private restoring?: Promise<void>;
+    /** Bumped when restoring ends, so a late attempt result cannot apply. */
+    private restoreRun = 0;
+    /** Whether restoring went beyond the SDK's first answer, so its outcome is worth recording. */
+    private restoreStarted = false;
+    /** Set when the user chose to sign in instead, until any session arrives. */
+    private restoreAbandoned = false;
     private observingNetwork = false;
     private readonly networkObserver = {
         observe: (_subject: unknown, _topic: string, state: string) => {
-            if (this.disposed || !this.snapshot.session) return;
+            if (this.disposed) return;
+            if (!this.snapshot.initialized) {
+                this.restoreNetworkChanged(state);
+                return;
+            }
+            if (!this.snapshot.session) return;
             if (state === "offline") {
                 if (this.timer) clearTimeout(this.timer);
                 this.timer = undefined;
@@ -220,6 +260,33 @@ export class InstanceAccount {
                 if (event === "SIGNED_OUT") {
                     if (!this.pendingAuth) this.signedOut = true;
                     Zotero.Beaver?.voice?.authChanged(null);
+                    // `signedOut` is set by the sign-out command before it runs.
+                    recordAuthDiagnostic(
+                        "signed_out",
+                        !this.pendingAuth
+                            ? "session discarded by the SDK"
+                            : this.signedOut
+                              ? "sign-out command"
+                              : "during sign-in",
+                    );
+                }
+                if (event === "INITIAL_SESSION")
+                    recordAuthDiagnostic(
+                        session ? "initial_session_restored" : "initial_session_empty",
+                    );
+                // The SDK reports no initial session both when nothing is saved
+                // and when restoring a saved one failed for a transient reason
+                // (it keeps the session and retries). Ask again before showing
+                // sign-in, so a slow network is not mistaken for a sign-out.
+                if (
+                    event === "INITIAL_SESSION" &&
+                    !session &&
+                    !this.snapshot.initialized &&
+                    !this.pendingAuth &&
+                    !this.disposed
+                ) {
+                    void this.restoreSession();
+                    return;
                 }
                 if (
                     !this.pendingAuth &&
@@ -229,6 +296,127 @@ export class InstanceAccount {
                     this.acceptSession(session);
             },
         ).data.subscription;
+        this.slowRestoreTimer = setTimeout(() => {
+            this.slowRestoreTimer = undefined;
+            if (this.disposed || this.snapshot.initialized || this.snapshot.restore)
+                return;
+            this.restoreStarted = true;
+            recordAuthDiagnostic("restore_slow");
+            this.snapshot.restore = {
+                attempt: 0,
+                offline: this.isOffline(),
+                message: "",
+            };
+            this.publish();
+        }, RESTORE_SLOW_MS);
+    }
+    /**
+     * Ask the SDK for the saved session while the account is uninitialized.
+     * A session or a definite "none saved" ends restoring; an error means the
+     * SDK kept the session (it deletes it, and reports SIGNED_OUT, when the
+     * auth server rejects it), so restoring continues with backoff.
+     */
+    private restoreSession(): Promise<void> {
+        if (this.restoring) return this.restoring;
+        if (this.disposed || this.snapshot.initialized) return Promise.resolve();
+        this.restoreStarted = true;
+        if (this.restoreTimer) clearTimeout(this.restoreTimer);
+        this.restoreTimer = undefined;
+        const run = this.restoreRun;
+        const current = () =>
+            !this.disposed &&
+            run === this.restoreRun &&
+            !this.snapshot.initialized &&
+            !this.pendingAuth;
+        const promise = (async () => {
+            let result: { data?: { session: Session | null }; error?: unknown };
+            try {
+                result = await this.sdk.auth.getSession();
+            } catch (error) {
+                result = { error };
+            }
+            if (!current()) return;
+            const restored = result.data?.session ?? null;
+            if (restored) {
+                this.acceptSession(restored);
+                return;
+            }
+            if (!result.error) {
+                recordAuthDiagnostic("restore_found_no_session");
+                this.acceptSession(null);
+                return;
+            }
+            const attempt = (this.snapshot.restore?.attempt ?? 0) + 1;
+            const message = describeAuthError(result.error);
+            recordAuthDiagnostic("restore_failed", `attempt ${attempt}: ${message}`);
+            this.snapshot.restore = {
+                attempt,
+                offline: this.isOffline(),
+                message,
+            };
+            this.publish();
+            // Offline, the network observer starts the next attempt.
+            if (!this.isOffline())
+                this.restoreTimer = setTimeout(() => {
+                    this.restoreTimer = undefined;
+                    void this.restoreSession();
+                }, restoreRetryDelay(attempt));
+        })().finally(() => {
+            if (this.restoring === promise) this.restoring = undefined;
+        });
+        this.restoring = promise;
+        return promise;
+    }
+    private restoreNetworkChanged(state: string): void {
+        const restore = this.snapshot.restore;
+        if (!restore) return;
+        if (state === "offline") {
+            if (this.restoreTimer) clearTimeout(this.restoreTimer);
+            this.restoreTimer = undefined;
+            this.snapshot.restore = { ...restore, offline: true };
+            this.publish();
+        } else if (state === "online") {
+            this.snapshot.restore = { ...restore, offline: false };
+            this.publish();
+            // Before the SDK reports its initial session, the SDK is restoring
+            // on its own; asking now would only wait behind it.
+            if (restore.attempt > 0) void this.restoreSession();
+        }
+    }
+    /** Stop restoring: timers, pending attempts and the published state. */
+    private endRestore(): void {
+        this.restoreRun++;
+        if (this.restoreTimer) clearTimeout(this.restoreTimer);
+        if (this.slowRestoreTimer) clearTimeout(this.slowRestoreTimer);
+        this.restoreTimer = undefined;
+        this.slowRestoreTimer = undefined;
+        this.restoring = undefined;
+        this.snapshot.restore = null;
+    }
+    /** Retry restoring the saved session now (the "Try again" command). */
+    retrySessionRestore(): Promise<void> {
+        if (this.disposed || this.snapshot.initialized) return Promise.resolve();
+        // Before the first failure, the SDK's own restore is still running.
+        if (!this.snapshot.restore?.attempt) return Promise.resolve();
+        return this.restoreSession();
+    }
+    /**
+     * Show sign-in instead of waiting for the saved session. The session stays
+     * saved: signing in replaces it, and if the SDK restores it first, the
+     * account signs in with it as usual.
+     */
+    abandonSessionRestore(): void {
+        if (this.disposed || this.snapshot.initialized) return;
+        recordAuthDiagnostic(
+            "restore_abandoned",
+            `after ${this.snapshot.restore?.attempt ?? 0} failed attempts`,
+        );
+        this.acceptSession(null);
+        this.restoreAbandoned = true;
+    }
+    /** Recent auth and session-storage events, for error reports. */
+    getAuthDiagnostics(): AuthDiagnosticEntry[] {
+        return getAuthDiagnostics();
     }
     getSnapshot(): AccountSnapshot {
         return copy(this.snapshot);
@@ -285,6 +473,7 @@ export class InstanceAccount {
             beaver.hasOcrAccess,
             beaver.hasSearchIndexAccess,
         ]);
+        const previouslySearchable = beaver.searchableLibraryIds ?? [];
         beaver.searchableLibraryIds =
             this.snapshot.scopeReady && this.snapshot.session
                 ? this.snapshot.libraries
@@ -311,6 +500,10 @@ export class InstanceAccount {
             accepted && !!this.snapshot.session && !!profile?.has_search_index_access;
         beaver.libraryScopeInitialized =
             this.snapshot.scopeReady && !!this.snapshot.session;
+        const nowSearchable = new Set(beaver.searchableLibraryIds);
+        if (previouslySearchable.some((libraryId) => !nowSearchable.has(libraryId))) {
+            beaver.libraryRevocations = (beaver.libraryRevocations ?? 0) + 1;
+        }
         const next = JSON.stringify([
             beaver.libraryScopeInitialized,
             beaver.searchableLibraryIds,
@@ -351,6 +544,19 @@ export class InstanceAccount {
         this.publish();
     }
     private acceptSession(session: Session | null): void {
+        // However restoring ends (a retry, the SDK's own refresh, or after the
+        // user chose to sign in), record that the saved session came back.
+        if (session && !this.snapshot.session && !this.pendingAuth) {
+            if (!this.snapshot.initialized && this.restoreStarted)
+                recordAuthDiagnostic(
+                    "restore_succeeded",
+                    `after ${this.snapshot.restore?.attempt ?? 0} failed attempts`,
+                );
+            else if (this.restoreAbandoned)
+                recordAuthDiagnostic("restore_succeeded", "after the user chose to sign in");
+        }
+        if (session) this.restoreAbandoned = false;
+        this.endRestore();
         const changed = this.snapshot.session?.user.id !== session?.user.id;
         if (changed) this.revoke();
         const oldEmail = getPref("userEmail");
@@ -363,6 +569,8 @@ export class InstanceAccount {
     }
     private authCommand(name: string, args: unknown[]): Promise<any> {
         this.signedOut = name === "signOut";
+        // A session this command produces is a sign-in, not a restored one.
+        this.restoreAbandoned = false;
         const revision = ++this.commandRevision;
         this.pendingAuth++;
         this.snapshot.authenticating = true;
@@ -731,6 +939,7 @@ export class InstanceAccount {
             this.observingNetwork = false;
         }
         this.authSubscription?.unsubscribe();
+        this.endRestore();
         this.listeners.clear();
         this.stopNetwork();
         await disposeSupabaseClient();

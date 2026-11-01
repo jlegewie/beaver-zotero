@@ -16,9 +16,6 @@ vi.mock('../../../src/utils/zoteroUtils', () => ({
     safeFileExists: vi.fn(),
     isLinkedUrlAttachment: vi.fn(),
 }));
-vi.mock('../../../src/utils/sync', () => ({
-    syncingItemFilterAsync: vi.fn(),
-}));
 vi.mock('../../../src/utils/prefs', () => ({
     getPref: vi.fn(),
 }));

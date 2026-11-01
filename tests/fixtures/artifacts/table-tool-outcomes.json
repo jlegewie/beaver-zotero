@@ -1,0 +1,268 @@
+{
+ "confirmed_commit": {
+  "ok": true,
+  "table": "u-TABLE222"
+ },
+ "local_repair_needed": {
+  "ok": true,
+  "table": "u-TABLE222",
+  "repair_warning": "Content committed. Zotero bookkeeping needs local repair; reopening the table retries it. Do not repeat the change."
+ },
+ "unknown_dispatch": {
+  "ok": false,
+  "error_code": "outcome_unknown",
+  "error": "The table may have been created. Do not create a replacement; ask the user to check Zotero for it."
+ },
+ "recording_failed_after_commit": {
+  "ok": true,
+  "table": "u-TABLE222",
+  "recording_warning": "Result-body storage failed. The outcome and the table are unchanged; do not repeat the operation to save its result."
+ },
+ "fill_stamp": {
+  "event": "table_fill_started",
+  "run_id": "00000000-0000-4000-8000-0000000000a1",
+  "toolcall_id": "test-tool-call-id",
+  "table": {
+   "key": "u-TABLE222",
+   "title": "Comparison"
+  },
+  "rows": 14,
+  "cells": 28,
+  "documents": 12,
+  "no_input": 0,
+  "columns": [
+   "Sample size",
+   "Design"
+  ],
+  "started_at": "2026-10-27T12:00:00+00:00"
+ },
+ "fill_stopped_by_a_credit_decline": {
+  "ok": true,
+  "table": "u-TABLE222",
+  "title": "Comparison",
+  "run": "fill",
+  "filled": {
+   "rows": 5,
+   "answered": 10,
+   "not_reported": 0,
+   "from_title_abstract": 0,
+   "failed": 0
+  },
+  "documents_read": 5,
+  "credits_charged": 0.0,
+  "not_started": {
+   "credits": {
+    "rows": 9,
+    "ids": [
+     "u-PAPERDAF",
+     "u-PAPERDAG",
+     "u-PAPERDAH",
+     "u-PAPERDAJ",
+     "u-PAPERDAK",
+     "u-PAPERDAL",
+     "u-PAPERDAM",
+     "u-PAPERMAA",
+     "u-PAPERMAB"
+    ],
+    "why": "the user did not approve more credits"
+   }
+  },
+  "columns": [
+   {
+    "id": "sample_size",
+    "header": "Sample size",
+    "answered": 5,
+    "unattempted": 9
+   },
+   {
+    "id": "design",
+    "header": "Design",
+    "answered": 5,
+    "unattempted": 9,
+    "distribution": {
+     "RCT": 5
+    }
+   }
+  ],
+  "stages": {
+   "rows": 14,
+   "sources": 1,
+   "columns": 2,
+   "rows_without_document": 2,
+   "remaining_rows": 9,
+   "remaining_cells": 18,
+   "answered": 10,
+   "title_abstract_only": 0,
+   "failed": 0,
+   "stale": 0,
+   "failed_rows": 0
+  },
+  "next_step": "9 of 14 rows have unanswered questions (18 cells); fill_table fills them."
+ },
+ "fill_record": {
+  "reference": {
+   "kind": "table",
+   "key": "u-TABLE222",
+   "title": "Comparison"
+  },
+  "change": "Filled table",
+  "description": "Sample sizes and designs.",
+  "sources": [
+   {
+    "id": "s1",
+    "type": "items",
+    "kind": null,
+    "name": null,
+    "library_ref": null,
+    "rows": 14
+   }
+  ],
+  "columns": [
+   {
+    "id": "sample_size",
+    "header": "Sample size",
+    "type": "text",
+    "description": "How many participants?",
+    "options": null,
+    "role": null
+   },
+   {
+    "id": "design",
+    "header": "Design",
+    "type": "select",
+    "description": "What is the study design?",
+    "options": [
+     "RCT",
+     "Observational"
+    ],
+    "role": null
+   }
+  ],
+  "summary": {
+   "rows": 14,
+   "columns": 5,
+   "sources": 1,
+   "in_scope_rows": 14,
+   "failed_rows": 0,
+   "user_edits": 0,
+   "columns_detail": {
+    "_reference": {
+     "type": "reference",
+     "answered": 14,
+     "not_reported": 0,
+     "failed": 0,
+     "cleared": 0,
+     "unattempted": 0,
+     "in_failed_rows": 0,
+     "stale": 0,
+     "needs_review": 0,
+     "title_abstract_only": 0,
+     "system": true
+    },
+    "_year": {
+     "type": "date",
+     "answered": 0,
+     "not_reported": 0,
+     "failed": 0,
+     "cleared": 0,
+     "unattempted": 0,
+     "in_failed_rows": 0,
+     "stale": 0,
+     "needs_review": 0,
+     "title_abstract_only": 0,
+     "system": true
+    },
+    "_identifier": {
+     "type": "link",
+     "answered": 0,
+     "not_reported": 0,
+     "failed": 0,
+     "cleared": 0,
+     "unattempted": 0,
+     "in_failed_rows": 0,
+     "stale": 0,
+     "needs_review": 0,
+     "title_abstract_only": 0,
+     "system": true
+    },
+    "sample_size": {
+     "type": "text",
+     "answered": 5,
+     "not_reported": 0,
+     "failed": 0,
+     "cleared": 0,
+     "unattempted": 9,
+     "in_failed_rows": 0,
+     "stale": 0,
+     "needs_review": 0,
+     "title_abstract_only": 0
+    },
+    "design": {
+     "type": "select",
+     "answered": 5,
+     "not_reported": 0,
+     "failed": 0,
+     "cleared": 0,
+     "unattempted": 9,
+     "in_failed_rows": 0,
+     "stale": 0,
+     "needs_review": 0,
+     "title_abstract_only": 0,
+     "distribution": {
+      "RCT": 5
+     }
+    }
+   }
+  },
+  "changes": {},
+  "operation_id": null,
+  "version": 2,
+  "saved": true,
+  "stages": {
+   "rows": 14,
+   "sources": 1,
+   "columns": 2,
+   "rows_without_document": 2,
+   "remaining_rows": 9,
+   "remaining_cells": 18,
+   "answered": 10,
+   "title_abstract_only": 0,
+   "failed": 0,
+   "stale": 0,
+   "failed_rows": 0
+  },
+  "run": "fill",
+  "fill": {
+   "rows": 14,
+   "rows_filled": 5,
+   "rows_failed": 0,
+   "rows_not_started": {
+    "credits": 9
+   },
+   "rows_without_input": 0,
+   "rows_not_written": 0,
+   "rows_uncertain": 0,
+   "answered": 10,
+   "not_reported": 0,
+   "from_title_abstract": 0,
+   "failed": 0,
+   "skipped": {},
+   "documents_read": 5,
+   "credits_charged": 0.0,
+   "stopped_by": "credits"
+  },
+  "next_step": "9 of 14 rows have unanswered questions (18 cells); fill_table fills them."
+ },
+ "edit_table": {
+  "ok": true,
+  "table": "u-TABLE222",
+  "title": "Sample sizes",
+  "description": "Sample sizes and designs.",
+  "changed": [
+   "title"
+  ],
+  "rows_removed": 1,
+  "rows": 2,
+  "next_step": "2 of 2 rows have unanswered questions (4 cells); fill_table fills them."
+ }
+}

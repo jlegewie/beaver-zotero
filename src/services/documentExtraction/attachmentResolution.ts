@@ -6,8 +6,10 @@ import {
     type ReadableContentKind,
 } from '@beaver/agent-core/extract/document/shared/contentKinds';
 import {
+    attachmentDocumentType,
     hasSnapshotContentType,
     isLinkedUrlAttachment,
+    isPdfDocument,
     safeAttachmentFilename,
     safeFileExists,
 } from '../../utils/attachmentFiles';
@@ -27,20 +29,12 @@ export function getReadableContentKind(item: Zotero.Item): ReadableContentKind |
     if (isLinkedUrlAttachment(item)) {
         return null;
     }
-    if (item.isPDFAttachment()) {
-        return 'pdf';
-    }
-
-    const maybeIsEPUB = (item as unknown as { isEPUBAttachment?: () => boolean })
-        .isEPUBAttachment;
-    if (typeof maybeIsEPUB === 'function' && maybeIsEPUB.call(item)) {
-        return 'epub';
+    const documentType = attachmentDocumentType(item);
+    if (documentType) {
+        return documentType;
     }
 
     const contentType = (item.attachmentContentType || '').toLowerCase();
-    if (contentType === 'application/epub+zip') {
-        return 'epub';
-    }
     const maybeIsImage = (item as unknown as { isImageAttachment?: () => boolean })
         .isImageAttachment;
     if (
@@ -174,7 +168,7 @@ export async function resolveToPdfAttachment(
     uniqueKey: string,
 ): Promise<PdfAttachmentResolveResult> {
     if (item.isAttachment()) {
-        if (item.isPDFAttachment()) {
+        if (isPdfDocument(item)) {
             return { resolved: true, item, key: uniqueKey };
         }
         if (item.attachmentLinkMode === Zotero.Attachments.LINK_MODE_LINKED_URL) {
@@ -200,7 +194,7 @@ export async function resolveToPdfAttachment(
         // auto-resolves (and ambiguity errors never list trashed files),
         // matching resolveToImageAttachment/resolveToReadableAttachment.
         const pdfAttachments = fetched.filter(
-            (a): a is Zotero.Item => !!a && !a.deleted && a.isPDFAttachment(),
+            (a): a is Zotero.Item => !!a && !a.deleted && isPdfDocument(a),
         );
 
         if (pdfAttachments.length > 0) {

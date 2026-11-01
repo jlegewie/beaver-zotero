@@ -1,19 +1,19 @@
 import { useSurfaceWindow } from '../../../runtime/SurfaceWindowContext';
+import { getMergedItemReference } from '../../../atoms/mergeItemsChoices';
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { navigateToAnnotation } from '../../../utils/readerUtils';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { AgentRunStatus } from '@beaver/agent-core/agents/types';
 import {
     AgentAction,
     getAgentActionsByToolcallAtom,
     pendingApprovalsAtom,
     removePendingApprovalAtom,
-    isCreateAnnotationsAgentAction,
 } from '../../../agents/agentActions';
 import type { PendingApproval } from '@beaver/agent-ui/host';
 import {
     setRunPermissionModeAtom,
     approvalResponseIntentsAtom,
+    isRunReconnectingAtom,
     isWSChatPendingAtom,
     removeApprovalResponseIntentAtom,
     sendApprovalResponseAtom,
@@ -27,16 +27,19 @@ import {
 } from '../../../atoms/messageUIState';
 import {
     applyAgentActionsAtom,
+    refreshMergeProposalsAtom,
     rejectAgentActionsAtom,
     undoAgentActionsAtom,
 } from '../agentActionExecution';
 import { shortItemTitle } from '../../../../src/utils/zoteroUtils';
+import { RECONNECT_HELD_CAPTION, RECONNECT_SENDING_CAPTION, RECONNECT_UNAVAILABLE_TOOLTIP, RESOLVING_UNAVAILABLE_TOOLTIP } from '@beaver/agent-core/transport/connectionFailure';
+import { useRunReconnectShown } from '../../../hooks/useVisibleReconnect';
+import { useReattachResolutionView } from '../../../components/agentRuns/RunResolutionNotices';
 import { hasLibraryIdentity, resolveItemReference, resolveLibraryRef } from '../../../../src/utils/libraryIdentity';
 import { notifyReferenceUnavailable } from '../sourceActions';
 import {
     TickIcon,
     CancelIcon,
-    ChevronIcon,
     Spinner,
     Icon,
     RepeatIcon,
@@ -48,12 +51,20 @@ import { revealSource, openNoteByKey, getCurrentCollectionKeyForItem } from '../
 import Button from '@beaver/agent-ui/primitives/Button';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
+import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
+import { DownloadIcon } from '@beaver/agent-ui/icons';
+import type { FileExportFormat } from '@beaver/agent-ui/host/types';
+import { exportNoteToFile, openExportedFile, revealExportedFile } from '../fileExport';
+import { exportWithFeedback, fileExportFormatMenuItems } from '../../../utils/fileExportFeedback';
+import { addPopupMessageAtom } from '../../../utils/popupMessageUtils';
+import { getCreatedNoteExportTarget } from './reviewChangeRows';
+import { countPendingNoteEdits } from './reviewChanges/useRunActionRows';
+import { getCreateAnnotationsOpenLink } from './createAnnotationsNavigation';
 import { useOverflowCollapse } from '@beaver/agent-ui/utils/useOverflowCollapse';
 import DeferredToolPreferenceButton from '../../../components/ui/buttons/DeferredToolPreferenceButton';
 import RunPermissionButton, { RunPermissionMode } from '../../../components/ui/buttons/RunPermissionButton';
 import {
     ActionStatus,
-    STATUS_CONFIGS,
     NEVER_AUTO_COLLAPSE_TOOLS,
     getOverallStatus,
     getActionLabel,
@@ -63,7 +74,11 @@ import {
     getCreateAnnotationsDisplayStatus,
     getAgentActionToolIcon,
     inFlightProgressMessage,
+    hasFailedUndo,
+    getStatusConfig,
+    unconfirmedCaption,
 } from './agentActionViewHelpers';
+import { isStaleMergeProposal } from './mergeItemsErrors';
 import { ActionPreview } from './ActionPreview';
 import { useApprovalRecovery } from './useApprovalRecovery';
 import {
@@ -73,6 +88,7 @@ import {
     runApprovalPolicyAtom,
 } from '../../../atoms/runApprovalPolicy';
 import { dismissActiveEditNotePreview } from '../editNotePreviewLifecycle';
+import { agentService } from '@beaver/agent-core/transport/agentService';
 
 export { STATUS_CONFIGS, getOverallStatus } from './agentActionViewHelpers';
 export type { ActionStatus } from './agentActionViewHelpers';
@@ -95,10 +111,6 @@ type HeaderLinkAction = {
     onClick: () => void | Promise<void>;
 };
 
-type HeaderLinkActionRule = HeaderLinkAction & {
-    matches: () => boolean;
-};
-
 export const AgentActionView: React.FC<AgentActionViewProps> = ({
     toolcallId,
     toolName,
@@ -119,6 +131,17 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const actionInFinalState = action && action.status !== 'pending';
     const pendingApproval = actionInFinalState ? null : pendingApprovalProp;
     const isAwaitingApproval = pendingApproval !== null;
+    // An answer to the run waits while its connection is being recovered.
+    const isRunReconnecting = useAtomValue(isRunReconnectingAtom);
+    const isAnswerHeld = isAwaitingApproval && isRunReconnecting;
+    const reconnectShown = useRunReconnectShown();
+    // A run whose reattach failed may still be waiting on the server for this
+    // answer; acting on it locally waits until the server says how it ended.
+    const isRunResolving = useReattachResolutionView(runId, true) !== null;
+    const isDecisionHeld = isAnswerHeld || isRunResolving;
+    const heldTooltip = isAnswerHeld
+        ? RECONNECT_UNAVAILABLE_TOOLTIP
+        : isRunResolving ? RESOLVING_UNAVAILABLE_TOOLTIP : null;
 
     const runIsStreamable = runStatus === undefined || runStatus === 'in_progress';
     const isStreaming = !action
@@ -163,7 +186,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const [isProcessingAction, setIsProcessingAction] = useState(false);
     const [isUndoError, setIsUndoError] = useState(false);
     const [isExternallyProcessing, setIsExternallyProcessing] = useState(false);
-    const [clickedButton, setClickedButton] = useState<'approve' | 'reject' | 'undo' | null>(null);
+    const [clickedButton, setClickedButton] = useState<'approve' | 'reject' | 'undo' | 'refresh' | null>(null);
     const prevPendingApprovalRef = useRef<PendingApproval | null>(pendingApproval);
 
     const isRunPending = useAtomValue(isWSChatPendingAtom);
@@ -183,6 +206,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const removeApprovalResponseIntent = useSetAtom(removeApprovalResponseIntentAtom);
     const removePendingApproval = useSetAtom(removePendingApprovalAtom);
     const applyAgentActions = useSetAtom(applyAgentActionsAtom);
+    const refreshMergeProposals = useSetAtom(refreshMergeProposalsAtom);
     const rejectAgentActions = useSetAtom(rejectAgentActionsAtom);
     const surfaceWindow = useSurfaceWindow();
     const undoAgentActions = useSetAtom(undoAgentActionsAtom);
@@ -231,6 +255,34 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 
         fetchTitle();
     }, [action, pendingApproval, itemTitle, itemTitleKey, hasAssociatedItem, setItemTitle]);
+
+    // A created note exports as it is now in Zotero, with later edits by the
+    // agent or the user, from the same header as its Open link.
+    const noteExportTarget = toolName === 'create_note' && action ? getCreatedNoteExportTarget(action) : null;
+    const [isExportingNote, setIsExportingNote] = useState(false);
+    const addPopupMessage = useSetAtom(addPopupMessageAtom);
+    const jotaiStore = useStore();
+    const handleExportNote = useCallback(async (format: FileExportFormat) => {
+        if (isExportingNote || !noteExportTarget) return;
+        setIsExportingNote(true);
+        try {
+            const pendingChanges = countPendingNoteEdits(jotaiStore, noteExportTarget);
+            await exportWithFeedback(
+                format,
+                () => exportNoteToFile({
+                    format,
+                    surface: 'note_card',
+                    note: noteExportTarget,
+                    createdBy: { runId, toolCallId: toolcallId },
+                    pendingChanges,
+                }),
+                addPopupMessage,
+                { reveal: revealExportedFile, open: openExportedFile },
+            );
+        } finally {
+            setIsExportingNote(false);
+        }
+    }, [isExportingNote, noteExportTarget, runId, toolcallId, addPopupMessage, jotaiStore]);
 
     const handleApprovalRecovered = useCallback(() => {
         setIsProcessingApproval(false);
@@ -307,10 +359,19 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const isConfirmExternalSearch = toolName === 'confirm_external_search';
     const isConfirmAction = isConfirmExtraction || isConfirmExternalSearch;
     const hasNoActionData = !action && !pendingApproval && !isStreaming;
-    const baseConfig = STATUS_CONFIGS[status];
+    const baseConfig = getStatusConfig(status, actions);
+    // A stale merge fails the same way on every retry; Refresh proposes it
+    // again for review instead.
+    const isStaleMerge = actions.some(isStaleMergeProposal);
     const config = (isConfirmAction && status !== 'awaiting')
         ? { ...baseConfig, showApply: false, showReject: false, showUndo: false, showRetry: false }
-        : baseConfig;
+        : isStaleMerge
+            ? { ...baseConfig, showRetry: false }
+            : baseConfig;
+    const showRefresh = isStaleMerge && !isConfirmAction && status === 'error';
+    // Read off the records, like the Library changes row, so the choice between
+    // re-applying and retrying undo survives a remount.
+    const isUndoRetry = isUndoError || hasFailedUndo(actions);
 
     // Every action on this card has settled, but the tool call has not returned:
     // the backend is still working on it (`create_items` holds its result while
@@ -336,6 +397,24 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         && !isAwaitingApproval
         && (status === 'awaiting' || status === 'pending'),
     );
+
+    // While the run reconnects, a card awaiting a decision says when it can be
+    // answered, and one already answered says its answer has yet to be sent.
+    // An answer sent before the connection dropped is not waiting: the
+    // action may already be applied, its result on the way.
+    const answeredActionId = pendingApprovalProp?.actionId ?? action?.id ?? null;
+    const isReplyHeld = isRunReconnecting && !actionInFinalState
+        && (isProcessingApproval || isExternallyProcessing)
+        && answeredActionId !== null
+        && agentService.isApprovalAnswerHeld(answeredActionId);
+    // Shown only once the reconnect has outlasted a blip.
+    const reconnectCaption = !reconnectShown
+        ? null
+        : isAnswerHeld
+            ? RECONNECT_HELD_CAPTION
+            : isReplyHeld ? RECONNECT_SENDING_CAPTION : null;
+    // An unconfirmed action offers nothing to click; this says what to do.
+    const unconfirmedNote = !isProcessing && !isConfirmAction ? unconfirmedCaption(actions) : null;
 
     const handleApprove = useCallback(() => {
         if (!pendingApproval) return;
@@ -429,14 +508,27 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         }
     }, [action, actions, isProcessing, undoAgentActions]);
 
+    const handleRefresh = useCallback(async () => {
+        if (actions.length === 0 || isProcessing) return;
+
+        setIsProcessingAction(true);
+        setClickedButton('refresh');
+        try {
+            await refreshMergeProposals({ actions });
+        } finally {
+            setIsProcessingAction(false);
+            setClickedButton(null);
+        }
+    }, [actions, isProcessing, refreshMergeProposals]);
+
     const handleRetry = useCallback(async () => {
-        if (isUndoError) {
+        if (isUndoRetry) {
             setIsUndoError(false);
             await handleUndo();
         } else {
             await handleApplyPending();
         }
-    }, [isUndoError, handleUndo, handleApplyPending]);
+    }, [isUndoRetry, handleUndo, handleApplyPending]);
 
     const handleRevealNote = useCallback(async () => {
         const libraryId = action?.result_data?.library_id;
@@ -455,6 +547,11 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     }, [action]);
 
     const toggleExpanded = () => setExpanded({ key: expansionKey, expanded: !isExpanded });
+    // While the action awaits a decision, a collapsed card carries Apply /
+    // Reject in its header. Expanded, the footer's labeled buttons decide and
+    // the header keeps the open link, so the item can be checked first.
+    const isDecisionState = isAwaitingApproval || status === 'pending';
+    const showDecisionButtons = isDecisionState && !isExpanded && !isProcessing && !isConfirmAction && !hasNoActionData;
     const previewData = buildPreviewData(toolName, pendingApproval, action);
     const runPermissionMode: RunPermissionMode =
         isFullAccessGrantedForRun(runApprovalPolicy, runId) ? 'full_access' : 'ask';
@@ -477,67 +574,70 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     };
 
     const actionTitle = getActionTitle(toolName, action?.proposed_data, itemTitle, actions);
-    const bulkAnnotationRevealRef = action && isCreateAnnotationsAgentAction(action)
-        ? action.proposed_data.resolved_ref
-        : null;
-    const headerLinkActionRules: HeaderLinkActionRule[] = [
-        {
-            matches: () => (
-                toolName === 'create_note' &&
-                action?.status === 'applied' &&
-                // The click handler resolves through `library_ref`, so gate on
-                // library identity rather than a rowid the result may not carry.
-                hasLibraryIdentity({
-                    library_id: action?.result_data?.library_id,
-                    library_ref: action?.result_data?.library_ref,
-                }) &&
-                !!action?.result_data?.zotero_key
-            ),
-            tooltip: 'Open note',
-            onClick: () => {
-                // Resolve through the device-portable library_ref so a note created
-                // in a group library on another computer opens the right local item.
-                const libraryId = resolveLibraryRef({
-                    library_ref: action!.result_data!.library_ref,
-                    library_id: action!.result_data!.library_id,
-                });
-                if (libraryId) void openNoteByKey(libraryId, action!.result_data!.zotero_key);
-                else notifyReferenceUnavailable('item', 'library_unavailable');
-            },
-        },
-        {
-            matches: () => (
-                (toolName === 'create_highlight_annotations' || toolName === 'create_note_annotations')&&
-                action?.status === 'applied' &&
-                action?.result_data?.created?.length > 0
-            ),
-            tooltip: 'Open annotation',
-            onClick: async () => {
-                const firstCreated = action!.result_data!.created[0];
-                const resolved = await resolveItemReference({
-                    library_ref: firstCreated.library_ref,
-                    library_id: firstCreated.library_id,
-                    zotero_key: firstCreated.zotero_key,
-                });
-                if (resolved.status === 'found') {
-                    await navigateToAnnotation(resolved.item as Zotero.Item);
-                } else {
-                    notifyReferenceUnavailable('annotation', resolved.status === 'library_unavailable' ? 'library_unavailable' : 'missing');
-                }
-            },
-        },
-    ];
+    const mergedItemReference = action ? getMergedItemReference(action) : null;
+    const annotationKind = toolName === 'create_highlight_annotations'
+        ? 'highlight'
+        : toolName === 'create_note_annotations' ? 'note' : null;
+    // The header's open link (↗) goes to the action's result, where it is
+    // viewed: a note opens in the note editor, annotations in the reader, and
+    // an item-level change shows the item in the library. Each card type has
+    // one destination; a card with nothing to open yet shows no link.
+    const headerLinkAction: HeaderLinkAction | null = (() => {
+        if (mergedItemReference) {
+            return {
+                tooltip: 'Reveal in library',
+                onClick: async () => {
+                    // The collection lookup is a local query, so it needs this
+                    // device's rowid; `revealSource` resolves the reference itself.
+                    const libraryId = resolveLibraryRef(mergedItemReference);
+                    const collectionKey = libraryId
+                        ? await getCurrentCollectionKeyForItem(libraryId, mergedItemReference.zotero_key)
+                        : undefined;
+                    revealSource(mergedItemReference, collectionKey);
+                },
+            };
+        }
 
-    const defaultHeaderLinkAction: HeaderLinkAction | null = (() => {
-        const revealRef = bulkAnnotationRevealRef ?? {
+        if (toolName === 'create_note') {
+            const created = action?.status === 'applied' ? action.result_data : undefined;
+            // The click handler resolves through `library_ref`, so gate on
+            // library identity rather than a rowid the result may not carry.
+            if (!created?.zotero_key || !hasLibraryIdentity({
+                library_id: created.library_id,
+                library_ref: created.library_ref,
+            })) return null;
+            return {
+                tooltip: 'Open note',
+                onClick: () => {
+                    // Resolve through the device-portable library_ref so a note created
+                    // in a group library on another computer opens the right local item.
+                    const libraryId = resolveLibraryRef({
+                        library_ref: created.library_ref,
+                        library_id: created.library_id,
+                    });
+                    if (libraryId) void openNoteByKey(libraryId, created.zotero_key);
+                    else notifyReferenceUnavailable('item', 'library_unavailable');
+                },
+            };
+        }
+
+        if (annotationKind) {
+            return getCreateAnnotationsOpenLink(
+                annotationKind,
+                previewData?.actionData ?? action?.proposed_data,
+                action?.result_data,
+                action?.status === 'applied',
+            );
+        }
+
+        const revealRef = {
             library_id: action?.proposed_data?.library_id,
             zotero_key: action?.proposed_data?.zotero_key,
             library_ref: action?.proposed_data?.library_ref,
         };
         if (!hasLibraryIdentity(revealRef) || !revealRef.zotero_key) return null;
-
         return {
-            tooltip: 'Reveal in Zotero',
+            tooltip: 'Reveal in library',
             onClick: () => {
                 revealSource({
                     library_id: revealRef.library_id,
@@ -547,7 +647,6 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             },
         };
     })();
-    const headerLinkAction = headerLinkActionRules.find((rule) => rule.matches()) ?? defaultHeaderLinkAction;
 
     if (isStreaming) {
         const effectiveArgs = streamingArgs ?? {};
@@ -618,27 +717,12 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                     no action row exists yet. */}
                                 <span className="font-color-primary font-medium">{getActionLabel(toolName, previewData?.actionData ?? action?.proposed_data)}</span>
                                 {actionTitle && <span className="font-color-secondary ml-15">{actionTitle}</span>}
-                                {headerLinkAction && (
-                                    <>
-                                        {'\u00A0'}
-                                        <Tooltip content={headerLinkAction.tooltip} singleLine>
-                                            <span
-                                                className="font-color-secondary scale-10"
-                                                style={{ display: 'inline-flex', verticalAlign: 'middle', cursor: 'pointer' }}
-                                                role="button"
-                                                onClick={async (e) => {
-                                                    e.stopPropagation();
-                                                    e.preventDefault();
-                                                    await headerLinkAction.onClick();
-                                                }}
-                                            >
-                                                <Icon icon={ArrowUpRightIcon} />
-                                            </span>
-                                        </Tooltip>
-                                    </>
-                                )}
                             </div>
-                            {progressMessage && (
+                            {reconnectCaption ? (
+                                <span className="font-color-secondary text-sm" role="status">{reconnectCaption}</span>
+                            ) : unconfirmedNote ? (
+                                <span className="font-color-secondary text-sm" role="status">{unconfirmedNote}</span>
+                            ) : progressMessage && (
                                 <span className="font-color-tertiary shimmer-text">{progressMessage}</span>
                             )}
                         </div>
@@ -647,48 +731,66 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 
                 <div className="flex-1" />
 
-                <div
-                    className="display-flex flex-row items-center gap-25 mr-2 mt-015"
-                    style={{ visibility: !(isAwaitingApproval || status === 'pending') ? 'visible' : 'hidden' }}
-                >
-                    <Tooltip content="Expand" showArrow singleLine>
-                        <IconButton
-                            icon={ChevronIcon}
-                            variant="ghost-secondary"
-                            iconClassName="scale-12"
-                            onClick={toggleExpanded}
-                        />
-                    </Tooltip>
-                </div>
-
-                {((isAwaitingApproval || status === 'pending') && !isProcessing && !isConfirmAction && !hasNoActionData) && (
-                    <div className="display-flex flex-row items-center gap-25 mr-3 mt-015">
-                        {(!isProcessing || clickedButton === 'reject') && (
-                            <Tooltip content="Reject" showArrow singleLine>
+                {/* Header actions, right-aligned: Apply / Reject alone while a
+                    collapsed card awaits a decision; otherwise at most one
+                    tool-specific action, then the open / reveal link as the
+                    rightmost icon. Folding is the header button itself. */}
+                <div className="display-flex flex-row items-center gap-25 mr-2 mt-015">
+                    {showDecisionButtons && (
+                        <>
+                            <Tooltip content={heldTooltip ?? 'Reject'} showArrow singleLine>
                                 <IconButton
                                     icon={CancelIcon}
                                     variant="ghost-secondary"
                                     iconClassName="font-color-red"
                                     onClick={isAwaitingApproval ? handleReject : handleRejectPending}
-                                    disabled={isProcessing}
-                                    loading={isProcessing && clickedButton === 'reject'}
+                                    ariaLabel="Reject"
+                                    disabled={isDecisionHeld}
                                 />
                             </Tooltip>
-                        )}
-                        {(!isProcessing || clickedButton === 'approve') && (
-                            <Tooltip content="Apply" showArrow singleLine>
+                            <Tooltip content={heldTooltip ?? 'Apply'} showArrow singleLine>
                                 <IconButton
                                     icon={TickIcon}
                                     variant="ghost-secondary"
                                     iconClassName="font-color-green scale-14"
                                     onClick={isAwaitingApproval ? handleApprove : handleApplyPending}
-                                    disabled={isProcessing}
-                                    loading={isProcessing && clickedButton === 'approve'}
+                                    ariaLabel="Apply"
+                                    disabled={isDecisionHeld}
                                 />
                             </Tooltip>
-                        )}
-                    </div>
-                )}
+                        </>
+                    )}
+                    {!isDecisionState && noteExportTarget && !isProcessing && (isExportingNote ? (
+                        <IconButton
+                            icon={DownloadIcon}
+                            variant="ghost-secondary"
+                            iconClassName="font-color-secondary scale-10"
+                            onClick={() => {}}
+                            loading
+                            ariaLabel="Exporting"
+                        />
+                    ) : (
+                        <MenuButton
+                            icon={DownloadIcon}
+                            variant="ghost-secondary"
+                            iconClassName="font-color-secondary scale-10"
+                            menuItems={fileExportFormatMenuItems(handleExportNote)}
+                            tooltipContent="Export"
+                            ariaLabel="Export"
+                        />
+                    ))}
+                    {headerLinkAction && !showDecisionButtons && (
+                        <Tooltip content={headerLinkAction.tooltip} showArrow singleLine>
+                            <IconButton
+                                icon={ArrowUpRightIcon}
+                                variant="ghost-secondary"
+                                iconClassName="font-color-secondary scale-10"
+                                onClick={() => void headerLinkAction.onClick()}
+                                ariaLabel={headerLinkAction.tooltip}
+                            />
+                        </Tooltip>
+                    )}
+                </div>
             </div>
 
             {isExpanded && (
@@ -697,6 +799,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                         <ActionPreview
                             toolName={toolName}
                             previewData={previewData}
+                            disabled={isProcessing}
                             status={status}
                             actions={actions}
                         />
@@ -746,7 +849,8 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                 variant="outline"
                                 onClick={isAwaitingApproval ? handleReject : handleRejectPending}
                                 loading={isProcessing && clickedButton === 'reject'}
-                                disabled={isProcessing}
+                                disabled={isProcessing || isDecisionHeld}
+                                title={heldTooltip ?? undefined}
                                 className="flex-none whitespace-nowrap"
                             >
                                 Reject
@@ -784,7 +888,21 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                 loading={isProcessing}
                                 className="flex-none whitespace-nowrap"
                             >
-                                {isUndoError ? 'Retry Undo' : 'Try Again'}
+                                {isUndoRetry ? 'Retry Undo' : 'Try Again'}
+                            </Button>
+                        )}
+
+                        {showRefresh && (
+                            <Button
+                                variant="outline"
+                                icon={RepeatIcon}
+                                onClick={handleRefresh}
+                                loading={isProcessing && clickedButton === 'refresh'}
+                                disabled={isProcessing}
+                                title="Check the records again and show the current merge for review"
+                                className="flex-none whitespace-nowrap"
+                            >
+                                Refresh
                             </Button>
                         )}
 
@@ -793,7 +911,8 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                 variant="solid"
                                 onClick={isAwaitingApproval ? handleApprove : handleApplyPending}
                                 loading={isProcessing && clickedButton === 'approve'}
-                                disabled={isProcessing}
+                                disabled={isProcessing || isDecisionHeld}
+                                title={heldTooltip ?? undefined}
                                 className="flex-none whitespace-nowrap"
                             >
                                 <span>{isConfirmAction ? 'Confirm' : 'Apply'}</span>
