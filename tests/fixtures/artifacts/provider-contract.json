@@ -3089,6 +3089,7 @@
           ],
           "stale": 2,
           "cleared": 1,
+          "user_cleared": 0,
           "relabelled": 1
         },
         {

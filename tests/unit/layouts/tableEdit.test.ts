@@ -203,3 +203,61 @@ describe("review fixes, refresh", () => {
         expect(result.changes.map((c) => (c as any).rows_added)).toEqual([1, 0]);
     });
 });
+
+describe("option edits in the change list", () => {
+    const withDesign = (): TableSpec => {
+        const built = buildTable(
+            {
+                id: "t",
+                title: "T",
+                columns: [
+                    {
+                        header: "Design",
+                        type: "select",
+                        description: "What is the design?",
+                        options: [{ label: "RCT", description: "Randomized" }, { label: "Cohort" }, { label: "Other" }],
+                    },
+                ],
+            },
+            [source("s1", [paper("AAAAAAAA"), paper("BBBBBBBB"), paper("CCCCCCCC")])],
+            "2026-10-30",
+        );
+        if (!built.ok) throw new Error(built.message);
+        const [a, b, c] = built.spec.rows;
+        a.cells.design = { outcome: "answered", provenance: "model", value: { kind: "select", label: "Other" } };
+        b.cells.design = { outcome: "answered", provenance: "user", value: { kind: "select", label: "Other" } };
+        c.cells.design = { outcome: "answered", provenance: "model", value: { kind: "select", label: "RCT" } };
+        return built.spec;
+    };
+    const edit = (spec: TableSpec, options: any[]) =>
+        applyEdit(spec, { update_columns: [{ id: "design", options }] }, { added: [], refreshed: new Map() }, NOW);
+
+    it("counts the user's answers a removed option clears, and does not call it a new question", () => {
+        const result = edit(withDesign(), [{ label: "RCT" }, { label: "Cohort" }]);
+        if (!result.ok) throw new Error(result.message);
+        expect(result.changes).toEqual([
+            { op: "update_column", column: "design", header: "Design", fields: ["options"], stale: 0, cleared: 2, user_cleared: 1, relabelled: 0 },
+        ]);
+    });
+    it("reads a rename that keeps its definition as an options change only", () => {
+        const result = edit(withDesign(), [{ label: "Randomized trial", previous_label: "RCT" }, { label: "Cohort" }, { label: "Other" }]);
+        if (!result.ok) throw new Error(result.message);
+        expect(result.changes[0]).toMatchObject({ fields: ["options"], stale: 0, relabelled: 1 });
+    });
+    it("pairs a re-spelled option as the engine does: its definition decides the question", () => {
+        const kept = edit(withDesign(), [{ label: "rct" }, { label: "Cohort" }, { label: "Other" }]);
+        expect(kept.ok && kept.changes[0]).toMatchObject({ fields: ["options"], stale: 0 });
+        const cleared = edit(withDesign(), [{ label: "rct", description: null }, { label: "Cohort" }, { label: "Other" }]);
+        expect(cleared.ok && cleared.changes[0]).toMatchObject({ fields: ["question", "options"], stale: 3 });
+    });
+    it("reads removing an option with a definition as a new question, as its staleness does", () => {
+        const result = edit(withDesign(), [{ label: "Cohort" }, { label: "Other" }]);
+        expect(result.ok && result.changes[0]).toMatchObject({ fields: ["question", "options"], cleared: 1, stale: 2 });
+    });
+    it("reads a new definition, on a kept or an added option, as a new question", () => {
+        const defined = edit(withDesign(), [{ label: "RCT" }, { label: "Cohort", description: "Followed over time" }, { label: "Other" }]);
+        expect(defined.ok && defined.changes[0]).toMatchObject({ fields: ["question"], stale: 3 });
+        const added = edit(withDesign(), [{ label: "RCT" }, { label: "Cohort" }, { label: "Other" }, { label: "Case study", description: "One case" }]);
+        expect(added.ok && added.changes[0]).toMatchObject({ fields: ["question", "options"] });
+    });
+});

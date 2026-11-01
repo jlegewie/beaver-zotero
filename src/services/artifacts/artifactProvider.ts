@@ -523,13 +523,15 @@ async function applyEditRequest(
     const refreshed = new Map<string, ResolvedSource>();
     if (operations.refresh_sources != null) {
         const opened = await openTable(ref, guard);
+        content(opened.spec);
         for (const entry of refreshTargets(opened.spec, operations.refresh_sources))
             refreshed.set(entry.id, await resolveSource(entry));
     }
     const now = new Date().toISOString();
     const result = await applyTableEdit(
         ref,
-        (spec) => applyEdit(spec, operations, { added, refreshed }, now),
+        // A table `read` refuses is refused here too, before anything is applied.
+        (spec) => applyEdit(content(spec), operations, { added, refreshed }, now),
         { ...meta, seal: true },
         { operation_id: request.operation_id!, request_sha256 },
         guard,

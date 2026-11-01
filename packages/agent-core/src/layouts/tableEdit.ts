@@ -317,11 +317,15 @@ function optionUpdates(update: TableColumnUpdate): UpdateColumnOption[] | undefi
     });
 }
 
-function columnFields(before: Column, after: Column): ("header" | "question" | "options")[] {
+/**
+ * What an update changed. Whether the question changed is the engine's
+ * answer, the one its staleness follows: renames and re-spellings are not a
+ * new question, and removing an option counts only when it had a definition.
+ */
+function columnFields(before: Column, after: Column, report: MutationReport): ("header" | "question" | "options")[] {
     const fields: ("header" | "question" | "options")[] = [];
     if (before.header !== after.header) fields.push("header");
-    const definitions = (column: Column) => JSON.stringify((column.options ?? []).map((o) => o.description ?? null));
-    if ((before.description ?? "") !== (after.description ?? "") || definitions(before) !== definitions(after)) fields.push("question");
+    if (report.question_changed) fields.push("question");
     const labels = (column: Column) => JSON.stringify((column.options ?? []).map((o) => o.label));
     if (labels(before) !== labels(after)) fields.push("options");
     return fields;
@@ -419,9 +423,10 @@ export function applyEdit(
             op: "update_column",
             column: update.id,
             header: after.header,
-            fields: columnFields(before, after),
+            fields: columnFields(before, after, result[0]),
             stale: result[0].stale ?? 0,
             cleared: result[0].cleared ?? 0,
+            user_cleared: result[0].user_cleared ?? 0,
             relabelled: result[0].relabelled ?? 0,
         });
     }

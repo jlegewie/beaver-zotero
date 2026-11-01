@@ -49,7 +49,9 @@ export function tableChangeLines(changes: readonly TableChange[]): TableChangeLi
                 const effects = [
                     change.stale ? `${plural(change.stale, "answer")} out of date` : null,
                     change.relabelled ? `${plural(change.relabelled, "answer")} relabelled` : null,
-                    change.cleared ? `${plural(change.cleared, "answer")} cleared` : null,
+                    change.cleared
+                        ? `${plural(change.cleared, "answer")} cleared${change.user_cleared ? `, ${change.user_cleared} of them yours` : ""}`
+                        : null,
                 ].filter(Boolean);
                 lines.push({
                     tone: "change",

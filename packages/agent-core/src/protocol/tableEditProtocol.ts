@@ -127,9 +127,13 @@ export type TableChange =
           header: string;
           /** What changed: the header, the question, the options. */
           fields: ("header" | "question" | "options")[];
-          /** Cells marked out of date, cleared by a removed option, relabelled. */
+          /**
+           * Cells marked out of date, cleared by a removed option (and of them
+           * the user's), relabelled.
+           */
           stale: number;
           cleared: number;
+          user_cleared: number;
           relabelled: number;
       }
     | {

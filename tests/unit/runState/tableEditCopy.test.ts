@@ -23,6 +23,12 @@ describe("the change list of an edit", () => {
             { tone: "add", text: "Refreshed collection “Cash transfers” · 1 new paper · 1 removed paper left out · 1 no longer in it, kept" },
         ]);
     });
+    it("names the user's answers a removed option cleared", () => {
+        const change = { op: "update_column", column: "design", header: "Design", fields: ["options"], stale: 0, cleared: 2, user_cleared: 1, relabelled: 0 } as const;
+        expect(tableChangeLines([change])).toEqual([
+            { tone: "change", text: "Changed column “Design” (options) · 2 answers cleared, 1 of them yours" },
+        ]);
+    });
     it("reads title, description and row removals", () => {
         expect(tableChangeLines([{ op: "title", title: "X" }, { op: "description" }, { op: "remove_rows", rows: 1 }])).toEqual([
             { tone: "change", text: "Renamed the table to “X”" },

@@ -2498,6 +2498,19 @@ describe('the edit operations', () => {
         expect(last.operation_id).toBeUndefined();
     });
 
+    it('refuse an edit of a table a read refuses as invalid, writing nothing', async () => {
+        const file = await readTableFile();
+        const spec = { ...file.spec, columns: [...file.spec.columns, file.spec.columns.at(-1)!] };
+        await writeFile(tablePath(), JSON.stringify({ ...file, spec }), 'utf8');
+        const read = await handleArtifactRequest({ event: 'artifact_request', request_id: 'r', op: 'read', key: `u-${KEY}` });
+        expect(read).toMatchObject({ ok: false, error_code: 'invalid_spec' });
+        for (const [operations, id] of [[{ title: 'Never' }, 'edit-a'], [{ refresh_sources: true }, 'edit-b']] as const) {
+            expect(await edit(operations, id)).toMatchObject({ ok: false, error_code: 'invalid_spec' });
+        }
+        expect(await storedVersion()).toBe(file.spec.version);
+        expect((await listVersions(ref)).some((entry) => entry.operation_id)).toBe(false);
+    });
+
     it('refuse the whole call on an unknown id, naming the parameter and index', async () => {
         const response = await edit({ title: 'Never', remove_columns: ['note', 'gone'] }, 'edit-bad');
         expect(response).toMatchObject({ ok: false, error_code: 'unknown_column' });

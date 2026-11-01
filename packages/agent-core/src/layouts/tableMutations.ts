@@ -307,6 +307,8 @@ export interface SkippedCell {
  * counts a mutation can move are set.
  */
 export interface MutationReport {
+    /** `update_column` asked a new question (by {@link questionHash}). */
+    question_changed?: true;
     /** Cells marked out of date. */
     stale?: number;
     /** Cells deleted; of them, the user's. */
@@ -1059,6 +1061,7 @@ function updateColumn(
     // A write planned against the column before this change no longer
     // lands: its type, its question or a label it may write moved.
     const questionChanged = questionHash(column) !== question;
+    if (questionChanged) draft.report.question_changed = true;
     const refill = mutation.existing_answers === "refill";
     if (
         typeChange ||
