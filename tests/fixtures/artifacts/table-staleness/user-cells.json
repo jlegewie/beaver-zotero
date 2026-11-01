@@ -1,0 +1,251 @@
+{
+    "name": "a user cell is stale only when its question changed after the edit; its replaced answer never makes it stale",
+    "spec": {
+        "id": "t-user-cells",
+        "spec_version": 2,
+        "title": "User cells",
+        "anchor_column_id": "_reference",
+        "sources": [
+            {
+                "id": "s1",
+                "type": "items",
+                "ids": [
+                    "u-AAAAAAAA",
+                    "u-BBBBBBBB",
+                    "u-CCCCCCCC"
+                ]
+            }
+        ],
+        "removed": [
+            {
+                "ref": {
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "DDDDDDDD"
+                },
+                "removed_at": "2026-10-31T09:30:00.000Z"
+            }
+        ],
+        "columns": [
+            {
+                "id": "_reference",
+                "header": "Reference",
+                "type": "reference",
+                "system": true
+            },
+            {
+                "id": "_year",
+                "header": "Year",
+                "type": "date",
+                "system": true,
+                "priority": "secondary"
+            },
+            {
+                "id": "design",
+                "header": "Design",
+                "type": "select",
+                "description": "What is the design?",
+                "revision": 2,
+                "options": [
+                    {
+                        "label": "RCT",
+                        "color": "blue"
+                    },
+                    {
+                        "label": "Observational",
+                        "color": "green"
+                    }
+                ]
+            },
+            {
+                "id": "n",
+                "header": "Sample",
+                "type": "text",
+                "description": "How many participants?",
+                "revision": 1
+            }
+        ],
+        "rows": [
+            {
+                "id": "r1",
+                "ref": {
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "AAAAAAAA"
+                },
+                "documents": [
+                    "u-AAAAAPDF"
+                ],
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-30"
+                    }
+                ],
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Ames 2020",
+                            "title": "Ames 2020 title words"
+                        }
+                    },
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "date",
+                            "value": "2020"
+                        }
+                    },
+                    "design": {
+                        "outcome": "answered",
+                        "provenance": "user",
+                        "value": {
+                            "kind": "select",
+                            "label": "Observational"
+                        },
+                        "reasoning": "The authors call it a natural experiment.",
+                        "replaced": {
+                            "outcome": "answered",
+                            "provenance": "model",
+                            "value": {
+                                "kind": "select",
+                                "label": "RCT"
+                            },
+                            "documents": [
+                                "u-AAAAAPDF"
+                            ],
+                            "confidence": "medium",
+                            "evidence": [
+                                {
+                                    "document": "u-AAAAAPDF",
+                                    "locator": "s3",
+                                    "quote": "Schools were assigned by lottery.",
+                                    "page": 2
+                                }
+                            ]
+                        }
+                    },
+                    "n": {
+                        "outcome": "not_reported",
+                        "provenance": "user",
+                        "stale": true,
+                        "reasoning": "Not given anywhere."
+                    }
+                }
+            },
+            {
+                "id": "r2",
+                "ref": {
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "BBBBBBBB"
+                },
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-30"
+                    }
+                ],
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Burke 2019",
+                            "title": "Burke 2019 title words"
+                        }
+                    },
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "date",
+                            "value": "2019"
+                        }
+                    },
+                    "design": {
+                        "outcome": "cleared",
+                        "provenance": "user",
+                        "replaced": {
+                            "outcome": "not_reported",
+                            "provenance": "model",
+                            "stale": true,
+                            "reasoning": "The abstract does not say."
+                        }
+                    },
+                    "n": {
+                        "outcome": "answered",
+                        "provenance": "model",
+                        "value": {
+                            "kind": "text",
+                            "text": "about 300"
+                        },
+                        "stale": true
+                    }
+                }
+            },
+            {
+                "id": "r3",
+                "ref": {
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "CCCCCCCC"
+                },
+                "documents": [
+                    "u-CCCCCPDF"
+                ],
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-30"
+                    }
+                ],
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Cole 2021",
+                            "title": "Cole 2021 title words"
+                        }
+                    },
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "date",
+                            "value": "2021"
+                        }
+                    },
+                    "design": {
+                        "outcome": "answered",
+                        "provenance": "model",
+                        "value": {
+                            "kind": "select",
+                            "label": "RCT"
+                        },
+                        "documents": [
+                            "u-CCCCCPDF"
+                        ]
+                    }
+                }
+            }
+        ]
+    },
+    "stale": [
+        [
+            "r1",
+            "n"
+        ],
+        [
+            "r2",
+            "n"
+        ]
+    ]
+}

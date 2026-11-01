@@ -18,7 +18,7 @@ describe("artifact request envelopes", () => {
             validateArtifactRequest({
                 ...read,
                 keys: null,
-                spec: null,
+                sources: null,
                 meta: null,
             }),
         ).toBeNull();
@@ -39,26 +39,32 @@ describe("artifact request envelopes", () => {
             "unsupported_op",
         );
     });
-    it("requires agent provenance and exact positive revision guards", () => {
+    it("requires agent provenance on a write", () => {
         const request = {
             ...read,
-            op: "write",
-            spec: {},
+            op: "apply_edit",
+            operations: { title: "New" },
             meta: { actor: "agent", run_id: "run", thread_id: "thread" },
-            expected_version: 1,
-            expected_sha256: "a".repeat(64),
             operation_id: "op",
         };
         expect(validateArtifactRequest(request)).toBeNull();
         expect(
             validateArtifactRequest({ ...request, meta: { actor: "agent" } }),
         ).toBe("invalid_request");
-        expect(
-            validateArtifactRequest({ ...request, expected_version: 1.5 }),
-        ).toBe("invalid_request");
-        expect(
-            validateArtifactRequest({ ...request, expected_sha256: "abc" }),
-        ).toBe("invalid_request");
+        expect(validateArtifactRequest({ ...request, operation_id: " " })).toBe("invalid_request");
+        expect(validateArtifactRequest({ ...request, operations: [] })).toBe("invalid_request");
+    });
+    it("no longer knows a whole-spec write", () => {
+        expect(validateArtifactRequest({ ...read, op: "write" })).toBe("unsupported_op");
+    });
+    it("takes sources with unique ids on a preview, and column drafts", () => {
+        const preview = { event: "artifact_request", request_id: "p", op: "preview", sources: [{ id: "s1", type: "items", ids: ["u-ABCDEFGH"] }] };
+        expect(validateArtifactRequest(preview)).toBeNull();
+        expect(validateArtifactRequest({ ...preview, columns: [{ header: "N", type: "text" }] })).toBeNull();
+        expect(validateArtifactRequest({ ...preview, columns: ["n"] })).toBe("invalid_request");
+        expect(validateArtifactRequest({ ...preview, sources: [] })).toBe("invalid_request");
+        expect(validateArtifactRequest({ ...preview, sources: [{ id: "s1", type: "items" }, { id: "s1", type: "library" }] })).toBe("invalid_request");
+        expect(validateArtifactRequest({ ...preview, key: "u-ABCDEFGH" })).toBe("invalid_request");
     });
 });
 
@@ -70,7 +76,7 @@ describe("create into a collection", () => {
         kind: "table",
         library_ref: "u",
         title: "Comparison",
-        spec: {},
+        sources: [{ id: "s1", type: "items", ids: ["u-ABCDEFGH"] }],
         meta: { actor: "agent", run_id: "run", thread_id: "thread" },
         operation_id: "op",
     };

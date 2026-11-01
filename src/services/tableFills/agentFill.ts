@@ -93,7 +93,7 @@ export class AgentTableFills {
     async plan(request: ArtifactRequest, target: TableFillTarget): Promise<ArtifactResponse> {
         const scope: TableFillScope =
             request.rows || request.columns
-                ? { kind: 'cells', ...(request.rows ? { rows: request.rows } : {}), ...(request.columns ? { columns: request.columns } : {}) }
+                ? { kind: 'cells', ...(request.rows ? { rows: request.rows } : {}), ...(request.columns ? { columns: request.columns as string[] } : {}) }
                 : { kind: 'pending' };
         const result = await this.fills.plan(target, scope);
         if (!result.ok) return failure(request, result.code);

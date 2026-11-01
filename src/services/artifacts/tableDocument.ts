@@ -111,7 +111,7 @@ export interface TableHtmlOptions {
     /**
      * SHA-256 of the whole committed `table.json`. Zotero syncs a snapshot
      * when its main file changes, so a commit that changes only the file's
-     * receipts must still change the HTML.
+     * creation marker must still change the HTML.
      */
     fileSha256?: string;
     /**

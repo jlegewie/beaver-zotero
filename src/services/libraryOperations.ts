@@ -61,6 +61,8 @@ const operations = {
     executeEditAnnotationsAction: editAnnotations.executeEditAnnotationsAction,
     undoEditAnnotationsAction: editAnnotations.undoEditAnnotationsAction,
     table_createTable: tables.createTableUncoordinated,
+    table_createTableFromRequest: tables.createTableFromRequestUncoordinated,
+    table_applyTableEdit: tables.applyTableEditUncoordinated,
     table_writeTable: tables.writeTableUncoordinated,
     table_editTable: tables.editTableUncoordinated,
     table_editTableSession: tables.editTableSessionUncoordinated,

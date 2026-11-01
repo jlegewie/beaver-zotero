@@ -324,6 +324,13 @@ export interface RowFailure {
     message: string;
 }
 
+/** A paper removed from the table, remembered so a refresh skips it. */
+export interface RemovedPaper {
+    ref: RowRef;
+    /** ISO time of the removal. */
+    removed_at: string;
+}
+
 export interface Row {
     /**
      * Opaque, allocated when the row is created and never derived from the
@@ -466,19 +473,30 @@ export interface AnsweredCell extends CellBase {
     /** Why this answer; on a user correction, the user's stated reason. */
     reasoning?: string;
     evidence?: Evidence[];
+    /**
+     * User cells only: the model cell this one replaced, without its own
+     * `replaced`. It keeps Beaver's evidence visible after a correction, and
+     * resetting the cell restores it.
+     */
+    replaced?: ReplacedCell;
     error?: never;
     error_code?: never;
 }
 
-/** The material does not say — a finding, not a failure. */
+/**
+ * The material does not say — a finding, not a failure. A user may mark a cell
+ * this way too (provenance `user`, no filler fields, an optional note).
+ */
 export interface NotReportedCell extends CellBase {
     outcome: "not_reported";
     documents?: DocumentId[];
     confidence?: Confidence;
-    /** Why there is no answer. */
+    /** Why there is no answer; on a user's mark, the user's note. */
     reasoning?: string;
     /** The closest passages, when any. */
     evidence?: Evidence[];
+    /** User cells only: the model cell this one replaced. */
+    replaced?: ReplacedCell;
     value?: never;
     error?: never;
     error_code?: never;
@@ -496,12 +514,15 @@ export interface FailedCell extends CellBase {
     confidence?: never;
     reasoning?: never;
     evidence?: never;
+    replaced?: never;
 }
 
 /** A user-owned blank the filler never refills. */
 export interface ClearedCell extends CellBase {
     outcome: "cleared";
     provenance: "user";
+    /** The model cell the user cleared. */
+    replaced?: ReplacedCell;
     value?: never;
     documents?: never;
     confidence?: never;
@@ -516,6 +537,9 @@ export interface ClearedCell extends CellBase {
  * ({@link cellInvariantError}) hold on every write.
  */
 export type Cell = AnsweredCell | NotReportedCell | FailedCell | ClearedCell;
+
+/** The model answer a user cell replaced: an answered or not-reported model cell. */
+export type ReplacedCell = (AnsweredCell | NotReportedCell) & { replaced?: never };
 
 /** One collection, tag or saved search in one library. */
 export interface LibraryScope {
@@ -609,6 +633,11 @@ export interface TableSpec {
     rows: Row[];
     /** The approved source entries that produced the rows. */
     sources?: SourceEntry[];
+    /**
+     * Papers the user or the model removed from the table. Refreshing a
+     * source leaves them out; adding one explicitly restores it.
+     */
+    removed?: RemovedPaper[];
     /**
      * The column that owns row identity: sticky under horizontal scroll and the
      * target of reveal. Absent ⇒ {@link anchorColumn} picks the first
@@ -1544,6 +1573,21 @@ export function cellInvariantError(cell: Cell): string | undefined {
     const reasons = cell.outcome === "answered" || cell.outcome === "not_reported";
     if (raw.reasoning != null && !reasons)
         return "Only an answered or not-reported cell gives reasoning";
+    if (raw.replaced != null) {
+        if (cell.provenance !== "user")
+            return "Only a user cell keeps the answer it replaced";
+        const replaced = raw.replaced as Record<string, unknown>;
+        if (
+            !isPlainObject(replaced) ||
+            replaced.provenance !== "model" ||
+            (replaced.outcome !== "answered" && replaced.outcome !== "not_reported")
+        )
+            return "A replaced answer is a model answer or finding";
+        if (replaced.replaced != null)
+            return "A replaced answer keeps no replaced answer of its own";
+        const inner = cellInvariantError(replaced as unknown as Cell);
+        if (inner) return `Replaced answer: ${inner}`;
+    }
     const modelFields = ["documents", "confidence", "evidence"].some(
         (name) => raw[name] != null,
     );

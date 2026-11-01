@@ -355,170 +355,283 @@
     }
   },
   {
-    "name": "create-replay-after-user-edit",
+    "name": "preview-merges-duplicates",
     "request": {
       "event": "artifact_request",
-      "request_id": "create-replay-after-user-edit",
-      "op": "create",
-      "kind": "table",
-      "library_ref": "u",
-      "title": "Comparison",
-      "spec": {
-        "id": "t4",
-        "spec_version": 2,
-        "title": "Comparison",
-        "description": "Open-access status and topic of the compared papers.",
-        "anchor_column_id": "_reference",
-        "sources": [
-          {
-            "id": "s1",
-            "type": "items",
-            "ids": [
-              "u-PAPER222"
-            ]
+      "request_id": "preview-merges-duplicates",
+      "op": "preview",
+      "sources": [
+        {
+          "id": "s1",
+          "type": "items",
+          "ids": [
+            "u-PAPER222",
+            "u-PAPER2PD",
+            "u-NOTE1111"
+          ]
+        },
+        {
+          "id": "s2",
+          "type": "library",
+          "scope": {
+            "kind": "collection",
+            "library_ref": "u",
+            "key": "CASHTRN2"
           }
-        ],
-        "columns": [
-          {
-            "id": "_reference",
-            "header": "Reference",
-            "type": "reference",
-            "system": true
-          },
-          {
-            "id": "_year",
-            "header": "Year",
-            "type": "date",
-            "system": true,
-            "priority": "secondary"
-          },
-          {
-            "id": "_identifier",
-            "header": "Identifier",
-            "type": "link",
-            "system": true,
-            "priority": "secondary"
-          },
-          {
-            "id": "topic",
-            "header": "Topic",
-            "type": "select",
-            "description": "What is the paper's main topic?",
-            "options": [
-              {
-                "label": "Methods",
-                "color": "blue"
-              }
-            ]
-          },
-          {
-            "id": "open_access",
-            "header": "Open access",
-            "type": "boolean",
-            "description": "Is the paper open access?"
-          }
-        ],
-        "rows": [
-          {
-            "id": "r5f2c81a90b",
-            "ref": {
-              "kind": "item",
-              "library_ref": "u",
-              "zotero_key": "PAPER222"
+        }
+      ],
+      "columns": [
+        {
+          "header": "Design",
+          "type": "select",
+          "description": "What is the study design?",
+          "options": [
+            {
+              "label": "RCT",
+              "description": "Random assignment to arms."
             },
-            "documents": [
-              "u-PAPER222PDF"
-            ],
-            "cells": {
-              "_reference": {
-                "outcome": "answered",
-                "provenance": "system",
-                "value": {
-                  "kind": "reference",
-                  "display_name": "Smith 2021",
-                  "title": "Sampling online panels",
-                  "item_type": "journalArticle",
-                  "formatted_citation": "Smith, J. (2021). Sampling online panels. Survey Methods, 4, 1-20."
-                }
-              },
-              "_year": {
-                "outcome": "answered",
-                "provenance": "system",
-                "value": {
-                  "kind": "date",
-                  "value": "2021"
-                }
-              },
-              "_identifier": {
-                "outcome": "answered",
-                "provenance": "system",
-                "value": {
-                  "kind": "link",
-                  "url": "https://doi.org/10.1000/smith",
-                  "label": "10.1000/smith"
-                }
-              },
-              "topic": {
-                "outcome": "answered",
-                "provenance": "model",
-                "value": {
-                  "kind": "select",
-                  "label": "Methods"
-                },
-                "documents": [
-                  "u-PAPER222PDF"
-                ],
-                "evidence": [
-                  {
-                    "document": "u-PAPER222PDF",
-                    "locator": "s4-s5",
-                    "quote": "We compare three sampling designs.",
-                    "page": 0,
-                    "boxes": [
-                      [
-                        72,
-                        300,
-                        520,
-                        330
-                      ]
-                    ]
-                  }
-                ]
-              },
-              "open_access": {
-                "outcome": "not_reported",
-                "provenance": "model"
-              }
-            },
-            "in_library": true,
-            "origin": [
-              {
-                "source": "s1",
-                "date": "2026-09-10"
-              }
-            ]
-          }
-        ]
-      },
-      "meta": {
-        "actor": "agent",
-        "run_id": "run",
-        "thread_id": "thread"
-      },
-      "operation_id": "operation"
+            {
+              "label": "Quasi-experimental"
+            }
+          ]
+        },
+        {
+          "header": "Sample",
+          "type": "text",
+          "description": "How many people were studied?"
+        }
+      ]
     },
     "response": {
       "type": "artifact_response",
-      "request_id": "create-replay-after-user-edit",
+      "request_id": "preview-merges-duplicates",
+      "op": "preview",
+      "ok": true,
+      "preview": {
+        "sources": [
+          {
+            "entry": {
+              "id": "s1",
+              "type": "items",
+              "ids": [
+                "u-PAPER222"
+              ]
+            },
+            "count": 1,
+            "total": 1,
+            "truncated": false,
+            "without_document": 0,
+            "sample": [
+              {
+                "id": "u-PAPER222",
+                "title": "Cash transfers and school enrolment"
+              }
+            ],
+            "rejected": [
+              {
+                "id": "u-NOTE1111",
+                "error": "not a regular item; notes and standalone attachments are not table rows"
+              }
+            ]
+          },
+          {
+            "entry": {
+              "id": "s2",
+              "type": "library",
+              "scope": {
+                "kind": "collection",
+                "library_ref": "u",
+                "key": "CASHTRN2",
+                "name": "Cash transfers"
+              }
+            },
+            "count": 3,
+            "total": 3,
+            "truncated": false,
+            "without_document": 2,
+            "sample": [
+              {
+                "id": "u-PAPER222",
+                "title": "Cash transfers and school enrolment"
+              },
+              {
+                "id": "u-PAPER444",
+                "title": "Household responses to transfer programmes"
+              },
+              {
+                "id": "u-PAPER777",
+                "title": "Transfers and child labour in Nigeria"
+              }
+            ],
+            "rejected": []
+          }
+        ],
+        "rows": 3,
+        "duplicates": 1,
+        "total": 4,
+        "documents": 1,
+        "title_abstract": 1,
+        "no_input": 1,
+        "row_cap": 1000
+      }
+    }
+  },
+  {
+    "name": "preview-unusable-source",
+    "request": {
+      "event": "artifact_request",
+      "request_id": "preview-unusable-source",
+      "op": "preview",
+      "sources": [
+        {
+          "id": "s2",
+          "type": "library",
+          "scope": {
+            "kind": "collection",
+            "library_ref": "u",
+            "key": "CASHTRN2"
+          }
+        },
+        {
+          "id": "s3",
+          "type": "library",
+          "scope": {
+            "kind": "tag",
+            "library_ref": "g42",
+            "tag": "cash"
+          }
+        }
+      ]
+    },
+    "response": {
+      "type": "artifact_response",
+      "request_id": "preview-unusable-source",
+      "op": "preview",
+      "ok": true,
+      "preview": {
+        "sources": [
+          {
+            "entry": {
+              "id": "s2",
+              "type": "library",
+              "scope": {
+                "kind": "collection",
+                "library_ref": "u",
+                "key": "CASHTRN2",
+                "name": "Cash transfers"
+              }
+            },
+            "count": 3,
+            "total": 3,
+            "truncated": false,
+            "without_document": 2,
+            "sample": [
+              {
+                "id": "u-PAPER222",
+                "title": "Cash transfers and school enrolment"
+              }
+            ],
+            "rejected": []
+          },
+          {
+            "entry": {
+              "id": "s3",
+              "type": "library",
+              "scope": {
+                "kind": "tag",
+                "library_ref": "g42",
+                "tag": "cash"
+              }
+            },
+            "count": 0,
+            "total": 0,
+            "truncated": false,
+            "without_document": 0,
+            "sample": [],
+            "rejected": [],
+            "error": "This library is not available to Beaver."
+          }
+        ],
+        "rows": 3,
+        "duplicates": 0,
+        "total": 3,
+        "documents": 1,
+        "title_abstract": 1,
+        "no_input": 1,
+        "row_cap": 1000
+      }
+    }
+  },
+  {
+    "name": "create-from-sources",
+    "request": {
+      "event": "artifact_request",
+      "request_id": "create-from-sources",
+      "op": "create",
+      "kind": "table",
+      "library_ref": "u",
+      "collection_key": "CASHTRN2",
+      "title": "Cash transfers",
+      "description": "Design and sample of cash-transfer evaluations.",
+      "sources": [
+        {
+          "id": "s1",
+          "type": "items",
+          "ids": [
+            "u-PAPER222"
+          ]
+        },
+        {
+          "id": "s2",
+          "type": "library",
+          "scope": {
+            "kind": "collection",
+            "library_ref": "u",
+            "key": "CASHTRN2"
+          }
+        }
+      ],
+      "columns": [
+        {
+          "header": "Design",
+          "type": "select",
+          "description": "What is the study design?",
+          "options": [
+            {
+              "label": "RCT",
+              "description": "Random assignment to arms."
+            },
+            {
+              "label": "Quasi-experimental"
+            }
+          ]
+        },
+        {
+          "header": "Sample",
+          "type": "text",
+          "description": "How many people were studied?"
+        }
+      ],
+      "meta": {
+        "actor": "agent",
+        "run_id": "run",
+        "thread_id": "thread",
+        "change": "Created table"
+      },
+      "operation_id": "create-operation"
+    },
+    "response": {
+      "type": "artifact_response",
+      "request_id": "create-from-sources",
       "op": "create",
       "ok": true,
-      "version": 3,
+      "version": 1,
       "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "spec": {
-        "id": "t4",
+        "id": "t9",
         "spec_version": 2,
-        "title": "Comparison",
-        "description": "Open-access status and topic of the compared papers.",
+        "title": "Cash transfers",
+        "description": "Design and sample of cash-transfer evaluations.",
         "anchor_column_id": "_reference",
         "sources": [
           {
@@ -527,6 +640,16 @@
             "ids": [
               "u-PAPER222"
             ]
+          },
+          {
+            "id": "s2",
+            "type": "library",
+            "scope": {
+              "kind": "collection",
+              "library_ref": "u",
+              "key": "CASHTRN2",
+              "name": "Cash transfers"
+            }
           }
         ],
         "columns": [
@@ -551,22 +674,27 @@
             "priority": "secondary"
           },
           {
-            "id": "topic",
-            "header": "Topic",
+            "id": "design",
+            "header": "Design",
             "type": "select",
-            "description": "What is the paper's main topic?",
+            "description": "What is the study design?",
             "options": [
               {
-                "label": "Methods",
-                "color": "blue"
+                "label": "RCT",
+                "color": "blue",
+                "description": "Random assignment to arms."
+              },
+              {
+                "label": "Quasi-experimental",
+                "color": "green"
               }
             ]
           },
           {
-            "id": "open_access",
-            "header": "Open access",
-            "type": "boolean",
-            "description": "Is the paper open access?"
+            "id": "sample",
+            "header": "Sample",
+            "type": "text",
+            "description": "How many people were studied?"
           }
         ],
         "rows": [
@@ -578,7 +706,7 @@
               "zotero_key": "PAPER222"
             },
             "documents": [
-              "u-PAPER222PDF"
+              "u-PAPER2PD"
             ],
             "cells": {
               "_reference": {
@@ -587,9 +715,9 @@
                 "value": {
                   "kind": "reference",
                   "display_name": "Smith 2021",
-                  "title": "Sampling online panels",
-                  "item_type": "journalArticle",
-                  "formatted_citation": "Smith, J. (2021). Sampling online panels. Survey Methods, 4, 1-20."
+                  "title": "Cash transfers and school enrolment",
+                  "subtitle": "Jane Smith",
+                  "item_type": "journalArticle"
                 }
               },
               "_year": {
@@ -608,62 +736,110 @@
                   "url": "https://doi.org/10.1000/smith",
                   "label": "10.1000/smith"
                 }
-              },
-              "topic": {
-                "outcome": "answered",
-                "provenance": "model",
-                "value": {
-                  "kind": "select",
-                  "label": "Methods"
-                },
-                "documents": [
-                  "u-PAPER222PDF"
-                ],
-                "evidence": [
-                  {
-                    "document": "u-PAPER222PDF",
-                    "locator": "s4-s5",
-                    "quote": "We compare three sampling designs.",
-                    "page": 0,
-                    "boxes": [
-                      [
-                        72,
-                        300,
-                        520,
-                        330
-                      ]
-                    ]
-                  }
-                ]
-              },
-              "open_access": {
-                "outcome": "not_reported",
-                "provenance": "model"
               }
             },
             "in_library": true,
             "origin": [
               {
                 "source": "s1",
-                "date": "2026-09-10"
+                "date": "2026-10-31"
+              },
+              {
+                "source": "s2",
+                "date": "2026-10-31"
+              }
+            ]
+          },
+          {
+            "id": "r9c3d2e1f00",
+            "ref": {
+              "kind": "item",
+              "library_ref": "u",
+              "zotero_key": "PAPER444"
+            },
+            "documents": [
+              "u-PAPER4PD"
+            ],
+            "cells": {
+              "_reference": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "reference",
+                  "display_name": "Diaz et al. 2018",
+                  "title": "Household responses to transfer programmes",
+                  "subtitle": "Ana Diaz; Ben Roe; Cy Hu",
+                  "item_type": "journalArticle"
+                }
+              },
+              "_year": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "date",
+                  "value": "2018"
+                }
+              }
+            },
+            "in_library": true,
+            "origin": [
+              {
+                "source": "s2",
+                "date": "2026-10-31"
+              }
+            ]
+          },
+          {
+            "id": "rb4e5f6a7b8",
+            "ref": {
+              "kind": "item",
+              "library_ref": "u",
+              "zotero_key": "PAPER777"
+            },
+            "cells": {
+              "_reference": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "reference",
+                  "display_name": "Okafor 2020",
+                  "title": "Transfers and child labour in Nigeria",
+                  "subtitle": "Chi Okafor",
+                  "item_type": "journalArticle"
+                }
+              },
+              "_year": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "date",
+                  "value": "2020"
+                }
+              }
+            },
+            "in_library": true,
+            "origin": [
+              {
+                "source": "s2",
+                "date": "2026-10-31"
               }
             ]
           }
         ],
         "key": "ABCDEFGH",
-        "version": 3
+        "version": 1
       },
       "summary": {
-        "rows": 1,
+        "rows": 3,
         "columns": 5,
-        "sources": 1,
-        "in_scope_rows": 1,
+        "sources": 2,
+        "in_scope_rows": 3,
         "failed_rows": 0,
         "user_edits": 0,
         "columns_detail": {
           "_reference": {
             "type": "reference",
-            "answered": 1,
+            "answered": 3,
             "not_reported": 0,
             "failed": 0,
             "cleared": 0,
@@ -676,7 +852,7 @@
           },
           "_year": {
             "type": "date",
-            "answered": 1,
+            "answered": 3,
             "not_reported": 0,
             "failed": 0,
             "cleared": 0,
@@ -700,217 +876,153 @@
             "title_abstract_only": 0,
             "system": true
           },
-          "topic": {
+          "design": {
             "type": "select",
-            "answered": 1,
+            "answered": 0,
             "not_reported": 0,
             "failed": 0,
             "cleared": 0,
-            "unattempted": 0,
+            "unattempted": 3,
             "in_failed_rows": 0,
             "stale": 0,
             "needs_review": 0,
             "title_abstract_only": 0,
-            "distribution": {
-              "Methods": 1
-            }
+            "distribution": {}
           },
-          "open_access": {
-            "type": "boolean",
+          "sample": {
+            "type": "text",
             "answered": 0,
-            "not_reported": 1,
+            "not_reported": 0,
             "failed": 0,
             "cleared": 0,
-            "unattempted": 0,
+            "unattempted": 3,
             "in_failed_rows": 0,
-            "stale": 1,
+            "stale": 0,
             "needs_review": 0,
-            "title_abstract_only": 0,
-            "distribution": {}
+            "title_abstract_only": 0
           }
         }
       },
+      "pending": {
+        "rows": 3,
+        "cells": 6,
+        "new_rows": 3,
+        "columns": [],
+        "retry_rows": 0,
+        "blocked_rows": 0
+      },
       "zotero_item": {
-        "library_id": 47,
+        "library_id": 1,
         "library_ref": "u",
         "zotero_key": "ABCDEFGH"
       },
-      "operation": {
-        "operation_id": "operation",
-        "request_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-        "version": 1,
-        "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-      },
-      "replayed": true,
+      "changes": [
+        {
+          "op": "add_source",
+          "source": "s1",
+          "type": "items",
+          "rows_added": 1,
+          "rows_restored": 0,
+          "duplicates": 0,
+          "rejected": []
+        },
+        {
+          "op": "add_source",
+          "source": "s2",
+          "type": "library",
+          "kind": "collection",
+          "name": "Cash transfers",
+          "library_ref": "u",
+          "rows_added": 2,
+          "rows_restored": 0,
+          "duplicates": 1,
+          "rejected": []
+        },
+        {
+          "op": "add_column",
+          "column": "design",
+          "header": "Design"
+        },
+        {
+          "op": "add_column",
+          "column": "sample",
+          "header": "Sample"
+        }
+      ],
+      "replayed": false,
       "saved": true
     }
   },
   {
-    "name": "create-into-collection",
+    "name": "create-replayed",
     "request": {
       "event": "artifact_request",
-      "request_id": "create-into-collection",
+      "request_id": "create-replayed",
       "op": "create",
       "kind": "table",
       "library_ref": "u",
-      "title": "Comparison",
-      "spec": {
-        "id": "t4",
-        "spec_version": 2,
-        "title": "Comparison",
-        "description": "Open-access status and topic of the compared papers.",
-        "anchor_column_id": "_reference",
-        "sources": [
-          {
-            "id": "s1",
-            "type": "items",
-            "ids": [
-              "u-PAPER222"
-            ]
+      "collection_key": "CASHTRN2",
+      "title": "Cash transfers",
+      "description": "Design and sample of cash-transfer evaluations.",
+      "sources": [
+        {
+          "id": "s1",
+          "type": "items",
+          "ids": [
+            "u-PAPER222"
+          ]
+        },
+        {
+          "id": "s2",
+          "type": "library",
+          "scope": {
+            "kind": "collection",
+            "library_ref": "u",
+            "key": "CASHTRN2"
           }
-        ],
-        "columns": [
-          {
-            "id": "_reference",
-            "header": "Reference",
-            "type": "reference",
-            "system": true
-          },
-          {
-            "id": "_year",
-            "header": "Year",
-            "type": "date",
-            "system": true,
-            "priority": "secondary"
-          },
-          {
-            "id": "_identifier",
-            "header": "Identifier",
-            "type": "link",
-            "system": true,
-            "priority": "secondary"
-          },
-          {
-            "id": "topic",
-            "header": "Topic",
-            "type": "select",
-            "description": "What is the paper's main topic?",
-            "options": [
-              {
-                "label": "Methods",
-                "color": "blue"
-              }
-            ]
-          },
-          {
-            "id": "open_access",
-            "header": "Open access",
-            "type": "boolean",
-            "description": "Is the paper open access?"
-          }
-        ],
-        "rows": [
-          {
-            "id": "r5f2c81a90b",
-            "ref": {
-              "kind": "item",
-              "library_ref": "u",
-              "zotero_key": "PAPER222"
+        }
+      ],
+      "columns": [
+        {
+          "header": "Design",
+          "type": "select",
+          "description": "What is the study design?",
+          "options": [
+            {
+              "label": "RCT",
+              "description": "Random assignment to arms."
             },
-            "documents": [
-              "u-PAPER222PDF"
-            ],
-            "cells": {
-              "_reference": {
-                "outcome": "answered",
-                "provenance": "system",
-                "value": {
-                  "kind": "reference",
-                  "display_name": "Smith 2021",
-                  "title": "Sampling online panels",
-                  "item_type": "journalArticle",
-                  "formatted_citation": "Smith, J. (2021). Sampling online panels. Survey Methods, 4, 1-20."
-                }
-              },
-              "_year": {
-                "outcome": "answered",
-                "provenance": "system",
-                "value": {
-                  "kind": "date",
-                  "value": "2021"
-                }
-              },
-              "_identifier": {
-                "outcome": "answered",
-                "provenance": "system",
-                "value": {
-                  "kind": "link",
-                  "url": "https://doi.org/10.1000/smith",
-                  "label": "10.1000/smith"
-                }
-              },
-              "topic": {
-                "outcome": "answered",
-                "provenance": "model",
-                "value": {
-                  "kind": "select",
-                  "label": "Methods"
-                },
-                "documents": [
-                  "u-PAPER222PDF"
-                ],
-                "evidence": [
-                  {
-                    "document": "u-PAPER222PDF",
-                    "locator": "s4-s5",
-                    "quote": "We compare three sampling designs.",
-                    "page": 0,
-                    "boxes": [
-                      [
-                        72,
-                        300,
-                        520,
-                        330
-                      ]
-                    ]
-                  }
-                ]
-              },
-              "open_access": {
-                "outcome": "not_reported",
-                "provenance": "model"
-              }
-            },
-            "in_library": true,
-            "origin": [
-              {
-                "source": "s1",
-                "date": "2026-09-10"
-              }
-            ]
-          }
-        ]
-      },
+            {
+              "label": "Quasi-experimental"
+            }
+          ]
+        },
+        {
+          "header": "Sample",
+          "type": "text",
+          "description": "How many people were studied?"
+        }
+      ],
       "meta": {
         "actor": "agent",
         "run_id": "run",
-        "thread_id": "thread"
+        "thread_id": "thread",
+        "change": "Created table"
       },
-      "operation_id": "operation",
-      "collection_key": "CASHTRN2"
+      "operation_id": "create-operation"
     },
     "response": {
       "type": "artifact_response",
-      "request_id": "create-into-collection",
+      "request_id": "create-replayed",
       "op": "create",
       "ok": true,
-      "version": 3,
-      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "version": 2,
+      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "spec": {
-        "id": "t4",
+        "id": "t9",
         "spec_version": 2,
-        "title": "Comparison",
-        "description": "Open-access status and topic of the compared papers.",
+        "title": "Cash transfers (renamed by the user)",
+        "description": "Design and sample of cash-transfer evaluations.",
         "anchor_column_id": "_reference",
         "sources": [
           {
@@ -919,6 +1031,16 @@
             "ids": [
               "u-PAPER222"
             ]
+          },
+          {
+            "id": "s2",
+            "type": "library",
+            "scope": {
+              "kind": "collection",
+              "library_ref": "u",
+              "key": "CASHTRN2",
+              "name": "Cash transfers"
+            }
           }
         ],
         "columns": [
@@ -943,22 +1065,27 @@
             "priority": "secondary"
           },
           {
-            "id": "topic",
-            "header": "Topic",
+            "id": "design",
+            "header": "Design",
             "type": "select",
-            "description": "What is the paper's main topic?",
+            "description": "What is the study design?",
             "options": [
               {
-                "label": "Methods",
-                "color": "blue"
+                "label": "RCT",
+                "color": "blue",
+                "description": "Random assignment to arms."
+              },
+              {
+                "label": "Quasi-experimental",
+                "color": "green"
               }
             ]
           },
           {
-            "id": "open_access",
-            "header": "Open access",
-            "type": "boolean",
-            "description": "Is the paper open access?"
+            "id": "sample",
+            "header": "Sample",
+            "type": "text",
+            "description": "How many people were studied?"
           }
         ],
         "rows": [
@@ -970,7 +1097,7 @@
               "zotero_key": "PAPER222"
             },
             "documents": [
-              "u-PAPER222PDF"
+              "u-PAPER2PD"
             ],
             "cells": {
               "_reference": {
@@ -979,9 +1106,9 @@
                 "value": {
                   "kind": "reference",
                   "display_name": "Smith 2021",
-                  "title": "Sampling online panels",
-                  "item_type": "journalArticle",
-                  "formatted_citation": "Smith, J. (2021). Sampling online panels. Survey Methods, 4, 1-20."
+                  "title": "Cash transfers and school enrolment",
+                  "subtitle": "Jane Smith",
+                  "item_type": "journalArticle"
                 }
               },
               "_year": {
@@ -1000,62 +1127,110 @@
                   "url": "https://doi.org/10.1000/smith",
                   "label": "10.1000/smith"
                 }
-              },
-              "topic": {
-                "outcome": "answered",
-                "provenance": "model",
-                "value": {
-                  "kind": "select",
-                  "label": "Methods"
-                },
-                "documents": [
-                  "u-PAPER222PDF"
-                ],
-                "evidence": [
-                  {
-                    "document": "u-PAPER222PDF",
-                    "locator": "s4-s5",
-                    "quote": "We compare three sampling designs.",
-                    "page": 0,
-                    "boxes": [
-                      [
-                        72,
-                        300,
-                        520,
-                        330
-                      ]
-                    ]
-                  }
-                ]
-              },
-              "open_access": {
-                "outcome": "not_reported",
-                "provenance": "model"
               }
             },
             "in_library": true,
             "origin": [
               {
                 "source": "s1",
-                "date": "2026-09-10"
+                "date": "2026-10-31"
+              },
+              {
+                "source": "s2",
+                "date": "2026-10-31"
+              }
+            ]
+          },
+          {
+            "id": "r9c3d2e1f00",
+            "ref": {
+              "kind": "item",
+              "library_ref": "u",
+              "zotero_key": "PAPER444"
+            },
+            "documents": [
+              "u-PAPER4PD"
+            ],
+            "cells": {
+              "_reference": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "reference",
+                  "display_name": "Diaz et al. 2018",
+                  "title": "Household responses to transfer programmes",
+                  "subtitle": "Ana Diaz; Ben Roe; Cy Hu",
+                  "item_type": "journalArticle"
+                }
+              },
+              "_year": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "date",
+                  "value": "2018"
+                }
+              }
+            },
+            "in_library": true,
+            "origin": [
+              {
+                "source": "s2",
+                "date": "2026-10-31"
+              }
+            ]
+          },
+          {
+            "id": "rb4e5f6a7b8",
+            "ref": {
+              "kind": "item",
+              "library_ref": "u",
+              "zotero_key": "PAPER777"
+            },
+            "cells": {
+              "_reference": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "reference",
+                  "display_name": "Okafor 2020",
+                  "title": "Transfers and child labour in Nigeria",
+                  "subtitle": "Chi Okafor",
+                  "item_type": "journalArticle"
+                }
+              },
+              "_year": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "date",
+                  "value": "2020"
+                }
+              }
+            },
+            "in_library": true,
+            "origin": [
+              {
+                "source": "s2",
+                "date": "2026-10-31"
               }
             ]
           }
         ],
         "key": "ABCDEFGH",
-        "version": 3
+        "version": 2
       },
       "summary": {
-        "rows": 1,
+        "rows": 3,
         "columns": 5,
-        "sources": 1,
-        "in_scope_rows": 1,
+        "sources": 2,
+        "in_scope_rows": 3,
         "failed_rows": 0,
         "user_edits": 0,
         "columns_detail": {
           "_reference": {
             "type": "reference",
-            "answered": 1,
+            "answered": 3,
             "not_reported": 0,
             "failed": 0,
             "cleared": 0,
@@ -1068,7 +1243,7 @@
           },
           "_year": {
             "type": "date",
-            "answered": 1,
+            "answered": 3,
             "not_reported": 0,
             "failed": 0,
             "cleared": 0,
@@ -1092,742 +1267,81 @@
             "title_abstract_only": 0,
             "system": true
           },
-          "topic": {
+          "design": {
             "type": "select",
-            "answered": 1,
+            "answered": 0,
             "not_reported": 0,
             "failed": 0,
             "cleared": 0,
-            "unattempted": 0,
+            "unattempted": 3,
             "in_failed_rows": 0,
             "stale": 0,
             "needs_review": 0,
             "title_abstract_only": 0,
-            "distribution": {
-              "Methods": 1
-            }
+            "distribution": {}
           },
-          "open_access": {
-            "type": "boolean",
+          "sample": {
+            "type": "text",
             "answered": 0,
-            "not_reported": 1,
+            "not_reported": 0,
             "failed": 0,
             "cleared": 0,
-            "unattempted": 0,
+            "unattempted": 3,
             "in_failed_rows": 0,
-            "stale": 1,
+            "stale": 0,
             "needs_review": 0,
-            "title_abstract_only": 0,
-            "distribution": {}
+            "title_abstract_only": 0
           }
         }
       },
+      "pending": {
+        "rows": 3,
+        "cells": 6,
+        "new_rows": 3,
+        "columns": [],
+        "retry_rows": 0,
+        "blocked_rows": 0
+      },
       "zotero_item": {
-        "library_id": 47,
+        "library_id": 1,
         "library_ref": "u",
         "zotero_key": "ABCDEFGH"
       },
-      "operation": {
-        "operation_id": "operation",
-        "request_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-        "version": 1,
-        "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-      },
-      "replayed": true,
-      "saved": true
-    }
-  },
-  {
-    "name": "write-replay-needs-bookkeeping",
-    "request": {
-      "event": "artifact_request",
-      "request_id": "write-replay-needs-bookkeeping",
-      "op": "write",
-      "key": "u-ABCDEFGH",
-      "spec": {
-        "id": "t4",
-        "spec_version": 2,
-        "title": "Comparison",
-        "description": "Open-access status and topic of the compared papers.",
-        "anchor_column_id": "_reference",
-        "sources": [
-          {
-            "id": "s1",
-            "type": "items",
-            "ids": [
-              "u-PAPER222"
-            ]
-          }
-        ],
-        "columns": [
-          {
-            "id": "_reference",
-            "header": "Reference",
-            "type": "reference",
-            "system": true
-          },
-          {
-            "id": "_year",
-            "header": "Year",
-            "type": "date",
-            "system": true,
-            "priority": "secondary"
-          },
-          {
-            "id": "_identifier",
-            "header": "Identifier",
-            "type": "link",
-            "system": true,
-            "priority": "secondary"
-          },
-          {
-            "id": "topic",
-            "header": "Topic",
-            "type": "select",
-            "description": "What is the paper's main topic?",
-            "options": [
-              {
-                "label": "Methods",
-                "color": "blue"
-              }
-            ]
-          },
-          {
-            "id": "open_access",
-            "header": "Open access",
-            "type": "boolean",
-            "description": "Is the paper open access?"
-          }
-        ],
-        "rows": [
-          {
-            "id": "r5f2c81a90b",
-            "ref": {
-              "kind": "item",
-              "library_ref": "u",
-              "zotero_key": "PAPER222"
-            },
-            "documents": [
-              "u-PAPER222PDF"
-            ],
-            "cells": {
-              "_reference": {
-                "outcome": "answered",
-                "provenance": "system",
-                "value": {
-                  "kind": "reference",
-                  "display_name": "Smith 2021",
-                  "title": "Sampling online panels",
-                  "item_type": "journalArticle",
-                  "formatted_citation": "Smith, J. (2021). Sampling online panels. Survey Methods, 4, 1-20."
-                }
-              },
-              "_year": {
-                "outcome": "answered",
-                "provenance": "system",
-                "value": {
-                  "kind": "date",
-                  "value": "2021"
-                }
-              },
-              "_identifier": {
-                "outcome": "answered",
-                "provenance": "system",
-                "value": {
-                  "kind": "link",
-                  "url": "https://doi.org/10.1000/smith",
-                  "label": "10.1000/smith"
-                }
-              },
-              "topic": {
-                "outcome": "answered",
-                "provenance": "model",
-                "value": {
-                  "kind": "select",
-                  "label": "Methods"
-                },
-                "documents": [
-                  "u-PAPER222PDF"
-                ],
-                "evidence": [
-                  {
-                    "document": "u-PAPER222PDF",
-                    "locator": "s4-s5",
-                    "quote": "We compare three sampling designs.",
-                    "page": 0,
-                    "boxes": [
-                      [
-                        72,
-                        300,
-                        520,
-                        330
-                      ]
-                    ]
-                  }
-                ]
-              },
-              "open_access": {
-                "outcome": "not_reported",
-                "provenance": "model"
-              }
-            },
-            "in_library": true,
-            "origin": [
-              {
-                "source": "s1",
-                "date": "2026-09-10"
-              }
-            ]
-          }
-        ],
-        "key": "ABCDEFGH",
-        "version": 3
-      },
-      "meta": {
-        "actor": "agent",
-        "run_id": "run",
-        "thread_id": "thread"
-      },
-      "expected_version": 1,
-      "expected_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-      "operation_id": "operation"
-    },
-    "response": {
-      "type": "artifact_response",
-      "request_id": "write-replay-needs-bookkeeping",
-      "op": "write",
-      "ok": true,
-      "version": 3,
-      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "spec": {
-        "id": "t4",
-        "spec_version": 2,
-        "title": "Comparison",
-        "description": "Open-access status and topic of the compared papers.",
-        "anchor_column_id": "_reference",
-        "sources": [
-          {
-            "id": "s1",
-            "type": "items",
-            "ids": [
-              "u-PAPER222"
-            ]
-          }
-        ],
-        "columns": [
-          {
-            "id": "_reference",
-            "header": "Reference",
-            "type": "reference",
-            "system": true
-          },
-          {
-            "id": "_year",
-            "header": "Year",
-            "type": "date",
-            "system": true,
-            "priority": "secondary"
-          },
-          {
-            "id": "_identifier",
-            "header": "Identifier",
-            "type": "link",
-            "system": true,
-            "priority": "secondary"
-          },
-          {
-            "id": "topic",
-            "header": "Topic",
-            "type": "select",
-            "description": "What is the paper's main topic?",
-            "options": [
-              {
-                "label": "Methods",
-                "color": "blue"
-              }
-            ]
-          },
-          {
-            "id": "open_access",
-            "header": "Open access",
-            "type": "boolean",
-            "description": "Is the paper open access?"
-          }
-        ],
-        "rows": [
-          {
-            "id": "r5f2c81a90b",
-            "ref": {
-              "kind": "item",
-              "library_ref": "u",
-              "zotero_key": "PAPER222"
-            },
-            "documents": [
-              "u-PAPER222PDF"
-            ],
-            "cells": {
-              "_reference": {
-                "outcome": "answered",
-                "provenance": "system",
-                "value": {
-                  "kind": "reference",
-                  "display_name": "Smith 2021",
-                  "title": "Sampling online panels",
-                  "item_type": "journalArticle",
-                  "formatted_citation": "Smith, J. (2021). Sampling online panels. Survey Methods, 4, 1-20."
-                }
-              },
-              "_year": {
-                "outcome": "answered",
-                "provenance": "system",
-                "value": {
-                  "kind": "date",
-                  "value": "2021"
-                }
-              },
-              "_identifier": {
-                "outcome": "answered",
-                "provenance": "system",
-                "value": {
-                  "kind": "link",
-                  "url": "https://doi.org/10.1000/smith",
-                  "label": "10.1000/smith"
-                }
-              },
-              "topic": {
-                "outcome": "answered",
-                "provenance": "model",
-                "value": {
-                  "kind": "select",
-                  "label": "Methods"
-                },
-                "documents": [
-                  "u-PAPER222PDF"
-                ],
-                "evidence": [
-                  {
-                    "document": "u-PAPER222PDF",
-                    "locator": "s4-s5",
-                    "quote": "We compare three sampling designs.",
-                    "page": 0,
-                    "boxes": [
-                      [
-                        72,
-                        300,
-                        520,
-                        330
-                      ]
-                    ]
-                  }
-                ]
-              },
-              "open_access": {
-                "outcome": "not_reported",
-                "provenance": "model"
-              }
-            },
-            "in_library": true,
-            "origin": [
-              {
-                "source": "s1",
-                "date": "2026-09-10"
-              }
-            ]
-          }
-        ],
-        "key": "ABCDEFGH",
-        "version": 3
-      },
-      "summary": {
-        "rows": 1,
-        "columns": 5,
-        "sources": 1,
-        "in_scope_rows": 1,
-        "failed_rows": 0,
-        "user_edits": 0,
-        "columns_detail": {
-          "_reference": {
-            "type": "reference",
-            "answered": 1,
-            "not_reported": 0,
-            "failed": 0,
-            "cleared": 0,
-            "unattempted": 0,
-            "in_failed_rows": 0,
-            "stale": 0,
-            "needs_review": 0,
-            "title_abstract_only": 0,
-            "system": true
-          },
-          "_year": {
-            "type": "date",
-            "answered": 1,
-            "not_reported": 0,
-            "failed": 0,
-            "cleared": 0,
-            "unattempted": 0,
-            "in_failed_rows": 0,
-            "stale": 0,
-            "needs_review": 0,
-            "title_abstract_only": 0,
-            "system": true
-          },
-          "_identifier": {
-            "type": "link",
-            "answered": 1,
-            "not_reported": 0,
-            "failed": 0,
-            "cleared": 0,
-            "unattempted": 0,
-            "in_failed_rows": 0,
-            "stale": 0,
-            "needs_review": 0,
-            "title_abstract_only": 0,
-            "system": true
-          },
-          "topic": {
-            "type": "select",
-            "answered": 1,
-            "not_reported": 0,
-            "failed": 0,
-            "cleared": 0,
-            "unattempted": 0,
-            "in_failed_rows": 0,
-            "stale": 0,
-            "needs_review": 0,
-            "title_abstract_only": 0,
-            "distribution": {
-              "Methods": 1
-            }
-          },
-          "open_access": {
-            "type": "boolean",
-            "answered": 0,
-            "not_reported": 1,
-            "failed": 0,
-            "cleared": 0,
-            "unattempted": 0,
-            "in_failed_rows": 0,
-            "stale": 1,
-            "needs_review": 0,
-            "title_abstract_only": 0,
-            "distribution": {}
-          }
+      "changes": [
+        {
+          "op": "add_source",
+          "source": "s1",
+          "type": "items",
+          "rows_added": 1,
+          "rows_restored": 0,
+          "duplicates": 0,
+          "rejected": []
+        },
+        {
+          "op": "add_source",
+          "source": "s2",
+          "type": "library",
+          "kind": "collection",
+          "name": "Cash transfers",
+          "library_ref": "u",
+          "rows_added": 2,
+          "rows_restored": 0,
+          "duplicates": 1,
+          "rejected": []
+        },
+        {
+          "op": "add_column",
+          "column": "design",
+          "header": "Design"
+        },
+        {
+          "op": "add_column",
+          "column": "sample",
+          "header": "Sample"
         }
-      },
-      "operation": {
-        "operation_id": "operation",
-        "request_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-        "version": 1,
-        "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-      },
+      ],
       "replayed": true,
       "saved": false
-    }
-  },
-  {
-    "name": "write-conflict-current-state",
-    "request": {
-      "event": "artifact_request",
-      "request_id": "write-conflict-current-state",
-      "op": "write",
-      "key": "u-ABCDEFGH",
-      "spec": {
-        "id": "t4",
-        "spec_version": 2,
-        "title": "Comparison",
-        "description": "Open-access status and topic of the compared papers.",
-        "anchor_column_id": "_reference",
-        "sources": [
-          {
-            "id": "s1",
-            "type": "items",
-            "ids": [
-              "u-PAPER222"
-            ]
-          }
-        ],
-        "columns": [
-          {
-            "id": "_reference",
-            "header": "Reference",
-            "type": "reference",
-            "system": true
-          },
-          {
-            "id": "_year",
-            "header": "Year",
-            "type": "date",
-            "system": true,
-            "priority": "secondary"
-          },
-          {
-            "id": "_identifier",
-            "header": "Identifier",
-            "type": "link",
-            "system": true,
-            "priority": "secondary"
-          },
-          {
-            "id": "topic",
-            "header": "Topic",
-            "type": "select",
-            "description": "What is the paper's main topic?",
-            "options": [
-              {
-                "label": "Methods",
-                "color": "blue"
-              }
-            ]
-          },
-          {
-            "id": "open_access",
-            "header": "Open access",
-            "type": "boolean",
-            "description": "Is the paper open access?"
-          }
-        ],
-        "rows": [
-          {
-            "id": "r5f2c81a90b",
-            "ref": {
-              "kind": "item",
-              "library_ref": "u",
-              "zotero_key": "PAPER222"
-            },
-            "documents": [
-              "u-PAPER222PDF"
-            ],
-            "cells": {
-              "_reference": {
-                "outcome": "answered",
-                "provenance": "system",
-                "value": {
-                  "kind": "reference",
-                  "display_name": "Smith 2021",
-                  "title": "Sampling online panels",
-                  "item_type": "journalArticle",
-                  "formatted_citation": "Smith, J. (2021). Sampling online panels. Survey Methods, 4, 1-20."
-                }
-              },
-              "_year": {
-                "outcome": "answered",
-                "provenance": "system",
-                "value": {
-                  "kind": "date",
-                  "value": "2021"
-                }
-              },
-              "_identifier": {
-                "outcome": "answered",
-                "provenance": "system",
-                "value": {
-                  "kind": "link",
-                  "url": "https://doi.org/10.1000/smith",
-                  "label": "10.1000/smith"
-                }
-              },
-              "topic": {
-                "outcome": "answered",
-                "provenance": "model",
-                "value": {
-                  "kind": "select",
-                  "label": "Methods"
-                },
-                "documents": [
-                  "u-PAPER222PDF"
-                ],
-                "evidence": [
-                  {
-                    "document": "u-PAPER222PDF",
-                    "locator": "s4-s5",
-                    "quote": "We compare three sampling designs.",
-                    "page": 0,
-                    "boxes": [
-                      [
-                        72,
-                        300,
-                        520,
-                        330
-                      ]
-                    ]
-                  }
-                ]
-              },
-              "open_access": {
-                "outcome": "not_reported",
-                "provenance": "model"
-              }
-            },
-            "in_library": true,
-            "origin": [
-              {
-                "source": "s1",
-                "date": "2026-09-10"
-              }
-            ]
-          }
-        ],
-        "key": "ABCDEFGH",
-        "version": 3
-      },
-      "meta": {
-        "actor": "agent",
-        "run_id": "run",
-        "thread_id": "thread"
-      },
-      "expected_version": 1,
-      "expected_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-      "operation_id": "new-operation"
-    },
-    "response": {
-      "type": "artifact_response",
-      "request_id": "write-conflict-current-state",
-      "op": "write",
-      "ok": false,
-      "error_code": "conflict",
-      "conflict": true,
-      "version": 3,
-      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "spec": {
-        "id": "t4",
-        "spec_version": 2,
-        "title": "Comparison",
-        "description": "Open-access status and topic of the compared papers.",
-        "anchor_column_id": "_reference",
-        "sources": [
-          {
-            "id": "s1",
-            "type": "items",
-            "ids": [
-              "u-PAPER222"
-            ]
-          }
-        ],
-        "columns": [
-          {
-            "id": "_reference",
-            "header": "Reference",
-            "type": "reference",
-            "system": true
-          },
-          {
-            "id": "_year",
-            "header": "Year",
-            "type": "date",
-            "system": true,
-            "priority": "secondary"
-          },
-          {
-            "id": "_identifier",
-            "header": "Identifier",
-            "type": "link",
-            "system": true,
-            "priority": "secondary"
-          },
-          {
-            "id": "topic",
-            "header": "Topic",
-            "type": "select",
-            "description": "What is the paper's main topic?",
-            "options": [
-              {
-                "label": "Methods",
-                "color": "blue"
-              }
-            ]
-          },
-          {
-            "id": "open_access",
-            "header": "Open access",
-            "type": "boolean",
-            "description": "Is the paper open access?"
-          }
-        ],
-        "rows": [
-          {
-            "id": "r5f2c81a90b",
-            "ref": {
-              "kind": "item",
-              "library_ref": "u",
-              "zotero_key": "PAPER222"
-            },
-            "documents": [
-              "u-PAPER222PDF"
-            ],
-            "cells": {
-              "_reference": {
-                "outcome": "answered",
-                "provenance": "system",
-                "value": {
-                  "kind": "reference",
-                  "display_name": "Smith 2021",
-                  "title": "Sampling online panels",
-                  "item_type": "journalArticle",
-                  "formatted_citation": "Smith, J. (2021). Sampling online panels. Survey Methods, 4, 1-20."
-                }
-              },
-              "_year": {
-                "outcome": "answered",
-                "provenance": "system",
-                "value": {
-                  "kind": "date",
-                  "value": "2021"
-                }
-              },
-              "_identifier": {
-                "outcome": "answered",
-                "provenance": "system",
-                "value": {
-                  "kind": "link",
-                  "url": "https://doi.org/10.1000/smith",
-                  "label": "10.1000/smith"
-                }
-              },
-              "topic": {
-                "outcome": "answered",
-                "provenance": "model",
-                "value": {
-                  "kind": "select",
-                  "label": "Methods"
-                },
-                "documents": [
-                  "u-PAPER222PDF"
-                ],
-                "evidence": [
-                  {
-                    "document": "u-PAPER222PDF",
-                    "locator": "s4-s5",
-                    "quote": "We compare three sampling designs.",
-                    "page": 0,
-                    "boxes": [
-                      [
-                        72,
-                        300,
-                        520,
-                        330
-                      ]
-                    ]
-                  }
-                ]
-              },
-              "open_access": {
-                "outcome": "not_reported",
-                "provenance": "model"
-              }
-            },
-            "in_library": true,
-            "origin": [
-              {
-                "source": "s1",
-                "date": "2026-09-10"
-              }
-            ]
-          }
-        ],
-        "key": "ABCDEFGH",
-        "version": 3
-      }
     }
   },
   {
@@ -1838,20 +1352,506 @@
       "op": "create",
       "kind": "table",
       "library_ref": "u",
-      "title": "Comparison",
+      "collection_key": "CASHTRN2",
+      "title": "Cash transfers",
+      "description": "Design and sample of cash-transfer evaluations.",
+      "sources": [
+        {
+          "id": "s1",
+          "type": "items",
+          "ids": [
+            "u-PAPER222"
+          ]
+        },
+        {
+          "id": "s2",
+          "type": "library",
+          "scope": {
+            "kind": "collection",
+            "library_ref": "u",
+            "key": "CASHTRN2"
+          }
+        }
+      ],
+      "columns": [
+        {
+          "header": "Design",
+          "type": "select",
+          "description": "What is the study design?",
+          "options": [
+            {
+              "label": "RCT",
+              "description": "Random assignment to arms."
+            },
+            {
+              "label": "Quasi-experimental"
+            }
+          ]
+        },
+        {
+          "header": "Sample",
+          "type": "text",
+          "description": "How many people were studied?"
+        }
+      ],
+      "meta": {
+        "actor": "agent",
+        "run_id": "run",
+        "thread_id": "thread",
+        "change": "Created table"
+      },
+      "operation_id": "create-operation"
+    },
+    "response": {
+      "type": "artifact_response",
+      "request_id": "pending-create",
+      "op": "create",
+      "ok": false,
+      "error_code": "operation_pending"
+    }
+  },
+  {
+    "name": "create-source-unavailable",
+    "request": {
+      "event": "artifact_request",
+      "request_id": "create-source-unavailable",
+      "op": "create",
+      "kind": "table",
+      "library_ref": "u",
+      "title": "Cash transfers",
+      "description": "Design and sample of cash-transfer evaluations.",
+      "sources": [
+        {
+          "id": "s3",
+          "type": "library",
+          "scope": {
+            "kind": "tag",
+            "library_ref": "g42",
+            "tag": "cash"
+          }
+        }
+      ],
+      "columns": [
+        {
+          "header": "Design",
+          "type": "select",
+          "description": "What is the study design?",
+          "options": [
+            {
+              "label": "RCT",
+              "description": "Random assignment to arms."
+            },
+            {
+              "label": "Quasi-experimental"
+            }
+          ]
+        },
+        {
+          "header": "Sample",
+          "type": "text",
+          "description": "How many people were studied?"
+        }
+      ],
+      "meta": {
+        "actor": "agent",
+        "run_id": "run",
+        "thread_id": "thread",
+        "change": "Created table"
+      },
+      "operation_id": "create-operation"
+    },
+    "response": {
+      "type": "artifact_response",
+      "request_id": "create-source-unavailable",
+      "op": "create",
+      "ok": false,
+      "conflict": false,
+      "error_code": "source_unavailable",
+      "error": "sources[0]: This library is not available to Beaver."
+    }
+  },
+  {
+    "name": "apply-edit-title-description",
+    "before": {
+      "id": "t9",
+      "spec_version": 2,
+      "title": "Cash transfers",
+      "description": "Design and sample of cash-transfer evaluations.",
+      "anchor_column_id": "_reference",
+      "sources": [
+        {
+          "id": "s1",
+          "type": "items",
+          "ids": [
+            "u-PAPER222",
+            "u-PAPER333"
+          ]
+        },
+        {
+          "id": "s2",
+          "type": "library",
+          "scope": {
+            "kind": "collection",
+            "library_ref": "u",
+            "key": "CASHTRN2",
+            "name": "Cash transfers"
+          }
+        }
+      ],
+      "columns": [
+        {
+          "id": "_reference",
+          "header": "Reference",
+          "type": "reference",
+          "system": true
+        },
+        {
+          "id": "_year",
+          "header": "Year",
+          "type": "date",
+          "system": true,
+          "priority": "secondary"
+        },
+        {
+          "id": "_identifier",
+          "header": "Identifier",
+          "type": "link",
+          "system": true,
+          "priority": "secondary"
+        },
+        {
+          "id": "design",
+          "header": "Design",
+          "type": "select",
+          "description": "What is the study design?",
+          "options": [
+            {
+              "label": "RCT",
+              "color": "blue",
+              "description": "Random assignment to arms."
+            },
+            {
+              "label": "Quasi-experimental",
+              "color": "green"
+            },
+            {
+              "label": "Observational",
+              "color": "yellow"
+            }
+          ]
+        },
+        {
+          "id": "sample",
+          "header": "Sample",
+          "type": "text",
+          "description": "How many people were studied?"
+        },
+        {
+          "id": "open_access",
+          "header": "Open access",
+          "type": "boolean",
+          "description": "Is the paper open access?"
+        }
+      ],
+      "rows": [
+        {
+          "id": "r5f2c81a90b",
+          "ref": {
+            "kind": "item",
+            "library_ref": "u",
+            "zotero_key": "PAPER222"
+          },
+          "documents": [
+            "u-PAPER2PD"
+          ],
+          "cells": {
+            "_reference": {
+              "outcome": "answered",
+              "provenance": "system",
+              "value": {
+                "kind": "reference",
+                "display_name": "Smith 2021",
+                "title": "Cash transfers and school enrolment",
+                "subtitle": "Jane Smith",
+                "item_type": "journalArticle"
+              }
+            },
+            "_year": {
+              "outcome": "answered",
+              "provenance": "system",
+              "value": {
+                "kind": "date",
+                "value": "2021"
+              }
+            },
+            "_identifier": {
+              "outcome": "answered",
+              "provenance": "system",
+              "value": {
+                "kind": "link",
+                "url": "https://doi.org/10.1000/smith",
+                "label": "10.1000/smith"
+              }
+            },
+            "design": {
+              "outcome": "answered",
+              "provenance": "model",
+              "value": {
+                "kind": "select",
+                "label": "RCT"
+              },
+              "confidence": "high",
+              "documents": [
+                "u-PAPER2PD"
+              ],
+              "evidence": [
+                {
+                  "document": "u-PAPER2PD",
+                  "locator": "s4",
+                  "quote": "Villages were randomly assigned.",
+                  "page": 3
+                }
+              ]
+            },
+            "sample": {
+              "outcome": "answered",
+              "provenance": "model",
+              "value": {
+                "kind": "text",
+                "text": "1,200 households"
+              },
+              "confidence": "high",
+              "documents": [
+                "u-PAPER2PD"
+              ]
+            },
+            "open_access": {
+              "outcome": "answered",
+              "provenance": "user",
+              "value": {
+                "kind": "boolean",
+                "value": true
+              },
+              "reasoning": "Published under CC-BY.",
+              "replaced": {
+                "outcome": "answered",
+                "provenance": "model",
+                "value": {
+                  "kind": "boolean",
+                  "value": false
+                },
+                "confidence": "high",
+                "documents": [
+                  "u-PAPER2PD"
+                ]
+              }
+            }
+          },
+          "in_library": true,
+          "origin": [
+            {
+              "source": "s1",
+              "date": "2026-10-20"
+            }
+          ]
+        },
+        {
+          "id": "r7a01bc3d4e",
+          "ref": {
+            "kind": "item",
+            "library_ref": "u",
+            "zotero_key": "PAPER333"
+          },
+          "cells": {
+            "_reference": {
+              "outcome": "answered",
+              "provenance": "system",
+              "value": {
+                "kind": "reference",
+                "display_name": "Lee and Park 2019",
+                "title": "Conditional transfers in rural Malawi",
+                "subtitle": "Min Lee; Ji Park",
+                "item_type": "journalArticle"
+              }
+            },
+            "_year": {
+              "outcome": "answered",
+              "provenance": "system",
+              "value": {
+                "kind": "date",
+                "value": "2019"
+              }
+            },
+            "design": {
+              "outcome": "answered",
+              "provenance": "model",
+              "value": {
+                "kind": "select",
+                "label": "Quasi-experimental"
+              },
+              "confidence": "high"
+            },
+            "sample": {
+              "outcome": "not_reported",
+              "provenance": "user",
+              "reasoning": "The paper gives no count."
+            },
+            "open_access": {
+              "outcome": "answered",
+              "provenance": "model",
+              "value": {
+                "kind": "boolean",
+                "value": false
+              },
+              "confidence": "high"
+            }
+          },
+          "in_library": true,
+          "origin": [
+            {
+              "source": "s1",
+              "date": "2026-10-20"
+            }
+          ]
+        },
+        {
+          "id": "r9c3d2e1f00",
+          "ref": {
+            "kind": "item",
+            "library_ref": "u",
+            "zotero_key": "PAPER444"
+          },
+          "documents": [
+            "u-PAPER4PD"
+          ],
+          "cells": {
+            "_reference": {
+              "outcome": "answered",
+              "provenance": "system",
+              "value": {
+                "kind": "reference",
+                "display_name": "Diaz et al. 2018",
+                "title": "Household responses to transfer programmes",
+                "subtitle": "Ana Diaz; Ben Roe; Cy Hu",
+                "item_type": "journalArticle"
+              }
+            },
+            "_year": {
+              "outcome": "answered",
+              "provenance": "system",
+              "value": {
+                "kind": "date",
+                "value": "2018"
+              }
+            },
+            "design": {
+              "outcome": "answered",
+              "provenance": "model",
+              "value": {
+                "kind": "select",
+                "label": "Observational"
+              },
+              "confidence": "high",
+              "documents": [
+                "u-PAPER4PD"
+              ]
+            }
+          },
+          "in_library": true,
+          "origin": [
+            {
+              "source": "s2",
+              "date": "2026-10-20"
+            }
+          ]
+        },
+        {
+          "id": "rb4e5f6a7b8",
+          "ref": {
+            "kind": "item",
+            "library_ref": "u",
+            "zotero_key": "PAPER777"
+          },
+          "cells": {
+            "_reference": {
+              "outcome": "answered",
+              "provenance": "system",
+              "value": {
+                "kind": "reference",
+                "display_name": "Okafor 2020",
+                "title": "Transfers and child labour in Nigeria",
+                "subtitle": "Chi Okafor",
+                "item_type": "journalArticle"
+              }
+            },
+            "_year": {
+              "outcome": "answered",
+              "provenance": "system",
+              "value": {
+                "kind": "date",
+                "value": "2020"
+              }
+            }
+          },
+          "in_library": true,
+          "origin": [
+            {
+              "source": "s2",
+              "date": "2026-10-20"
+            }
+          ]
+        }
+      ],
+      "key": "ABCDEFGH",
+      "version": 4
+    },
+    "request": {
+      "event": "artifact_request",
+      "request_id": "apply-edit-title-description",
+      "op": "apply_edit",
+      "key": "u-ABCDEFGH",
+      "operations": {
+        "title": "Cash transfers and schooling",
+        "description": ""
+      },
+      "meta": {
+        "actor": "agent",
+        "run_id": "run",
+        "thread_id": "thread",
+        "change": "Edited table"
+      },
+      "operation_id": "apply-edit-title-description-op"
+    },
+    "response": {
+      "type": "artifact_response",
+      "request_id": "apply-edit-title-description",
+      "op": "apply_edit",
+      "ok": true,
+      "version": 5,
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "spec": {
-        "id": "t4",
+        "id": "t9",
         "spec_version": 2,
-        "title": "Comparison",
-        "description": "Open-access status and topic of the compared papers.",
+        "title": "Cash transfers and schooling",
         "anchor_column_id": "_reference",
         "sources": [
           {
             "id": "s1",
             "type": "items",
             "ids": [
-              "u-PAPER222"
+              "u-PAPER222",
+              "u-PAPER333"
             ]
+          },
+          {
+            "id": "s2",
+            "type": "library",
+            "scope": {
+              "kind": "collection",
+              "library_ref": "u",
+              "key": "CASHTRN2",
+              "name": "Cash transfers"
+            }
           }
         ],
         "columns": [
@@ -1876,16 +1876,31 @@
             "priority": "secondary"
           },
           {
-            "id": "topic",
-            "header": "Topic",
+            "id": "design",
+            "header": "Design",
             "type": "select",
-            "description": "What is the paper's main topic?",
+            "description": "What is the study design?",
             "options": [
               {
-                "label": "Methods",
-                "color": "blue"
+                "label": "RCT",
+                "color": "blue",
+                "description": "Random assignment to arms."
+              },
+              {
+                "label": "Quasi-experimental",
+                "color": "green"
+              },
+              {
+                "label": "Observational",
+                "color": "yellow"
               }
             ]
+          },
+          {
+            "id": "sample",
+            "header": "Sample",
+            "type": "text",
+            "description": "How many people were studied?"
           },
           {
             "id": "open_access",
@@ -1903,7 +1918,7 @@
               "zotero_key": "PAPER222"
             },
             "documents": [
-              "u-PAPER222PDF"
+              "u-PAPER2PD"
             ],
             "cells": {
               "_reference": {
@@ -1912,9 +1927,9 @@
                 "value": {
                   "kind": "reference",
                   "display_name": "Smith 2021",
-                  "title": "Sampling online panels",
-                  "item_type": "journalArticle",
-                  "formatted_citation": "Smith, J. (2021). Sampling online panels. Survey Methods, 4, 1-20."
+                  "title": "Cash transfers and school enrolment",
+                  "subtitle": "Jane Smith",
+                  "item_type": "journalArticle"
                 }
               },
               "_year": {
@@ -1934,61 +1949,3993 @@
                   "label": "10.1000/smith"
                 }
               },
-              "topic": {
+              "design": {
                 "outcome": "answered",
                 "provenance": "model",
                 "value": {
                   "kind": "select",
-                  "label": "Methods"
+                  "label": "RCT"
                 },
+                "confidence": "high",
                 "documents": [
-                  "u-PAPER222PDF"
+                  "u-PAPER2PD"
                 ],
                 "evidence": [
                   {
-                    "document": "u-PAPER222PDF",
-                    "locator": "s4-s5",
-                    "quote": "We compare three sampling designs.",
-                    "page": 0,
-                    "boxes": [
-                      [
-                        72,
-                        300,
-                        520,
-                        330
-                      ]
-                    ]
+                    "document": "u-PAPER2PD",
+                    "locator": "s4",
+                    "quote": "Villages were randomly assigned.",
+                    "page": 3
                   }
                 ]
               },
+              "sample": {
+                "outcome": "answered",
+                "provenance": "model",
+                "value": {
+                  "kind": "text",
+                  "text": "1,200 households"
+                },
+                "confidence": "high",
+                "documents": [
+                  "u-PAPER2PD"
+                ]
+              },
               "open_access": {
-                "outcome": "not_reported",
-                "provenance": "model"
+                "outcome": "answered",
+                "provenance": "user",
+                "value": {
+                  "kind": "boolean",
+                  "value": true
+                },
+                "reasoning": "Published under CC-BY.",
+                "replaced": {
+                  "outcome": "answered",
+                  "provenance": "model",
+                  "value": {
+                    "kind": "boolean",
+                    "value": false
+                  },
+                  "confidence": "high",
+                  "documents": [
+                    "u-PAPER2PD"
+                  ]
+                }
               }
             },
             "in_library": true,
             "origin": [
               {
                 "source": "s1",
-                "date": "2026-09-10"
+                "date": "2026-10-20"
               }
             ]
+          },
+          {
+            "id": "r7a01bc3d4e",
+            "ref": {
+              "kind": "item",
+              "library_ref": "u",
+              "zotero_key": "PAPER333"
+            },
+            "cells": {
+              "_reference": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "reference",
+                  "display_name": "Lee and Park 2019",
+                  "title": "Conditional transfers in rural Malawi",
+                  "subtitle": "Min Lee; Ji Park",
+                  "item_type": "journalArticle"
+                }
+              },
+              "_year": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "date",
+                  "value": "2019"
+                }
+              },
+              "design": {
+                "outcome": "answered",
+                "provenance": "model",
+                "value": {
+                  "kind": "select",
+                  "label": "Quasi-experimental"
+                },
+                "confidence": "high"
+              },
+              "sample": {
+                "outcome": "not_reported",
+                "provenance": "user",
+                "reasoning": "The paper gives no count."
+              },
+              "open_access": {
+                "outcome": "answered",
+                "provenance": "model",
+                "value": {
+                  "kind": "boolean",
+                  "value": false
+                },
+                "confidence": "high"
+              }
+            },
+            "in_library": true,
+            "origin": [
+              {
+                "source": "s1",
+                "date": "2026-10-20"
+              }
+            ]
+          },
+          {
+            "id": "r9c3d2e1f00",
+            "ref": {
+              "kind": "item",
+              "library_ref": "u",
+              "zotero_key": "PAPER444"
+            },
+            "documents": [
+              "u-PAPER4PD"
+            ],
+            "cells": {
+              "_reference": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "reference",
+                  "display_name": "Diaz et al. 2018",
+                  "title": "Household responses to transfer programmes",
+                  "subtitle": "Ana Diaz; Ben Roe; Cy Hu",
+                  "item_type": "journalArticle"
+                }
+              },
+              "_year": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "date",
+                  "value": "2018"
+                }
+              },
+              "design": {
+                "outcome": "answered",
+                "provenance": "model",
+                "value": {
+                  "kind": "select",
+                  "label": "Observational"
+                },
+                "confidence": "high",
+                "documents": [
+                  "u-PAPER4PD"
+                ]
+              }
+            },
+            "in_library": true,
+            "origin": [
+              {
+                "source": "s2",
+                "date": "2026-10-20"
+              }
+            ]
+          },
+          {
+            "id": "rb4e5f6a7b8",
+            "ref": {
+              "kind": "item",
+              "library_ref": "u",
+              "zotero_key": "PAPER777"
+            },
+            "cells": {
+              "_reference": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "reference",
+                  "display_name": "Okafor 2020",
+                  "title": "Transfers and child labour in Nigeria",
+                  "subtitle": "Chi Okafor",
+                  "item_type": "journalArticle"
+                }
+              },
+              "_year": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "date",
+                  "value": "2020"
+                }
+              }
+            },
+            "in_library": true,
+            "origin": [
+              {
+                "source": "s2",
+                "date": "2026-10-20"
+              }
+            ]
+          }
+        ],
+        "key": "ABCDEFGH",
+        "version": 5
+      },
+      "summary": {
+        "rows": 4,
+        "columns": 6,
+        "sources": 2,
+        "in_scope_rows": 4,
+        "failed_rows": 0,
+        "user_edits": 2,
+        "columns_detail": {
+          "_reference": {
+            "type": "reference",
+            "answered": 4,
+            "not_reported": 0,
+            "failed": 0,
+            "cleared": 0,
+            "unattempted": 0,
+            "in_failed_rows": 0,
+            "stale": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0,
+            "system": true
+          },
+          "_year": {
+            "type": "date",
+            "answered": 4,
+            "not_reported": 0,
+            "failed": 0,
+            "cleared": 0,
+            "unattempted": 0,
+            "in_failed_rows": 0,
+            "stale": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0,
+            "system": true
+          },
+          "_identifier": {
+            "type": "link",
+            "answered": 1,
+            "not_reported": 0,
+            "failed": 0,
+            "cleared": 0,
+            "unattempted": 0,
+            "in_failed_rows": 0,
+            "stale": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0,
+            "system": true
+          },
+          "design": {
+            "type": "select",
+            "answered": 3,
+            "not_reported": 0,
+            "failed": 0,
+            "cleared": 0,
+            "unattempted": 1,
+            "in_failed_rows": 0,
+            "stale": 0,
+            "needs_review": 0,
+            "title_abstract_only": 1,
+            "distribution": {
+              "RCT": 1,
+              "Quasi-experimental": 1,
+              "Observational": 1
+            }
+          },
+          "sample": {
+            "type": "text",
+            "answered": 1,
+            "not_reported": 1,
+            "failed": 0,
+            "cleared": 0,
+            "unattempted": 2,
+            "in_failed_rows": 0,
+            "stale": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0
+          },
+          "open_access": {
+            "type": "boolean",
+            "answered": 2,
+            "not_reported": 0,
+            "failed": 0,
+            "cleared": 0,
+            "unattempted": 2,
+            "in_failed_rows": 0,
+            "stale": 0,
+            "needs_review": 0,
+            "title_abstract_only": 1,
+            "distribution": {
+              "true": 1,
+              "false": 1
+            }
+          }
+        }
+      },
+      "pending": {
+        "rows": 2,
+        "cells": 5,
+        "new_rows": 1,
+        "columns": [
+          {
+            "id": "sample",
+            "header": "Sample",
+            "reason": "new",
+            "cells": 2
+          },
+          {
+            "id": "open_access",
+            "header": "Open access",
+            "reason": "new",
+            "cells": 2
+          }
+        ],
+        "retry_rows": 0,
+        "blocked_rows": 0
+      },
+      "changes": [
+        {
+          "op": "title",
+          "title": "Cash transfers and schooling"
+        },
+        {
+          "op": "description"
+        }
+      ],
+      "replayed": false,
+      "saved": true
+    }
+  },
+  {
+    "name": "apply-edit-columns",
+    "before": {
+      "id": "t9",
+      "spec_version": 2,
+      "title": "Cash transfers",
+      "description": "Design and sample of cash-transfer evaluations.",
+      "anchor_column_id": "_reference",
+      "sources": [
+        {
+          "id": "s1",
+          "type": "items",
+          "ids": [
+            "u-PAPER222",
+            "u-PAPER333"
+          ]
+        },
+        {
+          "id": "s2",
+          "type": "library",
+          "scope": {
+            "kind": "collection",
+            "library_ref": "u",
+            "key": "CASHTRN2",
+            "name": "Cash transfers"
+          }
+        }
+      ],
+      "columns": [
+        {
+          "id": "_reference",
+          "header": "Reference",
+          "type": "reference",
+          "system": true
+        },
+        {
+          "id": "_year",
+          "header": "Year",
+          "type": "date",
+          "system": true,
+          "priority": "secondary"
+        },
+        {
+          "id": "_identifier",
+          "header": "Identifier",
+          "type": "link",
+          "system": true,
+          "priority": "secondary"
+        },
+        {
+          "id": "design",
+          "header": "Design",
+          "type": "select",
+          "description": "What is the study design?",
+          "options": [
+            {
+              "label": "RCT",
+              "color": "blue",
+              "description": "Random assignment to arms."
+            },
+            {
+              "label": "Quasi-experimental",
+              "color": "green"
+            },
+            {
+              "label": "Observational",
+              "color": "yellow"
+            }
+          ]
+        },
+        {
+          "id": "sample",
+          "header": "Sample",
+          "type": "text",
+          "description": "How many people were studied?"
+        },
+        {
+          "id": "open_access",
+          "header": "Open access",
+          "type": "boolean",
+          "description": "Is the paper open access?"
+        }
+      ],
+      "rows": [
+        {
+          "id": "r5f2c81a90b",
+          "ref": {
+            "kind": "item",
+            "library_ref": "u",
+            "zotero_key": "PAPER222"
+          },
+          "documents": [
+            "u-PAPER2PD"
+          ],
+          "cells": {
+            "_reference": {
+              "outcome": "answered",
+              "provenance": "system",
+              "value": {
+                "kind": "reference",
+                "display_name": "Smith 2021",
+                "title": "Cash transfers and school enrolment",
+                "subtitle": "Jane Smith",
+                "item_type": "journalArticle"
+              }
+            },
+            "_year": {
+              "outcome": "answered",
+              "provenance": "system",
+              "value": {
+                "kind": "date",
+                "value": "2021"
+              }
+            },
+            "_identifier": {
+              "outcome": "answered",
+              "provenance": "system",
+              "value": {
+                "kind": "link",
+                "url": "https://doi.org/10.1000/smith",
+                "label": "10.1000/smith"
+              }
+            },
+            "design": {
+              "outcome": "answered",
+              "provenance": "model",
+              "value": {
+                "kind": "select",
+                "label": "RCT"
+              },
+              "confidence": "high",
+              "documents": [
+                "u-PAPER2PD"
+              ],
+              "evidence": [
+                {
+                  "document": "u-PAPER2PD",
+                  "locator": "s4",
+                  "quote": "Villages were randomly assigned.",
+                  "page": 3
+                }
+              ]
+            },
+            "sample": {
+              "outcome": "answered",
+              "provenance": "model",
+              "value": {
+                "kind": "text",
+                "text": "1,200 households"
+              },
+              "confidence": "high",
+              "documents": [
+                "u-PAPER2PD"
+              ]
+            },
+            "open_access": {
+              "outcome": "answered",
+              "provenance": "user",
+              "value": {
+                "kind": "boolean",
+                "value": true
+              },
+              "reasoning": "Published under CC-BY.",
+              "replaced": {
+                "outcome": "answered",
+                "provenance": "model",
+                "value": {
+                  "kind": "boolean",
+                  "value": false
+                },
+                "confidence": "high",
+                "documents": [
+                  "u-PAPER2PD"
+                ]
+              }
+            }
+          },
+          "in_library": true,
+          "origin": [
+            {
+              "source": "s1",
+              "date": "2026-10-20"
+            }
+          ]
+        },
+        {
+          "id": "r7a01bc3d4e",
+          "ref": {
+            "kind": "item",
+            "library_ref": "u",
+            "zotero_key": "PAPER333"
+          },
+          "cells": {
+            "_reference": {
+              "outcome": "answered",
+              "provenance": "system",
+              "value": {
+                "kind": "reference",
+                "display_name": "Lee and Park 2019",
+                "title": "Conditional transfers in rural Malawi",
+                "subtitle": "Min Lee; Ji Park",
+                "item_type": "journalArticle"
+              }
+            },
+            "_year": {
+              "outcome": "answered",
+              "provenance": "system",
+              "value": {
+                "kind": "date",
+                "value": "2019"
+              }
+            },
+            "design": {
+              "outcome": "answered",
+              "provenance": "model",
+              "value": {
+                "kind": "select",
+                "label": "Quasi-experimental"
+              },
+              "confidence": "high"
+            },
+            "sample": {
+              "outcome": "not_reported",
+              "provenance": "user",
+              "reasoning": "The paper gives no count."
+            },
+            "open_access": {
+              "outcome": "answered",
+              "provenance": "model",
+              "value": {
+                "kind": "boolean",
+                "value": false
+              },
+              "confidence": "high"
+            }
+          },
+          "in_library": true,
+          "origin": [
+            {
+              "source": "s1",
+              "date": "2026-10-20"
+            }
+          ]
+        },
+        {
+          "id": "r9c3d2e1f00",
+          "ref": {
+            "kind": "item",
+            "library_ref": "u",
+            "zotero_key": "PAPER444"
+          },
+          "documents": [
+            "u-PAPER4PD"
+          ],
+          "cells": {
+            "_reference": {
+              "outcome": "answered",
+              "provenance": "system",
+              "value": {
+                "kind": "reference",
+                "display_name": "Diaz et al. 2018",
+                "title": "Household responses to transfer programmes",
+                "subtitle": "Ana Diaz; Ben Roe; Cy Hu",
+                "item_type": "journalArticle"
+              }
+            },
+            "_year": {
+              "outcome": "answered",
+              "provenance": "system",
+              "value": {
+                "kind": "date",
+                "value": "2018"
+              }
+            },
+            "design": {
+              "outcome": "answered",
+              "provenance": "model",
+              "value": {
+                "kind": "select",
+                "label": "Observational"
+              },
+              "confidence": "high",
+              "documents": [
+                "u-PAPER4PD"
+              ]
+            }
+          },
+          "in_library": true,
+          "origin": [
+            {
+              "source": "s2",
+              "date": "2026-10-20"
+            }
+          ]
+        },
+        {
+          "id": "rb4e5f6a7b8",
+          "ref": {
+            "kind": "item",
+            "library_ref": "u",
+            "zotero_key": "PAPER777"
+          },
+          "cells": {
+            "_reference": {
+              "outcome": "answered",
+              "provenance": "system",
+              "value": {
+                "kind": "reference",
+                "display_name": "Okafor 2020",
+                "title": "Transfers and child labour in Nigeria",
+                "subtitle": "Chi Okafor",
+                "item_type": "journalArticle"
+              }
+            },
+            "_year": {
+              "outcome": "answered",
+              "provenance": "system",
+              "value": {
+                "kind": "date",
+                "value": "2020"
+              }
+            }
+          },
+          "in_library": true,
+          "origin": [
+            {
+              "source": "s2",
+              "date": "2026-10-20"
+            }
+          ]
+        }
+      ],
+      "key": "ABCDEFGH",
+      "version": 4
+    },
+    "request": {
+      "event": "artifact_request",
+      "request_id": "apply-edit-columns",
+      "op": "apply_edit",
+      "key": "u-ABCDEFGH",
+      "operations": {
+        "update_columns": [
+          {
+            "id": "design",
+            "description": "What is the study design, as the authors describe it?",
+            "options": [
+              {
+                "label": "Randomized trial",
+                "previous_label": "RCT"
+              },
+              {
+                "label": "Quasi-experimental"
+              }
+            ]
+          }
+        ],
+        "add_columns": [
+          {
+            "header": "Country",
+            "type": "text",
+            "description": "In which country was the study done?"
+          }
+        ],
+        "remove_columns": [
+          "open_access"
+        ]
+      },
+      "meta": {
+        "actor": "agent",
+        "run_id": "run",
+        "thread_id": "thread",
+        "change": "Edited table"
+      },
+      "operation_id": "apply-edit-columns-op"
+    },
+    "response": {
+      "type": "artifact_response",
+      "request_id": "apply-edit-columns",
+      "op": "apply_edit",
+      "ok": true,
+      "version": 5,
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "spec": {
+        "id": "t9",
+        "spec_version": 2,
+        "title": "Cash transfers",
+        "description": "Design and sample of cash-transfer evaluations.",
+        "anchor_column_id": "_reference",
+        "sources": [
+          {
+            "id": "s1",
+            "type": "items",
+            "ids": [
+              "u-PAPER222",
+              "u-PAPER333"
+            ]
+          },
+          {
+            "id": "s2",
+            "type": "library",
+            "scope": {
+              "kind": "collection",
+              "library_ref": "u",
+              "key": "CASHTRN2",
+              "name": "Cash transfers"
+            }
+          }
+        ],
+        "columns": [
+          {
+            "id": "_reference",
+            "header": "Reference",
+            "type": "reference",
+            "system": true
+          },
+          {
+            "id": "_year",
+            "header": "Year",
+            "type": "date",
+            "system": true,
+            "priority": "secondary"
+          },
+          {
+            "id": "_identifier",
+            "header": "Identifier",
+            "type": "link",
+            "system": true,
+            "priority": "secondary"
+          },
+          {
+            "id": "design",
+            "header": "Design",
+            "type": "select",
+            "description": "What is the study design, as the authors describe it?",
+            "options": [
+              {
+                "label": "Randomized trial",
+                "color": "blue",
+                "description": "Random assignment to arms."
+              },
+              {
+                "label": "Quasi-experimental",
+                "color": "green"
+              }
+            ],
+            "revision": 1
+          },
+          {
+            "id": "sample",
+            "header": "Sample",
+            "type": "text",
+            "description": "How many people were studied?"
+          },
+          {
+            "id": "country",
+            "header": "Country",
+            "type": "text",
+            "description": "In which country was the study done?"
+          }
+        ],
+        "rows": [
+          {
+            "id": "r5f2c81a90b",
+            "ref": {
+              "kind": "item",
+              "library_ref": "u",
+              "zotero_key": "PAPER222"
+            },
+            "documents": [
+              "u-PAPER2PD"
+            ],
+            "cells": {
+              "_reference": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "reference",
+                  "display_name": "Smith 2021",
+                  "title": "Cash transfers and school enrolment",
+                  "subtitle": "Jane Smith",
+                  "item_type": "journalArticle"
+                }
+              },
+              "_year": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "date",
+                  "value": "2021"
+                }
+              },
+              "_identifier": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "link",
+                  "url": "https://doi.org/10.1000/smith",
+                  "label": "10.1000/smith"
+                }
+              },
+              "design": {
+                "outcome": "answered",
+                "provenance": "model",
+                "value": {
+                  "kind": "select",
+                  "label": "Randomized trial"
+                },
+                "confidence": "high",
+                "documents": [
+                  "u-PAPER2PD"
+                ],
+                "evidence": [
+                  {
+                    "document": "u-PAPER2PD",
+                    "locator": "s4",
+                    "quote": "Villages were randomly assigned.",
+                    "page": 3
+                  }
+                ],
+                "stale": true
+              },
+              "sample": {
+                "outcome": "answered",
+                "provenance": "model",
+                "value": {
+                  "kind": "text",
+                  "text": "1,200 households"
+                },
+                "confidence": "high",
+                "documents": [
+                  "u-PAPER2PD"
+                ]
+              }
+            },
+            "in_library": true,
+            "origin": [
+              {
+                "source": "s1",
+                "date": "2026-10-20"
+              }
+            ]
+          },
+          {
+            "id": "r7a01bc3d4e",
+            "ref": {
+              "kind": "item",
+              "library_ref": "u",
+              "zotero_key": "PAPER333"
+            },
+            "cells": {
+              "_reference": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "reference",
+                  "display_name": "Lee and Park 2019",
+                  "title": "Conditional transfers in rural Malawi",
+                  "subtitle": "Min Lee; Ji Park",
+                  "item_type": "journalArticle"
+                }
+              },
+              "_year": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "date",
+                  "value": "2019"
+                }
+              },
+              "design": {
+                "outcome": "answered",
+                "provenance": "model",
+                "value": {
+                  "kind": "select",
+                  "label": "Quasi-experimental"
+                },
+                "confidence": "high",
+                "stale": true
+              },
+              "sample": {
+                "outcome": "not_reported",
+                "provenance": "user",
+                "reasoning": "The paper gives no count."
+              }
+            },
+            "in_library": true,
+            "origin": [
+              {
+                "source": "s1",
+                "date": "2026-10-20"
+              }
+            ]
+          },
+          {
+            "id": "r9c3d2e1f00",
+            "ref": {
+              "kind": "item",
+              "library_ref": "u",
+              "zotero_key": "PAPER444"
+            },
+            "documents": [
+              "u-PAPER4PD"
+            ],
+            "cells": {
+              "_reference": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "reference",
+                  "display_name": "Diaz et al. 2018",
+                  "title": "Household responses to transfer programmes",
+                  "subtitle": "Ana Diaz; Ben Roe; Cy Hu",
+                  "item_type": "journalArticle"
+                }
+              },
+              "_year": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "date",
+                  "value": "2018"
+                }
+              }
+            },
+            "in_library": true,
+            "origin": [
+              {
+                "source": "s2",
+                "date": "2026-10-20"
+              }
+            ]
+          },
+          {
+            "id": "rb4e5f6a7b8",
+            "ref": {
+              "kind": "item",
+              "library_ref": "u",
+              "zotero_key": "PAPER777"
+            },
+            "cells": {
+              "_reference": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "reference",
+                  "display_name": "Okafor 2020",
+                  "title": "Transfers and child labour in Nigeria",
+                  "subtitle": "Chi Okafor",
+                  "item_type": "journalArticle"
+                }
+              },
+              "_year": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "date",
+                  "value": "2020"
+                }
+              }
+            },
+            "in_library": true,
+            "origin": [
+              {
+                "source": "s2",
+                "date": "2026-10-20"
+              }
+            ]
+          }
+        ],
+        "key": "ABCDEFGH",
+        "version": 5
+      },
+      "summary": {
+        "rows": 4,
+        "columns": 6,
+        "sources": 2,
+        "in_scope_rows": 4,
+        "failed_rows": 0,
+        "user_edits": 1,
+        "columns_detail": {
+          "_reference": {
+            "type": "reference",
+            "answered": 4,
+            "not_reported": 0,
+            "failed": 0,
+            "cleared": 0,
+            "unattempted": 0,
+            "in_failed_rows": 0,
+            "stale": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0,
+            "system": true
+          },
+          "_year": {
+            "type": "date",
+            "answered": 4,
+            "not_reported": 0,
+            "failed": 0,
+            "cleared": 0,
+            "unattempted": 0,
+            "in_failed_rows": 0,
+            "stale": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0,
+            "system": true
+          },
+          "_identifier": {
+            "type": "link",
+            "answered": 1,
+            "not_reported": 0,
+            "failed": 0,
+            "cleared": 0,
+            "unattempted": 0,
+            "in_failed_rows": 0,
+            "stale": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0,
+            "system": true
+          },
+          "design": {
+            "type": "select",
+            "answered": 2,
+            "not_reported": 0,
+            "failed": 0,
+            "cleared": 0,
+            "unattempted": 2,
+            "in_failed_rows": 0,
+            "stale": 2,
+            "needs_review": 0,
+            "title_abstract_only": 1,
+            "distribution": {
+              "Randomized trial": 1,
+              "Quasi-experimental": 1
+            }
+          },
+          "sample": {
+            "type": "text",
+            "answered": 1,
+            "not_reported": 1,
+            "failed": 0,
+            "cleared": 0,
+            "unattempted": 2,
+            "in_failed_rows": 0,
+            "stale": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0
+          },
+          "country": {
+            "type": "text",
+            "answered": 0,
+            "not_reported": 0,
+            "failed": 0,
+            "cleared": 0,
+            "unattempted": 4,
+            "in_failed_rows": 0,
+            "stale": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0
+          }
+        }
+      },
+      "pending": {
+        "rows": 4,
+        "cells": 10,
+        "new_rows": 2,
+        "columns": [
+          {
+            "id": "design",
+            "header": "Design",
+            "reason": "changed",
+            "cells": 4
+          },
+          {
+            "id": "country",
+            "header": "Country",
+            "reason": "new",
+            "cells": 4
+          }
+        ],
+        "retry_rows": 0,
+        "blocked_rows": 0
+      },
+      "changes": [
+        {
+          "op": "remove_column",
+          "column": "open_access",
+          "header": "Open access",
+          "cleared": 2,
+          "user_cleared": 1
+        },
+        {
+          "op": "update_column",
+          "column": "design",
+          "header": "Design",
+          "fields": [
+            "question",
+            "options"
+          ],
+          "stale": 2,
+          "cleared": 1,
+          "relabelled": 1
+        },
+        {
+          "op": "add_column",
+          "column": "country",
+          "header": "Country"
+        }
+      ],
+      "replayed": false,
+      "saved": true
+    }
+  },
+  {
+    "name": "apply-edit-remove-rows",
+    "before": {
+      "id": "t9",
+      "spec_version": 2,
+      "title": "Cash transfers",
+      "description": "Design and sample of cash-transfer evaluations.",
+      "anchor_column_id": "_reference",
+      "sources": [
+        {
+          "id": "s1",
+          "type": "items",
+          "ids": [
+            "u-PAPER222",
+            "u-PAPER333"
+          ]
+        },
+        {
+          "id": "s2",
+          "type": "library",
+          "scope": {
+            "kind": "collection",
+            "library_ref": "u",
+            "key": "CASHTRN2",
+            "name": "Cash transfers"
+          }
+        }
+      ],
+      "columns": [
+        {
+          "id": "_reference",
+          "header": "Reference",
+          "type": "reference",
+          "system": true
+        },
+        {
+          "id": "_year",
+          "header": "Year",
+          "type": "date",
+          "system": true,
+          "priority": "secondary"
+        },
+        {
+          "id": "_identifier",
+          "header": "Identifier",
+          "type": "link",
+          "system": true,
+          "priority": "secondary"
+        },
+        {
+          "id": "design",
+          "header": "Design",
+          "type": "select",
+          "description": "What is the study design?",
+          "options": [
+            {
+              "label": "RCT",
+              "color": "blue",
+              "description": "Random assignment to arms."
+            },
+            {
+              "label": "Quasi-experimental",
+              "color": "green"
+            },
+            {
+              "label": "Observational",
+              "color": "yellow"
+            }
+          ]
+        },
+        {
+          "id": "sample",
+          "header": "Sample",
+          "type": "text",
+          "description": "How many people were studied?"
+        },
+        {
+          "id": "open_access",
+          "header": "Open access",
+          "type": "boolean",
+          "description": "Is the paper open access?"
+        }
+      ],
+      "rows": [
+        {
+          "id": "r5f2c81a90b",
+          "ref": {
+            "kind": "item",
+            "library_ref": "u",
+            "zotero_key": "PAPER222"
+          },
+          "documents": [
+            "u-PAPER2PD"
+          ],
+          "cells": {
+            "_reference": {
+              "outcome": "answered",
+              "provenance": "system",
+              "value": {
+                "kind": "reference",
+                "display_name": "Smith 2021",
+                "title": "Cash transfers and school enrolment",
+                "subtitle": "Jane Smith",
+                "item_type": "journalArticle"
+              }
+            },
+            "_year": {
+              "outcome": "answered",
+              "provenance": "system",
+              "value": {
+                "kind": "date",
+                "value": "2021"
+              }
+            },
+            "_identifier": {
+              "outcome": "answered",
+              "provenance": "system",
+              "value": {
+                "kind": "link",
+                "url": "https://doi.org/10.1000/smith",
+                "label": "10.1000/smith"
+              }
+            },
+            "design": {
+              "outcome": "answered",
+              "provenance": "model",
+              "value": {
+                "kind": "select",
+                "label": "RCT"
+              },
+              "confidence": "high",
+              "documents": [
+                "u-PAPER2PD"
+              ],
+              "evidence": [
+                {
+                  "document": "u-PAPER2PD",
+                  "locator": "s4",
+                  "quote": "Villages were randomly assigned.",
+                  "page": 3
+                }
+              ]
+            },
+            "sample": {
+              "outcome": "answered",
+              "provenance": "model",
+              "value": {
+                "kind": "text",
+                "text": "1,200 households"
+              },
+              "confidence": "high",
+              "documents": [
+                "u-PAPER2PD"
+              ]
+            },
+            "open_access": {
+              "outcome": "answered",
+              "provenance": "user",
+              "value": {
+                "kind": "boolean",
+                "value": true
+              },
+              "reasoning": "Published under CC-BY.",
+              "replaced": {
+                "outcome": "answered",
+                "provenance": "model",
+                "value": {
+                  "kind": "boolean",
+                  "value": false
+                },
+                "confidence": "high",
+                "documents": [
+                  "u-PAPER2PD"
+                ]
+              }
+            }
+          },
+          "in_library": true,
+          "origin": [
+            {
+              "source": "s1",
+              "date": "2026-10-20"
+            }
+          ]
+        },
+        {
+          "id": "r7a01bc3d4e",
+          "ref": {
+            "kind": "item",
+            "library_ref": "u",
+            "zotero_key": "PAPER333"
+          },
+          "cells": {
+            "_reference": {
+              "outcome": "answered",
+              "provenance": "system",
+              "value": {
+                "kind": "reference",
+                "display_name": "Lee and Park 2019",
+                "title": "Conditional transfers in rural Malawi",
+                "subtitle": "Min Lee; Ji Park",
+                "item_type": "journalArticle"
+              }
+            },
+            "_year": {
+              "outcome": "answered",
+              "provenance": "system",
+              "value": {
+                "kind": "date",
+                "value": "2019"
+              }
+            },
+            "design": {
+              "outcome": "answered",
+              "provenance": "model",
+              "value": {
+                "kind": "select",
+                "label": "Quasi-experimental"
+              },
+              "confidence": "high"
+            },
+            "sample": {
+              "outcome": "not_reported",
+              "provenance": "user",
+              "reasoning": "The paper gives no count."
+            },
+            "open_access": {
+              "outcome": "answered",
+              "provenance": "model",
+              "value": {
+                "kind": "boolean",
+                "value": false
+              },
+              "confidence": "high"
+            }
+          },
+          "in_library": true,
+          "origin": [
+            {
+              "source": "s1",
+              "date": "2026-10-20"
+            }
+          ]
+        },
+        {
+          "id": "r9c3d2e1f00",
+          "ref": {
+            "kind": "item",
+            "library_ref": "u",
+            "zotero_key": "PAPER444"
+          },
+          "documents": [
+            "u-PAPER4PD"
+          ],
+          "cells": {
+            "_reference": {
+              "outcome": "answered",
+              "provenance": "system",
+              "value": {
+                "kind": "reference",
+                "display_name": "Diaz et al. 2018",
+                "title": "Household responses to transfer programmes",
+                "subtitle": "Ana Diaz; Ben Roe; Cy Hu",
+                "item_type": "journalArticle"
+              }
+            },
+            "_year": {
+              "outcome": "answered",
+              "provenance": "system",
+              "value": {
+                "kind": "date",
+                "value": "2018"
+              }
+            },
+            "design": {
+              "outcome": "answered",
+              "provenance": "model",
+              "value": {
+                "kind": "select",
+                "label": "Observational"
+              },
+              "confidence": "high",
+              "documents": [
+                "u-PAPER4PD"
+              ]
+            }
+          },
+          "in_library": true,
+          "origin": [
+            {
+              "source": "s2",
+              "date": "2026-10-20"
+            }
+          ]
+        },
+        {
+          "id": "rb4e5f6a7b8",
+          "ref": {
+            "kind": "item",
+            "library_ref": "u",
+            "zotero_key": "PAPER777"
+          },
+          "cells": {
+            "_reference": {
+              "outcome": "answered",
+              "provenance": "system",
+              "value": {
+                "kind": "reference",
+                "display_name": "Okafor 2020",
+                "title": "Transfers and child labour in Nigeria",
+                "subtitle": "Chi Okafor",
+                "item_type": "journalArticle"
+              }
+            },
+            "_year": {
+              "outcome": "answered",
+              "provenance": "system",
+              "value": {
+                "kind": "date",
+                "value": "2020"
+              }
+            }
+          },
+          "in_library": true,
+          "origin": [
+            {
+              "source": "s2",
+              "date": "2026-10-20"
+            }
+          ]
+        }
+      ],
+      "key": "ABCDEFGH",
+      "version": 4
+    },
+    "request": {
+      "event": "artifact_request",
+      "request_id": "apply-edit-remove-rows",
+      "op": "apply_edit",
+      "key": "u-ABCDEFGH",
+      "operations": {
+        "remove_rows": [
+          "r7a01bc3d4e"
+        ]
+      },
+      "meta": {
+        "actor": "agent",
+        "run_id": "run",
+        "thread_id": "thread",
+        "change": "Edited table"
+      },
+      "operation_id": "apply-edit-remove-rows-op"
+    },
+    "response": {
+      "type": "artifact_response",
+      "request_id": "apply-edit-remove-rows",
+      "op": "apply_edit",
+      "ok": true,
+      "version": 5,
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "spec": {
+        "id": "t9",
+        "spec_version": 2,
+        "title": "Cash transfers",
+        "description": "Design and sample of cash-transfer evaluations.",
+        "anchor_column_id": "_reference",
+        "sources": [
+          {
+            "id": "s1",
+            "type": "items",
+            "ids": [
+              "u-PAPER222",
+              "u-PAPER333"
+            ]
+          },
+          {
+            "id": "s2",
+            "type": "library",
+            "scope": {
+              "kind": "collection",
+              "library_ref": "u",
+              "key": "CASHTRN2",
+              "name": "Cash transfers"
+            }
+          }
+        ],
+        "columns": [
+          {
+            "id": "_reference",
+            "header": "Reference",
+            "type": "reference",
+            "system": true
+          },
+          {
+            "id": "_year",
+            "header": "Year",
+            "type": "date",
+            "system": true,
+            "priority": "secondary"
+          },
+          {
+            "id": "_identifier",
+            "header": "Identifier",
+            "type": "link",
+            "system": true,
+            "priority": "secondary"
+          },
+          {
+            "id": "design",
+            "header": "Design",
+            "type": "select",
+            "description": "What is the study design?",
+            "options": [
+              {
+                "label": "RCT",
+                "color": "blue",
+                "description": "Random assignment to arms."
+              },
+              {
+                "label": "Quasi-experimental",
+                "color": "green"
+              },
+              {
+                "label": "Observational",
+                "color": "yellow"
+              }
+            ]
+          },
+          {
+            "id": "sample",
+            "header": "Sample",
+            "type": "text",
+            "description": "How many people were studied?"
+          },
+          {
+            "id": "open_access",
+            "header": "Open access",
+            "type": "boolean",
+            "description": "Is the paper open access?"
+          }
+        ],
+        "rows": [
+          {
+            "id": "r5f2c81a90b",
+            "ref": {
+              "kind": "item",
+              "library_ref": "u",
+              "zotero_key": "PAPER222"
+            },
+            "documents": [
+              "u-PAPER2PD"
+            ],
+            "cells": {
+              "_reference": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "reference",
+                  "display_name": "Smith 2021",
+                  "title": "Cash transfers and school enrolment",
+                  "subtitle": "Jane Smith",
+                  "item_type": "journalArticle"
+                }
+              },
+              "_year": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "date",
+                  "value": "2021"
+                }
+              },
+              "_identifier": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "link",
+                  "url": "https://doi.org/10.1000/smith",
+                  "label": "10.1000/smith"
+                }
+              },
+              "design": {
+                "outcome": "answered",
+                "provenance": "model",
+                "value": {
+                  "kind": "select",
+                  "label": "RCT"
+                },
+                "confidence": "high",
+                "documents": [
+                  "u-PAPER2PD"
+                ],
+                "evidence": [
+                  {
+                    "document": "u-PAPER2PD",
+                    "locator": "s4",
+                    "quote": "Villages were randomly assigned.",
+                    "page": 3
+                  }
+                ]
+              },
+              "sample": {
+                "outcome": "answered",
+                "provenance": "model",
+                "value": {
+                  "kind": "text",
+                  "text": "1,200 households"
+                },
+                "confidence": "high",
+                "documents": [
+                  "u-PAPER2PD"
+                ]
+              },
+              "open_access": {
+                "outcome": "answered",
+                "provenance": "user",
+                "value": {
+                  "kind": "boolean",
+                  "value": true
+                },
+                "reasoning": "Published under CC-BY.",
+                "replaced": {
+                  "outcome": "answered",
+                  "provenance": "model",
+                  "value": {
+                    "kind": "boolean",
+                    "value": false
+                  },
+                  "confidence": "high",
+                  "documents": [
+                    "u-PAPER2PD"
+                  ]
+                }
+              }
+            },
+            "in_library": true,
+            "origin": [
+              {
+                "source": "s1",
+                "date": "2026-10-20"
+              }
+            ]
+          },
+          {
+            "id": "r9c3d2e1f00",
+            "ref": {
+              "kind": "item",
+              "library_ref": "u",
+              "zotero_key": "PAPER444"
+            },
+            "documents": [
+              "u-PAPER4PD"
+            ],
+            "cells": {
+              "_reference": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "reference",
+                  "display_name": "Diaz et al. 2018",
+                  "title": "Household responses to transfer programmes",
+                  "subtitle": "Ana Diaz; Ben Roe; Cy Hu",
+                  "item_type": "journalArticle"
+                }
+              },
+              "_year": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "date",
+                  "value": "2018"
+                }
+              },
+              "design": {
+                "outcome": "answered",
+                "provenance": "model",
+                "value": {
+                  "kind": "select",
+                  "label": "Observational"
+                },
+                "confidence": "high",
+                "documents": [
+                  "u-PAPER4PD"
+                ]
+              }
+            },
+            "in_library": true,
+            "origin": [
+              {
+                "source": "s2",
+                "date": "2026-10-20"
+              }
+            ]
+          },
+          {
+            "id": "rb4e5f6a7b8",
+            "ref": {
+              "kind": "item",
+              "library_ref": "u",
+              "zotero_key": "PAPER777"
+            },
+            "cells": {
+              "_reference": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "reference",
+                  "display_name": "Okafor 2020",
+                  "title": "Transfers and child labour in Nigeria",
+                  "subtitle": "Chi Okafor",
+                  "item_type": "journalArticle"
+                }
+              },
+              "_year": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "date",
+                  "value": "2020"
+                }
+              }
+            },
+            "in_library": true,
+            "origin": [
+              {
+                "source": "s2",
+                "date": "2026-10-20"
+              }
+            ]
+          }
+        ],
+        "key": "ABCDEFGH",
+        "version": 5,
+        "removed": [
+          {
+            "ref": {
+              "kind": "item",
+              "library_ref": "u",
+              "zotero_key": "PAPER333"
+            },
+            "removed_at": "2026-10-31T12:00:00.000Z"
+          }
+        ]
+      },
+      "summary": {
+        "rows": 3,
+        "columns": 6,
+        "sources": 2,
+        "in_scope_rows": 3,
+        "failed_rows": 0,
+        "user_edits": 1,
+        "columns_detail": {
+          "_reference": {
+            "type": "reference",
+            "answered": 3,
+            "not_reported": 0,
+            "failed": 0,
+            "cleared": 0,
+            "unattempted": 0,
+            "in_failed_rows": 0,
+            "stale": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0,
+            "system": true
+          },
+          "_year": {
+            "type": "date",
+            "answered": 3,
+            "not_reported": 0,
+            "failed": 0,
+            "cleared": 0,
+            "unattempted": 0,
+            "in_failed_rows": 0,
+            "stale": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0,
+            "system": true
+          },
+          "_identifier": {
+            "type": "link",
+            "answered": 1,
+            "not_reported": 0,
+            "failed": 0,
+            "cleared": 0,
+            "unattempted": 0,
+            "in_failed_rows": 0,
+            "stale": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0,
+            "system": true
+          },
+          "design": {
+            "type": "select",
+            "answered": 2,
+            "not_reported": 0,
+            "failed": 0,
+            "cleared": 0,
+            "unattempted": 1,
+            "in_failed_rows": 0,
+            "stale": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0,
+            "distribution": {
+              "RCT": 1,
+              "Observational": 1
+            }
+          },
+          "sample": {
+            "type": "text",
+            "answered": 1,
+            "not_reported": 0,
+            "failed": 0,
+            "cleared": 0,
+            "unattempted": 2,
+            "in_failed_rows": 0,
+            "stale": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0
+          },
+          "open_access": {
+            "type": "boolean",
+            "answered": 1,
+            "not_reported": 0,
+            "failed": 0,
+            "cleared": 0,
+            "unattempted": 2,
+            "in_failed_rows": 0,
+            "stale": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0,
+            "distribution": {
+              "true": 1
+            }
+          }
+        }
+      },
+      "pending": {
+        "rows": 2,
+        "cells": 5,
+        "new_rows": 1,
+        "columns": [
+          {
+            "id": "sample",
+            "header": "Sample",
+            "reason": "new",
+            "cells": 2
+          },
+          {
+            "id": "open_access",
+            "header": "Open access",
+            "reason": "new",
+            "cells": 2
+          }
+        ],
+        "retry_rows": 0,
+        "blocked_rows": 0
+      },
+      "changes": [
+        {
+          "op": "remove_rows",
+          "rows": 1
+        }
+      ],
+      "replayed": false,
+      "saved": true
+    }
+  },
+  {
+    "name": "apply-edit-sources",
+    "before": {
+      "id": "t9",
+      "spec_version": 2,
+      "title": "Cash transfers",
+      "description": "Design and sample of cash-transfer evaluations.",
+      "anchor_column_id": "_reference",
+      "sources": [
+        {
+          "id": "s1",
+          "type": "items",
+          "ids": [
+            "u-PAPER222",
+            "u-PAPER333"
+          ]
+        },
+        {
+          "id": "s2",
+          "type": "library",
+          "scope": {
+            "kind": "collection",
+            "library_ref": "u",
+            "key": "CASHTRN2",
+            "name": "Cash transfers"
+          }
+        }
+      ],
+      "columns": [
+        {
+          "id": "_reference",
+          "header": "Reference",
+          "type": "reference",
+          "system": true
+        },
+        {
+          "id": "_year",
+          "header": "Year",
+          "type": "date",
+          "system": true,
+          "priority": "secondary"
+        },
+        {
+          "id": "_identifier",
+          "header": "Identifier",
+          "type": "link",
+          "system": true,
+          "priority": "secondary"
+        },
+        {
+          "id": "design",
+          "header": "Design",
+          "type": "select",
+          "description": "What is the study design?",
+          "options": [
+            {
+              "label": "RCT",
+              "color": "blue",
+              "description": "Random assignment to arms."
+            },
+            {
+              "label": "Quasi-experimental",
+              "color": "green"
+            },
+            {
+              "label": "Observational",
+              "color": "yellow"
+            }
+          ]
+        },
+        {
+          "id": "sample",
+          "header": "Sample",
+          "type": "text",
+          "description": "How many people were studied?"
+        },
+        {
+          "id": "open_access",
+          "header": "Open access",
+          "type": "boolean",
+          "description": "Is the paper open access?"
+        }
+      ],
+      "rows": [
+        {
+          "id": "r5f2c81a90b",
+          "ref": {
+            "kind": "item",
+            "library_ref": "u",
+            "zotero_key": "PAPER222"
+          },
+          "documents": [
+            "u-PAPER2PD"
+          ],
+          "cells": {
+            "_reference": {
+              "outcome": "answered",
+              "provenance": "system",
+              "value": {
+                "kind": "reference",
+                "display_name": "Smith 2021",
+                "title": "Cash transfers and school enrolment",
+                "subtitle": "Jane Smith",
+                "item_type": "journalArticle"
+              }
+            },
+            "_year": {
+              "outcome": "answered",
+              "provenance": "system",
+              "value": {
+                "kind": "date",
+                "value": "2021"
+              }
+            },
+            "_identifier": {
+              "outcome": "answered",
+              "provenance": "system",
+              "value": {
+                "kind": "link",
+                "url": "https://doi.org/10.1000/smith",
+                "label": "10.1000/smith"
+              }
+            },
+            "design": {
+              "outcome": "answered",
+              "provenance": "model",
+              "value": {
+                "kind": "select",
+                "label": "RCT"
+              },
+              "confidence": "high",
+              "documents": [
+                "u-PAPER2PD"
+              ],
+              "evidence": [
+                {
+                  "document": "u-PAPER2PD",
+                  "locator": "s4",
+                  "quote": "Villages were randomly assigned.",
+                  "page": 3
+                }
+              ]
+            },
+            "sample": {
+              "outcome": "answered",
+              "provenance": "model",
+              "value": {
+                "kind": "text",
+                "text": "1,200 households"
+              },
+              "confidence": "high",
+              "documents": [
+                "u-PAPER2PD"
+              ]
+            },
+            "open_access": {
+              "outcome": "answered",
+              "provenance": "user",
+              "value": {
+                "kind": "boolean",
+                "value": true
+              },
+              "reasoning": "Published under CC-BY.",
+              "replaced": {
+                "outcome": "answered",
+                "provenance": "model",
+                "value": {
+                  "kind": "boolean",
+                  "value": false
+                },
+                "confidence": "high",
+                "documents": [
+                  "u-PAPER2PD"
+                ]
+              }
+            }
+          },
+          "in_library": true,
+          "origin": [
+            {
+              "source": "s1",
+              "date": "2026-10-20"
+            }
+          ]
+        },
+        {
+          "id": "r9c3d2e1f00",
+          "ref": {
+            "kind": "item",
+            "library_ref": "u",
+            "zotero_key": "PAPER444"
+          },
+          "documents": [
+            "u-PAPER4PD"
+          ],
+          "cells": {
+            "_reference": {
+              "outcome": "answered",
+              "provenance": "system",
+              "value": {
+                "kind": "reference",
+                "display_name": "Diaz et al. 2018",
+                "title": "Household responses to transfer programmes",
+                "subtitle": "Ana Diaz; Ben Roe; Cy Hu",
+                "item_type": "journalArticle"
+              }
+            },
+            "_year": {
+              "outcome": "answered",
+              "provenance": "system",
+              "value": {
+                "kind": "date",
+                "value": "2018"
+              }
+            },
+            "design": {
+              "outcome": "answered",
+              "provenance": "model",
+              "value": {
+                "kind": "select",
+                "label": "Observational"
+              },
+              "confidence": "high",
+              "documents": [
+                "u-PAPER4PD"
+              ]
+            }
+          },
+          "in_library": true,
+          "origin": [
+            {
+              "source": "s2",
+              "date": "2026-10-20"
+            }
+          ]
+        },
+        {
+          "id": "rb4e5f6a7b8",
+          "ref": {
+            "kind": "item",
+            "library_ref": "u",
+            "zotero_key": "PAPER777"
+          },
+          "cells": {
+            "_reference": {
+              "outcome": "answered",
+              "provenance": "system",
+              "value": {
+                "kind": "reference",
+                "display_name": "Okafor 2020",
+                "title": "Transfers and child labour in Nigeria",
+                "subtitle": "Chi Okafor",
+                "item_type": "journalArticle"
+              }
+            },
+            "_year": {
+              "outcome": "answered",
+              "provenance": "system",
+              "value": {
+                "kind": "date",
+                "value": "2020"
+              }
+            }
+          },
+          "in_library": true,
+          "origin": [
+            {
+              "source": "s2",
+              "date": "2026-10-20"
+            }
+          ]
+        }
+      ],
+      "key": "ABCDEFGH",
+      "version": 5,
+      "removed": [
+        {
+          "ref": {
+            "kind": "item",
+            "library_ref": "u",
+            "zotero_key": "PAPER333"
+          },
+          "removed_at": "2026-10-31T12:00:00.000Z"
+        }
+      ]
+    },
+    "request": {
+      "event": "artifact_request",
+      "request_id": "apply-edit-sources",
+      "op": "apply_edit",
+      "key": "u-ABCDEFGH",
+      "operations": {
+        "remove_sources": [
+          "s2"
+        ],
+        "add_sources": [
+          {
+            "type": "items",
+            "ids": [
+              "u-PAPER333",
+              "u-PAPER555"
+            ]
+          },
+          {
+            "type": "library",
+            "scope": {
+              "kind": "tag",
+              "library_ref": "u",
+              "tag": "cash"
+            }
           }
         ]
       },
       "meta": {
         "actor": "agent",
         "run_id": "run",
-        "thread_id": "thread"
+        "thread_id": "thread",
+        "change": "Edited table"
       },
-      "operation_id": "pending-operation"
+      "operation_id": "apply-edit-sources-op"
     },
     "response": {
       "type": "artifact_response",
-      "request_id": "pending-create",
-      "op": "create",
+      "request_id": "apply-edit-sources",
+      "op": "apply_edit",
+      "ok": true,
+      "version": 6,
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "spec": {
+        "id": "t9",
+        "spec_version": 2,
+        "title": "Cash transfers",
+        "description": "Design and sample of cash-transfer evaluations.",
+        "anchor_column_id": "_reference",
+        "sources": [
+          {
+            "id": "s1",
+            "type": "items",
+            "ids": [
+              "u-PAPER222",
+              "u-PAPER333",
+              "u-PAPER555"
+            ]
+          },
+          {
+            "id": "s3",
+            "type": "library",
+            "scope": {
+              "kind": "tag",
+              "library_ref": "u",
+              "tag": "cash"
+            }
+          }
+        ],
+        "columns": [
+          {
+            "id": "_reference",
+            "header": "Reference",
+            "type": "reference",
+            "system": true
+          },
+          {
+            "id": "_year",
+            "header": "Year",
+            "type": "date",
+            "system": true,
+            "priority": "secondary"
+          },
+          {
+            "id": "_identifier",
+            "header": "Identifier",
+            "type": "link",
+            "system": true,
+            "priority": "secondary"
+          },
+          {
+            "id": "design",
+            "header": "Design",
+            "type": "select",
+            "description": "What is the study design?",
+            "options": [
+              {
+                "label": "RCT",
+                "color": "blue",
+                "description": "Random assignment to arms."
+              },
+              {
+                "label": "Quasi-experimental",
+                "color": "green"
+              },
+              {
+                "label": "Observational",
+                "color": "yellow"
+              }
+            ]
+          },
+          {
+            "id": "sample",
+            "header": "Sample",
+            "type": "text",
+            "description": "How many people were studied?"
+          },
+          {
+            "id": "open_access",
+            "header": "Open access",
+            "type": "boolean",
+            "description": "Is the paper open access?"
+          }
+        ],
+        "rows": [
+          {
+            "id": "r5f2c81a90b",
+            "ref": {
+              "kind": "item",
+              "library_ref": "u",
+              "zotero_key": "PAPER222"
+            },
+            "documents": [
+              "u-PAPER2PD"
+            ],
+            "cells": {
+              "_reference": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "reference",
+                  "display_name": "Smith 2021",
+                  "title": "Cash transfers and school enrolment",
+                  "subtitle": "Jane Smith",
+                  "item_type": "journalArticle"
+                }
+              },
+              "_year": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "date",
+                  "value": "2021"
+                }
+              },
+              "_identifier": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "link",
+                  "url": "https://doi.org/10.1000/smith",
+                  "label": "10.1000/smith"
+                }
+              },
+              "design": {
+                "outcome": "answered",
+                "provenance": "model",
+                "value": {
+                  "kind": "select",
+                  "label": "RCT"
+                },
+                "confidence": "high",
+                "documents": [
+                  "u-PAPER2PD"
+                ],
+                "evidence": [
+                  {
+                    "document": "u-PAPER2PD",
+                    "locator": "s4",
+                    "quote": "Villages were randomly assigned.",
+                    "page": 3
+                  }
+                ]
+              },
+              "sample": {
+                "outcome": "answered",
+                "provenance": "model",
+                "value": {
+                  "kind": "text",
+                  "text": "1,200 households"
+                },
+                "confidence": "high",
+                "documents": [
+                  "u-PAPER2PD"
+                ]
+              },
+              "open_access": {
+                "outcome": "answered",
+                "provenance": "user",
+                "value": {
+                  "kind": "boolean",
+                  "value": true
+                },
+                "reasoning": "Published under CC-BY.",
+                "replaced": {
+                  "outcome": "answered",
+                  "provenance": "model",
+                  "value": {
+                    "kind": "boolean",
+                    "value": false
+                  },
+                  "confidence": "high",
+                  "documents": [
+                    "u-PAPER2PD"
+                  ]
+                }
+              }
+            },
+            "in_library": true,
+            "origin": [
+              {
+                "source": "s1",
+                "date": "2026-10-20"
+              },
+              {
+                "source": "s3",
+                "date": "2026-10-31"
+              }
+            ]
+          },
+          {
+            "id": "rc1d2e3f4a5",
+            "ref": {
+              "kind": "item",
+              "library_ref": "u",
+              "zotero_key": "PAPER333"
+            },
+            "cells": {
+              "_reference": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "reference",
+                  "display_name": "Lee and Park 2019",
+                  "title": "Conditional transfers in rural Malawi",
+                  "subtitle": "Min Lee; Ji Park",
+                  "item_type": "journalArticle"
+                }
+              },
+              "_year": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "date",
+                  "value": "2019"
+                }
+              }
+            },
+            "in_library": true,
+            "origin": [
+              {
+                "source": "s1",
+                "date": "2026-10-31"
+              }
+            ]
+          },
+          {
+            "id": "rd2e3f4a5b6",
+            "ref": {
+              "kind": "item",
+              "library_ref": "u",
+              "zotero_key": "PAPER555"
+            },
+            "documents": [
+              "u-PAPER5PD"
+            ],
+            "cells": {
+              "_reference": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "reference",
+                  "display_name": "Banerjee 2017",
+                  "title": "Transfers and test scores",
+                  "subtitle": "Abhi Banerjee",
+                  "item_type": "journalArticle"
+                }
+              },
+              "_year": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "date",
+                  "value": "2017"
+                }
+              }
+            },
+            "in_library": true,
+            "origin": [
+              {
+                "source": "s1",
+                "date": "2026-10-31"
+              },
+              {
+                "source": "s3",
+                "date": "2026-10-31"
+              }
+            ]
+          }
+        ],
+        "key": "ABCDEFGH",
+        "version": 6
+      },
+      "summary": {
+        "rows": 3,
+        "columns": 6,
+        "sources": 2,
+        "in_scope_rows": 3,
+        "failed_rows": 0,
+        "user_edits": 1,
+        "columns_detail": {
+          "_reference": {
+            "type": "reference",
+            "answered": 3,
+            "not_reported": 0,
+            "failed": 0,
+            "cleared": 0,
+            "unattempted": 0,
+            "in_failed_rows": 0,
+            "stale": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0,
+            "system": true
+          },
+          "_year": {
+            "type": "date",
+            "answered": 3,
+            "not_reported": 0,
+            "failed": 0,
+            "cleared": 0,
+            "unattempted": 0,
+            "in_failed_rows": 0,
+            "stale": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0,
+            "system": true
+          },
+          "_identifier": {
+            "type": "link",
+            "answered": 1,
+            "not_reported": 0,
+            "failed": 0,
+            "cleared": 0,
+            "unattempted": 0,
+            "in_failed_rows": 0,
+            "stale": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0,
+            "system": true
+          },
+          "design": {
+            "type": "select",
+            "answered": 1,
+            "not_reported": 0,
+            "failed": 0,
+            "cleared": 0,
+            "unattempted": 2,
+            "in_failed_rows": 0,
+            "stale": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0,
+            "distribution": {
+              "RCT": 1
+            }
+          },
+          "sample": {
+            "type": "text",
+            "answered": 1,
+            "not_reported": 0,
+            "failed": 0,
+            "cleared": 0,
+            "unattempted": 2,
+            "in_failed_rows": 0,
+            "stale": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0
+          },
+          "open_access": {
+            "type": "boolean",
+            "answered": 1,
+            "not_reported": 0,
+            "failed": 0,
+            "cleared": 0,
+            "unattempted": 2,
+            "in_failed_rows": 0,
+            "stale": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0,
+            "distribution": {
+              "true": 1
+            }
+          }
+        }
+      },
+      "pending": {
+        "rows": 2,
+        "cells": 6,
+        "new_rows": 2,
+        "columns": [],
+        "retry_rows": 0,
+        "blocked_rows": 0
+      },
+      "changes": [
+        {
+          "op": "remove_source",
+          "source": "s2",
+          "type": "library",
+          "kind": "collection",
+          "name": "Cash transfers",
+          "library_ref": "u",
+          "rows_removed": 2
+        },
+        {
+          "op": "add_source",
+          "source": "s1",
+          "type": "items",
+          "rows_added": 1,
+          "rows_restored": 1,
+          "duplicates": 0,
+          "rejected": []
+        },
+        {
+          "op": "add_source",
+          "source": "s3",
+          "type": "library",
+          "kind": "tag",
+          "name": "cash",
+          "library_ref": "u",
+          "rows_added": 0,
+          "rows_restored": 0,
+          "duplicates": 2,
+          "rejected": []
+        }
+      ],
+      "replayed": false,
+      "saved": true
+    }
+  },
+  {
+    "name": "apply-edit-refresh",
+    "before": {
+      "id": "t9",
+      "spec_version": 2,
+      "title": "Cash transfers",
+      "description": "Design and sample of cash-transfer evaluations.",
+      "anchor_column_id": "_reference",
+      "sources": [
+        {
+          "id": "s1",
+          "type": "items",
+          "ids": [
+            "u-PAPER222",
+            "u-PAPER333"
+          ]
+        },
+        {
+          "id": "s2",
+          "type": "library",
+          "scope": {
+            "kind": "collection",
+            "library_ref": "u",
+            "key": "CASHTRN2",
+            "name": "Cash transfers"
+          }
+        }
+      ],
+      "columns": [
+        {
+          "id": "_reference",
+          "header": "Reference",
+          "type": "reference",
+          "system": true
+        },
+        {
+          "id": "_year",
+          "header": "Year",
+          "type": "date",
+          "system": true,
+          "priority": "secondary"
+        },
+        {
+          "id": "_identifier",
+          "header": "Identifier",
+          "type": "link",
+          "system": true,
+          "priority": "secondary"
+        },
+        {
+          "id": "design",
+          "header": "Design",
+          "type": "select",
+          "description": "What is the study design?",
+          "options": [
+            {
+              "label": "RCT",
+              "color": "blue",
+              "description": "Random assignment to arms."
+            },
+            {
+              "label": "Quasi-experimental",
+              "color": "green"
+            },
+            {
+              "label": "Observational",
+              "color": "yellow"
+            }
+          ]
+        },
+        {
+          "id": "sample",
+          "header": "Sample",
+          "type": "text",
+          "description": "How many people were studied?"
+        },
+        {
+          "id": "open_access",
+          "header": "Open access",
+          "type": "boolean",
+          "description": "Is the paper open access?"
+        }
+      ],
+      "rows": [
+        {
+          "id": "r5f2c81a90b",
+          "ref": {
+            "kind": "item",
+            "library_ref": "u",
+            "zotero_key": "PAPER222"
+          },
+          "documents": [
+            "u-PAPER2PD"
+          ],
+          "cells": {
+            "_reference": {
+              "outcome": "answered",
+              "provenance": "system",
+              "value": {
+                "kind": "reference",
+                "display_name": "Smith 2021",
+                "title": "Cash transfers and school enrolment",
+                "subtitle": "Jane Smith",
+                "item_type": "journalArticle"
+              }
+            },
+            "_year": {
+              "outcome": "answered",
+              "provenance": "system",
+              "value": {
+                "kind": "date",
+                "value": "2021"
+              }
+            },
+            "_identifier": {
+              "outcome": "answered",
+              "provenance": "system",
+              "value": {
+                "kind": "link",
+                "url": "https://doi.org/10.1000/smith",
+                "label": "10.1000/smith"
+              }
+            },
+            "design": {
+              "outcome": "answered",
+              "provenance": "model",
+              "value": {
+                "kind": "select",
+                "label": "RCT"
+              },
+              "confidence": "high",
+              "documents": [
+                "u-PAPER2PD"
+              ],
+              "evidence": [
+                {
+                  "document": "u-PAPER2PD",
+                  "locator": "s4",
+                  "quote": "Villages were randomly assigned.",
+                  "page": 3
+                }
+              ]
+            },
+            "sample": {
+              "outcome": "answered",
+              "provenance": "model",
+              "value": {
+                "kind": "text",
+                "text": "1,200 households"
+              },
+              "confidence": "high",
+              "documents": [
+                "u-PAPER2PD"
+              ]
+            },
+            "open_access": {
+              "outcome": "answered",
+              "provenance": "user",
+              "value": {
+                "kind": "boolean",
+                "value": true
+              },
+              "reasoning": "Published under CC-BY.",
+              "replaced": {
+                "outcome": "answered",
+                "provenance": "model",
+                "value": {
+                  "kind": "boolean",
+                  "value": false
+                },
+                "confidence": "high",
+                "documents": [
+                  "u-PAPER2PD"
+                ]
+              }
+            }
+          },
+          "in_library": true,
+          "origin": [
+            {
+              "source": "s1",
+              "date": "2026-10-20"
+            }
+          ]
+        },
+        {
+          "id": "r9c3d2e1f00",
+          "ref": {
+            "kind": "item",
+            "library_ref": "u",
+            "zotero_key": "PAPER444"
+          },
+          "documents": [
+            "u-PAPER4PD"
+          ],
+          "cells": {
+            "_reference": {
+              "outcome": "answered",
+              "provenance": "system",
+              "value": {
+                "kind": "reference",
+                "display_name": "Diaz et al. 2018",
+                "title": "Household responses to transfer programmes",
+                "subtitle": "Ana Diaz; Ben Roe; Cy Hu",
+                "item_type": "journalArticle"
+              }
+            },
+            "_year": {
+              "outcome": "answered",
+              "provenance": "system",
+              "value": {
+                "kind": "date",
+                "value": "2018"
+              }
+            },
+            "design": {
+              "outcome": "answered",
+              "provenance": "model",
+              "value": {
+                "kind": "select",
+                "label": "Observational"
+              },
+              "confidence": "high",
+              "documents": [
+                "u-PAPER4PD"
+              ]
+            }
+          },
+          "in_library": true,
+          "origin": [
+            {
+              "source": "s2",
+              "date": "2026-10-20"
+            }
+          ]
+        },
+        {
+          "id": "rb4e5f6a7b8",
+          "ref": {
+            "kind": "item",
+            "library_ref": "u",
+            "zotero_key": "PAPER777"
+          },
+          "cells": {
+            "_reference": {
+              "outcome": "answered",
+              "provenance": "system",
+              "value": {
+                "kind": "reference",
+                "display_name": "Okafor 2020",
+                "title": "Transfers and child labour in Nigeria",
+                "subtitle": "Chi Okafor",
+                "item_type": "journalArticle"
+              }
+            },
+            "_year": {
+              "outcome": "answered",
+              "provenance": "system",
+              "value": {
+                "kind": "date",
+                "value": "2020"
+              }
+            }
+          },
+          "in_library": true,
+          "origin": [
+            {
+              "source": "s2",
+              "date": "2026-10-20"
+            }
+          ]
+        }
+      ],
+      "key": "ABCDEFGH",
+      "version": 4,
+      "removed": [
+        {
+          "ref": {
+            "kind": "item",
+            "library_ref": "u",
+            "zotero_key": "PAPER333"
+          },
+          "removed_at": "2026-10-31T12:00:00.000Z"
+        }
+      ]
+    },
+    "request": {
+      "event": "artifact_request",
+      "request_id": "apply-edit-refresh",
+      "op": "apply_edit",
+      "key": "u-ABCDEFGH",
+      "operations": {
+        "refresh_sources": true
+      },
+      "meta": {
+        "actor": "agent",
+        "run_id": "run",
+        "thread_id": "thread",
+        "change": "Edited table"
+      },
+      "operation_id": "apply-edit-refresh-op"
+    },
+    "response": {
+      "type": "artifact_response",
+      "request_id": "apply-edit-refresh",
+      "op": "apply_edit",
+      "ok": true,
+      "version": 5,
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "spec": {
+        "id": "t9",
+        "spec_version": 2,
+        "title": "Cash transfers",
+        "description": "Design and sample of cash-transfer evaluations.",
+        "anchor_column_id": "_reference",
+        "sources": [
+          {
+            "id": "s1",
+            "type": "items",
+            "ids": [
+              "u-PAPER222",
+              "u-PAPER333"
+            ]
+          },
+          {
+            "id": "s2",
+            "type": "library",
+            "scope": {
+              "kind": "collection",
+              "library_ref": "u",
+              "key": "CASHTRN2",
+              "name": "Cash transfers"
+            }
+          }
+        ],
+        "columns": [
+          {
+            "id": "_reference",
+            "header": "Reference",
+            "type": "reference",
+            "system": true
+          },
+          {
+            "id": "_year",
+            "header": "Year",
+            "type": "date",
+            "system": true,
+            "priority": "secondary"
+          },
+          {
+            "id": "_identifier",
+            "header": "Identifier",
+            "type": "link",
+            "system": true,
+            "priority": "secondary"
+          },
+          {
+            "id": "design",
+            "header": "Design",
+            "type": "select",
+            "description": "What is the study design?",
+            "options": [
+              {
+                "label": "RCT",
+                "color": "blue",
+                "description": "Random assignment to arms."
+              },
+              {
+                "label": "Quasi-experimental",
+                "color": "green"
+              },
+              {
+                "label": "Observational",
+                "color": "yellow"
+              }
+            ]
+          },
+          {
+            "id": "sample",
+            "header": "Sample",
+            "type": "text",
+            "description": "How many people were studied?"
+          },
+          {
+            "id": "open_access",
+            "header": "Open access",
+            "type": "boolean",
+            "description": "Is the paper open access?"
+          }
+        ],
+        "rows": [
+          {
+            "id": "r5f2c81a90b",
+            "ref": {
+              "kind": "item",
+              "library_ref": "u",
+              "zotero_key": "PAPER222"
+            },
+            "documents": [
+              "u-PAPER2PD"
+            ],
+            "cells": {
+              "_reference": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "reference",
+                  "display_name": "Smith 2021",
+                  "title": "Cash transfers and school enrolment",
+                  "subtitle": "Jane Smith",
+                  "item_type": "journalArticle"
+                }
+              },
+              "_year": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "date",
+                  "value": "2021"
+                }
+              },
+              "_identifier": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "link",
+                  "url": "https://doi.org/10.1000/smith",
+                  "label": "10.1000/smith"
+                }
+              },
+              "design": {
+                "outcome": "answered",
+                "provenance": "model",
+                "value": {
+                  "kind": "select",
+                  "label": "RCT"
+                },
+                "confidence": "high",
+                "documents": [
+                  "u-PAPER2PD"
+                ],
+                "evidence": [
+                  {
+                    "document": "u-PAPER2PD",
+                    "locator": "s4",
+                    "quote": "Villages were randomly assigned.",
+                    "page": 3
+                  }
+                ]
+              },
+              "sample": {
+                "outcome": "answered",
+                "provenance": "model",
+                "value": {
+                  "kind": "text",
+                  "text": "1,200 households"
+                },
+                "confidence": "high",
+                "documents": [
+                  "u-PAPER2PD"
+                ]
+              },
+              "open_access": {
+                "outcome": "answered",
+                "provenance": "user",
+                "value": {
+                  "kind": "boolean",
+                  "value": true
+                },
+                "reasoning": "Published under CC-BY.",
+                "replaced": {
+                  "outcome": "answered",
+                  "provenance": "model",
+                  "value": {
+                    "kind": "boolean",
+                    "value": false
+                  },
+                  "confidence": "high",
+                  "documents": [
+                    "u-PAPER2PD"
+                  ]
+                }
+              }
+            },
+            "in_library": true,
+            "origin": [
+              {
+                "source": "s1",
+                "date": "2026-10-20"
+              }
+            ]
+          },
+          {
+            "id": "r9c3d2e1f00",
+            "ref": {
+              "kind": "item",
+              "library_ref": "u",
+              "zotero_key": "PAPER444"
+            },
+            "documents": [
+              "u-PAPER4PD"
+            ],
+            "cells": {
+              "_reference": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "reference",
+                  "display_name": "Diaz et al. 2018",
+                  "title": "Household responses to transfer programmes",
+                  "subtitle": "Ana Diaz; Ben Roe; Cy Hu",
+                  "item_type": "journalArticle"
+                }
+              },
+              "_year": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "date",
+                  "value": "2018"
+                }
+              },
+              "design": {
+                "outcome": "answered",
+                "provenance": "model",
+                "value": {
+                  "kind": "select",
+                  "label": "Observational"
+                },
+                "confidence": "high",
+                "documents": [
+                  "u-PAPER4PD"
+                ]
+              }
+            },
+            "in_library": true,
+            "origin": [
+              {
+                "source": "s2",
+                "date": "2026-10-20"
+              }
+            ]
+          },
+          {
+            "id": "rb4e5f6a7b8",
+            "ref": {
+              "kind": "item",
+              "library_ref": "u",
+              "zotero_key": "PAPER777"
+            },
+            "cells": {
+              "_reference": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "reference",
+                  "display_name": "Okafor 2020",
+                  "title": "Transfers and child labour in Nigeria",
+                  "subtitle": "Chi Okafor",
+                  "item_type": "journalArticle"
+                }
+              },
+              "_year": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "date",
+                  "value": "2020"
+                }
+              }
+            },
+            "in_library": true,
+            "origin": [
+              {
+                "source": "s2",
+                "date": "2026-10-20"
+              }
+            ]
+          },
+          {
+            "id": "re3f4a5b6c7",
+            "ref": {
+              "kind": "item",
+              "library_ref": "u",
+              "zotero_key": "PAPER666"
+            },
+            "cells": {
+              "_reference": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "reference",
+                  "display_name": "Haushofer and Shapiro 2016",
+                  "title": "The short-term impact of unconditional cash transfers",
+                  "item_type": "journalArticle"
+                }
+              },
+              "_year": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "date",
+                  "value": "2016"
+                }
+              }
+            },
+            "in_library": true,
+            "origin": [
+              {
+                "source": "s2",
+                "date": "2026-10-31"
+              }
+            ]
+          }
+        ],
+        "key": "ABCDEFGH",
+        "version": 5,
+        "removed": [
+          {
+            "ref": {
+              "kind": "item",
+              "library_ref": "u",
+              "zotero_key": "PAPER333"
+            },
+            "removed_at": "2026-10-31T12:00:00.000Z"
+          }
+        ]
+      },
+      "summary": {
+        "rows": 4,
+        "columns": 6,
+        "sources": 2,
+        "in_scope_rows": 4,
+        "failed_rows": 0,
+        "user_edits": 1,
+        "columns_detail": {
+          "_reference": {
+            "type": "reference",
+            "answered": 4,
+            "not_reported": 0,
+            "failed": 0,
+            "cleared": 0,
+            "unattempted": 0,
+            "in_failed_rows": 0,
+            "stale": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0,
+            "system": true
+          },
+          "_year": {
+            "type": "date",
+            "answered": 4,
+            "not_reported": 0,
+            "failed": 0,
+            "cleared": 0,
+            "unattempted": 0,
+            "in_failed_rows": 0,
+            "stale": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0,
+            "system": true
+          },
+          "_identifier": {
+            "type": "link",
+            "answered": 1,
+            "not_reported": 0,
+            "failed": 0,
+            "cleared": 0,
+            "unattempted": 0,
+            "in_failed_rows": 0,
+            "stale": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0,
+            "system": true
+          },
+          "design": {
+            "type": "select",
+            "answered": 2,
+            "not_reported": 0,
+            "failed": 0,
+            "cleared": 0,
+            "unattempted": 2,
+            "in_failed_rows": 0,
+            "stale": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0,
+            "distribution": {
+              "RCT": 1,
+              "Observational": 1
+            }
+          },
+          "sample": {
+            "type": "text",
+            "answered": 1,
+            "not_reported": 0,
+            "failed": 0,
+            "cleared": 0,
+            "unattempted": 3,
+            "in_failed_rows": 0,
+            "stale": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0
+          },
+          "open_access": {
+            "type": "boolean",
+            "answered": 1,
+            "not_reported": 0,
+            "failed": 0,
+            "cleared": 0,
+            "unattempted": 3,
+            "in_failed_rows": 0,
+            "stale": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0,
+            "distribution": {
+              "true": 1
+            }
+          }
+        }
+      },
+      "pending": {
+        "rows": 3,
+        "cells": 8,
+        "new_rows": 2,
+        "columns": [
+          {
+            "id": "sample",
+            "header": "Sample",
+            "reason": "new",
+            "cells": 3
+          },
+          {
+            "id": "open_access",
+            "header": "Open access",
+            "reason": "new",
+            "cells": 3
+          }
+        ],
+        "retry_rows": 0,
+        "blocked_rows": 0
+      },
+      "changes": [
+        {
+          "op": "refresh_source",
+          "source": "s2",
+          "kind": "collection",
+          "name": "Cash transfers",
+          "library_ref": "u",
+          "rows_added": 1,
+          "removed_skipped": 1,
+          "no_longer_found": 1
+        }
+      ],
+      "replayed": false,
+      "saved": true
+    }
+  },
+  {
+    "name": "apply-edit-replayed",
+    "request": {
+      "event": "artifact_request",
+      "request_id": "apply-edit-replayed",
+      "op": "apply_edit",
+      "key": "u-ABCDEFGH",
+      "operations": {
+        "title": "Cash transfers and schooling"
+      },
+      "meta": {
+        "actor": "agent",
+        "run_id": "run",
+        "thread_id": "thread",
+        "change": "Edited table"
+      },
+      "operation_id": "title-op"
+    },
+    "response": {
+      "type": "artifact_response",
+      "request_id": "apply-edit-replayed",
+      "op": "apply_edit",
+      "ok": true,
+      "version": 5,
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "spec": {
+        "id": "t9",
+        "spec_version": 2,
+        "title": "Cash transfers and schooling",
+        "description": "Design and sample of cash-transfer evaluations.",
+        "anchor_column_id": "_reference",
+        "sources": [
+          {
+            "id": "s1",
+            "type": "items",
+            "ids": [
+              "u-PAPER222",
+              "u-PAPER333"
+            ]
+          },
+          {
+            "id": "s2",
+            "type": "library",
+            "scope": {
+              "kind": "collection",
+              "library_ref": "u",
+              "key": "CASHTRN2",
+              "name": "Cash transfers"
+            }
+          }
+        ],
+        "columns": [
+          {
+            "id": "_reference",
+            "header": "Reference",
+            "type": "reference",
+            "system": true
+          },
+          {
+            "id": "_year",
+            "header": "Year",
+            "type": "date",
+            "system": true,
+            "priority": "secondary"
+          },
+          {
+            "id": "_identifier",
+            "header": "Identifier",
+            "type": "link",
+            "system": true,
+            "priority": "secondary"
+          },
+          {
+            "id": "design",
+            "header": "Design",
+            "type": "select",
+            "description": "What is the study design?",
+            "options": [
+              {
+                "label": "RCT",
+                "color": "blue",
+                "description": "Random assignment to arms."
+              },
+              {
+                "label": "Quasi-experimental",
+                "color": "green"
+              },
+              {
+                "label": "Observational",
+                "color": "yellow"
+              }
+            ]
+          },
+          {
+            "id": "sample",
+            "header": "Sample",
+            "type": "text",
+            "description": "How many people were studied?"
+          },
+          {
+            "id": "open_access",
+            "header": "Open access",
+            "type": "boolean",
+            "description": "Is the paper open access?"
+          }
+        ],
+        "rows": [
+          {
+            "id": "r5f2c81a90b",
+            "ref": {
+              "kind": "item",
+              "library_ref": "u",
+              "zotero_key": "PAPER222"
+            },
+            "documents": [
+              "u-PAPER2PD"
+            ],
+            "cells": {
+              "_reference": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "reference",
+                  "display_name": "Smith 2021",
+                  "title": "Cash transfers and school enrolment",
+                  "subtitle": "Jane Smith",
+                  "item_type": "journalArticle"
+                }
+              },
+              "_year": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "date",
+                  "value": "2021"
+                }
+              },
+              "_identifier": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "link",
+                  "url": "https://doi.org/10.1000/smith",
+                  "label": "10.1000/smith"
+                }
+              },
+              "design": {
+                "outcome": "answered",
+                "provenance": "model",
+                "value": {
+                  "kind": "select",
+                  "label": "RCT"
+                },
+                "confidence": "high",
+                "documents": [
+                  "u-PAPER2PD"
+                ],
+                "evidence": [
+                  {
+                    "document": "u-PAPER2PD",
+                    "locator": "s4",
+                    "quote": "Villages were randomly assigned.",
+                    "page": 3
+                  }
+                ]
+              },
+              "sample": {
+                "outcome": "answered",
+                "provenance": "model",
+                "value": {
+                  "kind": "text",
+                  "text": "1,200 households"
+                },
+                "confidence": "high",
+                "documents": [
+                  "u-PAPER2PD"
+                ]
+              },
+              "open_access": {
+                "outcome": "answered",
+                "provenance": "user",
+                "value": {
+                  "kind": "boolean",
+                  "value": true
+                },
+                "reasoning": "Published under CC-BY.",
+                "replaced": {
+                  "outcome": "answered",
+                  "provenance": "model",
+                  "value": {
+                    "kind": "boolean",
+                    "value": false
+                  },
+                  "confidence": "high",
+                  "documents": [
+                    "u-PAPER2PD"
+                  ]
+                }
+              }
+            },
+            "in_library": true,
+            "origin": [
+              {
+                "source": "s1",
+                "date": "2026-10-20"
+              }
+            ]
+          },
+          {
+            "id": "r7a01bc3d4e",
+            "ref": {
+              "kind": "item",
+              "library_ref": "u",
+              "zotero_key": "PAPER333"
+            },
+            "cells": {
+              "_reference": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "reference",
+                  "display_name": "Lee and Park 2019",
+                  "title": "Conditional transfers in rural Malawi",
+                  "subtitle": "Min Lee; Ji Park",
+                  "item_type": "journalArticle"
+                }
+              },
+              "_year": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "date",
+                  "value": "2019"
+                }
+              },
+              "design": {
+                "outcome": "answered",
+                "provenance": "model",
+                "value": {
+                  "kind": "select",
+                  "label": "Quasi-experimental"
+                },
+                "confidence": "high"
+              },
+              "sample": {
+                "outcome": "not_reported",
+                "provenance": "user",
+                "reasoning": "The paper gives no count."
+              },
+              "open_access": {
+                "outcome": "answered",
+                "provenance": "model",
+                "value": {
+                  "kind": "boolean",
+                  "value": false
+                },
+                "confidence": "high"
+              }
+            },
+            "in_library": true,
+            "origin": [
+              {
+                "source": "s1",
+                "date": "2026-10-20"
+              }
+            ]
+          },
+          {
+            "id": "r9c3d2e1f00",
+            "ref": {
+              "kind": "item",
+              "library_ref": "u",
+              "zotero_key": "PAPER444"
+            },
+            "documents": [
+              "u-PAPER4PD"
+            ],
+            "cells": {
+              "_reference": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "reference",
+                  "display_name": "Diaz et al. 2018",
+                  "title": "Household responses to transfer programmes",
+                  "subtitle": "Ana Diaz; Ben Roe; Cy Hu",
+                  "item_type": "journalArticle"
+                }
+              },
+              "_year": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "date",
+                  "value": "2018"
+                }
+              },
+              "design": {
+                "outcome": "answered",
+                "provenance": "model",
+                "value": {
+                  "kind": "select",
+                  "label": "Observational"
+                },
+                "confidence": "high",
+                "documents": [
+                  "u-PAPER4PD"
+                ]
+              }
+            },
+            "in_library": true,
+            "origin": [
+              {
+                "source": "s2",
+                "date": "2026-10-20"
+              }
+            ]
+          },
+          {
+            "id": "rb4e5f6a7b8",
+            "ref": {
+              "kind": "item",
+              "library_ref": "u",
+              "zotero_key": "PAPER777"
+            },
+            "cells": {
+              "_reference": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "reference",
+                  "display_name": "Okafor 2020",
+                  "title": "Transfers and child labour in Nigeria",
+                  "subtitle": "Chi Okafor",
+                  "item_type": "journalArticle"
+                }
+              },
+              "_year": {
+                "outcome": "answered",
+                "provenance": "system",
+                "value": {
+                  "kind": "date",
+                  "value": "2020"
+                }
+              }
+            },
+            "in_library": true,
+            "origin": [
+              {
+                "source": "s2",
+                "date": "2026-10-20"
+              }
+            ]
+          }
+        ],
+        "key": "ABCDEFGH",
+        "version": 5
+      },
+      "summary": {
+        "rows": 4,
+        "columns": 6,
+        "sources": 2,
+        "in_scope_rows": 4,
+        "failed_rows": 0,
+        "user_edits": 2,
+        "columns_detail": {
+          "_reference": {
+            "type": "reference",
+            "answered": 4,
+            "not_reported": 0,
+            "failed": 0,
+            "cleared": 0,
+            "unattempted": 0,
+            "in_failed_rows": 0,
+            "stale": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0,
+            "system": true
+          },
+          "_year": {
+            "type": "date",
+            "answered": 4,
+            "not_reported": 0,
+            "failed": 0,
+            "cleared": 0,
+            "unattempted": 0,
+            "in_failed_rows": 0,
+            "stale": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0,
+            "system": true
+          },
+          "_identifier": {
+            "type": "link",
+            "answered": 1,
+            "not_reported": 0,
+            "failed": 0,
+            "cleared": 0,
+            "unattempted": 0,
+            "in_failed_rows": 0,
+            "stale": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0,
+            "system": true
+          },
+          "design": {
+            "type": "select",
+            "answered": 3,
+            "not_reported": 0,
+            "failed": 0,
+            "cleared": 0,
+            "unattempted": 1,
+            "in_failed_rows": 0,
+            "stale": 0,
+            "needs_review": 0,
+            "title_abstract_only": 1,
+            "distribution": {
+              "RCT": 1,
+              "Quasi-experimental": 1,
+              "Observational": 1
+            }
+          },
+          "sample": {
+            "type": "text",
+            "answered": 1,
+            "not_reported": 1,
+            "failed": 0,
+            "cleared": 0,
+            "unattempted": 2,
+            "in_failed_rows": 0,
+            "stale": 0,
+            "needs_review": 0,
+            "title_abstract_only": 0
+          },
+          "open_access": {
+            "type": "boolean",
+            "answered": 2,
+            "not_reported": 0,
+            "failed": 0,
+            "cleared": 0,
+            "unattempted": 2,
+            "in_failed_rows": 0,
+            "stale": 0,
+            "needs_review": 0,
+            "title_abstract_only": 1,
+            "distribution": {
+              "true": 1,
+              "false": 1
+            }
+          }
+        }
+      },
+      "pending": {
+        "rows": 2,
+        "cells": 5,
+        "new_rows": 1,
+        "columns": [
+          {
+            "id": "sample",
+            "header": "Sample",
+            "reason": "new",
+            "cells": 2
+          },
+          {
+            "id": "open_access",
+            "header": "Open access",
+            "reason": "new",
+            "cells": 2
+          }
+        ],
+        "retry_rows": 0,
+        "blocked_rows": 0
+      },
+      "changes": [
+        {
+          "op": "title",
+          "title": "Cash transfers and schooling"
+        }
+      ],
+      "replayed": true,
+      "saved": true
+    }
+  },
+  {
+    "name": "apply-edit-operation-mismatch",
+    "request": {
+      "event": "artifact_request",
+      "request_id": "apply-edit-operation-mismatch",
+      "op": "apply_edit",
+      "key": "u-ABCDEFGH",
+      "operations": {
+        "title": "Another title"
+      },
+      "meta": {
+        "actor": "agent",
+        "run_id": "run",
+        "thread_id": "thread",
+        "change": "Edited table"
+      },
+      "operation_id": "title-op"
+    },
+    "response": {
+      "type": "artifact_response",
+      "request_id": "apply-edit-operation-mismatch",
+      "op": "apply_edit",
       "ok": false,
-      "error_code": "operation_pending"
+      "conflict": false,
+      "error_code": "operation_mismatch",
+      "error": "This operation id was used for another edit."
+    }
+  },
+  {
+    "name": "apply-edit-unknown-column",
+    "request": {
+      "event": "artifact_request",
+      "request_id": "apply-edit-unknown-column",
+      "op": "apply_edit",
+      "key": "u-ABCDEFGH",
+      "operations": {
+        "title": "Renamed",
+        "remove_columns": [
+          "design",
+          "attrition"
+        ]
+      },
+      "meta": {
+        "actor": "agent",
+        "run_id": "run",
+        "thread_id": "thread",
+        "change": "Edited table"
+      },
+      "operation_id": "unknown-op"
+    },
+    "response": {
+      "type": "artifact_response",
+      "request_id": "apply-edit-unknown-column",
+      "op": "apply_edit",
+      "ok": false,
+      "conflict": false,
+      "error_code": "unknown_column",
+      "error": "remove_columns[1]: column attrition does not exist. Read the table again."
+    }
+  },
+  {
+    "name": "apply-edit-over-row-cap",
+    "request": {
+      "event": "artifact_request",
+      "request_id": "apply-edit-over-row-cap",
+      "op": "apply_edit",
+      "key": "u-ABCDEFGH",
+      "operations": {
+        "add_sources": [
+          {
+            "type": "library",
+            "scope": {
+              "kind": "saved_search",
+              "library_ref": "u",
+              "key": "BIGSRCH2"
+            }
+          }
+        ]
+      },
+      "meta": {
+        "actor": "agent",
+        "run_id": "run",
+        "thread_id": "thread",
+        "change": "Edited table"
+      },
+      "operation_id": "cap-op"
+    },
+    "response": {
+      "type": "artifact_response",
+      "request_id": "apply-edit-over-row-cap",
+      "op": "apply_edit",
+      "ok": false,
+      "conflict": false,
+      "error_code": "too_large",
+      "error": "add_sources[0]: this change would give the table 1,204 rows; a table holds at most 1,000. Narrow the source or start a second table."
     }
   },
   {
@@ -2226,7 +6173,15 @@
           }
         }
       },
-      "saved": true
+      "saved": true,
+      "pending": {
+        "rows": 0,
+        "cells": 0,
+        "new_rows": 0,
+        "columns": [],
+        "retry_rows": 0,
+        "blocked_rows": 0
+      }
     }
   },
   {
@@ -2692,7 +6647,7 @@
         "rows_done": 31,
         "rows_failed": 1,
         "in_flight": 3,
-        "credits_charged": 6.0,
+        "credits_charged": 6,
         "credits_planned": 9.2,
         "seconds_left": 75
       }
@@ -2751,7 +6706,7 @@
         "rows_failed": 1,
         "in_flight": 0,
         "credits_charged": 2.4,
-        "credits_planned": 6.0,
+        "credits_planned": 6,
         "seconds_left": null
       },
       "result": {

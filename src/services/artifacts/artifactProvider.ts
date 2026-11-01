@@ -9,8 +9,22 @@ import {
     validateTableSpec,
     type TableSpec,
 } from "@beaver/agent-core/layouts/table";
-import { summarize } from "@beaver/agent-core/layouts/tableMutations";
+import { applyMutations, summarize } from "@beaver/agent-core/layouts/tableMutations";
 import { pendingWork } from "@beaver/agent-core/layouts/tableFill";
+import {
+    applyEdit,
+    buildTable,
+    columnFromDraft,
+    previewFacts,
+    refreshTargets,
+    systemColumns,
+    type ResolvedSource,
+} from "@beaver/agent-core/layouts/tableEdit";
+import type { SourceEntry } from "@beaver/agent-core/layouts/table";
+import type {
+    TableColumnDraft,
+    TableEditOperations,
+} from "@beaver/agent-core/protocol/tableEditProtocol";
 import type { AgentDataRequestContext } from "@beaver/agent-core/transport/agentDataDispatch";
 import {
     parseItemReference,
@@ -19,15 +33,17 @@ import {
 } from "../../utils/libraryIdentity";
 import { checkLibraryExcluded } from "../agentDataProvider/utils";
 import {
-    createTableUncoordinated as createTable,
-    writeTableUncoordinated as writeTable,
+    applyTableEditUncoordinated as applyTableEdit,
+    createTableFromRequestUncoordinated as createTableFromRequest,
     openTableUncoordinated as openTable,
     revertTableUncoordinated as revertTable,
+    tableOperationHash,
     trimTableUncoordinated as trimTable,
     deleteTableUncoordinated as deleteTable,
     type TableWriteMeta,
 } from "./tableStore";
-import { TableItemError, type TableRef } from "./tableItemIdentity";
+import { resolveSource, resolveSources } from "./tableSources";
+import { TableItemError, type TableRef, type TableVersionEntry } from "./tableItemIdentity";
 import type { MutationOptions } from '../libraryMutations';
 
 /** No content or device-local identifiers in provider failure prose. */
@@ -99,6 +115,62 @@ export function visitLibraryReferences(
     visit(value);
 }
 
+/** A refusal whose text names the parameter and its index; it carries no table content. */
+function editFailure(raw: unknown, code: string, message: string): ArtifactResponse {
+    return { ...artifactFailure(raw, code), error: message };
+}
+
+/**
+ * The question columns of a proposal, checked as the engine adds them; a
+ * refusal names the column.
+ */
+function checkColumns(drafts: readonly TableColumnDraft[]): { code: string; message: string } | null {
+    const taken = new Set(systemColumns().map((column) => column.id));
+    const columns = drafts.map((draft) => {
+        const column = columnFromDraft(draft, taken);
+        taken.add(column.id);
+        return column;
+    });
+    const checked = applyMutations({ id: "check", columns: [], rows: [] }, [{ op: "add_columns", columns }]);
+    if (checked.ok) return null;
+    return { code: checked.error.code === "too_large" ? "too_large" : "invalid_edit", message: `columns: ${checked.error.message}` };
+}
+
+/**
+ * Checks a change list against the libraries Beaver may read (a replay may
+ * describe a source of a library excluded since). The ids an items entry
+ * rejected are left out: an excluded item is rejected by design, and its id
+ * is the caller's own.
+ */
+function checkChanges(changes: unknown): void {
+    const visible = (changes as Record<string, unknown>[] | undefined ?? []).map(({ rejected: _rejected, ...rest }) => rest);
+    visitLibraryReferences(visible, checkLibrary);
+}
+
+/**
+ * A version entry as it leaves the device: without the change list and the
+ * operation identity an edit recorded for its replay, which may name a source
+ * of a library excluded since.
+ */
+function remoteEntry(entry: TableVersionEntry): TableVersionEntry {
+    const { changes: _changes, operation_id: _id, request_sha256: _sha, ...rest } = entry;
+    return rest;
+}
+
+/** Whether every library a resolved source names is still one Beaver may read. */
+function readable(source: ResolvedSource): boolean {
+    try {
+        visitLibraryReferences({ entry: source.entry, papers: source.papers }, checkLibrary);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+function todayOf(now: Date): string {
+    return now.toISOString().slice(0, 10);
+}
+
 /** Retain the libraries inspected through async history reads for a final policy check. */
 function accessFor(libraryID: number) {
     const libraries = new Set<number>([libraryID]);
@@ -165,6 +237,7 @@ export async function handleArtifactRequest(
     const request = raw as ArtifactRequest;
     if (request.op === "fill_plan" || request.op === "fill")
         return handleFillRequest(request, options);
+    if (request.op === "preview") return handlePreviewRequest(request);
     try {
         return await Zotero.Beaver.libraryOperations.run('artifact_request', [raw], options);
     } catch (error) {
@@ -189,6 +262,46 @@ async function handleFillRequest(
             return await fills.agent.plan(request, ref);
         }
         return await fills.agent.fill(request, context as AgentDataRequestContext | undefined);
+    } catch (error) {
+        return artifactFailure(request, errorCode(error));
+    }
+}
+
+/**
+ * `preview`: what a proposal's sources give, through the same resolver and
+ * merge as `create`. Not a write: it takes no queue admission and writes
+ * nothing. A source that cannot be used comes back with its `error`.
+ */
+async function handlePreviewRequest(request: ArtifactRequest): Promise<ArtifactResponse> {
+    try {
+        const columns = (request.columns ?? []) as TableColumnDraft[];
+        const refused = checkColumns(columns);
+        if (refused) return editFailure(request, refused.code, refused.message);
+        // Exclusions may change while the sources resolve: a source that now
+        // touches a library Beaver may not read comes back as unusable, with
+        // nothing of its content.
+        const asked = request.sources as SourceEntry[];
+        const resolved = (await resolveSources(asked)).map((source, index) =>
+            readable(source)
+                ? source
+                : {
+                      // The entry as it was asked for: nothing resolved from
+                      // the library (a name, the papers) leaves the device.
+                      entry: asked[index],
+                      papers: [],
+                      total: 0,
+                      truncated: false,
+                      rejected: [],
+                      error: "This library is not available to Beaver.",
+                  },
+        );
+        return {
+            type: "artifact_response",
+            request_id: request.request_id,
+            op: request.op,
+            ok: true,
+            preview: previewFacts(resolved),
+        };
     } catch (error) {
         return artifactFailure(request, errorCode(error));
     }
@@ -244,7 +357,7 @@ export async function handleArtifactRequestUncoordinated(
                         sha256: opened.sha256,
                         summary: summarize(opened.spec),
                         unseen: request.thread_id
-                            ? opened.history.filter(
+                            ? opened.history.map(remoteEntry).filter(
                                   (entry) => entry.version > seen,
                               )
                             : [],
@@ -281,28 +394,52 @@ export async function handleArtifactRequestUncoordinated(
             });
             checkLibrary(libraryID);
             const guard = accessFor(libraryID);
-            const created = await createTable({
+            const columns = (request.columns ?? []) as TableColumnDraft[];
+            const sources = request.sources as SourceEntry[];
+            const created = await createTableFromRequest({
                 libraryID,
                 // Resolved by the store after its replay check.
                 ...(request.collection_key ? { collectionKey: request.collection_key } : {}),
                 title: request.title!,
-                spec: content(request.spec),
-                ...meta,
                 operation_id: request.operation_id!,
+                request: {
+                    title: request.title,
+                    description: request.description ?? null,
+                    sources,
+                    columns,
+                    meta: request.meta,
+                },
+                ...meta,
                 accessGuard: guard,
+                // Runs only for a new table: a replay never resolves again.
+                build: async () =>
+                    buildTable(
+                        {
+                            id: `t${Date.now().toString(36)}`,
+                            title: request.title!,
+                            description: request.description,
+                            columns,
+                        },
+                        await resolveSources(sources),
+                        todayOf(new Date()),
+                    ),
             });
+            if ("ok" in created && created.ok === false)
+                return editFailure(request, created.code, created.message);
+            const table = created as Exclude<typeof created, { ok: false }>;
             checkLibrary(libraryID);
-            guard(created.spec);
+            guard(table.spec);
+            checkChanges(table.changes);
             return success({
-                version: created.version,
-                sha256: created.sha256,
-                spec: created.spec,
-                summary: summarize(created.spec),
-                pending: pendingWork(created.spec),
-                zotero_item: itemIdentity({ libraryID, key: created.key }),
-                operation: created.operation,
-                replayed: created.replayed ?? false,
-                saved: created.saved !== false,
+                version: table.version,
+                sha256: table.sha256,
+                spec: table.spec,
+                summary: summarize(table.spec),
+                pending: pendingWork(table.spec),
+                zotero_item: itemIdentity({ libraryID, key: table.key }),
+                changes: table.changes as ArtifactResponse["changes"],
+                replayed: table.replayed ?? false,
+                saved: table.saved !== false,
             });
         }
         const ref = target(request.key!);
@@ -314,7 +451,7 @@ export async function handleArtifactRequestUncoordinated(
             content(opened.spec);
             guard(opened.spec);
             return request.op === "versions"
-                ? success({ versions: opened.history })
+                ? success({ versions: opened.history.map(remoteEntry) })
                 : success({
                       version: opened.version,
                       sha256: opened.sha256,
@@ -336,20 +473,8 @@ export async function handleArtifactRequestUncoordinated(
             guard();
             return success(result);
         }
-        const result =
-            request.op === "write"
-                ? await writeTable(
-                      ref,
-                      content(request.spec),
-                      meta,
-                      request.expected_version!,
-                      {
-                          expected_sha256: request.expected_sha256!,
-                          operation_id: request.operation_id!,
-                          accessGuard: guard,
-                      },
-                  )
-                : await revertTable(ref, request.to_version!, meta, guard);
+        if (request.op === "apply_edit") return await applyEditRequest(request, ref, guard, meta, success);
+        const result = await revertTable(ref, request.to_version!, meta, guard);
         checkLibrary(ref.libraryID);
         guard(result.spec ?? undefined);
         if (!result.ok) {
@@ -370,10 +495,57 @@ export async function handleArtifactRequestUncoordinated(
             summary: summarize(result.spec),
             pending: pendingWork(result.spec),
             saved: result.saved,
-            ...(result.operation ? { operation: result.operation } : {}),
-            replayed: result.replayed ?? false,
         });
     } catch (error) {
         return artifactFailure(request, errorCode(error));
     }
+}
+
+/**
+ * `apply_edit`: one `edit_table` call as one sealed write. Sources to add or
+ * refresh are resolved first, outside the table's lock; the engine then
+ * applies the whole call to the table as it stands under the lock, all of it
+ * or nothing. A repeat with the same operation id answers from the version it
+ * committed.
+ */
+async function applyEditRequest(
+    request: ArtifactRequest,
+    ref: TableRef,
+    guard: ReturnType<typeof accessFor>,
+    meta: TableWriteMeta,
+    success: (result: Partial<ArtifactResponse>) => ArtifactResponse,
+): Promise<ArtifactResponse> {
+    const operations = request.operations as TableEditOperations;
+    const request_sha256 = await tableOperationHash({ key: request.key, operations, meta: request.meta });
+    const added: ResolvedSource[] = [];
+    for (const draft of operations.add_sources ?? [])
+        added.push(await resolveSource({ ...draft, id: "new" } as SourceEntry));
+    const refreshed = new Map<string, ResolvedSource>();
+    if (operations.refresh_sources != null) {
+        const opened = await openTable(ref, guard);
+        for (const entry of refreshTargets(opened.spec, operations.refresh_sources))
+            refreshed.set(entry.id, await resolveSource(entry));
+    }
+    const now = new Date().toISOString();
+    const result = await applyTableEdit(
+        ref,
+        (spec) => applyEdit(spec, operations, { added, refreshed }, now),
+        { ...meta, seal: true },
+        { operation_id: request.operation_id!, request_sha256 },
+        guard,
+    );
+    if (!result.ok) return editFailure(request, result.code, result.message);
+    checkLibrary(ref.libraryID);
+    guard(result.spec);
+    checkChanges(result.changes);
+    return success({
+        version: result.version,
+        sha256: result.sha256,
+        spec: result.spec,
+        summary: summarize(result.spec),
+        pending: pendingWork(result.spec),
+        changes: result.changes as ArtifactResponse["changes"],
+        replayed: result.replayed,
+        saved: result.saved,
+    });
 }
