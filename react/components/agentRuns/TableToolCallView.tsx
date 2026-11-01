@@ -21,6 +21,7 @@ import {
     Icon,
     Spinner,
     TableIcon,
+    UndoIcon,
 } from '../icons/icons';
 import { toolExpandedAtom, setToolExpandedAtom } from '../../atoms/messageUIState';
 
@@ -223,6 +224,7 @@ export const TableToolCallView: React.FC<TableToolCallViewProps> = ({
                         {canUndo && undoState !== 'done' && (
                             <Button
                                 variant="ghost-secondary"
+                                icon={UndoIcon}
                                 onClick={handleUndo}
                                 disabled={undoState === 'working'}
                                 className="flex-none whitespace-nowrap"

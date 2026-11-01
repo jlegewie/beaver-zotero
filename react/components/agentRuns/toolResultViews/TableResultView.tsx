@@ -4,14 +4,36 @@ import type { TableView } from "@beaver/agent-core/run-state/toolResultViews";
 import { tableChangeLines, type TableChangeTone } from "@beaver/agent-core/run-state/tableEditCopy";
 import { ColumnOptionChips, ColumnTypeTag } from "../../tables/columnTypes";
 import { sourceKindIcon } from "../../tables/sourceKinds";
-import { Icon } from "../../icons/icons";
+import { DeleteIcon, EditIcon, Icon, PlusSignIcon } from "../../icons/icons";
 
-/** Additions green, changes amber, removals red. */
-const TONE_CLASS: Record<TableChangeTone, string> = {
-    add: "font-color-green",
-    change: "font-color-orange",
-    remove: "font-color-red",
+/**
+ * A change's mark: additions a green plus, changes an amber pencil, removals
+ * a red bin. The colour stays on the mark; the sentence reads in the text
+ * colours, so a removal is visible without the whole line shouting.
+ */
+const TONE_MARK: Record<TableChangeTone, { icon: React.ComponentType<React.SVGProps<SVGSVGElement>>; className: string; label: string }> = {
+    add: { icon: PlusSignIcon, className: "table-record-mark-add", label: "Added" },
+    change: { icon: EditIcon, className: "table-record-mark-change", label: "Changed" },
+    remove: { icon: DeleteIcon, className: "table-record-mark-remove", label: "Removed" },
 };
+
+/** One change: its mark, what changed, and after it the cells it touched. */
+function ChangeRow({ tone, text }: { tone: TableChangeTone; text: string }) {
+    const mark = TONE_MARK[tone];
+    // The sentence leads; the counts after the first " · " are its effects.
+    const [what, ...effects] = text.split(" · ");
+    return (
+        <div className="table-record-row table-record-change">
+            <span className={`table-record-mark ${mark.className}`} role="img" aria-label={mark.label}>
+                <Icon icon={mark.icon} />
+            </span>
+            <span className="table-record-change-text">
+                <span className="font-color-primary">{what}</span>
+                {effects.length > 0 && <span className="font-color-secondary">{` · ${effects.join(" · ")}`}</span>}
+            </span>
+        </div>
+    );
+}
 
 function plural(count: number, noun: string): string {
     return `${count} ${noun}${count === 1 ? "" : "s"}`;
@@ -266,17 +288,25 @@ function ColumnRow({ column, progress }: { column: TableRecordColumn; progress: 
  */
 export function TableResultView({ view }: { view: TableView }) {
     const { record } = view;
-    // The card's header already names the tool ("Create table"), so a change
-    // line that only restates it is dropped.
-    const change = /^(created?|read) (the )?table\.?$/i.test(record.change?.trim() ?? "")
+    // The card's header already names the tool ("Create table", "Edit
+    // table"), so a change line that only restates it is dropped.
+    const change = /^(created?|read|edited) (the )?table\.?$/i.test(record.change?.trim() ?? "")
         ? null
         : record.change;
-    const statusLine = [formatSize(record), formatTableChanges(record)].filter(Boolean).join(" · ");
+    // The sources and columns below already give the table's size: the size
+    // line is for records without them.
+    const showsParts = !!record.sources?.length || !!record.columns?.length;
+    const statusParts = [showsParts ? null : formatSize(record), formatTableChanges(record)].filter(Boolean).join(" · ");
+    const statusLine = statusParts.charAt(0).toUpperCase() + statusParts.slice(1);
     const fillLines = formatFillLines(record);
     // A fill's own lines say what it answered from metadata; the table's
     // stage lines then add what is left and what failed overall.
+    // Each column below shows how many rows it has answered, so a call that
+    // filled nothing does not repeat what is left as a line of its own.
     const stageLines = formatTableStages(record).filter(
-        (line) => !(fillLines.length && line.endsWith("from title and abstract only")),
+        (line) =>
+            !(fillLines.length && line.endsWith("from title and abstract only")) &&
+            !(!fillLines.length && record.columns?.length && line.endsWith(" still to fill")),
     );
     const sources = record.sources ?? [];
     const columns = record.columns ?? [];
@@ -296,9 +326,7 @@ export function TableResultView({ view }: { view: TableView }) {
                     <div className="table-record-label">Changes</div>
                     <div className="table-record-list">
                         {edits.map((line, index) => (
-                            <div key={index} className={`table-record-change ${TONE_CLASS[line.tone]}`}>
-                                {line.text}
-                            </div>
+                            <ChangeRow key={index} tone={line.tone} text={line.text} />
                         ))}
                     </div>
                 </div>
