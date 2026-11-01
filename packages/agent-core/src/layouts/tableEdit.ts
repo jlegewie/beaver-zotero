@@ -12,11 +12,16 @@
 
 import {
     IDENTIFIER_COLUMN_ID,
+    isFillableColumn,
+    MAX_REASONING_BYTES,
     MAX_ROWS,
     REFERENCE_COLUMN_ID,
     SELECT_COLORS,
     YEAR_COLUMN_ID,
     TABLE_SPEC_VERSION,
+    utf8Length,
+    type Cell,
+    type CellValue,
     type Column,
     type Row,
     type SelectColor,
@@ -629,4 +634,80 @@ export function applyEdit(
             message: `this change would give the table ${current.rows.length} rows; a table holds at most ${rowCap}. Narrow the source or start a second table.`,
         };
     return { ok: true, spec: current, changes };
+}
+
+// ---------------------------------------------------------------------------
+// Cell edits from the tab
+// ---------------------------------------------------------------------------
+
+/**
+ * One cell edit from the tab (section 5 of the table design). `answer`,
+ * `not_reported` and `clear` write the user's cell, which no fill touches;
+ * `restore` gives the cell back to Beaver (`restore_cell`); `document`
+ * chooses the document a row is read from, which puts its answers out of
+ * date. `expected` is the row's documents as the user saw them: a row that
+ * names others by now is refused rather than switched under a concurrent
+ * writer.
+ */
+export type TableCellEdit =
+    | { op: "answer"; row: string; column: string; value: CellValue; note?: string | null }
+    | { op: "not_reported"; row: string; column: string; note?: string | null }
+    | { op: "clear"; row: string; column: string }
+    | { op: "restore"; row: string; column: string }
+    | { op: "document"; row: string; document: string; expected: string[] };
+
+/** The engine mutations for a cell edit, checked against the table as it stands. */
+export function cellEditMutations(
+    spec: TableSpec,
+    edit: TableCellEdit,
+): { ok: true; mutations: TableMutation[] } | EditFailure {
+    const row = spec.rows.find((candidate) => candidate.id === edit.row);
+    if (!row) return { ok: false, code: "unknown_row", message: "This row is no longer in the table." };
+    if (edit.op === "document") {
+        if (typeof edit.document !== "string" || !edit.document)
+            return { ok: false, code: "invalid_edit", message: "No document was chosen." };
+        return {
+            ok: true,
+            mutations: [{ op: "update_row", row: row.id, documents: [edit.document], expected_documents: edit.expected }],
+        };
+    }
+    const column = spec.columns.find((candidate) => candidate.id === edit.column);
+    if (!column) return { ok: false, code: "unknown_column", message: "This column is no longer in the table." };
+    if (!isFillableColumn(column))
+        return { ok: false, code: "invalid_edit", message: `“${column.header}” is not a question column.` };
+    if (edit.op === "restore") return { ok: true, mutations: [{ op: "restore_cell", row: row.id, column: column.id }] };
+    const note = typeof (edit as { note?: unknown }).note === "string" ? (edit as { note: string }).note.trim() : "";
+    let cell: Cell;
+    if (edit.op === "clear") {
+        cell = { outcome: "cleared", provenance: "user" };
+    } else if (edit.op === "not_reported") {
+        cell = { outcome: "not_reported", provenance: "user", ...(note ? { reasoning: note } : {}) };
+    } else {
+        const problem = userValueProblem(column, edit.value);
+        if (problem) return { ok: false, code: "invalid_edit", message: problem };
+        const value = edit.value.kind === "text" ? { kind: "text" as const, text: edit.value.text.trim() } : edit.value;
+        cell = { outcome: "answered", provenance: "user", value, ...(note ? { reasoning: note } : {}) };
+    }
+    if (utf8Length(note) > MAX_REASONING_BYTES)
+        return { ok: false, code: "invalid_edit", message: "The note is too long. Shorten it and save again." };
+    return { ok: true, mutations: [{ op: "set_cells", cells: [{ row: row.id, column: column.id, cell }] }] };
+}
+
+/** Why a value cannot be the user's answer in this column, or null. */
+function userValueProblem(column: Column, value: CellValue | undefined): string | null {
+    if (!value || value.kind !== column.type) return `This answer does not fit the column “${column.header}”.`;
+    switch (value.kind) {
+        case "text":
+            return value.text.trim() ? null : "Write an answer, or clear the cell.";
+        case "date":
+            return /^\d{4}(-\d{2}(-\d{2})?)?$/.test(value.value) ? null : "Write the date as YYYY, YYYY-MM or YYYY-MM-DD.";
+        case "boolean":
+            return typeof value.value === "boolean" ? null : "Choose Yes or No.";
+        case "select":
+            return column.options?.some((option) => option.label === value.label)
+                ? null
+                : `“${value.label}” is not one of the column's options.`;
+        default:
+            return `This answer does not fit the column “${column.header}”.`;
+    }
 }

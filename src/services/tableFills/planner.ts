@@ -33,6 +33,11 @@ export const DOCUMENT_KINDS = ['pdf', 'epub', 'snapshot'] as const;
  */
 export type RowDocumentKind = (typeof DOCUMENT_KINDS)[number] | 'text';
 
+/** A kind a row may name: the rule's kinds, and plain text a row already names. */
+export function isRowDocumentKind(kind: string | null | undefined): kind is RowDocumentKind {
+    return kind === 'text' || (DOCUMENT_KINDS as readonly string[]).includes(kind ?? '');
+}
+
 /** A readable document attachment of an item. */
 export interface DocumentCandidate {
     /** Portable id (`u-KEY`, `g<id>-KEY`). */

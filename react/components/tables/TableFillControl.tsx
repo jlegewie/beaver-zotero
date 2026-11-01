@@ -66,7 +66,22 @@ export interface TableFillButtonProps {
     improvableRows: ReadonlySet<string>;
     /** Why the table cannot be filled (a read-only library); disables the control. */
     disabledReason?: string;
+    /** The rows selected in the table, for "Fill selected rows". */
+    selectedRowIds?: string[];
 }
+
+/**
+ * Shows a plan in the Fill popover, asked for from elsewhere in the tab
+ * (Refill row, Fill this column, the selection bar's Fill).
+ */
+export interface TableFillButtonHandle {
+    openPlan(scope: TableFillScope): void;
+}
+
+/** The five-row trial's size. */
+export const TRIAL_ROWS = 5;
+
+const EMPTY_ROWS: string[] = [];
 
 /**
  * The Fill split button of the table tab.
@@ -78,7 +93,10 @@ export interface TableFillButtonProps {
  * the exact cost, the pricing sentence and how far the balance reaches. "Fill
  * N" starts exactly that plan. While a job runs it is the Stop button.
  */
-export function TableFillButton({ tableRef, table, job, improvableRows, disabledReason }: TableFillButtonProps): React.ReactElement {
+export const TableFillButton = React.forwardRef<TableFillButtonHandle, TableFillButtonProps>(function TableFillButton(
+    { tableRef, table, job, improvableRows, disabledReason, selectedRowIds = EMPTY_ROWS },
+    ref,
+): React.ReactElement {
     const [popover, setPopover] = React.useState<Popover | null>(null);
     const wrapRef = React.useRef<HTMLDivElement>(null);
     const request = React.useRef(0);
@@ -150,6 +168,16 @@ export function TableFillButton({ tableRef, table, job, improvableRows, disabled
         [tableRef.libraryID, tableRef.key],
     );
 
+    React.useImperativeHandle(
+        ref,
+        () => ({
+            openPlan: (scope: TableFillScope) => {
+                if (!running && !disabledReason) void openPlan(scope);
+            },
+        }),
+        [running, disabledReason, openPlan],
+    );
+
     const start = React.useCallback(async () => {
         if (popover?.state !== 'ready') return;
         const fills = Zotero.Beaver.tableFills;
@@ -188,12 +216,38 @@ export function TableFillButton({ tableRef, table, job, improvableRows, disabled
     }
 
     const lit = rows > 0;
+    const count = (n: number) => n.toLocaleString('en-US');
+    const selected = selectedRowIds.length;
     const menuItems: MenuItem[] = [
-        { label: 'Fill all pending', onClick: () => void openPlan({ kind: 'pending' }) },
         {
-            label: `Retry failed rows (${retryRows})`,
+            label: 'Fill everything pending',
+            shortcut: count(pending.rows),
+            onClick: () => void openPlan({ kind: 'pending' }),
+        },
+        {
+            label: 'Try on 5 rows first',
+            shortcut: count(Math.min(TRIAL_ROWS, pending.rows)),
+            disabled: pending.rows === 0,
+            onClick: () => void openPlan({ kind: 'pending', limit: TRIAL_ROWS }),
+        },
+        {
+            label: 'Fill selected rows',
+            shortcut: selected ? count(selected) : 'Select rows first',
+            disabled: selected === 0,
+            onClick: () => void openPlan({ kind: 'cells', rows: selectedRowIds }),
+        },
+        {
+            label: 'Retry rows that failed',
+            shortcut: count(retryRows),
             onClick: () => void openPlan({ kind: 'retry_failed' }),
             disabled: retryRows === 0,
+        },
+        { label: '', isDivider: true, onClick: () => {} },
+        {
+            label: 'Fill this column and Refill row live in the column and row menus.',
+            disabled: true,
+            onClick: () => {},
+            customContent: <span className="bt-fill-menu-note">Fill this column and Refill row live in the column and row menus.</span>,
         },
     ];
 
@@ -217,31 +271,35 @@ export function TableFillButton({ tableRef, table, job, improvableRows, disabled
                     className={`bt-fill-more${lit ? '' : ' bt-fill-idle'}`}
                     ariaLabel="More ways to fill"
                     disabled={!!disabledReason}
-                    width="14rem"
+                    width="17rem"
                 />
             </div>
             {popover ? (
                 <FillPopover
                     popover={popover}
                     onStart={() => void start()}
+                    onTrial={() => void openPlan({ kind: 'pending', limit: TRIAL_ROWS })}
                     onCancel={close}
                 />
             ) : null}
         </div>
     );
-}
+});
 
 function FillPopover({
     popover,
     onStart,
+    onTrial,
     onCancel,
 }: {
     popover: Popover;
     onStart: () => void;
+    onTrial: () => void;
     onCancel: () => void;
 }): React.ReactElement {
     let body: React.ReactNode;
     let action: React.ReactNode = null;
+    let trial: React.ReactNode = null;
     if (popover.state === 'planning') {
         body = (
             <div className="bt-fill-status">
@@ -281,6 +339,13 @@ function FillPopover({
                 ) : null}
             </>
         );
+        // A whole pending fill can be tried on its first rows first.
+        if (popover.scope.kind === 'pending' && !popover.scope.limit && plan.rows > TRIAL_ROWS)
+            trial = (
+                <Button variant="ghost-secondary" onClick={onTrial} disabled={popover.state === 'starting'}>
+                    Try on 5 rows first
+                </Button>
+            );
         action = (
             <Button
                 variant="solid"
@@ -296,6 +361,8 @@ function FillPopover({
         <div className="bt-fill-popover" role="dialog" aria-label="Fill the table">
             {body}
             <div className="bt-fill-actions">
+                {trial}
+                {trial ? <span className="bt-fill-actions-gap" /> : null}
                 <Button variant="ghost-secondary" onClick={onCancel}>
                     {action ? 'Cancel' : 'Close'}
                 </Button>

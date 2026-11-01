@@ -1,5 +1,6 @@
 /**
- * The user's structural edits from the table tab, applied in the plugin realm.
+ * The user's edits from the table tab, applied in the plugin realm: the
+ * structural edits below, and the cell edits at the end.
  *
  * A tab edit takes the same path as the model's `apply_edit`: the sources it
  * adds or refreshes are resolved first by the one resolver
@@ -16,10 +17,22 @@
  */
 
 import { readSpec, validateTableSpec, type SourceEntry, type TableSpec } from '@beaver/agent-core/layouts/table';
-import { applyEdit, refreshTargets, type ResolvedSource, type TableUserEdit } from '@beaver/agent-core/layouts/tableEdit';
+import {
+    applyEdit,
+    cellEditMutations,
+    refreshTargets,
+    type ResolvedSource,
+    type TableCellEdit,
+    type TableUserEdit,
+} from '@beaver/agent-core/layouts/tableEdit';
+import { applyMutations, type TableMutation } from '@beaver/agent-core/layouts/tableMutations';
+import { parseItemReference } from '@beaver/agent-core/identity/libraryRef';
 import type { TableChange } from '@beaver/agent-core/protocol/tableEditProtocol';
 import { applyTableEditUncoordinated, openTableUncoordinated, type TableApplyEditResult } from './tableStore';
 import { resolveSource } from './tableSources';
+import { isRowDocumentKind } from '../tableFills/planner';
+import { getReadableContentKind } from '../documentExtraction/attachmentResolution';
+import { resolveLibraryRef } from '../../utils/libraryIdentity';
 import { TableItemError, type TableRef } from './tableItemIdentity';
 
 /** How the tab commits an edit. */
@@ -71,4 +84,67 @@ export async function applyUserTableEditUncoordinated(
         },
     );
     return result as TableUserEditResult;
+}
+
+/**
+ * Checks a chosen document before it is written: a readable attachment of
+ * the row's own item. Throws a user-facing refusal otherwise.
+ */
+async function checkRowDocument(spec: TableSpec, edit: Extract<TableCellEdit, { op: 'document' }>): Promise<void> {
+    const row = spec.rows.find((candidate) => candidate.id === edit.row);
+    const ref = row?.ref;
+    if (!row) throw new TableItemError('This row is no longer in the table.', 'invalid_request');
+    if (ref?.kind !== 'item') throw new TableItemError('Only a library item’s row can be read from another document.', 'invalid_request');
+    const parsed = parseItemReference(edit.document);
+    const libraryID = parsed ? resolveLibraryRef(parsed) : null;
+    const attachment = parsed && libraryID != null
+        ? ((await Zotero.Items.getByLibraryAndKeyAsync(libraryID, parsed.zotero_key)) as Zotero.Item | false)
+        : false;
+    const parent = attachment && attachment.parentItemID ? ((await Zotero.Items.getAsync(attachment.parentItemID)) as Zotero.Item | false) : false;
+    const sameItem = !!parent && parent.key === ref.zotero_key && resolveLibraryRef({ library_ref: ref.library_ref, library_id: ref.library_id }) === parent.libraryID;
+    if (!attachment || attachment.deleted || !sameItem || !isRowDocumentKind(getReadableContentKind(attachment)))
+        throw new TableItemError('That document is not a readable attachment of this paper.', 'invalid_request');
+}
+
+/**
+ * Applies cell edits from the tab (section 5): the user's answers, Not
+ * reported and cleared cells, a reset to Beaver's answer, and the document a
+ * row is read from. All of them or none, under the table's lock; they
+ * collapse into the tab session's version like other ordinary edits. A row
+ * whose documents changed since the user chose another is refused. Call
+ * through `addon.libraryOperations` (`table_applyUserCellEdit`).
+ */
+export async function applyUserCellEditUncoordinated(
+    ref: TableRef,
+    edits: TableCellEdit[],
+    options: { session?: string; change?: string } = {},
+): Promise<TableApplyEditResult> {
+    if (!Array.isArray(edits) || !edits.length) throw new TableItemError('A cell edit names what to change.', 'invalid_request');
+    const documents = edits.filter((edit): edit is Extract<TableCellEdit, { op: 'document' }> => edit?.op === 'document');
+    if (documents.length) {
+        const opened = validSpec((await openTableUncoordinated(ref)).spec);
+        for (const edit of documents) await checkRowDocument(opened, edit);
+    }
+    return applyTableEditUncoordinated(
+        ref,
+        (raw) => {
+            const spec = validSpec(raw);
+            const mutations: TableMutation[] = [];
+            for (const edit of edits) {
+                const built = cellEditMutations(spec, edit);
+                if (!built.ok) return { ok: false, code: built.code, message: built.message };
+                mutations.push(...built.mutations);
+            }
+            const applied = applyMutations(spec, mutations);
+            if (!applied.ok) return { ok: false, code: applied.error.code, message: applied.error.message };
+            if (applied.skipped.some((skip) => skip.reason === 'documents_changed'))
+                return { ok: false, code: 'documents_changed', message: 'This row’s document changed in the meantime. Choose again.' };
+            return { ok: true, spec: applied.spec, changes: [] };
+        },
+        {
+            actor: 'user',
+            ...(options.session ? { collapse_key: `tab:${options.session}` } : {}),
+            ...(options.change ? { change: options.change } : {}),
+        },
+    );
 }

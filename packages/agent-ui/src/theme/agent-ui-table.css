@@ -2809,3 +2809,220 @@
 .beaver-root .rt-td-add {
     border-right: 0;
 }
+
+/* Editing cells -------------------------------------------------------------- */
+
+/* The pencil on a question cell, shown while the cell is hovered or focused. */
+.beaver-root .rt-cell-edit {
+    position: absolute;
+    top: 0.35rem;
+    right: 0.35rem;
+    width: 1.55rem;
+    height: 1.55rem;
+    background: var(--material-background);
+    box-shadow: 0 0 0 1px var(--fill-quinary);
+    opacity: 0;
+}
+
+.beaver-root .rt-cell:hover .rt-cell-edit,
+.beaver-root .rt-cell:focus-within .rt-cell-edit {
+    opacity: 1;
+}
+
+.beaver-root .rt-cell-edit:hover:not(:disabled) {
+    background: var(--material-background);
+    color: var(--fill-primary);
+}
+
+.beaver-root .rt-peek-footer {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.beaver-root .rt-peek-footer > span {
+    flex: 1 1 auto;
+}
+
+.beaver-root .rt-peek-edit {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    height: 1.6rem;
+    padding: 0 0.55rem;
+    border: 1px solid var(--color-border50);
+    border-radius: 0.4rem;
+    background: var(--material-background);
+    color: var(--fill-primary);
+    font: inherit;
+    cursor: pointer;
+}
+
+.beaver-root .rt-peek-edit:hover {
+    background: var(--fill-quinary);
+}
+
+/* The editor floats over the grid at its cell, above the sticky header. */
+.beaver-root .rt-grid {
+    position: relative;
+}
+
+.beaver-root .rt-cell-editor-layer {
+    position: absolute;
+    z-index: 6;
+}
+
+.beaver-root .rt-cell-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    padding: 0.75rem 0.85rem;
+    border-radius: 0.65rem;
+    background: var(--material-background);
+    box-shadow:
+        0 0 0 1px var(--color-border50),
+        0 0.75rem 2rem rgba(20, 24, 40, 0.18);
+    cursor: default;
+}
+
+.beaver-root .rt-cell-editor-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+
+.beaver-root .rt-cell-editor-label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--fill-secondary);
+}
+
+.beaver-root .rt-cell-editor-input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.4rem 0.55rem;
+    border: 1px solid var(--color-border50);
+    border-radius: 0.45rem;
+    background: var(--material-background);
+    color: var(--fill-primary);
+    font: inherit;
+    line-height: var(--rt-line, 1.45);
+}
+
+.beaver-root .rt-cell-editor-input:focus {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: -1px;
+}
+
+.beaver-root .rt-cell-editor-answer {
+    min-height: 5.5rem;
+    resize: vertical;
+}
+
+.beaver-root .rt-cell-editor-hint {
+    margin: 0;
+    font-size: 0.85rem;
+    color: var(--fill-secondary);
+}
+
+.beaver-root .rt-cell-editor-error {
+    margin: 0;
+    font-size: 0.85rem;
+    color: var(--tag-red-primary);
+}
+
+.beaver-root .rt-cell-editor-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.beaver-root .rt-cell-editor-actions .rt-spacer {
+    flex: 1 1 auto;
+}
+
+/* A Choice or Yes / no cell: its options, then Not reported and Clear cell. */
+.beaver-root .rt-cell-choices {
+    min-width: 12rem;
+    max-width: 20rem;
+    max-height: 18rem;
+    overflow-y: auto;
+    gap: 0;
+    padding: 0.3rem;
+}
+
+.beaver-root .rt-cell-choices:focus {
+    outline: none;
+}
+
+.beaver-root .rt-cell-choice {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-height: 2rem;
+    padding: 0 0.55rem;
+    border-radius: 0.4rem;
+    cursor: pointer;
+}
+
+.beaver-root .rt-cell-choice.rt-active {
+    background: var(--fill-quinary);
+}
+
+.beaver-root .rt-cell-choice-label {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.beaver-root .rt-cell-choice-muted .rt-cell-choice-label {
+    color: var(--fill-secondary);
+}
+
+.beaver-root .rt-cell-choice-tick {
+    color: var(--accent-blue);
+}
+
+.beaver-root .rt-cell-choices-divider {
+    height: 1px;
+    margin: 0.3rem 0.2rem;
+    background: var(--fill-quinary);
+}
+
+.beaver-root .rt-cell-choices .rt-cell-editor-error {
+    padding: 0.3rem 0.55rem;
+}
+
+/* The inspector's Edit, Clear, Restore Beaver's answer and Change. */
+.beaver-root .rt-inspector-action {
+    height: 1.85rem;
+    padding: 0 0.7rem;
+    border: 1px solid var(--color-border50);
+    border-radius: 0.45rem;
+    background: var(--material-background);
+    color: var(--fill-primary);
+    font: inherit;
+    font-size: 0.92rem;
+    cursor: pointer;
+}
+
+.beaver-root .rt-inspector-action:hover:not(:disabled) {
+    background: var(--fill-quinary);
+}
+
+.beaver-root .rt-inspector-action:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.beaver-root .rt-inspector-change {
+    flex: 0 0 auto;
+    height: 1.6rem;
+    margin-left: auto;
+}
+
+.beaver-root .rt-selection-fill {
+    color: var(--accent-blue);
+    font-weight: 600;
+}

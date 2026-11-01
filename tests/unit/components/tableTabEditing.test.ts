@@ -34,6 +34,9 @@ vi.mock('../../../src/utils/libraryIdentity', () => ({
     resolveLibraryRef: (ref: { library_ref?: string }) => (ref.library_ref === 'u' ? 1 : null),
     libraryRefForLibraryID: (id: number) => (id === 1 ? 'u' : null),
 }));
+vi.mock('../../../src/services/documentExtraction/attachmentResolution', () => ({
+    getReadableContentKind: (item: any) => item.kind ?? null,
+}));
 vi.mock('../../../src/ui/tableDocumentActions', () => ({
     tableActionErrorMessage: (error: any) => String(error?.message ?? error),
 }));
@@ -85,6 +88,7 @@ function spec(): TableSpec {
 
 const commands = {
     edit: vi.fn(),
+    editCells: vi.fn(),
     undo: vi.fn(),
 };
 const confirm = vi.fn(() => true);
@@ -105,6 +109,7 @@ function Harness({ table, readOnly, fillRunning }: { table: TableSpec; readOnly?
         h(ResearchTable, {
             table,
             editing: edits.editing,
+            cellEditing: edits.cellEditing,
             selectionActions: edits.selectionActions,
             rowMenuItems: edits.rowMenuItems,
             banner: edits.toast ?? undefined,
@@ -143,6 +148,7 @@ const committed = (changes: unknown[], version = 5) => ({ ok: true, committed: t
 beforeEach(() => {
     mocks.targets = [];
     commands.edit.mockReset();
+    commands.editCells.mockReset();
     commands.undo.mockReset();
     confirm.mockReset();
     confirm.mockReturnValue(true);
@@ -373,5 +379,74 @@ describe('a read-only library', () => {
         await click($('tr[data-row-id="r1"] button[aria-label="Select row"]'));
         expect($<HTMLButtonElement>('.rt-selection-remove')!.disabled).toBe(true);
         expect(commands.edit).not.toHaveBeenCalled();
+    });
+});
+
+describe('cell edits', () => {
+    const cellAt = (row: string, column: string) => $(`tr[data-row-id="${row}"] td[data-column-id="${column}"]`);
+    const written = { ok: true, committed: true, version: 6, sha256: 'hash-6', spec: spec(), changes: [] };
+
+    it("writes the user's answer in the tab session, with no toast", async () => {
+        commands.editCells.mockResolvedValue(written);
+        mount();
+        await click(cellAt('r1', 'effect')!.querySelector('button[aria-label="Edit Effect"]'));
+        type($<HTMLTextAreaElement>('.rt-cell-editor textarea')!, 'Enrollment rose 3.4 points.');
+        await click(Array.from(container!.querySelectorAll('.rt-cell-editor button')).find((b) => b.textContent === 'Save'));
+        expect(commands.editCells).toHaveBeenCalledWith(
+            ref,
+            [{ op: 'answer', row: 'r1', column: 'effect', value: { kind: 'text', text: 'Enrollment rose 3.4 points.' }, note: undefined }],
+            { session: expect.any(String), change: 'Edited a cell in “Effect”' },
+        );
+        expect($('.rt-cell-editor')).toBeNull();
+        expect($('.rt-toast')).toBeNull();
+    });
+
+    it("restores Beaver's answer from the inspector, and shows a refusal over the table", async () => {
+        commands.editCells.mockResolvedValue({ ok: false, code: 'unknown_row', message: 'This row is no longer in the table.' });
+        mount();
+        await click(cellAt('r2', 'effect'));
+        await click(Array.from(container!.querySelectorAll('.rt-inspector-action')).find((b) => b.textContent === 'Reset'));
+        expect(commands.editCells).toHaveBeenCalledWith(ref, [{ op: 'restore', row: 'r2', column: 'effect' }], expect.objectContaining({ session: expect.any(String) }));
+        expect(container!.textContent).toContain('This row is no longer in the table.');
+    });
+
+    it("chooses a row's document among the paper's readable attachments, guarded by the documents it showed", async () => {
+        commands.editCells.mockResolvedValue(written);
+        const attachments = [
+            { id: 11, key: 'PDF00001', kind: 'pdf', attachmentFilename: 'Baird_2011.pdf', deleted: false, getField: () => '' },
+            { id: 12, key: 'PDF00002', kind: 'pdf', attachmentFilename: 'Baird_2011_appendix.pdf', deleted: false, getField: () => '' },
+            { id: 13, key: 'NOTE0001', kind: null, attachmentFilename: 'link', deleted: false, getField: () => '' },
+        ];
+        (globalThis as any).Zotero.Items = {
+            getByLibraryAndKeyAsync: async () => ({
+                libraryID: 1,
+                isRegularItem: () => true,
+                getAttachments: () => [11, 12, 13],
+                getBestAttachment: async () => attachments[0],
+            }),
+            getAsync: async () => attachments,
+            loadDataTypes: async () => {},
+        };
+        const table = spec();
+        table.rows[0].documents = ['u-PDF00001'];
+        mount({ table });
+        await click(container!.querySelector('tr[data-row-id="r1"] button[aria-label="Row actions"]'));
+        await click(menuItem('Choose document…'));
+        await act(async () => {});
+        const dialog = $('.rt-document-chooser')!;
+        expect(Array.from(dialog.querySelectorAll('.rt-document-choice-name')).map((n) => n.textContent)).toEqual([
+            'Baird_2011.pdf',
+            'Baird_2011_appendix.pdf',
+        ]);
+        expect(dialog.querySelector<HTMLInputElement>('input[type="radio"]:checked')?.closest('label')?.textContent).toBe('Baird_2011.pdf');
+        await click(dialog.querySelectorAll<HTMLInputElement>('input[type="radio"]')[1]);
+        await click(Array.from(dialog.querySelectorAll('button')).find((b) => b.textContent === 'Use this document'));
+        expect(commands.editCells).toHaveBeenCalledWith(
+            ref,
+            [{ op: 'document', row: 'r1', document: 'u-PDF00002', expected: ['u-PDF00001'] }],
+            expect.objectContaining({ session: expect.any(String) }),
+        );
+        expect($('.rt-document-chooser')).toBeNull();
+        expect($('.rt-toast')?.textContent).toContain('Baird_2011_appendix.pdf');
     });
 });

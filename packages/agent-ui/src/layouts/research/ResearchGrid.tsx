@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef } from "react";
+import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
     cellIdFor,
     cellValueText,
@@ -10,7 +10,7 @@ import {
     type Row,
     type TableSpec,
 } from "@beaver/agent-core/layouts/table";
-import { ArrowDownIcon, Icon, PlusSignIcon, RepeatIcon, TickIcon } from "../../icons";
+import { ArrowDownIcon, EditIcon, Icon, PlusSignIcon, RepeatIcon, TickIcon } from "../../icons";
 import type { MenuItem } from "../../primitives/ContextMenu";
 import MenuButton from "../../primitives/MenuButton";
 import { useHoverAnchor, useHoverLayer } from "../../primitives/HoverLayer";
@@ -54,6 +54,15 @@ export interface ResearchGridProps {
     virtualize?: boolean;
     emptyText: string;
     filteredEmptyText: string;
+    /**
+     * Opens the cell editor: the pencil on a cell and the peek's Edit.
+     * Absent, cells are not editable here.
+     */
+    onEditCell?(address: CellAddress): void;
+    /** Why cells cannot be edited (a read-only library); the pencil shows it. */
+    cellEditDisabledReason?: string;
+    /** The open cell editor, floated over its cell and the rows below. */
+    cellEditor?: { address: CellAddress; content: React.ReactNode; list: boolean } | null;
 }
 
 /** A question column's width: prose shares what is left; short types are fixed. */
@@ -96,6 +105,9 @@ export function ResearchGrid({
     virtualize = false,
     emptyText,
     filteredEmptyText,
+    onEditCell,
+    cellEditDisabledReason,
+    cellEditor,
 }: ResearchGridProps): React.ReactElement {
     const rootRef = useRef<HTMLDivElement>(null);
     const bodyRef = useRef<HTMLTableSectionElement>(null);
@@ -202,6 +214,8 @@ export function ResearchGrid({
                             onSelectCell={onSelectCell}
                             menuItems={rowMenuItems}
                             addColumn={addColumn}
+                            onEditCell={onEditCell}
+                            editDisabledReason={cellEditDisabledReason}
                         />
                     ))}
                     {rowWindow.padBottom > 0 ? <Spacer height={rowWindow.padBottom} /> : null}
@@ -214,6 +228,58 @@ export function ResearchGrid({
                     ) : null}
                 </tbody>
             </table>
+            {cellEditor ? <CellEditorLayer rootRef={rootRef} {...cellEditor} /> : null}
+        </div>
+    );
+}
+
+/**
+ * The cell editor, floated over the grid at its cell: a text editor covers
+ * the cell and grows over the rows below; an option list opens under the
+ * cell's first line. Placed within the grid, so it scrolls with the rows.
+ * The cell itself clips its content, so the editor cannot live inside it.
+ */
+function CellEditorLayer({
+    rootRef,
+    address,
+    content,
+    list,
+}: {
+    rootRef: React.RefObject<HTMLDivElement>;
+    address: CellAddress;
+    content: React.ReactNode;
+    list: boolean;
+}): React.ReactElement | null {
+    const [place, setPlace] = useState<{ top: number; left: number; width: number } | null>(null);
+    // A windowed row scrolled into view is drawn a frame or two later.
+    const [attempt, setAttempt] = useState(0);
+    useLayoutEffect(() => {
+        const root = rootRef.current;
+        const id = cellIdFor(address.rowId, address.columnId).replace(/["\\]/g, "\\$&");
+        const cell = root?.querySelector<HTMLElement>(`[id="${id}"]`);
+        if (!root || !cell) {
+            setPlace(null);
+            if (!root || attempt >= 5) return;
+            const frame = root.ownerDocument.defaultView?.requestAnimationFrame(() => setAttempt((n) => n + 1));
+            return () => {
+                if (frame != null) root.ownerDocument.defaultView?.cancelAnimationFrame(frame);
+            };
+        }
+        const rootBox = root.getBoundingClientRect();
+        const box = cell.getBoundingClientRect();
+        setPlace({
+            top: box.top - rootBox.top + (list ? Math.min(box.height, 40) : 0),
+            left: box.left - rootBox.left,
+            width: box.width,
+        });
+    }, [rootRef, address.rowId, address.columnId, list, attempt]);
+    if (!place) return null;
+    return (
+        <div
+            className={`rt-cell-editor-layer${list ? " rt-cell-editor-layer-list" : ""}`}
+            style={{ top: place.top, left: place.left, width: list ? undefined : place.width, minWidth: list ? undefined : 320 }}
+        >
+            {content}
         </div>
     );
 }
@@ -376,6 +442,8 @@ interface ResearchRowProps {
     onSelectCell(address: CellAddress): void;
     menuItems(row: Row): MenuItem[];
     addColumn: boolean;
+    onEditCell?(address: CellAddress): void;
+    editDisabledReason?: string;
 }
 
 const ResearchRow = React.memo(function ResearchRow({
@@ -394,6 +462,8 @@ const ResearchRow = React.memo(function ResearchRow({
     onSelectCell,
     menuItems,
     addColumn,
+    onEditCell,
+    editDisabledReason,
 }: ResearchRowProps): React.ReactElement {
     return (
         <tr
@@ -428,6 +498,8 @@ const ResearchRow = React.memo(function ResearchRow({
                     documents={documents}
                     selected={selectedColumn === column.id}
                     onSelect={onSelectCell}
+                    onEdit={onEditCell}
+                    editDisabledReason={editDisabledReason}
                 />
             ))}
             {addColumn ? <td className="rt-td rt-td-add" aria-hidden="true" /> : null}
@@ -539,6 +611,8 @@ function QuestionCell({
     documents,
     selected,
     onSelect,
+    onEdit,
+    editDisabledReason,
 }: {
     row: Row;
     column: Column;
@@ -546,9 +620,12 @@ function QuestionCell({
     documents?: TableDocuments;
     selected: boolean;
     onSelect(address: CellAddress): void;
+    onEdit?(address: CellAddress): void;
+    editDisabledReason?: string;
 }): React.ReactElement {
     const cell = row.cells[column.id];
     const select = () => onSelect({ rowId: row.id, columnId: column.id });
+    const edit = onEdit && !editDisabledReason ? () => onEdit({ rowId: row.id, columnId: column.id }) : undefined;
     const layers = useHoverLayer();
     const peek = useHoverAnchor({
         slot: "peek",
@@ -570,7 +647,23 @@ function QuestionCell({
                 <div className="rt-peek-body">
                     <CellBody row={row} cell={cell} column={column} renderText={renderText} documents={documents} full />
                 </div>
-                <div className="rt-peek-footer">Click for evidence</div>
+                <div className="rt-peek-footer">
+                    <span>Click for evidence</span>
+                    {edit ? (
+                        <button
+                            type="button"
+                            className="rt-peek-edit"
+                            onClick={(event) => {
+                                event.stopPropagation();
+                                layers?.hide();
+                                edit();
+                            }}
+                        >
+                            <Icon icon={EditIcon} size={11} />
+                            Edit
+                        </button>
+                    ) : null}
+                </div>
             </div>
         ),
     });
@@ -605,6 +698,21 @@ function QuestionCell({
             <div className="rt-cell-body">
                 <CellBody row={row} cell={cell} column={column} renderText={renderText} documents={documents} />
             </div>
+            {onEdit ? (
+                <button
+                    type="button"
+                    className="rt-icon-button rt-cell-edit"
+                    aria-label={`Edit ${column.header}`}
+                    title={editDisabledReason ?? "Edit answer"}
+                    disabled={!!editDisabledReason}
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        edit?.();
+                    }}
+                >
+                    <Icon icon={EditIcon} size={12} />
+                </button>
+            ) : null}
         </td>
     );
 }
