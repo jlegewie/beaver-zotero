@@ -1,6 +1,6 @@
 /**
  * Building and changing a table from the provider's `create` and
- * `apply_edit` (and, later, the tab's structural edits): the pure half.
+ * `apply_edit` and from the tab's structural edits: the pure half.
  *
  * Sources are resolved first, outside the table's lock, into
  * {@link ResolvedSource}s (rows with their metadata identifiers, built from
@@ -35,6 +35,7 @@ import type {
     TableChange,
     TableColumnDraft,
     TableColumnUpdate,
+    TableEditColumnType,
     TableEditOperations,
     TablePreview,
     TableRejectedItem,
@@ -65,6 +66,22 @@ export interface ResolvedSource {
     rejected: TableRejectedItem[];
     /** The source cannot be used. */
     error?: string;
+}
+
+/**
+ * A column update from the tab: the model's fields, plus what only the user
+ * changes. A new `type` clears the column's answers (a select column then
+ * needs its `options`); `existing_answers` overrides what a changed question
+ * does to them: `keep` leaves them fresh, `refill` marks them out of date.
+ */
+export interface TableUserColumnUpdate extends TableColumnUpdate {
+    type?: TableEditColumnType | null;
+    existing_answers?: "keep" | "refill" | null;
+}
+
+/** One edit from the tab: the model's operations, with user column updates. */
+export interface TableUserEdit extends Omit<TableEditOperations, "update_columns"> {
+    update_columns?: TableUserColumnUpdate[] | null;
 }
 
 /** A refusal, with a message that names the parameter and its index. */
@@ -317,13 +334,23 @@ function optionUpdates(update: TableColumnUpdate): UpdateColumnOption[] | undefi
     });
 }
 
+type ColumnChangeField = Extract<TableChange, { op: "update_column" }>["fields"][number];
+
 /**
- * What an update changed. Whether the question changed is the engine's
+ * What an update changed. Apart from a type change, whether the question changed is the engine's
  * answer, the one its staleness follows: renames and re-spellings are not a
  * new question, and removing an option counts only when it had a definition.
  */
-function columnFields(before: Column, after: Column, report: MutationReport): ("header" | "question" | "options")[] {
-    const fields: ("header" | "question" | "options")[] = [];
+function columnFields(before: Column, after: Column, report: MutationReport): ColumnChangeField[] {
+    const fields: ColumnChangeField[] = [];
+    // A new type replaces the question and the options with it: the change
+    // names the type, and the header or question text if they moved too.
+    if (before.type !== after.type) {
+        fields.push("type");
+        if (before.header !== after.header) fields.push("header");
+        if ((before.description ?? "") !== (after.description ?? "")) fields.push("question");
+        return fields;
+    }
     if (before.header !== after.header) fields.push("header");
     if (report.question_changed) fields.push("question");
     const labels = (column: Column) => JSON.stringify((column.options ?? []).map((o) => o.label));
@@ -340,7 +367,7 @@ function columnFields(before: Column, after: Column, report: MutationReport): ("
  */
 export function applyEdit(
     spec: TableSpec,
-    operations: TableEditOperations,
+    operations: TableUserEdit,
     resolved: ResolvedEdit,
     now: string,
     rowCap = MAX_ROWS,
@@ -416,6 +443,8 @@ export function applyEdit(
         if (update.description != null) mutation.description = update.description;
         const options = optionUpdates(update);
         if (options) mutation.options = options;
+        if (update.type != null && update.type !== before.type) mutation.type = update.type;
+        if (update.existing_answers != null) mutation.existing_answers = update.existing_answers;
         const result = step([mutation], `update_columns[${index}]`);
         if (failed(result)) return result;
         const after = current.columns.find((c) => c.id === update.id)!;

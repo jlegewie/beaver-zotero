@@ -25,6 +25,7 @@ import { CellInspector, type InspectorView } from "./CellInspector";
 import { researchColumns, type TableDocuments } from "./cellModel";
 import { paperOpenAction, rowItemReference } from "./PaperCell";
 import { ResearchGrid, type CellAddress } from "./ResearchGrid";
+import { AnchoredPopover, InlineText } from "./TableEditing";
 import { getHost } from "../../host";
 
 /** "3 new in 'Cash transfers'": a source whose items the table lacks. */
@@ -35,6 +36,39 @@ export interface NewPapersNotice {
     sourceName?: string;
     /** How many sources have new papers. */
     sources: number;
+}
+
+/** The column types a user may change a question column to. */
+export type ResearchColumnType = "text" | "boolean" | "select" | "date";
+
+/** Named and ordered as the column editor and the create card name them. */
+const COLUMN_TYPE_LABELS: Array<{ type: ResearchColumnType; label: string }> = [
+    { type: "text", label: "Text" },
+    { type: "date", label: "Date" },
+    { type: "boolean", label: "Yes / no" },
+    { type: "select", label: "Category" },
+];
+
+/**
+ * The structural edit controls. Each is offered when its callback is
+ * present; with `disabledReason` (a read-only library) they show disabled
+ * with that reason.
+ */
+export interface ResearchTableEditing {
+    disabledReason?: string;
+    onTitle?(title: string): void;
+    onDescription?(description: string): void;
+    /** The column menu's Edit column…; also the (+) after the last column. */
+    onEditColumn?(column: Column): void;
+    onAddColumn?(): void;
+    onChangeType?(column: Column, type: ResearchColumnType): void;
+    onRemoveColumn?(column: Column): void;
+    /** The sources popover's content, opened from the sources chip. */
+    renderSources?(close: () => void): React.ReactNode;
+    /** The new-papers notice's Add. */
+    onAddNewPapers?(): void;
+    /** Controls after the notice (+ Papers). */
+    toolbarActions?: React.ReactNode;
 }
 
 /**
@@ -78,6 +112,8 @@ export interface ResearchTableProps {
     documentAction?: (row: Row) => React.ReactNode;
     /** Brings a row (and a cell, in the inspector) into view. */
     focus?: ResearchTableFocus | null;
+    /** The structural edit controls; absent, the table is display only. */
+    editing?: ResearchTableEditing;
     /** Window the rows, for a long table. */
     virtualize?: boolean;
     className?: string;
@@ -119,12 +155,15 @@ export function ResearchTable({
     userAnswerActions,
     documentAction,
     focus,
+    editing,
     virtualize,
     className,
 }: ResearchTableProps): React.ReactElement {
     const state = useTableState(table, { density: "cozy", onlyRows });
     const columns = useMemo(() => researchColumns(table), [table]);
     const [panel, setPanel] = useState<Panel | null>(null);
+    const [sourcesOpen, setSourcesOpen] = useState(false);
+    const editDisabled = editing?.disabledReason;
     const scrollRef = useRef<HTMLDivElement>(null);
 
     // The paper and the year are system columns, which the shared view state
@@ -172,6 +211,45 @@ export function ResearchTable({
         },
         [navigation, rowMenuItems, documents],
     );
+
+    // A question column's menu: its edits (when the host makes them), then
+    // the view's own Sort and Hide.
+    const columnMenu = useCallback(
+        (column: Column): MenuItem[] => {
+            const items: MenuItem[] = [];
+            const disabled = !!editing?.disabledReason;
+            if (editing?.onEditColumn)
+                items.push({ label: "Edit column…", disabled, onClick: () => editing.onEditColumn!(column) });
+            if (items.length) items.push({ label: "", isDivider: true, onClick: () => {} });
+            items.push({
+                label: "Sort A → Z",
+                onClick: () => state.setSort({ column_id: column.id, direction: "asc" }),
+            });
+            items.push({ label: "Hide column", onClick: () => state.toggleColumn(column.id) });
+            if (editing?.onChangeType)
+                items.push({
+                    label: "Change type",
+                    disabled,
+                    onClick: () => {},
+                    submenu: COLUMN_TYPE_LABELS.filter((entry) => entry.type !== column.type).map((entry) => ({
+                        label: entry.label,
+                        onClick: () => editing.onChangeType!(column, entry.type),
+                    })),
+                });
+            if (editing?.onRemoveColumn) {
+                items.push({ label: "", isDivider: true, onClick: () => {} });
+                items.push({
+                    label: "Remove column",
+                    disabled,
+                    customContent: <span className="rt-menu-danger">Remove column</span>,
+                    onClick: () => editing.onRemoveColumn!(column),
+                });
+            }
+            return items;
+        },
+        [editing, state],
+    );
+    const hiddenQuestions = columns.questions.filter((column) => state.hiddenColumns.has(column.id));
 
     // Previous and next row in the view's order, keeping the column.
     const rowIndex = selected ? state.rows.findIndex((row) => row.id === selected.rowId) : -1;
@@ -235,8 +313,32 @@ export function ResearchTable({
                         <Icon icon={TableIcon} size={18} />
                     </span>
                     <div className="rt-identity">
-                        <h1 className="rt-title">{table.title || "Table"}</h1>
-                        {table.description ? <p className="rt-description">{table.description}</p> : null}
+                        {editing?.onTitle ? (
+                            <InlineText
+                                as="h1"
+                                className="rt-title"
+                                value={table.title || ""}
+                                placeholder="Table"
+                                label="Rename table"
+                                disabledReason={editDisabled}
+                                onSave={editing.onTitle}
+                            />
+                        ) : (
+                            <h1 className="rt-title">{table.title || "Table"}</h1>
+                        )}
+                        {editing?.onDescription ? (
+                            <InlineText
+                                className="rt-description"
+                                value={table.description ?? ""}
+                                placeholder="Add a description"
+                                label="Edit description"
+                                multiline
+                                disabledReason={editDisabled}
+                                onSave={editing.onDescription}
+                            />
+                        ) : table.description ? (
+                            <p className="rt-description">{table.description}</p>
+                        ) : null}
                     </div>
                     <div className="rt-header-actions">
                         {moreItems.length ? (
@@ -273,21 +375,69 @@ export function ResearchTable({
                         </div>
                     ) : (
                         <div className="rt-toolbar-left">
-                            <span className="rt-sources-chip" title={sourceNames(table)}>
-                                <Icon icon={LayersIcon} size={14} />
-                                {sourcesLabel}
-                            </span>
+                            {editing?.renderSources ? (
+                                <AnchoredPopover
+                                    open={sourcesOpen}
+                                    label="Sources"
+                                    className="rt-sources-popover"
+                                    onClose={() => setSourcesOpen(false)}
+                                    anchor={
+                                        <button
+                                            type="button"
+                                            className="rt-sources-chip rt-sources-button"
+                                            aria-haspopup="dialog"
+                                            aria-expanded={sourcesOpen}
+                                            onClick={() => setSourcesOpen((open) => !open)}
+                                        >
+                                            <Icon icon={LayersIcon} size={14} />
+                                            {sourcesLabel}
+                                            <Icon icon={ChevronIcon} size={11} className="rt-chip-chevron" />
+                                        </button>
+                                    }
+                                >
+                                    {editing.renderSources(() => setSourcesOpen(false))}
+                                </AnchoredPopover>
+                            ) : (
+                                <span className="rt-sources-chip" title={sourceNames(table)}>
+                                    <Icon icon={LayersIcon} size={14} />
+                                    {sourcesLabel}
+                                </span>
+                            )}
                             {newPapers && newPapers.count > 0 ? (
                                 <span className="rt-new-papers" role="status">
                                     <span className="rt-dot" aria-hidden="true" />
                                     {newPapers.sources === 1 && newPapers.sourceName
                                         ? `${newPapers.count} new in “${newPapers.sourceName}”`
                                         : `${newPapers.count} new in ${newPapers.sources} sources`}
+                                    {editing?.onAddNewPapers ? (
+                                        <button
+                                            type="button"
+                                            className="rt-new-papers-add"
+                                            disabled={!!editDisabled}
+                                            title={editDisabled ?? "Add them to the table"}
+                                            onClick={editing.onAddNewPapers}
+                                        >
+                                            Add
+                                        </button>
+                                    ) : null}
                                 </span>
                             ) : null}
+                            {editing?.toolbarActions}
                         </div>
                     )}
                     <FilterChips table={table} state={state} />
+                    {hiddenQuestions.length > 0 ? (
+                        <button
+                            type="button"
+                            className="rt-hidden-columns"
+                            title={hiddenQuestions.map((column) => column.header).join("\n")}
+                            onClick={() => hiddenQuestions.forEach((column) => state.toggleColumn(column.id))}
+                        >
+                            {hiddenQuestions.length === 1
+                                ? "1 hidden column · Show"
+                                : `${hiddenQuestions.length} hidden columns · Show`}
+                        </button>
+                    ) : null}
                     <span className="rt-spacer" />
                     <label className="rt-search">
                         <Icon icon={SearchIcon} size={14} />
@@ -368,6 +518,9 @@ export function ResearchTable({
                             selected={selected}
                             onSelectCell={onSelectCell}
                             rowMenuItems={rowMenu}
+                            columnMenuItems={columnMenu}
+                            onAddColumn={editing?.onAddColumn}
+                            editDisabledReason={editDisabled}
                             virtualize={virtualize}
                             emptyText="No papers yet"
                             filteredEmptyText="No rows match the search or filters"

@@ -25,6 +25,34 @@ export async function openStoredTable(key: string, origin?: Window | null, optio
     return api.openTable(ref, { window: origin ?? null, ...(options.background ? { background: true } : {}) });
 }
 
+/**
+ * Undo of one `edit_table` call, through the renderer's table commands: the
+ * store restores the version before it while the table is as the edit left
+ * it, and refuses otherwise.
+ */
+export async function undoStoredTableEdit(
+    key: string,
+    edit: { version: number; runId: string },
+    origin?: Window | null,
+): Promise<{ ok: true } | { error: string }> {
+    const api = getTablesApi();
+    const ref = resolveTableRef(key);
+    const runtime = tryGetWindowRuntime();
+    const win = origin ?? runtime?.hostWindow ?? null;
+    if (!api || !win) return { error: "Table provider unavailable." };
+    if (!ref) return { error: "Table library unavailable on this device." };
+    // A fill changes the table with every commit: Undo waits for it to end,
+    // and then works only if the fill touched nothing.
+    const fill = Zotero.Beaver.tableFills?.jobForTable(ref);
+    if (fill && fill.state !== "done") return { error: "Undo is available when the fill ends." };
+    try {
+        const result = await api.local.commands(win).undo(ref, { version: edit.version, run_id: edit.runId });
+        return result.ok ? { ok: true } : { error: result.message };
+    } catch (error) {
+        return { error: String((error as Error)?.message ?? error) };
+    }
+}
+
 /** Local display only; submission validates access through the provider separately. */
 export async function resolveTableDisplay(key: string): Promise<TableDisplay> {
     if (!getTablesApi())

@@ -282,6 +282,7 @@
     "./src/layouts/research/ResearchGrid.tsx",
     "./src/layouts/research/CellInspector.tsx",
     "./src/layouts/research/ResearchTable.tsx",
+    "./src/layouts/research/TableEditing.tsx",
 
     "./src/host/index.ts",
     "./src/host/types.ts"

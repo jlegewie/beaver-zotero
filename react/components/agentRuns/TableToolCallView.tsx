@@ -106,6 +106,25 @@ export const TableToolCallView: React.FC<TableToolCallViewProps> = ({
         });
     }, [tableKey]);
 
+    // Undo of an `edit_table` call: the version it committed, while the
+    // table is as it left it. Once used, the button gives way to what
+    // happened.
+    const [undoState, setUndoState] = useState<'idle' | 'working' | 'done'>('idle');
+    const canUndo =
+        part.tool_name === 'edit_table' && !!record?.edits?.length && typeof record?.version === 'number' && !!getHost().navigation?.undoTableEdit;
+    const handleUndo = useCallback(async (event: React.SyntheticEvent) => {
+        const undo = getHost().navigation?.undoTableEdit;
+        if (!tableKey || !undo || typeof record?.version !== 'number') return;
+        const origin = (event.currentTarget as Element).ownerDocument?.defaultView ?? null;
+        setUndoState('working');
+        const outcome = await undo(tableKey, { version: record.version, runId }, origin)
+            .catch(() => ({ error: 'Table provider unavailable.' }));
+        // A refusal keeps the button: a running fill may end, and a refused
+        // Undo is refused again without harm.
+        setUndoState('error' in outcome ? 'idle' : 'done');
+        setOpenMessage('error' in outcome ? outcome.error : 'Undone. The table is back to the version before this edit.');
+    }, [tableKey, record?.version, runId]);
+
     const isInProgress = status === 'in_progress';
     const isShimmering = isInProgress && !hasResult && runStatus === 'in_progress';
     const isFailed = status === 'error' || (isReturn && !record && notices.length > 0);
@@ -201,6 +220,16 @@ export const TableToolCallView: React.FC<TableToolCallViewProps> = ({
                 <div id={`tool-result-${part.tool_call_id}`} className="display-flex flex-col">
                     <TableResultView view={{ view_type: 'table', record }} />
                     <div className="display-flex flex-row items-center gap-2 px-2 py-2">
+                        {canUndo && undoState !== 'done' && (
+                            <Button
+                                variant="ghost-secondary"
+                                onClick={handleUndo}
+                                disabled={undoState === 'working'}
+                                className="flex-none whitespace-nowrap"
+                            >
+                                Undo
+                            </Button>
+                        )}
                         <div className="flex-1" />
                         <Button variant="outline" onClick={handleReveal} className="flex-none whitespace-nowrap">
                             Reveal

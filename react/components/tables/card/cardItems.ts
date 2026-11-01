@@ -1,5 +1,48 @@
 import type { TableCardLibraryScope } from '@beaver/agent-core/protocol/tableCardProtocol';
-import { libraryRefForLibraryID } from '../../../../src/utils/libraryIdentity';
+import type { ZoteroTag } from '@beaver/agent-core/types/zotero';
+import type { MessageFiltersState } from '../../../atoms/messageComposition';
+import type { SourcesMenuEntries } from '../../ui/menus/hooks/useSourcesMenu';
+import { libraryRefForLibraryID, resolveLibraryRef } from '../../../../src/utils/libraryIdentity';
+
+/** The Add Sources menu's rows for a table: papers, collections and tags, added rather than filtered. */
+export const TABLE_MENU_ENTRIES: SourcesMenuEntries = { libraries: false, notes: false, files: false, scopeVerb: 'add' };
+
+/** A table's item search runs everywhere, not in the scopes it already has. */
+export const NO_SEARCH_FILTERS: MessageFiltersState = { libraryIds: [], collectionIds: [], tagSelections: [] };
+
+/**
+ * The collections and tags a table already has, as the menu's filter state:
+ * read only, for the checkmarks.
+ */
+export function scopeMenuFilters(scopes: readonly TableCardLibraryScope[]): MessageFiltersState {
+    const collectionIds: number[] = [];
+    const tagSelections: ZoteroTag[] = [];
+    for (const scope of scopes) {
+        const libraryId = resolveLibraryRef({ library_ref: scope.library_ref });
+        if (!libraryId) continue;
+        if (scope.kind === 'collection' && scope.key) {
+            const collection = Zotero.Collections.getByLibraryAndKey(libraryId, scope.key) as Zotero.Collection | false;
+            if (collection) collectionIds.push(collection.id);
+        } else if (scope.kind === 'tag' && scope.tag) {
+            const id = Zotero.Tags.getID(scope.tag);
+            if (id) tagSelections.push({ id, tag: scope.tag, libraryId, type: 0, color: '' });
+        }
+    }
+    return { libraryIds: [], collectionIds, tagSelections };
+}
+
+/** The collection a menu pick names, as a source scope; null when it cannot be one. */
+export function pickedCollectionScope(collectionId: number): TableCardLibraryScope | null {
+    const collection = Zotero.Collections.get(collectionId) as Zotero.Collection | false;
+    const ref = collection ? libraryRefForLibraryID(collection.libraryID) : null;
+    return collection && ref ? { kind: 'collection', library_ref: ref, key: collection.key, name: collection.name } : null;
+}
+
+/** The tag a menu pick names, as a source scope. */
+export function pickedTagScope(tag: ZoteroTag): TableCardLibraryScope | null {
+    const ref = libraryRefForLibraryID(tag.libraryId);
+    return ref ? { kind: 'tag', library_ref: ref, tag: tag.tag } : null;
+}
 
 /** The regular item a pick stands for: itself, or a child attachment's parent. */
 export function paperOf(item: Zotero.Item): Zotero.Item | null {

@@ -125,8 +125,11 @@ export type TableChange =
           op: "update_column";
           column: string;
           header: string;
-          /** What changed: the header, the question, the options. */
-          fields: ("header" | "question" | "options")[];
+          /**
+           * What changed: the header, the question, the options; `type`
+           * only in the tab's own edits (the model cannot change a type).
+           */
+          fields: ("type" | "header" | "question" | "options")[];
           /**
            * Cells marked out of date, cleared by a removed option (and of them
            * the user's), relabelled.
