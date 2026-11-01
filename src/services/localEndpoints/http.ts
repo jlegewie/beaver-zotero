@@ -1161,10 +1161,6 @@ export function registerEndpoints(): (() => void) | undefined {
 
         endpoints['/beaver/test/beaver-window'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/beaver-window', request));
 
-        endpoints['/beaver/test/open-table'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/open-table', request));
-
-        endpoints['/beaver/test/close-table'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/close-table', request));
-
         // `openTable` itself — the product path the item-pane button takes.
         endpoints['/beaver/test/open-stored-table'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/open-stored-table', request));
 

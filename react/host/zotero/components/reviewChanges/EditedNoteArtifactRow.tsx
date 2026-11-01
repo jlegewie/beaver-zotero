@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
@@ -6,7 +6,7 @@ import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import { DownloadIcon } from '@beaver/agent-ui/icons';
 import type { FileExportFormat } from '@beaver/agent-ui/host/types';
 import {
-    agentActionItemTitlesAtom,
+    agentActionItemTitleAtom,
     getAgentActionItemTitleKey,
     setAgentActionItemTitleAtom,
 } from '../../../../atoms/messageUIState';
@@ -38,7 +38,7 @@ export const EditedNoteArtifactRow: React.FC<EditedNoteArtifactRowProps> = ({ su
     // The in-stream edit card caches the note's title under its tool call;
     // without that card (a collapsed or reloaded thread) the row looks it up.
     const titleKey = getAgentActionItemTitleKey(summary.runId, summary.toolcallId);
-    const title = useAtomValue(agentActionItemTitlesAtom)[titleKey] ?? null;
+    const title = useAtomValue(useMemo(() => agentActionItemTitleAtom(titleKey), [titleKey]));
     const setItemTitle = useSetAtom(setAgentActionItemTitleAtom);
     useEffect(() => {
         if (title) return;

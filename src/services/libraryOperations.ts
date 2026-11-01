@@ -5,6 +5,7 @@ import type { OperationContext } from './agentDataProvider/operationContext';
 import { hydrateOperationRendering } from './agentDataProvider/prepareOperationRendering';
 import * as tables from './artifacts/tableStore';
 import { handleArtifactRequestUncoordinated } from './artifacts/artifactProvider';
+import { applyUserCellEditUncoordinated, applyUserTableEditUncoordinated } from './artifacts/tableUserEdits';
 import * as imports from './itemImport/legacy';
 import { coordinateLibraryMutation, type MutationOptions } from './libraryMutations';
 import * as createAnnotations from './manualActions/createAnnotationsActions';
@@ -62,6 +63,11 @@ const operations = {
     executeEditAnnotationsAction: editAnnotations.executeEditAnnotationsAction,
     undoEditAnnotationsAction: editAnnotations.undoEditAnnotationsAction,
     table_createTable: tables.createTableUncoordinated,
+    table_createTableFromRequest: tables.createTableFromRequestUncoordinated,
+    table_applyTableEdit: tables.applyTableEditUncoordinated,
+    table_applyUserEdit: applyUserTableEditUncoordinated,
+    table_applyUserCellEdit: applyUserCellEditUncoordinated,
+    table_undoTableEdit: tables.undoTableEditUncoordinated,
     table_writeTable: tables.writeTableUncoordinated,
     table_editTable: tables.editTableUncoordinated,
     table_editTableSession: tables.editTableSessionUncoordinated,

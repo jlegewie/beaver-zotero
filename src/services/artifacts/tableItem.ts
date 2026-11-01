@@ -23,7 +23,6 @@
  * disagree about where they live.
  */
 
-import { tableSpecHash } from './recoveryShadow';
 import { logger } from '@beaver/agent-core/platform/logger';
 import {
     TABLE_SPEC_VERSION,
@@ -66,9 +65,8 @@ export {
     readTable,
     readTableHistory,
     readTableItemSpec,
-    readTableFileLedger,
+    readTableFileCreation,
     parseTableFile,
-    recoverTableFromHistory,
     resolveTableItem,
     tableFilePath,
     tableHistoryPath,
@@ -103,12 +101,11 @@ export function storedSpecVersion(spec: Pick<TableSpec, 'spec_version'>): number
 export type {
     ReadTableItemResult,
     TableCreationState,
+    TableEditMarker,
     TableFile,
-    TableOperationReceipt,
     TableActor,
     TableHistory,
     TableItemErrorCode,
-    TableLedger,
     TableRef,
     TableVersionEntry,
 } from './tableItemIdentity';
@@ -214,6 +211,8 @@ export interface CreateTableItemOptions {
         request_sha256: string;
         url: string;
         meta: TableCreationState['meta'];
+        /** The change list a creation from a request answered with. */
+        changes?: unknown[];
     };
     /** Where to file it. Resolved by {@link resolveTableLibrary} when absent. */
     libraryID?: number;
@@ -353,19 +352,12 @@ export async function createTableItem(
         const file: TableFile = creation
             ? {
                   spec: stored,
-                  receipts: [
-                      {
-                          operation_id: creation.operation_id,
-                          request_sha256: creation.request_sha256,
-                          version: 1,
-                          sha256: await tableSpecHash(stored),
-                      },
-                  ],
                   creation: {
                       operation_id: creation.operation_id,
                       request_sha256: creation.request_sha256,
                       complete: true,
                       meta: creation.meta,
+                      ...(creation.changes ? { changes: creation.changes } : {}),
                   },
               }
             : { spec: stored };

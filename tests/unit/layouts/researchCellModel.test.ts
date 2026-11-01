@@ -214,16 +214,6 @@ describe('inspector content', () => {
 });
 
 describe('the paper cell', () => {
-    it('reads an annotation row as its passage, source and page', () => {
-        const annotationRow: Row = {
-            id: 'a1',
-            cells: {
-                anchor: { outcome: 'answered', provenance: 'system', value: { kind: 'annotation', annotation_type: 'highlight', text: 'A highlighted passage', page_label: '7', source_display_name: 'Smith 2020' } } as Cell,
-            },
-        };
-        expect(paperText(annotationRow)).toEqual({ title: 'A highlighted passage', meta: 'Smith 2020 · p. 7' });
-    });
-
     it('reads a row without a reference by its anchor value', () => {
         const textRow: Row = { id: 't1', cells: { name: { outcome: 'answered', provenance: 'user', value: { kind: 'text', text: 'Site A' } } as Cell } };
         expect(paperText(textRow, 'name').title).toBe('Site A');

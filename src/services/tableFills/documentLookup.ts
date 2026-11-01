@@ -9,39 +9,29 @@ import { getReadableContentKind } from '../documentExtraction/attachmentResoluti
 import { getBestAttachmentBatch } from '../documentExtraction/attachmentInfoBatch';
 import { isLibrarySearchable } from '../agentDataProvider/utils';
 import { libraryRefForLibraryID, parseItemReference, resolveLibraryRef } from '../../utils/libraryIdentity';
-import { DOCUMENT_KINDS, type DocumentCandidate, type RowDocumentKind, type RowLookup } from './planner';
+import { isRowDocumentKind, type DocumentCandidate, type RowLookup } from './planner';
 
 const LOOKUP_CHUNK = 200;
 
-/** A kind a row may name: the rule's kinds, and plain text a row already names. */
-function isDocumentKind(kind: string | null): kind is RowDocumentKind {
-    return kind === 'text' || (DOCUMENT_KINDS as readonly string[]).includes(kind ?? '');
-}
-
-/** The local library of a Zotero row, or null when this device has none. */
+/** The local library of an item row, or null when this device has none. */
 export function rowLibraryID(row: Pick<Row, 'ref'>): number | null {
     const ref = row.ref;
-    if (!ref || ref.kind === 'external' || ref.kind === 'file') return null;
+    if (ref?.kind !== 'item') return null;
     return resolveLibraryRef({ library_ref: ref.library_ref, library_id: ref.library_id });
 }
 
 /**
- * Whether a fill may send the row off the device: a Zotero row from a
- * library Beaver may read, an external work, or a context file.
+ * Whether a fill may send the row off the device: an item from a library
+ * Beaver may read, or an external work.
  */
 export function rowSendable(row: Pick<Row, 'ref'>): boolean {
-    const ref = row.ref;
-    if (!ref || ref.kind === 'external' || ref.kind === 'file') return true;
+    if (row.ref?.kind !== 'item') return true;
     const libraryID = rowLibraryID(row);
     return libraryID != null && isLibrarySearchable(libraryID);
 }
 
-/**
- * Whether a fill may send a document off the device: a context file, or an
- * attachment in a library Beaver may read.
- */
+/** Whether a fill may send a document off the device: an attachment in a library Beaver may read. */
 export function documentSendable(documentId: string): boolean {
-    if (documentId.startsWith('ext-')) return true;
     const parsed = parseItemReference(documentId);
     if (!parsed) return false;
     const libraryID = resolveLibraryRef(parsed);
@@ -93,7 +83,7 @@ async function lookupChunk(rows: readonly Row[], out: Map<string, RowLookup>): P
             const attachment = byId.get(id);
             if (!attachment || attachment.deleted) continue;
             const kind = getReadableContentKind(attachment);
-            if (!isDocumentKind(kind)) continue;
+            if (!isRowDocumentKind(kind)) continue;
             documents.push({
                 id: `${libraryRef}-${attachment.key}`,
                 kind,

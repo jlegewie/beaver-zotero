@@ -10,7 +10,9 @@ import {
     type TableRef,
 } from '../../../src/services/artifacts/tableItemIdentity';
 import { isTableChatEnabled } from '../../../src/services/tableCapability';
-import { TableFillBanner, TableFillButton, useTableFillJob } from './TableFillControl';
+import { TableFillBanner, TableFillButton, useTableFillJob, type TableFillButtonHandle } from './TableFillControl';
+import type { TableFillScope } from '@beaver/agent-core/protocol/tableFillProtocol';
+import type { ResearchTableFill } from '@beaver/agent-ui/layouts';
 import { TABLE_UPDATED_EVENT, type TableUpdatedDetail } from '../../../src/services/artifacts/tableStore';
 import type { TableTabMountOptions, TableTabRenderReport } from '../../../src/ui/tableTabTypes';
 import { getWindowRuntime } from '../../runtime/windowRuntime';
@@ -21,6 +23,10 @@ import { libraryRefForLibraryID } from '../../../src/utils/libraryIdentity';
 import { exportTableCsv, renderTableDocumentActions, tableActionErrorMessage } from '../../../src/ui/tableDocumentActions';
 import { getTablesApi } from '../../../src/services/artifacts/tablesApi';
 import { useNewPapers, useTableDocuments } from './tableTabData';
+import { useTableEditing } from './useTableEditing';
+import TableCardDropZone from './card/TableCardDropZone';
+import { useAtomValue } from 'jotai';
+import { searchableLibraryIdsAtom } from '../../atoms/profile';
 
 /** A value the tab's owner sets from outside React, read with `useSyncExternalStore`. */
 export interface TableTabWarningSource {
@@ -281,6 +287,36 @@ export default function TableTabView({
     const [actionError, setActionError] = React.useState<string | null>(null);
     const fillEnabled = isTableChatEnabled();
     const fillJob = useTableFillJob(tableRef);
+    const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
+    const library = Zotero.Libraries.get(tableRef.libraryID);
+    const readOnly = library ? !tableFilesEditable(library) : false;
+    const editDisabledReason = readOnly ? 'This library is read-only.' : undefined;
+    const [dropNotice, setDropNotice] = React.useState<string | null>(null);
+    // A plan asked for from a row, a column or the selection bar, shown by
+    // the Fill button's popover.
+    const fillButton = React.useRef<TableFillButtonHandle>(null);
+    const requestFill = React.useCallback((scope: TableFillScope) => fillButton.current?.openPlan(scope), []);
+    const fillRunning = !!fillJob && fillJob.state !== 'done';
+    const fill = React.useMemo<ResearchTableFill | undefined>(
+        () =>
+            fillEnabled
+                ? {
+                      disabledReason: editDisabledReason ?? (fillRunning ? 'A fill of this table is running.' : undefined),
+                      onFillRows: (rowIds) => requestFill({ kind: 'cells', rows: rowIds }),
+                      onFillColumn: (column) => requestFill({ kind: 'cells', columns: [column.id] }),
+                  }
+                : undefined,
+        [fillEnabled, editDisabledReason, fillRunning, requestFill],
+    );
+    const edits = useTableEditing({
+        tableRef,
+        spec: table?.spec ?? EMPTY_SPEC,
+        disabledReason: editDisabledReason,
+        fillRunning,
+        surfaceWindow,
+        portalContainer: hostRef.current,
+        newBySource: newPapers.bySource,
+    });
     // The finished job whose banner the user dismissed, and whether the table
     // shows only the rows it could not read.
     const [dismissedJob, setDismissedJob] = React.useState<string | null>(null);
@@ -327,47 +363,68 @@ export default function TableTabView({
         );
     }
 
-    const notices = [warning, state.error, actionError].filter(Boolean);
+    const notices = [warning, state.error, actionError, edits.error, dropNotice].filter(Boolean);
     const itemID = Zotero.Items.getIDFromLibraryAndKey(tableRef.libraryID, tableRef.key);
-    const library = Zotero.Libraries.get(tableRef.libraryID);
-    const readOnly = library ? !tableFilesEditable(library) : false;
+    const fillBanner =
+        fillEnabled && finishedJob ? (
+            <TableFillBanner
+                job={finishedJob}
+                showingFailed={showFailed}
+                onShowFailed={setShowFailed}
+                onDismiss={() => {
+                    setDismissedJob(finishedJob.job_id);
+                    Zotero.Beaver.tableFills?.dismiss(finishedJob.job_id);
+                }}
+            />
+        ) : null;
 
     return (
         <div
             ref={hostRef}
-            className="display-flex flex-col h-full w-full min-w-0 min-h-0"
+            className="display-flex flex-col h-full w-full min-w-0 min-h-0 relative"
             data-beaver-table-tab={tableRef.key}
         >
-            <div className="flex-1 min-h-0 min-w-0">
+            <TableCardDropZone
+                className="flex-1 min-h-0 min-w-0 relative"
+                searchableLibraryIds={searchableLibraryIds}
+                disabled={readOnly}
+                onAddItems={edits.onDrop.onAddItems}
+                onAddScopes={edits.onDrop.onAddScopes}
+                onNotice={setDropNotice}
+            >
                 <ResearchTable
                     table={state.table.spec}
                     renderText={renderCellText}
                     documents={documents}
-                    newPapers={newPapers}
+                    newPapers={newPapers.notice}
                     virtualize
+                    editing={edits.editing}
+                    cellEditing={edits.cellEditing}
+                    fill={fill}
+                    selectionActions={edits.selectionActions}
+                    rowMenuItems={edits.rowMenuItems}
                     notice={notices.length ? notices.join(' ') : undefined}
                     headerEnd={
-                        fillEnabled ? (
-                            <TableFillButton
-                                tableRef={tableRef}
-                                table={state.table.spec}
-                                job={fillJob}
-                                improvableRows={improvableRows}
-                                disabledReason={readOnly ? 'This library is read-only.' : undefined}
-                            />
-                        ) : undefined
+                        fillEnabled
+                            ? (selectedRowIds: string[]) => (
+                                  <TableFillButton
+                                      tableRef={tableRef}
+                                      table={state.table.spec}
+                                      job={fillJob}
+                                      improvableRows={improvableRows}
+                                      disabledReason={editDisabledReason}
+                                      selectedRowIds={selectedRowIds}
+                                      ref={fillButton}
+                                  />
+                              )
+                            : undefined
                     }
                     banner={
-                        fillEnabled && finishedJob ? (
-                            <TableFillBanner
-                                job={finishedJob}
-                                showingFailed={showFailed}
-                                onShowFailed={setShowFailed}
-                                onDismiss={() => {
-                                    setDismissedJob(finishedJob.job_id);
-                                    Zotero.Beaver.tableFills?.dismiss(finishedJob.job_id);
-                                }}
-                            />
+                        fillBanner || edits.toast ? (
+                            <>
+                                {edits.toast}
+                                {fillBanner}
+                            </>
                         ) : undefined
                     }
                     onlyRows={failedRows}
@@ -393,7 +450,11 @@ export default function TableTabView({
                         <DomView create={(doc) => renderTableDocumentActions(doc, tableRef, { historyOnly: true })} />
                     )}
                 />
-            </div>
+            </TableCardDropZone>
+            {edits.overlay}
         </div>
     );
 }
+
+/** What the editing hook reads before the table has loaded. */
+const EMPTY_SPEC: TableSpec = { spec_version: 2, id: '', title: '', columns: [], rows: [] } as unknown as TableSpec;

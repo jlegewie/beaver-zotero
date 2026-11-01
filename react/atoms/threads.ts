@@ -44,6 +44,7 @@ import {
     validateAppliedAgentAction, 
     undoAgentActionAtom,
     clearAllPendingApprovalsAtom,
+    resetAgentActionSelectorCaches,
 } from "../agents/agentActions";
 import { clearAllPendingQuestionsAtom } from "@beaver/agent-core/run-state/pendingQuestions";
 import { clearAllPendingCreditConfirmationsAtom } from "@beaver/agent-core/run-state/pendingCreditConfirmations";
@@ -57,6 +58,12 @@ import { enrichMessageAttachmentStub } from "../types/attachments/converters";
 import { zoteroReferenceKey } from "@beaver/agent-core/types/attachments/apiTypes";
 import { resolveItemReference } from "../../src/utils/libraryIdentity";
 import type { ZoteroItemReference } from "@beaver/agent-core/types/zotero";
+
+/** Drop the selectors scoped to the previous thread's runs, tool calls and actions. */
+function resetThreadSelectorCaches(): void {
+    resetRunSelectorCaches();
+    resetAgentActionSelectorCaches();
+}
 
 /**
  * Stores a run ID that ThreadView should scroll to after a thread finishes loading.
@@ -330,7 +337,7 @@ export const newThreadAtom = atom(
             set(removePopupMessagesByTypeAtom, ['items_summary']);
             set(citationsAtom, []);
             set(resetCitationMarkersAtom);
-            resetRunSelectorCaches();
+            resetThreadSelectorCaches();
             if (!options?.preserveDraft) set(clearComposerAtom);
             set(resetMessageUIStateAtom);
             set(clearExternalReferenceCacheAtom);
@@ -641,8 +648,8 @@ export const loadThreadAtom = atom(
                 // Set agent runs. The scoped run selectors are dropped in the
                 // same breath: reset any earlier and the old thread's runs, still
                 // in the store while this load ran, would populate them again.
-                if (canCommit) staged.push(resetRunSelectorCaches);
-                else resetRunSelectorCaches();
+                if (canCommit) staged.push(resetThreadSelectorCaches);
+                else resetThreadSelectorCaches();
                 set(threadRunsAtom, processedRuns);
 
                 // Reconcile toolcall_id mismatches between REST API and model messages
@@ -716,8 +723,8 @@ export const loadThreadAtom = atom(
                 }
             } else {
                 // No runs found, clear state
-                if (canCommit) staged.push(resetRunSelectorCaches);
-                else resetRunSelectorCaches();
+                if (canCommit) staged.push(resetThreadSelectorCaches);
+                else resetThreadSelectorCaches();
                 set(threadRunsAtom, []);
                 set(threadAgentActionsAtom, []);
                 set(citationsAtom, []);
@@ -747,7 +754,7 @@ export const loadThreadAtom = atom(
                 // on another device.
                 Zotero.Beaver.threads.markThreadDeleted(threadId);
                 set(currentThreadIdAtom, null);
-                if (!canCommit) resetRunSelectorCaches();
+                if (!canCommit) resetThreadSelectorCaches();
                 set(threadRunsAtom, []);
                 set(activeRunAtom, null);
                 set(threadAgentActionsAtom, []);

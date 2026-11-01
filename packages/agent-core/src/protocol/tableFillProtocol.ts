@@ -100,11 +100,12 @@ export interface TableFillTarget {
 }
 
 /**
- * Which cells a plan fills: the pending work, the rows whose last fill
- * failed with a retryable failure, or explicit rows and columns.
+ * Which cells a plan fills: the pending work (with `limit`, the first rows
+ * of it in table order: the five-row trial), the rows whose last fill failed
+ * with a retryable failure, or explicit rows and columns.
  */
 export type TableFillScope =
-    | { kind: "pending" }
+    | { kind: "pending"; limit?: number }
     | { kind: "retry_failed" }
     | { kind: "cells"; rows?: string[]; columns?: string[] };
 

@@ -24,7 +24,6 @@
 import { readSpec, type TableSpec } from '@beaver/agent-core/layouts/table';
 import type { TableSummary } from '@beaver/agent-core/layouts/tableMutations';
 import { logger } from '@beaver/agent-core/platform/logger';
-import { sha256Hex } from '../../utils/hash';
 import { getTablesApi } from './tablesApi';
 
 // ---------------------------------------------------------------------------
@@ -89,7 +88,7 @@ export type TableItemErrorCode =
     | 'unsupported_version'
     /** `table.json` is not a readable table. */
     | 'invalid_spec'
-    /** `table.json` is gone and the version history cannot rebuild it. */
+    /** `table.json` is gone beside a retained version history. */
     | 'corrupt'
     /** The write would grow the table past a limit. */
     | 'too_large'
@@ -275,12 +274,12 @@ export function tableVersionPath(
 // Reading
 // ---------------------------------------------------------------------------
 
-/** Durable acknowledgement of a remote write, committed with the table. */
-export interface TableOperationReceipt {
-    operation_id: string;
-    request_sha256: string;
-    version: number;
-    sha256: string;
+/** Who wrote a version a `table.json` marker describes. */
+export interface TableMarkerMeta {
+    actor: 'agent' | 'user' | 'system';
+    run_id?: string;
+    thread_id?: string;
+    change?: string;
 }
 
 /** The identity of a retriable creation, committed with the table. */
@@ -288,38 +287,51 @@ export interface TableCreationState {
     operation_id: string;
     request_sha256: string;
     complete: boolean;
-    meta?: { actor: 'agent' | 'user' | 'system'; run_id?: string; thread_id?: string; change?: string };
+    meta?: TableMarkerMeta;
+    /** The change list a creation from a request answered with; a replay returns it. */
+    changes?: unknown[];
 }
 
 /**
- * `table.json`: the spec, and the store state that has to commit atomically
- * with it — the receipts that make remote retries idempotent and the creation
- * marker — kept beside the spec so the spec's own bytes, and therefore its
- * hash, never include them.
+ * The newest model edit (`apply_edit`) the table committed, written in the same
+ * `table.json` write as its spec. The version log records the same identity,
+ * but the log is rewritten after the commit point and can be lost; this marker
+ * cannot, so a retry whose log entry never landed still replays instead of
+ * applying the edit again. Later writes carry it until the next model edit
+ * replaces it.
+ */
+export interface TableEditMarker {
+    operation_id: string;
+    request_sha256: string;
+    /** The version the edit committed. */
+    version: number;
+    /** The spec hash of that version. */
+    sha256: string;
+    meta: TableMarkerMeta;
+    /** The change list the edit answered with; a replay returns it. */
+    changes: unknown[];
+}
+
+/**
+ * `table.json`: the spec, and the creation and edit markers that have to
+ * commit atomically with it, kept beside the spec so the spec's own bytes, and
+ * therefore its hash, never include them. Fields written by older builds (a
+ * `receipts` list) are ignored and dropped by the next write.
  */
 export interface TableFile {
     spec: TableSpec;
-    receipts?: TableOperationReceipt[];
     creation?: TableCreationState;
+    edit?: TableEditMarker;
 }
 
 export type ReadTableItemResult =
-    | { ok: true; spec: TableSpec; file: TableFile; recovered?: true }
+    | { ok: true; spec: TableSpec; file: TableFile }
     | {
           ok: false;
           code: 'not_a_table' | 'no_file' | 'no_spec' | 'unsupported_version' | 'invalid' | 'corrupt';
           message: string;
           specVersion?: number;
       };
-
-function isReceipt(value: unknown): value is TableOperationReceipt {
-    if (!value || typeof value !== 'object') return false;
-    const receipt = value as Partial<TableOperationReceipt>;
-    return typeof receipt.operation_id === 'string' &&
-        typeof receipt.request_sha256 === 'string' &&
-        typeof receipt.version === 'number' &&
-        typeof receipt.sha256 === 'string';
-}
 
 /** `table.json` text as a validated file for `item`, or why it is not one. */
 export function parseTableFile(item: Zotero.Item, text: string): ReadTableItemResult {
@@ -337,47 +349,70 @@ function tableFileFrom(item: Zotero.Item, raw: unknown): ReadTableItemResult {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
         return { ok: false, code: 'invalid', message: `Table ${item.key} is not a table file.` };
     }
-    const ledger = ledgerFrom(item, raw);
-    if ('error' in ledger) return { ok: false, code: 'invalid', message: ledger.error };
+    const creation = creationFrom(item, raw);
+    if (creation && 'error' in creation) return { ok: false, code: 'invalid', message: creation.error };
     const read = specFor(item, (raw as Partial<TableFile>).spec);
     if (!read.ok) return read;
-    return { ok: true, spec: read.spec, file: { spec: read.spec, ...ledger } };
-}
-
-/** A parsed `table.json` value's receipts and creation marker, checked apart from its spec. */
-function ledgerFrom(item: Zotero.Item, raw: object): TableLedger | { error: string } {
-    const file = raw as Partial<TableFile>;
-    if (file.receipts !== undefined && (!Array.isArray(file.receipts) || !file.receipts.every(isReceipt))) {
-        return { error: `Table ${item.key} has unreadable operation receipts.` };
-    }
-    if (file.creation !== undefined && (
-        !file.creation || typeof file.creation !== 'object' ||
-        typeof file.creation.operation_id !== 'string' ||
-        typeof file.creation.request_sha256 !== 'string' ||
-        typeof file.creation.complete !== 'boolean'
-    )) {
-        return { error: `Table ${item.key} has an unreadable creation marker.` };
-    }
+    const edit = editFrom(raw);
     return {
-        ...(file.receipts ? { receipts: file.receipts } : {}),
-        ...(file.creation ? { creation: file.creation } : {}),
+        ok: true,
+        spec: read.spec,
+        file: { spec: read.spec, ...(creation ? { creation } : {}), ...(edit ? { edit } : {}) },
     };
 }
 
 /**
- * The receipts and creation marker `table.json` holds, read even when its spec
- * is not: they are what answers operation retries. Null when the file is
- * missing, unparseable, or its ledger itself is unreadable.
+ * A parsed `table.json` value's edit marker. An unreadable one is dropped
+ * rather than failing the table: it only lets a retry replay, and without it
+ * the version log still can.
  */
-export async function readTableFileLedger(item: Zotero.Item): Promise<TableLedger | null> {
+function editFrom(raw: object): TableEditMarker | undefined {
+    const edit = (raw as Partial<TableFile>).edit;
+    if (
+        !edit || typeof edit !== 'object' ||
+        typeof edit.operation_id !== 'string' ||
+        typeof edit.request_sha256 !== 'string' ||
+        !Number.isInteger(edit.version) || edit.version < 1 ||
+        typeof edit.sha256 !== 'string' ||
+        !edit.meta || typeof edit.meta !== 'object' ||
+        !['agent', 'user', 'system'].includes(edit.meta.actor) ||
+        !Array.isArray(edit.changes)
+    ) {
+        return undefined;
+    }
+    return edit;
+}
+
+/** A parsed `table.json` value's creation marker, checked apart from its spec. */
+function creationFrom(item: Zotero.Item, raw: object): TableCreationState | { error: string } | undefined {
+    const creation = (raw as Partial<TableFile>).creation;
+    if (creation === undefined) return undefined;
+    if (
+        !creation || typeof creation !== 'object' ||
+        typeof creation.operation_id !== 'string' ||
+        typeof creation.request_sha256 !== 'string' ||
+        typeof creation.complete !== 'boolean' ||
+        (creation.changes !== undefined && !Array.isArray(creation.changes))
+    ) {
+        return { error: `Table ${item.key} has an unreadable creation marker.` };
+    }
+    return creation;
+}
+
+/**
+ * The creation marker `table.json` holds, read even when its spec is not, so a
+ * write that replaces an unreadable spec keeps it. Null when the file is
+ * missing, unparseable, or carries no readable marker.
+ */
+export async function readTableFileCreation(item: Zotero.Item): Promise<TableCreationState | null> {
     const path = tableFilePath(item);
     if (!path) return null;
     try {
         if (!(await IOUtils.exists(path))) return null;
         const raw: unknown = JSON.parse(await IOUtils.readUTF8(path));
         if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
-        const ledger = ledgerFrom(item, raw);
-        return 'error' in ledger ? null : ledger;
+        const creation = creationFrom(item, raw);
+        return creation && !('error' in creation) ? creation : null;
     } catch {
         return null;
     }
@@ -402,42 +437,7 @@ function specFor(item: Zotero.Item, raw: unknown): ReadTableItemResult {
 }
 
 /**
- * The spec a missing `table.json` is rebuilt from: the version file of the
- * history's tip, when its bytes still hash to what the history recorded.
- * Nothing is written here; the store rewrites the file under its lock.
- */
-export async function recoverTableFromHistory(item: Zotero.Item): Promise<ReadTableItemResult> {
-    const corrupt: ReadTableItemResult = {
-        ok: false,
-        code: 'corrupt',
-        message: `Table ${item.key} has no table.json and its history cannot restore it.`,
-    };
-    const history = await readTableHistory(item);
-    const tip = history.versions[history.versions.length - 1];
-    const path = tip ? tableVersionPath(item, tip.version) : null;
-    if (!tip || !path) return corrupt;
-    let text: string;
-    try {
-        if (!(await IOUtils.exists(path))) return corrupt;
-        text = await IOUtils.readUTF8(path);
-    } catch {
-        return corrupt;
-    }
-    if ((await sha256Hex(text)) !== tip.sha256) return corrupt;
-    let raw: unknown;
-    try {
-        raw = JSON.parse(text);
-    } catch {
-        return corrupt;
-    }
-    // The ledger is restored with the spec; an unreadable one fails like the spec.
-    const read = tableFileFrom(item, { ...history.ledger, spec: raw });
-    if (!read.ok || read.spec.version !== tip.version) return corrupt;
-    return { ...read, recovered: true };
-}
-
-/**
- * The stored table: `table.json`, or the history's tip when that file is gone.
+ * The stored table, from `table.json`.
  *
  * Reading is deliberately not gated on library exclusion: an existing table the
  * user opens is theirs to look at, and exclusion governs what leaves the
@@ -465,15 +465,38 @@ export async function readTableItemSpec(item: Zotero.Item): Promise<ReadTableIte
 /**
  * Why `table.json` is absent: a table whose files have not arrived on this
  * device yet (`no_file`), a snapshot that carries no table (`no_spec`), or a
- * table whose history can rebuild it, or cannot (`corrupt`).
+ * table whose file is gone beside a retained history (`corrupt`). The file is
+ * written atomically and syncs with its history, so the last case is damage
+ * from outside; restoring a retained version writes a new `table.json`.
  */
 async function missingTableFile(item: Zotero.Item): Promise<ReadTableItemResult> {
-    if ((await readTableHistory(item)).versions.length) return recoverTableFromHistory(item);
+    if ((await readTableHistory(item)).versions.length) {
+        return {
+            ok: false,
+            code: 'corrupt',
+            message: `Table ${item.key} has no table.json; restore a retained version to repair it.`,
+        };
+    }
     const snapshot = await item.getFilePathAsync();
     if (snapshot && (await IOUtils.exists(snapshot))) {
         return { ok: false, code: 'no_spec', message: `Table ${item.key} carries no table.` };
     }
     return { ok: false, code: 'no_file', message: `Table ${item.key} has no file on disk.` };
+}
+
+/**
+ * Whether opening a `no_file` table downloads its files first: file syncing is
+ * on for its library, so the files can still arrive from the server.
+ */
+export function tableFilesDownloadable(item: Zotero.Item): boolean {
+    return Zotero.Sync.Storage.Local.getEnabledForLibrary(item.libraryID);
+}
+
+/** What to show for a `no_file` table: its files are absent or still to come. */
+export function missingTableFileMessage(item: Zotero.Item): string {
+    return tableFilesDownloadable(item)
+        ? 'Table files are not on this device yet. Opening the table downloads them.'
+        : 'Table file is missing on this device.';
 }
 
 // ---------------------------------------------------------------------------
@@ -493,7 +516,10 @@ export interface TableVersionEntry {
     actor: TableActor;
     run_id?: string;
     thread_id?: string;
-    /** The key consecutive writes collapse under (a fill's job id); see `writeTable`. */
+    /**
+     * The key consecutive writes collapse under (a fill's job id, a tab
+     * session); see the collapse rule in `tableStore.ts`.
+     */
     collapse_key?: string;
     change?: string;
     /** ISO timestamp of the write. */
@@ -512,28 +538,27 @@ export interface TableVersionEntry {
     /** `summarize()` of that spec, so listing tables never reads one. */
     summary: TableSummary;
     /**
-     * This version may never be overwritten in place — see the collapse rule on
-     * `writeTable`. Set on the version a table was created in, and on any
+     * This version may never be overwritten in place — see the collapse rule
+     * in `tableStore.ts`. Set on the version a table was created in, on a
+     * write that asked for it (a model edit, a destructive edit), and on any
      * version reconstructed from the file rather than written by a known author.
      */
     sealed?: true;
     /** Known creation, unlike a sealed entry reconstructed from lost history. */
     creation?: true;
+    /** The model edit that committed this version, so a repeat replays it. */
+    operation_id?: string;
+    /** Fingerprint of that edit's request; the same id with another one is refused. */
+    request_sha256?: string;
+    /** The change list that edit answered with, returned again on a replay. */
+    changes?: unknown[];
 }
-
-/** The retry ledger `table.json` carries beside its spec. */
-export type TableLedger = Omit<TableFile, 'spec'>;
 
 export interface TableHistory {
     /** The highest version the log knows about. 0 when there is none. */
     tip: number;
     /** Oldest first, capped by the store's retention limit. */
     versions: TableVersionEntry[];
-    /**
-     * A copy of `table.json`'s receipts and creation marker as of the tip, so
-     * a `table.json` rebuilt from the tip still answers operation retries.
-     */
-    ledger?: TableLedger;
 }
 
 /** A table with no log at all — a fresh item, or one whose sidecar is gone. */
@@ -549,8 +574,8 @@ export function normalizeTableHistory(
               .sort((a, b) => a.version - b.version)
         : [];
     const tip = versions.length ? versions[versions.length - 1].version : 0;
-    const ledger = history?.ledger && typeof history.ledger === 'object' ? history.ledger : undefined;
-    return { tip: Math.max(tip, Number(history?.tip) || 0), versions, ...(ledger ? { ledger } : {}) };
+    // A `ledger` written by older builds is dropped here, and so on the next commit.
+    return { tip: Math.max(tip, Number(history?.tip) || 0), versions };
 }
 
 /**

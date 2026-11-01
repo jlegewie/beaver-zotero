@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import type { TableArtifact } from '@beaver/agent-core/run-state/tableResults';
 import { getHost } from '@beaver/agent-ui/host';
@@ -35,9 +35,8 @@ export const TableArtifactRow: React.FC<TableArtifactRowProps> = ({ row }) => {
     // Same scope as the review rows so a tool call opened here does not open its
     // in-stream card too.
     const expansionKey = `${row.runId}:changes:${row.toolcallId}`;
-    const expansionState = useAtomValue(toolExpandedAtom);
+    const isExpanded = useAtomValue(useMemo(() => toolExpandedAtom(expansionKey), [expansionKey])) ?? false;
     const setExpanded = useSetAtom(setToolExpandedAtom);
-    const isExpanded = expansionState[expansionKey] ?? false;
     const toggleExpanded = useCallback(
         () => setExpanded({ key: expansionKey, expanded: !isExpanded }),
         [expansionKey, isExpanded, setExpanded],
@@ -57,7 +56,7 @@ export const TableArtifactRow: React.FC<TableArtifactRowProps> = ({ row }) => {
             setOpenMessage('Table provider unavailable.');
             return;
         }
-        const outcome = await open(record.reference.key, surfaceWindow)
+        const outcome = await open(record.reference.key, surfaceWindow, { onDownload: () => setOpenMessage('Downloading table…') })
             .catch(() => ({ error: 'Table provider unavailable.' }));
         setOpenMessage('error' in outcome ? outcome.error : (outcome.warning ?? ''));
     }, [record.reference.key, surfaceWindow]);

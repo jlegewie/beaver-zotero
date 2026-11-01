@@ -23,18 +23,6 @@ export const TABLES_API_MISSING = {
     error: TABLES_API_UNAVAILABLE,
 };
 
-export interface OpenTableRequest {
-    variant?: 'search' | 'extraction';
-    /** A spec to render as-is. Omit it and one is built from the library. */
-    table?: TableSpec;
-    title?: string;
-    subtitle?: string;
-    /** How many library items the built spec should cover. */
-    limit?: number;
-    /** Pass false to leave the window closed and only set the surface. */
-    open?: boolean;
-}
-
 export interface DemoItem {
     libraryID: number;
     key: string;
@@ -144,7 +132,6 @@ export function typeColumn(items: DemoItem[]): Column {
         id: '_type',
         header: 'Type',
         type: 'select',
-        role: 'row_type',
         system: true,
         priority: 'secondary',
         options: labels.map((label) => ({ label, color: 'gray' })),
@@ -413,10 +400,17 @@ export function selectLabelFor(itemType: string): string {
     return 'Other';
 }
 
-export interface TableCreateRequest extends OpenTableRequest {
+export interface TableCreateRequest {
     operation_id?: string;
     /** The spec to store. Omit it and a demo spec is built from the library. */
     spec?: TableSpec;
+    /** Alias of `spec`. */
+    table?: TableSpec;
+    /** Which demo to build when no spec is given. */
+    variant?: 'search' | 'extraction';
+    /** How many library items the demo should cover. */
+    limit?: number;
+    title?: string;
     libraryID?: number;
     collectionID?: number;
     actor?: string;
@@ -451,7 +445,6 @@ export async function handleTestTableCreateHttpRequest(
             key: created.key,
             sha256: created.sha256 ?? created.entry.sha256,
             replayed: created.replayed,
-            operation: created.operation,
             item_id: created.itemID,
             library_id: created.libraryID,
             title: created.title,
@@ -618,8 +611,6 @@ export function writeResponse(
         ok: true,
         version: result.version,
         sha256: result.sha256,
-        replayed: result.replayed,
-        operation: result.operation,
         // False here after a second write in the same run means the collapse
         // rule did not fire when it should have.
         collapsed: result.collapsed,
@@ -637,8 +628,6 @@ export function writeResponse(
 export interface TableWriteRequest extends TableStoreRequest {
     spec?: TableSpec;
     expectedVersion?: number;
-    expected_sha256?: string;
-    operation_id?: string;
 }
 
 export async function handleTestTableWriteHttpRequest(
@@ -655,13 +644,7 @@ export async function handleTestTableWriteHttpRequest(
                 ref,
                 request.spec,
                 writeMetaFrom(request),
-                request.expectedVersion,
-                request.operation_id !== undefined || request.expected_sha256 !== undefined
-                    ? {
-                          operation_id: request.operation_id ?? '',
-                          expected_sha256: request.expected_sha256 ?? '',
-                      }
-                    : undefined
+                request.expectedVersion
             )
         );
     } catch (error) {
@@ -916,20 +899,15 @@ export async function rollBackWholeDirectory(
 
     // The other device's `table.json`, which is the table: a download replaces
     // the whole directory, so the table itself goes back to the target too. It
-    // keeps the creation marker and the receipts of versions it already had.
+    // keeps the creation marker.
     const filePath = tableFilePath(item);
     let fileSha256: string | undefined;
     if (filePath) {
         const file = JSON.parse(await IOUtils.readUTF8(filePath).catch(() => '{}')) as {
-            receipts?: Array<{ version?: number }>;
             creation?: unknown;
         };
-        const receipts = Array.isArray(file.receipts)
-            ? file.receipts.filter((receipt) => typeof receipt?.version === 'number' && receipt.version <= target)
-            : undefined;
         const downloaded = {
             spec,
-            ...(receipts ? { receipts } : {}),
             ...(file.creation ? { creation: file.creation } : {}),
         };
         await IOUtils.writeUTF8(filePath, JSON.stringify(downloaded));

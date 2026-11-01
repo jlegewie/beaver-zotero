@@ -15,21 +15,15 @@ import { useRowWindow, type RowWindow } from '@beaver/agent-ui/layouts/useRowWin
 const h = React.createElement;
 const ROW_PX = 40;
 const rows = Array.from({ length: 500 }, (_, i) => ({ id: `r${i}`, cells: {} })) as Row[];
-const expanded = new Set(['r0']);
 let latest: RowWindow | null = null;
-let detailHeight = 100;
+let firstRowHeight = ROW_PX;
 
 function Harness() {
     const rootRef = React.useRef<HTMLDivElement | null>(null);
     const bodyRef = React.useRef<HTMLTableSectionElement | null>(null);
-    const win = useRowWindow({ enabled: true, rows, expandedRows: expanded, rootRef, bodyRef });
+    const win = useRowWindow({ enabled: true, rows, rootRef, bodyRef });
     latest = win;
-    const trs: React.ReactNode[] = [];
-    for (const row of rows.slice(win.start, win.end)) {
-        trs.push(h('tr', { key: row.id, 'data-row-id': row.id }));
-        if (expanded.has(row.id))
-            trs.push(h('tr', { key: `${row.id}-detail`, 'data-detail-for': row.id }));
-    }
+    const trs = rows.slice(win.start, win.end).map((row) => h('tr', { key: row.id, 'data-row-id': row.id }));
     return h('div', { ref: rootRef }, h('table', null, h('tbody', { ref: bodyRef }, trs)));
 }
 
@@ -47,7 +41,7 @@ describe('useRowWindow resize', () => {
             configurable: true,
             get() {
                 if (this.localName !== 'tr') return 0;
-                return this.hasAttribute('data-detail-for') ? detailHeight : ROW_PX;
+                return this.getAttribute('data-row-id') === 'r0' ? firstRowHeight : ROW_PX;
             },
         });
         const container = document.createElement('div');
@@ -64,16 +58,16 @@ describe('useRowWindow resize', () => {
         act(() => root.render(h(Harness)));
         expect(latest!.start).toBe(0);
 
-        // The viewport narrows: the expanded row's detail rewraps taller, and
-        // nothing re-renders.
-        detailHeight = 400;
+        // The viewport narrows: the first row rewraps taller, and nothing
+        // re-renders.
+        firstRowHeight = 400;
         act(() => { window.dispatchEvent(new Event('resize')); });
 
         scrollTop = 5000;
         act(() => { container.dispatchEvent(new Event('scroll')); });
         expect(latest!.start).toBeGreaterThan(0);
-        // The spacer above counts the expanded row at its new height.
-        const expectedTop = ROW_PX + detailHeight + (latest!.start - 1) * ROW_PX;
+        // The spacer above counts the first row at its new height.
+        const expectedTop = firstRowHeight + (latest!.start - 1) * ROW_PX;
         expect(latest!.padTop).toBeCloseTo(expectedTop, 0);
 
         act(() => root.unmount());

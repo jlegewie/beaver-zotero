@@ -215,6 +215,48 @@ describe("planning", () => {
     });
 });
 
+describe("the Fill menu's scopes", () => {
+    const userCell: Cell = { outcome: "answered", provenance: "user", value: { kind: "text", text: "Mine" } };
+    const modelCell: Cell = { outcome: "answered", provenance: "model", value: { kind: "text", text: "Beaver's" }, documents: ["u-PDFa"] };
+
+    it("tries the first five rows with work to do, in table order, and starts only those", async () => {
+        const rows = ["a", "b", "c", "d", "e", "f", "g"].map((id) => itemRow(id));
+        const { state, fills } = harness(rows);
+        const planned = await fills.plan(TARGET, { kind: "pending", limit: 5 });
+        if (!planned.ok) throw new Error(planned.message);
+        expect(planned.plan).toMatchObject({ rows: 5, cells: 10, credits: 1 });
+        const started = await fills.start(planned.plan.plan_id);
+        if (!started.ok) throw new Error(started.message);
+        await fills.wait(started.job.job_id);
+        expect(state.requests.map((r) => r.row_id)).toEqual(["a", "b", "c", "d", "e"]);
+        expect(state.table.rows[5].cells.method).toBeUndefined();
+    });
+
+    it("refills a row's answers but never the user's cell in it", async () => {
+        const { state, fills } = harness([itemRow("a", { documents: ["u-PDFa"], cells: { method: modelCell, design: userCell } })]);
+        const planned = await fills.plan(TARGET, { kind: "cells", rows: ["a"] });
+        if (!planned.ok) throw new Error(planned.message);
+        expect(planned.plan).toMatchObject({ rows: 1, cells: 1 });
+        const started = await fills.start(planned.plan.plan_id);
+        if (!started.ok) throw new Error(started.message);
+        await fills.wait(started.job.job_id);
+        expect(state.requests[0].columns.map((c) => c.id)).toEqual(["method"]);
+        expect(state.table.rows[0].cells.method).toMatchObject({ provenance: "model", value: { text: "answer a" } });
+        expect(state.table.rows[0].cells.design).toEqual(userCell);
+    });
+
+    it("fills a column's pending cells only, leaving its answers and the user's cells", async () => {
+        const { fills } = harness([
+            itemRow("a", { documents: ["u-PDFa"], cells: { method: modelCell } }),
+            itemRow("b", { cells: { method: userCell } }),
+            itemRow("c"),
+        ]);
+        const planned = await fills.plan(TARGET, { kind: "cells", columns: ["method"] });
+        if (!planned.ok) throw new Error(planned.message);
+        expect(planned.plan).toMatchObject({ rows: 1, cells: 1 });
+    });
+});
+
 describe("a fill", () => {
     it("writes each answer with the planned revision, question hash and documents, and charges per row", async () => {
         const { state, fills, deps } = harness([itemRow("a"), itemRow("b")]);

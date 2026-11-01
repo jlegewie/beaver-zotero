@@ -66,6 +66,8 @@ export function pendingLines(
     if (plan.scope.kind === "retry_failed")
         return [`Retry ${count(plan.rows, "paper")} that failed last time`];
     if (plan.scope.kind === "cells") return [];
+    if (plan.scope.limit)
+        return [`A trial: the first ${count(plan.rows, "row")} with work to do`];
     const pending = plan.pending;
     const lines: string[] = [];
     if (pending.new_rows > 0) lines.push(`${count(pending.new_rows, "new paper")}`);

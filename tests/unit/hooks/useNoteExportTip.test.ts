@@ -26,7 +26,6 @@ vi.mock('../../../react/agents/agentActions', async () => {
 
 import { activeRunAtom, currentThreadIdAtom } from '@beaver/agent-core/run-state/atoms';
 import { isBeaverWindowOpenAtom, isSidebarVisibleAtom } from '../../../react/atoms/ui';
-import { windowSurfaceAtom } from '../../../react/atoms/windowSurface';
 import { threadAgentActionsAtom } from '../../../react/agents/agentActions';
 import { useNoteExportTip } from '../../../react/hooks/useNoteExportTip';
 
@@ -122,18 +121,13 @@ describe('useNoteExportTip', () => {
         expect(mocks.show).not.toHaveBeenCalled();
     });
 
-    it('asks in the separate window while it shows the chat, not a table', () => {
+    it('asks in the separate window while the sidebar is closed', () => {
         store.set(isSidebarVisibleAtom as any, false);
         store.set(isBeaverWindowOpenAtom as any, true);
-        store.set(windowSurfaceAtom, { kind: 'table', id: 'table-1' } as any);
         mount();
         set(activeRunAtom, LIVE_RUN);
         set(threadAgentActionsAtom, [note()]);
         set(activeRunAtom, null);
-        wait();
-        expect(mocks.show).not.toHaveBeenCalled();
-
-        set(windowSurfaceAtom, { kind: 'thread' });
         wait();
         expect(mocks.show).toHaveBeenCalledExactlyOnceWith('note-export');
     });

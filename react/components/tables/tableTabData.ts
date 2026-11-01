@@ -41,7 +41,6 @@ export function tableDocumentIds(spec: TableSpec | null): string[] {
  * like any other (exclusion is not a UI restriction).
  */
 async function describeDocument(id: string): Promise<TableDocumentInfo | undefined> {
-    if (id.startsWith('ext-')) return undefined;
     const parsed = parseItemReference(id);
     const libraryID = parsed ? resolveLibraryRef(parsed) : null;
     if (!parsed || !libraryID) return undefined;
@@ -121,13 +120,23 @@ function rowItemId(row: Row): string | undefined {
     return ref?.kind === 'item' ? `${ref.library_ref}-${ref.zotero_key}` : undefined;
 }
 
+/** Papers the table's library sources hold that it does not. */
+export interface NewPapers {
+    /** The toolbar's notice; null when no source has new papers. */
+    notice: NewPapersNotice | null;
+    /** New papers by source id, for the sources popover and the notice's Add. */
+    bySource: ReadonlyMap<string, number>;
+}
+
+const NO_NEW_PAPERS: NewPapers = { notice: null, bySource: new Map() };
+
 /**
  * Papers the table's library sources (collections, tags, saved searches) hold
  * that it does not: what refreshing them would add. Papers the user removed
  * from the table stay out, as a refresh skips them. A source in a library
  * Beaver may not read is not offered.
  */
-export function useNewPapers(spec: TableSpec | null): NewPapersNotice | null {
+export function useNewPapers(spec: TableSpec | null): NewPapers {
     const sources = React.useMemo(
         () => (spec?.sources ?? []).filter((source) => source.type === 'library' && source.scope),
         [spec?.sources],
@@ -138,14 +147,14 @@ export function useNewPapers(spec: TableSpec | null): NewPapersNotice | null {
         [spec?.rows],
     );
     // The spec's list of removed papers (written by the table engine).
-    const removedKey = JSON.stringify((spec as { removed?: Array<{ ref?: unknown }> } | null)?.removed ?? []);
-    const [notice, setNotice] = React.useState<NewPapersNotice | null>(null);
+    const removedKey = JSON.stringify(spec?.removed ?? []);
+    const [found, setFound] = React.useState<NewPapers>(NO_NEW_PAPERS);
     const [changed, setChanged] = React.useState(0);
     useLibraryChanges(sources.length > 0, ['item', 'collection-item', 'item-tag'], () => setChanged((n) => n + 1));
 
     React.useEffect(() => {
         if (!sources.length) {
-            setNotice(null);
+            setFound(NO_NEW_PAPERS);
             return;
         }
         let live = true;
@@ -158,6 +167,7 @@ export function useNewPapers(spec: TableSpec | null): NewPapersNotice | null {
                 else if (ref?.library_ref && ref.zotero_key) removed.add(`${ref.library_ref}-${ref.zotero_key}`);
             }
             const fresh = new Set<string>();
+            const bySource = new Map<string, number>();
             let withNew = 0;
             let firstName: string | undefined;
             for (const source of sources) {
@@ -170,6 +180,7 @@ export function useNewPapers(spec: TableSpec | null): NewPapersNotice | null {
                     const added = found.ids.filter((id) => !inTable.has(id) && !removed.has(id));
                     if (!added.length) continue;
                     withNew += 1;
+                    bySource.set(source.id, added.length);
                     firstName ??= scope.name ?? found.response.collection_names?.[0] ?? scope.tag ?? undefined;
                     added.forEach((id) => fresh.add(id));
                 } catch {
@@ -177,11 +188,14 @@ export function useNewPapers(spec: TableSpec | null): NewPapersNotice | null {
                 }
             }
             if (!live) return;
-            setNotice(fresh.size ? { count: fresh.size, sources: withNew, ...(firstName ? { sourceName: firstName } : {}) } : null);
+            setFound({
+                notice: fresh.size ? { count: fresh.size, sources: withNew, ...(firstName ? { sourceName: firstName } : {}) } : null,
+                bySource,
+            });
         })();
         return () => {
             live = false;
         };
     }, [sourcesKey, rowsKey, removedKey, changed]);
-    return notice;
+    return found;
 }

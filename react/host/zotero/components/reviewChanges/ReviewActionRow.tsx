@@ -1,8 +1,8 @@
 import { useSurfaceWindow } from '../../../../runtime/SurfaceWindowContext';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import {
-    agentActionItemTitlesAtom,
+    agentActionItemTitleAtom,
     getAgentActionItemTitleKey,
     toolExpandedAtom,
     setToolExpandedAtom,
@@ -96,15 +96,14 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
     // run surfaces so a tool call opened here does not open the in-stream card
     // too; one tool call is never on both of those surfaces, so one scope does.
     const expansionKey = `${runId}:changes:${row.toolcallId}`;
-    const expansionState = useAtomValue(toolExpandedAtom);
+    const isExpanded = useAtomValue(useMemo(() => toolExpandedAtom(expansionKey), [expansionKey])) ?? false;
     const setExpanded = useSetAtom(setToolExpandedAtom);
-    const isExpanded = expansionState[expansionKey] ?? false;
 
     // Read-only: the in-stream card resolves and caches the title under the same
     // run-scoped key, so this surface shares that one fetch without colliding
     // with an identically named tool call from a continuation run.
     const itemTitleKey = getAgentActionItemTitleKey(runId, row.toolcallId);
-    const itemTitle = useAtomValue(agentActionItemTitlesAtom)[itemTitleKey] ?? null;
+    const itemTitle = useAtomValue(useMemo(() => agentActionItemTitleAtom(itemTitleKey), [itemTitleKey]));
 
     // Read the executor's claim rather than a card-local flag: it is the only
     // signal that sees a write started from another surface (the in-stream card),

@@ -242,3 +242,265 @@ describe('the cell inspector', () => {
         expect(inspector()!.textContent).toContain('Not reported');
     });
 });
+
+describe('structural edit controls', () => {
+    const menuItem = (label: string) =>
+        Array.from(document.querySelectorAll<HTMLElement>('*')).find((el) => el.textContent === label && el.children.length === 0);
+    const type = (input: HTMLInputElement | HTMLTextAreaElement, value: string) =>
+        act(() => {
+            const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value')!.set!;
+            setter.call(input, value);
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+    const key = (el: Element, init: KeyboardEventInit) =>
+        act(() => {
+            el.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }));
+        });
+
+    it('renames the table in place: Enter saves, Escape cancels, a composing IME keeps the field', () => {
+        const onTitle = vi.fn();
+        mount({ editing: { onTitle } });
+        click(container!.querySelector('button[aria-label="Rename table"]')!);
+        const field = container!.querySelector<HTMLInputElement>('input[aria-label="Rename table"]')!;
+        type(field, 'Cash and schooling');
+        key(field, { key: 'Enter', isComposing: true });
+        expect(onTitle).not.toHaveBeenCalled();
+        expect(container!.querySelector('input[aria-label="Rename table"]')).not.toBeNull();
+        key(field, { key: 'Enter' });
+        expect(onTitle).toHaveBeenCalledWith('Cash and schooling');
+
+        click(container!.querySelector('button[aria-label="Rename table"]')!);
+        const again = container!.querySelector<HTMLInputElement>('input[aria-label="Rename table"]')!;
+        type(again, 'Never saved');
+        key(again, { key: 'Escape' });
+        expect(onTitle).toHaveBeenCalledTimes(1);
+        expect(container!.querySelector('input[aria-label="Rename table"]')).toBeNull();
+    });
+
+    it('edits the description, and clears it with an empty field', () => {
+        const onDescription = vi.fn();
+        mount({ editing: { onDescription } });
+        click(container!.querySelector('.rt-description')!);
+        const field = container!.querySelector<HTMLTextAreaElement>('textarea[aria-label="Edit description"]')!;
+        type(field, '');
+        key(field, { key: 'Enter' });
+        expect(onDescription).toHaveBeenCalledWith('');
+    });
+
+    it('shows the controls disabled with the reason in a read-only library', () => {
+        mount({ editing: { disabledReason: 'This library is read-only.', onTitle: vi.fn(), onAddColumn: vi.fn() } });
+        const pencil = container!.querySelector<HTMLButtonElement>('button[aria-label="Rename table"]')!;
+        expect(pencil.disabled).toBe(true);
+        expect(pencil.title).toBe('This library is read-only.');
+        expect(container!.querySelector<HTMLButtonElement>('button[aria-label="Add column"]')!.disabled).toBe(true);
+    });
+
+    it("offers the column menu's edits, then Sort and Hide, and adds a column from (+)", () => {
+        const onEditColumn = vi.fn();
+        const onChangeType = vi.fn();
+        const onRemoveColumn = vi.fn();
+        const onAddColumn = vi.fn();
+        mount({ editing: { onEditColumn, onChangeType, onRemoveColumn, onAddColumn } });
+        click(container!.querySelector('button[aria-label="Column menu: Headline effect"]')!);
+        click(menuItem('Edit column…')!);
+        expect(onEditColumn).toHaveBeenCalledWith(expect.objectContaining({ id: 'effect' }));
+        click(container!.querySelector('button[aria-label="Column menu: Headline effect"]')!);
+        click(menuItem('Remove column')!);
+        expect(onRemoveColumn).toHaveBeenCalledWith(expect.objectContaining({ id: 'effect' }));
+        click(container!.querySelector('button[aria-label="Add column"]')!);
+        expect(onAddColumn).toHaveBeenCalledTimes(1);
+    });
+
+    it('raises the header whose menu is open over the headers after it', () => {
+        mount({ editing: { onEditColumn: vi.fn() } });
+        const header = container!.querySelector('th[data-column-id="effect"]')!;
+        expect(header.classList.contains('rt-th-menu-open')).toBe(false);
+        click(container!.querySelector('button[aria-label="Column menu: Headline effect"]')!);
+        expect(header.classList.contains('rt-th-menu-open')).toBe(true);
+        click(menuItem('Edit column…')!);
+        expect(header.classList.contains('rt-th-menu-open')).toBe(false);
+    });
+
+    it('hides a column from its menu and shows it again from the toolbar', () => {
+        mount();
+        click(container!.querySelector('button[aria-label="Column menu: Amount"]')!);
+        click(menuItem('Hide column')!);
+        expect(container!.querySelector('th[data-column-id="amount"]')).toBeNull();
+        click(container!.querySelector('.rt-hidden-columns')!);
+        expect(container!.querySelector('th[data-column-id="amount"]')).not.toBeNull();
+    });
+
+    it('opens the sources popover from the chip and closes it on Escape', () => {
+        mount({ editing: { renderSources: (close) => h('button', { className: 'probe', onClick: close }, 'Inside') } });
+        const chip = container!.querySelector<HTMLButtonElement>('.rt-sources-button')!;
+        click(chip);
+        expect(container!.querySelector('[role="dialog"][aria-label="Sources"] .probe')).not.toBeNull();
+        key(document, { key: 'Escape' });
+        expect(container!.querySelector('[aria-label="Sources"]')).toBeNull();
+        click(chip);
+        click(container!.querySelector('.probe')!);
+        expect(container!.querySelector('[aria-label="Sources"]')).toBeNull();
+    });
+
+    it("adds the new papers from the notice's Add", () => {
+        const onAddNewPapers = vi.fn();
+        mount({ newPapers: { count: 3, sources: 1, sourceName: 'Cash transfers' }, editing: { onAddNewPapers } });
+        click(container!.querySelector('.rt-new-papers-add')!);
+        expect(onAddNewPapers).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe('editing cells and filling from rows and columns', () => {
+    const menuItem = (label: string) =>
+        Array.from(document.querySelectorAll<HTMLElement>('*')).find((el) => el.textContent === label && el.children.length === 0);
+    const type = (input: HTMLInputElement | HTMLTextAreaElement, value: string) =>
+        act(() => {
+            const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value')!.set!;
+            setter.call(input, value);
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+    const key = (el: Element, init: KeyboardEventInit) =>
+        act(() => {
+            el.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }));
+        });
+    const editor = () => container!.querySelector<HTMLElement>('.rt-cell-editor');
+    const flush = () => act(async () => {});
+
+    function editing(onEdit = vi.fn(async () => null as string | null)) {
+        return { onEdit, onRestore: vi.fn(), onChooseDocument: vi.fn() };
+    }
+
+    it("edits a text cell in place from the cell's pencil: the answer, a note, and Save", async () => {
+        const cellEditing = editing();
+        mount({ cellEditing });
+        click(cell('r1', 'effect').querySelector('button[aria-label="Edit Headline effect"]')!);
+        expect(inspector()).toBeNull();
+        const [answer] = editor()!.querySelectorAll<HTMLTextAreaElement>('textarea');
+        expect(answer.value).toBe('Conditional transfers raised enrollment.');
+        expect(editor()!.textContent).toContain('Fills won’t change your answer.');
+        type(answer, 'Enrollment rose 3.4 points.');
+        type(editor()!.querySelector<HTMLInputElement>('input[placeholder="Why you changed it (optional)"]')!, 'Table 2');
+        click(Array.from(editor()!.querySelectorAll('button')).find((b) => b.textContent === 'Save')!);
+        await flush();
+        expect(cellEditing.onEdit).toHaveBeenCalledWith(
+            expect.objectContaining({ id: 'r1' }),
+            expect.objectContaining({ id: 'effect' }),
+            { op: 'answer', value: { kind: 'text', text: 'Enrollment rose 3.4 points.' }, note: 'Table 2' },
+        );
+        expect(editor()).toBeNull();
+    });
+
+    it('keeps the editor open with the refusal, and Escape (not while composing) cancels', async () => {
+        const cellEditing = editing(vi.fn(async () => 'This row is no longer in the table.'));
+        mount({ cellEditing });
+        click(cell('r1', 'effect').querySelector('button[aria-label="Edit Headline effect"]')!);
+        click(Array.from(editor()!.querySelectorAll('button')).find((b) => b.textContent === 'Save')!);
+        await flush();
+        expect(editor()!.querySelector('[role="alert"]')?.textContent).toBe('This row is no longer in the table.');
+        const answer = editor()!.querySelector('textarea')!;
+        key(answer, { key: 'Escape', isComposing: true });
+        expect(editor()).not.toBeNull();
+        key(answer, { key: 'Escape' });
+        expect(editor()).toBeNull();
+    });
+
+    it('opens a Choice cell on its options, Not reported and Clear cell, each saving at once', async () => {
+        const cellEditing = editing();
+        mount({ cellEditing });
+        click(cell('r1', 'design').querySelector('button[aria-label="Edit Design"]')!);
+        const options = Array.from(editor()!.querySelectorAll('[role="option"]')).map((o) => o.textContent);
+        expect(options).toEqual(['RCT', 'Not reported', 'Clear cell']);
+        expect(editor()!.querySelector('[role="option"][aria-selected="true"]')?.textContent).toBe('RCT');
+        click(Array.from(editor()!.querySelectorAll('[role="option"]')).find((o) => o.textContent === 'Not reported')!);
+        await flush();
+        expect(cellEditing.onEdit).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ id: 'design' }), { op: 'not_reported' });
+        expect(editor()).toBeNull();
+    });
+
+    it("offers Edit on Beaver's answer, and Edit, Clear and Restore Beaver's answer on the user's", async () => {
+        const cellEditing = editing();
+        mount({ cellEditing });
+        click(cell('r1', 'effect'));
+        expect(Array.from(inspector()!.querySelectorAll('.rt-inspector-action')).map((b) => b.textContent)).toEqual(['Edit', 'Change']);
+        click(cell('r2', 'effect'));
+        const actions = () => Array.from(inspector()!.querySelectorAll<HTMLButtonElement>('.rt-inspector-action'));
+        expect(actions().map((b) => b.textContent)).toEqual(['Edit', 'Clear', 'Restore Beaver’s answer', 'Change']);
+        click(actions().find((b) => b.textContent === 'Restore Beaver’s answer')!);
+        expect(cellEditing.onRestore).toHaveBeenCalledWith(expect.objectContaining({ id: 'r2' }), expect.objectContaining({ id: 'effect' }));
+        click(actions().find((b) => b.textContent === 'Clear')!);
+        await flush();
+        expect(cellEditing.onEdit).toHaveBeenCalledWith(expect.objectContaining({ id: 'r2' }), expect.anything(), { op: 'clear' });
+        click(actions().find((b) => b.textContent === 'Change')!);
+        expect(cellEditing.onChooseDocument).toHaveBeenCalledWith(expect.objectContaining({ id: 'r2' }));
+        click(actions().find((b) => b.textContent === 'Edit')!);
+        expect(editor()!.querySelector('textarea')!.value).toBe('Gains in consumption.');
+        expect(editor()!.querySelector<HTMLInputElement>('input[placeholder="Why you changed it (optional)"]')!.value).toBe('Schooling was not an outcome.');
+    });
+
+    it("makes Beaver's own choice the user's when it is picked, so fills keep it", async () => {
+        const cellEditing = editing();
+        mount({ cellEditing });
+        click(cell('r1', 'design').querySelector('button[aria-label="Edit Design"]')!);
+        click(Array.from(editor()!.querySelectorAll('[role="option"]')).find((o) => o.textContent === 'RCT')!);
+        await flush();
+        expect(cellEditing.onEdit).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ id: 'design' }), {
+            op: 'answer',
+            value: { kind: 'select', label: 'RCT' },
+        });
+    });
+
+    it("opens the editor from the inspector on a hidden column, showing the column first", () => {
+        mount({ cellEditing: editing() });
+        click(cell('r1', 'amount'));
+        act(() => {
+            container!.querySelector<HTMLButtonElement>('button[aria-label="Column menu: Amount"]')!.click();
+        });
+        click(menuItem('Hide column')!);
+        expect(container!.querySelector('th[data-column-id="amount"]')).toBeNull();
+        click(Array.from(inspector()!.querySelectorAll('.rt-inspector-action')).find((b) => b.textContent === 'Edit')!);
+        expect(container!.querySelector('th[data-column-id="amount"]')).not.toBeNull();
+        expect(editor()).not.toBeNull();
+    });
+
+    it('shows the cell controls disabled with the reason in a read-only library', () => {
+        mount({ cellEditing: { ...editing(), disabledReason: 'This library is read-only.' } });
+        const pencil = cell('r1', 'effect').querySelector<HTMLButtonElement>('button[aria-label="Edit Headline effect"]')!;
+        expect(pencil.disabled).toBe(true);
+        expect(pencil.title).toBe('This library is read-only.');
+        click(cell('r2', 'effect'));
+        expect(Array.from(inspector()!.querySelectorAll<HTMLButtonElement>('.rt-inspector-action')).every((b) => b.disabled)).toBe(true);
+    });
+
+    it('offers Refill row and Choose document… in the row menu', () => {
+        const fill = { onFillRows: vi.fn(), onFillColumn: vi.fn() };
+        const cellEditing = editing();
+        mount({ fill, cellEditing });
+        click(container!.querySelector('tr[data-row-id="r1"] button[aria-label="Row actions"]')!);
+        click(menuItem('Refill row')!);
+        expect(fill.onFillRows).toHaveBeenCalledWith(['r1']);
+        click(container!.querySelector('tr[data-row-id="r1"] button[aria-label="Row actions"]')!);
+        click(menuItem('Choose document…')!);
+        expect(cellEditing.onChooseDocument).toHaveBeenCalledWith(expect.objectContaining({ id: 'r1' }));
+    });
+
+    it("offers Fill this column with its pending count, and the selection bar's Fill N rows", () => {
+        const fill = { onFillRows: vi.fn(), onFillColumn: vi.fn() };
+        mount({ fill, editing: { onEditColumn: vi.fn() } });
+        click(container!.querySelector('button[aria-label="Column menu: Amount"]')!);
+        click(menuItem('Fill this column (3)')!);
+        expect(fill.onFillColumn).toHaveBeenCalledWith(expect.objectContaining({ id: 'amount' }));
+        click(container!.querySelector('tr[data-row-id="r1"] button[aria-label="Select row"]')!);
+        click(container!.querySelector('tr[data-row-id="r3"] button[aria-label="Select row"]')!);
+        const fillRows = container!.querySelector<HTMLButtonElement>('.rt-selection-fill')!;
+        expect(fillRows.textContent).toBe('Fill 2 rows');
+        click(fillRows);
+        expect(fill.onFillRows).toHaveBeenCalledWith(['r1', 'r3']);
+    });
+
+    it('hands the selected rows to the header controls', () => {
+        const headerEnd = vi.fn((ids: string[]) => h('span', { className: 'selected-ids' }, ids.join(',')));
+        mount({ headerEnd });
+        click(container!.querySelector('tr[data-row-id="r2"] button[aria-label="Select row"]')!);
+        expect(container!.querySelector('.selected-ids')?.textContent).toBe('r2');
+    });
+});

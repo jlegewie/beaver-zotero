@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef } from "react";
+import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
     cellIdFor,
     cellValueText,
@@ -10,8 +10,9 @@ import {
     type Row,
     type TableSpec,
 } from "@beaver/agent-core/layouts/table";
-import { Icon, RepeatIcon, TickIcon } from "../../icons";
+import { ArrowDownIcon, EditIcon, Icon, PlusSignIcon, RepeatIcon, TickIcon } from "../../icons";
 import type { MenuItem } from "../../primitives/ContextMenu";
+import MenuButton from "../../primitives/MenuButton";
 import { useHoverAnchor, useHoverLayer } from "../../primitives/HoverLayer";
 import type { TextRenderer } from "../tableView";
 import type { TableState } from "../useTableState";
@@ -43,10 +44,25 @@ export interface ResearchGridProps {
     selected: CellAddress | null;
     onSelectCell(address: CellAddress): void;
     rowMenuItems(row: Row): MenuItem[];
+    /** A question column's menu (on hover over its header). */
+    columnMenuItems?(column: Column): MenuItem[];
+    /** The (+) after the last column; absent, no add column. */
+    onAddColumn?(): void;
+    /** Why the (+) is disabled (a read-only library). */
+    editDisabledReason?: string;
     /** Window the rows, for a long table. */
     virtualize?: boolean;
     emptyText: string;
     filteredEmptyText: string;
+    /**
+     * Opens the cell editor: the pencil on a cell and the peek's Edit.
+     * Absent, cells are not editable here.
+     */
+    onEditCell?(address: CellAddress): void;
+    /** Why cells cannot be edited (a read-only library); the pencil shows it. */
+    cellEditDisabledReason?: string;
+    /** The open cell editor, floated over its cell and the rows below. */
+    cellEditor?: { address: CellAddress; content: React.ReactNode; list: boolean } | null;
 }
 
 /** A question column's width: prose shares what is left; short types are fixed. */
@@ -83,9 +99,15 @@ export function ResearchGrid({
     selected,
     onSelectCell,
     rowMenuItems,
+    columnMenuItems,
+    onAddColumn,
+    editDisabledReason,
     virtualize = false,
     emptyText,
     filteredEmptyText,
+    onEditCell,
+    cellEditDisabledReason,
+    cellEditor,
 }: ResearchGridProps): React.ReactElement {
     const rootRef = useRef<HTMLDivElement>(null);
     const bodyRef = useRef<HTMLTableSectionElement>(null);
@@ -104,16 +126,16 @@ export function ResearchGrid({
     const rowWindow = useRowWindow({
         enabled: virtualize,
         rows: state.rows,
-        expandedRows: EMPTY,
         rootRef,
         bodyRef,
         layoutKey: `${state.density}|${questions.map((column) => column.id).join(",")}`,
     });
     const windowRows = virtualize ? state.rows.slice(rowWindow.start, rowWindow.end) : state.rows;
-    const minWidth = `calc(2.75rem + 20rem + ${columns.year ? "4.5rem + " : ""}${questions
+    const addColumn = !!onAddColumn;
+    const minWidth = `calc(2.75rem + 20rem + ${columns.year ? "4.5rem + " : ""}${addColumn ? `${ADD_WIDTH} + ` : ""}${questions
         .map((column) => questionWidth(column) ?? FLEX_MIN)
         .join(" + ") || "0px"})`;
-    const columnCount = 2 + (columns.year ? 1 : 0) + questions.length;
+    const columnCount = 2 + (columns.year ? 1 : 0) + questions.length + (addColumn ? 1 : 0);
     const selectable = table.rows.length > 0;
 
     return (
@@ -126,6 +148,7 @@ export function ResearchGrid({
                     {questions.map((column) => (
                         <col key={column.id} style={{ width: questionWidth(column) }} />
                     ))}
+                    {addColumn ? <col style={{ width: ADD_WIDTH }} /> : null}
                 </colgroup>
                 <thead>
                     <tr className="rt-head-row">
@@ -147,8 +170,27 @@ export function ResearchGrid({
                             </th>
                         ) : null}
                         {questions.map((column) => (
-                            <QuestionHeader key={column.id} column={column} badges={badges.get(column.id)!} />
+                            <QuestionHeader
+                                key={column.id}
+                                column={column}
+                                badges={badges.get(column.id)!}
+                                menuItems={columnMenuItems}
+                            />
                         ))}
+                        {addColumn ? (
+                            <th className="rt-th rt-th-add" scope="col">
+                                <button
+                                    type="button"
+                                    className="rt-icon-button rt-add-column"
+                                    aria-label="Add column"
+                                    title={editDisabledReason ?? "Add column"}
+                                    disabled={!!editDisabledReason}
+                                    onClick={onAddColumn}
+                                >
+                                    <Icon icon={PlusSignIcon} size={14} />
+                                </button>
+                            </th>
+                        ) : null}
                     </tr>
                 </thead>
                 <tbody ref={bodyRef}>
@@ -170,6 +212,9 @@ export function ResearchGrid({
                             onToggleSelect={state.toggleRowSelection}
                             onSelectCell={onSelectCell}
                             menuItems={rowMenuItems}
+                            addColumn={addColumn}
+                            onEditCell={onEditCell}
+                            editDisabledReason={cellEditDisabledReason}
                         />
                     ))}
                     {rowWindow.padBottom > 0 ? <Spacer height={rowWindow.padBottom} /> : null}
@@ -182,11 +227,63 @@ export function ResearchGrid({
                     ) : null}
                 </tbody>
             </table>
+            {cellEditor ? <CellEditorLayer rootRef={rootRef} {...cellEditor} /> : null}
         </div>
     );
 }
 
-const EMPTY: ReadonlySet<string> = new Set();
+/**
+ * The cell editor, floated over the grid at its cell: a text editor covers
+ * the cell and grows over the rows below; an option list opens under the
+ * cell's first line. Placed within the grid, so it scrolls with the rows.
+ * The cell itself clips its content, so the editor cannot live inside it.
+ */
+function CellEditorLayer({
+    rootRef,
+    address,
+    content,
+    list,
+}: {
+    rootRef: React.RefObject<HTMLDivElement>;
+    address: CellAddress;
+    content: React.ReactNode;
+    list: boolean;
+}): React.ReactElement | null {
+    const [place, setPlace] = useState<{ top: number; left: number; width: number } | null>(null);
+    // A windowed row scrolled into view is drawn a frame or two later.
+    const [attempt, setAttempt] = useState(0);
+    useLayoutEffect(() => {
+        const root = rootRef.current;
+        const id = cellIdFor(address.rowId, address.columnId).replace(/["\\]/g, "\\$&");
+        const cell = root?.querySelector<HTMLElement>(`[id="${id}"]`);
+        if (!root || !cell) {
+            setPlace(null);
+            if (!root || attempt >= 5) return;
+            const frame = root.ownerDocument.defaultView?.requestAnimationFrame(() => setAttempt((n) => n + 1));
+            return () => {
+                if (frame != null) root.ownerDocument.defaultView?.cancelAnimationFrame(frame);
+            };
+        }
+        const rootBox = root.getBoundingClientRect();
+        const box = cell.getBoundingClientRect();
+        setPlace({
+            top: box.top - rootBox.top + (list ? Math.min(box.height, 40) : 0),
+            left: box.left - rootBox.left,
+            width: box.width,
+        });
+    }, [rootRef, address.rowId, address.columnId, list, attempt]);
+    if (!place) return null;
+    return (
+        <div
+            className={`rt-cell-editor-layer${list ? " rt-cell-editor-layer-list" : ""}`}
+            style={{ top: place.top, left: place.left, width: list ? undefined : place.width, minWidth: list ? undefined : 320 }}
+        >
+            {content}
+        </div>
+    );
+}
+
+const ADD_WIDTH = "3.25rem";
 
 function Spacer({ height }: { height: number }): React.ReactElement {
     return (
@@ -249,16 +346,41 @@ function SelectBox({
     );
 }
 
-/** A question column's header: its name and badges over its question. */
+/**
+ * A question column's header: its name and badges over its question, and the
+ * column menu's button on hover.
+ */
 function QuestionHeader({
     column,
     badges,
+    menuItems,
 }: {
     column: Column;
     badges: ReturnType<typeof columnBadges>;
+    menuItems?(column: Column): MenuItem[];
 }): React.ReactElement {
+    // The menu renders inside this sticky cell, which stacks on its own: while
+    // it is open the cell is raised over its neighbours, or the next header
+    // would paint over the menu and take its clicks.
+    const [menuOpen, setMenuOpen] = React.useState(false);
     return (
-        <th className="rt-th rt-th-question" scope="col" data-column-id={column.id}>
+        <th
+            className={`rt-th rt-th-question${menuOpen ? " rt-th-menu-open" : ""}`}
+            scope="col"
+            data-column-id={column.id}
+        >
+            {menuItems ? (
+                <span className="rt-column-menu">
+                    <MenuButton
+                        menuItems={menuItems(column)}
+                        variant="ghost-secondary"
+                        icon={ArrowDownIcon}
+                        ariaLabel={`Column menu: ${column.header}`}
+                        width="13rem"
+                        toggleCallback={setMenuOpen}
+                    />
+                </span>
+            ) : null}
             <div className="rt-th-top">
                 <span className="rt-th-label">{column.header}</span>
                 {badges.staleCells > 0 ? (
@@ -317,6 +439,9 @@ interface ResearchRowProps {
     onToggleSelect(rowId: string): void;
     onSelectCell(address: CellAddress): void;
     menuItems(row: Row): MenuItem[];
+    addColumn: boolean;
+    onEditCell?(address: CellAddress): void;
+    editDisabledReason?: string;
 }
 
 const ResearchRow = React.memo(function ResearchRow({
@@ -334,6 +459,9 @@ const ResearchRow = React.memo(function ResearchRow({
     onToggleSelect,
     onSelectCell,
     menuItems,
+    addColumn,
+    onEditCell,
+    editDisabledReason,
 }: ResearchRowProps): React.ReactElement {
     return (
         <tr
@@ -368,8 +496,11 @@ const ResearchRow = React.memo(function ResearchRow({
                     documents={documents}
                     selected={selectedColumn === column.id}
                     onSelect={onSelectCell}
+                    onEdit={onEditCell}
+                    editDisabledReason={editDisabledReason}
                 />
             ))}
+            {addColumn ? <td className="rt-td rt-td-add" aria-hidden="true" /> : null}
         </tr>
     );
 });
@@ -478,6 +609,8 @@ function QuestionCell({
     documents,
     selected,
     onSelect,
+    onEdit,
+    editDisabledReason,
 }: {
     row: Row;
     column: Column;
@@ -485,9 +618,12 @@ function QuestionCell({
     documents?: TableDocuments;
     selected: boolean;
     onSelect(address: CellAddress): void;
+    onEdit?(address: CellAddress): void;
+    editDisabledReason?: string;
 }): React.ReactElement {
     const cell = row.cells[column.id];
     const select = () => onSelect({ rowId: row.id, columnId: column.id });
+    const edit = onEdit && !editDisabledReason ? () => onEdit({ rowId: row.id, columnId: column.id }) : undefined;
     const layers = useHoverLayer();
     const peek = useHoverAnchor({
         slot: "peek",
@@ -509,7 +645,23 @@ function QuestionCell({
                 <div className="rt-peek-body">
                     <CellBody row={row} cell={cell} column={column} renderText={renderText} documents={documents} full />
                 </div>
-                <div className="rt-peek-footer">Click for evidence</div>
+                <div className="rt-peek-footer">
+                    <span>Click for evidence</span>
+                    {edit ? (
+                        <button
+                            type="button"
+                            className="rt-peek-edit"
+                            onClick={(event) => {
+                                event.stopPropagation();
+                                layers?.hide();
+                                edit();
+                            }}
+                        >
+                            <Icon icon={EditIcon} size={11} />
+                            Edit
+                        </button>
+                    ) : null}
+                </div>
             </div>
         ),
     });
@@ -544,6 +696,21 @@ function QuestionCell({
             <div className="rt-cell-body">
                 <CellBody row={row} cell={cell} column={column} renderText={renderText} documents={documents} />
             </div>
+            {onEdit ? (
+                <button
+                    type="button"
+                    className="rt-icon-button rt-cell-edit"
+                    aria-label={`Edit ${column.header}`}
+                    title={editDisabledReason ?? "Edit answer"}
+                    disabled={!!editDisabledReason}
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        edit?.();
+                    }}
+                >
+                    <Icon icon={EditIcon} size={12} />
+                </button>
+            ) : null}
         </td>
     );
 }

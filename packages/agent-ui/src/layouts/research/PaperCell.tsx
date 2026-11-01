@@ -1,12 +1,11 @@
 import React from "react";
 import {
     cellValueText,
-    isZoteroRowRef,
     YEAR_COLUMN_ID,
     type Row,
     type TableSpec,
 } from "@beaver/agent-core/layouts/table";
-import { annotationTitle, documentReference } from "@beaver/agent-core/layouts/rowKinds";
+import { documentReference } from "@beaver/agent-core/layouts/rowActions";
 import { rowReference } from "@beaver/agent-core/layouts/tableCitations";
 import { itemTypeToIconName } from "@beaver/agent-core/types/citations";
 import type { ZoteroItemReference } from "@beaver/agent-core/types/zotero";
@@ -23,21 +22,15 @@ import { documentKindLabel, documentNoun, type TableDocuments } from "./cellMode
 /** The row's own item, as the host's navigation names it. */
 export function rowItemReference(row: Row): ZoteroItemReference | undefined {
     const ref = row.ref;
-    if (!ref || !isZoteroRowRef(ref)) return undefined;
-    // An annotation or attachment row reveals the work it belongs to.
-    const target =
-        ref.kind === "item" ? ref : (ref.parent_item ?? ref);
+    if (ref?.kind !== "item") return undefined;
     return {
-        library_id: target.library_id ?? 0,
-        zotero_key: target.zotero_key,
-        library_ref: target.library_ref,
+        library_id: ref.library_id ?? 0,
+        zotero_key: ref.zotero_key,
+        library_ref: ref.library_ref,
     };
 }
 
-/**
- * The paper's title, and its authors and venue as one line. A row anchored on
- * an annotation reads as its passage, with its source and page.
- */
+/** The paper's title, and its authors and venue as one line. */
 export function paperText(
     row: Row,
     /** The anchor column, whose value names a row that has no reference. */
@@ -45,17 +38,6 @@ export function paperText(
 ): { title: string; meta: string; year?: string } {
     const reference = rowReference(row);
     const year = cellValueText(row.cells[YEAR_COLUMN_ID]?.value) || undefined;
-    if (!reference) {
-        const annotation = Object.values(row.cells).find((cell) => cell.value?.kind === "annotation")?.value;
-        if (annotation?.kind === "annotation")
-            return {
-                title: annotationTitle(annotation),
-                meta: [annotation.source_display_name, annotation.page_label ? `p. ${annotation.page_label}` : undefined]
-                    .filter(Boolean)
-                    .join(" · "),
-                ...(year ? { year } : {}),
-            };
-    }
     const anchorText = !reference && anchorColumnId ? cellValueText(row.cells[anchorColumnId]?.value) : "";
     return {
         title: reference?.title ?? reference?.display_name ?? (anchorText || "Untitled"),
@@ -65,9 +47,8 @@ export function paperText(
 }
 
 /**
- * The row's Open: its Zotero document, else the row kind's own open verb (an
- * annotation opens in the reader at the highlight, a context file launches).
- * Offered by the paper card and the row menu alike.
+ * The row's Open: its document, else the item's best attachment, which the
+ * host picks when clicked. Offered by the paper card and the row menu alike.
  */
 export function paperOpenAction(
     row: Row,
@@ -77,7 +58,7 @@ export function paperOpenAction(
     if (!navigation) return undefined;
     const documentId = row.documents?.[0];
     const documentRef = documentReference(documentId);
-    if (row.ref?.kind !== "annotation" && documentRef)
+    if (documentRef)
         return {
             label: `Open ${documentKindLabel(documentId ? documents?.get(documentId)?.kind : undefined)}`,
             run: () => void navigation.openSource(documentRef),
@@ -89,7 +70,7 @@ export function paperOpenAction(
 function PaperIcon({ row, className }: { row: Row; className?: string }): React.ReactElement {
     const reference = rowReference(row);
     const hostIcon = getHost().components?.itemTypeIcon({
-        itemType: itemTypeToIconName(reference?.item_type, reference?.content_kind),
+        itemType: itemTypeToIconName(reference?.item_type, undefined),
         className,
     });
     return <>{hostIcon ?? <Icon icon={FileIcon} size={15} className={className} />}</>;

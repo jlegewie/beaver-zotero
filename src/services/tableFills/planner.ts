@@ -33,6 +33,11 @@ export const DOCUMENT_KINDS = ['pdf', 'epub', 'snapshot'] as const;
  */
 export type RowDocumentKind = (typeof DOCUMENT_KINDS)[number] | 'text';
 
+/** A kind a row may name: the rule's kinds, and plain text a row already names. */
+export function isRowDocumentKind(kind: string | null | undefined): kind is RowDocumentKind {
+    return kind === 'text' || (DOCUMENT_KINDS as readonly string[]).includes(kind ?? '');
+}
+
 /** A readable document attachment of an item. */
 export interface DocumentCandidate {
     /** Portable id (`u-KEY`, `g<id>-KEY`). */
@@ -246,10 +251,6 @@ export function buildPlan(
     }
     const before = new Map(spec.rows.map((row) => [row.id, row.documents ?? []]));
     const rows: RowPlan[] = [];
-    // Documents of rows that name themselves (an attachment, an annotation, a
-    // file) without naming them yet: recorded like planning's other changes,
-    // so the answers read from them are not stale at once.
-    const inferred = new Map<string, string[]>();
     for (const row of planning.rows) {
         const rowColumns = byRow.get(row.id);
         if (!rowColumns) continue;
@@ -285,19 +286,6 @@ export function buildPlan(
                     plan.document = { id: named, kind: lookup.documents.find((d) => d.id === named)?.kind };
                 }
             }
-        } else if (ref?.kind === 'attachment' || ref?.kind === 'annotation' || ref?.kind === 'file') {
-            let id = named;
-            if (id === undefined) {
-                if (ref.kind === 'file') id = `ext-${ref.ext_key}`;
-                else {
-                    const source = ref.kind === 'attachment' ? ref : ref.attachment;
-                    id = `${source.library_ref}-${source.zotero_key}`;
-                }
-                plan.documents = [id];
-                inferred.set(row.id, [id]);
-            }
-            plan.mode = 'document';
-            plan.document = { id };
         } else if (ref?.kind === 'external') {
             const abstract = text(ref.reference?.abstract, ABSTRACT_MAX_CHARS);
             if (abstract) plan.abstract = abstract;
@@ -326,7 +314,7 @@ export function buildPlan(
     return {
         rows,
         columns: columns.map(plannedColumn),
-        documentUpdates: [...changes, ...inferred].map(([row, documents]) => ({
+        documentUpdates: [...changes].map(([row, documents]) => ({
             row,
             documents,
             before: [...(before.get(row) ?? [])],

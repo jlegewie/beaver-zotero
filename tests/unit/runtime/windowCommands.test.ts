@@ -24,7 +24,6 @@ vi.mock('../../../react/events/eventManager', () => ({ eventManager: { dispatch:
 import { windowCommands } from '../../../react/runtime/windowCommands';
 import { currentThreadIdAtom } from '@beaver/agent-core/run-state/atoms';
 import { currentMessageContentAtom } from '../../../react/atoms/messageComposition';
-import { windowSurfaceAtom } from '../../../react/atoms/windowSurface';
 
 beforeEach(() => {
     state.store = createStore();
@@ -37,26 +36,15 @@ beforeEach(() => {
     state.store.set(currentThreadIdAtom, 'current');
     state.store.set(currentMessageContentAtom, 'unsent draft');
 });
-it('table and chat commands preserve the destination chat and draft', async () => {
-    await windowCommands['show-table']({ surface: { variant: 'search', table: { id: 'table', columns: [], rows: [] } as any } });
-    expect(state.store.get(windowSurfaceAtom).kind).toBe('table');
-    await windowCommands['show-chat']();
-    expect(state.store.get(windowSurfaceAtom).kind).toBe('thread');
-    expect(state.store.get(currentThreadIdAtom)).toBe('current');
-    expect(state.store.get(currentMessageContentAtom)).toBe('unsent draft');
-    expect(state.load).not.toHaveBeenCalled();
-});
 it('does not replace a draft when its owner cancels', async () => {
     state.confirm.mockReturnValue(1);
     expect(await windowCommands['open-chat']({ threadId: 'requested' })).toEqual({ ok: false, canceled: true });
     expect(state.load).not.toHaveBeenCalled();
     expect(state.store.get(currentMessageContentAtom)).toBe('unsent draft');
 });
-it('reveals the composer and preserves its draft when loading fails', async () => {
-    await windowCommands['show-table']({ surface: { variant: 'search', table: { id: 'table', columns: [], rows: [] } as any } });
+it('preserves the draft when loading fails', async () => {
     state.load.mockResolvedValue(false);
     expect(await windowCommands['open-chat']({ threadId: 'requested' })).toEqual({ ok: false, canceled: true });
-    expect(state.store.get(windowSurfaceAtom).kind).toBe('thread');
     expect(state.store.get(currentMessageContentAtom)).toBe('unsent draft');
 });
 it('reveals the same chat without replacing its draft or asking to switch', async () => {

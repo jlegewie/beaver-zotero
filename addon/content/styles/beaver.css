@@ -63,6 +63,12 @@
     --beaver-surface-overlay: var(--material-background);
 }
 
+/* Beaver tabs (a stored table) sit on the plain background too: their menus
+ * and tooltips lift to it, as in the preferences and the separate window. */
+.beaver-root.beaver-tab {
+    --beaver-surface-overlay: var(--material-background);
+}
+
 /* Preferences window: two-column shell. The sidebar keeps the window's
  * sidepane material; the settings column sits on the plain background so the
  * cards read against it the way they do in Zotero's own settings. */
@@ -5420,6 +5426,50 @@
     border-top: 1px solid var(--fill-quarternary);
 }
 
+/* A change in an edit card's list: its mark, then the sentence with its
+   effects in quieter text. The mark carries the colour; the text does not. */
+[id^="beaver-pane-"] .table-record-change {
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 0.5rem;
+}
+
+[id^="beaver-pane-"] .table-record-mark {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 1.15rem;
+    height: 1.15rem;
+    margin-top: 0.05rem;
+    border-radius: 50%;
+}
+
+[id^="beaver-pane-"] .table-record-mark svg {
+    width: 0.7rem;
+    height: 0.7rem;
+}
+
+[id^="beaver-pane-"] .table-record-mark-add {
+    color: var(--tag-green-primary);
+    background: var(--tag-green-quarternary);
+}
+
+[id^="beaver-pane-"] .table-record-mark-change {
+    color: var(--tag-orange-primary);
+    background: var(--tag-orange-quarternary);
+}
+
+[id^="beaver-pane-"] .table-record-mark-remove {
+    color: var(--tag-red-primary);
+    background: var(--tag-red-quarternary);
+}
+
+[id^="beaver-pane-"] .table-record-change-text {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
 [id^="beaver-pane-"] .table-card-problem {
     color: var(--tag-orange-secondary);
 }
@@ -5480,6 +5530,400 @@
 [id^="beaver-pane-"] .table-card-inline-field::placeholder {
     color: var(--fill-secondary);
     opacity: 0.8;
+}
+
+/* ==========================================================================
+ * Table tab — structural edits: the column editor, the sources popover's
+ * entries, + Papers, the selection bar's Remove and the Undo toast.
+ * ========================================================================== */
+
+[id^="beaver-pane-"] .column-type-segments {
+    display: flex;
+    padding: 2px;
+    border-radius: 7px;
+    background: var(--fill-quinary);
+}
+
+[id^="beaver-pane-"] .column-type-segments > button {
+    flex: 1 1 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    height: 26px;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--fill-secondary);
+    font: inherit;
+    font-size: 0.8125rem;
+    cursor: pointer;
+}
+
+[id^="beaver-pane-"] .column-type-segments > button.column-type-segment-on {
+    background: var(--material-background);
+    color: var(--fill-primary);
+    font-weight: 600;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+[id^="beaver-pane-"] .rt-dialog-backdrop {
+    position: absolute;
+    inset: 0;
+    z-index: 50;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding-top: 6rem;
+    background: rgba(0, 0, 0, 0.12);
+}
+
+[id^="beaver-pane-"] .rt-dialog {
+    width: 30rem;
+    max-width: calc(100% - 2rem);
+    max-height: calc(100% - 8rem);
+    display: flex;
+    flex-direction: column;
+    border-radius: 12px;
+    background: var(--material-background);
+    box-shadow: 0 0 0 1px var(--color-border50), 0 14px 36px rgba(0, 0, 0, 0.18);
+    overflow: hidden;
+}
+
+[id^="beaver-pane-"] .rt-dialog-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+    padding: 1rem 1rem 0.25rem;
+    overflow-y: auto;
+}
+
+[id^="beaver-pane-"] .rt-dialog-title {
+    font-weight: 600;
+    font-size: 1rem;
+}
+
+[id^="beaver-pane-"] .rt-dialog-warning {
+    font-size: 0.875rem;
+    color: var(--tag-orange-secondary);
+}
+
+[id^="beaver-pane-"] .rt-dialog-error {
+    font-size: 0.875rem;
+    color: var(--tag-red-primary);
+}
+
+[id^="beaver-pane-"] .rt-dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+}
+
+[id^="beaver-pane-"] .rt-existing-answers {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin: 0;
+    padding: 0.75rem;
+    border: 0;
+    border-radius: 9px;
+    background: var(--fill-senary);
+    box-shadow: inset 0 0 0 1px var(--fill-quinary);
+}
+
+[id^="beaver-pane-"] .rt-existing-legend {
+    float: left;
+    padding: 0;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--fill-secondary);
+}
+
+[id^="beaver-pane-"] .rt-existing-answers > label {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    clear: both;
+}
+
+[id^="beaver-pane-"] .rt-existing-answers > label > span {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+[id^="beaver-pane-"] .rt-hint {
+    font-size: 0.8125rem;
+    color: var(--fill-secondary);
+}
+
+/* Choose document…: the paper's readable attachments, one to read the row from. */
+[id^="beaver-pane-"] .rt-document-chooser .rt-dialog-title {
+    font-size: 1.15rem;
+}
+
+[id^="beaver-pane-"] .rt-document-paper {
+    margin-top: -0.45rem;
+    line-height: 1.4;
+    color: var(--fill-secondary);
+}
+
+[id^="beaver-pane-"] .rt-document-choices {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    padding: 0.35rem;
+    border-radius: 9px;
+    background: var(--fill-senary);
+    box-shadow: inset 0 0 0 1px var(--fill-quinary);
+}
+
+[id^="beaver-pane-"] .rt-document-choice {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-height: 2rem;
+    padding: 0 0.4rem;
+    border-radius: 6px;
+}
+
+[id^="beaver-pane-"] .rt-document-choice:hover {
+    background: var(--fill-quinary);
+}
+
+[id^="beaver-pane-"] .rt-document-choice-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 0.35rem 0;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+}
+
+/* The Fill menu's closing note. */
+[id^="beaver-pane-"] .bt-fill-menu-note {
+    display: block;
+    font-size: 0.8125rem;
+    line-height: 1.3;
+    white-space: normal;
+    color: var(--fill-secondary);
+}
+
+[id^="beaver-pane-"] .bt-fill-actions-gap {
+    flex: 1 1 auto;
+}
+
+[id^="beaver-pane-"] .rt-add-papers,
+[id^="beaver-pane-"] .rt-sources-add-menu,
+[id^="beaver-pane-"] .rt-selection-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    height: 2.15rem;
+    padding: 0 0.7rem;
+    border: 1px solid var(--color-border50);
+    border-radius: 0.55rem;
+    background: transparent;
+    color: var(--fill-primary);
+    font: inherit;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+[id^="beaver-pane-"] .rt-add-papers:hover:not(:disabled),
+[id^="beaver-pane-"] .rt-sources-add-menu:hover:not(:disabled),
+[id^="beaver-pane-"] .rt-selection-action:hover:not(:disabled) {
+    background: var(--fill-quinary);
+}
+
+[id^="beaver-pane-"] .rt-add-papers:disabled,
+[id^="beaver-pane-"] .rt-sources-add-menu:disabled,
+[id^="beaver-pane-"] .rt-selection-action:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+[id^="beaver-pane-"] .rt-selection-remove {
+    color: var(--tag-red-primary);
+}
+
+[id^="beaver-pane-"] .rt-sources {
+    display: flex;
+    flex-direction: column;
+    font-size: 0.92rem;
+}
+
+[id^="beaver-pane-"] .rt-sources-heading {
+    padding: 0.75rem 0.9rem 0.35rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--fill-secondary);
+}
+
+[id^="beaver-pane-"] .rt-sources-removed-heading {
+    margin: 0.4rem 0.9rem 0;
+    padding: 0.6rem 0 0;
+    border-top: 1px solid var(--fill-quinary);
+}
+
+[id^="beaver-pane-"] .rt-sources-empty,
+[id^="beaver-pane-"] .rt-sources-note {
+    margin: 0.2rem 0.9rem 0.35rem;
+    color: var(--fill-secondary);
+}
+
+[id^="beaver-pane-"] .rt-source {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.6rem;
+    margin: 0 0.5rem;
+    padding: 0.6rem;
+    border-radius: 9px;
+}
+
+[id^="beaver-pane-"] .rt-source:hover {
+    background: var(--fill-senary);
+}
+
+[id^="beaver-pane-"] .rt-source-icon {
+    flex: 0 0 auto;
+    display: grid;
+    place-items: center;
+    width: 1.9rem;
+    height: 1.9rem;
+    border-radius: 7px;
+    background: var(--fill-quinary);
+    color: var(--fill-secondary);
+}
+
+[id^="beaver-pane-"] .rt-source-text {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+[id^="beaver-pane-"] .rt-source-name {
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+[id^="beaver-pane-"] .rt-source-line {
+    font-size: 0.85rem;
+    color: var(--fill-secondary);
+}
+
+[id^="beaver-pane-"] .rt-source-new {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-top: 0.35rem;
+}
+
+[id^="beaver-pane-"] .rt-source-new-count {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    height: 1.4rem;
+    padding: 0 0.5rem;
+    border-radius: 6px;
+    background: var(--tag-blue-quarternary);
+    color: var(--tag-blue-primary);
+    font-size: 0.85rem;
+}
+
+[id^="beaver-pane-"] .rt-source-add {
+    height: 1.4rem;
+    padding: 0 0.5rem;
+    border: 0;
+    border-radius: 6px;
+    background: var(--accent-blue);
+    color: #fff;
+    font: inherit;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+[id^="beaver-pane-"] .rt-removed-list {
+    display: flex;
+    flex-direction: column;
+    margin: 0 0.5rem;
+}
+
+[id^="beaver-pane-"] .rt-removed {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.35rem 0.4rem;
+}
+
+[id^="beaver-pane-"] .rt-removed-title {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+[id^="beaver-pane-"] .rt-removed-restore {
+    height: 1.55rem;
+    padding: 0 0.5rem;
+    border: 1px solid var(--color-border50);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--fill-primary);
+    font: inherit;
+    font-size: 0.85rem;
+    cursor: pointer;
+}
+
+[id^="beaver-pane-"] .rt-sources-footer {
+    margin-top: 0.5rem;
+    padding: 0.6rem 0.75rem;
+    border-top: 1px solid var(--fill-quinary);
+    background: var(--fill-senary);
+}
+
+[id^="beaver-pane-"] .rt-toast {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    min-width: 0;
+}
+
+[id^="beaver-pane-"] .rt-toast + * {
+    margin-top: 0.4rem;
+}
+
+[id^="beaver-pane-"] .rt-toast-text {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+[id^="beaver-pane-"] .rt-toast-action {
+    height: 1.6rem;
+    padding: 0 0.6rem;
+    border: 1px solid var(--color-border50);
+    border-radius: 6px;
+    background: var(--material-background);
+    color: var(--fill-primary);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+[id^="beaver-pane-"] .rt-toast-action:disabled {
+    opacity: 0.5;
+    cursor: default;
 }
 
 /* External records (PubMed, ClinicalTrials.gov): tags, facts, search header, details. */

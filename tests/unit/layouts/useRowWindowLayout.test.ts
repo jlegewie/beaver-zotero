@@ -19,7 +19,7 @@ let rowHeight = 80;
 function Harness({ layoutKey }: { layoutKey: string }) {
     const rootRef = React.useRef<HTMLDivElement | null>(null);
     const bodyRef = React.useRef<HTMLTableSectionElement | null>(null);
-    const win = useRowWindow({ enabled: true, rows, expandedRows: new Set(), rootRef, bodyRef, layoutKey });
+    const win = useRowWindow({ enabled: true, rows, rootRef, bodyRef, layoutKey });
     latest = win;
     return h('div', { ref: rootRef },
         h('table', null,

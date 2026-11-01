@@ -4,7 +4,7 @@ import { AgentRunStatus, ToolCallPart } from '@beaver/agent-core/agents/types';
 import { getToolCallStatusFromResult, toolResultAtom } from '@beaver/agent-core/run-state/atoms';
 import {
     AgentAction,
-    getAgentActionsByToolcallAtom,
+    agentActionsForToolcallAtom,
     isAnnotationAgentAction,
     isNoteAnnotationAgentAction,
     ackAgentActionsAtom,
@@ -37,7 +37,7 @@ import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import { inFlightProgressMessage } from './agentActionViewHelpers';
 import {
-    annotationAttachmentTitlesAtom,
+    annotationAttachmentTitleAtom,
     annotationBusyAtom,
     annotationPanelStateAtom,
     defaultAnnotationPanelState,
@@ -367,8 +367,11 @@ export const AnnotationToolCallView: React.FC<AnnotationToolCallViewProps> = ({ 
     const isError = status === 'error';
 
     // Get annotations from agent actions
-    const getAgentActionsByToolcall = useAtomValue(getAgentActionsByToolcallAtom);
-    const annotations = getAgentActionsByToolcall(toolCallId, isAnnotationAgentAction) as AnnotationAgentAction[];
+    const toolcallActions = useAtomValue(useMemo(() => agentActionsForToolcallAtom(toolCallId), [toolCallId]));
+    const annotations = useMemo(
+        () => toolcallActions.filter(isAnnotationAgentAction) as AnnotationAgentAction[],
+        [toolcallActions],
+    );
     const totalAnnotations = annotations.length;
 
     // Current reader state
@@ -392,8 +395,7 @@ export const AnnotationToolCallView: React.FC<AnnotationToolCallViewProps> = ({ 
     const { resultsVisible, isApplying: isApplyingAnnotations } = panelState;
     const busyStateMap = useAtomValue(annotationBusyAtom);
     const busyState = busyStateMap[toolCallId] ?? {};
-    const attachmentTitleMap = useAtomValue(annotationAttachmentTitlesAtom);
-    const attachmentTitle = attachmentTitleMap[toolCallId] ?? null;
+    const attachmentTitle = useAtomValue(useMemo(() => annotationAttachmentTitleAtom(toolCallId), [toolCallId]));
 
     // State management atoms
     const ackAgentActions = useSetAtom(ackAgentActionsAtom);
@@ -421,11 +423,12 @@ export const AnnotationToolCallView: React.FC<AnnotationToolCallViewProps> = ({ 
     const canToggleResults = isCompleted && hasAnnotationsToShow && !allErrors;
     const showApplyButton = isCompleted && (somePending || someErrors) && !isApplyingAnnotations && !readOnlyLibrary;
 
-    // Fetch attachment title
+    // Fetch attachment title. Keyed on the first annotation, the one it is read
+    // from: `annotations` is a new array on every render.
+    const firstAnnotation = annotations[0];
     useEffect(() => {
         const fetchTitle = async () => {
-            if (annotations.length === 0) return;
-            const firstAnnotation = annotations[0];
+            if (!firstAnnotation) return;
             const resolved = await resolveItemReference({
                 library_ref: firstAnnotation.proposed_data.library_ref,
                 library_id: firstAnnotation.proposed_data.library_id,
@@ -436,10 +439,10 @@ export const AnnotationToolCallView: React.FC<AnnotationToolCallViewProps> = ({ 
                 setAnnotationAttachmentTitle({ key: toolCallId, title });
             }
         };
-        if (!attachmentTitle && annotations.length > 0) {
+        if (!attachmentTitle) {
             fetchTitle();
         }
-    }, [annotations, attachmentTitle, toolCallId, setAnnotationAttachmentTitle]);
+    }, [firstAnnotation, attachmentTitle, toolCallId, setAnnotationAttachmentTitle]);
 
     // Toggle visibility
     const toggleResults = useCallback(() => {

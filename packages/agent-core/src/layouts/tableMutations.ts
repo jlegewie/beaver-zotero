@@ -30,6 +30,7 @@
  */
 
 import {
+    MODEL_COLUMN_TYPES,
     validateTableSpec,
     normalizeSelectLabel,
     isExtractionColumn,
@@ -57,10 +58,12 @@ import {
     type Column,
     type ColumnRole,
     type ColumnType,
+    type ReplacedCell,
     type Row,
     type RowFailure,
     type SelectColor,
     type SelectOption,
+    type SourceEntry,
     type TableCapabilities,
     type TableCostEstimate,
     type TableSort,
@@ -75,6 +78,8 @@ import {
 export interface AddColumnsMutation {
     op: "add_columns";
     columns: Column[];
+    /** Inserts the columns after this column; absent, at the end. */
+    after?: string | null;
 }
 
 /**
@@ -86,6 +91,11 @@ export interface UpdateColumnOption {
     label: string;
     color?: SelectColor;
     description?: string | null;
+    /**
+     * Renames that option: every cell holding the old label (and every
+     * `replaced` holding it) is relabelled, without staleness.
+     */
+    previous_label?: string | null;
 }
 
 /**
@@ -100,9 +110,23 @@ export interface UpdateColumnMutation {
     column: string;
     header?: string;
     description?: string | null;
-    /** Add-only: the list may re-spell and append, never drop a label in use. */
+    /**
+     * The full new option list. An option with `previous_label` renames that
+     * option; an option the list drops is removed, and the cells holding it
+     * are deleted (user cells included).
+     */
     options?: UpdateColumnOption[] | null;
     priority?: "primary" | "secondary" | null;
+    /**
+     * A new type (the user's change only): every cell of the column is
+     * deleted, since a value's kind must equal the column type.
+     */
+    type?: ColumnType;
+    /**
+     * `refill` marks the column's cells stale whatever changed; `keep` leaves
+     * them fresh whatever changed. Absent, the question hash decides.
+     */
+    existing_answers?: "keep" | "refill" | null;
 }
 
 /** Removes columns and every cell under them. */
@@ -122,6 +146,22 @@ export interface RemoveRowsMutation {
     op: "remove_rows";
     /** Row ids. */
     rows: string[];
+    /**
+     * When set, the rows' papers are remembered in `removed` with this time:
+     * a removal by choice, which a refreshed source leaves out.
+     */
+    removed_at?: string | null;
+}
+
+/**
+ * Resets a user cell: restores the model cell it replaced, with its `stale`
+ * flag, when that still fits the column (its type, a label still among the
+ * options); otherwise deletes the cell, which is pending again.
+ */
+export interface RestoreCellMutation {
+    op: "restore_cell";
+    row: string;
+    column: string;
 }
 
 /** One cell write, addressed by row id and column id. */
@@ -193,6 +233,15 @@ export interface SetMetaMutation {
     cost_estimate?: TableCostEstimate | null;
 }
 
+/**
+ * Adds source entries. An entry whose id the table has already is an items
+ * entry growing: its ids are appended (each once). Library entries are new.
+ */
+export interface AddSourcesMutation {
+    op: "add_sources";
+    sources: SourceEntry[];
+}
+
 /** Drops source entries and the rows whose only origin they are. */
 export interface RemoveSourcesMutation {
     op: "remove_sources";
@@ -209,7 +258,9 @@ export type TableMutation =
     | SetCellsMutation
     | UpdateRowMutation
     | SetMetaMutation
-    | RemoveSourcesMutation;
+    | AddSourcesMutation
+    | RemoveSourcesMutation
+    | RestoreCellMutation;
 
 export type ApplyErrorCode =
     /** A column id that is not in the table. */
@@ -251,8 +302,28 @@ export interface SkippedCell {
     reason: SkipReason;
 }
 
+/**
+ * What one mutation did to the cells and rows, for a change list. Only the
+ * counts a mutation can move are set.
+ */
+export interface MutationReport {
+    /** `update_column` asked a new question (by {@link questionHash}). */
+    question_changed?: true;
+    /** Cells marked out of date. */
+    stale?: number;
+    /** Cells deleted; of them, the user's. */
+    cleared?: number;
+    user_cleared?: number;
+    /** Cells relabelled by an option rename. */
+    relabelled?: number;
+    rows_added?: number;
+    rows_removed?: number;
+    /** Added rows whose paper had been removed before. */
+    rows_restored?: number;
+}
+
 export type ApplyResult =
-    | { ok: true; spec: TableSpec; skipped: SkippedCell[] }
+    | { ok: true; spec: TableSpec; skipped: SkippedCell[]; reports: MutationReport[] }
     | { ok: false; error: ApplyError };
 
 type Failure = Extract<ApplyResult, { ok: false }>;
@@ -281,9 +352,11 @@ interface Draft {
     columnIndex: Map<string, number>;
     rowIndex: Map<string, number>;
     skipped: SkippedCell[];
+    /** The report of the mutation being applied. */
+    report: MutationReport;
     /**
-     * `set_cells` and `update_row` skip writes to a removed row or column (the
-     * provider `edit`).
+     * `set_cells` and `update_row` skip writes to a removed row or column (a
+     * fill's commits).
      */
     skipMissing: boolean;
 }
@@ -304,6 +377,7 @@ function draftOf(spec: TableSpec, skipMissing = false): Draft {
         columnIndex: indexById(spec.columns),
         rowIndex: indexById(spec.rows),
         skipped: [],
+        report: {},
         skipMissing,
     };
 }
@@ -406,9 +480,12 @@ export function applyMutations(
 ): ApplyResult {
     const draft = draftOf(spec, options.skipMissing === true);
     const before = { rows: spec.rows.length, columns: modelColumnCount(spec) };
+    const reports: MutationReport[] = [];
     for (const mutation of mutations) {
+        draft.report = {};
         const failure = applyOne(draft, mutation);
         if (failure) return failure;
+        reports.push(draft.report);
     }
     const invalid = validateTableSpec(draft.spec).find((issue) =>
         WRITE_BLOCKING_ISSUES.has(issue.code),
@@ -416,7 +493,7 @@ export function applyMutations(
     if (invalid) return fail("invalid_mutation", invalid.message);
     const tooLarge = capacityFailure(spec, draft.spec, before);
     if (tooLarge) return tooLarge;
-    return { ok: true, spec: draft.spec, skipped: draft.skipped };
+    return { ok: true, spec: draft.spec, skipped: draft.skipped, reports };
 }
 
 /** Refuses a batch that grows the table past a limit; shrinking is always allowed. */
@@ -494,8 +571,12 @@ function applyOne(draft: Draft, mutation: TableMutation): Failure | undefined {
             return updateRow(draft, mutation);
         case "set_meta":
             return setMeta(draft, mutation);
+        case "add_sources":
+            return addSources(draft, mutation);
         case "remove_sources":
             return removeSources(draft, mutation);
+        case "restore_cell":
+            return restoreCell(draft, mutation);
         default:
             return fail(
                 "invalid_mutation",
@@ -508,6 +589,13 @@ function addColumns(
     draft: Draft,
     mutation: AddColumnsMutation,
 ): Failure | undefined {
+    let insertAt: number | undefined;
+    if (mutation.after != null) {
+        insertAt = draft.columnIndex.get(mutation.after);
+        if (insertAt === undefined)
+            return fail("unknown_column", `add_columns: column "${mutation.after}" does not exist`);
+        insertAt += 1;
+    }
     for (const column of mutation.columns) {
         if (!column?.id) {
             return fail("invalid_mutation", "add_columns: a column has no id");
@@ -530,11 +618,18 @@ function addColumns(
             : undefined;
         if (isFailure(options)) return options;
         const columns = columnsOf(draft);
-        draft.columnIndex.set(column.id, columns.length);
         // Copied so a caller that keeps editing its own object cannot reach
         // into the spec it just produced.
         draft.ownColumns.add(column.id);
-        columns.push(options ? { ...column, options } : { ...column });
+        const copy = options ? { ...column, options } : { ...column };
+        if (insertAt === undefined) {
+            draft.columnIndex.set(column.id, columns.length);
+            columns.push(copy);
+        } else {
+            columns.splice(insertAt, 0, copy);
+            insertAt += 1;
+            draft.columnIndex = indexById(columns);
+        }
     }
     return undefined;
 }
@@ -715,45 +810,29 @@ function cleanDefinitions(
     return cleaned;
 }
 
-/** Every select label the cells of `columnId` hold, in row order, with repeats. */
-function* selectLabels(draft: Draft, columnId: string): Generator<string> {
-    for (const row of draft.spec.rows) {
-        const value = row.cells[columnId]?.value;
-        if (value?.kind === "select") yield value.label;
-    }
-}
-
-/** An accepted `update_column.options`: the new list, and the cells it re-spells. */
+/** An accepted `update_column.options`: the new list, and how old labels map onto it. */
 interface OptionsPlan {
     options: SelectOption[];
-    /** Old spelling → new spelling, for the labels whose wording moved. */
-    respell: Map<string, string>;
+    /**
+     * Normalised old label → the new label it becomes (itself, a
+     * re-spelling or a rename). A label missing here was removed.
+     */
+    labels: Map<string, string>;
 }
 
 /**
  * What an `options` update would do, or why it is refused.
  *
- * Options are **add-only**: the two lists are paired by
- * {@link normalizeSelectLabel}, so the update may re-spell a label it already
- * has and append ones it does not, but a label the cells still hold has to
- * survive it. What survives is the invariant every renderer leans on: after any
- * mutation, every cell's label is one of its column's options.
+ * `incoming` is the full new list. Each option is paired with an old one by
+ * `previous_label` (a rename) or else by {@link normalizeSelectLabel} (the
+ * same category, maybe re-spelled); it keeps that option's colour and, when
+ * it is sent without one, its definition. An old option nothing pairs with is
+ * removed: the cells holding it are cleared by {@link applyOptions}.
  */
 function planOptions(
-    draft: Draft,
     column: Column,
     incoming: UpdateColumnOption[],
 ): OptionsPlan | Failure {
-    // The colours the update keeps, known before the first new label is given
-    // one: a label further down the list that holds on to blue must not have
-    // blue handed to a new category above it.
-    const reserved = new Set<SelectColor>();
-    for (const option of incoming) {
-        const color =
-            option.color ?? optionFor(column.options, option.label)?.color;
-        if (color) reserved.add(color);
-    }
-
     const clash = duplicateOptionLabels(incoming);
     if (clash) {
         return fail(
@@ -761,73 +840,134 @@ function planOptions(
             `update_column: column "${column.id}" lists "${clash[0]}" and "${clash[1]}" as two options, which are one label`,
         );
     }
-
-    const planned: UpdateColumnOption[] = [];
+    const sources: (SelectOption | undefined)[] = [];
+    const paired = new Set<SelectOption>();
     for (const option of incoming) {
-        // A label the column already has keeps the colour it had, so
-        // re-spelling one does not repaint the table.
-        const previous = optionFor(column.options, option.label);
-        const color =
-            option.color ??
-            previous?.color ??
-            nextSelectColor(planned, reserved);
-        const next: UpdateColumnOption = color
-            ? { label: option.label, color }
-            : { label: option.label };
+        if (option.previous_label != null) {
+            const source = optionFor(column.options, option.previous_label);
+            if (!source) {
+                return fail(
+                    "invalid_mutation",
+                    `update_column: column "${column.id}" has no option "${option.previous_label}" to rename`,
+                );
+            }
+            if (paired.has(source)) {
+                return fail(
+                    "invalid_mutation",
+                    `update_column: column "${column.id}" renames "${source.label}" twice`,
+                );
+            }
+            paired.add(source);
+            sources.push(source);
+        } else {
+            sources.push(undefined);
+        }
+    }
+    incoming.forEach((option, at) => {
+        if (sources[at]) return;
+        const same = optionFor(column.options, option.label);
+        if (same && !paired.has(same)) {
+            paired.add(same);
+            sources[at] = same;
+        }
+    });
+
+    // The colours the update keeps, known before the first new label is given
+    // one: a label further down the list that holds on to blue must not have
+    // blue handed to a new category above it.
+    const reserved = new Set<SelectColor>();
+    incoming.forEach((option, at) => {
+        const color = option.color ?? sources[at]?.color;
+        if (color) reserved.add(color);
+    });
+    const planned: UpdateColumnOption[] = [];
+    incoming.forEach((option, at) => {
+        const previous = sources[at];
+        const color = option.color ?? previous?.color ?? nextSelectColor(planned, reserved);
+        const next: UpdateColumnOption = color ? { label: option.label, color } : { label: option.label };
         // An option sent without a definition keeps the one it had.
-        const description =
-            "description" in option ? option.description : previous?.description;
+        const description = "description" in option ? option.description : previous?.description;
         if (description != null) next.description = description;
         planned.push(next);
-    }
+    });
     const options = cleanDefinitions("update_column", column.id, planned);
     if (isFailure(options)) return options;
-    const byKey = new Map<string, SelectOption>();
-    for (const option of options)
-        byKey.set(normalizeSelectLabel(option.label), option);
+    const labels = new Map<string, string>();
+    incoming.forEach((_, at) => {
+        const source = sources[at];
+        if (source) labels.set(normalizeSelectLabel(source.label), options[at].label);
+    });
+    return { options, labels };
+}
 
-    const dropped = new Set<string>();
-    const respell = new Map<string, string>();
-    for (const label of selectLabels(draft, column.id)) {
-        const option = byKey.get(normalizeSelectLabel(label));
-        if (!option) dropped.add(label);
-        else if (option.label !== label) respell.set(label, option.label);
-    }
-    if (dropped.size > 0) {
-        const labels = [...dropped].map((label) => `"${label}"`).join(", ");
-        return fail(
-            "invalid_mutation",
-            `update_column: options for column "${column.id}" would drop ${labels}, which its cells still use; a narrower vocabulary is a new column`,
-        );
-    }
-    return { options, respell };
+/** The label a cell value holds after an options plan, or null when its option was removed. */
+function plannedLabel(plan: OptionsPlan, label: string): string | null {
+    return plan.labels.get(normalizeSelectLabel(label)) ?? null;
 }
 
 /**
- * Writes an accepted plan: the new option list, and the cells whose label was
- * only re-worded. Re-spelling does **not** set `stale` — the question did not
- * change, only how its answer is written down.
+ * Writes an accepted plan: the new option list; cells whose option was
+ * renamed or re-spelled are relabelled, without staleness (the question did
+ * not change, only how its answer is written down), and so is a `replaced`
+ * holding it; cells whose option was removed are deleted, user cells
+ * included, and a `replaced` holding one is dropped.
  */
 function applyOptions(draft: Draft, column: Column, plan: OptionsPlan): void {
     column.options = plan.options;
-    if (plan.respell.size === 0) return;
     for (const row of draft.spec.rows) {
-        const value = row.cells[column.id]?.value;
-        if (value?.kind !== "select") continue;
-        const label = plan.respell.get(value.label);
-        if (label === undefined) continue;
-        const writable = writableRow(draft, row.id);
-        if (!writable) continue;
-        writable.cells[column.id] = {
-            ...(writable.cells[column.id] as AnsweredCell),
-            value: { ...value, label },
-        };
+        const cell = row.cells[column.id];
+        if (!cell) continue;
+        let next: Cell | null = cell;
+        const value = cell.value;
+        if (value?.kind === "select") {
+            const label = plannedLabel(plan, value.label);
+            if (label === null) next = null;
+            else if (label !== value.label) {
+                next = { ...cell, value: { ...value, label } } as Cell;
+                draft.report.relabelled = (draft.report.relabelled ?? 0) + 1;
+            }
+        }
+        const replaced = next?.replaced;
+        if (next && replaced?.value?.kind === "select") {
+            const label = plannedLabel(plan, replaced.value.label);
+            if (label === null) {
+                const { replaced: _dropped, ...rest } = next;
+                next = rest as Cell;
+            } else if (label !== replaced.value.label) {
+                next = { ...next, replaced: { ...replaced, value: { ...replaced.value, label } } } as Cell;
+            }
+        }
+        if (next === cell) continue;
+        const writable = writableRow(draft, row.id)!;
+        if (next === null) {
+            delete writable.cells[column.id];
+            draft.report.cleared = (draft.report.cleared ?? 0) + 1;
+            if (cell.provenance === "user") draft.report.user_cleared = (draft.report.user_cleared ?? 0) + 1;
+        } else {
+            writable.cells[column.id] = next;
+        }
     }
 }
 
 // ---------------------------------------------------------------------------
 // Columns
 // ---------------------------------------------------------------------------
+
+/**
+ * The column as its question read before an options plan, with only the
+ * plan's renames applied: a removed option stays, so removing a defined
+ * category still changes the question.
+ */
+function renamedColumn(column: Column, plan: OptionsPlan | undefined): Column {
+    if (!plan || !column.options) return column;
+    return {
+        ...column,
+        options: column.options.map((option) => {
+            const label = plannedLabel(plan, option.label);
+            return label === null ? option : { ...option, label };
+        }),
+    };
+}
 
 function updateColumn(
     draft: Draft,
@@ -846,57 +986,119 @@ function updateColumn(
             `update_column: column "${column.id}": header must be a string`,
         );
     }
+    if (
+        mutation.existing_answers != null &&
+        mutation.existing_answers !== "keep" &&
+        mutation.existing_answers !== "refill"
+    ) {
+        return fail(
+            "invalid_mutation",
+            `update_column: column "${column.id}": existing_answers is keep or refill`,
+        );
+    }
+    const typeChange = mutation.type !== undefined && mutation.type !== column.type;
+    if (typeChange && (column.system || !MODEL_COLUMN_TYPES.includes(mutation.type!))) {
+        return fail(
+            "invalid_mutation",
+            `update_column: column "${column.id}" cannot become a ${mutation.type} column`,
+        );
+    }
+    const type = typeChange ? mutation.type! : column.type;
 
-    // Planned before anything is written, so a refused options update leaves
-    // the column and its cells exactly as they were.
+    // Planned before anything is written, so a refused update leaves the
+    // column and its cells exactly as they were.
     let options: OptionsPlan | undefined;
     if (mutation.options != null) {
-        const planned = planOptions(draft, column, mutation.options);
-        if (isFailure(planned)) return planned;
-        options = planned;
-    } else if (mutation.options === null) {
-        const used = [...selectLabels(draft, column.id)];
-        if (used.length) {
+        if (type !== "select") {
             return fail(
                 "invalid_mutation",
-                `update_column: options for column "${column.id}" would drop "${used[0]}", which its cells still use; a narrower vocabulary is a new column`,
+                `update_column: column "${column.id}": only select columns have options`,
+            );
+        }
+        const planned = planOptions(typeChange ? { ...column, options: [] } : column, mutation.options);
+        if (isFailure(planned)) return planned;
+        options = planned;
+    } else if (mutation.options === null || (typeChange && type !== "select")) {
+        if (!typeChange && [...selectLabels(draft, column.id)].length) {
+            return fail(
+                "invalid_mutation",
+                `update_column: options for column "${column.id}" would drop labels its cells still use; remove the options one by one`,
             );
         }
     }
+    if (typeChange && type === "select" && !options) {
+        return fail(
+            "invalid_mutation",
+            `update_column: column "${column.id}": a select column lists its options`,
+        );
+    }
 
-    const question = questionHash(column);
-    const vocabulary = optionVocabulary(column);
+    const before = { ...column };
+    const question = questionHash(renamedColumn(before, options));
+    const vocabulary = optionVocabulary(before);
 
+    if (typeChange) {
+        // A value's kind must equal the column type: every answer goes, and
+        // the column is pending again.
+        column.type = type;
+        for (const row of draft.spec.rows) {
+            const cell = row.cells[column.id];
+            if (!cell) continue;
+            const writable = writableRow(draft, row.id)!;
+            delete writable.cells[column.id];
+            draft.report.cleared = (draft.report.cleared ?? 0) + 1;
+            if (cell.provenance === "user") draft.report.user_cleared = (draft.report.user_cleared ?? 0) + 1;
+        }
+    }
     if (mutation.header !== undefined) column.header = mutation.header;
     if (mutation.description !== undefined)
         setOptional(column, "description", mutation.description);
     if (options) applyOptions(draft, column, options);
-    else if (mutation.options === null) setOptional(column, "options", null);
+    else if (mutation.options === null || (typeChange && type !== "select")) delete column.options;
     if (mutation.priority !== undefined)
         setOptional(column, "priority", mutation.priority);
 
     // A write planned against the column before this change no longer
-    // lands: its question, or a label it may write, moved.
+    // lands: its type, its question or a label it may write moved.
     const questionChanged = questionHash(column) !== question;
-    if (questionChanged || optionVocabulary(column) !== vocabulary)
+    if (questionChanged) draft.report.question_changed = true;
+    const refill = mutation.existing_answers === "refill";
+    if (
+        typeChange ||
+        refill ||
+        questionHash(column) !== questionHash(before) ||
+        optionVocabulary(column) !== vocabulary
+    )
         column.revision = (column.revision ?? 0) + 1;
 
     // The answers under the column were given to the previous question (its
     // description or an option definition), so they are marked rather than
     // dropped: the value is still the best thing anyone has until the column
-    // is re-run. A header, colour or re-spelling is not a new question.
-    if (questionChanged) {
+    // is filled again. A user cell is marked too ("the question changed
+    // after your edit"), and so is the model answer it replaced; no fill
+    // selects a user cell. A header, colour, re-spelling or rename is not a
+    // new question; `keep` and `refill` override the hash.
+    const stale = refill || (questionChanged && mutation.existing_answers !== "keep");
+    if (stale) {
         for (const row of draft.spec.rows) {
-            if (!row.cells[column.id]) continue;
-            const writable = writableRow(draft, row.id);
-            if (!writable) continue;
-            writable.cells[column.id] = {
-                ...writable.cells[column.id],
-                stale: true,
-            };
+            const cell = row.cells[column.id];
+            if (!cell) continue;
+            const writable = writableRow(draft, row.id)!;
+            const next = { ...cell, stale: true } as Cell;
+            if (cell.replaced) next.replaced = { ...cell.replaced, stale: true };
+            writable.cells[column.id] = next;
+            draft.report.stale = (draft.report.stale ?? 0) + 1;
         }
     }
     return undefined;
+}
+
+/** Every select label the cells of `columnId` hold, in row order, with repeats. */
+function* selectLabels(draft: Draft, columnId: string): Generator<string> {
+    for (const row of draft.spec.rows) {
+        const value = row.cells[columnId]?.value;
+        if (value?.kind === "select") yield value.label;
+    }
 }
 
 /**
@@ -974,7 +1176,13 @@ function removeColumns(
         if (!Object.keys(row.cells).some((id) => doomed.has(id))) continue;
         const writable = writableRow(draft, row.id);
         if (!writable) continue;
-        for (const id of doomed) delete writable.cells[id];
+        for (const id of doomed) {
+            const cell = writable.cells[id];
+            if (!cell) continue;
+            draft.report.cleared = (draft.report.cleared ?? 0) + 1;
+            if (cell.provenance === "user") draft.report.user_cleared = (draft.report.user_cleared ?? 0) + 1;
+            delete writable.cells[id];
+        }
     }
 
     // A sort or an anchor pointing at a column that no longer exists would make
@@ -1036,8 +1244,26 @@ function addRows(draft: Draft, mutation: AddRowsMutation): Failure | undefined {
         draft.rowIndex.set(incoming.id, rows.length);
         draft.ownRows.add(incoming.id);
         rows.push({ ...fields, cells });
+        draft.report.rows_added = (draft.report.rows_added ?? 0) + 1;
+        // Adding a removed paper explicitly takes it off the removed list.
+        if (incoming.ref && draft.spec.removed?.length) {
+            const key = paperKey(incoming.ref);
+            const kept = draft.spec.removed.filter((paper) => paperKey(paper.ref) !== key);
+            if (kept.length !== draft.spec.removed.length) {
+                draft.report.rows_restored = (draft.report.rows_restored ?? 0) + 1;
+                if (kept.length) draft.spec.removed = kept;
+                else delete draft.spec.removed;
+            }
+        }
     }
     return undefined;
+}
+
+/** What identifies a row's paper on the removed list. */
+export function paperKey(ref: NonNullable<Row["ref"]>): string {
+    return ref.kind === "external"
+        ? `external:${ref.source}:${ref.source_id}`
+        : `zotero:${ref.library_ref}:${ref.zotero_key}`;
 }
 
 /** Whether the row names its documents as none: an empty list or null. */
@@ -1161,8 +1387,23 @@ function removeRows(
     }
     if (doomed.size === 0) return undefined;
 
+    if (mutation.removed_at != null) {
+        if (typeof mutation.removed_at !== "string" || !mutation.removed_at)
+            return fail("invalid_mutation", "remove_rows: removed_at is a time");
+        const removed = [...(draft.spec.removed ?? [])];
+        const known = new Set(removed.map((paper) => paperKey(paper.ref)));
+        for (const row of draft.spec.rows) {
+            if (!doomed.has(row.id) || !row.ref) continue;
+            const key = paperKey(row.ref);
+            if (known.has(key)) continue;
+            known.add(key);
+            removed.push({ ref: { ...row.ref }, removed_at: mutation.removed_at });
+        }
+        if (removed.length) draft.spec.removed = removed;
+    }
     draft.spec.rows = rowsOf(draft).filter((r) => !doomed.has(r.id));
     draft.rowIndex = indexById(draft.spec.rows);
+    draft.report.rows_removed = doomed.size;
     return undefined;
 }
 
@@ -1283,11 +1524,79 @@ function setCells(
         const canonical = canonicalCell(
             draft,
             column,
-            write.cell as Cell,
+            withReplaced(write.cell as Cell, existing),
             `cell "${write.row}/${write.column}"`,
         );
         if (isFailure(canonical)) return canonical;
         row.cells[write.column] = canonical;
+    }
+    return undefined;
+}
+
+/**
+ * A user cell keeps the model cell it replaces (`replaced`, without its own
+ * `replaced`), so the evidence stays visible and Reset is free: written over
+ * a model answer or finding it takes that cell, written over another user
+ * cell it inherits that cell's `replaced`. A write that names its own
+ * `replaced` keeps it. Over the cell's byte caps (evidence and reasoning,
+ * counted with `replaced`), its evidence is dropped first, then the field.
+ */
+function withReplaced(cell: Cell, existing: Cell | undefined): Cell {
+    if (cell.provenance !== "user" || cell.outcome === "failed") return cell;
+    let replaced: ReplacedCell | undefined = cell.replaced;
+    if (replaced === undefined && existing && existing.outcome !== "failed") {
+        if (existing.provenance === "model" && (existing.outcome === "answered" || existing.outcome === "not_reported")) {
+            const { replaced: _nested, ...model } = existing;
+            replaced = model as ReplacedCell;
+        } else if (existing.provenance === "user") {
+            replaced = existing.replaced;
+        }
+    }
+    if (!replaced) return cell;
+    const fits = (candidate: ReplacedCell) =>
+        jsonBytes([...(cell.evidence ?? []), ...(candidate.evidence ?? [])]) <= MAX_EVIDENCE_BYTES &&
+        utf8Length((cell.reasoning ?? "") + (candidate.reasoning ?? "")) <= MAX_REASONING_BYTES;
+    if (!fits(replaced)) {
+        const { evidence: _evidence, ...lighter } = replaced;
+        if (!fits(lighter as ReplacedCell)) {
+            const { replaced: _gone, ...rest } = cell;
+            return rest as Cell;
+        }
+        replaced = lighter as ReplacedCell;
+    }
+    return { ...cell, replaced } as Cell;
+}
+
+/** Whether a stored model answer still fits a column: its value kind and select label. */
+function fitsColumn(column: Column, cell: ReplacedCell): boolean {
+    if (cell.outcome === "not_reported") return true;
+    const value = cell.value;
+    if (value?.kind !== column.type) return false;
+    if (value.kind === "select") return !!optionFor(column.options, value.label);
+    return true;
+}
+
+function restoreCell(draft: Draft, mutation: RestoreCellMutation): Failure | undefined {
+    const columnAt = draft.columnIndex.get(mutation.column);
+    if (columnAt === undefined)
+        return fail("unknown_column", `restore_cell: column "${mutation.column}" does not exist`);
+    if (!draft.rowIndex.has(mutation.row))
+        return fail("unknown_row", `restore_cell: row "${mutation.row}" does not exist`);
+    const column = draft.spec.columns[columnAt];
+    const cell = draft.spec.rows[draft.rowIndex.get(mutation.row)!].cells[mutation.column];
+    // Only a user cell is reset; anything else is already Beaver's.
+    if (!cell || cell.provenance !== "user") return undefined;
+    const row = writableRow(draft, mutation.row)!;
+    const replaced = cell.replaced;
+    if (replaced && fitsColumn(column, replaced)) {
+        const restored = { ...replaced } as Cell;
+        if (restored.value?.kind === "select") {
+            const option = optionFor(column.options, restored.value.label)!;
+            restored.value = { ...restored.value, label: option.label };
+        }
+        row.cells[mutation.column] = restored;
+    } else {
+        delete row.cells[mutation.column];
     }
     return undefined;
 }
@@ -1309,6 +1618,25 @@ function setMeta(draft: Draft, mutation: SetMetaMutation): Failure | undefined {
             "cost_estimate",
             copied(mutation.cost_estimate),
         );
+    return undefined;
+}
+
+function addSources(draft: Draft, mutation: AddSourcesMutation): Failure | undefined {
+    const sources = [...(draft.spec.sources ?? [])];
+    for (const entry of mutation.sources) {
+        if (!entry?.id || !entry.type)
+            return fail("invalid_mutation", "add_sources: an entry names its id and type");
+        const at = sources.findIndex((source) => source.id === entry.id);
+        if (at === -1) {
+            sources.push({ ...entry, ...(entry.ids ? { ids: [...new Set(entry.ids)] } : {}) });
+            continue;
+        }
+        const existing = sources[at];
+        if (existing.type !== "items" || entry.type !== "items")
+            return fail("invalid_mutation", `add_sources: source "${entry.id}" already exists`);
+        sources[at] = { ...existing, ids: [...new Set([...(existing.ids ?? []), ...(entry.ids ?? [])])] };
+    }
+    draft.spec.sources = sources;
     return undefined;
 }
 
@@ -1342,6 +1670,7 @@ function removeSources(
                 : { ...row, origin: remaining },
         );
     }
+    draft.report.rows_removed = draft.spec.rows.length - kept.length;
     draft.spec.rows = kept;
     draft.rowsCopied = true;
     draft.ownRows = new Set(

@@ -5,8 +5,9 @@ import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { AgentRunStatus } from '@beaver/agent-core/agents/types';
 import {
     AgentAction,
-    getAgentActionsByToolcallAtom,
-    pendingApprovalsAtom,
+    agentActionsForToolcallAtom,
+    noPendingApprovalsCoveredCountAtom,
+    pendingApprovalsCoveredByFullAccessCountAtom,
     removePendingApprovalAtom,
 } from '../../../agents/agentActions';
 import type { PendingApproval } from '@beaver/agent-ui/host';
@@ -19,7 +20,7 @@ import {
     sendApprovalResponseAtom,
 } from '../../../atoms/agentRunAtoms';
 import {
-    agentActionItemTitlesAtom,
+    agentActionItemTitleAtom,
     getAgentActionItemTitleKey,
     setAgentActionItemTitleAtom,
     toolExpandedAtom,
@@ -82,7 +83,6 @@ import { isStaleMergeProposal } from './mergeItemsErrors';
 import { ActionPreview } from './ActionPreview';
 import { useApprovalRecovery } from './useApprovalRecovery';
 import {
-    getPendingApprovalIdsCoveredByFullAccess,
     isCoveredByFullAccess,
     isFullAccessGrantedForRun,
     runApprovalPolicyAtom,
@@ -124,8 +124,11 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 }) => {
     const [isHovered, setIsHovered] = useState(false);
 
-    const getAgentActionsByToolcall = useAtomValue(getAgentActionsByToolcallAtom);
-    const actions = getAgentActionsByToolcall(toolcallId, (a) => a.run_id === runId);
+    const toolcallActions = useAtomValue(useMemo(() => agentActionsForToolcallAtom(toolcallId), [toolcallId]));
+    const actions = useMemo(
+        () => toolcallActions.filter((a) => a.run_id === runId),
+        [toolcallActions, runId],
+    );
     const action = actions.length > 0 ? actions[0] : null;
 
     const actionInFinalState = action && action.status !== 'pending';
@@ -151,11 +154,11 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         && runIsStreamable;
 
     const expansionKey = `${runId}:${responseIndex}:${toolcallId}`;
-    const expansionState = useAtomValue(toolExpandedAtom);
+    const storedExpanded = useAtomValue(useMemo(() => toolExpandedAtom(expansionKey), [expansionKey]));
     const setExpanded = useSetAtom(setToolExpandedAtom);
-    const hasExistingState = expansionState[expansionKey] !== undefined;
+    const hasExistingState = storedExpanded !== undefined;
     const neverAutoCollapse = NEVER_AUTO_COLLAPSE_TOOLS.has(toolName);
-    const isExpanded = expansionState[expansionKey] ?? (isAwaitingApproval || neverAutoCollapse);
+    const isExpanded = storedExpanded ?? (isAwaitingApproval || neverAutoCollapse);
 
     // The footer's buttons never wrap; when the row is too narrow for them,
     // the permission trigger drops to its icon.
@@ -190,18 +193,16 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const prevPendingApprovalRef = useRef<PendingApproval | null>(pendingApproval);
 
     const isRunPending = useAtomValue(isWSChatPendingAtom);
-    const approvalResponseIntents = useAtomValue(approvalResponseIntentsAtom);
     const isMultiAction = (toolName === 'create_items' || toolName === 'create_item') && actions.length > 1;
 
     const sendApprovalResponse = useSetAtom(sendApprovalResponseAtom);
     const setRunPermissionMode = useSetAtom(setRunPermissionModeAtom);
     const runApprovalPolicy = useAtomValue(runApprovalPolicyAtom);
     // How many cards a switch to full access would answer at once, so the menu
-    // row can say so before the user reaches for it.
-    const allPendingApprovals = useAtomValue(pendingApprovalsAtom);
-    const pendingCoveredCount = useMemo(
-        () => getPendingApprovalIdsCoveredByFullAccess(allPendingApprovals.values()).length,
-        [allPendingApprovals],
+    // row can say so before the user reaches for it. The row shows only while
+    // this card awaits approval, so only then does the count need following.
+    const pendingCoveredCount = useAtomValue(
+        isAwaitingApproval ? pendingApprovalsCoveredByFullAccessCountAtom : noPendingApprovalsCoveredCountAtom,
     );
     const removeApprovalResponseIntent = useSetAtom(removeApprovalResponseIntentAtom);
     const removePendingApproval = useSetAtom(removePendingApprovalAtom);
@@ -214,8 +215,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     // Shared with the terminal review row for this tool call. The run belongs
     // in the identity because continuation runs may reuse tool-call ids.
     const itemTitleKey = getAgentActionItemTitleKey(runId, toolcallId);
-    const itemTitleMap = useAtomValue(agentActionItemTitlesAtom);
-    const itemTitle = itemTitleMap[itemTitleKey] ?? null;
+    const itemTitle = useAtomValue(useMemo(() => agentActionItemTitleAtom(itemTitleKey), [itemTitleKey]));
     const setItemTitle = useSetAtom(setAgentActionItemTitleAtom);
 
     const hasAssociatedItem =
@@ -304,7 +304,10 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 
         if (wasAwaiting && isNoLongerAwaiting) {
             const previousActionId = previousPendingApproval.actionId;
-            const previousIntent = approvalResponseIntents.get(previousActionId);
+            // Read when the approval resolves rather than subscribed to: only
+            // this transition consults it, and a subscription would re-render
+            // every card in the thread whenever any approval is answered.
+            const previousIntent = jotaiStore.get(approvalResponseIntentsAtom).get(previousActionId);
 
             if (!isProcessingApproval && isRunPending && !hasToolReturn) {
                 setIsExternallyProcessing(true);
@@ -329,7 +332,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         isProcessingApproval,
         isRunPending,
         hasToolReturn,
-        approvalResponseIntents,
+        jotaiStore,
         removeApprovalResponseIntent,
         setProcessingApproval,
     ]);

@@ -6,6 +6,13 @@ import type {
     TableFillResult,
     TableFillWirePlan,
 } from "./tableFillProtocol";
+import type {
+    TableChange,
+    TableColumnDraft,
+    TableEditOperations,
+    TablePreview,
+    TableSourceEntryWire,
+} from "./tableEditProtocol";
 
 /** Historical identity observed in a message or tool result. */
 export interface TableReference {
@@ -124,6 +131,8 @@ export interface TableRecord {
     columns?: TableRecordColumn[] | null;
     summary: Partial<TableSummary>;
     changes?: Record<string, number>;
+    /** An `edit_table` call's change list, as the plugin applied it. */
+    edits?: TableChange[] | null;
     operation_id?: string | null;
     version?: number | null;
     saved?: boolean | null;
@@ -152,7 +161,12 @@ export interface ArtifactRequest {
     /** `create`: bare key of the collection the new table is filed into. */
     collection_key?: string | null;
     title?: string | null;
-    spec?: Record<string, unknown> | null;
+    /** `create`: the table's description. */
+    description?: string | null;
+    /** `preview` and `create`: the source entries as approved, with their ids. */
+    sources?: TableSourceEntryWire[] | null;
+    /** `apply_edit`: the edits of one `edit_table` call. */
+    operations?: TableEditOperations | null;
     meta?: {
         actor: "agent" | "user" | "system";
         run_id?: string | null;
@@ -160,17 +174,16 @@ export interface ArtifactRequest {
         change?: string | null;
     } | null;
     operation_id?: string | null;
-    expected_version?: number | null;
-    expected_sha256?: string | null;
     to_version?: number | null;
     thread_id?: string | null;
     run_ids?: string[] | null;
     /**
      * `fill_plan`: explicit row ids (every question cell of those rows) and
-     * question column ids; absent, the table's pending work.
+     * question column ids; absent, the table's pending work. `preview` and
+     * `create`: the new question columns.
      */
     rows?: string[] | null;
-    columns?: string[] | null;
+    columns?: string[] | TableColumnDraft[] | null;
     /** `fill`: the approved plan. */
     plan_id?: string | null;
     /** `fill`: the tool call that starts it; one tool call is one job. */
@@ -193,12 +206,6 @@ export interface ArtifactVersion {
     summary: TableSummary;
     sealed?: boolean;
     creation?: boolean;
-}
-export interface ArtifactOperationReceipt {
-    operation_id: string;
-    request_sha256: string;
-    version: number;
-    sha256: string;
 }
 export interface ArtifactItem {
     library_id: number;
@@ -235,15 +242,26 @@ export interface ArtifactResponse {
     versions?: ArtifactVersion[];
     items?: ArtifactListEntry[];
     zotero_item?: ArtifactItem;
-    operation?: ArtifactOperationReceipt;
+    /** `create` and `apply_edit`: the operation had already committed. */
     replayed?: boolean;
+    /**
+     * `apply_edit`: the version this call's edit committed and its hash, the
+     * identity an Undo of the edit must name. `version`/`sha256` describe the
+     * table now; the two differ only on a replay after later writes.
+     */
+    edit_version?: number;
+    edit_sha256?: string;
     saved?: boolean;
     outcome?: "unchanged" | "trimmed" | "trashed";
     trimmed_versions?: number[];
     trimmed_to?: number | null;
     retention_exhausted?: boolean;
-    /** The table's pending work beside `summary` (read, create, write, revert). */
+    /** The table's pending work beside `summary` (read, create, apply_edit, revert). */
     pending?: PendingWork;
+    /** `preview`. */
+    preview?: TablePreview;
+    /** `create` and `apply_edit`: what the write changed. */
+    changes?: TableChange[];
     /** `fill_plan`. */
     plan?: TableFillWirePlan;
     /** `fill`: `done` with `result`, or `running`; both with the job's id and progress. */
@@ -258,21 +276,12 @@ const contracts: Record<string, [string[], string[]]> = {
     list: [["keys"], ["kind", "thread_id"]],
     read: [["key"], []],
     versions: [["key"], []],
+    preview: [["sources"], ["columns"]],
     create: [
-        ["kind", "library_ref", "title", "spec", "meta", "operation_id"],
-        ["collection_key"],
+        ["kind", "library_ref", "title", "sources", "meta", "operation_id"],
+        ["collection_key", "description", "columns"],
     ],
-    write: [
-        [
-            "key",
-            "spec",
-            "meta",
-            "expected_version",
-            "expected_sha256",
-            "operation_id",
-        ],
-        [],
-    ],
+    apply_edit: [["key", "operations", "meta", "operation_id"], []],
     revert: [["key", "to_version", "meta"], []],
     trim: [["key", "thread_id", "run_ids"], []],
     delete: [["key"], []],
@@ -343,7 +352,9 @@ export function validateArtifactRequest(
     for (const name of ["thread_id", "operation_id", "plan_id", "tool_call_id"])
         if (raw[name] != null && !nonempty(raw[name])) return "invalid_request";
     if (raw.wait != null && typeof raw.wait !== "boolean") return "invalid_request";
-    for (const [name, max] of [["rows", 1000], ["columns", 30]] as const) {
+    const idLists: (readonly [string, number])[] =
+        raw.op === "fill_plan" ? [["rows", 1000], ["columns", 30]] : [["rows", 1000]];
+    for (const [name, max] of idLists) {
         const list = raw[name];
         if (
             list != null &&
@@ -355,16 +366,29 @@ export function validateArtifactRequest(
         )
             return "invalid_request";
     }
-    for (const name of ["expected_version", "to_version"])
+    if (
+        raw.op !== "fill_plan" &&
+        raw.columns != null &&
+        (!Array.isArray(raw.columns) || raw.columns.length > 30 || !raw.columns.every(object))
+    )
+        return "invalid_request";
+    if (raw.sources != null) {
         if (
-            raw[name] != null &&
-            (!Number.isSafeInteger(raw[name]) || (raw[name] as number) < 1)
+            !Array.isArray(raw.sources) ||
+            !raw.sources.length ||
+            raw.sources.length > 50 ||
+            !raw.sources.every((source) => object(source) && nonempty(source.id) && nonempty(source.type))
         )
             return "invalid_request";
+        const ids = raw.sources.map((source) => (source as { id: string }).id);
+        if (new Set(ids).size !== ids.length) return "invalid_request";
+    }
+    if (raw.operations != null && !object(raw.operations)) return "invalid_request";
+    if (raw.description != null && typeof raw.description !== "string")
+        return "invalid_request";
     if (
-        raw.expected_sha256 != null &&
-        (typeof raw.expected_sha256 !== "string" ||
-            !/^[a-f0-9]{64}$/.test(raw.expected_sha256))
+        raw.to_version != null &&
+        (!Number.isSafeInteger(raw.to_version) || (raw.to_version as number) < 1)
     )
         return "invalid_request";
     if (
@@ -374,7 +398,6 @@ export function validateArtifactRequest(
         return "invalid_request";
     if (raw.title != null && typeof raw.title !== "string")
         return "invalid_request";
-    if (raw.spec != null && !object(raw.spec)) return "invalid_request";
     if (raw.meta != null) {
         if (
             !object(raw.meta) ||

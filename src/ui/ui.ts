@@ -579,7 +579,7 @@ export class BeaverUIFactory {
                 if (isMacShortcut || isWindowsShortcut) {
                     ev.preventDefault();
                     const origin = (ev.target as HTMLElement)?.ownerDocument?.defaultView;
-                    void resolveChatWindow(origin).then(win => this.openBeaverWindow(undefined, win)).catch(Zotero.logError);
+                    void resolveChatWindow(origin).then(win => this.openBeaverWindow(win)).catch(Zotero.logError);
                 }
             }
         );
@@ -637,55 +637,26 @@ export class BeaverUIFactory {
         return undefined;
     }
 
-    /**
-     * Open Beaver in a separate window.
-     *
-     * `minSize` is for surfaces the window's default 450px cannot hold — a
-     * table needs room for its columns before it is worth looking at. It only
-     * ever grows the window: the width is `persist`ed, so a user who has sized
-     * this window keeps their size unless it is too small for what is about to
-     * be shown.
-     */
-    static openBeaverWindow(minSize?: { width?: number; height?: number }, origin?: Window, skipInitialSelection = false): Window {
+    /** Open Beaver in a separate window, or focus the one already open. */
+    static openBeaverWindow(origin?: Window, skipInitialSelection = false): Window {
         const existingWindow = this.findBeaverWindow();
         if (existingWindow) {
             if (skipInitialSelection) existingWindow.__beaverSkipInitialSelection = true;
-            this.growWindowTo(existingWindow, minSize);
             existingWindow.focus();
             Zotero.debug("Beaver: Focusing existing separate window");
             return existingWindow;
         }
 
         const mainWindow = origin ?? Zotero.getMainWindow();
-        const features = [
-            'chrome',
-            'resizable',
-            'centerscreen',
-            'dialog=false',
-            minSize?.width ? `width=${minSize.width}` : '',
-            minSize?.height ? `height=${minSize.height}` : '',
-        ]
-            .filter(Boolean)
-            .join(',');
-
         const opened = Services.ww.openWindow(
             (mainWindow ?? null) as any,
             'chrome://beaver/content/beaverWindow.xhtml',
             BEAVER_WINDOW_NAME,
-            features,
+            'chrome,resizable,centerscreen,dialog=false',
             null as any,
         ) as unknown as Window;
         opened.__beaverSkipInitialSelection = skipInitialSelection;
         if (Zotero.Beaver?.runtime) Zotero.Beaver.runtime.standaloneWindow = opened;
-        // A persisted width smaller than the feature string's is reapplied once
-        // the window's attributes load, so grow it again after that.
-        if (opened && minSize) {
-            opened.addEventListener(
-                'load',
-                () => this.growWindowTo(opened, minSize),
-                { once: true }
-            );
-        }
         Zotero.debug("Beaver: Opened separate window");
         return opened;
     }
@@ -701,7 +672,7 @@ export class BeaverUIFactory {
             generation === Zotero.Beaver.account?.getSnapshot().generation
         );
         if (!await allowed()) return { ok: false, reason: "thread_active", message: RESPONSE_FINISH_MESSAGE };
-        const win = this.openBeaverWindow(undefined, undefined, command === "open-chat");
+        const win = this.openBeaverWindow(undefined, command === "open-chat");
         if (!win)
             throw Object.assign(new Error("Beaver window unavailable"), {
                 code: "window_unavailable",
@@ -724,19 +695,6 @@ export class BeaverUIFactory {
             ...JSON.parse(JSON.stringify(payload)),
             windowId: win.__beaverRuntime.id,
         });
-    }
-
-    /** Grows a window to at least `minSize`, never shrinking it. */
-    private static growWindowTo(
-        win: Window,
-        minSize?: { width?: number; height?: number }
-    ): void {
-        if (!minSize) return;
-        const width = Math.max(win.outerWidth, minSize.width ?? 0);
-        const height = Math.max(win.outerHeight, minSize.height ?? 0);
-        if (width !== win.outerWidth || height !== win.outerHeight) {
-            win.resizeTo(width, height);
-        }
     }
 
     /**

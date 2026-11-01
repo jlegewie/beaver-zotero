@@ -162,6 +162,7 @@ import {
     clearAllPendingApprovalsAtom,
     recordUndeliveredActionsAtom,
     retryUnrecordedActionsNow,
+    resetAgentActionSelectorCaches,
 } from '../agents/agentActions';
 import {
     addPendingQuestionAtom,
@@ -3913,6 +3914,7 @@ export const clearThreadAtom = atom(null, (_get, set) => {
     set(citationsAtom, []);
     set(resetCitationMarkersAtom);  // Reset citation markers for cleared thread
     resetRunSelectorCaches();  // Drop scoped run selectors keyed by the cleared thread's runs
+    resetAgentActionSelectorCaches();  // ...and the action/approval selectors keyed by its tool calls
     set(clearWarningsAtom);
     // Clear pending questions so a reset never leaves the composer disabled
     // behind an unanswerable card (pending approvals are left as-is here).

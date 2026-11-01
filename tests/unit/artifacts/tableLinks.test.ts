@@ -71,35 +71,7 @@ describe('zoteroLinksFor', () => {
         ).toEqual({ reveal: 'zotero://select/library/items/BBB' });
     });
 
-    it('opens an attachment row itself', () => {
-        expect(
-            zoteroLinksFor(row({ kind: 'attachment', library_ref: 'u', library_id: LIBRARY_ID, zotero_key: 'FFF' }))
-        ).toEqual({
-            reveal: 'zotero://select/library/items/FFF',
-            open: 'zotero://open/library/items/FFF',
-        });
-    });
-
-    it('opens an annotation row in the reader on its attachment, and reveals its item', () => {
-        expect(
-            zoteroLinksFor(
-                row({
-                    kind: 'annotation',
-                    library_ref: 'u',
-                    library_id: LIBRARY_ID,
-                    zotero_key: 'ANN',
-                    attachment: { library_ref: 'u', library_id: LIBRARY_ID, zotero_key: 'FFF' },
-                    parent_item: { library_ref: 'u', library_id: LIBRARY_ID, zotero_key: 'AAA' },
-                })
-            )
-        ).toEqual({
-            reveal: 'zotero://select/library/items/AAA',
-            open: 'zotero://open/library/items/FFF?annotation=ANN',
-        });
-    });
-
     it('offers nothing a static document cannot do: import, or a file the host resolves', () => {
-        expect(zoteroLinksFor(row({ kind: 'file', ext_key: 'AB12CD34' }))).toEqual({});
         expect(
             zoteroLinksFor(
                 row({
@@ -110,7 +82,6 @@ describe('zoteroLinksFor', () => {
                 })
             )
         ).toEqual({});
-        expect(rowActionHref({ kind: 'open_external_file', ext_key: 'AB12CD34' })).toBeNull();
         expect(
             rowActionHref({ kind: 'open_item', ref: { library_ref: 'u', library_id: LIBRARY_ID, zotero_key: 'AAA' } })
         ).toBeNull();
@@ -211,7 +182,7 @@ describe('a citation into a group library', () => {
     });
 });
 
-describe('a stored table with rows of every kind', () => {
+describe('a stored table of items and external works', () => {
     it('draws each row the verbs it has links for, and asks for them once per row', () => {
         const spec: TableSpec = {
             id: 'demo',
@@ -219,7 +190,7 @@ describe('a stored table with rows of every kind', () => {
             columns: [{ id: 'note', header: 'Note', type: 'text' }],
             rows: [
                 row({ kind: 'item', library_ref: 'u', library_id: LIBRARY_ID, zotero_key: 'AAA' }, ['u-FFF']),
-                { ...row({ kind: 'file', ext_key: 'AB12CD34' }), id: 'file' },
+                row({ kind: 'external', source: 'openalex', source_id: 'W1' }),
             ].map((r, i) => ({ ...r, id: `r${i}` })),
         };
         const linksFor = vi.fn(zoteroLinksFor);

@@ -11,8 +11,8 @@ vi.mock("@beaver/agent-core/run-state/atoms", () => ({
     getToolCallStatusFromResult: () => "completed",
 }));
 vi.mock("../../../react/agents/agentActions", () => ({
-    getPendingApprovalForToolcallAtom: atom(() => () => null),
-    getAgentActionsByToolcallAtom: atom(() => () => []),
+    pendingApprovalForToolcallAtom: () => atom(null),
+    agentActionsForToolcallAtom: () => atom([]),
 }));
 vi.mock("../../../react/utils/toolCallLabelEnrich", () => ({
     resolveToolCallLabelEnrich: async () => null,
@@ -29,7 +29,7 @@ vi.mock("../../../react/components/agentRuns/ToolResultView", async (importOrigi
 }));
 
 import { ToolCallPartView } from "../../../react/components/agentRuns/ToolCallPartView";
-import { toolExpandedAtom } from "../../../react/atoms/messageUIState";
+import { setToolExpandedAtom } from "../../../react/atoms/messageUIState";
 import { setHost } from "@beaver/agent-ui/host";
 import type { ToolReturnPart } from "@beaver/agent-core/agents/types";
 
@@ -77,7 +77,7 @@ async function renderCard(view: unknown, toolName = "pubmed_search", expanded?: 
         content: { ok: true },
         metadata: { view },
     } as ToolReturnPart);
-    if (expanded !== undefined) store.set(toolExpandedAtom, { "run:0:call": expanded });
+    if (expanded !== undefined) store.set(setToolExpandedAtom, { key: "run:0:call", expanded });
     container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);

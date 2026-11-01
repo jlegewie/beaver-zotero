@@ -1,7 +1,7 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { logger } from '@beaver/agent-core/platform/logger';
-import { getAgentActionsByToolcallAtom } from '../../../../agents/agentActions';
+import { agentActionsByToolcallAtom } from '../../../../agents/agentActions';
 import {
     annotationPanelStateAtom,
     defaultAnnotationPanelState,
@@ -62,9 +62,11 @@ export const ChangesCard: React.FC<ChangesCardProps> = ({ runId, rows }) => {
     const rejectAgentActions = useSetAtom(rejectAgentActionsAtom);
     const setToolExpanded = useSetAtom(setToolExpandedAtom);
 
-    // The jotai getter this closure carries reads the store when it is called, so
-    // the bulk loop sees each tool call's status as of its turn, not of the click.
-    const getActionsByToolcall = useAtomValue(getAgentActionsByToolcallAtom);
+    // The bulk loop reads the store on each turn, so it sees each tool call's
+    // status as of that turn, not of the click. Read rather than subscribed to:
+    // only the click needs the actions, and a subscription would re-render the
+    // card on every agent action written anywhere in the thread.
+    const store = useStore();
 
     // Expansion lives in the global panel state so it survives pane switches and
     // the separate window, like the other action cards.
@@ -133,10 +135,8 @@ export const ChangesCard: React.FC<ChangesCardProps> = ({ runId, rows }) => {
                 // re-run a tool call another surface has since applied — or worse,
                 // re-create an item the user undone or rejected in the meantime.
                 const rowRunId = row.runId;
-                const actions = getActionsByToolcall(
-                    row.toolcallId,
-                    (action) => action.run_id === rowRunId && action.status === 'pending',
-                );
+                const actions = (store.get(agentActionsByToolcallAtom).get(row.toolcallId) ?? [])
+                    .filter((action) => action.run_id === rowRunId && action.status === 'pending');
                 if (actions.length === 0) continue;
 
                 try {
@@ -150,7 +150,7 @@ export const ChangesCard: React.FC<ChangesCardProps> = ({ runId, rows }) => {
         } finally {
             setIsBulkRunning(false);
         }
-    }, [applyAgentActions, getActionsByToolcall, hasWritingRow, isBulkRunning, rows]);
+    }, [applyAgentActions, hasWritingRow, isBulkRunning, rows, store]);
 
     const handleBulkReject = useCallback(() => {
         if (isBulkRunning || hasWritingRow) return;

@@ -25,6 +25,9 @@ import {
     itemsSource,
     librarySourceKey,
     mergeLine,
+    draftSourceEntries,
+    draftSourcesKey,
+    setDraftPreview,
     nextStep,
     overCapMessage,
     overCapSources,
@@ -58,12 +61,10 @@ import { ArrowLeftIcon } from '@beaver/agent-ui/icons';
 import Button from '@beaver/agent-ui/primitives/Button';
 import { isImeKeyEvent } from '@beaver/agent-ui/primitives/ime';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
-import type { ZoteroTag } from '@beaver/agent-core/types/zotero';
 import { getHost } from '@beaver/agent-ui/host';
 import { libraryRefForLibraryID, resolveLibraryRef, resolveObjectId } from '../../../../src/utils/libraryIdentity';
 import { tableFilesEditable } from '../../../../src/services/artifacts/tableItemIdentity';
 import { searchableLibraryIdsAtom } from '../../../atoms/profile';
-import type { MessageFiltersState } from '../../../atoms/messageComposition';
 import { selectCollection, selectTagFilter, selectView } from '../../../utils/selectItem';
 import {
     ArrowRightIcon,
@@ -79,9 +80,20 @@ import {
 } from '../../icons/icons';
 import AddSourcesMenu, { type AddSourcesTarget } from '../../ui/menus/AddSourcesMenu';
 import TableCardCostBlock, { useFillPricing } from './TableCardCost';
-import type { SourcesMenuEntries } from '../../ui/menus/hooks/useSourcesMenu';
 import { describeItems, resolveItems, resolveLibraryScope } from './liveSources';
-import { paperOf, portableItemId, rowForItem } from './cardItems';
+import { previewFacts } from '@beaver/agent-core/layouts/tableEdit';
+import type { SourceEntry } from '@beaver/agent-core/layouts/table';
+import { resolveSources } from '../../../../src/services/artifacts/tableSources';
+import {
+    NO_SEARCH_FILTERS,
+    TABLE_MENU_ENTRIES,
+    paperOf,
+    pickedCollectionScope,
+    pickedTagScope,
+    portableItemId,
+    rowForItem,
+    scopeMenuFilters,
+} from './cardItems';
 import AutoGrowTextarea from './AutoGrowTextarea';
 import TableCardDropZone from './TableCardDropZone';
 import TableCardStepper from './TableCardStepper';
@@ -96,7 +108,6 @@ const STEP_LABELS: Record<TableCardStep, string> = {
 };
 
 /** The card takes items, collections and tags; files, notes and whole libraries are not sources. */
-const MENU_ENTRIES: SourcesMenuEntries = { libraries: false, notes: false, files: false, scopeVerb: 'add' };
 
 const BLOCK_GAP = '0.85rem';
 
@@ -112,6 +123,8 @@ function stepHeadingCount(step: TableCardStep, count: number): string {
 
 /** Tries for a source's item lookup, and the base delay between them. */
 const MAX_LOOKUP_ATTEMPTS = 3;
+/** How long the sources must stay unchanged before the card previews them. */
+const PREVIEW_DELAY_MS = 400;
 const LOOKUP_RETRY_MS = 1000;
 
 export interface TableCardProps {
@@ -172,7 +185,6 @@ function resolutionKey(source: DraftSource): string {
 }
 
 /** "Add source" searches every library: the card's sources are not a search scope. */
-const NO_SEARCH_FILTERS: MessageFiltersState = { libraryIds: [], collectionIds: [], tagSelections: [] };
 
 /**
  * The table card: the proposed table, editable step by step, answered once.
@@ -386,6 +398,44 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
         });
     }, [items?.removed, rowsById]);
 
+    // Once the sources are edited, the plugin's own resolver previews them, as
+    // `create` will resolve them: the exact merge line and cost. Each preview
+    // lands only while the sources are still the ones it was made for.
+    useEffect(() => {
+        if (!draft.sourcesEdited) return;
+        const sourcesKey = draftSourcesKey(draft);
+        if (draft.preview?.sourcesKey === sourcesKey) return;
+        const entries = draftSourceEntries(draft);
+        if (!entries.length) return;
+        let cancelled = false;
+        const timer = setTimeout(() => {
+            resolveSources(entries as SourceEntry[])
+                .then((resolved) => {
+                    if (cancelled || !mounted.current) return;
+                    const facts = previewFacts(resolved);
+                    setDraft((prev) =>
+                        draftSourcesKey(prev) !== sourcesKey
+                            ? prev
+                            : setDraftPreview(prev, {
+                                  sourcesKey,
+                                  rows: facts.rows,
+                                  duplicates: facts.duplicates,
+                                  documents: facts.documents,
+                                  title_abstract: facts.title_abstract,
+                                  no_input: facts.no_input,
+                              }),
+                    );
+                })
+                .catch(() => {
+                    // Without a preview the card falls back to its own counts.
+                });
+        }, PREVIEW_DELAY_MS);
+        return () => {
+            cancelled = true;
+            clearTimeout(timer);
+        };
+    }, [draft.sourcesEdited, draft.sources, draft.preview, setDraft]);
+
     // "+ Source": the composer's Add Sources menu, writing to this card.
     const menuRef = useRef<AddSourcesMenuHandle | null>(null);
     const containerRef = useRef<HTMLDivElement | null>(null);
@@ -411,22 +461,7 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
         () => draft.sources.flatMap((source) => (source.scope ? [source.scope] : [])),
         [draft.sources],
     );
-    const filters = useMemo<MessageFiltersState>(() => {
-        const collectionIds: number[] = [];
-        const tagSelections: ZoteroTag[] = [];
-        for (const scope of libraryScopes) {
-            const libraryId = libraryIdOf(scope.library_ref);
-            if (!libraryId) continue;
-            if (scope.kind === 'collection' && scope.key) {
-                const collection = Zotero.Collections.getByLibraryAndKey(libraryId, scope.key) as Zotero.Collection | false;
-                if (collection) collectionIds.push(collection.id);
-            } else if (scope.kind === 'tag' && scope.tag) {
-                const id = Zotero.Tags.getID(scope.tag);
-                if (id) tagSelections.push({ id, tag: scope.tag, libraryId, type: 0, color: '' });
-            }
-        }
-        return { libraryIds: [], collectionIds, tagSelections };
-    }, [libraryScopes]);
+    const filters = useMemo(() => scopeMenuFilters(libraryScopes), [libraryScopes]);
 
     const toggleScope = useCallback((scope: TableCardLibraryScope) => {
         setDraft((prev) => {
@@ -465,17 +500,15 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
         searchFilters: NO_SEARCH_FILTERS,
         setFilters: () => {},
         pickCollection: (collectionId) => {
-            const collection = Zotero.Collections.get(collectionId) as Zotero.Collection | false;
-            const ref = collection ? libraryRefForLibraryID(collection.libraryID) : null;
-            if (collection && ref)
-                toggleScope({ kind: 'collection', library_ref: ref, key: collection.key, name: collection.name });
+            const scope = pickedCollectionScope(collectionId);
+            if (scope) toggleScope(scope);
         },
         pickTag: (tag) => {
-            const ref = libraryRefForLibraryID(tag.libraryId);
-            if (ref) toggleScope({ kind: 'tag', library_ref: ref, tag: tag.tag });
+            const scope = pickedTagScope(tag);
+            if (scope) toggleScope(scope);
         },
         attachFiles: () => {},
-        entries: MENU_ENTRIES,
+        entries: TABLE_MENU_ENTRIES,
     }), [isAttached, canAdd, asSourceItem, rowIdOf, filters, toggleScope, setDraft]);
 
     const menuPortalContainer = containerRef.current?.closest(

@@ -14,7 +14,6 @@ import {
     RESPONSE_FINISH_MESSAGE,
 } from "../../src/services/threads/finishedChat";
 
-import type { TableWindowSurface } from "../atoms/windowSurface";
 import {
     currentThreadIdAtom,
     activeRunAtom,
@@ -25,10 +24,6 @@ import {
 } from "../atoms/messageComposition";
 import { loadThreadAtom, threadNavigationSeqAtom } from "../atoms/threads";
 import { userIdAtom } from "../atoms/auth";
-import {
-    showTableInWindowAtom,
-    showThreadInWindowAtom,
-} from "../atoms/windowSurface";
 import { getHostWindow } from "./windowRuntime";
 import { store } from "../store";
 
@@ -115,18 +110,8 @@ function waitForSurface(win: Window, delay: number): Promise<void> {
     });
 }
 
-/** Commands cross renderer boundaries as persisted ids and plain table data. */
+/** Commands cross renderer boundaries as persisted ids. */
 export const windowCommands = {
-    "show-table": async (request: {
-        surface: Omit<TableWindowSurface, "kind" | "id">;
-    }) => {
-        store.set(showTableInWindowAtom, request.surface);
-        return { ok: true };
-    },
-    "show-chat": async () => {
-        store.set(showThreadInWindowAtom);
-        return { ok: true };
-    },
     "open-chat": async (request: { threadId: string }) => {
         if (!request.threadId) throw new Error("A persisted chat is required");
         const win = getHostWindow();
@@ -176,9 +161,8 @@ export const windowCommands = {
                 );
 
             win.focus();
-            store.set(showThreadInWindowAtom);
             store.set(isThreadListViewAtom, false);
-            // Let a table surface unmount and reveal the composer before the native prompt.
+            // Let the thread view replace the list and reveal the composer before the native prompt.
             await waitForSurface(win, 0);
             if (!current() || destinationBusy())
                 return { ok: false, canceled: true };

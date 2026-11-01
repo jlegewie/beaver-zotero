@@ -65,7 +65,7 @@ it('marks a newly created explicit-chat window before its renderer mounts', asyn
 });
 it('ordinary window commands preserve access without requiring chat settlement', async () => {
     vi.spyOn(BeaverUIFactory, 'openBeaverWindow').mockReturnValue(win);
-    expect(await BeaverUIFactory.commandBeaverWindow('show-chat')).toMatchObject({ ok: true });
+    expect(await BeaverUIFactory.commandBeaverWindow('inspect-runtime')).toMatchObject({ ok: true });
     expect(state.history).not.toHaveBeenCalled();
 });
 it('does not deliver the command after account replacement during readiness', async () => {

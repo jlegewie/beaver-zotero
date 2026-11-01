@@ -5,12 +5,17 @@ const readSpec = vi.hoisted(() => vi.fn());
 const readHistory = vi.hoisted(() => vi.fn());
 vi.mock("../../../src/services/artifacts/recoveryShadow", () => ({ lastTableShadow: vi.fn().mockResolvedValue(null) }));
 const load = vi.hoisted(() => vi.fn());
-vi.mock("../../../src/services/artifacts/tableItemIdentity", () => ({
-    isTableItem,
-    loadTableItemFields: load,
-    readTableHistory: readHistory,
-    readTableItemSpec: readSpec,
-}));
+vi.mock("../../../src/services/artifacts/tableItemIdentity", async (importOriginal) => {
+    const original = await importOriginal<typeof import("../../../src/services/artifacts/tableItemIdentity")>();
+    return {
+        isTableItem,
+        loadTableItemFields: load,
+        readTableHistory: readHistory,
+        readTableItemSpec: readSpec,
+        missingTableFileMessage: original.missingTableFileMessage,
+        tableFilesDownloadable: original.tableFilesDownloadable,
+    };
+});
 import {
     initTableItemPane,
     cleanupTableItemPane,
@@ -29,6 +34,7 @@ beforeEach(() => {
         unregisterSection: vi.fn(),
     };
     (Zotero as any).Attachments = { LINK_MODE_IMPORTED_URL: 1 };
+    (Zotero as any).Sync = { Storage: { Local: { getEnabledForLibrary: vi.fn(() => false) } } };
     initTableItemPane();
     body = document.createElement("div");
     document.body.append(body);
@@ -148,4 +154,31 @@ it("populates counts without Zotero's async hook and refreshes the same item", a
     await hooks.onAsyncRender(args);
     expect(body.querySelector('.beaver-table-section-facts')!.textContent).toContain("Version 2");
     expect(readSpec).toHaveBeenCalledTimes(2);
+});
+it.each([
+    [true, false, "Table files are not on this device yet. Opening the table downloads them."],
+    [false, true, "Table file is missing on this device."],
+])("enables Open table for missing files only when file sync can download them (sync %s)", async (syncOn, disabled, reason) => {
+    (Zotero as any).Sync.Storage.Local.getEnabledForLibrary.mockReturnValue(syncOn);
+    isTableItem.mockReturnValue(true);
+    readHistory.mockResolvedValue({ tip: 0, versions: [] });
+    readSpec.mockResolvedValue({ ok: false, code: "no_file", message: "Table TABLE001 has no file on disk." });
+    setTablesApi({ openTable: vi.fn(), shadow: { check: vi.fn() } } as any);
+    hooks.onRender(args);
+    await hooks.onAsyncRender(args);
+    expect(body.querySelector<HTMLButtonElement>('[data-beaver-action="open"]')!.disabled).toBe(disabled);
+    expect(body.querySelector(".beaver-table-section-problem")!.textContent).toBe(reason);
+});
+it("shows that Open table is downloading the table", async () => {
+    let download!: () => void;
+    const openTable = vi.fn((_ref, options) => {
+        download = options.onDownload;
+        return new Promise(() => {});
+    });
+    setTablesApi({ openTable, shadow: { check: vi.fn() } } as any);
+    hooks.onRender(args);
+    body.querySelector<HTMLButtonElement>('[data-beaver-action="open"]')!.click();
+    await vi.waitFor(() => expect(openTable).toHaveBeenCalled());
+    download();
+    expect(body.querySelector('[role="status"]')!.textContent).toBe("Downloading table…");
 });

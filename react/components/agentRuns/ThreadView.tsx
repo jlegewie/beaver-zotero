@@ -9,7 +9,7 @@ import { currentThreadIdAtom, pendingScrollToRunAtom, isLoadingThreadAtom } from
 import { pendingApprovalsAtom } from "../../agents/agentActions";
 import { store } from "../../store";
 import { useAutoScroll } from "../../hooks/useAutoScroll";
-import { toolExpandedAtom, messageSourcesVisibilityAtom, annotationPanelStateAtom } from "../../atoms/messageUIState";
+import { toolExpansionRevisionAtom, messageSourcesVisibilityAtom, annotationPanelStateAtom } from "../../atoms/messageUIState";
 import { logger } from "@beaver/agent-core/platform/logger";
 
 const RESTORE_THRESHOLD = 100; // pixels - threshold for restoring scroll position
@@ -84,7 +84,7 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
 
         // Watch expansion state to re-evaluate scroll button visibility after expand/collapse
         // Track multiple expansion states: tool calls, sources, and agent actions
-        const toolExpansionState = useAtomValue(toolExpandedAtom);
+        const toolExpansionState = useAtomValue(toolExpansionRevisionAtom);
         const sourcesVisibilityState = useAtomValue(messageSourcesVisibilityAtom);
         const annotationPanelState = useAtomValue(annotationPanelStateAtom);
         const prevExpansionStateRef = useRef(toolExpansionState);
@@ -567,7 +567,7 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
 
         // Re-evaluate scroll state when content expands/collapses
         // This ensures the ScrollDownButton visibility is updated when user toggles:
-        // - Tool call results (toolExpandedAtom)
+        // - Tool call results (toolExpansionRevisionAtom)
         // - Sources sections (messageSourcesVisibilityAtom)
         // - Agent action panels (annotationPanelStateAtom)
         useEffect(() => {
