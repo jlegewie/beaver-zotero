@@ -113,7 +113,7 @@ function isTrialRecord(json: ZoteroItemJson | undefined): boolean {
  *
  * - an empty abstract or language takes the fallback's (the language may also
  *   come from the file recognizer);
- * - a book section without author creators takes the fallback's creators;
+ * - a book section without author creators takes the fallback's authors;
  * - identity is preserved, so duplicate detection finds the item later: a
  *   missing `PMID:` line in Extra takes the record's PMID, and a trial keeps
  *   the registry URL and report number.
@@ -135,9 +135,11 @@ export function fillFromFallback(
     if (!fallback) return;
 
     if (item.itemType === 'bookSection') {
-        const hasAuthor = (item.creators ?? []).some((creator) => (creator.creatorType || 'author') === 'author');
-        const fallbackCreators = (fallback.creators ?? []).map((creator) => ({ ...creator }));
-        if (!hasAuthor && fallbackCreators.length) item.creators = [...fallbackCreators, ...(item.creators ?? [])];
+        const isAuthor = (creator: { creatorType?: string }) => (creator.creatorType || 'author') === 'author';
+        const fallbackAuthors = (fallback.creators ?? []).filter(isAuthor).map((creator) => ({ ...creator }));
+        if (!(item.creators ?? []).some(isAuthor) && fallbackAuthors.length) {
+            item.creators = [...fallbackAuthors, ...(item.creators ?? [])];
+        }
     }
 
     const pmid = itemJsonPmid(fallback);

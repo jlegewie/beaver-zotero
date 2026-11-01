@@ -299,7 +299,7 @@ export function trialHeadline(ref: ExternalReference): string {
  * markdown, escaping punctuation ("\\[", "\\>"); the escapes are removed.
  */
 export function registryText(text: string): string {
-    return text.replace(/\\([\\`*_{}[\]()#+\-.!<>|~])/g, '$1');
+    return text.replace(/\\([!-/:-@[-`{-~])/g, '$1');
 }
 
 /** "Prot_SAP" → "Protocol and SAP" etc., for documents without a label. */

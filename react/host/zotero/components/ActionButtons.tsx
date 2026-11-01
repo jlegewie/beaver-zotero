@@ -277,6 +277,7 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
             logger(`ActionButtons: Successfully imported "${item.title}" (key: ${newItem.key})`, 1);
         } catch (error) {
             logger(`ActionButtons: Failed to import "${item.title}": ${error}`, 1);
+            setImportError((current) => current ?? 'The item could not be imported. Try again.');
         } finally {
             setIsImporting(false);
         }

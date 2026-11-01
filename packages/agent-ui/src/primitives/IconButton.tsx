@@ -21,6 +21,10 @@ interface IconButtonProps {
     ariaDescribedBy?: string;
     /** Whether the button is currently pressed when used as a toggle */
     ariaPressed?: React.AriaAttributes['aria-pressed'];
+    /** Whether the region the button discloses is open */
+    ariaExpanded?: React.AriaAttributes['aria-expanded'];
+    /** Id of the region the button controls */
+    ariaControls?: string;
     /** Whether the button is unavailable while remaining focusable */
     ariaDisabled?: React.AriaAttributes['aria-disabled'];
     /** Whether the button is disabled */
@@ -55,7 +59,9 @@ const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(({
     onMouseLeave,
     ariaDescribedBy,
     ariaPressed,
-    ariaDisabled
+    ariaDisabled,
+    ariaExpanded,
+    ariaControls,
 }, ref) => {
     // Use the existing icon-button class for ghost variant for compatibility
     // Use the variant-{type} classes for the other variants
@@ -72,6 +78,8 @@ const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(({
             aria-label={ariaLabel}
             aria-describedby={ariaDescribedBy}
             aria-pressed={ariaPressed}
+            aria-expanded={ariaExpanded}
+            aria-controls={ariaControls}
             aria-disabled={ariaDisabled}
             disabled={disabled || loading}
             title={title}

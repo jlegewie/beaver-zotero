@@ -13,9 +13,8 @@ import {
 import { combineSnapshotList } from '@beaver/agent-core/citations/externalRecords';
 import { externalRecordPresentation, formatRegistryDate } from '@beaver/agent-core/citations/externalRecordDisplay';
 import { trialDetails } from '@beaver/agent-core/types/externalReferences';
-import { ArrowDownIcon, ArrowRightIcon, ArrowUpRightIcon } from '@beaver/agent-ui/icons';
 import CopyButton from '../../ui/buttons/CopyButton';
-import { getHost } from '@beaver/agent-ui/host';
+import type { SearchDetailsDisclosure } from '../ToolResultView';
 import ExternalReferenceListItem from '../../externalReferences/ExternalReferenceListItem';
 import PubMedReferenceListItem from '../../externalReferences/PubMedReferenceListItem';
 import TrialReferenceListItem from '../../externalReferences/TrialReferenceListItem';
@@ -143,95 +142,54 @@ export function searchFilterLabels(filters: Record<string, unknown> | null | und
     return labels;
 }
 
-/** "Open in PubMed", "Open on ClinicalTrials.gov". */
-function openOnSiteLabel(info: SearchViewInfo): string {
-    const label = info.source_label || info.source;
-    return info.source === 'pubmed' ? `Open in ${label}` : `Open on ${label}`;
-}
-
-function openUrl(url: string) {
-    getHost().navigation?.openExternalUrl(url);
-}
-
 /**
- * The bar above a source search's results (pubmed_search, search_trials).
- * The tool label already names the search and the hit count, so the bar holds
- * only what the label cannot: the full search (the query as sent, its
- * filters, and for PubMed the query as PubMed ran it, with a copy button)
- * behind "Search details", and a link that runs the same search on the source's site.
+ * The search a source search ran (pubmed_search, search_trials): the query as
+ * sent, its filters, and for PubMed the query as PubMed ran it, which can be
+ * copied. Opened from the card header's search-details button, it sits on the
+ * header's band so it reads as part of the header. Fields without content are
+ * left out.
  */
-const SearchBar: React.FC<{ info: SearchViewInfo }> = ({ info }) => {
-    const [open, setOpen] = useState(false);
+const SearchDetailsPanel: React.FC<{ info: SearchViewInfo; id: string }> = ({ info, id }) => {
     const filters = searchFilterLabels(info.filters);
     const query = typeof info.query === 'string' ? info.query.trim() : '';
     const translation = info.query_translation?.trim();
     const sourceName = info.source_label || info.source;
-    const hasDetails = !!query || filters.length > 0 || !!translation;
-    const searchUrl = info.search_url;
-    if (!hasDetails && !searchUrl) return null;
-    const Arrow = open ? ArrowDownIcon : ArrowRightIcon;
+    const showTranslation = !!translation && translation !== query;
 
     return (
-        <div className="px-3 py-15 display-flex flex-col gap-2 border-bottom-quinary">
-            <div className="display-flex flex-row items-center gap-2 text-sm">
-                {hasDetails && (
-                    <a
-                        className="text-link-muted display-flex flex-row items-center gap-05"
-                        role="button"
-                        tabIndex={0}
-                        aria-expanded={open}
-                        onClick={() => setOpen((value) => !value)}
-                    >
-                        <Arrow width={12} height={12} />
-                        Search details
-                    </a>
-                )}
-                <div className="flex-1" />
-                {searchUrl && (
-                    <a
-                        className="text-link-muted whitespace-nowrap display-flex flex-row items-center gap-05"
-                        role="link"
-                        tabIndex={0}
-                        onClick={(event) => {
-                            event.preventDefault();
-                            openUrl(searchUrl);
-                        }}
-                    >
-                        {openOnSiteLabel(info)}
-                        <ArrowUpRightIcon width={12} height={12} />
-                    </a>
-                )}
-            </div>
-            {open && (
-                <div className="display-flex flex-col gap-3 pb-1">
-                    {query && (
-                        <div className="display-flex flex-col gap-1">
-                            <div className="ext-subheading">Query</div>
-                            <div className="text-sm font-color-primary select-text">{query}</div>
-                        </div>
-                    )}
-                    {filters.length > 0 && (
-                        <div className="display-flex flex-col gap-1">
-                            <div className="ext-subheading">Filters</div>
-                            <div className="display-flex flex-row flex-wrap gap-1">
-                                {filters.map((filter) => <span key={filter} className="ext-chip">{filter}</span>)}
-                            </div>
-                        </div>
-                    )}
-                    {translation && translation !== query && (
-                        <div className="display-flex flex-col gap-1">
-                            <div className="display-flex flex-row items-center gap-1">
-                                <span className="ext-subheading">{`As ${sourceName} ran it`}</span>
-                                <CopyButton
-                                    content={translation}
-                                    className="scale-90"
-                                    title="Copy query"
-                                    ariaLabel={`Copy the query as ${sourceName} ran it`}
-                                />
-                            </div>
-                            <div className="ext-query-translation select-text">{translation}</div>
-                        </div>
-                    )}
+        <div
+            id={id}
+            role="region"
+            aria-label="Search details"
+            className="bg-senary border-bottom-quinary px-3 pt-1 pb-25 display-flex flex-col gap-2"
+        >
+            {query && (
+                <div className="display-flex flex-col gap-05">
+                    <div className="text-xs font-color-secondary">Query</div>
+                    <div className="text-sm font-color-primary select-text">{query}</div>
+                </div>
+            )}
+            {filters.length > 0 && (
+                <div className="display-flex flex-col gap-05">
+                    <div className="text-xs font-color-secondary">Filters</div>
+                    <div className="display-flex flex-row flex-wrap gap-1">
+                        {filters.map((filter) => <span key={filter} className="ext-chip">{filter}</span>)}
+                    </div>
+                </div>
+            )}
+            {showTranslation && (
+                <div className="display-flex flex-col gap-05">
+                    <div className="display-flex flex-row items-center">
+                        <span className="text-xs font-color-secondary">{`As ${sourceName} ran it`}</span>
+                        <div className="flex-1" />
+                        <CopyButton
+                            content={translation!}
+                            className="scale-90"
+                            title="Copy query"
+                            ariaLabel={`Copy the query as ${sourceName} ran it`}
+                        />
+                    </div>
+                    <div className="ext-query-translation select-text" tabIndex={0}>{translation}</div>
                 </div>
             )}
         </div>
@@ -270,9 +228,11 @@ function registryNotice(dataAsOf: string | null | undefined): string {
  * the lookup_work-only extras (`not_found_queries`, `unavailable_queries`)
  * render below the matched references.
  */
-export const ExternalReferenceListResultView: React.FC<{ view: ExternalReferenceListView }> = ({
-    view,
-}) => {
+export const ExternalReferenceListResultView: React.FC<{
+    view: ExternalReferenceListView;
+    /** The search-details panel, opened from the card header. */
+    searchDetails?: SearchDetailsDisclosure;
+}> = ({ view, searchDetails }) => {
     const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
 
     // A row renders its reference combined with the view's other snapshots of
@@ -303,7 +263,7 @@ export const ExternalReferenceListResultView: React.FC<{ view: ExternalReference
                   : 'No external references found';
         return (
             <div className="display-flex flex-col">
-                {searchInfo && <SearchBar info={searchInfo} />}
+                {searchInfo && searchDetails?.open && <SearchDetailsPanel info={searchInfo} id={searchDetails.id} />}
                 <div className="p-3 text-sm font-color-tertiary">
                     {view.message || emptyDefault}
                 </div>
@@ -326,7 +286,7 @@ export const ExternalReferenceListResultView: React.FC<{ view: ExternalReference
                 />
             )} */}
 
-            {searchInfo && <SearchBar info={searchInfo} />}
+            {searchInfo && searchDetails?.open && <SearchDetailsPanel info={searchInfo} id={searchDetails.id} />}
 
             {/* {view.message && (
                 <div className="px-3 py-2 text-sm font-color-tertiary border-b border-color-quinary">

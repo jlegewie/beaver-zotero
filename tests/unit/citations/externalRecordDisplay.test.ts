@@ -127,6 +127,7 @@ describe('trials', () => {
     it('removes the registry\'s markdown escapes for display', () => {
         expect(registryText('\\[stratified as 12-15 or \\>55\\] and 5\\.0')).toBe('[stratified as 12-15 or >55] and 5.0');
         expect(registryText('a \\\\ b')).toBe('a \\ b');
+        expect(registryText('alpha \\& beta, 10\\^6 cells')).toBe('alpha & beta, 10^6 cells');
     });
 
     it('formats registry dates of any precision', () => {

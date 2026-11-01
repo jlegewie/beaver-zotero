@@ -481,6 +481,13 @@ describe('fillFromFallback', () => {
         expect(withAuthor.creators).toEqual([{ lastName: 'Own' }]);
     });
 
+    it('adds only the record\'s authors to a book section, not its editors again', () => {
+        const editor = { creatorType: 'editor', lastName: 'Ed' };
+        const item: any = { itemType: 'bookSection', creators: [editor] };
+        fillFromFallback(item, { itemType: 'bookSection', creators: [{ creatorType: 'author', lastName: 'Lee' }, editor] });
+        expect(item.creators).toEqual([{ creatorType: 'author', lastName: 'Lee' }, editor]);
+    });
+
     it('keeps the record\'s PubMed id in Extra unless the translator wrote one', () => {
         const item: any = { itemType: 'journalArticle', extra: 'Publisher: X' };
         fillFromFallback(item, { itemType: 'journalArticle', extra: 'PMID: 41234567\nPMCID: PMC1' });

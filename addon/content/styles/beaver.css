@@ -5548,6 +5548,9 @@
     white-space: pre-wrap;
     padding-left: 8px;
     border-left: 2px solid var(--fill-quinary);
+    /* Long field-tagged queries scroll after about eight lines. */
+    max-height: calc(1.45em * 8);
+    overflow-y: auto;
 }
 /* Details: one heading level for sections, a smaller one inside them. */
 .beaver-root .ext-section-title {
@@ -5561,4 +5564,8 @@
     letter-spacing: 0.04em;
     text-transform: uppercase;
     color: var(--fill-secondary);
+}
+/* A header button that discloses a panel looks pressed while it is open. */
+.beaver-root .tool-header-toggle[aria-expanded="true"] {
+    background-color: var(--fill-quinary);
 }

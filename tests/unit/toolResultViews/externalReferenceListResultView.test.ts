@@ -23,10 +23,13 @@ setHost({
     },
 } as any);
 
-function render(view: ExternalReferenceListView): string {
+function render(view: ExternalReferenceListView, detailsOpen = false): string {
     actionProps.length = 0;
     return renderToStaticMarkup(
-        React.createElement(Provider, { store: createStore() }, React.createElement(ExternalReferenceListResultView, { view })),
+        React.createElement(Provider, { store: createStore() }, React.createElement(ExternalReferenceListResultView, {
+            view,
+            searchDetails: { open: detailsOpen, id: 'search-details-call' },
+        })),
     );
 }
 
@@ -103,9 +106,8 @@ describe('ExternalReferenceListResultView', () => {
             },
         });
         expect(html).not.toContain('Showing');
-        expect(html).toContain('Open in PubMed');
-        expect(html).toContain('Search details');
-        expect(html).toContain('Courtesy of the U.S. National Library of Medicine');
+                expect(html).toContain('Courtesy of the U.S. National Library of Medicine');
+        expect(html).not.toContain('search-details-call');
         expect(html).toContain('N Engl J Med. 2024;390(9):801-812.');
         expect(html).toContain('PMID 41234567');
         expect(html).toContain('Randomized Controlled Trial');
@@ -133,7 +135,6 @@ describe('ExternalReferenceListResultView', () => {
             },
         });
         expect(html).toContain('Data as of Oct 30, 2026 · Source: ClinicalTrials.gov');
-        expect(html).toContain('Open on ClinicalTrials.gov');
         expect(html).toContain('Semaglutide Trial');
         expect(html).toContain('Terminated');
         expect(html).toContain('Phase 3 · Interventional · 500 participants (est.)');
@@ -172,6 +173,39 @@ describe('ExternalReferenceListResultView', () => {
             tool_info: { relation: 'references', total_count: 0, work: null } as any,
         });
         expect(html).toContain('No references found');
+    });
+});
+
+describe('search details panel', () => {
+    const view: ExternalReferenceListView = {
+        view_type: 'external_reference_list',
+        tool_name: 'pubmed_search',
+        references: [pubmedRecord],
+        tool_info: {
+            info_type: 'search',
+            source: 'pubmed',
+            source_label: 'PubMed',
+            query: 'semaglutide obesity',
+            query_translation: '"semaglutide"[MeSH Terms] AND "obesity"[MeSH Terms]',
+            filters: { min_year: 2020, max_year: 2024 },
+            returned: 1,
+        },
+    };
+
+    it('shows the query, filters and the query as PubMed ran it, with a copy button', () => {
+        const html = render(view, true);
+        expect(html).toContain('id="search-details-call"');
+        expect(html).toContain('>Query<');
+        expect(html).toContain('semaglutide obesity');
+        expect(html).toContain('Published 2020–2024');
+        expect(html).toContain('As PubMed ran it');
+        expect(html).toContain('aria-label="Copy the query as PubMed ran it"');
+    });
+
+    it('opens on an empty search too', () => {
+        const html = render({ ...view, references: [] }, true);
+        expect(html).toContain('As PubMed ran it');
+        expect(html).toContain('No results in PubMed');
     });
 });
 

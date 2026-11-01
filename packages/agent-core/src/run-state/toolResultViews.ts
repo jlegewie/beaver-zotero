@@ -267,6 +267,19 @@ export function relatedWorksViewInfo(view: Pick<ExternalReferenceListView, "tool
     return null;
 }
 
+/** Whether a search carries details worth showing: its query, filters, or the query as the source ran it. */
+export function searchHasDetails(info: SearchViewInfo): boolean {
+    const hasFilters = !!info.filters && Object.values(info.filters).some((value) =>
+        value !== null && value !== undefined && value !== '' && !(Array.isArray(value) && value.length === 0));
+    return !!info.query?.trim() || hasFilters || !!info.query_translation?.trim();
+}
+
+/** "Open in PubMed", "Open on ClinicalTrials.gov": the link that runs a search on the source's site. */
+export function searchSiteLabel(info: SearchViewInfo): string {
+    const label = info.source_label || info.source;
+    return info.source === 'pubmed' ? `Open in ${label}` : `Open on ${label}`;
+}
+
 /** The search info of a view, or null for any other kind. */
 export function searchViewInfo(view: Pick<ExternalReferenceListView, "tool_info">): SearchViewInfo | null {
     const info = view.tool_info;
