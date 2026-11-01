@@ -128,7 +128,7 @@ export async function renderTable(ref: TableRef): Promise<boolean> {
     return true;
 }
 
-/** The digest of a committed `table.json`, receipts included. */
+/** The digest of a committed `table.json`, its creation marker included. */
 function tableFileHash(file: unknown): Promise<string> {
     return sha256Hex(JSON.stringify(file));
 }
@@ -148,7 +148,7 @@ export async function snapshotIsCurrent(
 interface Bookkeeping {
     /** The spec hash the last completed render covered. */
     sha256?: string;
-    /** The `table.json` digest it covered: a receipt-only commit changes only this. */
+    /** The `table.json` digest it covered, which also covers the creation marker. */
     file_sha256?: string;
     /** The item's tags were never saved; the next render adds them. */
     tags_pending?: true;
@@ -169,7 +169,7 @@ async function readBookkeeping(item: Zotero.Item): Promise<Bookkeeping | null> {
 
 /**
  * Whether the snapshot is complete for `table.json` as committed now — its
- * spec and its receipts: the last completed render recorded both digests, and
+ * spec and its creation marker: the last completed render recorded both digests, and
  * the HTML on disk names them. False when the table cannot be read, so a
  * caller renders and learns why.
  */

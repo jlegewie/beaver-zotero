@@ -198,9 +198,32 @@ describe("recorded columns", () => {
         expect(html).toContain(">Text</span>");
         expect(html).toContain(">Category</span>");
         expect(html).toContain('<span class="table-card-option">Observational</span>');
-        expect(html).toContain("12 rows · 2 columns · not filled yet");
+        // The sources and columns give the size, so the status line says only
+        // how much is filled.
+        expect(html).toContain(">Not filled yet<");
+        expect(html).not.toContain("12 rows · 2 columns");
         expect(html).not.toContain("attachment");
         expect(html).not.toContain("Created table");
+    });
+    it("lists an edit's changes with a coloured mark and its effects in quieter text", () => {
+        const html = render({
+            ...created,
+            change: "Edited table",
+            changes: undefined as never,
+            stages: { answered: 4, remaining_rows: 4, failed: 0, title_abstract_only: 0 } as never,
+            edits: [
+                { op: "remove_source", source: "s3", type: "library", kind: "saved_search", name: "Trials", rows_removed: 3 },
+                { op: "add_column", column: "n", header: "Sample size" },
+            ] as never,
+        } as never);
+        expect(html).toContain('class="table-record-mark table-record-mark-remove"');
+        expect(html).toContain('class="table-record-mark table-record-mark-add"');
+        expect(html).toContain('<span class="font-color-primary">Removed saved search “Trials”</span><span class="font-color-secondary"> · 3 rows</span>');
+        // Nothing restates the tool, the size the sections show, or what the
+        // columns' progress already says is left.
+        expect(html).not.toContain("Edited table");
+        expect(html).not.toContain("12 rows · 2 columns");
+        expect(html).not.toContain("still to fill");
     });
     it("names each source with the rows it added", () => {
         const html = render(created);

@@ -324,6 +324,13 @@ export interface RowFailure {
     message: string;
 }
 
+/** A paper removed from the table, remembered so a refresh skips it. */
+export interface RemovedPaper {
+    ref: RowRef;
+    /** ISO time of the removal. */
+    removed_at: string;
+}
+
 export interface Row {
     /**
      * Opaque, allocated when the row is created and never derived from the
@@ -481,7 +488,7 @@ export interface NotReportedCell extends CellBase {
     outcome: "not_reported";
     documents?: DocumentId[];
     confidence?: Confidence;
-    /** Why there is no answer. */
+    /** Why there is no answer; on a user's mark, the user's note. */
     reasoning?: string;
     /** The closest passages, when any. */
     evidence?: Evidence[];
@@ -631,6 +638,11 @@ export interface TableSpec {
     rows: Row[];
     /** The approved source entries that produced the rows. */
     sources?: SourceEntry[];
+    /**
+     * Papers the user or the model removed from the table. Refreshing a
+     * source leaves them out; adding one explicitly restores it.
+     */
+    removed?: RemovedPaper[];
     /**
      * The column that owns row identity: sticky under horizontal scroll and the
      * target of reveal. Absent ⇒ {@link anchorColumn} picks the first
@@ -1566,6 +1578,21 @@ export function cellInvariantError(cell: Cell): string | undefined {
     const reasons = cell.outcome === "answered" || cell.outcome === "not_reported";
     if (raw.reasoning != null && !reasons)
         return "Only an answered or not-reported cell gives reasoning";
+    if (raw.replaced != null) {
+        if (cell.provenance !== "user")
+            return "Only a user cell keeps the answer it replaced";
+        const replaced = raw.replaced as Record<string, unknown>;
+        if (
+            !isPlainObject(replaced) ||
+            replaced.provenance !== "model" ||
+            (replaced.outcome !== "answered" && replaced.outcome !== "not_reported")
+        )
+            return "A replaced answer is a model answer or finding";
+        if (replaced.replaced != null)
+            return "A replaced answer keeps no replaced answer of its own";
+        const inner = cellInvariantError(replaced as unknown as Cell);
+        if (inner) return `Replaced answer: ${inner}`;
+    }
     const modelFields = ["documents", "confidence", "evidence"].some(
         (name) => raw[name] != null,
     );

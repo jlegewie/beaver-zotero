@@ -48,8 +48,10 @@ import type { TableSpec } from '@beaver/agent-core/layouts/table';
 import {
     isTableItem,
     loadTableItemFields,
+    missingTableFileMessage,
     readTableHistory,
     readTableItemSpec,
+    tableFilesDownloadable,
     type TableRef,
 } from '../services/artifacts/tableItemIdentity';
 import { getTablesApi } from '../services/artifacts/tablesApi';
@@ -192,8 +194,9 @@ export interface TableSectionData {
     reason: string | null;
     /**
      * Whether "Open table" would open it: the table is not in the trash and
-     * its `table.json` reads (or rebuilds from history). The snapshot is not
-     * required; opening re-renders a missing one.
+     * its `table.json` reads (or rebuilds from history), or is still to be
+     * downloaded. The snapshot is not required; opening re-renders a missing
+     * one.
      */
     canOpen: boolean;
     /**
@@ -254,7 +257,7 @@ export async function readTableSectionData(
         input.headers = headersOf(read.spec);
         input.conflict = await readTableConflict(item, read.spec);
     } else {
-        reason = read.message;
+        reason = read.code === 'no_file' ? missingTableFileMessage(item) : read.message;
     }
     // Offered only where it would work: the store checks the retained copy,
     // the library and the table's current file the way the restore does.
@@ -273,8 +276,9 @@ export async function readTableSectionData(
         }
     }
 
-    // The checks openTable makes before showing anything.
-    const canOpen = !item.deleted && read.ok;
+    // The checks openTable makes before showing anything; it downloads a
+    // table whose files have not reached this device yet.
+    const canOpen = !item.deleted && (read.ok || (read.code === 'no_file' && tableFilesDownloadable(item)));
 
     return { fields: buildTableSectionFields(input), reason, canOpen, canRestore };
 }
@@ -545,12 +549,12 @@ function refOf(item: Zotero.Item): TableRef {
  * caller of a table surface uses, and going through it means a torn-down bundle
  * reports "not up" instead of running a dead realm's closure.
  */
-async function openTable(ref: TableRef, win: Window | null): Promise<string> {
+async function openTable(ref: TableRef, win: Window | null, onDownload: () => void): Promise<string> {
     const api = getTablesApi();
     if (!api) {
         return 'Table document actions are unavailable.';
     }
-    const outcome = await api.openTable(ref, { window: win });
+    const outcome = await api.openTable(ref, { window: win, onDownload });
     return 'error' in outcome ? outcome.error : outcome.warning ?? '';
 }
 
@@ -597,7 +601,8 @@ function renderActions(doc: Document, item: Zotero.Item): HTMLElement {
         // Enabled optimistically; the async half disables it when the table
         // is trashed or unreadable, which only a read can tell.
         button(doc, 'open', 'Open table', actions.open, () =>
-            void openTable(ref, win).then((message) => { status.textContent = message; })
+            void openTable(ref, win, () => { status.textContent = 'Downloading table…'; })
+                .then((message) => { status.textContent = message; })
         ),
         button(doc, 'library', 'Show in library', actions.showInLibrary, () =>
             showInLibrary(win, item)

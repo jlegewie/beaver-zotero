@@ -242,3 +242,110 @@ describe('the cell inspector', () => {
         expect(inspector()!.textContent).toContain('Not reported');
     });
 });
+
+describe('structural edit controls', () => {
+    const menuItem = (label: string) =>
+        Array.from(document.querySelectorAll<HTMLElement>('*')).find((el) => el.textContent === label && el.children.length === 0);
+    const type = (input: HTMLInputElement | HTMLTextAreaElement, value: string) =>
+        act(() => {
+            const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value')!.set!;
+            setter.call(input, value);
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+    const key = (el: Element, init: KeyboardEventInit) =>
+        act(() => {
+            el.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }));
+        });
+
+    it('renames the table in place: Enter saves, Escape cancels, a composing IME keeps the field', () => {
+        const onTitle = vi.fn();
+        mount({ editing: { onTitle } });
+        click(container!.querySelector('button[aria-label="Rename table"]')!);
+        const field = container!.querySelector<HTMLInputElement>('input[aria-label="Rename table"]')!;
+        type(field, 'Cash and schooling');
+        key(field, { key: 'Enter', isComposing: true });
+        expect(onTitle).not.toHaveBeenCalled();
+        expect(container!.querySelector('input[aria-label="Rename table"]')).not.toBeNull();
+        key(field, { key: 'Enter' });
+        expect(onTitle).toHaveBeenCalledWith('Cash and schooling');
+
+        click(container!.querySelector('button[aria-label="Rename table"]')!);
+        const again = container!.querySelector<HTMLInputElement>('input[aria-label="Rename table"]')!;
+        type(again, 'Never saved');
+        key(again, { key: 'Escape' });
+        expect(onTitle).toHaveBeenCalledTimes(1);
+        expect(container!.querySelector('input[aria-label="Rename table"]')).toBeNull();
+    });
+
+    it('edits the description, and clears it with an empty field', () => {
+        const onDescription = vi.fn();
+        mount({ editing: { onDescription } });
+        click(container!.querySelector('.rt-description')!);
+        const field = container!.querySelector<HTMLTextAreaElement>('textarea[aria-label="Edit description"]')!;
+        type(field, '');
+        key(field, { key: 'Enter' });
+        expect(onDescription).toHaveBeenCalledWith('');
+    });
+
+    it('shows the controls disabled with the reason in a read-only library', () => {
+        mount({ editing: { disabledReason: 'This library is read-only.', onTitle: vi.fn(), onAddColumn: vi.fn() } });
+        const pencil = container!.querySelector<HTMLButtonElement>('button[aria-label="Rename table"]')!;
+        expect(pencil.disabled).toBe(true);
+        expect(pencil.title).toBe('This library is read-only.');
+        expect(container!.querySelector<HTMLButtonElement>('button[aria-label="Add column"]')!.disabled).toBe(true);
+    });
+
+    it("offers the column menu's edits, then Sort and Hide, and adds a column from (+)", () => {
+        const onEditColumn = vi.fn();
+        const onChangeType = vi.fn();
+        const onRemoveColumn = vi.fn();
+        const onAddColumn = vi.fn();
+        mount({ editing: { onEditColumn, onChangeType, onRemoveColumn, onAddColumn } });
+        click(container!.querySelector('button[aria-label="Column menu: Headline effect"]')!);
+        click(menuItem('Edit column…')!);
+        expect(onEditColumn).toHaveBeenCalledWith(expect.objectContaining({ id: 'effect' }));
+        click(container!.querySelector('button[aria-label="Column menu: Headline effect"]')!);
+        click(menuItem('Remove column')!);
+        expect(onRemoveColumn).toHaveBeenCalledWith(expect.objectContaining({ id: 'effect' }));
+        click(container!.querySelector('button[aria-label="Add column"]')!);
+        expect(onAddColumn).toHaveBeenCalledTimes(1);
+    });
+
+    it('raises the header whose menu is open over the headers after it', () => {
+        mount({ editing: { onEditColumn: vi.fn() } });
+        const header = container!.querySelector('th[data-column-id="effect"]')!;
+        expect(header.classList.contains('rt-th-menu-open')).toBe(false);
+        click(container!.querySelector('button[aria-label="Column menu: Headline effect"]')!);
+        expect(header.classList.contains('rt-th-menu-open')).toBe(true);
+        click(menuItem('Edit column…')!);
+        expect(header.classList.contains('rt-th-menu-open')).toBe(false);
+    });
+
+    it('hides a column from its menu and shows it again from the toolbar', () => {
+        mount();
+        click(container!.querySelector('button[aria-label="Column menu: Amount"]')!);
+        click(menuItem('Hide column')!);
+        expect(container!.querySelector('th[data-column-id="amount"]')).toBeNull();
+        click(container!.querySelector('.rt-hidden-columns')!);
+        expect(container!.querySelector('th[data-column-id="amount"]')).not.toBeNull();
+    });
+
+    it('opens the sources popover from the chip and closes it on Escape', () => {
+        mount({ editing: { renderSources: (close) => h('button', { className: 'probe', onClick: close }, 'Inside') } });
+        const chip = container!.querySelector<HTMLButtonElement>('.rt-sources-button')!;
+        click(chip);
+        expect(container!.querySelector('[role="dialog"][aria-label="Sources"] .probe')).not.toBeNull();
+        key(document, { key: 'Escape' });
+        expect(container!.querySelector('[aria-label="Sources"]')).toBeNull();
+        click(chip);
+        click(container!.querySelector('.probe')!);
+        expect(container!.querySelector('[aria-label="Sources"]')).toBeNull();
+    });
+
+    it("adds the new papers from the notice's Add", () => {
+        const onAddNewPapers = vi.fn();
+        mount({ newPapers: { count: 3, sources: 1, sourceName: 'Cash transfers' }, editing: { onAddNewPapers } });
+        click(container!.querySelector('.rt-new-papers-add')!);
+        expect(onAddNewPapers).toHaveBeenCalledTimes(1);
+    });
+});

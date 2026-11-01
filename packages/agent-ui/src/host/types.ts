@@ -105,12 +105,25 @@ export interface NavigationHost {
      * Opens a stored table in the client's table view. `origin` is the window
      * the interaction happened in — derive it from the clicked element's
      * `ownerDocument` — so the table opens beside the surface the user is
-     * looking at rather than in whichever window is newest.
+     * looking at rather than in whichever window is newest. `onDownload`
+     * fires when the table's files must be downloaded before it can open.
      */
     openTable?(
         key: string,
         origin?: Window | null,
+        options?: { onDownload?: () => void },
     ): Promise<{ ok: true; warning?: string } | { error: string }>;
+    /**
+     * Takes back one model edit of a stored table (the `edit_table` tool
+     * display's Undo): restores the version before it, only while the table
+     * is exactly as that edit left it. `version` is the version the edit
+     * committed, `runId` the run that made it.
+     */
+    undoTableEdit?(
+        key: string,
+        edit: { version: number; runId: string },
+        origin?: Window | null,
+    ): Promise<{ ok: true } | { error: string }>;
     /** Reveal/select the referenced item in the library view. */
     revealInLibrary(ref: ZoteroItemReference): void;
     /** Reveal/select the referenced library in the library view. */

@@ -846,6 +846,17 @@ describe('what the item-pane section reports', () => {
         expect(data.canRestore).toBe(false);
     });
 
+    it('offers and performs a restore for a table whose table.json is gone beside its history', async () => {
+        await createTable({ spec: demoSpec('One') });
+        expectOk(await writeTable(ref, demoSpec('Mine'), { actor: 'user' }));
+        await rm(tablePath());
+        await expect(openTable(ref)).rejects.toMatchObject({ code: 'corrupt' });
+        expect(await checkShadowRestore(ref)).toBe('ok');
+        expect(await restoreShadowVersion(ref)).toMatchObject({ ok: true, restoredFrom: 2, version: 3 });
+        expect(await storedText()).toBe('Mine');
+        expect((await openTable(ref)).history.at(-1)).toMatchObject({ version: 3, sealed: true });
+    });
+
     it('reads the table once on an ordinary table, and never the snapshot', async () => {
         await createTable({ spec: demoSpec('One') });
         expectOk(await writeTable(ref, demoSpec('Two'), { actor: 'user' }));

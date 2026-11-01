@@ -12,6 +12,8 @@ vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     checkLibraryExcluded,
 }));
 
+const resolvedSources = vi.hoisted(() => ({ resolveSources: vi.fn(), resolveSource: vi.fn() }));
+vi.mock('../../../src/services/artifacts/tableSources', () => resolvedSources);
 vi.mock('../../../src/utils/prefs', () => ({
     getPref: vi.fn(() => 0),
     setPref: vi.fn(),
@@ -20,7 +22,7 @@ vi.mock('../../../src/utils/prefs', () => ({
 
 import { TABLE_SPEC_VERSION, type TableSpec } from '@beaver/agent-core/layouts/table';
 import { buildTableDocument } from '../../../src/services/artifacts/tableDocument';
-import { TABLE_EMOJI_TAG, TABLE_TAG } from '../../../src/services/artifacts/tableItem';
+import { TABLE_EMOJI_TAG, TABLE_TAG, TableItemError } from '../../../src/services/artifacts/tableItem';
 import {
     registerTableLocalCommands,
     registerTableShadowRestore,
@@ -33,12 +35,17 @@ import {
     revertTable,
     writeTable,
     trimTable,
+    applyTableEdit,
+    undoTableEdit,
+    TABLE_UNDO_CHANGED,
+    createTableFromRequest,
     TABLE_VERSION_RETENTION,
     type TableHistory,
     type TableWriteResult,
 } from '../../../src/services/artifacts/tableStore';
 import { getTableLocalCommands, getTableShadowRestore, tableLocalCommands, tableWriteLocks } from '../../../src/services/artifacts/tablesApi';
 import * as recoveryShadow from '../../../src/services/artifacts/recoveryShadow';
+import { applyUserTableEditUncoordinated as applyUserEdit } from '../../../src/services/artifacts/tableUserEdits';
 
 // ---------------------------------------------------------------------------
 // A temp directory standing in for the attachment's storage directory
@@ -274,6 +281,14 @@ beforeEach(async () => {
 afterEach(async () => {
     await rm(storageDir, { recursive: true, force: true });
 });
+
+/** Refuses a spec with a row from an excluded library, as the provider's guard does. */
+function sourceGuard(spec: TableSpec): void {
+    for (const row of spec.rows) {
+        if (row.ref?.kind === 'item' && checkLibraryExcluded(row.ref.library_id))
+            throw new TableItemError('Excluded source.', 'library_excluded');
+    }
+}
 
 function expectOk(result: TableWriteResult) {
     if (!result.ok) throw new Error(`expected a write, got a conflict at ${result.version}`);
@@ -922,141 +937,234 @@ describe('addressing', () => {
     });
 });
 
-describe('remote writes', () => {
-    const meta = { actor: 'agent' as const, run_id: 'run', thread_id: 'thread' };
+describe('collapse keys and sealing', () => {
+    const rename = (title: string) => [{ op: 'set_meta' as const, title }];
 
-    it('refuses two same-run precomputed writes from the same collapsed base', async () => {
-        await writeTable(ref, demoSpec('base'), meta);
-        const base = await openTable(ref);
-        const results = await Promise.all(
-            ['first', 'second'].map((id) =>
-                writeTable(ref, demoSpec(id), meta, base.version, {
-                    operation_id: id,
-                    expected_sha256: base.sha256,
-                })
-            )
-        );
-        expect(results[0]).toMatchObject({ ok: true, collapsed: true, version: base.version });
-        expect(results[1]).toMatchObject({ ok: false, conflict: true, version: base.version });
-        expect((await openTable(ref)).spec.rows[0].cells.note.value).toMatchObject({
-            text: 'first',
-        });
+    it('collapses user edits that share a tab session key', async () => {
+        const meta = { actor: 'user' as const, collapse_key: 'tab-1' };
+        const first = expectOk((await editTable(ref, rename('A'), meta)) as TableWriteResult);
+        const second = expectOk((await editTable(ref, rename('B'), meta)) as TableWriteResult);
+        expect([first.version, second.version]).toEqual([2, 2]);
+        expect(second.collapsed).toBe(true);
+        expect(second.entry).toMatchObject({ actor: 'user', collapse_key: 'tab-1' });
+        expect((await readTable(ref)).spec.title).toBe('B');
     });
 
-    it('replays the original acknowledgement after intervening writes and module state loss', async () => {
-        const base = await openTable(ref);
-        const remote = { operation_id: 'first', expected_sha256: base.sha256 };
-        const first = await writeTable(ref, demoSpec('first'), meta, base.version, remote);
-        await writeTable(ref, demoSpec('user'), { actor: 'user' });
+    it('starts a new version after a write by someone else', async () => {
+        const meta = { actor: 'user' as const, collapse_key: 'tab-1' };
+        await editTable(ref, rename('A'), meta);
+        await editTable(ref, rename('Agent'), { actor: 'agent', run_id: 'run-1' });
+        const after = expectOk((await editTable(ref, rename('B'), meta)) as TableWriteResult);
+        expect([after.version, after.collapsed]).toEqual([4, false]);
+        // Another session's key is someone else, too.
+        const other = expectOk((await editTable(ref, rename('C'), { actor: 'user', collapse_key: 'tab-2' })) as TableWriteResult);
+        expect([other.version, other.collapsed]).toEqual([5, false]);
+    });
+
+    it('never collapses into a sealed version, and a sealed write never collapses', async () => {
+        const meta = { actor: 'user' as const, collapse_key: 'tab-1' };
+        await editTable(ref, rename('A'), meta);
+        const sealed = expectOk((await editTable(ref, rename('Destructive'), { ...meta, seal: true })) as TableWriteResult);
+        expect([sealed.version, sealed.collapsed, sealed.entry.sealed]).toEqual([3, false, true]);
+        const after = expectOk((await editTable(ref, rename('B'), meta)) as TableWriteResult);
+        expect([after.version, after.collapsed]).toEqual([4, false]);
+    });
+
+    it('still collapses an agent write without a key by its run', async () => {
+        const meta = { actor: 'agent' as const, run_id: 'run-1', thread_id: 't' };
+        await editTable(ref, rename('A'), meta);
+        const second = expectOk((await editTable(ref, rename('B'), meta)) as TableWriteResult);
+        expect([second.version, second.collapsed]).toEqual([2, true]);
+        // The same run with a user key is not the same writer.
+        const user = expectOk((await editTable(ref, rename('C'), { actor: 'user', run_id: 'run-1' })) as TableWriteResult);
+        expect([user.version, user.collapsed]).toEqual([3, false]);
+    });
+});
+
+describe('applyTableEdit', () => {
+    const meta = { actor: 'agent' as const, run_id: 'run', thread_id: 'thread' };
+    const operation = { operation_id: 'edit-1', request_sha256: 'a'.repeat(64) };
+    const retitle = (title: string, changes: unknown[] = [{ kind: 'renamed', title }]) =>
+        vi.fn((spec: TableSpec) => ({ ok: true as const, spec: { ...spec, title }, changes }));
+
+    it('applies a repeat with the same id once and answers it with the original changes', async () => {
+        const build = retitle('Edited');
+        const first = await applyTableEdit(ref, build, meta, operation);
+        expect(first).toMatchObject({ ok: true, replayed: false, version: 2, changes: [{ kind: 'renamed', title: 'Edited' }] });
+        await editTable(ref, [{ op: 'set_meta', title: 'User' }], { actor: 'user' });
         tableWriteLocks().clear();
-        const replay = await writeTable(ref, demoSpec('first'), meta, base.version, remote);
-        expect(replay).toMatchObject({ ok: true, replayed: true, version: 3 });
-        if (!first.ok || !replay.ok) throw new Error('write failed');
-        expect(replay.operation).toEqual(first.operation);
-        expect(replay.spec.rows[0].cells.note.value).toMatchObject({ text: 'user' });
+        const again = retitle('Edited', [{ kind: 'other' }]);
+        const replay = await applyTableEdit(ref, again, meta, operation);
+        expect(again).not.toHaveBeenCalled();
+        // The current state, with the changes the first call answered.
+        expect(replay).toMatchObject({ ok: true, replayed: true, version: 3, changes: [{ kind: 'renamed', title: 'Edited' }] });
+        if (!replay.ok) throw new Error('replay failed');
+        expect(replay.spec.title).toBe('User');
         expect(await listVersions(ref)).toHaveLength(3);
     });
 
-    it('reads replay receipts and the spec from one snapshot when sync replaces the file', async () => {
-        const base = await openTable(ref);
-        const beforeWrite = await readFile(tablePath(), 'utf8');
-        const remote = { operation_id: 'snapshot-replay', expected_sha256: base.sha256 };
-        const first = expectOk(await writeTable(ref, demoSpec('committed'), meta, base.version, remote));
-        // The render reads table.json too; settle it before the replacement hook.
-        const readUTF8 = (globalThis as any).IOUtils.readUTF8;
-        let replaced = false;
-        (globalThis as any).IOUtils.readUTF8 = async (path: string) => {
-            const snapshot = await readUTF8(path);
-            if (path === tablePath() && !replaced) {
-                // A sync replacement after the read must not replace just the
-                // receipts in the state assembled from that read.
-                replaced = true;
-                await writeFile(tablePath(), beforeWrite);
-            }
-            return snapshot;
-        };
-        const replay = expectOk(await writeTable(ref, demoSpec('committed'), meta, base.version, remote));
-        (globalThis as any).IOUtils.readUTF8 = readUTF8;
-        expect(replay).toMatchObject({ replayed: true, version: first.version, operation: first.operation });
-        expect(replay.spec).toEqual(first.spec);
-        expect(await readFile(tablePath(), 'utf8')).toBe(beforeWrite);
-    });
-
-    it('refuses reuse of an operation identity with different content', async () => {
-        const base = await openTable(ref);
-        const remote = { operation_id: 'first', expected_sha256: base.sha256 };
-        await writeTable(ref, demoSpec('first'), meta, base.version, remote);
+    it('refuses the same id with a different request', async () => {
+        await applyTableEdit(ref, retitle('Edited'), meta, operation);
+        const build = retitle('Other');
         await expect(
-            writeTable(ref, demoSpec('different'), meta, base.version, remote)
+            applyTableEdit(ref, build, meta, { ...operation, request_sha256: 'b'.repeat(64) })
         ).rejects.toMatchObject({ code: 'operation_mismatch' });
+        expect(build).not.toHaveBeenCalled();
+        expect((await readTable(ref)).spec.title).toBe('Edited');
     });
 
-    it('ignores caller stamps and JSON object key order in retry identity', async () => {
-        const base = await openTable(ref);
-        const remote = { operation_id: 'first', expected_sha256: base.sha256 };
-        await writeTable(ref, demoSpec(), meta, base.version, remote);
-        const spec = demoSpec();
-        const reordered = {
-            rows: spec.rows,
-            columns: spec.columns,
-            title: spec.title,
-            id: spec.id,
-            key: 'OTHER',
-            version: 999,
-        };
-        expect(await writeTable(ref, reordered, meta, base.version, remote)).toMatchObject({
-            ok: true,
-            replayed: true,
-        });
+    it('writes nothing when the build fails or changes nothing', async () => {
+        const before = await readFile(tablePath(), 'utf8');
+        expect(await applyTableEdit(ref, () => ({ ok: false, code: 'unknown_row', message: 'No row r9.' }), meta, operation))
+            .toEqual({ ok: false, code: 'unknown_row', message: 'No row r9.' });
+        const unchanged = await applyTableEdit(ref, (spec) => ({ ok: true, spec: { ...spec }, changes: [] }), meta, { ...operation, operation_id: 'noop' });
+        expect(unchanged).toMatchObject({ ok: true, replayed: false, version: 1, changes: [] });
+        expect(await readFile(tablePath(), 'utf8')).toBe(before);
+        expect(existsSync(sidecar('history.json'))).toBe(false);
+        // Neither left a record, so the id is still free.
+        expect(await applyTableEdit(ref, retitle('Edited'), meta, operation)).toMatchObject({ ok: true, replayed: false, version: 2 });
     });
 
-    it.each([false, true])('reports retention pruning during replay even if a later render fails: %s', async (failSave) => {
-        await createTable({ spec: demoSpec(), actor: 'user' });
-        for (let version = 2; version <= TABLE_VERSION_RETENTION; version++) {
-            await writeTable(ref, demoSpec(String(version)), { actor: 'user' });
-        }
-        const base = await openTable(ref);
-        const remote = { operation_id: 'retention-replay', expected_sha256: base.sha256 };
-        (globalThis as any).IOUtils = {
-            ...realIOUtils,
-            move: async (from: string, to: string) => {
-                if (to.endsWith('history.json')) throw new Error('disk full');
-                await realIOUtils.move(from, to);
-            },
-        };
-        expect(await writeTable(ref, demoSpec('new'), meta, base.version, remote))
-            .toMatchObject({ ok: true, saved: false, pruned: [] });
-        (globalThis as any).IOUtils = realIOUtils;
-        if (failSave) item.saveTx.mockRejectedValueOnce(new Error('item save failed'));
-        // The render that indexes and saves never reaches the replay's answer.
-        expect(await writeTable(ref, demoSpec('new'), meta, base.version, remote))
-            .toMatchObject({ ok: true, replayed: true, saved: true, pruned: [1] });
-        expect(existsSync(sidecar('v1.json'))).toBe(false);
-        expect((await listVersions(ref)).map((entry) => entry.version))
-            .toEqual(Array.from({ length: TABLE_VERSION_RETENTION }, (_, i) => i + 2));
-        expect(await writeTable(ref, demoSpec('new'), meta, base.version, remote))
-            .toMatchObject({ ok: true, replayed: true, saved: true, pruned: [] });
+    it('seals its version, so a later write of the same run or key starts a new one', async () => {
+        await applyTableEdit(ref, retitle('Edited'), meta, operation);
+        const entry = (await listVersions(ref)).at(-1)!;
+        expect(entry).toMatchObject({ version: 2, sealed: true, operation_id: 'edit-1', request_sha256: operation.request_sha256 });
+        const sameRun = expectOk((await editTable(ref, [{ op: 'set_meta', title: 'Run' }], meta)) as TableWriteResult);
+        expect([sameRun.version, sameRun.collapsed]).toEqual([3, false]);
+        await applyTableEdit(ref, retitle('Again'), { ...meta, collapse_key: 'job' }, { ...operation, operation_id: 'edit-2' });
+        const sameKey = expectOk((await editTable(ref, [{ op: 'set_meta', title: 'Job' }], { ...meta, collapse_key: 'job' })) as TableWriteResult);
+        expect([sameKey.version, sameKey.collapsed]).toEqual([5, false]);
     });
 
-    it('acknowledges a retry even when the history write failed after commit', async () => {
-        const base = await openTable(ref);
-        const remote = { operation_id: 'first', expected_sha256: base.sha256 };
-        (globalThis as any).IOUtils = {
-            ...realIOUtils,
-            move: async (from: string, to: string) => {
-                if (to.endsWith('history.json')) throw new Error('disk full');
-                await realIOUtils.move(from, to);
-            },
-        };
-        expect(await writeTable(ref, demoSpec('first'), meta, base.version, remote)).toMatchObject({
-            ok: true,
-            saved: false,
+    it('collapses a tab edit into its session and seals a destructive one, with no replay record', async () => {
+        const user = { actor: 'user' as const };
+        const first = await applyTableEdit(ref, retitle('One'), { ...user, collapse_key: 'tab:s1' });
+        expect(first).toMatchObject({ ok: true, committed: true, version: 2 });
+        const second = await applyTableEdit(ref, retitle('Two'), { ...user, collapse_key: 'tab:s1' });
+        expect(second).toMatchObject({ ok: true, committed: true, version: 2 });
+        const sealed = await applyTableEdit(ref, retitle('Three'), { ...user, seal: true });
+        expect(sealed).toMatchObject({ ok: true, committed: true, version: 3 });
+        const entries = await listVersions(ref);
+        expect(entries.at(-1)).toMatchObject({ version: 3, sealed: true });
+        expect(entries.at(-1)).not.toHaveProperty('operation_id');
+        // Nothing collapses onto the sealed version, not even the same session.
+        expect(await applyTableEdit(ref, retitle('Four'), { ...user, collapse_key: 'tab:s1' })).toMatchObject({ version: 4 });
+        // A build that changes nothing writes nothing and says so.
+        expect(await applyTableEdit(ref, (spec) => ({ ok: true, spec: { ...spec }, changes: [] }), user)).toMatchObject({ committed: false, version: 4 });
+    });
+
+    it('keeps the edit record through an open that repairs the version entry', async () => {
+        await applyTableEdit(ref, retitle('Edited'), meta, operation);
+        await writeFile(sidecar('v2.json'), '{"damaged":true}', 'utf8');
+        expect((await openTable(ref)).recovered).toContainEqual({ kind: 'version_file_repaired', version: 2 });
+        expect((await listVersions(ref)).at(-1)).toMatchObject({ operation_id: 'edit-1', changes: [{ kind: 'renamed', title: 'Edited' }] });
+        expect(await applyTableEdit(ref, retitle('Edited'), meta, operation)).toMatchObject({ ok: true, replayed: true });
+    });
+
+    it('applies the access guard to the current and the resulting table', async () => {
+        const guard = vi.fn((spec: TableSpec) => {
+            if (spec.title === 'Forbidden') throw new Error('excluded source');
         });
-        (globalThis as any).IOUtils = realIOUtils;
-        expect(await writeTable(ref, demoSpec('first'), meta, base.version, remote)).toMatchObject({
-            ok: true,
-            replayed: true,
+        await expect(applyTableEdit(ref, retitle('Forbidden'), meta, operation, guard)).rejects.toThrow('excluded source');
+        expect(await storedVersion()).toBe(1);
+    });
+
+    it('publishes the update event for a commit and not for a replay', async () => {
+        const publish = vi.fn();
+        (Zotero as any).Beaver = { ...(Zotero as any).Beaver, runtime: { publish } };
+        await applyTableEdit(ref, retitle('Edited'), meta, operation);
+        await applyTableEdit(ref, retitle('Edited'), meta, operation);
+        expect(publish).toHaveBeenCalledTimes(1);
+    });
+});
+
+
+describe("the tab's structural edits", () => {
+    it('collapse into the session, seal a removal, and resolve added papers before the write', async () => {
+        const first = await applyUserEdit(ref, { title: 'Renamed' }, { seal: false, session: 's1' });
+        expect(first).toMatchObject({ ok: true, committed: true, version: 2, changes: [{ op: 'title', title: 'Renamed' }] });
+        expect(await applyUserEdit(ref, { description: 'About it' }, { seal: false, session: 's1' })).toMatchObject({ version: 2 });
+        expect((await listVersions(ref)).at(-1)).toMatchObject({ version: 2, actor: 'user', collapse_key: 'tab:s1' });
+
+        resolvedSources.resolveSource.mockResolvedValueOnce({
+            entry: { id: 'new', type: 'items', ids: ['u-AAAAAAAA'] },
+            papers: [{ row: { id: 'r2', ref: { kind: 'item', library_ref: 'u', zotero_key: 'AAAAAAAA' }, cells: {} }, mode: 'title_abstract' }],
+            total: 1,
+            truncated: false,
+            rejected: [],
         });
+        const added = await applyUserEdit(ref, { add_sources: [{ type: 'items', ids: ['u-AAAAAAAA'] }] }, { seal: false, session: 's1' });
+        expect(resolvedSources.resolveSource).toHaveBeenCalledWith({ type: 'items', ids: ['u-AAAAAAAA'], id: 'new' });
+        expect(added).toMatchObject({ ok: true, version: 2, changes: [{ op: 'add_source', rows_added: 1 }] });
+
+        const removed = await applyUserEdit(ref, { remove_columns: ['note'] }, { seal: true, change: 'Removed column “Note”' });
+        expect(removed).toMatchObject({ ok: true, committed: true, version: 3, changes: [{ op: 'remove_column', cleared: 1 }] });
+        expect((await listVersions(ref)).at(-1)).toMatchObject({ version: 3, sealed: true, change: 'Removed column “Note”' });
+    });
+
+    it('refuse an id the table does not have, writing nothing', async () => {
+        const before = await readFile(tablePath(), 'utf8');
+        expect(await applyUserEdit(ref, { remove_rows: ['r9'] }, { seal: true })).toMatchObject({ ok: false, code: 'unknown_row' });
+        expect(await readFile(tablePath(), 'utf8')).toBe(before);
+    });
+});
+
+describe('undoTableEdit', () => {
+    const user = { actor: 'user' as const };
+    const retitle = (title: string) =>
+        vi.fn((spec: TableSpec) => ({ ok: true as const, spec: { ...spec, title }, changes: [{ op: 'title', title }] }));
+
+    it('restores the version before a sealed edit as a new sealed version', async () => {
+        const before = (await readTable(ref)).spec;
+        const edit = await applyTableEdit(ref, retitle('Removed'), { ...user, seal: true });
+        if (!edit.ok) throw new Error('edit failed');
+        const undone = await undoTableEdit(ref, { version: edit.version, sha256: edit.sha256 }, user);
+        expect(undone).toMatchObject({ ok: true, version: 3 });
+        expect((await readTable(ref)).spec.title).toBe(before.title);
+        expect((await listVersions(ref)).at(-1)).toMatchObject({ version: 3, sealed: true, change: 'Undid an edit' });
+    });
+
+    it('refuses once anything was written after the edit', async () => {
+        const edit = await applyTableEdit(ref, retitle('Removed'), { ...user, seal: true });
+        if (!edit.ok) throw new Error('edit failed');
+        await editTable(ref, [{ op: 'set_meta', title: 'Later' }], { actor: 'agent', run_id: 'fill', thread_id: 't' });
+        expect(await undoTableEdit(ref, { version: edit.version, sha256: edit.sha256 }, user)).toEqual({
+            ok: false,
+            code: 'changed',
+            message: TABLE_UNDO_CHANGED,
+        });
+        expect((await readTable(ref)).spec.title).toBe('Later');
+    });
+
+    it('refuses when the table no longer has the hash the edit produced', async () => {
+        const edit = await applyTableEdit(ref, retitle('Removed'), { ...user, seal: true });
+        if (!edit.ok) throw new Error('edit failed');
+        expect(await undoTableEdit(ref, { version: edit.version, sha256: 'f'.repeat(64) }, user)).toMatchObject({ ok: false, code: 'changed' });
+    });
+
+    it('undoes a model edit only for the run that made it', async () => {
+        const meta = { actor: 'agent' as const, run_id: 'run-1', thread_id: 'thread' };
+        const edit = await applyTableEdit(ref, retitle('Model'), meta, { operation_id: 'op-1', request_sha256: 'a'.repeat(64) });
+        if (!edit.ok) throw new Error('edit failed');
+        expect(await undoTableEdit(ref, { version: edit.version, run_id: 'run-2' }, user)).toMatchObject({ ok: false, code: 'changed' });
+        expect(await undoTableEdit(ref, { version: edit.version, run_id: 'run-1' }, user)).toMatchObject({ ok: true });
+    });
+
+    it('reports no changes for a model edit that changes nothing, so it offers no Undo of an earlier one', async () => {
+        const meta = { actor: 'agent' as const, run_id: 'run-1', thread_id: 'thread' };
+        await applyTableEdit(ref, retitle('Model'), meta, { operation_id: 'op-1', request_sha256: 'a'.repeat(64) });
+        const same = await applyTableEdit(ref, retitle('Model'), meta, { operation_id: 'op-2', request_sha256: 'b'.repeat(64) });
+        expect(same).toMatchObject({ ok: true, committed: false, version: 2, changes: [] });
+    });
+
+    it('refuses a version that was not a model edit when asked for a run', async () => {
+        const edit = await applyTableEdit(ref, retitle('Tab'), { ...user, seal: true });
+        if (!edit.ok) throw new Error('edit failed');
+        expect(await undoTableEdit(ref, { version: edit.version, run_id: 'run-1' }, user)).toMatchObject({ ok: false, code: 'changed' });
+    });
+
+    it('refuses the creation version, which has nothing before it', async () => {
+        await expect(undoTableEdit(ref, { version: 1 }, user)).rejects.toMatchObject({ code: 'invalid_request' });
     });
 });
 
@@ -1360,7 +1468,7 @@ describe('retriable creation', () => {
         const [a, b] = await Promise.all([createTable(options), createTable(options)]);
         expect(a.key).toBe(b.key);
         expect([a.replayed, b.replayed].sort()).toEqual([false, true]);
-        expect(b.operation).toEqual(a.operation);
+        expect(b.sha256).toBe(a.sha256);
         tableWriteLocks().clear();
         const replay = await createTable(options);
         expect(replay.replayed).toBe(true);
@@ -1392,22 +1500,71 @@ describe('retriable creation', () => {
         expect(Zotero.Attachments.importFromSnapshotContent).not.toHaveBeenCalled();
     });
 
-    it('still replays a creation after table.json is rebuilt from the history', async () => {
+    it('refuses a retry as corrupt when table.json is gone beside its history, until a restore repairs it', async () => {
         const created = await createTable(options);
         await rm(tablePath());
         tableWriteLocks().clear();
-        const replay = await createTable(options);
-        expect(replay).toMatchObject({ replayed: true, key: created.key });
-        expect((await readTableFile()).creation).toMatchObject({ operation_id: 'create-one', complete: true });
+        await expect(createTable(options)).rejects.toMatchObject({ code: 'corrupt' });
+        await expect(createTable({ ...options, spec: demoSpec('different') })).rejects.toMatchObject({ code: 'corrupt' });
+        expect(existsSync(tablePath())).toBe(false);
         expect(Zotero.Attachments.importFromSnapshotContent).toHaveBeenCalledTimes(1);
+        expect(await revertTable(ref, 1, { actor: 'user' })).toMatchObject({ ok: true, version: 2 });
+        const restored = await readTable(ref);
+        expect([restored.version, restored.spec.key]).toEqual([2, created.key]);
+        expect((await openTable(ref)).recovered).toEqual([]);
     });
 
-    it('refuses a mismatched creation retry without rebuilding table.json', async () => {
-        await createTable(options);
-        await rm(tablePath());
-        tableWriteLocks().clear();
-        await expect(createTable({ ...options, spec: demoSpec('different') })).rejects.toMatchObject({ code: 'operation_mismatch' });
-        expect(existsSync(tablePath())).toBe(false);
+    describe('from a request', () => {
+        const request = {
+            libraryID: LIBRARY_ID,
+            title: 'Demo table',
+            operation_id: 'create-request',
+            request: { title: 'Demo table', sources: [{ kind: 'collection', key: 'C1' }], columns: [] },
+            actor: 'agent' as const,
+            run_id: 'run',
+            thread_id: 'thread',
+        };
+        const changes = [{ kind: 'rows_added', count: 1 }];
+        const build = () => vi.fn(async () => ({ ok: true as const, spec: demoSpec(), changes }));
+
+        it('replays a committed creation with its changes without building again', async () => {
+            const first = build();
+            const created = await createTableFromRequest({ ...request, build: first });
+            expect(created).toMatchObject({ key: KEY, replayed: false, version: 1, changes });
+            expect((await readTableFile()).creation).toMatchObject({ operation_id: 'create-request', complete: true, changes });
+            tableWriteLocks().clear();
+            const second = build();
+            const replay = await createTableFromRequest({ ...request, build: second });
+            expect(second).not.toHaveBeenCalled();
+            expect(replay).toMatchObject({ key: created.key, replayed: true, changes, sha256: (created as any).sha256 });
+            expect(Zotero.Attachments.importFromSnapshotContent).toHaveBeenCalledTimes(1);
+            expect(await listVersions(ref)).toMatchObject([{ version: 1, creation: true, run_id: 'run' }]);
+        });
+
+        it('refuses the same id with a different request without building', async () => {
+            await createTableFromRequest({ ...request, build: build() });
+            const second = build();
+            await expect(createTableFromRequest({ ...request, request: { ...request.request, title: 'Other' }, build: second }))
+                .rejects.toMatchObject({ code: 'operation_mismatch' });
+            expect(second).not.toHaveBeenCalled();
+        });
+
+        it('returns a failed build unchanged and imports nothing', async () => {
+            const failed = vi.fn(async () => ({ ok: false as const, code: 'no_papers', message: 'No papers.' }));
+            expect(await createTableFromRequest({ ...request, build: failed }))
+                .toEqual({ ok: false, code: 'no_papers', message: 'No papers.' });
+            expect(Zotero.Attachments.importFromSnapshotContent).not.toHaveBeenCalled();
+            // Nothing was imported, so the id is still free.
+            expect(await createTableFromRequest({ ...request, build: build() })).toMatchObject({ replayed: false });
+        });
+
+        it('refuses a collection that is gone before building', async () => {
+            (Zotero as any).Collections = { get: vi.fn(), getByLibraryAndKey: vi.fn(() => false) };
+            const first = build();
+            await expect(createTableFromRequest({ ...request, collectionKey: 'GONE', build: first }))
+                .rejects.toMatchObject({ code: 'invalid_target' });
+            expect(first).not.toHaveBeenCalled();
+        });
     });
 
     it('confirms a committed creation even when its snapshot cannot be read back', async () => {
@@ -1454,7 +1611,7 @@ describe('retriable creation', () => {
             const shadow = vi.spyOn(recoveryShadow, helper).mockRejectedValueOnce(new Error('shadow unavailable'));
             try {
                 expect(await createTable(options)).toMatchObject({
-                    key: created.key, replayed: true, operation: created.operation,
+                    key: created.key, replayed: true, sha256: created.sha256,
                 });
                 expect(shadow).toHaveBeenCalledOnce();
                 expect(Zotero.Attachments.importFromSnapshotContent).toHaveBeenCalledTimes(1);
@@ -1560,10 +1717,7 @@ it('repairs a collapsed commit even when both its old sidecars still agree', asy
         },
     };
     expect(
-        await writeTable(ref, demoSpec('new'), meta, base.version, {
-            operation_id: 'collapse',
-            expected_sha256: base.sha256,
-        })
+        await writeTable(ref, demoSpec('new'), meta, base.version)
     ).toMatchObject({ ok: true, saved: false });
     (globalThis as any).IOUtils = realIOUtils;
     const opened = await openTable(ref);
@@ -1577,22 +1731,15 @@ it('repairs a collapsed commit even when both its old sidecars still agree', asy
 describe('artifact provider through the real file store', () => {
     const remoteKey = `u-${KEY}`;
     const request = (op: string, fields: Record<string, unknown> = {}) => handleArtifactRequest({ event: 'artifact_request', request_id: `request-${op}`, op, key: remoteKey, ...fields });
-    it('reads, writes, replays original receipts with current state, conflicts, and restores history', async () => {
+    it('reads and restores history', async () => {
         const read = await request('read');
         expect(read).toMatchObject({ ok: true, type: 'artifact_response', request_id: 'request-read', op: 'read', version: 1 });
-        const fields = { spec: demoSpec('remote'), meta: { actor: 'agent', run_id: 'run', thread_id: 'thread' }, operation_id: 'remote', expected_version: read.version, expected_sha256: read.sha256 };
-        const written = await request('write', fields);
-        expect(written).toMatchObject({ ok: true, saved: true, operation: { operation_id: 'remote' } });
         await editTable(ref, [{ op: 'set_meta', title: 'Local correction' }], { actor: 'user' });
-        const replay = await request('write', fields);
-        expect(replay).toMatchObject({ ok: true, replayed: true, operation: written.operation, spec: { title: 'Local correction' } });
-        expect(replay.version).toBeGreaterThan(written.version);
-        expect(await request('write', { ...fields, operation_id: 'different' })).toMatchObject({ ok: false, conflict: true, error_code: 'conflict', spec: { title: 'Local correction' } });
         const restored = await request('revert', { to_version: 1, meta: { actor: 'user' } });
         expect(restored).toMatchObject({ ok: true, spec: { title: 'Demo table' } });
-        expect(restored.version).toBeGreaterThan(replay.version);
+        expect(restored.version).toBe(3);
     });
-    it.each(['read', 'list', 'write'].flatMap(op => ['missing', 'digest', 'log-digest'].map(damage => [op, damage])))('repairs interrupted tip bookkeeping before provider %s (%s)', async (op, damage) => {
+    it.each(['read', 'list'].flatMap(op => ['missing', 'digest', 'log-digest'].map(damage => [op, damage])))('repairs interrupted tip bookkeeping before provider %s (%s)', async (op, damage) => {
         const before = await openTable(ref);
         if (damage === 'missing') await rm(sidecar(`v${before.version}.json`));
         else if (damage === 'digest') await writeFile(sidecar(`v${before.version}.json`), JSON.stringify({ ...before.spec, title: 'Interrupted sidecar' }));
@@ -1603,7 +1750,7 @@ describe('artifact provider through the real file store', () => {
         }
         const response = await request(op, op === 'list'
             ? { key: null, keys: [remoteKey] }
-            : op === 'write' ? { spec: demoSpec('new'), meta: { actor: 'user' }, operation_id: `repair-${damage}`, expected_version: before.version, expected_sha256: before.sha256 } : {});
+            : {});
         if (op === 'list') expect(response.items[0]).toMatchObject({ unavailable: false });
         else expect(response.ok).toBe(true);
         expect(JSON.parse(await readFile(sidecar(`v${before.version}.json`), 'utf8'))).toEqual(before.spec);
@@ -1674,14 +1821,6 @@ describe('artifact provider through the real file store', () => {
         expect(await request('delete')).toMatchObject({ ok: false });
         expect(item.deleted).toBe(false);
     });
-    it('rejects excluded incoming content before replay lookup and preserves current bytes', async () => {
-        const before = await readFile(htmlPath, 'utf8');
-        checkLibraryExcluded.mockImplementation((id) => id === 7 ? { message: 'excluded' } : null);
-        const spec = demoSpec();
-        spec.citations = [{ citation_id: 'private', resolved_ref: { kind: 'zotero', library_id: 7, zotero_key: 'SOURCE01' } } as any];
-        expect(await request('write', { spec, meta: { actor: 'user' }, operation_id: 'private', expected_version: 1, expected_sha256: 'a'.repeat(64) })).toMatchObject({ error_code: 'library_excluded' });
-        expect(await readFile(htmlPath, 'utf8')).toBe(before);
-    });
     it('maps absent local files distinctly from missing items and rejects mismatched table identity', async () => {
         // A table whose files have not arrived on this device yet.
         await emptyStorageDirectory();
@@ -1690,24 +1829,17 @@ describe('artifact provider through the real file store', () => {
         expect(await request('read')).toMatchObject({ ok: false });
     });
 
-    it('rebuilds a missing table.json from the history tip, or reports the table corrupt', async () => {
-        await createTable({ spec: demoSpec('Created'), actor: 'user' });
-        const written = expectOk(await writeTable(ref, demoSpec('Two'), { actor: 'user' }));
+    it('reports a table.json missing beside its history as corrupt', async () => {
+        await writeTable(ref, demoSpec('Two'), { actor: 'user' });
         await rm(tablePath());
-        const opened = await openTable(ref);
-        expect(opened.recovered).toContainEqual({ kind: 'table_file_rebuilt', version: written.version });
-        expect(opened.sha256).toBe(written.sha256);
-        expect((await readTableFile()).spec).toEqual(written.spec);
-
-        await rm(tablePath());
-        await writeFile(sidecar(`v${written.version}.json`), JSON.stringify(demoSpec('tampered')));
         expect(await request('read')).toMatchObject({ ok: false, error_code: 'corrupt' });
+        expect(existsSync(tablePath())).toBe(false);
     });
     it('guards local drafts inside the store lock and retains intentional blank ownership', async () => {
         const read = await openTable(ref);
         const guard = { version: read.version, sha256: read.sha256 };
         await editTable(ref, [{ op: 'set_cells', cells: [{ row: 'r1', column: 'note', cell: { outcome: 'cleared', provenance: 'user' } }] }], { actor: 'user' }, guard);
-        expect((await openTable(ref)).spec.rows[0].cells.note).toEqual({ outcome: 'cleared', provenance: 'user' });
+        expect((await openTable(ref)).spec.rows[0].cells.note).toMatchObject({ outcome: 'cleared', provenance: 'user' });
         const stale = await editTable(ref, [{ op: 'remove_rows', rows: ['r1'] }], { actor: 'user' }, guard);
         expect(stale).toMatchObject({ ok: false, conflict: true });
         expect((await openTable(ref)).spec.rows).toHaveLength(1);
@@ -1723,17 +1855,21 @@ describe('artifact provider through the real file store', () => {
 
 
 it('rechecks source exclusions at the table commit point', async () => {
-    const opened = await openTable(ref);
     const original = await readFile(tablePath(), 'utf8');
-    const spec = demoSpec('new answer, from 7-SOURCEAB');
     const ioWrite = IOUtils.writeUTF8;
     (IOUtils as any).writeUTF8 = async (...args: any[]) => {
         const result = await (ioWrite as any)(...args);
         checkLibraryExcluded.mockImplementation((id) => id === 7 ? { message: 'excluded' } : null);
         return result;
     };
-    const response = await handleArtifactRequest({ event: 'artifact_request', request_id: 'mid-write', op: 'write', key: `u-${KEY}`, spec, meta: { actor: 'user' }, operation_id: 'mid-write', expected_version: opened.version, expected_sha256: opened.sha256 });
-    expect(response).toMatchObject({ ok: false, error_code: 'library_excluded' });
+    const response = applyTableEdit(
+        ref,
+        (spec) => ({ ok: true, spec: { ...spec, rows: [{ ...spec.rows[0], ref: { kind: 'item', library_id: 7, zotero_key: 'SOURCEAB' } }] }, changes: [] }),
+        { actor: 'agent', run_id: 'run' },
+        { operation_id: 'mid-write', request_sha256: 'a'.repeat(64) },
+        sourceGuard,
+    );
+    await expect(response).rejects.toMatchObject({ code: 'library_excluded' });
     expect(await readFile(tablePath(), 'utf8')).toBe(original);
 });
 
@@ -1777,8 +1913,7 @@ it('cancels queued artifact and local table writes when their owner closes', asy
     expect((await readTable(ref)).version).toBe(1);
 });
 
-it('holds the instance queue through an active artifact write after its owner closes', async () => {
-    const opened = await openTable(ref);
+it('holds the instance queue through an active table write after its owner closes', async () => {
     let entered!: () => void;
     const writing = new Promise<void>(resolve => { entered = resolve; });
     let release!: () => void;
@@ -1791,7 +1926,12 @@ it('holds the instance queue through an active artifact write after its owner cl
         }
         return (originalMove as any)(...args);
     };
-    const write = handleArtifactRequest({ event: 'artifact_request', request_id: 'active-write', op: 'write', key: `u-${KEY}`, spec: demoSpec('survives close'), meta: { actor: 'user' }, operation_id: 'active-write', expected_version: opened.version, expected_sha256: opened.sha256 }, { owner: 'active-table-owner' });
+    const write = Zotero.Beaver.libraryOperations.run('table_applyTableEdit', [
+        ref,
+        (spec: TableSpec) => ({ ok: true as const, spec: { ...spec, title: 'survives close' }, changes: [] }),
+        { actor: 'agent' as const, run_id: 'run' },
+        { operation_id: 'active-write', request_sha256: 'a'.repeat(64) },
+    ], { owner: 'active-table-owner' });
     await writing;
     Zotero.Beaver.mutations.cancelOwner('active-table-owner');
     const read = openTable(ref);
@@ -1864,7 +2004,7 @@ it('keeps re-rendering across repeated failures, preserves newer content, and re
     expect(await readFile(htmlPath, 'utf8')).toContain('Newer');
 });
 
-describe('group tables through the provider and file store', () => {
+describe('group tables through the store and provider', () => {
     const groupLibraryID = 7;
     const groupID = 6073928;
     const groupRef = { libraryID: groupLibraryID, key: KEY };
@@ -1884,16 +2024,17 @@ describe('group tables through the provider and file store', () => {
             key: remoteKey,
             ...fields,
         });
-    const create = () =>
-        request('create', {
-            key: undefined,
-            kind: 'table',
-            library_ref: `g${groupID}`,
-            title: 'Group table',
-            spec: demoSpec(),
-            operation_id: 'group-create',
-            meta: { actor: 'user' },
-        });
+    /** A retriable creation in the group, its refusal as `{ ok: false, error_code }`. */
+    const create = async (spec = demoSpec(), operation_id = 'group-create', accessGuard?: (spec: TableSpec) => void) => {
+        try {
+            const created = await createTable({
+                libraryID: groupLibraryID, title: 'Group table', spec, operation_id, actor: 'user', accessGuard,
+            });
+            return { ok: true as const, ...created };
+        } catch (error: any) {
+            return { ok: false as const, error_code: error.code as string };
+        }
+    };
 
     beforeEach(() => {
         temporaryDirectories = [];
@@ -1958,23 +2099,15 @@ describe('group tables through the provider and file store', () => {
 
     it('creates in the requested group, seeds history, queues upload and replays without another import', async () => {
         const created = await create();
-        expect(created).toMatchObject({
-            ok: true,
-            saved: true,
-            version: 1,
-            zotero_item: {
-                library_id: groupLibraryID,
-                library_ref: `g${groupID}`,
-                zotero_key: KEY,
-            },
-        });
-        expect(created.spec?.key).toBe(KEY);
+        expect(created).toMatchObject({ ok: true, saved: true, version: 1, libraryID: groupLibraryID, key: KEY });
+        if (!created.ok) throw new Error('create failed');
+        expect(created.spec.key).toBe(KEY);
         expect((await readHistory()).tip).toBe(1);
         expect(item.attachmentSyncState).toBe(0);
         expect(Zotero.FullText.queueItem).toHaveBeenCalledWith(item);
         expect(Zotero.Attachments.importFromSnapshotContent).not.toHaveBeenCalled();
         const replay = await create();
-        expect(replay).toMatchObject({ ok: true, replayed: true, operation: created.operation });
+        expect(replay).toMatchObject({ ok: true, replayed: true, sha256: created.sha256 });
         expect(
             Zotero.Attachments.createURLAttachmentFromTemporaryStorageDirectory,
         ).toHaveBeenCalledTimes(1);
@@ -2052,15 +2185,7 @@ describe('group tables through the provider and file store', () => {
         const spec = demoSpec();
         spec.rows[0].ref = { kind: 'item', library_id: 1, zotero_key: 'SOURCEAB' };
         spec.rows[0].cells = {};
-        const result = await request('create', {
-            key: undefined,
-            kind: 'table',
-            library_ref: `g${groupID}`,
-            title: 'Group sources',
-            spec,
-            operation_id: 'group-source',
-            meta: { actor: 'user' },
-        });
+        const result = await create(spec, 'group-source', sourceGuard);
         expect(result).toMatchObject({ ok: false, error_code: 'library_excluded' });
         expect(
             Zotero.Attachments.createURLAttachmentFromTemporaryStorageDirectory,
@@ -2124,55 +2249,22 @@ describe('group tables through the provider and file store', () => {
         checkLibraryExcluded.mockImplementation((id) =>
             id === 1 ? { message: 'Excluded source' } : null,
         );
-        for (const op of ['read', 'write']) {
-            const result = await request(
-                op,
-                op === 'write'
-                    ? {
-                          spec: demoSpec('new'),
-                          expected_version: 1,
-                          expected_sha256: '0'.repeat(64),
-                          operation_id: 'excluded-write',
-                          meta: { actor: 'user' },
-                      }
-                    : {},
-            );
-            expect(result).toMatchObject({ ok: false, error_code: 'library_excluded' });
-            expect(result).not.toHaveProperty('spec');
-            expect(result).not.toHaveProperty('summary');
-        }
+        const result = await request('read');
+        expect(result).toMatchObject({ ok: false, error_code: 'library_excluded' });
+        expect(result).not.toHaveProperty('spec');
+        expect(result).not.toHaveProperty('summary');
     });
 
-    it('rejects a stale digest after a synced replacement and queues a fresh write for upload', async () => {
-        const base = await request('read');
-        const replaced = { ...base.spec!, title: 'Synced group revision' };
-        await writeFile(tablePath(), JSON.stringify({ spec: replaced }));
-        const fields = {
-            spec: demoSpec('updated'),
-            expected_version: base.version,
-            expected_sha256: base.sha256,
-            operation_id: 'group-write',
-            meta: { actor: 'user' },
-        };
-        expect(await request('write', fields)).toMatchObject({
-            ok: false,
-            conflict: true,
-            spec: { title: 'Synced group revision' },
-        });
-        const fresh = await request('read');
+    it('commits a model edit in the group and queues it for upload', async () => {
         item.attachmentSyncState = 1;
-        expect(
-            await request('write', {
-                ...fields,
-                expected_version: fresh.version,
-                expected_sha256: fresh.sha256,
-            }),
-        ).toMatchObject({ ok: true, saved: true });
+        expect(await applyTableEdit(
+            groupRef,
+            (spec) => ({ ok: true, spec: { ...spec, title: 'Edited in group' }, changes: [] }),
+            { actor: 'agent', run_id: 'run' },
+            { operation_id: 'group-edit', request_sha256: 'a'.repeat(64) },
+        )).toMatchObject({ ok: true, saved: true, version: 2 });
         expect(item.attachmentSyncState).toBe(0);
-        expect((await openTable(groupRef)).spec.rows[0].cells.note.value).toEqual({
-            kind: 'text',
-            text: 'updated',
-        });
+        expect((await openTable(groupRef)).spec.title).toBe('Edited in group');
     });
 });
 
@@ -2257,110 +2349,45 @@ describe('table.json storage', () => {
         expect(JSON.parse(await readFile(sidecar('bookkeeping.json'), 'utf8'))).toMatchObject({ sha256: written.sha256 });
     });
 
-    it('changes the snapshot for a commit that changes only its receipts', async () => {
-        const base = await openTable(ref);
-        const meta = { actor: 'agent' as const, run_id: 'run', thread_id: 'thread' };
-        const first = expectOk(await writeTable(ref, demoSpec('same'), meta, base.version, { operation_id: 'a', expected_sha256: base.sha256 }));
-        const before = await readFile(htmlPath, 'utf8');
-        const second = expectOk(await writeTable(ref, demoSpec('same'), meta, first.version, { operation_id: 'b', expected_sha256: first.sha256 }));
-        expect(second.sha256).toBe(first.sha256);
-        expect((await readTableFile()).receipts?.length).toBe(2);
-        const after = await readFile(htmlPath, 'utf8');
-        expect(after).not.toBe(before);
-        expect(after).toContain(`data-beaver-file-sha256="${await sha256(await readFile(tablePath(), 'utf8'))}"`);
-    });
-
-    it('re-renders on open after a receipt-only commit whose render never ran', async () => {
-        const base = await openTable(ref);
-        const meta = { actor: 'agent' as const, run_id: 'run', thread_id: 'thread' };
-        const first = expectOk(await writeTable(ref, demoSpec('same'), meta, base.version, { operation_id: 'a', expected_sha256: base.sha256 }));
-        const queueItem = vi.mocked(Zotero.FullText.queueItem);
-        queueItem.mockRejectedValueOnce(new Error('indexing failed'));
-        expectOk(await writeTable(ref, demoSpec('same'), meta, first.version, { operation_id: 'b', expected_sha256: first.sha256 }));
-        expect((await openTable(ref)).recovered).toContainEqual({ kind: 'rerendered' });
-        expect((await openTable(ref)).recovered).not.toContainEqual({ kind: 'rerendered' });
-    });
-
-    it('restores a missing table.json before acknowledging a write retry', async () => {
-        const base = await openTable(ref);
-        const meta = { actor: 'agent' as const, run_id: 'run', thread_id: 'thread' };
-        const remote = { operation_id: 'restored', expected_sha256: base.sha256 };
-        const first = expectOk(await writeTable(ref, demoSpec('restored'), meta, base.version, remote));
-        await rm(tablePath());
-        const replay = expectOk(await writeTable(ref, demoSpec('restored'), meta, base.version, remote));
-        expect(replay).toMatchObject({ replayed: true, saved: true, operation: first.operation });
-        expect(existsSync(tablePath())).toBe(true);
-        expect((await readTableFile()).receipts).toEqual([first.operation]);
-    });
-
-    it('keeps the retry ledger through a table.json rebuilt from the history', async () => {
-        const base = await openTable(ref);
-        const meta = { actor: 'agent' as const, run_id: 'run', thread_id: 'thread' };
-        const remote = { operation_id: 'ledger', expected_sha256: base.sha256 };
-        const first = expectOk(await writeTable(ref, demoSpec('ledger'), meta, base.version, remote));
-        expect((await readHistory()).ledger?.receipts).toEqual([first.operation]);
-        await rm(tablePath());
-        expect((await openTable(ref)).recovered).toContainEqual({ kind: 'table_file_rebuilt', version: first.version });
-        expect((await readTableFile()).receipts).toEqual([first.operation]);
-        const replay = expectOk(await writeTable(ref, demoSpec('ledger'), meta, base.version, remote));
-        expect(replay).toMatchObject({ replayed: true, operation: first.operation });
-    });
-
-    it('keeps the file\'s own newer receipts over the log copy when its spec is unreadable', async () => {
-        const base = await openTable(ref);
-        const meta = { actor: 'agent' as const, run_id: 'run', thread_id: 'thread' };
-        // The log update fails, so its ledger copy misses this receipt.
-        const move = (globalThis as any).IOUtils.move;
-        (globalThis as any).IOUtils.move = async (from: string, to: string) => {
-            if (to.endsWith('history.json')) throw new Error('disk full');
-            return move(from, to);
-        };
-        let first;
-        try {
-            first = expectOk(await writeTable(ref, demoSpec('newest'), meta, base.version, { operation_id: 'newest', expected_sha256: base.sha256 }));
-        } finally {
-            (globalThis as any).IOUtils.move = move;
-        }
-        expect(first.saved).toBe(false);
+    it('opens and writes a table still carrying receipts and a history ledger', async () => {
+        expectOk(await writeTable(ref, demoSpec('Two'), { actor: 'user' }));
         const file = await readTableFile();
-        await writeFile(tablePath(), JSON.stringify({ ...file, spec: { spec_version: TABLE_SPEC_VERSION, broken: true } }), 'utf8');
-        expectOk(await writeTable(ref, demoSpec('replacement'), { actor: 'user' }));
-        expect((await readTableFile()).receipts).toContainEqual(first.operation);
+        const receipt = { operation_id: 'old', request_sha256: 'a'.repeat(64), version: 2, sha256: 'b'.repeat(64) };
+        await writeFile(tablePath(), JSON.stringify({ ...file, receipts: [receipt, { broken: true }] }), 'utf8');
+        const history = await readHistory();
+        await writeFile(sidecar('history.json'), JSON.stringify({ ...history, ledger: { receipts: [receipt] } }), 'utf8');
+
+        expect((await openTable(ref)).spec.rows[0].cells.note?.value).toEqual({ kind: 'text', text: 'Two' });
+        expect((await editTable(ref, [{ op: 'set_meta', title: 'Renamed' }], { actor: 'user' })).ok).toBe(true);
+        expect((await readTable(ref)).spec.title).toBe('Renamed');
+        // The next commit drops both leftovers.
+        expect(await readTableFile()).not.toHaveProperty('receipts');
+        expect(await readHistory()).not.toHaveProperty('ledger');
     });
 
-    it('keeps the retry ledger when a write replaces an unreadable spec', async () => {
-        const base = await openTable(ref);
-        const meta = { actor: 'agent' as const, run_id: 'run', thread_id: 'thread' };
-        const remote = { operation_id: 'kept', expected_sha256: base.sha256 };
-        const first = expectOk(await writeTable(ref, demoSpec('kept'), meta, base.version, remote));
+    it('keeps the creation marker when a write replaces an unreadable spec', async () => {
+        const creation = { operation_id: 'create', request_sha256: 'a'.repeat(64), complete: true };
         const file = await readTableFile();
-        await writeFile(tablePath(), JSON.stringify({ ...file, spec: { spec_version: TABLE_SPEC_VERSION, broken: true } }), 'utf8');
+        await writeFile(tablePath(), JSON.stringify({ ...file, creation }), 'utf8');
+        await writeFile(tablePath(), JSON.stringify({ creation, spec: { spec_version: TABLE_SPEC_VERSION, broken: true } }), 'utf8');
+        await expect(editTable(ref, [{ op: 'set_meta', title: 'X' }], { actor: 'user' })).rejects.toMatchObject({ code: 'no_spec' });
         expectOk(await writeTable(ref, demoSpec('replacement'), { actor: 'user' }));
-        expect((await readTableFile()).receipts).toEqual([first.operation]);
-        expect((await readHistory()).ledger?.receipts).toEqual([first.operation]);
+        expect((await readTableFile()).creation).toEqual(creation);
     });
 
-    it('renders a missing snapshot when an operation is replayed', async () => {
-        const base = await openTable(ref);
-        const meta = { actor: 'agent' as const, run_id: 'run', thread_id: 'thread' };
-        const remote = { operation_id: 'replayed', expected_sha256: base.sha256 };
-        const first = expectOk(await writeTable(ref, demoSpec('replayed'), meta, base.version, remote));
-        await rm(htmlPath);
-        const replay = expectOk(await writeTable(ref, demoSpec('replayed'), meta, base.version, remote));
-        expect(replay).toMatchObject({ replayed: true, saved: true });
-        expect(await readFile(htmlPath, 'utf8')).toContain(`data-beaver-spec-sha256="${first.sha256}"`);
-    });
+    it('reads a missing table.json beside a history as corrupt, and restoring a version repairs it', async () => {
+        const written = expectOk(await writeTable(ref, demoSpec('Two'), { actor: 'user' }));
+        await rm(tablePath());
+        await expect(readTable(ref)).rejects.toMatchObject({ code: 'corrupt' });
+        await expect(openTable(ref)).rejects.toMatchObject({ code: 'corrupt' });
+        await expect(editTable(ref, [{ op: 'set_meta', title: 'X' }], { actor: 'user' })).rejects.toMatchObject({ code: 'corrupt' });
+        expect(existsSync(tablePath())).toBe(false);
 
-    it('keeps remote receipts through a later fill commit', async () => {
-        const base = await openTable(ref);
-        const remote = { operation_id: 'structural', expected_sha256: base.sha256 };
-        const meta = { actor: 'agent' as const, run_id: 'run', thread_id: 'thread' };
-        const first = expectOk(await writeTable(ref, demoSpec('structural'), meta, base.version, remote));
-        await editTable(ref, [{ op: 'set_cells', cells: [{ row: 'r1', column: 'note', cell: { outcome: 'answered', provenance: 'model', value: { kind: 'text', text: 'filled' } } }] }], { actor: 'agent', run_id: 'fill', thread_id: 'thread' });
-        expect((await readTableFile()).receipts).toEqual([first.operation]);
-        const replay = expectOk(await writeTable(ref, demoSpec('structural'), meta, base.version, remote));
-        expect(replay).toMatchObject({ replayed: true, operation: first.operation });
-        expect(replay.spec.rows[0].cells.note?.value).toEqual({ kind: 'text', text: 'filled' });
+        expect(await revertTable(ref, written.version, { actor: 'user' })).toMatchObject({ ok: true, version: 3 });
+        const restored = await openTable(ref);
+        expect(restored.spec.rows[0].cells.note?.value).toEqual({ kind: 'text', text: 'Two' });
+        expect(restored.version).toBe(3);
+        expect(restored.history.at(-1)).toMatchObject({ version: 3, sealed: true });
     });
 
     it('regenerates a missing or stale snapshot on the next read', async () => {
@@ -2379,14 +2406,12 @@ describe('table.json storage', () => {
     it.each([
         ['read-only', () => (Zotero.Libraries.get as any).mockReturnValue({ editable: false, filesEditable: false })],
         ['excluded', () => checkLibraryExcluded.mockReturnValue({ message: 'excluded' } as any)],
-    ])('opens a %s table without writing its rebuilt table.json or snapshot', async (_, restrict) => {
-        const written = expectOk(await writeTable(ref, demoSpec('Two'), { actor: 'user' }));
+    ])('reads a %s table with a missing table.json as corrupt and writes nothing', async (_, restrict) => {
+        expectOk(await writeTable(ref, demoSpec('Two'), { actor: 'user' }));
         await rm(tablePath());
         await rm(htmlPath);
         restrict();
-        const opened = await openTable(ref);
-        expect(opened.spec).toEqual(written.spec);
-        expect(opened.recovered).not.toContainEqual({ kind: 'table_file_rebuilt', version: written.version });
+        await expect(openTable(ref)).rejects.toMatchObject({ code: 'corrupt' });
         expect(existsSync(tablePath())).toBe(false);
         expect(existsSync(htmlPath)).toBe(false);
     });
@@ -2547,6 +2572,100 @@ describe('the fill operations', () => {
     });
 });
 
+describe('the edit operations', () => {
+    const meta = { actor: 'agent', run_id: 'run-edit', thread_id: 'thread-edit', change: 'Edited table' };
+    const edit = (operations: unknown, operation_id = 'edit-1') =>
+        handleArtifactRequest({ event: 'artifact_request', request_id: `r-${operation_id}`, op: 'apply_edit', key: `u-${KEY}`, operations, meta, operation_id });
+
+    it('apply one edit as one sealed version and answer the change list and pending work', async () => {
+        const response = await edit({ title: 'Renamed', add_columns: [{ header: 'Country', type: 'text', description: 'Where?' }] });
+        expect(response).toMatchObject({
+            ok: true,
+            version: 2,
+            replayed: false,
+            changes: [{ op: 'title', title: 'Renamed' }, { op: 'add_column', column: 'country', header: 'Country' }],
+            pending: { cells: 1 },
+        });
+        const versions = await listVersions(ref);
+        expect(versions.at(-1)).toMatchObject({ version: 2, sealed: true, operation_id: 'edit-1' });
+    });
+
+    it('answer a repeat with the same id from its version, and refuse the id reused for another edit', async () => {
+        await edit({ title: 'Once' });
+        const repeat = await edit({ title: 'Once' });
+        expect(repeat).toMatchObject({ ok: true, replayed: true, version: 2, changes: [{ op: 'title', title: 'Once' }] });
+        const reused = await edit({ title: 'Twice' });
+        expect(reused).toMatchObject({ ok: false, error_code: 'operation_mismatch' });
+        expect(await storedVersion()).toBe(2);
+    });
+
+    it('keep the replay record of an edit on the device: versions leave without it', async () => {
+        await edit({ title: 'Once' });
+        const response = await handleArtifactRequest({ event: 'artifact_request', request_id: 'v', op: 'versions', key: `u-${KEY}` });
+        const last = response.versions!.at(-1)! as any;
+        expect(last.version).toBe(2);
+        expect(last.changes).toBeUndefined();
+        expect(last.operation_id).toBeUndefined();
+    });
+
+    it('refuse an edit of a table a read refuses as invalid, writing nothing', async () => {
+        const file = await readTableFile();
+        const spec = { ...file.spec, columns: [...file.spec.columns, file.spec.columns.at(-1)!] };
+        await writeFile(tablePath(), JSON.stringify({ ...file, spec }), 'utf8');
+        const read = await handleArtifactRequest({ event: 'artifact_request', request_id: 'r', op: 'read', key: `u-${KEY}` });
+        expect(read).toMatchObject({ ok: false, error_code: 'invalid_spec' });
+        for (const [operations, id] of [[{ title: 'Never' }, 'edit-a'], [{ refresh_sources: true }, 'edit-b']] as const) {
+            expect(await edit(operations, id)).toMatchObject({ ok: false, error_code: 'invalid_spec' });
+        }
+        expect(await storedVersion()).toBe(file.spec.version);
+        expect((await listVersions(ref)).some((entry) => entry.operation_id)).toBe(false);
+    });
+
+    it('refuse the whole call on an unknown id, naming the parameter and index', async () => {
+        const response = await edit({ title: 'Never', remove_columns: ['note', 'gone'] }, 'edit-bad');
+        expect(response).toMatchObject({ ok: false, error_code: 'unknown_column' });
+        expect(response.error).toContain('remove_columns[1]');
+        expect((await readTable(ref)).spec.title).toBe('Demo table');
+    });
+
+    it('preview sources without queue admission or a write', async () => {
+        const run = vi.spyOn((globalThis as any).Zotero.Beaver.libraryOperations, 'run');
+        resolvedSources.resolveSources.mockResolvedValueOnce([
+            {
+                entry: { id: 's1', type: 'items', ids: ['u-AAAAAAAA'] },
+                papers: [{ row: { id: 'r', ref: { kind: 'item', library_ref: 'u', zotero_key: 'AAAAAAAA' }, cells: {}, documents: ['u-AAAAAPDF'] }, mode: 'document' }],
+                total: 1,
+                truncated: false,
+                rejected: [{ id: 'u-NOTE1111', error: 'not a regular item' }],
+            },
+        ]);
+        const response = await handleArtifactRequest({
+            event: 'artifact_request',
+            request_id: 'preview',
+            op: 'preview',
+            sources: [{ id: 's1', type: 'items', ids: ['u-AAAAAAAA', 'u-NOTE1111'] }],
+            columns: [{ header: 'N', type: 'text' }],
+        });
+        expect(response).toMatchObject({
+            ok: true,
+            preview: { rows: 1, documents: 1, duplicates: 0, row_cap: 1000, sources: [{ count: 1, rejected: [{ id: 'u-NOTE1111' }] }] },
+        });
+        expect(run).not.toHaveBeenCalled();
+        run.mockRestore();
+    });
+
+    it('refuse a preview whose column the engine refuses', async () => {
+        const response = await handleArtifactRequest({
+            event: 'artifact_request',
+            request_id: 'preview-bad',
+            op: 'preview',
+            sources: [{ id: 's1', type: 'items', ids: ['u-AAAAAAAA'] }],
+            columns: [{ header: 'D', type: 'select', options: [{ label: 'A' }, { label: 'a' }] }],
+        });
+        expect(response).toMatchObject({ ok: false, error_code: 'invalid_edit' });
+    });
+});
+
 describe('fill commits', () => {
     const meta = { actor: 'agent', run_id: 'run-fill', thread_id: 'thread-fill', change: 'Filled table', collapse_key: 'job-1' } as const;
     const answer = (row: string, text: string, extra: Record<string, unknown> = {}) => ({
@@ -2615,7 +2734,7 @@ describe('fill commits', () => {
         await editTable(ref, [{ op: 'set_cells', cells: [{ row: 'r1', column: 'note', cell: { outcome: 'cleared', provenance: 'user' } }] }], { actor: 'user' });
         const user = await commit([answer('r1', 'Over the user')]);
         expect(user.ok && user.skipped).toEqual([{ row: 'r1', column: 'note', reason: 'user_cell' }]);
-        expect((await readTable(ref)).spec.rows[0].cells.note).toEqual({ outcome: 'cleared', provenance: 'user' });
+        expect((await readTable(ref)).spec.rows[0].cells.note).toMatchObject({ outcome: 'cleared', provenance: 'user' });
     });
 
     it('fails the whole commit on an invalid cell, with nothing written', async () => {

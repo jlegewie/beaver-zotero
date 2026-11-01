@@ -92,6 +92,23 @@ export interface TableCardDraft {
     instructions: string;
     /** Counter for local keys. */
     nextKey: number;
+    /**
+     * The plugin's preview of the edited sources (its merge and its rows by
+     * how they would be answered), for the sources as they were when it was
+     * made (`sourcesKey`); it stands in for the backend's merge once the
+     * sources are edited.
+     */
+    preview?: DraftPreview | null;
+}
+
+/** The facts of a local preview of the card's sources. */
+export interface DraftPreview {
+    sourcesKey: string;
+    rows: number;
+    duplicates: number;
+    documents: number;
+    title_abstract: number;
+    no_input: number;
 }
 
 const ITEMS_KEY = 'items';
@@ -392,8 +409,33 @@ export function cardTotals(draft: TableCardDraft): { count: number; total: numbe
  * source's items are known it is the sum of their counts, an upper bound.
  * The backend's merge can still fold two different items that share a DOI.
  */
+/** The sources as the card would send them, as one comparable key. */
+export function draftSourcesKey(draft: TableCardDraft): string {
+    return JSON.stringify(draftSourceEntries(draft));
+}
+
+/** The draft's sources as stored entries (`s1`, `s2`, …), as a preview resolves them. */
+export function draftSourceEntries(draft: TableCardDraft): TableCardSource[] {
+    return draft.sources.flatMap((source): TableCardSource[] => {
+        if (source.type === 'library') return [{ type: 'library', scope: { ...source.scope! } }];
+        return (source.ids ?? []).length ? [{ type: 'items', ids: [...source.ids!] }] : [];
+    }).map((source, index) => ({ ...source, id: `s${index + 1}` }));
+}
+
+/** Records a local preview of the sources it was made for. */
+export function setDraftPreview(draft: TableCardDraft, preview: DraftPreview | null): TableCardDraft {
+    return { ...draft, preview };
+}
+
+/** The local preview when it was made for the sources as they are now. */
+export function currentPreview(draft: TableCardDraft): DraftPreview | null {
+    return draft.preview && draft.preview.sourcesKey === draftSourcesKey(draft) ? draft.preview : null;
+}
+
 export function cardRowCount(draft: TableCardDraft, request: WSTableCreateCardRequest): number {
     if (!draft.sourcesEdited) return request.merge.rows;
+    const preview = currentPreview(draft);
+    if (preview) return preview.rows;
     const distinct = distinctItemCount(draft);
     return distinct ?? cardTotals(draft).count;
 }
@@ -450,6 +492,11 @@ export function mergeLine(draft: TableCardDraft, request: WSTableCreateCardReque
         return duplicates ? `${head}; found in more than one source, merged −${format(duplicates)}` : head;
     }
     if (!several) return null;
+    const preview = currentPreview(draft);
+    if (preview) {
+        const head = `${plural(preview.rows, 'item')} across sources`;
+        return preview.duplicates ? `${head}; found in more than one source, merged −${format(preview.duplicates)}` : head;
+    }
     return `${plural(cardRowCount(draft, request), 'item')} across sources; duplicates are merged on create`;
 }
 
@@ -837,6 +884,23 @@ export function draftCost(
     if (!request.cost || !draft.columns.length) return { cost: null, upperBound: false };
     if (!draft.sourcesEdited) return { cost: request.cost, upperBound: false };
     if (!prices) return { cost: null, upperBound: true };
+    // The plugin's preview of the edited sources gives the merged rows and
+    // how each is answered: an exact cost, priced like the backend's.
+    const preview = currentPreview(draft);
+    if (preview) {
+        const credits =
+            Math.round((preview.documents * prices.document + preview.title_abstract * prices.title_abstract) * 100) / 100;
+        return {
+            cost: {
+                rows: preview.rows,
+                documents: preview.documents,
+                title_abstract: preview.title_abstract,
+                no_input: preview.no_input,
+                credits,
+            },
+            upperBound: false,
+        };
+    }
     const rows = cardRowCount(draft, request);
     // The card cannot tell which papers two sources share, so it counts as
     // many rows as it can as read from a document, the dearer kind: a bound
