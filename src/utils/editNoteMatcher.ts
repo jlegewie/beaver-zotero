@@ -50,6 +50,7 @@ import {
     countOccurrences,
     type SimplificationMetadata,
 } from './noteHtmlSimplifier';
+import { classifyMathAnchorOccurrences } from './noteMathAnchors';
 import { stripNoteWrapperDiv } from './noteWrapper';
 import {
     expandToRawHtml,
@@ -582,7 +583,13 @@ const partialElementStripStrategy: Strategy = {
         if (matchCount > 1 && input.operation !== 'str_replace_all') {
             try {
                 const strippedStart = simplifiedPos + stripped.leadingStrip;
-                const expandedBefore = expandOldAnchor(input, input.simplified.substring(0, strippedStart));
+                // The prefix comes from the CURRENT simplified output, which
+                // keeps math wrappers, so expand it literally even on the
+                // legacy pass — dollar expansion would wrap literal prose
+                // dollars and inflate the offset.
+                const expandedBefore = expandToRawHtml(
+                    input.simplified.substring(0, strippedStart), input.metadata, 'old',
+                );
                 const unwrapped = stripNoteWrapperDiv(input.strippedHtml);
                 const wrapperPrefixLen = unwrapped !== input.strippedHtml
                     ? input.strippedHtml.indexOf('>') + 1
@@ -1212,32 +1219,6 @@ const whitespaceRelaxedStrategy: Strategy = {
     },
 };
 
-/**
- * Dollar-delimited anchors inside a math wrapper must target the whole wrapper
- * through the legacy fallback, not create nested math or leave a wrapper when
- * replacing a formula with prose. A mix of literal and wrapped occurrences
- * needs a more specific anchor, including for replace-all.
- */
-function mathAnchorMatches(html: string, needle: string): 'literal' | 'wrapped' | 'mixed' {
-    if (!needle.includes('$')) return 'literal';
-    const wrappers = [...html.matchAll(/<(span|pre)\b[^>]*class="math"[^>]*>[\s\S]*?<\/\1>/g)]
-        .map(match => ({ start: match.index!, end: match.index! + match[0].length }));
-    let literal = false;
-    let wrapped = false;
-    let pos = html.indexOf(needle);
-    while (pos !== -1) {
-        const end = pos + needle.length;
-        if (wrappers.some(range => pos < range.end && end > range.start
-            && !(pos <= range.start && end >= range.end))) {
-            wrapped = true;
-        } else {
-            literal = true;
-        }
-        pos = html.indexOf(needle, end);
-    }
-    return wrapped ? (literal ? 'mixed' : 'wrapped') : 'literal';
-}
-
 /** Preserve a dollar-bearing insertion anchor; expand only the injected text. */
 function preserveMathInsertAnchor(input: MatchInput, result: MatchResult): MatchResult {
     if (!result.oldString.includes('$')) return result;
@@ -1330,7 +1311,15 @@ const STRATEGIES: Strategy[] = [
     whitespaceRelaxedStrategy,
 ];
 
-/** Apply the same boundary and insertion safeguards to either expansion mode. */
+/**
+ * Apply the same boundary and insertion safeguards to either expansion mode.
+ *
+ * A dollar-delimited anchor that only matches *inside* a math wrapper must
+ * target the whole wrapper through the legacy pass, not nest a second math
+ * element or leave an orphan wrapper when a formula becomes prose. An anchor
+ * matching both literal dollar text and math needs a more specific anchor,
+ * including for replace-all.
+ */
 function runStrategies(
     input: StrategyInput,
     base: BaseExpansion,
@@ -1339,7 +1328,7 @@ function runStrategies(
     for (const strategy of strategies) {
         const result = strategy.tryMatch(input, base);
         if (!result || result.matchCount === 0) continue;
-        const mathMatches = mathAnchorMatches(input.strippedHtml, result.expandedOld);
+        const mathMatches = classifyMathAnchorOccurrences(input.strippedHtml, result.expandedOld);
         if (mathMatches === 'mixed') {
             throw Object.assign(new Error(
                 'old_string matches both literal dollar text and part of a math element. '
