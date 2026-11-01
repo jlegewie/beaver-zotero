@@ -171,95 +171,20 @@ describe("citationForEvidence", () => {
         expectTagResolves(citation);
     });
 
-    it("cites an annotation row's attachment, under the annotation's item", () => {
-        const row: Row = {
-            id: "rann",
-            ref: {
-                kind: "annotation",
-                library_ref: "u",
-                library_id: 1,
-                zotero_key: "ANNO0001",
-                attachment: {
-                    library_ref: "u",
-                    library_id: 1,
-                    zotero_key: "ATT00001",
-                },
-                parent_item: {
-                    library_ref: "u",
-                    library_id: 1,
-                    zotero_key: "ITEM0001",
-                },
-            },
-            cells: {
-                anchor: {
-                    outcome: "answered",
-                    provenance: "system",
-                    value: {
-                        kind: "annotation",
-                        text: "highlighted",
-                        source_display_name: "Lee 2019",
-                    },
-                },
-            },
-        };
-        const citation = citationForEvidence(row, {
-            document: "u-ATT00001",
-            locator: "s12",
-            quote: "q",
-        });
-        expect(citation).toMatchObject({
-            // The annotation row knows its attachment's rowid, so it keeps it.
-            resolved_ref: { library_id: 1, zotero_key: "ATT00001", loc: { raw: "s12" } },
-            parent_ref: { zotero_key: "ITEM0001" },
-            citation_type: "attachment",
-            // Named by the annotation's source, so the marker has a label.
-            display_name: "Lee 2019",
-        });
-        expectTagResolves(citation);
-    });
-
     it("cites nothing for evidence whose document id is malformed", () => {
         expect(citationForEvidence(paper, { ...pdfEvidence, document: "not-an-id-" })).toBeNull();
     });
 
-    it("cites a context file by its external key", () => {
-        const row: Row = {
-            id: "rfile",
-            ref: { kind: "file", ext_key: "AB12CD34", label: "notes.pdf" },
-            documents: ["ext-AB12CD34"],
-            cells: {},
-        };
-        const citation = citationForEvidence(row, {
-            document: "ext-AB12CD34",
-            locator: "s3",
-            quote: "Field notes",
-            page: 0,
-        });
+    it("cites an external work's document with no item above it", () => {
+        const citation = citationForEvidence(
+            { id: "rx", ref: { kind: "external", source: "openalex", source_id: "W1" }, cells: {} },
+            { document: "u-ATT00001", quote: "q", locator: "s3" },
+        );
         expect(citation).toMatchObject({
-            requested_ref: { kind: "external_file", ext_key: "AB12CD34" },
-            citation_type: "external_file",
-            pages: [1],
-            locations: [{ part_id: "s3", page_idx: 0 }],
-            raw_tag: '<citation id="ext-AB12CD34" loc="s3"/>',
+            resolved_ref: { zotero_key: "ATT00001" },
+            citation_type: "attachment",
         });
-        expectTagResolves(citation);
-    });
-
-    it("names a file row by its label, else its key, without a reference cell", () => {
-        const labelled = citationForEvidence(
-            {
-                id: "rf",
-                ref: { kind: "file", ext_key: "EXT1", label: "notes.pdf" },
-                cells: {},
-            },
-            { document: "ext-EXT1", quote: "q", locator: "s1" },
-        );
-        expect(labelled?.display_name).toBe("notes.pdf");
-        const bare = citationForEvidence(
-            { id: "rf", ref: { kind: "file", ext_key: "EXT1" }, cells: {} },
-            { document: "ext-EXT1", quote: "q", locator: "s1" },
-        );
-        expect(bare?.display_name).toBe("EXT1");
+        expect(citation?.parent_ref).toBeUndefined();
     });
 
     it("cites nothing for a row without a ref", () => {
@@ -394,52 +319,6 @@ describe("cell citations", () => {
         expect(getCitationPages(at("s5.6-s6.2"))).toEqual([5]);
         // A document-scoped id names no page.
         expect(getCitationPages(at("s243"))).toEqual([]);
-    });
-
-    it("cites the attachment under its parent item on attachment and annotation rows", () => {
-        const parent = {
-            library_ref: "u",
-            library_id: 1,
-            zotero_key: "ITEM0001",
-        };
-        const attachmentRow: Row = {
-            id: "ra",
-            ref: {
-                kind: "attachment",
-                library_ref: "u",
-                library_id: 1,
-                zotero_key: "ATT00001",
-                parent_item: parent,
-            },
-            documents: ["u-ATT00001"],
-            cells: {},
-        };
-        const annotationRow: Row = {
-            id: "rn",
-            ref: {
-                kind: "annotation",
-                library_ref: "u",
-                library_id: 1,
-                zotero_key: "ANNO0001",
-                attachment: {
-                    library_ref: "u",
-                    library_id: 1,
-                    zotero_key: "ATT00001",
-                },
-                parent_item: parent,
-            },
-            documents: ["u-ATT00001"],
-            cells: {},
-        };
-        for (const row of [attachmentRow, annotationRow]) {
-            expect(
-                citationForEvidence(row, { document: "u-ATT00001", quote: "q", locator: "s3" }),
-            ).toMatchObject({
-                resolved_ref: { library_id: 1, zotero_key: "ATT00001" },
-                parent_ref: { zotero_key: "ITEM0001" },
-                citation_type: "attachment",
-            });
-        }
     });
 
     it("highlights boxes on the page a page locator names", () => {

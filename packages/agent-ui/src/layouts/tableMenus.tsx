@@ -1,3 +1,6 @@
+/**
+ * The table's filter and sort menus, and the chips that show active filters.
+ */
 import React from "react";
 import {
     anchorColumn,
@@ -5,7 +8,6 @@ import {
     isColumnSortable,
     selectLabelsInColumn,
     selectOption,
-    type Column,
     type Filter,
     type TableSpec,
 } from "@beaver/agent-core/layouts/table";
@@ -13,140 +15,11 @@ import {
     ArrowDownIcon,
     ArrowUpIcon,
     CancelIcon,
-    FilterIcon,
     Icon,
-    LayersIcon,
-    ChevronIcon,
     TickIcon,
-} from "../../icons";
-import MenuButton from "../../primitives/MenuButton";
-import type { MenuItem } from "../../primitives/ContextMenu";
-import {
-    DENSITY_LABELS,
-    TABLE_DENSITIES,
-    type TableDensity,
-} from "../tableView";
-import type { TableState } from "../useTableState";
-
-export interface TableToolbarProps {
-    table: TableSpec;
-    state: TableState;
-    /** Rows in view / rows in total, rendered on the right. */
-    shown: number;
-    total: number;
-    /** Surface-specific controls, placed before the view controls (e.g. "Add column"). */
-    actions?: React.ReactNode;
-    /**
-     * Opt-in free-text filter. Off by default: for a table of a few dozen rows
-     * the filter menu is both faster and more precise, and a search box that
-     * only matches visible text sets the wrong expectation.
-     */
-    showSearch?: boolean;
-    searchPlaceholder?: string;
-    /**
-     * A Sort menu beside Filter, for a surface where the header's hover-only
-     * sort control is too easy to miss.
-     */
-    showSortMenu?: boolean;
-    /**
-     * Offer "has a value" / "no value" for every column the filter menu has
-     * no categories for, so a table of prose still has something to filter by.
-     */
-    valueFilters?: boolean;
-}
-
-/**
- * The view controls: filter, active-filter chips, row height, column
- * visibility. Everything here narrows or reshapes what the grid shows and
- * nothing here mutates the spec, which is why it can be the same toolbar for
- * every kind of table.
- */
-export function TableToolbar({
-    table,
-    state,
-    shown,
-    total,
-    actions,
-    showSearch = false,
-    searchPlaceholder = "Filter rows",
-    showSortMenu = false,
-    valueFilters = false,
-}: TableToolbarProps): React.ReactElement {
-    const filterable = table.capabilities?.filterable ?? true;
-    const filterItems = filterable
-        ? buildFilterMenu(table, state, valueFilters)
-        : [];
-    const sortable = table.capabilities?.sortable ?? true;
-    const sortItems =
-        showSortMenu && sortable ? buildSortMenu(table, state) : [];
-    const sortColumn = state.sort
-        ? table.columns.find((c) => c.id === state.sort!.column_id)
-        : undefined;
-
-    return (
-        <div className="bt-toolbar">
-            {filterItems.length > 0 ? (
-                <MenuButton
-                    menuItems={filterItems}
-                    variant={state.hasFilters ? "surface" : "ghost-secondary"}
-                    icon={FilterIcon}
-                    buttonLabel="Filter"
-                    className={`bt-toolbar-button${state.hasFilters ? " bt-active" : ""}`}
-                    ariaLabel="Filter rows"
-                    maxHeight="24rem"
-                    width="16rem"
-                />
-            ) : null}
-
-            {sortItems.length > 0 ? (
-                <MenuButton
-                    menuItems={sortItems}
-                    variant={sortColumn ? "surface" : "ghost-secondary"}
-                    icon={ChevronIcon}
-                    buttonLabel={
-                        sortColumn
-                            ? `Sort: ${sortColumn.header} ${state.sort!.direction === "asc" ? "↑" : "↓"}`
-                            : "Sort"
-                    }
-                    className={`bt-toolbar-button${sortColumn ? " bt-active" : ""}`}
-                    ariaLabel="Sort rows"
-                    maxHeight="24rem"
-                    width="16rem"
-                />
-            ) : null}
-
-            {showSearch ? (
-                <input
-                    type="search"
-                    className="bt-search"
-                    placeholder={searchPlaceholder}
-                    aria-label={searchPlaceholder}
-                    value={state.quickFilter}
-                    onChange={(e) => state.setQuickFilter(e.target.value)}
-                />
-            ) : null}
-
-            <FilterChips table={table} state={state} />
-
-            <span className="bt-spacer" />
-
-            <span className="bt-rowcount" aria-live="polite">
-                {shown === total
-                    ? `${total} ${total === 1 ? "row" : "rows"}`
-                    : `${shown} of ${total}`}
-            </span>
-
-            {actions}
-
-            <DensityControl
-                density={state.density}
-                onChange={state.setDensity}
-            />
-
-            <ColumnsMenu table={table} state={state} />
-        </div>
-    );
-}
+} from "../icons";
+import type { MenuItem } from "../primitives/ContextMenu";
+import type { TableState } from "./useTableState";
 
 /**
  * One chip per active filter, each removing its own. Chips are what keep a
@@ -212,7 +85,6 @@ function describeFilter(filter: Filter): string {
 export function buildFilterMenu(
     table: TableSpec,
     state: TableState,
-    valueFilters: boolean,
 ): MenuItem[] {
     const items: MenuItem[] = [];
     const anchorId = anchorColumn(table)?.id;
@@ -221,7 +93,6 @@ export function buildFilterMenu(
         if (!isColumnFilterable(column)) continue;
 
         if (
-            valueFilters &&
             column.id !== anchorId &&
             column.type !== "select" &&
             column.type !== "boolean" &&
@@ -379,69 +250,4 @@ function checkItem(
             </div>
         ),
     };
-}
-
-function DensityControl({
-    density,
-    onChange,
-}: {
-    density: TableDensity;
-    onChange(next: TableDensity): void;
-}): React.ReactElement {
-    return (
-        <div className="bt-density" role="group" aria-label="Row height">
-            {TABLE_DENSITIES.map((option) => (
-                <button
-                    key={option}
-                    type="button"
-                    className={`bt-density-option${density === option ? " bt-active" : ""}`}
-                    aria-pressed={density === option}
-                    title={DENSITY_LABELS[option]}
-                    onClick={() => onChange(option)}
-                >
-                    <span className={`bt-density-glyph bt-density-${option}`} />
-                </button>
-            ))}
-        </div>
-    );
-}
-
-function ColumnsMenu({
-    table,
-    state,
-}: {
-    table: TableSpec;
-    state: TableState;
-}): React.ReactElement | null {
-    // The anchor is exempt: it carries row identity, and `DataTable` keeps it
-    // visible regardless — offering it here would leave a checkbox that lies.
-    const anchorId = anchorColumn(table)?.id;
-    const hideable = table.columns.filter((c: Column) => c.id !== anchorId);
-    // A single hideable column earns no menu — unless it started hidden (a
-    // lone system column), in which case the menu is the only way back.
-    if (hideable.length < 2 && state.hiddenColumns.size === 0) return null;
-
-    const items: MenuItem[] = hideable.map((column) =>
-        checkItem(column.header, !state.hiddenColumns.has(column.id), () =>
-            state.toggleColumn(column.id),
-        ),
-    );
-    if (state.hiddenColumns.size > 0)
-        items.push({
-            label: "Show all columns",
-            onClick: state.showAllColumns,
-        });
-
-    return (
-        <MenuButton
-            menuItems={items}
-            variant="ghost-secondary"
-            icon={LayersIcon}
-            className="bt-toolbar-button"
-            ariaLabel="Show and hide columns"
-            tooltipContent="Columns"
-            maxHeight="24rem"
-            width="14rem"
-        />
-    );
 }

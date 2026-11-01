@@ -234,20 +234,20 @@ describe("renderTableHtml", () => {
     });
 
     it("draws the primary verb on the anchor cell and never a column of its own", () => {
-        // A context-file row declares `open`, but a static document has no
-        // link for a local file, so its anchor carries no control.
-        const files: TableSpec = {
+        // An external work not in the library has nothing to reveal, so its
+        // anchor carries no control.
+        const external: TableSpec = {
             ...spec,
-            capabilities: { row_actions: ["open", "import"] },
+            capabilities: { row_actions: ["reveal", "open", "import"] },
             rows: [
                 {
-                    id: "f1",
-                    ref: { kind: "file", ext_key: "AB12CD34" },
-                    cells: { ref: reference("notes.pdf") },
+                    id: "x1",
+                    ref: { kind: "external", source: "openalex", source_id: "W1" },
+                    cells: { ref: reference("A preprint") },
                 },
             ],
         };
-        const html = renderTableHtml(files, { linksFor: () => ({}) });
+        const html = renderTableHtml(external, { linksFor: () => ({}) });
         expect(html).not.toContain("bt-ref-act");
         expect(html).not.toContain("bt-acts");
 
@@ -548,7 +548,6 @@ describe("citations", () => {
                 [{ locator: "s4", quote: "a 13% performance increase", page: 3 }],
                 reference("Bloom 2015", {
                     formatted_citation: "Bloom, N. 2015. Does working from home work?",
-                    content_kind: "pdf",
                 }),
             ),
             citedRow("r2", itemRow("P2", "K2"), [{ locator: "s1", quote: "no effect", page: 0 }], reference("Beta")),
@@ -586,8 +585,7 @@ describe("citations", () => {
                     cells: {
                         [REFERENCE_COLUMN_ID]: reference("Paper One", {
                             formatted_citation: "Paper One",
-                            content_kind: "pdf",
-                        }),
+                                }),
                         finding: answered({ kind: "text", text: "One." }, "model", {
                             documents: ["u-A1"],
                             evidence: [
@@ -680,25 +678,6 @@ describe("citations", () => {
         expect(cellHtml(html, "r1", "finding")).toContain(
             '<a class="bt-cite bt-cite--locator" title="Bloom 2015 — Page 4" href="zotero://open/library/items/K1?page=4">1</a>',
         );
-    });
-
-    it("colours a marker by what it points at", () => {
-        const mixed: TableSpec = {
-            id: "x",
-            columns,
-            rows: [
-                citedRow("r1", itemRow("P1", "K1"), [{ locator: "s4", quote: "located", page: 3 }]),
-                citedRow(
-                    "r3",
-                    { ref: { kind: "file", ext_key: "F1", label: "notes.pdf" }, documents: ["ext-F1"] },
-                    [{ locator: "s2", quote: "in a file", page: 1 }],
-                ),
-            ],
-        };
-        const html = renderTableHtml(mixed);
-        expect(cellHtml(html, "r1", "finding")).toContain("bt-cite bt-cite--locator");
-        // An attached file has no link here; the marker is a span.
-        expect(cellHtml(html, "r3", "finding")).toContain('<span class="bt-cite bt-cite--locator"');
     });
 
     it("lists the cited sources so a saved table stands on its own", () => {
@@ -1087,8 +1066,8 @@ describe("how answers read", () => {
  * all seven cell kinds, every outcome and provenance, `confidence` and
  * `stale`, answers from the document and from title and abstract,
  * evidence with table context, a select with a declared vocabulary, a
- * screening decision with its reasoning, a library row, an external row, a
- * context-file row with a row failure, row origins and the approved sources.
+ * screening decision with its reasoning, library rows (one with a row
+ * failure), an external row, row origins and the approved sources.
  */
 const fullSpec: TableSpec = {
     id: "full",
@@ -1164,8 +1143,7 @@ const fullSpec: TableSpec = {
                         venue: "QJE",
                         item_type: "journalArticle",
                         formatted_citation: "Bloom, N. et al. 2015. Does working from home work? QJE.",
-                        content_kind: "pdf",
-                    },
+                        },
                     "system",
                 ),
                 decision: answered({ kind: "select", label: "Include" }, "model", {
@@ -1248,10 +1226,10 @@ const fullSpec: TableSpec = {
         },
         {
             id: "g7h8i9",
-            ref: { kind: "file", ext_key: "f1", label: "protocol.pdf" },
-            documents: ["ext-f1"],
+            ref: { kind: "item", library_ref: "u", zotero_key: "PROT0001" },
+            documents: ["u-PROTPDF1"],
             failure: { code: "encrypted", message: "The file could not be read." },
-            cells: { ref: reference("protocol.pdf") },
+            cells: { ref: reference("Protocol") },
         },
     ],
     sort: { column_id: "when", direction: "asc" },

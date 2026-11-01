@@ -1,6 +1,5 @@
 import { regenerateFromRunAtom } from './atoms/agentRunAtoms';
 import { threadAdmissionAtom, threadConflictAtom } from './runtime/threadAdmission';
-import { windowSurfaceAtom } from './atoms/windowSurface';
 import { openPreferencesWindow } from './ui/openPreferencesWindow';
 import { attachThreadAdmission } from "./runtime/threadAdmission";
 import { threadEntitiesAtom } from './atoms/threadList';
@@ -447,7 +446,7 @@ export function inspectRuntime(request?: { runId?: string; command?: string; thr
             });
         }
         case 'admission': return { snapshot: store.get(threadAdmissionAtom), conflict: store.get(threadConflictAtom) };
-        case 'surface': return { surface: store.get(windowSurfaceAtom), contextId: runtime.contextWindow?.__beaverRuntime?.id ?? null };
+        case 'surface': return { contextId: runtime.contextWindow?.__beaverRuntime?.id ?? null };
         case 'open-preferences': openPreferencesWindow(); return { ok: true };
         case 'thread-retry':
             if (!request.runId) return { error: 'run_required' };

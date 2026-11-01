@@ -41,7 +41,6 @@ export function tableDocumentIds(spec: TableSpec | null): string[] {
  * like any other (exclusion is not a UI restriction).
  */
 async function describeDocument(id: string): Promise<TableDocumentInfo | undefined> {
-    if (id.startsWith('ext-')) return undefined;
     const parsed = parseItemReference(id);
     const libraryID = parsed ? resolveLibraryRef(parsed) : null;
     if (!parsed || !libraryID) return undefined;

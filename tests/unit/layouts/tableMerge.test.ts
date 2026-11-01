@@ -10,21 +10,8 @@ import { mergeRows, normalizeDoi, normalizeIdentifiers, identifierCell } from "@
 import type { Row } from "@beaver/agent-core/layouts/table";
 
 const dir = fileURLToPath(new URL("../../fixtures/artifacts/table-merges/", import.meta.url));
-// Tables hold Zotero regular items and external works only: the attachment,
-// annotation and file row kinds are being removed (K1/K2), and the merge no
-// longer gives them an identity of their own.
-const OTHER_ROW_KINDS = new Set([
-    "annotation-annotation-same-key.json",
-    "annotation-item.json",
-    "attachment-external.json",
-    "attachment-item-parent.json",
-    "attachment-item-unrelated.json",
-    "file-external.json",
-    "file-file-same-key.json",
-    "file-item.json",
-]);
 const cases = readdirSync(dir)
-    .filter((file) => file.endsWith(".json") && !OTHER_ROW_KINDS.has(file))
+    .filter((file) => file.endsWith(".json"))
     .sort()
     .map((file) => ({ file, fixture: JSON.parse(readFileSync(path.join(dir, file), "utf8")) }));
 
@@ -76,8 +63,8 @@ describe("identifiers", () => {
         });
     });
     it("gives an incoming row with a taken id a fresh one", () => {
-        const stored: Row = { id: "r1", cells: {}, ref: { kind: "file", ext_key: "AAAA0001" } };
-        const incoming: Row = { id: "r1", cells: {}, ref: { kind: "file", ext_key: "BBBB0002" } };
+        const stored: Row = { id: "r1", cells: {}, ref: { kind: "item", library_ref: "u", zotero_key: "AAAA0001" } };
+        const incoming: Row = { id: "r1", cells: {}, ref: { kind: "item", library_ref: "u", zotero_key: "BBBB0002" } };
         const result = mergeRows([stored], [{ row: incoming }]);
         expect(result.rows).toHaveLength(2);
         expect(result.added).toEqual([result.rows[1].id]);

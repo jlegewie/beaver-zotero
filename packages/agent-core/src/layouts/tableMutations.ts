@@ -1261,14 +1261,9 @@ function addRows(draft: Draft, mutation: AddRowsMutation): Failure | undefined {
 
 /** What identifies a row's paper on the removed list. */
 export function paperKey(ref: NonNullable<Row["ref"]>): string {
-    switch (ref.kind) {
-        case "external":
-            return `external:${ref.source}:${ref.source_id}`;
-        case "file":
-            return `file:${ref.ext_key}`;
-        default:
-            return `zotero:${ref.library_ref}:${ref.zotero_key}`;
-    }
+    return ref.kind === "external"
+        ? `external:${ref.source}:${ref.source_id}`
+        : `zotero:${ref.library_ref}:${ref.zotero_key}`;
 }
 
 /** Whether the row names its documents as none: an empty list or null. */
@@ -1576,8 +1571,7 @@ function withReplaced(cell: Cell, existing: Cell | undefined): Cell {
 function fitsColumn(column: Column, cell: ReplacedCell): boolean {
     if (cell.outcome === "not_reported") return true;
     const value = cell.value;
-    const allowed = column.type === "reference" ? ["reference", "annotation"] : [column.type];
-    if (!value || !allowed.includes(value.kind)) return false;
+    if (value?.kind !== column.type) return false;
     if (value.kind === "select") return !!optionFor(column.options, value.label);
     return true;
 }

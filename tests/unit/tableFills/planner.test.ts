@@ -177,17 +177,6 @@ describe("buildPlan", () => {
         expect(plan.cells).toBe(2);
     });
 
-    it("records the document of a row that names itself, so its answers are not stale at once", () => {
-        const attachment: Row = {
-            id: "att",
-            ref: { kind: "attachment", library_ref: "u", zotero_key: "ATTACH01" },
-            cells: {},
-        };
-        const plan = buildPlan(table([attachment]), {}, new Map());
-        expect(plan.rows[0]).toMatchObject({ mode: "document", document: { id: "u-ATTACH01" }, documents: ["u-ATTACH01"] });
-        expect(plan.documentUpdates).toEqual([{ row: "att", documents: ["u-ATTACH01"], before: [] }]);
-    });
-
     it("never sends a row that names several documents: it gets a blocking failure", () => {
         const spec = table([itemRow("two", { documents: ["u-P1", "u-P2"] })]);
         const plan = buildPlan(spec, { rows: ["two"] }, new Map([["two", lookup([{ id: "u-P1", kind: "pdf", primary: true }, { id: "u-P2", kind: "pdf", primary: false }])]]));
@@ -221,11 +210,11 @@ describe("buildPlan", () => {
         const external: Row = {
             id: "ext",
             ref: { kind: "external", source: "openalex", source_id: "W1", reference: { abstract: "An abstract." } as never },
-            documents: ["ext-FILE0001"],
+            documents: ["u-PDF22222"],
             cells: {},
         };
         const plan = buildPlan(table([external]), {}, new Map());
-        expect(plan.rows[0]).toMatchObject({ mode: "document", document: { id: "ext-FILE0001" }, documents: ["ext-FILE0001"] });
+        expect(plan.rows[0]).toMatchObject({ mode: "document", document: { id: "u-PDF22222" }, documents: ["u-PDF22222"] });
     });
 
     it("fills only the named rows and columns", () => {

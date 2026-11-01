@@ -17,10 +17,9 @@
  * - A stored spec carries its own format version (`spec_version`), identity
  *   (`key`) and revision (`version`), and {@link readSpec} is the guarded way
  *   back in: a spec written in another format is refused rather than misread.
- * - Rows are discriminated by what they are about (`Row.ref`, a `RowRef`), and
- *   everything that depends on that — in-library state, which verbs apply and
- *   where they point — is answered by `./rowKinds`, never by branching on
- *   `ref.kind` in a renderer. Row ids are opaque.
+ * - A row is a Zotero regular item or an external work (`Row.ref`). Which
+ *   verbs it offers and where they point is answered by `./rowActions`. Row
+ *   ids are opaque.
  * - One column is the **anchor** (`anchor_column_id`): it owns row identity, is
  *   the sticky column under horizontal scroll and is the target of reveal.
  * - Evidence names its document: each entry locates text in one of the
@@ -34,30 +33,15 @@
  */
 
 import type { ExternalReference } from "../types/externalReferences";
-import { anchorValueKindsFor, rowKindsIn, type RowAction } from "./rowKinds";
+import type { RowAction } from "./rowActions";
 
 export {
     ROW_ACTIONS,
-    ROW_KINDS,
-    anchorValueKindsFor,
-    annotationComment,
-    annotationTitle,
-    annotationTypeLabel,
     isRowInLibrary,
     rowActionTarget,
     rowActions,
-    rowKindOf,
-    rowKindsIn,
-    rowPrimaryAction,
-    rowTypeColor,
-    rowTypeLabel,
-} from "./rowKinds";
-export type {
-    RowAction,
-    RowActionTarget,
-    RowKind,
-    RowKindDef,
-} from "./rowKinds";
+} from "./rowActions";
+export type { RowAction, RowActionTarget } from "./rowActions";
 
 // ---------------------------------------------------------------------------
 // Spec
@@ -234,14 +218,9 @@ export interface ZoteroRowReference {
 /**
  * What a row is about — its identity, and nothing about how it looks. The
  * reference cell carries the display; the ref carries what the row's verbs
- * need. `./rowKinds` reads it; renderers do not branch on `kind` themselves.
+ * need. A stored table holds nothing else: validation rejects another kind.
  */
-export type RowRef =
-    | ItemRowRef
-    | AttachmentRowRef
-    | AnnotationRowRef
-    | ExternalRowRef
-    | FileRowRef;
+export type RowRef = ItemRowRef | ExternalRowRef;
 
 /**
  * A regular (bibliographic) library item. The document it is filled from, which
@@ -250,25 +229,6 @@ export type RowRef =
 export interface ItemRowRef extends ZoteroRowReference {
     kind: "item";
 }
-
-/** A file attachment in its own right, not folded onto its parent. */
-export interface AttachmentRowRef extends ZoteroRowReference {
-    kind: "attachment";
-    /** The bibliographic item it belongs to; absent for a standalone attachment. */
-    parent_item?: ZoteroRowReference;
-}
-
-/** An annotation. `open` lands in the reader on it; `reveal` selects its item. */
-export interface AnnotationRowRef extends ZoteroRowReference {
-    kind: "annotation";
-    /** The attachment the annotation is on. */
-    attachment: ZoteroRowReference;
-    /** The bibliographic item above the attachment, when there is one. */
-    parent_item?: ZoteroRowReference;
-}
-
-/** A Zotero object of any kind — what the three library kinds have in common. */
-export type ZoteroRowRef = ItemRowRef | AttachmentRowRef | AnnotationRowRef;
 
 /**
  * A work found outside the library. Carries the full `reference` when the
@@ -282,34 +242,13 @@ export interface ExternalRowRef {
     reference?: ExternalReference;
 }
 
-/**
- * A context file the user supplied — not a library item and not a work with an
- * external identity.
- */
-export interface FileRowRef {
-    kind: "file";
-    ext_key: string;
-    label?: string;
-}
-
-export function isZoteroRowRef(ref: RowRef): ref is ZoteroRowRef {
-    return (
-        ref.kind === "item" ||
-        ref.kind === "attachment" ||
-        ref.kind === "annotation"
-    );
-}
-
 /** The source entry that added a row, and when (`YYYY-MM-DD`). */
 export interface RowOrigin {
     source: string;
     date: string;
 }
 
-/**
- * A document id: the portable id of a Zotero attachment (`u-KEY`,
- * `g<groupID>-KEY`) or of an attached file (`ext-KEY`).
- */
+/** A document id: the portable id of a Zotero attachment (`u-KEY`, `g<groupID>-KEY`). */
 export type DocumentId = string;
 
 /**
@@ -340,10 +279,9 @@ export interface Row {
     id: string;
     ref?: RowRef;
     /**
-     * The documents this row is filled from. An attachment or file row names
-     * itself, an annotation row its attachment, an item row the attachment
-     * found for it. Absent ⇒ the row has none and is answered from its title
-     * and abstract.
+     * The documents this row is filled from: the item's attachment found for
+     * it, or the one the user chose. Absent ⇒ the row has none and is answered
+     * from its title and abstract.
      */
     documents?: DocumentId[];
     /** Why the last fill stopped before the row was answered. */
@@ -352,7 +290,7 @@ export interface Row {
     cells: Record<string, Cell>;
     /**
      * Whether this row's subject is in the user's library. Absent ⇒ derived
-     * from the ref's kind by `isRowInLibrary`.
+     * from the ref by `isRowInLibrary`.
      */
     in_library?: boolean;
     /** Every source entry that produced the row. */
@@ -370,9 +308,8 @@ export type CellValue =
     /** One category; must be in `Column.options` when those are declared. */
     | { kind: "select"; label: string }
     /**
-     * A bibliographic item, library or external, or a file: what a citation
-     * needs to render the row without loading Zotero data. Identity lives on
-     * `Row.ref`.
+     * A bibliographic item, library or external: what a citation needs to
+     * render the row without loading Zotero data. Identity lives on `Row.ref`.
      */
     | {
           kind: "reference";
@@ -384,29 +321,10 @@ export type CellValue =
           subtitle?: string;
           /** Where it appeared — journal, publisher, repository. */
           venue?: string;
-          /** Zotero item type (`journalArticle`, `attachment`, …), for the icon. */
+          /** Zotero item type (`journalArticle`, `book`, …), for the icon. */
           item_type?: string;
           /** The formatted bibliographic reference. */
           formatted_citation?: string;
-          /** Attachments only: `pdf`, `epub`, `snapshot`, … refines the icon. */
-          content_kind?: string;
-      }
-    /**
-     * An annotation, described for display. Only meaningful in a `reference`
-     * column, next to an `annotation` ref.
-     */
-    | {
-          kind: "annotation";
-          /** `highlight`, `underline`, `note`, `text` or `image`. */
-          annotation_type?: string;
-          /** The highlighted or underlined passage. */
-          text?: string;
-          comment?: string;
-          /** Hex or CSS colour; tints the icon. */
-          color?: string;
-          page_label?: string;
-          /** The bibliographic item it belongs to, short form ("Smith 2020"). */
-          source_display_name?: string;
       }
     | { kind: "link"; url: string; label?: string };
 
@@ -745,20 +663,15 @@ export function cellIdFor(rowId: string, columnId: string): string {
 // Defaults
 // ---------------------------------------------------------------------------
 
-/**
- * Value kinds a column of each type holds. One each, except `reference`: the
- * anchor column describes the row's subject, and a table may mix papers and
- * annotations, so it accepts both display shapes.
- */
-const VALUE_KINDS_BY_COLUMN_TYPE: Record<ColumnType, readonly CellValueKind[]> =
-    {
-        text: ["text"],
-        date: ["date"],
-        boolean: ["boolean"],
-        select: ["select"],
-        reference: ["reference", "annotation"],
-        link: ["link"],
-    };
+/** The column types this version reads; a cell's value kind is its column's type. */
+const COLUMN_TYPES: ReadonlySet<string> = new Set<ColumnType>([
+    "text",
+    "date",
+    "boolean",
+    "select",
+    "reference",
+    "link",
+]);
 
 export function isColumnSortable(column: Column): boolean {
     return column.sortable ?? true;
@@ -787,44 +700,10 @@ export function isColumnFilterable(column: Column): boolean {
 
 /**
  * Columns a rendering hides until asked: the `system` ones, because they are
- * enrichment rather than answers — with one exception. A `row_type` column
- * shows by default when the table mixes kinds of row (papers beside
- * annotations, a search result beside a library item), since that is when the
- * type is the first thing a reader needs; in a table of one kind the anchor
- * icon already says it.
+ * enrichment rather than answers.
  */
 export function defaultHiddenColumnIds(spec: TableSpec): string[] {
-    const mixed = rowKindsIn(spec).size > 1;
-    return spec.columns
-        .filter((c) => c.system && !(c.role === "row_type" && mixed))
-        .map((c) => c.id);
-}
-
-/**
- * The fields a row reveals only when expanded, beyond its cells: an
- * annotation's passage and comment, listed under their names.
- */
-export function cellExpandedFields(
-    cell: Cell | undefined,
-): { label: string; details: Details }[] {
-    const fields: { label: string; details: Details }[] = [];
-    const value = cell?.value;
-    if (value?.kind === "annotation") {
-        if (value.text)
-            fields.push({
-                label:
-                    value.annotation_type === "text"
-                        ? "Text"
-                        : "Highlighted text",
-                details: { kind: "text", text: value.text },
-            });
-        if (value.comment)
-            fields.push({
-                label: "Comment",
-                details: { kind: "text", text: value.comment },
-            });
-    }
-    return fields;
+    return spec.columns.filter((c) => c.system).map((c) => c.id);
 }
 
 /** Trailing punctuation {@link normalizeSelectLabel} ignores. */
@@ -1013,8 +892,6 @@ export function cellValueText(value: CellValue | undefined): string {
             ]
                 .filter(Boolean)
                 .join(" — ");
-        case "annotation":
-            return [value.text, value.comment].filter(Boolean).join(" — ");
         case "link":
             return value.label ?? value.url;
     }
@@ -1144,10 +1021,6 @@ export function cellSortKey(cell: Cell | undefined): SortKey {
             return (value.title ?? value.display_name).toLocaleLowerCase(
                 SORT_LOCALE,
             );
-        case "annotation": {
-            const text = value.text ?? value.comment;
-            return text ? text.toLocaleLowerCase(SORT_LOCALE) : null;
-        }
         case "link":
             return (value.label ?? value.url).toLocaleLowerCase(SORT_LOCALE);
     }
@@ -1639,6 +1512,9 @@ export function cellInvariantError(cell: Cell): string | undefined {
 
 /** The first structural row rule the row breaks, or undefined. */
 export function rowInvariantError(row: Row): string | undefined {
+    const kind = (row.ref as { kind?: unknown } | undefined)?.kind;
+    if (row.ref != null && kind !== "item" && kind !== "external")
+        return "A row is a Zotero item or an external work";
     if (row.documents != null && !isDocumentList(row.documents))
         return "A row's documents are a list of document ids";
     const failure = row.failure as unknown;
@@ -1668,10 +1544,7 @@ export function validateTableSpec(spec: TableSpec): TableSpecIssue[] {
 
     for (const column of spec.columns) {
         if (
-            !Object.prototype.hasOwnProperty.call(
-                VALUE_KINDS_BY_COLUMN_TYPE,
-                column.type,
-            ) ||
+            !COLUMN_TYPES.has(column.type) ||
             typeof column.header !== "string"
         ) {
             issues.push({
@@ -1794,13 +1667,11 @@ export function validateTableSpec(spec: TableSpec): TableSpecIssue[] {
             }
         }
 
-        // The anchor cell describes the row's subject, so it has to describe
-        // the kind of subject the ref says it is: an annotation ref under a
-        // bibliographic title is a row that lies about itself.
+        // The anchor cell describes the row's subject, a work, so it holds a
+        // reference.
         const anchorValue = anchor ? row.cells[anchor.id]?.value : undefined;
         if (row.ref && anchorValue && anchor) {
-            const allowed = anchorValueKindsFor(row.ref);
-            if (!allowed.includes(anchorValue.kind)) {
+            if (anchorValue.kind !== "reference") {
                 issues.push({
                     code: "anchor_kind_mismatch",
                     row_id: row.id,
@@ -1833,9 +1704,7 @@ export function validateTableSpec(spec: TableSpec): TableSpecIssue[] {
             const value = cell.value;
             if (!value) continue;
 
-            if (
-                !VALUE_KINDS_BY_COLUMN_TYPE[column.type]?.includes(value.kind)
-            ) {
+            if (value.kind !== column.type) {
                 issues.push({
                     code: "value_kind_mismatch",
                     row_id: row.id,

@@ -47,14 +47,9 @@ export function rowActionHref(target: RowActionTarget): string | null {
             return `zotero://select/${zoteroScopeOf(target.ref, zoteroLinkScope)}/items/${target.ref.zotero_key}`;
         case 'open_file':
             return `zotero://open/${zoteroScopeOf(target.ref, zoteroLinkScope)}/items/${target.ref.zotero_key}`;
-        case 'open_annotation':
-            // `zotero://open` accepts only a file attachment, and scrolls to the
-            // annotation named in the query.
-            return `zotero://open/${zoteroScopeOf(target.attachment, zoteroLinkScope)}/items/${target.attachment.zotero_key}?annotation=${encodeURIComponent(target.ref.zotero_key)}`;
-        // The host resolves these at click time (best attachment, local file
-        // copy) or carries them through approval (import); no static link.
+        // The host resolves these at click time (best attachment) or carries
+        // them through approval (import); no static link.
         case 'open_item':
-        case 'open_external_file':
         case 'import_reference':
             return null;
     }

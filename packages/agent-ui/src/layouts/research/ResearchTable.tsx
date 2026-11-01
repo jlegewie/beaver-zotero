@@ -29,7 +29,7 @@ import {
 import MenuButton from "../../primitives/MenuButton";
 import type { MenuItem } from "../../primitives/ContextMenu";
 import { HoverLayerProvider } from "../../primitives/HoverLayer";
-import { buildFilterMenu, buildSortMenu, FilterChips } from "../chrome/TableToolbar";
+import { buildFilterMenu, buildSortMenu, FilterChips } from "../tableMenus";
 import { renderPlainText, type TableDensity, type TextRenderer } from "../tableView";
 import { useTableState } from "../useTableState";
 import { CellEditor, editsAsList, type CellEditInput } from "./CellEditor";
@@ -477,7 +477,7 @@ export function ResearchTable({
     const sourceCount = table.sources?.length ?? 0;
     const papers = table.rows.length;
     const sourcesLabel = `${sourceCount ? `${sourceCount} ${sourceCount === 1 ? "source" : "sources"} · ` : ""}${papers} ${papers === 1 ? "paper" : "papers"}`;
-    const filterItems = buildFilterMenu(table, state, true);
+    const filterItems = buildFilterMenu(table, state);
     const sortItems = buildSortMenu(table, state);
     const sortColumn = state.sort ? table.columns.find((column) => column.id === state.sort!.column_id) : undefined;
 
