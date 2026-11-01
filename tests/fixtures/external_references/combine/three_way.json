@@ -1,0 +1,179 @@
+{
+  "expected": {
+    "abstract": "BACKGROUND: Obesity.",
+    "authors": [
+      "Lee, Min"
+    ],
+    "citation_count": 812,
+    "creators": [
+      {
+        "creatorType": "author",
+        "firstName": "Min",
+        "lastName": "Lee",
+        "name": null
+      }
+    ],
+    "details": {
+      "abstract_sections": [
+        {
+          "label": "BACKGROUND",
+          "text": "Obesity."
+        }
+      ],
+      "kind": "work",
+      "mesh": [
+        {
+          "descriptor": "Obesity",
+          "major": true,
+          "qualifiers": []
+        }
+      ],
+      "pmc_free_after": null
+    },
+    "fields_of_study": null,
+    "id": null,
+    "identifiers": {
+      "arXivID": null,
+      "archiveID": null,
+      "doi": "10.1056/x",
+      "isbn": "9780000000002",
+      "issn": null,
+      "pmcid": "PMC1",
+      "pmid": "41234567"
+    },
+    "influential_citation_count": null,
+    "is_open_access": true,
+    "is_retracted": false,
+    "journal": {
+      "issue": "9",
+      "name": "N Engl J Med",
+      "pages": "801-812",
+      "volume": "390"
+    },
+    "library_items": [],
+    "oa_candidates": [
+      {
+        "access_method": "openalex",
+        "host_type": null,
+        "page_url": null,
+        "source_name": null,
+        "url": "https://oa.example/a.pdf",
+        "version": null
+      }
+    ],
+    "open_access_url": "https://oa.example/a.pdf",
+    "publication_date": "2024-03-01",
+    "publication_types": null,
+    "publication_url": null,
+    "raw_publication_types": [
+      "Randomized Controlled Trial"
+    ],
+    "reference_count": 40,
+    "retrieved_at": "2026-11-02T14:03:12Z",
+    "source": "pubmed",
+    "source_id": "W4390000001",
+    "title": "Semaglutide and weight loss",
+    "url": "https://doi.org/10.1056/x",
+    "venue": null,
+    "year": 2024
+  },
+  "snapshots": [
+    {
+      "abstract": "BACKGROUND: Obesity.",
+      "authors": [
+        "Lee, Min"
+      ],
+      "citation_count": 3,
+      "creators": [
+        {
+          "creatorType": "author",
+          "firstName": "Min",
+          "lastName": "Lee"
+        }
+      ],
+      "details": {
+        "abstract_sections": [
+          {
+            "label": "BACKGROUND",
+            "text": "Obesity."
+          }
+        ],
+        "kind": "work",
+        "mesh": [
+          {
+            "descriptor": "Obesity",
+            "major": true,
+            "qualifiers": []
+          }
+        ]
+      },
+      "identifiers": {
+        "doi": "10.1056/x",
+        "pmid": "41234567"
+      },
+      "is_retracted": false,
+      "journal": {
+        "issue": "9",
+        "name": "N Engl J Med",
+        "pages": "801-812",
+        "volume": "390"
+      },
+      "publication_date": "2024-03-01",
+      "raw_publication_types": [
+        "Randomized Controlled Trial"
+      ],
+      "retrieved_at": "2026-11-02T14:03:11Z",
+      "source": "pubmed",
+      "source_id": "W4390000001",
+      "title": "Semaglutide and weight loss",
+      "year": 2024
+    },
+    {
+      "abstract": "Obesity is common.",
+      "authors": [
+        "Min Lee",
+        "Ana Garcia"
+      ],
+      "citation_count": 812,
+      "identifiers": {
+        "doi": "10.1056/X",
+        "pmcid": "PMC1"
+      },
+      "is_open_access": true,
+      "is_retracted": false,
+      "oa_candidates": [
+        {
+          "url": "https://oa.example/a.pdf"
+        }
+      ],
+      "open_access_url": "https://oa.example/a.pdf",
+      "publication_types": [
+        "journal_article"
+      ],
+      "raw_publication_types": [
+        "article"
+      ],
+      "reference_count": 40,
+      "retrieved_at": "2026-11-02T14:03:10Z",
+      "source": "openalex",
+      "source_id": "W4390000001",
+      "title": "Semaglutide and Weight Loss",
+      "venue": "New England Journal of Medicine",
+      "year": 2024
+    },
+    {
+      "authors": [
+        "Lee, M."
+      ],
+      "identifiers": {
+        "doi": "10.1056/x",
+        "isbn": "9780000000002"
+      },
+      "retrieved_at": "2026-11-02T14:03:12Z",
+      "source": "crossref",
+      "source_id": "W4390000001",
+      "title": "SEMAGLUTIDE",
+      "url": "https://doi.org/10.1056/x"
+    }
+  ]
+}

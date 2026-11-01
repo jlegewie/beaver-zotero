@@ -92,4 +92,26 @@ describe("checkExternalReferencesAtom", () => {
       zotero_key: "USER1234",
     });
   });
+
+  it("checks again when another source's snapshot finds a copy the first check missed", async () => {
+    const store = createStore();
+    mocks.findExistingReference.mockResolvedValue(null);
+    const openalex: ExternalReference = { source: "openalex", source_id: "W9", title: "Work", library_items: [] };
+    await store.set(checkExternalReferencesAtom, [openalex]);
+    expect(store.get(externalReferenceItemMappingAtom).W9).toBeNull();
+
+    const combined: ExternalReference = {
+      ...openalex,
+      source: "pubmed",
+      identifiers: { pmid: "41234567" },
+      library_items: [{ item_id: "", library_id: 7, library_ref: "u", zotero_key: "PMIDCOPY" }],
+    };
+    await store.set(checkExternalReferencesAtom, [combined]);
+    expect(store.get(externalReferenceItemMappingAtom).W9).toMatchObject({ zotero_key: "PMIDCOPY" });
+
+    // A record that still lists no copy keeps the cached answer.
+    mocks.findExistingReference.mockClear();
+    await store.set(checkExternalReferencesAtom, [openalex]);
+    expect(mocks.findExistingReference).not.toHaveBeenCalled();
+  });
 });

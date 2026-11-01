@@ -37,6 +37,7 @@ const operations = {
     executeImportItemAction: importItem.executeImportItemAction,
     undoImportItemAction: importItem.undoImportItemAction,
     executeImportItemActions: importItem.executeImportItemActions,
+    importExternalReference: importItem.importExternalReference,
     undoImportItemActions: importItem.undoImportItemActions,
     executeCreateNoteAction: createNote.executeCreateNoteAction,
     undoCreateNoteAction: createNote.undoCreateNoteAction,

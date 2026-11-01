@@ -562,6 +562,12 @@ export interface ExternalReferenceCheckItem {
     isbn?: string;
     /** Array of creator last names for fuzzy matching */
     creators?: string[];
+    /** PubMed id, matched against a `PMID: <id>` line in Extra */
+    pmid?: string | null;
+    /** Record URL (e.g. a trial's registry page) */
+    url?: string | null;
+    /** Report number (e.g. a trial's NCT id) */
+    report_number?: string | null;
 }
 
 /** Request from backend to check if references exist in Zotero library */
@@ -3057,6 +3063,16 @@ export const CLIENT_FEATURES = {
     CONTINUATION_NEW_RUN: 'continuation_new_run',
     /** `citation_graph` capability (`find_related_works`). */
     CITATION_GRAPH: 'citation_graph',
+    /**
+     * External records from several sources (PubMed, ClinicalTrials.gov, ...):
+     * the client renders `item_type` / `creators` / `details` / `is_retracted`
+     * and `tool_info.info_type === 'search'`, combines per-source snapshots of
+     * one id, prepares unresolved imports through the import-proposals
+     * endpoint, applies the fill-only rules when resolving, and attaches a
+     * proposal's `attachments` in order. Gates the `pubmed_search` and
+     * `clinical_trials` capabilities.
+     */
+    EXTERNAL_RECORDS: 'external_records',
     /**
      * `resolve_population` honors `any_conditions`: a second condition list,
      * ORed among itself and ANDed with `conditions`. Without it the backend

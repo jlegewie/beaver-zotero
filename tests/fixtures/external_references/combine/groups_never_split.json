@@ -1,0 +1,67 @@
+{
+  "expected": {
+    "abstract": null,
+    "authors": [
+      "Lee, Min"
+    ],
+    "citation_count": null,
+    "fields_of_study": null,
+    "id": null,
+    "identifiers": null,
+    "influential_citation_count": null,
+    "is_open_access": null,
+    "journal": {
+      "issue": null,
+      "name": "Lancet",
+      "pages": null,
+      "volume": null
+    },
+    "library_items": [],
+    "oa_candidates": [],
+    "open_access_url": null,
+    "publication_date": null,
+    "publication_types": null,
+    "publication_url": null,
+    "raw_publication_types": null,
+    "reference_count": null,
+    "retrieved_at": "2026-11-02T14:00:00Z",
+    "source": "pubmed",
+    "source_id": "W4390000001",
+    "title": null,
+    "url": null,
+    "venue": "The Lancet",
+    "year": 2024
+  },
+  "snapshots": [
+    {
+      "authors": [
+        "Lee, Min"
+      ],
+      "retrieved_at": "2026-11-02T14:00:00Z",
+      "source": "pubmed",
+      "source_id": "W4390000001",
+      "year": 2024
+    },
+    {
+      "authors": [
+        "Ana Garcia"
+      ],
+      "creators": [
+        {
+          "creatorType": "author",
+          "firstName": "Ana",
+          "lastName": "Garcia"
+        }
+      ],
+      "journal": {
+        "name": "Lancet"
+      },
+      "publication_date": "2023-12-30",
+      "retrieved_at": "2026-11-02T14:00:00Z",
+      "source": "openalex",
+      "source_id": "W4390000001",
+      "venue": "The Lancet",
+      "year": 2023
+    }
+  ]
+}

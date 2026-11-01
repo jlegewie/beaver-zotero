@@ -109,6 +109,10 @@ const VERSION_GATES: { feature: string; minVersion: string; op: Op }[] = [
 // undelivered_action_ack is declaration-only because it makes the backend store
 // actions as unconfirmed before executing them: a build that predates it never
 // completes those records and would offer to retry a change already made.
+// external_records is declaration-only because it gates record shapes (details,
+// search headers, combined snapshots) and import behavior (click-time
+// proposals, fill-only rules, ordered attachments) a build must implement; the
+// PubMed and trial capabilities are offered only to declaring clients.
 const DECLARATION_ONLY_FEATURES = [
     'external_files',
     'pdf_candidates',
@@ -141,6 +145,7 @@ const DECLARATION_ONLY_FEATURES = [
     'book_chapters',
     'run_reattach',
     'undelivered_action_ack',
+    'external_records',
 ];
 
 // The full backend feature vocabulary (ALL_FEATURES in version_gates.py): every

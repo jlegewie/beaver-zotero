@@ -41,6 +41,7 @@ export { default as PinIcon } from './PinIcon';
 export { default as PinOffIcon } from './PinOffIcon';
 export { default as DollarCircleIcon } from './DollarCircleIcon';
 export { default as DocumentValidationIcon } from './DocumentValidationIcon';
+export { default as MedicalFileIcon } from './MedicalFileIcon';
 export { default as DownloadIcon } from './DownloadIcon';
 export { default as AttachmentIcon } from './AttachmentIcon';
 export { default as ArrowUpIcon } from './ArrowUpIcon';

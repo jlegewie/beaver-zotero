@@ -60,7 +60,8 @@ export interface ImportSourceDescriptor {
     kind: ImportSourceKind;
     /** The input key, e.g. "doi:10.1038/…", "W2064675550", "metadata[2]". */
     input: string;
-    provider?: 'openalex' | 'openlibrary' | 'exa';
+    /** Who supplies the external record ("openalex", "pubmed", ...); an open string. */
+    provider?: string;
     /** Search-provider id (citation mapping, imported markers). */
     external_id?: string;
     identifier?: TypedIdentifier;
@@ -173,7 +174,20 @@ export interface ImportItemProposedData {
     file?: ImportFileRef;
     snapshot_url?: string;
     pdf_candidates?: PdfCandidate[];
+    /**
+     * Files the record names, attached in this order after the item is
+     * written. Absent or null: no known files, so PDF discovery runs. `[]`: the
+     * record has no files.
+     */
+    attachments?: ImportAttachment[] | null;
     warnings?: string[];
+}
+
+/** A file an import attaches from a known URL. */
+export interface ImportAttachment {
+    url: string;
+    title?: string | null;
+    content_type?: string | null;
 }
 
 /** Result data of an applied `import_item` action; same shape as `create_item`'s plus the file. */
@@ -279,6 +293,13 @@ export function itemJsonDisplay(json: ZoteroItemJson): ItemJsonDisplay {
         isbn: fieldString(json, 'ISBN'),
         site: hostName(url),
     };
+}
+
+/** The PubMed id of item JSON: Zotero 11's PMID field, else a `PMID: <id>` line in Extra. */
+export function itemJsonPmid(json: ZoteroItemJson | undefined): string | undefined {
+    const field = typeof json?.PMID === 'string' ? json.PMID.trim() : '';
+    if (/^\d+$/.test(field)) return field;
+    return typeof json?.extra === 'string' ? /^\s*PMID:\s*(\d+)\s*$/im.exec(json.extra)?.[1] : undefined;
 }
 
 /** The item JSON a row should show: the resolved item, else the citation fallback. */

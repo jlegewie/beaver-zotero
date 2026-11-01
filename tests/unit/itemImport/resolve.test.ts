@@ -22,7 +22,7 @@ vi.mock('../../../src/services/itemImport/duplicates', () => ({
 }));
 
 import type { ImportItemSpec } from '@beaver/agent-core/types/itemImport';
-import { resolveImportItems } from '../../../src/services/itemImport/resolve';
+import { fillFromFallback, resolveImportItems } from '../../../src/services/itemImport/resolve';
 
 /** Zotero round trip that keeps every field, which is all these dispatch tests need. */
 class PassthroughItem {
@@ -453,5 +453,53 @@ describe('resolveImportItems duplicate check', () => {
     it('skips the duplicate check when asked', async () => {
         await resolveImportItems([spec('a', { item: { itemType: 'book', title: 'T' } })], { ...base, skipDuplicateCheck: true });
         expect(mocks.findExistingItems).not.toHaveBeenCalled();
+    });
+});
+
+describe('fillFromFallback', () => {
+    it('fills an empty abstract and language but never overwrites what the translator set', () => {
+        const item: any = { itemType: 'journalArticle', abstractNote: '', language: 'de' };
+        fillFromFallback(item, { itemType: 'journalArticle', abstractNote: 'From the record', language: 'en' });
+        expect(item).toMatchObject({ abstractNote: 'From the record', language: 'de' });
+    });
+
+    it('takes the recognizer language when the fallback has none', () => {
+        const item: any = { itemType: 'journalArticle' };
+        fillFromFallback(item, undefined, 'fr');
+        expect(item.language).toBe('fr');
+    });
+
+    it('gives a book section without authors the record\'s creators', () => {
+        const item: any = { itemType: 'bookSection', creators: [{ creatorType: 'editor', lastName: 'Ed' }] };
+        fillFromFallback(item, { itemType: 'bookSection', creators: [{ creatorType: 'author', lastName: 'Lee', firstName: 'Min' }] });
+        expect(item.creators).toEqual([
+            { creatorType: 'author', lastName: 'Lee', firstName: 'Min' },
+            { creatorType: 'editor', lastName: 'Ed' },
+        ]);
+        const withAuthor: any = { itemType: 'bookSection', creators: [{ lastName: 'Own' }] };
+        fillFromFallback(withAuthor, { itemType: 'bookSection', creators: [{ creatorType: 'author', lastName: 'Lee' }] });
+        expect(withAuthor.creators).toEqual([{ lastName: 'Own' }]);
+    });
+
+    it('keeps the record\'s PubMed id in Extra unless the translator wrote one', () => {
+        const item: any = { itemType: 'journalArticle', extra: 'Publisher: X' };
+        fillFromFallback(item, { itemType: 'journalArticle', extra: 'PMID: 41234567\nPMCID: PMC1' });
+        expect(item.extra).toBe('Publisher: X\nPMID: 41234567');
+        const zotero11: any = { itemType: 'journalArticle', PMID: '41234567' };
+        fillFromFallback(zotero11, { itemType: 'journalArticle', extra: 'PMID: 41234567' });
+        expect(zotero11.extra).toBeUndefined();
+        const translated: any = { itemType: 'journalArticle', extra: 'PMID: 41234567' };
+        fillFromFallback(translated, { itemType: 'journalArticle', extra: 'PMID: 41234567' });
+        expect(translated.extra).toBe('PMID: 41234567');
+    });
+
+    it('keeps a trial\'s registry URL and report number', () => {
+        const trial = { itemType: 'report', url: 'https://clinicaltrials.gov/study/NCT03548935', reportNumber: 'NCT03548935', institution: 'clinicaltrials.gov' };
+        const item: any = { itemType: 'report', title: 'T' };
+        fillFromFallback(item, trial);
+        expect(item).toMatchObject({ url: trial.url, reportNumber: 'NCT03548935' });
+        const other: any = { itemType: 'journalArticle', title: 'T' };
+        fillFromFallback(other, trial);
+        expect(other.reportNumber).toBeUndefined();
     });
 });

@@ -145,6 +145,28 @@ describe('importActionReference', () => {
         expect(reference).toBe(known);
     });
 
+    it('carries the PubMed id from the PMID field or an Extra line, and the trial fields', () => {
+        const fromField = importActionReference(data({
+            source: { kind: 'external', input: 'pmid:42', external_id: 'pmid:42', provider: 'pubmed' },
+            item: { itemType: 'journalArticle', title: 'T', PMID: '42' },
+        }), {});
+        expect(fromField).toMatchObject({ source: 'pubmed', identifiers: { pmid: '42' } });
+        const fromExtra = importActionReference(data({
+            source: { kind: 'external', input: 'pmid:42', external_id: 'pmid:42' },
+            item: { itemType: 'journalArticle', title: 'T', extra: 'PMID: 42' },
+        }), {});
+        expect(fromExtra).toMatchObject({ source: 'pubmed', identifiers: { pmid: '42' } });
+        const trial = importActionReference(data({
+            source: { kind: 'external', input: 'NCT03548935', external_id: 'NCT03548935' },
+            item: { itemType: 'report', title: 'T', reportNumber: 'NCT03548935', institution: 'clinicaltrials.gov' },
+        }), {});
+        expect(trial).toMatchObject({
+            source: 'clinicaltrials',
+            item_type: 'report',
+            zotero_fields: { reportNumber: 'NCT03548935', institution: 'clinicaltrials.gov' },
+        });
+    });
+
     it('derives a reference from the resolved item when the mapping has no entry', () => {
         const reference = importActionReference(
             data({

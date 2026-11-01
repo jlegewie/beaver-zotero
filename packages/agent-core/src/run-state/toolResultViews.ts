@@ -190,8 +190,11 @@ export interface AnnotationListView {
 
 /** find_related_works view data */
 export interface RelatedWorksViewInfo {
-    /** Discriminator for tool-specific view data. */
-    info_type: "related_works";
+    /**
+     * Discriminator for tool-specific view data. Rows stored before the
+     * discriminator existed lack it; read them with {@link relatedWorksViewInfo}.
+     */
+    info_type?: "related_works";
     /** "references" = works the work cites; "cited_by" = works citing it. */
     relation: "references" | "cited_by";
     /** Full result count across all pages (after filters). */
@@ -200,19 +203,76 @@ export interface RelatedWorksViewInfo {
     work?: ExternalReference | null;
 }
 
+/**
+ * Search-tool view data (pubmed_search, search_trials): the searched source,
+ * the executed query or filters, counts, and a link that reproduces the
+ * search on the source's own site.
+ */
+export interface SearchViewInfo {
+    info_type: "search";
+    /** Searched source, e.g. "pubmed", "clinicaltrials". */
+    source: string;
+    source_label: string;
+    query?: string | null;
+    /** The query as the source executed it (PubMed "Search details"). */
+    query_translation?: string | null;
+    filters?: Record<string, unknown> | null;
+    total_count?: number | null;
+    returned?: number;
+    offset?: number | null;
+    /** Source data timestamp, in the source's terms. */
+    data_as_of?: string | null;
+    /** e.g. "Source: ClinicalTrials.gov". */
+    attribution?: string | null;
+    search_url?: string | null;
+}
+
+/** View data of an `info_type` this client does not know; never rendered. */
+export interface UnknownViewInfo {
+    info_type?: string | null;
+    [field: string]: unknown;
+}
+
+export type ExternalReferenceViewInfo = RelatedWorksViewInfo | SearchViewInfo | UnknownViewInfo;
+
 export interface ExternalReferenceListView {
     view_type: "external_reference_list";
     tool_name: string;
-    /** Already fully hydrated. */
+    /** Already fully hydrated; one row each, in result order. */
     references: ExternalReference[];
+    /**
+     * Other-source snapshots for ids in `references` (PubMed's OpenAlex
+     * enrichment). Never rendered as rows: a row renders its reference
+     * combined with the snapshots that share its id.
+     */
+    extra_snapshots?: ExternalReference[];
     // lookup_work-only extras (absent/empty for external_search):
     found_count?: number | null;
     not_found_queries?: string[];
     /** temporarily_unchecked_queries */
     unavailable_queries?: string[];
     message?: string | null;
-    /** Optional tool-specific extension */
-    tool_info?: RelatedWorksViewInfo | null;
+    /** Optional tool-specific extension; render per `info_type`. */
+    tool_info?: ExternalReferenceViewInfo | null;
+}
+
+/** The related-works info of a view (rows without `info_type` predate the discriminator). */
+export function relatedWorksViewInfo(view: Pick<ExternalReferenceListView, "tool_info">): RelatedWorksViewInfo | null {
+    const info = view.tool_info;
+    if (!info || typeof info !== "object") return null;
+    if (info.info_type === "related_works") return info as RelatedWorksViewInfo;
+    if (info.info_type === undefined || info.info_type === null) {
+        return "relation" in info || "total_count" in info ? info as RelatedWorksViewInfo : null;
+    }
+    return null;
+}
+
+/** The search info of a view, or null for any other kind. */
+export function searchViewInfo(view: Pick<ExternalReferenceListView, "tool_info">): SearchViewInfo | null {
+    const info = view.tool_info;
+    return info && typeof info === "object" && info.info_type === "search" && typeof info.source === "string"
+        ? info as SearchViewInfo
+        : null;
 }
 
 export interface CollectionListView {

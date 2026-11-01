@@ -5481,3 +5481,49 @@
     color: var(--fill-secondary);
     opacity: 0.8;
 }
+
+/* External records (PubMed, ClinicalTrials.gov): badges, banner, results header. */
+.beaver-root .ext-badge {
+    display: inline-block;
+    font-size: 11px;
+    line-height: 1.4;
+    padding: 0 5px;
+    border-radius: 4px;
+    white-space: nowrap;
+    color: var(--fill-secondary);
+    background-color: var(--beaver-fill-chip);
+    border: 1px solid var(--beaver-border-subtle);
+}
+.beaver-root .ext-badge[data-tone="green"] {
+    color: var(--tag-green-primary);
+    background-color: var(--tag-green-quinary);
+    border-color: var(--tag-green-tertiary);
+}
+.beaver-root .ext-badge[data-tone="blue"] {
+    color: var(--tag-blue-primary);
+    background-color: var(--tag-blue-quinary);
+    border-color: var(--tag-blue-tertiary);
+}
+.beaver-root .ext-badge[data-tone="red"] {
+    color: var(--tag-red-primary);
+    background-color: var(--tag-red-quinary);
+    border-color: var(--tag-red-tertiary);
+}
+.beaver-root .ext-retracted-banner {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    padding: 1px 6px;
+    border-radius: 4px;
+    color: var(--tag-red-primary);
+    background-color: var(--tag-red-quarternary);
+    border: 1px solid var(--tag-red-tertiary);
+}
+.beaver-root .ext-results-header {
+    border-bottom: 1px solid var(--fill-quinary);
+}
+.beaver-root .ext-query-translation {
+    font-family: var(--beaver-font-mono, monospace);
+    word-break: break-word;
+    white-space: pre-wrap;
+}

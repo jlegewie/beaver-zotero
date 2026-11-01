@@ -44,6 +44,7 @@ import {
     TableIcon,
     BookCopyIcon,
     BookSearchIcon,
+    MedicalFileIcon,
 } from '../icons/icons';
 import { toolExpandedAtom, setToolExpandedAtom } from '../../atoms/messageUIState';
 import { resolveToolCallLabelEnrich } from '../../utils/toolCallLabelEnrich';
@@ -107,6 +108,9 @@ const TOOL_ICONS: Record<string, IconComponent> = {
     lookup_work: GlobalSearchIcon,
     find_related_works: FlowConnectionIcon,
     find_book_chapters: BookSearchIcon,
+    pubmed_search: GlobalSearchIcon,
+    search_trials: MedicalFileIcon,
+    get_trial: MedicalFileIcon,
 
     // Create item tool
     create_zotero_item: DocumentValidationIcon,

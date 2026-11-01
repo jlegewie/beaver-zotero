@@ -106,3 +106,26 @@ describe('getToolCallLabel for list_items', () => {
         expect(getToolCallLabel(listCall({ special_collection: 'trash' }), 'completed')).toBe('List items');
     });
 });
+
+describe('external record tool labels', () => {
+    const searchView = (shown: number, total: number) => ({
+        view_type: 'external_reference_list' as const,
+        tool_name: 'pubmed_search',
+        references: Array.from({ length: shown }, (_, i) => ({ source: 'pubmed', source_id: `pmid:${i}`, library_items: [] })),
+        tool_info: { info_type: 'search' as const, source: 'pubmed', source_label: 'PubMed', total_count: total, returned: shown },
+    });
+
+    it('labels a PubMed search by its query and its page of the hits', () => {
+        const part = toolCall({ tool_name: 'pubmed_search', args: { query: 'semaglutide obesity' } });
+        expect(getToolCallLabel(part, 'in_progress')).toBe('PubMed search: semaglutide obesity');
+        expect(getToolCallLabel(part, 'completed', { view: searchView(20, 155) })).toBe('PubMed search: semaglutide obesity (20 of 155)');
+    });
+
+    it('labels a trial search by its terms and a trial lookup by its id', () => {
+        expect(getToolCallLabel(toolCall({ tool_name: 'search_trials', args: { condition: 'obesity', intervention: 'semaglutide' } }), 'in_progress'))
+            .toBe('Trial search: obesity · semaglutide');
+        expect(getToolCallLabel(toolCall({ tool_name: 'get_trial', args: { nct_ids: ['NCT03548935'] } }), 'in_progress'))
+            .toBe('Clinical trial: NCT03548935');
+    });
+});
+

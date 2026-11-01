@@ -32,6 +32,9 @@ const mocks = vi.hoisted(() => ({
     recheckExistingCollections: vi.fn(),
     coordinateLibraryMutation: vi.fn(async (work: () => Promise<unknown>) => work()),
     isPdfDocument: vi.fn(),
+    // import proposals and record files
+    fetchImportProposal: vi.fn(),
+    scheduleAttachInOrderTask: vi.fn(),
 }));
 
 vi.mock('../../../src/services/itemImport/zoteroApis', () => ({
@@ -78,6 +81,8 @@ vi.mock('../../../src/services/collections/collectionMutations', () => ({
 }));
 vi.mock('../../../src/services/libraryMutations', () => ({ coordinateLibraryMutation: mocks.coordinateLibraryMutation }));
 vi.mock('../../../src/utils/attachmentFiles', () => ({ isPdfDocument: mocks.isPdfDocument }));
+vi.mock('../../../src/services/itemImport/importProposals', () => ({ fetchImportProposal: mocks.fetchImportProposal }));
+vi.mock('../../../src/services/itemImport/attachInOrder', () => ({ scheduleAttachInOrderTask: mocks.scheduleAttachInOrderTask }));
 
 import type { ImportItemProposedData } from '@beaver/agent-core/types/itemImport';
 import { ImportItemError, undoImportItem, writeImportItem } from '../../../src/services/itemImport/write';
@@ -147,6 +152,7 @@ beforeEach(() => {
     mocks.resolveLibraryRef.mockReset();
     mocks.resolveImportItems.mockReset();
     mocks.locateImportFile.mockReset();
+    mocks.fetchImportProposal.mockReset();
     saved = makeSavedItem();
     itemCtor = vi.fn();
     childNotes = [];
@@ -789,6 +795,14 @@ describe('writeImportItem pending resolution (citation-derived actions)', () => 
         },
     });
 
+    beforeEach(() => {
+        // The backend prepares the same proposal the action embeds.
+        mocks.fetchImportProposal.mockImplementation(async () => {
+            const { library_id: _ignored, ...proposal } = pending();
+            return proposal;
+        });
+    });
+
     it('resolves at apply time and writes the resolved item with its method', async () => {
         mocks.resolveImportItems.mockResolvedValue([
             { key: 'W123', status: 'resolved', method: 'fallback_metadata', item: { itemType: 'journalArticle', title: 'Resolved' } },
@@ -834,6 +848,115 @@ describe('writeImportItem pending resolution (citation-derived actions)', () => 
     it('fails with resolution_failed when resolution returns nothing', async () => {
         mocks.resolveImportItems.mockResolvedValue([]);
         await expect(writeImportItem(pending())).rejects.toMatchObject({ code: 'resolution_failed' });
+    });
+});
+
+describe('writeImportItem external records prepared at click time', () => {
+    const citation = (): ImportItemProposedData => ({
+        library_id: 3,
+        collection_keys: ['COLL0001'],
+        tags: ['to-read'],
+        source: { kind: 'external', input: 'NCT03548935', external_id: 'NCT03548935', provider: 'clinicaltrials' },
+        pending_resolution: { fallback_item: { itemType: 'report', title: 'Embedded (stale)' } },
+    });
+    const trialProposal = (attachments: ImportItemProposedData['attachments']): ImportItemProposedData => ({
+        source: { kind: 'external', input: 'NCT03548935', external_id: 'NCT03548935', provider: 'clinicaltrials' },
+        pending_resolution: { fallback_item: { itemType: 'report', title: 'Current title' } },
+        pdf_candidates: [{ url: 'https://oa.example/a.pdf' }],
+        attachments,
+    });
+
+    beforeEach(() => {
+        mocks.resolveWriteTargetLibrary.mockReturnValue({ ok: true, libraryID: 1 });
+        mocks.resolveImportItems.mockImplementation(async (specs: any[]) => [
+            { key: specs[0].key, status: 'resolved', method: 'fallback_metadata', item: specs[0].fallback_item },
+        ]);
+    });
+
+    it('writes the fresh proposal, keeping the action\'s library, collections and tags', async () => {
+        mocks.fetchImportProposal.mockResolvedValue(trialProposal(null));
+        mocks.recheckExistingCollections.mockReturnValue([]);
+        await writeImportItem(citation());
+        expect(mocks.fetchImportProposal).toHaveBeenCalledWith('NCT03548935', 'clinicaltrials');
+        expect(mocks.resolveImportItems.mock.calls[0][0][0].fallback_item).toEqual({ itemType: 'report', title: 'Current title' });
+        expect(savedJson()).toMatchObject({ title: 'Current title' });
+        expect(mocks.resolveWriteTargetLibrary).toHaveBeenCalledWith(expect.objectContaining({ library_id: 3 }));
+        expect(mocks.recheckExistingCollections).toHaveBeenCalledWith(['COLL0001'], 1);
+        expect(saved.fromJSON.mock.calls[0][0].tags).toEqual([{ tag: 'to-read', type: 0 }]);
+    });
+
+    it('stamps a record without an identifier as search-result metadata, not a failed lookup', async () => {
+        mocks.fetchImportProposal.mockResolvedValue(trialProposal([]));
+        await writeImportItem(citation());
+        expect(savedJson().extra).toContain('Beaver Metadata: search-result metadata');
+        expect(savedJson().extra).not.toContain('identifier lookup failed');
+    });
+
+    it('fails without writing when the proposal cannot be prepared, instead of using embedded data', async () => {
+        mocks.fetchImportProposal.mockRejectedValue(new ImportItemError('provider_unavailable', 'ClinicalTrials.gov is unavailable right now. Try importing again in a few minutes.'));
+        await expect(writeImportItem(citation())).rejects.toMatchObject({ code: 'provider_unavailable' });
+        expect(mocks.resolveImportItems).not.toHaveBeenCalled();
+        expect(itemCtor).not.toHaveBeenCalled();
+    });
+
+    it('prepares a result row with no action from its external id alone', async () => {
+        mocks.fetchImportProposal.mockResolvedValue(trialProposal(null));
+        await writeImportItem({ source: { kind: 'external', input: 'NCT03548935', external_id: 'NCT03548935' } }, { libraryId: 1 });
+        expect(savedJson()).toMatchObject({ title: 'Current title' });
+    });
+
+    it('resolves an unresolved action without an external id from its embedded data', async () => {
+        await writeImportItem({ library_id: 1, source: { kind: 'url', input: 'https://x.org' }, pending_resolution: { fallback_item: { itemType: 'webpage', title: 'Page' } } });
+        expect(mocks.fetchImportProposal).not.toHaveBeenCalled();
+        expect(savedJson()).toMatchObject({ title: 'Page' });
+    });
+
+    it('attaches the files a record names, in order, and skips PDF discovery', async () => {
+        const files = [
+            { url: 'https://cdn.example/Prot_002.pdf', title: 'Study Protocol (2019-03-29)', content_type: 'application/pdf' },
+            { url: 'https://cdn.example/SAP_003.pdf', title: 'Statistical Analysis Plan (2020-07-03)', content_type: 'application/pdf' },
+        ];
+        mocks.fetchImportProposal.mockResolvedValue(trialProposal(files));
+        const result = await writeImportItem(citation(), { actionId: 'a1', threadId: 't1' });
+        expect(result.attachment_status).toBe('pending');
+        expect(mocks.scheduleAttachInOrderTask).toHaveBeenCalledWith(1, 'ITEM0001', files, expect.objectContaining({ actionId: 'a1', threadId: 't1' }));
+        expect(mocks.schedulePdfFetchTask).not.toHaveBeenCalled();
+    });
+
+    it('runs no PDF discovery for a record that has no files', async () => {
+        mocks.fetchImportProposal.mockResolvedValue(trialProposal([]));
+        const result = await writeImportItem(citation());
+        expect(result.attachment_status).toBe('none');
+        expect(mocks.scheduleAttachInOrderTask).not.toHaveBeenCalled();
+        expect(mocks.schedulePdfFetchTask).not.toHaveBeenCalled();
+    });
+
+    it('also attaches the files of an approved create_items item', async () => {
+        const files = [{ url: 'https://cdn.example/Prot_SAP_000.pdf', title: 'Protocol', content_type: 'application/pdf' }];
+        await writeImportItem({ ...journal(), attachments: files });
+        expect(mocks.scheduleAttachInOrderTask).toHaveBeenCalledWith(1, 'ITEM0001', files, expect.anything());
+        expect(mocks.schedulePdfFetchTask).not.toHaveBeenCalled();
+    });
+
+    it('tries translator PDF links before the record\'s candidates', async () => {
+        mocks.fetchImportProposal.mockResolvedValue({
+            source: { kind: 'external', input: 'W1', external_id: 'W1' },
+            pending_resolution: { identifier: { type: 'doi', value: '10.1/x' }, fallback_item: { itemType: 'journalArticle', title: 'T' } },
+            pdf_candidates: [{ url: 'https://oa.example/a.pdf' }, { url: 'https://arxiv.org/pdf/1.pdf' }],
+        });
+        mocks.resolveImportItems.mockResolvedValue([{
+            key: 'W1', status: 'resolved', method: 'translator',
+            item: { itemType: 'journalArticle', title: 'T', DOI: '10.1/x' },
+            attachment_urls: [
+                { url: 'https://arxiv.org/pdf/1.pdf', mime_type: 'application/pdf' },
+                { url: 'https://arxiv.org/abs/1', mime_type: 'text/html', snapshot: true },
+            ],
+        }]);
+        await writeImportItem({ library_id: 1, source: { kind: 'external', input: 'W1', external_id: 'W1' } });
+        expect(mocks.schedulePdfFetchTask.mock.calls[0][2].pdfCandidates).toEqual([
+            { url: 'https://arxiv.org/pdf/1.pdf', access_method: 'translator' },
+            { url: 'https://oa.example/a.pdf' },
+        ]);
     });
 });
 

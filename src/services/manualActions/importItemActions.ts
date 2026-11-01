@@ -51,6 +51,27 @@ export async function executeImportItemAction(action: AgentAction, opts: Execute
     });
 }
 
+/**
+ * Import an external record that has no pending action (a result row's
+ * Import): the backend prepares the proposal, which is written to the UI
+ * context's library and collection.
+ */
+export async function importExternalReference(
+    externalId: string,
+    opts: ExecuteImportItemActionOptions & { provider?: string } = {},
+): Promise<ImportItemResultData> {
+    return writeImportItem(
+        { source: { kind: 'external', input: externalId, external_id: externalId, provider: opts.provider } },
+        {
+            libraryId: opts.libraryId,
+            collectionId: opts.collectionId,
+            runId: opts.runId,
+            threadId: opts.threadId,
+            onAttachmentResolved: opts.onAttachmentResolved,
+        },
+    );
+}
+
 /** Erase the item an applied `import_item` action created. */
 export async function undoImportItemAction(action: AgentAction): Promise<void> {
     await undoImportItem(action.result_data as ImportItemResultData | undefined);
