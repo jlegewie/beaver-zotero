@@ -3,26 +3,25 @@
  *
  * ## Why this exists
  *
- * `view/readerTableView.ts` and `src/ui/tableItemPane.ts` keep **module-level
- * state**: the enhanced-reader registry and the registered pane id.
- * `src/hooks.ts` imports them, so esbuild compiles them into `beaver.js`. If
- * anything under `react/` imports them too, webpack compiles a *second* copy
- * into `reactBundle.js` — and the two copies never see each other. CLAUDE.md
- * states the rule this violates: "The two bundles cannot import from each
- * other … cross-bundle communication goes through `__beaver*` properties".
+ * `view/readerTableView.ts`, `src/ui/tableTab.ts` and `src/ui/tableItemPane.ts`
+ * keep **module-level state**: the reader listener, the open tabs and the
+ * registered pane id. `src/hooks.ts` imports them, so esbuild compiles them
+ * into `beaver.js`. If anything under `react/` imports them too, webpack
+ * compiles a *second* copy into `reactBundle.js`, and the two copies never see
+ * each other. CLAUDE.md states the rule this violates: "The two bundles cannot
+ * import from each other … cross-bundle communication goes through `__beaver*`
+ * properties".
  *
- * The failure is quiet and specific. The webpack copy's registries stay empty
- * while the esbuild copy does the real work, so a dev endpoint reports an empty
- * view list for readers that are demonstrably enhanced — and a view registered
- * through the webpack copy is invisible to `cleanupReaderTableViews()`, which
- * runs from `hooks.ts` against the esbuild copy, leaking the reader's document
- * and its window.
+ * The failure is quiet and specific: the webpack copy's registries stay empty
+ * while the esbuild copy does the real work, so a dev endpoint reports nothing
+ * for state that demonstrably exists, and anything registered through the
+ * webpack copy is invisible to the cleanup `hooks.ts` runs.
  *
  * ## The seam
  *
  * The **esbuild bundle owns these surfaces**, because that is where `hooks.ts`
- * runs and where the reader integration and the item-pane section actually
- * live. It publishes them here at startup; the webpack side reaches them
+ * runs and where the reader redirect, the tabs and the item-pane section
+ * actually live. It publishes them here at startup; the webpack side reaches them
  * through {@link getTablesApi} instead of importing the modules.
  *
  * **This module must never gain a value import.** Types are erased, so the
@@ -42,8 +41,6 @@ import type { Citation } from '@beaver/agent-core/types/citations';
 import type { SkippedCell } from '@beaver/agent-core/layouts/tableMutations';
 import type { TableVersionEntry } from './tableItemIdentity';
 import type { TableWriteResult, TableShadowRestoreCheck, TableShadowRestoreResult } from './tableStore';
-import type { TableViewSummary } from './view/enhanceTableDocument';
-import type { ReaderTableDiagnostics } from './view/readerTableView';
 import type { OpenTableOptions, OpenTableOutcome } from '../../ui/openTable';
 import type { TableItemPaneReport } from '../../ui/tableItemPane';
 import type { TableTabRenderReport } from '../../ui/tableTabTypes';
@@ -112,24 +109,6 @@ export interface TablesApi {
      */
     openTable(ref: TableRef, options?: OpenTableOptions): Promise<OpenTableOutcome>;
 
-    /** Every table document currently enhanced. */
-    listViews(): TableViewSummary[];
-
-    /**
-     * Opens a stored table in the reader — kept there, not replaced by the
-     * Beaver tab — and reports what the enhancer attached. Dev only;
-     * {@link openTable} is the product path.
-     */
-    openInReader(
-        item: Zotero.Item,
-        options?: { timeoutMs?: number }
-    ): Promise<ReaderTableDiagnostics>;
-
-    /**
-     * Marks open snapshots as outdated after a persisted write. With `sha256`,
-     * only those not already showing that spec.
-     */
-    tableChanged(ref: TableRef, sha256?: string): void;
     local: {
         commands(win: Window): TableLocalCommands;
     };

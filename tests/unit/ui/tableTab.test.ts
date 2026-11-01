@@ -8,7 +8,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const isTableItem = vi.hoisted(() => vi.fn(() => true));
 const loadTableItemFields = vi.hoisted(() => vi.fn(async () => {}));
-const optedIn = vi.hoisted(() => new Set<number>());
 const redirect = vi.hoisted(() => ({ current: null as null | ((reader: any, item: any) => boolean) }));
 const prefs = vi.hoisted(() => new Map<string, unknown>());
 
@@ -18,7 +17,6 @@ vi.mock('../../../src/utils/prefs', () => ({
     setPref: (key: string, value: unknown) => { prefs.set(key, value); },
 }));
 vi.mock('../../../src/services/artifacts/view/readerTableView', () => ({
-    isTableReaderOptedIn: (id: number) => optedIn.has(id),
     setTableReaderRedirect: (fn: any) => { redirect.current = fn; },
 }));
 
@@ -63,7 +61,6 @@ let session: { state: any; save: ReturnType<typeof vi.fn> };
 
 beforeEach(() => {
     vi.clearAllMocks();
-    optedIn.clear();
     prefs.clear();
     windows = [fakeWindow()];
     session = { state: { windows: [] }, save: vi.fn(async () => {}) };
@@ -327,18 +324,44 @@ describe('readers on a table item', () => {
         expect(opener).not.toHaveBeenCalled();
     });
 
-    it('keeps a reader the dev endpoint opened on purpose', async () => {
-        optedIn.add(42);
-        await addReader(windows[0]);
-        expect(opener).not.toHaveBeenCalled();
-    });
-
     it('hands the reader toolbar hook a redirect for restored reader tabs that load later', () => {
         const win = windows[0];
         const { id } = win.Zotero_Tabs.add({ type: 'reader', data: { itemID: 42 } });
         expect(redirect.current?.({ tabID: id, _window: win }, tableItem())).toBe(true);
         expect(opener).toHaveBeenCalledWith(REF, { window: win, background: true });
-        expect(redirect.current?.({ _window: win }, tableItem())).toBe(false);
+    });
+
+    it('closes a reader window on a table and opens the tab in the most recent main window', async () => {
+        const win = windows[0];
+        const focus = vi.fn();
+        win.focus = focus;
+        opener.mockImplementationOnce(async () => {
+            const { tabID } = openTableTab(win, tableItem(), REF);
+            return { ok: true, tabID };
+        });
+        const close = vi.fn();
+        const before = tableTabStats().redirected;
+        expect(redirect.current?.({ _window: {}, close }, tableItem())).toBe(true);
+        expect(close).toHaveBeenCalledOnce();
+        // No origin: the open picks the most recent main window itself.
+        expect(opener).toHaveBeenCalledWith(REF, {});
+        await vi.waitFor(() => expect(focus).toHaveBeenCalledOnce());
+        expect(tableTabStats().redirected).toBe(before + 1);
+    });
+
+    it('says why when the table behind a closed reader window cannot be shown', async () => {
+        const alert = vi.fn();
+        (Zotero as any).alert = alert;
+        (Zotero as any).getMainWindow = () => windows[0];
+        opener.mockResolvedValueOnce({ error: 'This table cannot be read.' });
+        expect(redirect.current?.({ close: vi.fn() }, tableItem())).toBe(true);
+        await vi.waitFor(() => expect(alert).toHaveBeenCalledWith(windows[0], 'Beaver', 'This table cannot be read.'));
+    });
+
+    it('leaves a reader window it cannot close showing the static page', () => {
+        expect(redirect.current?.({ _window: {} }, tableItem())).toBe(false);
+        expect(redirect.current?.({ close: () => { throw new Error('gone'); } }, tableItem())).toBe(false);
+        expect(opener).not.toHaveBeenCalled();
     });
 });
 

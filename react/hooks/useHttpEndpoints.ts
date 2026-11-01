@@ -61,7 +61,6 @@ import {
     handleTestCloseTableHttpRequest,
     handleTestOpenStoredTableHttpRequest,
     handleTestOpenTableHttpRequest,
-    handleTestTableOpenReaderHttpRequest,
 } from './httpHandlers/testTableHandlers';
 import { handleTestVersionPopupHttpRequest } from './httpHandlers/testVersionPopupHandlers';
 import { handleTestExportHttpRequest } from './httpHandlers/testExportHandlers';
@@ -107,7 +106,6 @@ export function registerWindowTestCommands(
         '/beaver/test/open-table': handleTestOpenTableHttpRequest,
         '/beaver/test/close-table': handleTestCloseTableHttpRequest,
         '/beaver/test/open-stored-table': handleTestOpenStoredTableHttpRequest,
-        '/beaver/test/table-open-reader': handleTestTableOpenReaderHttpRequest,
         '/beaver/test/beaver-sidebar': handleTestBeaverSidebarHttpRequest,
         '/beaver/test/select-tab': handleTestSelectTabHttpRequest,
         '/beaver/test/run-status-popup': handleTestRunStatusPopupHttpRequest,

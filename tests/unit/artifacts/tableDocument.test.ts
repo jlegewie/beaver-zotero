@@ -12,15 +12,17 @@ import {
     type RowRef,
     type TableSpec,
     validateTableSpec,
+    jsonBytes,
+    MAX_SPEC_BYTES,
 } from "@beaver/agent-core/layouts/table";
 import {
-    BEAVER_ACTIVE_ATTRIBUTE,
     BEAVER_HOME_URL,
     buildTableDocument,
-    evidenceKey,
+    renderedFileHash,
     renderedSpecHash,
     renderTableHtml,
     TABLE_CSS,
+    TABLE_FILE_HASH_ATTRIBUTE,
     TABLE_SPEC_HASH_ATTRIBUTE,
 } from "../../../src/services/artifacts/tableDocument";
 import { CSS_RULE_BUDGET, escapeHtml } from "../../../src/utils/html";
@@ -113,23 +115,6 @@ const spec: TableSpec = {
     capabilities: { row_actions: ["reveal", "open"] },
 };
 
-/** The `--o<i>` / `--p<i>` pair a row carries, by row id. */
-function ranksFor(html: string, rowId: string): Record<string, number> {
-    const row = new RegExp(
-        `<details class="[^"]*" id="${rowId}" style="([^"]*)"`,
-    ).exec(html);
-    if (!row) return {};
-    return Object.fromEntries(
-        row[1]
-            .split(";")
-            .filter(Boolean)
-            .map((pair) => {
-                const [name, value] = pair.split(":");
-                return [name.replace("--", ""), Number(value)];
-            }),
-    );
-}
-
 /** The markup of one grid cell, from its opening tag to the end of its row. */
 function cellHtml(html: string, rowId: string, columnId: string): string {
     const start = html.indexOf(`id="${rowId}/${columnId}"`);
@@ -138,15 +123,19 @@ function cellHtml(html: string, rowId: string, columnId: string): string {
 
 /** The expanded detail of one row. */
 function detailHtml(html: string, rowId: string): string {
-    const start = html.indexOf(`id="${rowId}" style=`);
+    const start = html.search(new RegExp(`<details class="[^"]*" id="${rowId}">`));
     const detail = html.indexOf('<div class="bt-d">', start);
     return html.slice(detail, html.indexOf("</details>", detail));
 }
 
+/** The numbers of every citation marker, in document order. */
+function markerNumbers(html: string): string[] {
+    return [...html.matchAll(/class="bt-cite[^"]*"[^>]*>(\d+)</g)].map((m) => m[1]);
+}
+
 /**
  * The document's text, near enough for offset comparisons: annotations anchor
- * into text, and markup — including the inline style attributes that carry the
- * sort ranks — is not text. Entities are left alone, since both sides of a
+ * into text, and markup is not text. Entities are left alone, since both sides of a
  * comparison carry the same ones.
  */
 function textOf(html: string): string {
@@ -159,54 +148,28 @@ const HASH = "0123456789abcdef".repeat(4);
 
 describe("renderTableHtml", () => {
     it("bakes the producer's sort into document order, so a viewer with no CSS still agrees", () => {
-        const { html } = renderTableHtml(spec);
+        const html = renderTableHtml(spec);
         const order = [
             ...html.matchAll(/<details class="[^"]*" id="([^"]+)"/g),
         ].map((m) => m[1]);
         expect(order).toEqual(["r2", "r1", "r3"]);
     });
 
-    it("ranks an empty cell last in both directions", () => {
-        const { html } = renderTableHtml(spec);
-        // Column index 1 is Citations: r3 has no value.
-        expect(ranksFor(html, "r3").o1).toBe(2);
-        expect(ranksFor(html, "r3").p1).toBe(2);
-        // …while the two filled rows swap ends.
-        expect(ranksFor(html, "r1").o1).toBe(0);
-        expect(ranksFor(html, "r1").p1).toBe(1);
-        expect(ranksFor(html, "r2").o1).toBe(1);
-        expect(ranksFor(html, "r2").p1).toBe(0);
-    });
-
-    it("emits one filter rule per value and tags the rows it matches", () => {
-        const { html } = renderTableHtml(spec, { idPrefix: "x" });
-        // Type is column 2, Article is its first option.
-        expect(html).toContain(
-            "#x-f0-1:checked ~ .bt-scroll .bt-r:not(.bt-v2-0)",
-        );
-        expect(html).toMatch(/<details class="bt-r bt-v2-0 bt-v3-1" id="r1"/);
-        // Boolean columns get a group too.
-        expect(html).toContain(
-            "#x-f1-1:checked ~ .bt-scroll .bt-r:not(.bt-v3-1)",
-        );
-    });
-
-    it("checks the radio matching the producer's sort", () => {
-        const { html } = renderTableHtml(spec, { idPrefix: "x" });
-        expect(html).toContain('id="x-sd1" class="bt-ctl" checked');
-        expect(html).not.toContain('id="x-sa1" class="bt-ctl" checked');
-    });
-
-    it("omits the controls when the caller asks for a plain document", () => {
-        const { html } = renderTableHtml(spec, { controls: false });
-        expect(html).not.toContain("bt-ctl");
+    it("has no sort, filter or row-height controls, only rows in the producer's order", () => {
+        const html = renderTableHtml(spec);
+        expect(html).not.toMatch(/<input\b/);
+        expect(html).not.toMatch(/<label\b/);
         expect(html).not.toContain("bt-toolbar");
-        // The rows are still there, still in the producer's order.
-        expect(html).toContain('id="r2"');
+        expect(html).not.toContain("bt-sorters");
+        expect(html).not.toContain(":checked");
+        // No per-row rank properties and no filter classes.
+        expect(html).not.toMatch(/<details [^>]*style=/);
+        expect(html).not.toMatch(/bt-v\d+-\d+/);
+        expect(html).toContain('<details class="bt-r" id="r2">');
     });
 
     it("renders the table's description under its title", () => {
-        const { html } = renderTableHtml(spec);
+        const html = renderTableHtml(spec);
         expect(html).toContain('<h1 class="bt-t">Results</h1><p class="bt-cap">From OpenAlex</p>');
     });
 
@@ -221,7 +184,7 @@ describe("renderTableHtml", () => {
                 },
             ],
         };
-        const { html } = renderTableHtml(hostile);
+        const html = renderTableHtml(hostile);
         expect(html).not.toContain("<script>");
         expect(html).not.toContain("<img src=x");
         expect(html).not.toContain("<b>bold</b>");
@@ -253,13 +216,13 @@ describe("renderTableHtml", () => {
                 },
             ],
         };
-        const { html } = renderTableHtml(withLinks);
+        const html = renderTableHtml(withLinks);
         expect(html).not.toContain("javascript:");
         expect(html).toContain('href="https://doi.org/10.1/x"');
     });
 
     it("emits a row's verbs only where the host supplied a URI for them", () => {
-        const { html } = renderTableHtml(spec, {
+        const html = renderTableHtml(spec, {
             linksFor: (row) =>
                 row.ref?.kind === "item" && row.ref.zotero_key === "K1"
                     ? { reveal: "zotero://select/library/items/K1" }
@@ -284,13 +247,13 @@ describe("renderTableHtml", () => {
                 },
             ],
         };
-        const { html } = renderTableHtml(files, { linksFor: () => ({}) });
+        const html = renderTableHtml(files, { linksFor: () => ({}) });
         expect(html).not.toContain("bt-ref-act");
         expect(html).not.toContain("bt-acts");
 
         const linked = renderTableHtml(spec, {
             linksFor: () => ({ reveal: "zotero://select/library/items/K1" }),
-        }).html;
+        });
         // The reveal link sits inside the anchor cell; the expanded detail
         // lists it too.
         expect(linked).toMatch(
@@ -333,11 +296,17 @@ describe("buildTableDocument", () => {
         );
     });
 
-    it("hides the notice for a host that is enhancing the document", () => {
+    it("carries nothing that needs the plugin: no commands, no host mark, no script", () => {
         const { html } = buildTableDocument(spec);
-        expect(html).toContain(`html[${BEAVER_ACTIVE_ATTRIBUTE}] .bt-nb { display: none; }`);
-        // The stored file is the un-enhanced document; only a live host marks it.
-        expect(html).not.toContain(`<html lang="en" ${BEAVER_ACTIVE_ATTRIBUTE}`);
+        expect(html).not.toContain("data-bt-command");
+        expect(html).not.toContain("bt-export");
+        expect(html).not.toContain("data-beaver-active");
+        expect(html).not.toContain("data-cite-");
+        expect(html).not.toMatch(/<script\b|\son[a-z]+=/i);
+        // The one control is the notice's dismiss, which needs no script.
+        expect(html.match(/<input\b[^>]*>/g)).toEqual([
+            '<input type="checkbox" id="beaver-table-notice-dismiss" class="bt-ctl">',
+        ]);
     });
 
     it("marks the document so a viewer can recognise it without parsing", () => {
@@ -352,21 +321,7 @@ describe("buildTableDocument", () => {
         expect(cssRuleCount).toBeLessThan(CSS_RULE_BUDGET);
     });
 
-    it("sheds its filters rather than break the reader's theming", () => {
-        // Wide enough that its filter rules alone would break the budget.
-        const columns = Array.from({ length: 40 }, (_, i) => ({
-            id: `c${i}`,
-            header: `Column ${i}`,
-            type: "select" as const,
-            options: Array.from({ length: 6 }, (_, j) => ({ label: `v${j}` })),
-        }));
-        const wide = renderTableHtml({ id: "w", columns, rows: [] });
-        // Sorting survives; the filter bar does not.
-        expect(wide.html).toContain("bt-sorters");
-        expect(wide.html).not.toContain("bt-fg-h");
-    });
-
-    it("stays under the budget for a table with many sortable and filterable columns", () => {
+    it("stays under the budget however wide the table, since no rule depends on the spec", () => {
         const columns = Array.from({ length: 20 }, (_, i) => ({
             id: `c${i}`,
             header: `Column ${i}`,
@@ -379,9 +334,7 @@ describe("buildTableDocument", () => {
         );
     });
 
-    it("keeps the static stylesheet free of the id selectors that vary per table", () => {
-        // Anything naming a control id belongs in the per-table block, or two
-        // tables in one document would drive each other.
+    it("keeps the table stylesheet free of control selectors", () => {
         expect(TABLE_CSS).not.toContain(":checked");
     });
 });
@@ -401,6 +354,20 @@ describe("the spec hash", () => {
             expect(html).not.toContain(TABLE_SPEC_HASH_ATTRIBUTE);
             expect(renderedSpecHash(html)).toBeNull();
         }
+    });
+
+    it("is written beside the digest of the whole table.json, and both read back", () => {
+        const FILE = "fedcba9876543210".repeat(4);
+        const { html } = buildTableDocument(spec, { specSha256: HASH, fileSha256: FILE });
+        expect(html).toContain(
+            `<html lang="en" data-beaver-table="${TABLE_SPEC_VERSION}" ${TABLE_SPEC_HASH_ATTRIBUTE}="${HASH}" ${TABLE_FILE_HASH_ATTRIBUTE}="${FILE}">`,
+        );
+        expect(renderedSpecHash(html)).toBe(HASH);
+        expect(renderedFileHash(html)).toBe(FILE);
+        // A commit that leaves the spec alone still changes the synced file.
+        const next = buildTableDocument(spec, { specSha256: HASH, fileSha256: HASH }).html;
+        expect(next).not.toBe(html);
+        expect(buildTableDocument(spec, { fileSha256: "nope" }).html).not.toContain(TABLE_FILE_HASH_ATTRIBUTE);
     });
 
     it("reads null from a document that names none", () => {
@@ -454,7 +421,7 @@ describe("category definitions", () => {
     };
 
     it("lists each select column's categories in a collapsed codebook under the table", () => {
-        const { html } = renderTableHtml(coded);
+        const html = renderTableHtml(coded);
         const codebook = html.slice(html.indexOf('<details class="bt-codebook">'));
         expect(codebook).toMatch(/^<details class="bt-codebook"><summary class="bt-codebook-h">Codebook<\/summary>/);
         expect(codebook).toContain('<h3 class="bt-cb-h">Design</h3><p class="bt-cb-q">What is the study design?</p>');
@@ -465,7 +432,7 @@ describe("category definitions", () => {
     });
 
     it("shows definitions on the header and the pill", () => {
-        const { html } = renderTableHtml(coded);
+        const html = renderTableHtml(coded);
         expect(html).toContain('title="What is the study design?\n\nCategories\nRCT — Random &lt;assignment&gt; to arms."');
         expect(cellHtml(html, "r1", "design")).toContain('title="Random &lt;assignment&gt; to arms."');
     });
@@ -475,7 +442,7 @@ describe("category definitions", () => {
             ...coded,
             columns: [{ ...coded.columns[0], options: [{ label: "RCT" }, { label: "Observational" }] }],
         };
-        expect(renderTableHtml(plain).html).not.toContain("bt-codebook");
+        expect(renderTableHtml(plain)).not.toContain("bt-codebook");
     });
 });
 
@@ -485,7 +452,7 @@ describe("select pills", () => {
         // A colour added there but missing from a list restated here would
         // silently come out grey in every stored table.
         for (const color of SELECT_COLORS) {
-            const { html } = renderTableHtml({
+            const html = renderTableHtml({
                 id: "p",
                 columns: [
                     {
@@ -515,7 +482,7 @@ describe("select pills", () => {
     });
 
     it("falls back to grey for a colour outside the palette", () => {
-        const { html } = renderTableHtml({
+        const html = renderTableHtml({
             id: "p",
             columns: [
                 {
@@ -591,23 +558,21 @@ describe("citations", () => {
     };
 
     it("numbers each source once, in the order it is met", () => {
-        const { html } = renderTableHtml(cited);
-        const markers = [...html.matchAll(/data-bt-cite="(\d+)"/g)].map(
-            (m) => m[1],
-        );
-        // Each cell is rendered twice — in its row and in that row's detail —
-        // so what matters is that each source kept one number.
+        const html = renderTableHtml(cited);
+        const markers = markerNumbers(html);
+        // A marker sits in the grid cell and again after its passage in the
+        // row's expansion, so what matters is that each source kept one number.
         expect([...new Set(markers)]).toEqual(["1", "2"]);
-        expect(markers.filter((m) => m === "1").length).toBeGreaterThan(1);
+        expect(markers.filter((m) => m === "1")).toHaveLength(2);
     });
 
-    it("keys every marker by the evidence entry behind it", () => {
-        const { html } = renderTableHtml(cited, { controls: false });
-        expect(evidenceKey("r1", "finding", 0)).toBe("r1|finding|0");
-        expect(cellHtml(html, "r1", "finding")).toContain('data-cite-key="r1|finding|0"');
-        expect(cellHtml(html, "r2", "finding")).toContain('data-cite-key="r2|finding|0"');
+    it("quotes each passage once, in the expanded row, followed by its marker", () => {
+        const html = renderTableHtml(cited);
+        expect(html.split("a 13% performance increase")).toHaveLength(2);
+        expect(detailHtml(html, "r1")).toMatch(/“a 13% performance increase”<a class="bt-cite bt-cite--locator"[^>]*>1<\/a>/);
+        expect(cellHtml(html, "r1", "finding")).toMatch(/Finding of r1\.<\/span><a class="bt-cite/);
         // No reference, nothing to cite: the answer stands without a marker.
-        expect(cellHtml(html, "r3", "finding")).not.toContain("data-bt-cite");
+        expect(cellHtml(html, "r3", "finding")).not.toContain("bt-cite");
     });
 
     it("gives every passage from one paper that paper's number and lists the paper once", () => {
@@ -638,14 +603,15 @@ describe("citations", () => {
                 },
             ],
         };
-        const { html } = renderTableHtml(paper, { controls: false });
-        const markers = [...html.matchAll(/data-bt-cite="(\d+)"/g)].map((m) => m[1]);
-        // The passages of both answers are all the one paper's.
-        expect(new Set(markers)).toEqual(new Set(["1"]));
-        // Each marker still names its own evidence for the host to navigate to.
-        expect(html).toContain('data-cite-key="r|finding|0"');
-        expect(html).toContain('data-cite-key="r|finding|1"');
-        expect(html).toContain('data-cite-key="r|method|0"');
+        const html = renderTableHtml(paper);
+        const markers = markerNumbers(html);
+        // The passages of both answers are all the one paper's: three in the
+        // grid and the same three in the expansion.
+        expect(markers).toEqual(["1", "1", "1", "1", "1", "1"]);
+        // Each marker opens its own passage's page.
+        expect(html).toContain('href="zotero://open/library/items/A1?page=1"');
+        expect(html).toContain('href="zotero://open/library/items/A1?page=3"');
+        expect(html).toContain('href="zotero://open/library/items/A1?page=6"');
         const sources = html.slice(html.indexOf('class="bt-srcs"'));
         expect(sources.match(/<li /g)).toHaveLength(1);
         // The entry reveals the paper; the file it was read from is a separate link.
@@ -664,24 +630,24 @@ describe("citations", () => {
                 ]),
             ],
         };
-        const { html } = renderTableHtml(twice, { controls: false });
-        expect(cellHtml(html, "r1", "finding").match(/data-bt-cite="1"/g)).toHaveLength(2);
+        const html = renderTableHtml(twice);
+        expect(markerNumbers(cellHtml(html, "r1", "finding"))).toEqual(["1", "1"]);
     });
 
-    it("names the page of a located passage and says a click shows it", () => {
+    it("names a located passage's page in the marker's tooltip and link, and never its boxes", () => {
         const located: TableSpec = {
             id: "l",
             columns,
             rows: [
                 citedRow("r1", itemRow("P1", "K1"), [
-                    { locator: "s3", quote: "the passage", page: 2, boxes: [[1, 2, 3, 4]] },
+                    { locator: "s3", quote: "the passage", page: 2, boxes: [[11.5, 22.5, 33.5, 44.5]] },
                 ]),
             ],
         };
-        const { html } = renderTableHtml(located);
-        expect(html).toContain('data-cite-loc="Page 3"');
-        expect(html).toContain('data-cite-action="Click to show the highlighted passage"');
-        expect(html).toContain('href="zotero://open/library/items/K1?page=3"');
+        const html = renderTableHtml(located);
+        expect(html).toContain('title="r1 — Page 3" href="zotero://open/library/items/K1?page=3"');
+        expect(html).not.toContain("22.5");
+        expect(html).not.toContain("data-cite-");
     });
 
     it("marks an answer taken from title and abstract, which cites nothing", () => {
@@ -701,25 +667,19 @@ describe("citations", () => {
                 },
             ],
         };
-        const { html } = renderTableHtml(fromAbstract);
+        const html = renderTableHtml(fromAbstract);
         expect(cellHtml(html, "r1", "finding")).toContain("From title and abstract");
-        expect(html).not.toContain("data-bt-cite");
+        expect(html).not.toContain("bt-cite");
         expect(html).not.toContain("bt-srcs");
-        expect(detailHtml(html, "r1")).toContain("The abstract says so.");
+        // The reasoning stays in `table.json`; the tab's inspector shows it.
+        expect(html).not.toContain("The abstract says so.");
     });
 
-    it("opens the cited page, and carries the card's parts", () => {
-        const { html } = renderTableHtml(cited);
-        expect(html).toContain('href="zotero://open/library/items/K1?page=4"');
-        // Kept apart so a host can lay them out the way the app does.
-        expect(html).toContain('data-cite-name="Bloom 2015"');
-        expect(html).toContain('data-cite-loc="Page 4"');
-        expect(html).toContain("a 13% performance increase");
-        expect(html).toContain("Click to open page 4");
-        // …and joined into a `title` for a viewer that can show no card.
-        const title = /title="([^"]*)"[^>]*data-bt-cite/.exec(html)![1];
-        expect(title).toContain("Bloom 2015");
-        expect(title).toContain("Page 4");
+    it("opens the cited page, and names the source and the page in its tooltip", () => {
+        const html = renderTableHtml(cited);
+        expect(cellHtml(html, "r1", "finding")).toContain(
+            '<a class="bt-cite bt-cite--locator" title="Bloom 2015 — Page 4" href="zotero://open/library/items/K1?page=4">1</a>',
+        );
     });
 
     it("colours a marker by what it points at", () => {
@@ -735,7 +695,7 @@ describe("citations", () => {
                 ),
             ],
         };
-        const { html } = renderTableHtml(mixed, { controls: false });
+        const html = renderTableHtml(mixed);
         expect(cellHtml(html, "r1", "finding")).toContain("bt-cite bt-cite--locator");
         // An attached file has no link here; the marker is a span.
         expect(cellHtml(html, "r3", "finding")).toContain('<span class="bt-cite bt-cite--locator"');
@@ -750,7 +710,7 @@ describe("citations", () => {
                 citedRow("r4", itemRow("P4", "K4"), [{ locator: "s1", quote: "unnamed", page: 0 }], null),
             ],
         };
-        const { html } = renderTableHtml(listed);
+        const html = renderTableHtml(listed);
         const sources = html.slice(html.indexOf('class="bt-srcs"'));
         const entries = [...sources.matchAll(/<li id="bt-src-(\d+)"[\s\S]*?<\/li>/g)];
         expect(entries.map((m) => m[1])).toEqual(["1", "2", "3"]);
@@ -761,7 +721,7 @@ describe("citations", () => {
     });
 
     it("strips citation tags from a text value instead of printing them raw", () => {
-        const { html } = renderTableHtml({
+        const html = renderTableHtml({
             ...cited,
             rows: [
                 {
@@ -794,7 +754,7 @@ describe("citations", () => {
             ],
         };
 
-        const { html } = renderTableHtml(inGroup, {
+        const html = renderTableHtml(inGroup, {
             citationScopeFor: (libraryId) =>
                 libraryId === 7 ? "groups/4242" : "library",
         });
@@ -812,13 +772,13 @@ describe("citations", () => {
     });
 
     it("falls back to the personal library when no host supplies a scope", () => {
-        const { html } = renderTableHtml(cited);
+        const html = renderTableHtml(cited);
         expect(html).toContain('href="zotero://open/library/items/K1?page=4"');
     });
 
     it("renders no sources section for a table without evidence", () => {
-        expect(renderTableHtml(spec).html).not.toContain("bt-srcs");
-        expect(renderTableHtml({ ...cited, rows: [] }).html).not.toContain("bt-srcs");
+        expect(renderTableHtml(spec)).not.toContain("bt-srcs");
+        expect(renderTableHtml({ ...cited, rows: [] })).not.toContain("bt-srcs");
     });
 });
 
@@ -829,7 +789,7 @@ describe("cell states", () => {
     ];
 
     it("shows staleness beside a failure's error", () => {
-        const { html } = renderTableHtml({
+        const html = renderTableHtml({
             id: "states",
             columns: [{ id: "a", header: "Answer", type: "text" }],
             rows: [
@@ -853,7 +813,7 @@ describe("cell states", () => {
     });
 
     it("says a failure failed even when it names no error", () => {
-        const { html } = renderTableHtml({
+        const html = renderTableHtml({
             id: "f",
             columns: [{ id: "a", header: "Answer", type: "text" }],
             rows: [{ id: "r", cells: { a: { outcome: "failed", provenance: "model" } as Cell } }],
@@ -908,7 +868,7 @@ describe("cell states", () => {
 
         expect(cellHtml(html, "unreported", "a")).toContain("Not reported");
         // A not-reported finding still cites where it looked.
-        expect(cellHtml(html, "unreported", "a")).toContain('data-cite-key="unreported|a|0"');
+        expect(cellHtml(html, "unreported", "a")).toContain('class="bt-cite');
         expect(cellHtml(html, "blank", "a")).toContain("Cleared by you");
         expect(cellHtml(html, "mine", "a")).toContain("Edited by you");
         // Prose is never marked for review, whatever its confidence.
@@ -918,12 +878,12 @@ describe("cell states", () => {
         expect(cellHtml(html, "meta", "a")).toContain("From title and abstract");
         expect(cellHtml(html, "broken", "a")).toContain("Timed out");
 
-        // The expanded row shows the reason, then the closest passages.
+        // The expanded row shows the closest passages; the reason stays in
+        // `table.json`.
         const detail = detailHtml(html, "unreported");
-        expect(detail).toContain(
-            '<div class="bt-d-extra">The methods section names no sample.</div><div class="bt-d-h">Closest passages</div>',
-        );
-        expect(detail).toContain("<li>“We surveyed firms.”</li>");
+        expect(detail).toContain('<div class="bt-d-h">Closest passages</div>');
+        expect(detail).not.toContain("The methods section names no sample.");
+        expect(detail).toMatch(/<li>“We surveyed firms\.”<a class="bt-cite[^>]*>\d<\/a><\/li>/);
 
         const footer = /<footer class="bt-foot">([^<]*)<\/footer>/.exec(html)![1];
         expect(footer).toBe("6 rows · 1 not reported · 1 failed · 1 from title and abstract");
@@ -932,7 +892,7 @@ describe("cell states", () => {
     });
 
     it("never counts a column as filling in the footer", () => {
-        const { html } = renderTableHtml({
+        const html = renderTableHtml({
             id: "f",
             columns: [
                 { id: "a", header: "Answer", type: "text", status: "filling", progress: { done: 1, total: 3 } },
@@ -962,7 +922,7 @@ describe("how answers read", () => {
     });
 
     it("writes a no as the word, in muted type, never as an empty cell", () => {
-        const { html } = renderTableHtml({
+        const html = renderTableHtml({
             id: "b",
             columns,
             rows: [row("r", { rct: filler({ kind: "boolean", value: false }) })],
@@ -971,8 +931,8 @@ describe("how answers read", () => {
         expect(TABLE_CSS).toContain(".bt-wrap .bt-no { color: var(--t-fade); }");
     });
 
-    it("heads a no's passages as evidence, after its reason, and says when an answer cites none", () => {
-        const { html } = renderTableHtml({
+    it("heads a no's passages as evidence, leaves out its reason, and says when an answer cites none", () => {
+        const html = renderTableHtml({
             id: "a",
             columns,
             rows: [
@@ -991,13 +951,12 @@ describe("how answers read", () => {
         });
         expect(cellHtml(html, "r", "rct")).toContain('<span class="bt-no">No</span>');
         const detail = detailHtml(html, "r");
-        const reasoning = detail.indexOf("No randomisation is described.");
         const heading = detail.indexOf('<div class="bt-d-h">Evidence</div>');
-        expect(reasoning).toBeGreaterThan(0);
-        expect(heading).toBeGreaterThan(reasoning);
+        expect(heading).toBeGreaterThan(0);
+        expect(detail).not.toContain("No randomisation is described.");
         expect(detail.indexOf("<li>“Participants chose a group.”")).toBeGreaterThan(heading);
         const uncited = detailHtml(html, "u");
-        expect(uncited).toContain('<div class="bt-d-extra">Randomisation is never mentioned.</div>');
+        expect(uncited).not.toContain("Randomisation is never mentioned.");
         expect(uncited).not.toContain("bt-d-h");
         expect(uncited).toContain('<div class="bt-d-uncited">No passage cited</div>');
         expect(detail).not.toContain("bt-d-uncited");
@@ -1011,7 +970,7 @@ describe("how answers read", () => {
             options: [{ label: "No case study" }, { label: "Case study" }],
         };
         const quote = [{ document: doc, locator: "s7", quote: "Randomly assigned." }];
-        const { html } = renderTableHtml({
+        const html = renderTableHtml({
             id: "e",
             columns: [...columns, design],
             rows: [
@@ -1028,7 +987,7 @@ describe("how answers read", () => {
     });
 
     it("never marks an answer for review, whatever its stored confidence", () => {
-        const { html } = renderTableHtml({
+        const html = renderTableHtml({
             id: "r",
             columns,
             rows: [
@@ -1048,7 +1007,7 @@ describe("how answers read", () => {
     });
 
     it("sets a cited table row's caption and header rows in small type above the quote", () => {
-        const { html } = renderTableHtml({
+        const html = renderTableHtml({
             id: "c",
             columns,
             rows: [
@@ -1067,13 +1026,13 @@ describe("how answers read", () => {
             ],
         });
         expect(detailHtml(html, "r")).toContain(
-            '<li><span class="bt-ev-ctx">Table 2. Participants | Group | %</span>“Women 41”</li>',
+            '<li><span class="bt-ev-ctx">Table 2. Participants | Group | %</span>“Women 41”',
         );
         expect(TABLE_CSS).toContain(".bt-ev-ctx { display: block; font-size: 12px; color: var(--t-fade); }");
     });
 
     it("says why a cell is stale", () => {
-        const { html } = renderTableHtml({
+        const html = renderTableHtml({
             id: "s",
             columns,
             rows: [
@@ -1095,7 +1054,7 @@ describe("how answers read", () => {
     });
 
     it("keeps a failed row's error style and says why it stopped, telling nothing to read from a read error", () => {
-        const { html } = renderTableHtml({
+        const html = renderTableHtml({
             id: "f",
             columns,
             rows: [
@@ -1326,15 +1285,10 @@ describe("a stored table's rendering", () => {
 
     it("renders every evidence entry as a marker and lists each source once", () => {
         const { html } = buildTableDocument(fullSpec);
-        const keys = new Set([...html.matchAll(/data-cite-key="([^"]+)"/g)].map((m) => m[1]));
-        expect(keys).toEqual(
-            new Set([
-                "a1b2c3|decision|0",
-                "a1b2c3|n|0",
-                "a1b2c3|finding|0",
-                "a1b2c3|finding|1",
-            ]),
-        );
+        // Four evidence entries, each marked in the grid and after its quote.
+        const detail = detailHtml(html, "a1b2c3");
+        expect(markerNumbers(detail)).toEqual(["1", "1", "1", "1"]);
+        expect(markerNumbers(html)).toHaveLength(8);
         const sources = html.slice(html.indexOf('class="bt-srcs"'));
         expect(sources.match(/<li /g)).toHaveLength(1);
         expect(sources).toContain("Bloom, N. et al. 2015. Does working from home work? QJE.");
@@ -1410,57 +1364,19 @@ describe("a stored table stands on its own", () => {
     });
 
     it("stays under the reader's CSS budget at the design caps", () => {
-        // 20 columns, seven of them selects declaring ten categories each —
-        // the shape that drives the per-table rules.
-        const columns = Array.from({ length: 20 }, (_, i) =>
+        const columns = Array.from({ length: 30 }, (_, i) =>
             i % 3 === 0
                 ? {
                       id: `c${i}`,
                       header: `Column ${i}`,
                       type: "select" as const,
-                      options: Array.from({ length: 10 }, (_, j) => ({
-                          label: `v${j}`,
-                      })),
+                      options: Array.from({ length: 10 }, (_, j) => ({ label: `v${j}` })),
                   }
                 : { id: `c${i}`, header: `Column ${i}`, type: "text" as const },
         );
-        const { html, cssRuleCount } = buildTableDocument({
-            id: "caps",
-            columns,
-            rows: [],
-        });
-        // The filters must survive, or the budget is met by shedding them.
-        expect(html).toContain("bt-fg-h");
+        const { cssRuleCount } = buildTableDocument({ id: "caps", columns, rows: [] });
         expect(cssRuleCount).toBeLessThan(CSS_RULE_BUDGET);
-    });
-});
-
-describe("things a stored table must survive", () => {
-    it("points a filter chip at the rows that actually carry its label", () => {
-        // The chip and the row class are two halves of one index. An open
-        // select enumerated once over sorted rows and once over the spec's
-        // used to pair each chip with a different label's rows.
-        const openSelect: TableSpec = {
-            id: "f",
-            columns: [{ id: "d", header: "Design", type: "select" }],
-            sort: { column_id: "d", direction: "asc" },
-            rows: [
-                { id: "zeta", cells: { d: answered({ kind: "select", label: "Zeta" }) } },
-                { id: "alpha", cells: { d: answered({ kind: "select", label: "Alpha" }) } },
-            ],
-        };
-        const { html } = buildTableDocument(openSelect, { controls: true });
-
-        // The chip labelled "Alpha" hides everything that is not class N; the
-        // Alpha row must be the row carrying class N.
-        const chip = /class="bt-fo bt-fo0-(\d+)"[^>]*>Alpha</.exec(html);
-        expect(chip).not.toBeNull();
-        const rule = new RegExp(
-            `#bt-f0-${chip![1]}:checked ~ \\.bt-scroll \\.bt-r:not\\.?\\(\\.(bt-v0-\\d+)\\)`
-        ).exec(html);
-        expect(rule).not.toBeNull();
-        const alphaRow = /<details class="([^"]*)" id="alpha"/.exec(html);
-        expect(alphaRow?.[1]).toContain(rule![1]);
+        expect(cssRuleCount).toBe(buildTableDocument(spec).cssRuleCount);
     });
 });
 
@@ -1474,22 +1390,101 @@ describe("reading layout", () => {
         rows: [{ id: "r", cells: { ref: reference("A") } }],
     };
 
-    it("opens on tall rows", () => {
-        const { html } = renderTableHtml(spec);
-        expect(html).toMatch(/id="bt-dt" class="bt-ctl" checked/);
-        expect(html).not.toMatch(/id="bt-dz" class="bt-ctl" checked/);
+    it("shows up to eight lines of an answer in the grid, the rest when the row expands", () => {
+        expect(TABLE_CSS).toContain(".bt-body { --lines: 8; --title-lines: 3;");
+        expect(TABLE_CSS).toContain(".bt-d .bt-clamp, .bt-d .bt-title { display: block; -webkit-line-clamp: unset;");
     });
 
     it("shares the frame's width between flexible columns instead of fixing them", () => {
-        const { html } = renderTableHtml(spec);
+        const html = renderTableHtml(spec);
         expect(html).toContain("--cols:2.6rem minmax(11rem, 1.3fr) minmax(8rem, 1fr)");
     });
 
-    it("offers export as a command only a host can run", () => {
-        const { html } = renderTableHtml(spec);
-        expect(html).toContain('data-bt-command="export-csv"');
-        expect(TABLE_CSS).toContain("html[data-beaver-active] .bt-export");
-        // No text of its own: the stored document's text stays the table's.
-        expect(html).not.toMatch(/class="bt-export"[^>]*>[^<]/);
+    it("offers no export, which only the Beaver tab can run", () => {
+        const html = renderTableHtml(spec);
+        expect(html).not.toContain("data-bt-command");
+        expect(TABLE_CSS).not.toContain("bt-export");
+    });
+});
+
+describe("what the static page carries", () => {
+    const words =
+        "the effect of conditional cash transfers on school enrolment among adolescent girls in rural districts was positive".split(" ");
+    const prose = (length: number, seed: number): string => {
+        let out = "";
+        for (let i = seed; out.length < length; i += 7) out += `${words[i % words.length]} `;
+        return out.trim();
+    };
+
+    /**
+     * A filled table at the spec cap: two evidence entries a cell with boxes,
+     * a context on one entry in ten, and a reasoning on every model cell.
+     */
+    function capSizedSpec(rows: number, questions: number): TableSpec {
+        const columns: TableSpec["columns"] = [
+            { id: REFERENCE_COLUMN_ID, header: "Reference", type: "reference", system: true },
+            ...Array.from({ length: questions }, (_, c) => ({
+                id: `q${c}`,
+                header: `Question ${c}`,
+                type: "text" as const,
+                description: prose(90, c),
+            })),
+        ];
+        return {
+            id: "cap",
+            title: "Cap",
+            columns,
+            rows: Array.from({ length: rows }, (_, r) => {
+                const document = `u-A${r}`;
+                const cells: Record<string, Cell> = {
+                    [REFERENCE_COLUMN_ID]: reference(`Author ${r} (2011)`, {
+                        title: prose(80, r),
+                        subtitle: "Baird, McIntosh, Özler",
+                        venue: "Quarterly Journal of Economics",
+                    }),
+                };
+                for (let c = 0; c < questions; c++) {
+                    cells[`q${c}`] = answered({ kind: "text", text: prose(180, r + c) }, "model", {
+                        documents: [document],
+                        reasoning: prose(300, c),
+                        evidence: [0, 1].map((e) => ({
+                            document,
+                            locator: `s${10 + e}.${c}`,
+                            quote: prose(220, r + c + e),
+                            page: 3 + e,
+                            boxes: [[72.1, 120.4, 523.9, 133.2], [72.1, 134.6, 401.2, 147.4]],
+                            ...((r * questions + c) % 10 === 0 ? { context: prose(160, c) } : {}),
+                        })),
+                    });
+                }
+                return { id: `r${r}`, ref: itemRef(`K${r}`), documents: [document], cells };
+            }),
+        };
+    }
+
+    it("renders every row, answers, quotes and contexts, and leaves out reasoning and boxes", () => {
+        const table = capSizedSpec(3, 2);
+        table.rows[0].cells.q0 = {
+            ...table.rows[0].cells.q0,
+            reasoning: "REASONING-MARK",
+        } as Cell;
+        const html = buildTableDocument(table).html;
+        expect(html.match(/<details class="bt-r" id="r\d+">/g)).toHaveLength(3);
+        const firstQuote = (table.rows[0].cells.q0 as { evidence: Evidence[] }).evidence[0];
+        expect(html).toContain(`“${firstQuote.quote}”`);
+        expect(html).toContain(`<span class="bt-ev-ctx">${firstQuote.context}</span>`);
+        expect(html).not.toContain("REASONING-MARK");
+        expect(html).not.toContain("523.9");
+    });
+
+    it("stays close to the size of table.json at the spec cap", () => {
+        const table = capSizedSpec(940, 7);
+        const json = jsonBytes({ spec: table });
+        expect(json).toBeLessThanOrEqual(MAX_SPEC_BYTES);
+        expect(json).toBeGreaterThan(0.9 * MAX_SPEC_BYTES);
+        const { html } = buildTableDocument(table, { specSha256: HASH, fileSha256: HASH });
+        // Measured at about 1.25 times; the enhanced document was 3.3 times.
+        expect(html.length / json).toBeLessThan(1.4);
+        expect(html.match(/<details class="bt-r" id="r\d+">/g)).toHaveLength(940);
     });
 });

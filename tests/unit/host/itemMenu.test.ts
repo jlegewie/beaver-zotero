@@ -6,6 +6,7 @@ const resolveLibraryRef = vi.hoisted(() => vi.fn());
 const revealSource = vi.hoisted(() => vi.fn());
 const selectItemById = vi.hoisted(() => vi.fn());
 const viewAttachment = vi.hoisted(() => vi.fn());
+const isTableItem = vi.hoisted(() => vi.fn((item: any) => item?.table === true));
 
 vi.mock('../../../src/utils/libraryIdentity', () => ({ resolveLibraryRef }));
 vi.mock('../../../react/runtime/navigation', () => ({
@@ -23,6 +24,11 @@ vi.mock('../../../react/components/icons/icons', () => ({
     FolderDetailIcon: () => null,
     LibraryIcon: () => null,
     NoteIcon: () => null,
+}));
+
+vi.mock('../../../src/services/artifacts/tableItemIdentity', () => ({
+    isTableItem,
+    loadTableItemFields: vi.fn(async () => undefined),
 }));
 
 import { itemMenuItems } from '../../../react/host/zotero/itemMenu';
@@ -112,6 +118,20 @@ describe('itemMenuItems', () => {
             'Open PDF in New Window',
             'Show in Finder',
         ]);
+    });
+
+    it('offers one "Open Table" for a stored table, through Zotero\'s own open', async () => {
+        prefs.openReaderInNewWindow = true;
+        const table = { ...docxAttachment(20), key: 'TABLEKEY', attachmentReaderType: 'snapshot', table: true };
+        getByLibraryAndKeyAsync.mockResolvedValue(table);
+
+        const entries = await itemMenuItems({ library_id: 7, zotero_key: 'TABLEKEY' });
+
+        expect(labels(entries)).toEqual(['Show in Library', 'Open Table']);
+        entries[1].onClick();
+        // Zotero downloads a file synced on demand; the reader it opens is
+        // handed to the Beaver tab.
+        expect(viewAttachment).toHaveBeenCalledWith(20);
     });
 
     it('lists the preferred window behavior first', async () => {

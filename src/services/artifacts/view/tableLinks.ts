@@ -5,11 +5,11 @@
  * this module builds the `zotero://` ones: a row's verbs become links here, and
  * `zoteroLinkScope` names a cited item's library.
  *
- * Stateless, and deliberately kept apart from the reader host: every bundle
- * that renders or stores a table needs these links, while
- * `view/readerTableView.ts`, which owns the enhanced-view registry, must exist
- * in the **esbuild bundle only**. A stateless helper living in a stateful
- * module is how a second copy of that registry gets created.
+ * Stateless, and deliberately kept apart from the reader redirect: every
+ * bundle that renders or stores a table needs these links, while
+ * `view/readerTableView.ts`, which owns a reader listener, must exist in the
+ * **esbuild bundle only**. A stateless helper living in a stateful module is
+ * how a second copy of that state gets created.
  *
  * **Best effort throughout.** `zoteroLinksFor` runs once per row inside
  * `buildTableDocument`, which every write goes through, so a lookup that throws
@@ -19,7 +19,6 @@
  * personal library.
  */
 
-import { logger } from '@beaver/agent-core/platform/logger';
 import {
     ROW_ACTIONS,
     rowActionTarget,
@@ -70,27 +69,4 @@ export function zoteroLinksFor(row: Row): TableHtmlLinks {
         if (href) links[action] = href;
     }
     return links;
-}
-
-export function openTableLink(href: string): void {
-    try {
-        if (/^https:\/\//i.test(href)) {
-            Zotero.launchURL(href);
-            return;
-        }
-        if (/^zotero:\/\//i.test(href)) {
-            const pane = Zotero.getActiveZoteroPane();
-            if (!pane?.loadURI) {
-                logger(`openTableLink: no Zotero pane to open ${href}`, 2);
-                return;
-            }
-            pane.loadURI(href);
-            return;
-        }
-        // Never handed to the OS: a scheme the renderer does not emit is not
-        // one this plugin should launch on the user's behalf.
-        logger(`openTableLink: refusing to open ${href}`, 2);
-    } catch (error) {
-        logger(`openTableLink: could not open ${href}: ${error}`, 2);
-    }
 }

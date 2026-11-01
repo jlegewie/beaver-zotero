@@ -31,7 +31,6 @@
  * to look at.
  */
 
-import { closeStaleTableReaders } from '../services/artifacts/view/readerTableView';
 import { snapshotIsCurrent } from '../services/artifacts/tableRenderer';
 import {
     readTableItemSpec,
@@ -133,8 +132,6 @@ export async function openTable(ref: TableRef, options: OpenTableOptions = {}): 
             };
         }
         const win = await tableTabWindow(options.window);
-        // A reader still showing an old snapshot of this table goes away.
-        await closeStaleTableReaders(item.id);
         const { tabID, reused } = openTableTab(win, item, ref, {
             initial: { spec: read.spec, version: read.spec.version ?? 0 },
             background: options.background,
