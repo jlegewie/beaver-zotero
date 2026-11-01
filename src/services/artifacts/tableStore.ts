@@ -125,6 +125,7 @@ import {
     type CreateTableItemOptions,
     type TableActor,
     type TableCreationState,
+    type TableEditMarker,
     type TableFile,
     type TableHistory,
     type TableRef,
@@ -581,14 +582,16 @@ async function readCurrentState(item: Zotero.Item): Promise<CurrentState> {
     const spec = read.ok ? read.spec : null;
     const history =
         (await readJson<TableHistory>(historyPathOf(item))) ?? EMPTY_TABLE_HISTORY;
-    // Only the creation marker is carried from one commit to the next; any
-    // other field an older build wrote is dropped. An unreadable spec keeps its
-    // marker, so a write that replaces it does not lose the creation identity.
+    // Only the creation and edit markers are carried from one commit to the
+    // next; any other field an older build wrote is dropped. An unreadable spec
+    // keeps its creation marker, so a write that replaces it does not lose the
+    // creation identity.
     const creation = read.ok ? read.file.creation : await readTableFileCreation(item);
+    const edit = read.ok ? read.file.edit : undefined;
     return {
         spec,
         unreadable: read.ok ? null : tableReadError(read.code, read.message),
-        file: creation ? { creation } : {},
+        file: { ...(creation ? { creation } : {}), ...(edit ? { edit } : {}) },
         version: typeof spec?.version === 'number' ? spec.version : 0,
         history: normalizeTableHistory(history),
     };
@@ -683,23 +686,19 @@ async function reconstructEntry(
     item: Zotero.Item,
     spec: TableSpec,
     version: number,
-    creationMeta?: TableWriteMeta
+    known?: { creation: TableWriteMeta } | { edit: TableEditMarker }
 ): Promise<TableVersionEntry> {
     const serialized = JSON.stringify(spec);
     await ensureSidecarDirectory(item);
     await writeAtomic(versionPathOf(item, version), serialized, tableTempPath(item));
-    const entry = seal(
-        await versionEntry(
-            version,
-            spec,
-            serialized,
-            creationMeta ?? {
-                actor: 'system',
-                change: RECOVERED_CHANGE,
-            }
-        )
-    );
-    return creationMeta ? { ...entry, creation: true } : entry;
+    const meta: TableWriteMeta = known
+        ? 'creation' in known ? known.creation : known.edit.meta
+        : { actor: 'system', change: RECOVERED_CHANGE };
+    // A model edit's identity survives in `table.json` when its log entry did
+    // not, and the rebuilt entry carries it so a repeat still replays.
+    const record = known && 'edit' in known ? known.edit : undefined;
+    const entry = seal(await versionEntry(version, spec, serialized, meta, record));
+    return known && 'creation' in known ? { ...entry, creation: true } : entry;
 }
 
 /**
@@ -840,16 +839,16 @@ async function reconcileLog(
     if (!versions.some((e) => e.version === tableVersion)) {
         // Version 1 of a table whose creation marker is complete is that
         // creation: version 1 is sealed, so no later write can have reused it.
-        const creation = current.file.creation;
-        versions = [
-            ...versions,
-            await reconstructEntry(
-                item,
-                current.spec,
-                tableVersion,
-                tableVersion === 1 && creation?.complete ? creation.meta ?? { actor: 'agent' } : undefined
-            ),
-        ];
+        // Likewise a version the edit marker names is that model edit, as
+        // long as the document is still the spec it committed.
+        const { creation, edit } = current.file;
+        const known =
+            tableVersion === 1 && creation?.complete
+                ? { creation: creation.meta ?? { actor: 'agent' as const } }
+                : edit?.version === tableVersion && edit.sha256 === (await tableSpecHash(current.spec))
+                  ? { edit }
+                  : undefined;
+        versions = [...versions, await reconstructEntry(item, current.spec, tableVersion, known)];
         repairs.push({ kind: 'history_appended', version: tableVersion });
     }
 
@@ -1546,7 +1545,22 @@ async function commitWrite(
     await ensureSidecarDirectory(item);
     const temp = tableTempPath(item);
     const versionPath = versionPathOf(item, version);
-    const file: TableFile = { spec: stored, ...current.file };
+    // A model edit's identity commits with the table, not only with the log
+    // rewritten after it: a retry after a lost log write must still replay.
+    const file: TableFile = {
+        spec: stored,
+        ...current.file,
+        ...(record
+            ? {
+                  edit: {
+                      ...record,
+                      version,
+                      sha256: entry.sha256,
+                      meta: { actor: entry.actor, run_id: entry.run_id, thread_id: entry.thread_id, change: entry.change },
+                  },
+              }
+            : {}),
+    };
 
     if (!collapse) {
         // Nothing points at this number yet, so a crash between the two leaves
@@ -1767,11 +1781,19 @@ export type TableApplyEditResult =
           replayed: boolean;
           /** Whether this call wrote a version (not a replay, not a no-op). */
           committed: boolean;
+          /** The table as it stands now: its version, hash and spec. */
           version: number;
           sha256: string;
           spec: TableSpec;
           saved: boolean;
           changes: unknown[];
+          /**
+           * The version this edit committed and its spec hash — what an Undo
+           * of this edit must name. Equal to `version`/`sha256` except on a
+           * replay after later writes, where the current state is someone
+           * else's. Absent when the edit changed nothing.
+           */
+          edit?: { version: number; sha256: string };
       }
     | { ok: false; code: string; message: string };
 
@@ -1783,11 +1805,13 @@ export type TableApplyEditResult =
  * any write.
  *
  * With an `operation`, the version entry records the edit's `operation_id`,
- * request fingerprint and change list. A repeat with the same id finds that
- * entry among the retained versions and answers the current state with the
- * recorded changes, writing nothing; the same id with a different request is
- * `operation_mismatch`. The tab's edits are local and never repeated, so they
- * pass none. A failed build writes nothing; a build that changes nothing
+ * request fingerprint and change list, and so does an edit marker committed
+ * in `table.json` itself, so the identity survives a log rewrite that failed
+ * or never ran. A repeat with the same id finds that entry among the retained
+ * versions (or the marker) and answers the current state with the recorded
+ * changes and the edit's own version in `edit`, applying nothing; the same id
+ * with a different request is `operation_mismatch`. The tab's edits are local
+ * and never repeated, so they pass none. A failed build writes nothing; a build that changes nothing
  * writes nothing and reports no changes.
  * Column revisions come from the build, not from the store.
  */
@@ -1812,14 +1836,41 @@ export async function applyTableEditUncoordinated(
         accessGuard?.(spec);
         const sha256 = await tableSpecHash(spec);
 
-        const prior = operation && current.history.versions.find((e) => e.operation_id === operation.operation_id);
+        // The edit's log entry, else the marker `table.json` committed with it.
+        const logged = operation && current.history.versions.find((e) => e.operation_id === operation.operation_id);
+        const prior = logged || (operation && current.file.edit?.operation_id === operation.operation_id ? current.file.edit : undefined);
         if (operation && prior) {
             if (prior.request_sha256 !== operation.request_sha256) {
                 throw new TableItemError('Operation identity was reused with a different request.', 'operation_mismatch');
             }
-            // A repeat may follow a render that never finished.
-            const saved = (await renderIsCurrent(item)) || (await renderCommitted(ref));
-            return { ok: true, replayed: true, committed: false, version: current.version, sha256, spec, saved, changes: prior.changes ?? [] };
+            // A repeat may follow a log rewrite or a render that never
+            // finished. Repairing the log here, not only on the next open,
+            // gives an Undo of this edit an entry to find.
+            let saved = true;
+            if (!logged) {
+                try {
+                    const reconciled = await reconcileLog(item, current);
+                    if (reconciled.repairs.length) await commitHistory(item, reconciled.versions);
+                } catch (error) {
+                    saved = false;
+                    logger(`tableStore: could not repair the version log of ${ref.key} on a replay: ${String(error)}`, 1);
+                }
+            }
+            if (!(await renderIsCurrent(item)) && !(await renderCommitted(ref))) saved = false;
+            // The current state answers the call; the edit's own version and
+            // hash say which edit it was, which differs once a later write
+            // landed between the commit and this repeat.
+            return {
+                ok: true,
+                replayed: true,
+                committed: false,
+                version: current.version,
+                sha256,
+                spec,
+                saved,
+                changes: prior.changes ?? [],
+                edit: { version: prior.version, sha256: prior.sha256 },
+            };
         }
 
         const built = build(spec);
@@ -1845,6 +1896,7 @@ export async function applyTableEditUncoordinated(
             spec: written.spec,
             saved: written.saved,
             changes: built.changes,
+            edit: { version: written.version, sha256: written.sha256 },
         };
     });
     if (result.ok && result.committed) emitTableUpdated(ref, result.version, meta);

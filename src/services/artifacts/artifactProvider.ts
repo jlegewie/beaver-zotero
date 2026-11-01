@@ -548,6 +548,7 @@ async function applyEditRequest(
         pending: pendingWork(result.spec),
         changes: result.changes as ArtifactResponse["changes"],
         replayed: result.replayed,
+        ...(result.edit ? { edit_version: result.edit.version, edit_sha256: result.edit.sha256 } : {}),
         saved: result.saved,
     });
 }

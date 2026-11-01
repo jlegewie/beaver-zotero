@@ -274,25 +274,54 @@ export function tableVersionPath(
 // Reading
 // ---------------------------------------------------------------------------
 
+/** Who wrote a version a `table.json` marker describes. */
+export interface TableMarkerMeta {
+    actor: 'agent' | 'user' | 'system';
+    run_id?: string;
+    thread_id?: string;
+    change?: string;
+}
+
 /** The identity of a retriable creation, committed with the table. */
 export interface TableCreationState {
     operation_id: string;
     request_sha256: string;
     complete: boolean;
-    meta?: { actor: 'agent' | 'user' | 'system'; run_id?: string; thread_id?: string; change?: string };
+    meta?: TableMarkerMeta;
     /** The change list a creation from a request answered with; a replay returns it. */
     changes?: unknown[];
 }
 
 /**
- * `table.json`: the spec, and the creation marker that has to commit
- * atomically with it, kept beside the spec so the spec's own bytes, and
- * therefore its hash, never include it. Fields written by older builds (a
+ * The newest model edit (`apply_edit`) the table committed, written in the same
+ * `table.json` write as its spec. The version log records the same identity,
+ * but the log is rewritten after the commit point and can be lost; this marker
+ * cannot, so a retry whose log entry never landed still replays instead of
+ * applying the edit again. Later writes carry it until the next model edit
+ * replaces it.
+ */
+export interface TableEditMarker {
+    operation_id: string;
+    request_sha256: string;
+    /** The version the edit committed. */
+    version: number;
+    /** The spec hash of that version. */
+    sha256: string;
+    meta: TableMarkerMeta;
+    /** The change list the edit answered with; a replay returns it. */
+    changes: unknown[];
+}
+
+/**
+ * `table.json`: the spec, and the creation and edit markers that have to
+ * commit atomically with it, kept beside the spec so the spec's own bytes, and
+ * therefore its hash, never include them. Fields written by older builds (a
  * `receipts` list) are ignored and dropped by the next write.
  */
 export interface TableFile {
     spec: TableSpec;
     creation?: TableCreationState;
+    edit?: TableEditMarker;
 }
 
 export type ReadTableItemResult =
@@ -324,7 +353,34 @@ function tableFileFrom(item: Zotero.Item, raw: unknown): ReadTableItemResult {
     if (creation && 'error' in creation) return { ok: false, code: 'invalid', message: creation.error };
     const read = specFor(item, (raw as Partial<TableFile>).spec);
     if (!read.ok) return read;
-    return { ok: true, spec: read.spec, file: { spec: read.spec, ...(creation ? { creation } : {}) } };
+    const edit = editFrom(raw);
+    return {
+        ok: true,
+        spec: read.spec,
+        file: { spec: read.spec, ...(creation ? { creation } : {}), ...(edit ? { edit } : {}) },
+    };
+}
+
+/**
+ * A parsed `table.json` value's edit marker. An unreadable one is dropped
+ * rather than failing the table: it only lets a retry replay, and without it
+ * the version log still can.
+ */
+function editFrom(raw: object): TableEditMarker | undefined {
+    const edit = (raw as Partial<TableFile>).edit;
+    if (
+        !edit || typeof edit !== 'object' ||
+        typeof edit.operation_id !== 'string' ||
+        typeof edit.request_sha256 !== 'string' ||
+        !Number.isInteger(edit.version) || edit.version < 1 ||
+        typeof edit.sha256 !== 'string' ||
+        !edit.meta || typeof edit.meta !== 'object' ||
+        !['agent', 'user', 'system'].includes(edit.meta.actor) ||
+        !Array.isArray(edit.changes)
+    ) {
+        return undefined;
+    }
+    return edit;
 }
 
 /** A parsed `table.json` value's creation marker, checked apart from its spec. */
