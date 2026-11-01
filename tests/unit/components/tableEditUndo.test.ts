@@ -14,7 +14,7 @@ vi.mock('../../../react/components/agentRuns/ToolResultView', () => ({ tableMess
 
 import { setHost } from '@beaver/agent-ui/host';
 import { TableToolCallView } from '../../../react/components/agentRuns/TableToolCallView';
-import { toolExpandedAtom } from '../../../react/atoms/messageUIState';
+import { setToolExpandedAtom } from '../../../react/atoms/messageUIState';
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 const h = React.createElement;
@@ -44,7 +44,7 @@ const record = (tool: string, edits: unknown[]) => ({
 
 function mount(tool: string, edits: unknown[]) {
     const store = createStore();
-    store.set(toolExpandedAtom, { 'run-1:0:call': true });
+    store.set(setToolExpandedAtom, { key: 'run-1:0:call', expanded: true });
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);

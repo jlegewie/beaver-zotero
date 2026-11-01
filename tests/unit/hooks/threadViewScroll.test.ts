@@ -18,7 +18,7 @@ vi.mock('@beaver/agent-core/run-state/atoms', () => ({
 }));
 vi.mock('../../../react/agents/agentActions', () => ({ pendingApprovalsAtom: atom(new Map()) }));
 vi.mock('../../../react/atoms/messageUIState', () => ({
-    toolExpandedAtom: atom({}), messageSourcesVisibilityAtom: atom({}), annotationPanelStateAtom: atom({}),
+    toolExpansionRevisionAtom: atom(0), messageSourcesVisibilityAtom: atom({}), annotationPanelStateAtom: atom({}),
 }));
 vi.mock('../../../react/runtime/SurfaceWindowContext', () => ({ useSurfaceWindow: () => window }));
 vi.mock('../../../react/components/agentRuns/AgentRunView', () => ({

@@ -14,11 +14,13 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('jotai', () => ({
-    useAtomValue: () => () => [],
+    // Each run's agent actions (none), and the reference mapping, which no
+    // action reaches here.
+    useAtomValue: () => [[], []],
 }));
 
 vi.mock('../../../react/agents/agentActions', () => ({
-    getAgentActionsByRunAtom: {},
+    agentActionsForRunsAtom: () => ({}),
     isCreateItemAgentAction: () => false,
 }));
 

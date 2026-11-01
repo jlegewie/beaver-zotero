@@ -151,6 +151,7 @@ vi.mock('../../../react/agents/agentActions', async () => {
         validateAppliedAgentAction: vi.fn(async () => 'valid' as const),
         undoAgentActionAtom: atom(null, () => {}),
         clearAllPendingApprovalsAtom: atom(null, () => {}),
+        resetAgentActionSelectorCaches: vi.fn(),
     };
 });
 
