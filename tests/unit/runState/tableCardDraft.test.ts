@@ -33,6 +33,10 @@ import {
     insertOptions,
     itemsSource,
     mergeLine,
+    currentPreview,
+    draftSourceEntries,
+    draftSourcesKey,
+    setDraftPreview,
     nextStep,
     overCapMessage,
     overCapSources,
@@ -186,6 +190,23 @@ describe('table card draft', () => {
         draft = undoRemoveItem(draft, request.sources[0].ids![0]);
         expect(mergeLine(draft, request)).toBe('3 items across sources; duplicates are merged on create');
         expect(mergeLine(initialTableCardDraft(fixture('create-items').request), fixture('create-items').request)).toBeNull();
+    });
+
+    it("takes the plugin's preview of edited sources for the merge line, rows and an exact cost", () => {
+        const { request } = fixture('create-merge-across-sources');
+        let draft = removeItem(initialTableCardDraft(request), request.sources[0].ids![0]);
+        draft = undoRemoveItem(draft, request.sources[0].ids![0]);
+        const preview = { sourcesKey: draftSourcesKey(draft), rows: 2, duplicates: 1, documents: 1, title_abstract: 0, no_input: 1 };
+        draft = setDraftPreview(draft, preview);
+        expect(currentPreview(draft)).toEqual(preview);
+        expect(mergeLine(draft, request)).toBe('2 items across sources; found in more than one source, merged −1');
+        expect(cardRowCount(draft, request)).toBe(2);
+        const cost = draftCost(draft, { ...request, cost: request.cost ?? { rows: 2, documents: 1, title_abstract: 1, no_input: 0, credits: 0.25 } }, { document: 0.2, title_abstract: 0.05 });
+        expect(cost).toEqual({ cost: { rows: 2, documents: 1, title_abstract: 0, no_input: 1, credits: 0.2 }, upperBound: false });
+        // A preview of other sources no longer applies.
+        draft = removeItem(draft, request.sources[0].ids![0]);
+        expect(currentPreview(draft)).toBeNull();
+        expect(draftSourceEntries(draft).map((entry) => entry.id)).toEqual(draftSourceEntries(draft).map((_, i) => `s${i + 1}`));
     });
 
     it('removes items from the Selected items card with undo', () => {

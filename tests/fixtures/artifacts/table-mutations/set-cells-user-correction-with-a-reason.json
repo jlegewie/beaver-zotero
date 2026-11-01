@@ -1,5 +1,5 @@
 {
-    "name": "a user correction may say why, and carries no documents or evidence",
+    "name": "a user correction may say why, carries no documents or evidence, and keeps the model answer it replaced",
     "before": {
         "id": "t1",
         "spec_version": 2,
@@ -315,7 +315,34 @@
                             "kind": "text",
                             "text": "Phone survey"
                         },
-                        "reasoning": "Checked the methods."
+                        "reasoning": "Checked the methods.",
+                        "replaced": {
+                            "outcome": "answered",
+                            "provenance": "model",
+                            "value": {
+                                "kind": "text",
+                                "text": "Telephone survey"
+                            },
+                            "documents": [
+                                "u-AAAPDF"
+                            ],
+                            "evidence": [
+                                {
+                                    "document": "u-AAAPDF",
+                                    "locator": "s12-s13",
+                                    "quote": "Respondents were sampled by random digit dialing.",
+                                    "page": 3,
+                                    "boxes": [
+                                        [
+                                            72,
+                                            410,
+                                            523,
+                                            436
+                                        ]
+                                    ]
+                                }
+                            ]
+                        }
                     }
                 },
                 "in_library": true,

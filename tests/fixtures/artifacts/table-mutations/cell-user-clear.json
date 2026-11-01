@@ -1,5 +1,5 @@
 {
-    "name": "a user clear is a user-owned blank with the user's reason",
+    "name": "a user clear is a user-owned blank and keeps the model answer it replaced",
     "before": {
         "id": "t1",
         "spec_version": 2,
@@ -305,7 +305,34 @@
                     },
                     "method": {
                         "outcome": "cleared",
-                        "provenance": "user"
+                        "provenance": "user",
+                        "replaced": {
+                            "outcome": "answered",
+                            "provenance": "model",
+                            "value": {
+                                "kind": "text",
+                                "text": "Telephone survey"
+                            },
+                            "documents": [
+                                "u-AAAPDF"
+                            ],
+                            "evidence": [
+                                {
+                                    "document": "u-AAAPDF",
+                                    "locator": "s12-s13",
+                                    "quote": "Respondents were sampled by random digit dialing.",
+                                    "page": 3,
+                                    "boxes": [
+                                        [
+                                            72,
+                                            410,
+                                            523,
+                                            436
+                                        ]
+                                    ]
+                                }
+                            ]
+                        }
                     }
                 },
                 "in_library": true,

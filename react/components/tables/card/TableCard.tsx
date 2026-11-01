@@ -25,6 +25,9 @@ import {
     itemsSource,
     librarySourceKey,
     mergeLine,
+    draftSourceEntries,
+    draftSourcesKey,
+    setDraftPreview,
     nextStep,
     overCapMessage,
     overCapSources,
@@ -81,6 +84,9 @@ import AddSourcesMenu, { type AddSourcesTarget } from '../../ui/menus/AddSources
 import TableCardCostBlock, { useFillPricing } from './TableCardCost';
 import type { SourcesMenuEntries } from '../../ui/menus/hooks/useSourcesMenu';
 import { describeItems, resolveItems, resolveLibraryScope } from './liveSources';
+import { previewFacts } from '@beaver/agent-core/layouts/tableEdit';
+import type { SourceEntry } from '@beaver/agent-core/layouts/table';
+import { resolveSources } from '../../../../src/services/artifacts/tableSources';
 import { paperOf, portableItemId, rowForItem } from './cardItems';
 import AutoGrowTextarea from './AutoGrowTextarea';
 import TableCardDropZone from './TableCardDropZone';
@@ -112,6 +118,8 @@ function stepHeadingCount(step: TableCardStep, count: number): string {
 
 /** Tries for a source's item lookup, and the base delay between them. */
 const MAX_LOOKUP_ATTEMPTS = 3;
+/** How long the sources must stay unchanged before the card previews them. */
+const PREVIEW_DELAY_MS = 400;
 const LOOKUP_RETRY_MS = 1000;
 
 export interface TableCardProps {
@@ -385,6 +393,44 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
             });
         });
     }, [items?.removed, rowsById]);
+
+    // Once the sources are edited, the plugin's own resolver previews them, as
+    // `create` will resolve them: the exact merge line and cost. Each preview
+    // lands only while the sources are still the ones it was made for.
+    useEffect(() => {
+        if (!draft.sourcesEdited) return;
+        const sourcesKey = draftSourcesKey(draft);
+        if (draft.preview?.sourcesKey === sourcesKey) return;
+        const entries = draftSourceEntries(draft);
+        if (!entries.length) return;
+        let cancelled = false;
+        const timer = setTimeout(() => {
+            resolveSources(entries as SourceEntry[])
+                .then((resolved) => {
+                    if (cancelled || !mounted.current) return;
+                    const facts = previewFacts(resolved);
+                    setDraft((prev) =>
+                        draftSourcesKey(prev) !== sourcesKey
+                            ? prev
+                            : setDraftPreview(prev, {
+                                  sourcesKey,
+                                  rows: facts.rows,
+                                  duplicates: facts.duplicates,
+                                  documents: facts.documents,
+                                  title_abstract: facts.title_abstract,
+                                  no_input: facts.no_input,
+                              }),
+                    );
+                })
+                .catch(() => {
+                    // Without a preview the card falls back to its own counts.
+                });
+        }, PREVIEW_DELAY_MS);
+        return () => {
+            cancelled = true;
+            clearTimeout(timer);
+        };
+    }, [draft.sourcesEdited, draft.sources, draft.preview, setDraft]);
 
     // "+ Source": the composer's Add Sources menu, writing to this card.
     const menuRef = useRef<AddSourcesMenuHandle | null>(null);

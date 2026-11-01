@@ -1,9 +1,17 @@
 import React from "react";
 import type { TableRecordColumn, TableRecordSource } from "@beaver/agent-core/protocol/artifactProtocol";
 import type { TableView } from "@beaver/agent-core/run-state/toolResultViews";
+import { tableChangeLines, type TableChangeTone } from "@beaver/agent-core/run-state/tableEditCopy";
 import { ColumnOptionChips, ColumnTypeTag } from "../../tables/columnTypes";
 import { sourceKindIcon } from "../../tables/sourceKinds";
 import { Icon } from "../../icons/icons";
+
+/** Additions green, changes amber, removals red. */
+const TONE_CLASS: Record<TableChangeTone, string> = {
+    add: "font-color-green",
+    change: "font-color-orange",
+    remove: "font-color-red",
+};
 
 function plural(count: number, noun: string): string {
     return `${count} ${noun}${count === 1 ? "" : "s"}`;
@@ -272,6 +280,7 @@ export function TableResultView({ view }: { view: TableView }) {
     );
     const sources = record.sources ?? [];
     const columns = record.columns ?? [];
+    const edits = tableChangeLines(record.edits ?? []);
     return (
         <div className="table-record text-sm">
             {(change || record.description) && (
@@ -280,6 +289,18 @@ export function TableResultView({ view }: { view: TableView }) {
                     {record.description && (
                         <div className="font-color-secondary">{record.description}</div>
                     )}
+                </div>
+            )}
+            {edits.length > 0 && (
+                <div className="table-record-section">
+                    <div className="table-record-label">Changes</div>
+                    <div className="table-record-list">
+                        {edits.map((line, index) => (
+                            <div key={index} className={`table-record-change ${TONE_CLASS[line.tone]}`}>
+                                {line.text}
+                            </div>
+                        ))}
+                    </div>
                 </div>
             )}
             {sources.length > 0 && (

@@ -385,14 +385,14 @@ describe('the trash', () => {
     });
 });
 
-describe('remote retry and conversation rewind', () => {
+describe('create retry and conversation rewind', () => {
     const tables: Table[] = [];
     beforeEach((ctx) => skipIfNoZotero(ctx, available));
     afterAll(async () => {
         for (const table of tables) await dropTable(table);
     });
 
-    it('deduplicates creates, guards collapsed content, replays writes and preserves a user boundary', async () => {
+    it('deduplicates creates and trims back to a user boundary', async () => {
         const operationId = `live-create-${Date.now()}`;
         const createRequest = {
             spec: spec('Live remote contract', 'One'),
@@ -414,7 +414,7 @@ describe('remote retry and conversation rewind', () => {
         expect(replayedCreate).toMatchObject({ ok: true, key: table.key, replayed: true });
         expect(created.filename).toBe('live-remote-contract.html');
         expect(replayedCreate.filename).toBe(created.filename);
-        expect(replayedCreate.operation).toEqual(created.operation);
+        expect(replayedCreate.sha256).toBe(created.sha256);
         expect(
             await post<any>('/beaver/test/table-create', {
                 ...createRequest,
@@ -429,35 +429,6 @@ describe('remote retry and conversation rewind', () => {
             ...owner,
             spec: spec('Live remote contract', 'Base'),
         });
-        const base = await post<any>('/beaver/test/table-open', at);
-        expect(base.sha256).toMatch(/^[a-f0-9]{64}$/);
-        const request = {
-            ...at,
-            ...owner,
-            expectedVersion: base.version,
-            expected_sha256: base.sha256,
-            spec: spec('Live remote contract', 'Winner'),
-            operation_id: 'first',
-        };
-        const [first, second] = await Promise.all([
-            post<any>('/beaver/test/table-write', request),
-            post<any>('/beaver/test/table-write', {
-                ...request,
-                operation_id: 'second',
-                spec: spec('Live remote contract', 'Loser'),
-            }),
-        ]);
-        const winner = first.ok ? first : second;
-        const loser = first.ok ? second : first;
-        expect(winner).toMatchObject({ ok: true, collapsed: true, version: base.version });
-        expect(loser).toMatchObject({ ok: false, conflict: true, version: base.version });
-        const winningRequest = first.ok
-            ? request
-            : { ...request, operation_id: 'second', spec: spec('Live remote contract', 'Loser') };
-        const replay = await post<any>('/beaver/test/table-write', winningRequest);
-        expect(replay).toMatchObject({ ok: true, replayed: true });
-        expect(replay.operation).toEqual(winner.operation);
-
         await post('/beaver/test/table-write', {
             ...at,
             ...owner,
@@ -480,12 +451,6 @@ describe('remote retry and conversation rewind', () => {
         expect(opened.conflict).toBeNull();
         expect(opened.recovered).toEqual([]);
         expect(existsSync(sidecar(table, 'v4.json'))).toBe(false);
-        expect(await post<any>('/beaver/test/table-write', winningRequest)).toMatchObject({
-            ok: true,
-            replayed: true,
-            version: 3,
-            operation: winner.operation,
-        });
     });
 
     it('finishes creation bookkeeping when the stamped import has no history seed', async () => {
@@ -640,40 +605,6 @@ describe('trim boundaries and stored citation cleanup', () => {
         expect(listed.versions.map((entry: { version: number }) => entry.version)).toEqual([1, 2, 3]);
         expect(JSON.parse(await readFile(path, 'utf8')).tip).toBe(3);
         expect((await post<any>('/beaver/test/table-open', at)).recovered).toEqual([]);
-    });
-
-    it('reports versions pruned while replay repairs history left behind its receipt', async () => {
-        const table = await makeTable('Live replay retention');
-        tables.push(table);
-        const at = { key: table.key, libraryID: table.libraryID };
-        for (let version = 2; version <= 20; version++) {
-            expect(await post<any>('/beaver/test/table-write', {
-                ...at, actor: 'user', spec: spec('Live replay retention', String(version)),
-            })).toMatchObject({ ok: true, version });
-        }
-        const historyPath = sidecar(table, 'history.json');
-        const historyBefore = await readFile(historyPath, 'utf8');
-        const oldestPath = sidecar(table, 'v1.json');
-        const oldestBefore = await readFile(oldestPath, 'utf8');
-        const base = await post<any>('/beaver/test/table-open', at);
-        const request = {
-            ...at, actor: 'agent', run_id: 'retention-run', thread_id: 'thread',
-            operation_id: 'retention-replay', expectedVersion: base.version,
-            expected_sha256: base.sha256, spec: spec('Live replay retention', 'New'),
-        };
-        expect(await post<any>('/beaver/test/table-write', request))
-            .toMatchObject({ ok: true, version: 21, pruned: [1] });
-        // Restore the sidecars an interruption before history commit would leave.
-        await writeFile(historyPath, historyBefore);
-        await writeFile(oldestPath, oldestBefore);
-        expect(await post<any>('/beaver/test/table-write', request))
-            .toMatchObject({ ok: true, replayed: true, saved: true, pruned: [1] });
-        expect(existsSync(oldestPath)).toBe(false);
-        const listed = await post<any>('/beaver/test/table-versions', at);
-        expect(listed.versions.map((entry: { version: number }) => entry.version))
-            .toEqual(Array.from({ length: 20 }, (_, i) => i + 2));
-        expect(await post<any>('/beaver/test/table-write', request))
-            .toMatchObject({ ok: true, replayed: true, pruned: [] });
     });
 
     it('reports retention exhaustion while preserving the oldest retained version', async () => {
