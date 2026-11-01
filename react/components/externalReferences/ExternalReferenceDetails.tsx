@@ -2,7 +2,7 @@ import React from 'react';
 import { ExternalReference } from '@beaver/agent-core/types/externalReferences';
 import { externalRecordPresentation } from '@beaver/agent-core/citations/externalRecordDisplay';
 import { formatAuthors } from './utils';
-import { DetailsActions, DetailsFrame, RecordLinks, RetractedBanner } from './ExternalRecordParts';
+import { DetailsActions, DetailsFrame, DetailsSection, RecordBadge, RecordLinks, RecordTags } from './ExternalRecordParts';
 import PubMedReferenceDetails from './PubMedReferenceDetails';
 import TrialReferenceDetails from './TrialReferenceDetails';
 
@@ -19,8 +19,8 @@ const GenericReferenceDetails: React.FC<ExternalReferenceDetailsProps> = ({ item
         <DetailsFrame
             header={(
                 <>
-                    {item.is_retracted && <RetractedBanner />}
                     <div className="text-lg font-bold font-color-primary leading-tight pr-8">{item.title || 'Untitled Item'}</div>
+                    {item.is_retracted && <RecordTags><RecordBadge label="Retracted" tone="red" /></RecordTags>}
                     {authors && (
                         <div className="font-color-primary">{authors}</div>
                     )}
@@ -36,14 +36,7 @@ const GenericReferenceDetails: React.FC<ExternalReferenceDetailsProps> = ({ item
             )}
             footer={<DetailsActions item={item} />}
         >
-            {item.abstract && (
-                <div className="display-flex flex-col gap-1">
-                    <div className="font-bold font-color-primary uppercase tracking-wider sticky top-0 z-10 pb-1">Abstract</div>
-                    <div className="font-color-primary leading-relaxed select-text">
-                        {item.abstract.trim()}
-                    </div>
-                </div>
-            )}
+            {item.abstract && <DetailsSection title="Abstract">{item.abstract.trim()}</DetailsSection>}
         </DetailsFrame>
     );
 };

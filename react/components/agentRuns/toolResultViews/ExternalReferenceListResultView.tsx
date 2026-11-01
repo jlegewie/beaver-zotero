@@ -11,7 +11,10 @@ import {
     authorLastNames,
 } from '@beaver/agent-core/types/externalReferences';
 import { combineSnapshotList } from '@beaver/agent-core/citations/externalRecords';
-import { externalRecordPresentation } from '@beaver/agent-core/citations/externalRecordDisplay';
+import { externalRecordPresentation, formatRegistryDate } from '@beaver/agent-core/citations/externalRecordDisplay';
+import { trialDetails } from '@beaver/agent-core/types/externalReferences';
+import { ArrowDownIcon, ArrowRightIcon, ArrowUpRightIcon } from '@beaver/agent-ui/icons';
+import CopyButton from '../../ui/buttons/CopyButton';
 import { getHost } from '@beaver/agent-ui/host';
 import ExternalReferenceListItem from '../../externalReferences/ExternalReferenceListItem';
 import PubMedReferenceListItem from '../../externalReferences/PubMedReferenceListItem';
@@ -146,70 +149,113 @@ function openOnSiteLabel(info: SearchViewInfo): string {
     return info.source === 'pubmed' ? `Open in ${label}` : `Open on ${label}`;
 }
 
+function openUrl(url: string) {
+    getHost().navigation?.openExternalUrl(url);
+}
+
 /**
- * Header for a source search (pubmed_search, search_trials): the hit count,
- * the query as the source executed it, the filters, the data date and
- * attribution the source requires, and a link that runs the search on the
- * source's own site.
+ * The bar above a source search's results (pubmed_search, search_trials).
+ * The tool label already names the search and the hit count, so the bar holds
+ * only what the label cannot: the full search (the query as sent, its
+ * filters, and for PubMed the query as PubMed ran it, with a copy button)
+ * behind "Search details", and a link that runs the same search on the source's site.
  */
-const SearchResultsHeader: React.FC<{ info: SearchViewInfo; shownCount: number }> = ({ info, shownCount }) => {
-    const [showDetails, setShowDetails] = useState(false);
-    const total = info.total_count;
-    const offset = info.offset ?? 0;
-    let count: string;
-    if (total == null) count = `${shownCount} result${shownCount === 1 ? '' : 's'}`;
-    else if (total > shownCount && shownCount > 0) {
-        count = `Showing ${(offset + 1).toLocaleString()}–${(offset + shownCount).toLocaleString()} of ${total.toLocaleString()}`;
-    } else count = `${total.toLocaleString()} result${total === 1 ? '' : 's'}`;
+const SearchBar: React.FC<{ info: SearchViewInfo }> = ({ info }) => {
+    const [open, setOpen] = useState(false);
     const filters = searchFilterLabels(info.filters);
     const query = typeof info.query === 'string' ? info.query.trim() : '';
     const translation = info.query_translation?.trim();
-    const provenance = [info.data_as_of ? `Data as of ${info.data_as_of}` : null, info.attribution]
-        .filter(Boolean)
-        .join(' · ');
+    const sourceName = info.source_label || info.source;
+    const hasDetails = !!query || filters.length > 0 || !!translation;
     const searchUrl = info.search_url;
+    if (!hasDetails && !searchUrl) return null;
+    const Arrow = open ? ArrowDownIcon : ArrowRightIcon;
 
     return (
-        <div className="px-3 py-2 display-flex flex-col gap-05 ext-results-header">
-            <div className="display-flex flex-row items-center gap-2">
-                <div className="text-sm font-color-secondary flex-1 min-w-0 truncate">
-                    {count}
-                    {query && <span className="font-color-tertiary"> · {query}</span>}
-                </div>
+        <div className="px-3 py-15 display-flex flex-col gap-2 border-bottom-quinary">
+            <div className="display-flex flex-row items-center gap-2 text-sm">
+                {hasDetails && (
+                    <a
+                        className="text-link-muted display-flex flex-row items-center gap-05"
+                        role="button"
+                        tabIndex={0}
+                        aria-expanded={open}
+                        onClick={() => setOpen((value) => !value)}
+                    >
+                        <Arrow width={12} height={12} />
+                        Search details
+                    </a>
+                )}
+                <div className="flex-1" />
                 {searchUrl && (
                     <a
-                        className="text-link-muted text-sm whitespace-nowrap"
+                        className="text-link-muted whitespace-nowrap display-flex flex-row items-center gap-05"
                         role="link"
                         tabIndex={0}
                         onClick={(event) => {
                             event.preventDefault();
-                            getHost().navigation?.openExternalUrl(searchUrl);
+                            openUrl(searchUrl);
                         }}
                     >
                         {openOnSiteLabel(info)}
+                        <ArrowUpRightIcon width={12} height={12} />
                     </a>
                 )}
             </div>
-            {filters.length > 0 && (
-                <div className="text-sm font-color-tertiary">{filters.join(' · ')}</div>
-            )}
-            {translation && translation !== query && (
-                <div className="text-sm font-color-tertiary">
-                    <a
-                        className="text-link-muted"
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => setShowDetails((value) => !value)}
-                    >
-                        {showDetails ? 'Hide search details' : 'Search details'}
-                    </a>
-                    {showDetails && <div className="ext-query-translation mt-1 select-text">{translation}</div>}
+            {open && (
+                <div className="display-flex flex-col gap-3 pb-1">
+                    {query && (
+                        <div className="display-flex flex-col gap-1">
+                            <div className="ext-subheading">Query</div>
+                            <div className="text-sm font-color-primary select-text">{query}</div>
+                        </div>
+                    )}
+                    {filters.length > 0 && (
+                        <div className="display-flex flex-col gap-1">
+                            <div className="ext-subheading">Filters</div>
+                            <div className="display-flex flex-row flex-wrap gap-1">
+                                {filters.map((filter) => <span key={filter} className="ext-chip">{filter}</span>)}
+                            </div>
+                        </div>
+                    )}
+                    {translation && translation !== query && (
+                        <div className="display-flex flex-col gap-1">
+                            <div className="display-flex flex-row items-center gap-1">
+                                <span className="ext-subheading">{`As ${sourceName} ran it`}</span>
+                                <CopyButton
+                                    content={translation}
+                                    className="scale-90"
+                                    title="Copy query"
+                                    ariaLabel={`Copy the query as ${sourceName} ran it`}
+                                />
+                            </div>
+                            <div className="ext-query-translation select-text">{translation}</div>
+                        </div>
+                    )}
                 </div>
             )}
-            {provenance && <div className="text-sm font-color-tertiary">{provenance}</div>}
         </div>
     );
 };
+
+/**
+ * The source's attribution under its results: the data date and source line
+ * ClinicalTrials.gov's terms require, or the acknowledgment NLM asks for.
+ */
+const SourceNotice: React.FC<{ text: string }> = ({ text }) => (
+    <div className="px-3 py-2 text-xs font-color-secondary border-top-quinary">{text}</div>
+);
+
+function searchNotice(info: SearchViewInfo): string | null {
+    const date = formatRegistryDate(info.data_as_of);
+    const text = [date ? `Data as of ${date}` : null, info.attribution].filter(Boolean).join(' · ');
+    return text || null;
+}
+
+function registryNotice(dataAsOf: string | null | undefined): string {
+    const date = formatRegistryDate(dataAsOf);
+    return `${date ? `Data as of ${date} · ` : ''}Source: ClinicalTrials.gov`;
+}
 
 /**
  * Shared renderer for the {@link ExternalReferenceListView} view model
@@ -257,15 +303,18 @@ export const ExternalReferenceListResultView: React.FC<{ view: ExternalReference
                   : 'No external references found';
         return (
             <div className="display-flex flex-col">
-                {searchInfo && <SearchResultsHeader info={searchInfo} shownCount={0} />}
+                {searchInfo && <SearchBar info={searchInfo} />}
                 <div className="p-3 text-sm font-color-tertiary">
                     {view.message || emptyDefault}
                 </div>
+                {searchInfo && searchNotice(searchInfo) && <SourceNotice text={searchNotice(searchInfo)!} />}
             </div>
         );
     }
 
     const inLibraryCount = references.filter((ref) => (ref.library_items?.length ?? 0) > 0).length;
+    const trialRows = references.filter((ref) =>
+        externalRecordPresentation(searchInfo?.source ?? ref.source, ref) === 'trial');
 
     return (
         <div className="display-flex flex-col">
@@ -277,7 +326,7 @@ export const ExternalReferenceListResultView: React.FC<{ view: ExternalReference
                 />
             )} */}
 
-            {searchInfo && <SearchResultsHeader info={searchInfo} shownCount={references.length} />}
+            {searchInfo && <SearchBar info={searchInfo} />}
 
             {/* {view.message && (
                 <div className="px-3 py-2 text-sm font-color-tertiary border-b border-color-quinary">
@@ -304,6 +353,7 @@ export const ExternalReferenceListResultView: React.FC<{ view: ExternalReference
                 }
             })}
 
+
             {notFoundQueries.map((query, index) => (
                 <div
                     key={`not-found-${index}`}
@@ -323,6 +373,11 @@ export const ExternalReferenceListResultView: React.FC<{ view: ExternalReference
                     <span> — lookup unavailable</span>
                 </div>
             ))}
+
+            {searchInfo && searchNotice(searchInfo) && <SourceNotice text={searchNotice(searchInfo)!} />}
+            {!searchInfo && trialRows.length > 0 && (
+                <SourceNotice text={registryNotice(trialDetails(trialRows[0])?.data_as_of)} />
+            )}
         </div>
     );
 };

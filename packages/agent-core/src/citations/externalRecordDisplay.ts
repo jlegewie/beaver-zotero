@@ -96,9 +96,9 @@ export function externalRecordLinks(ref: ExternalReference): ExternalRecordLink[
     const pmid = recordPmid(ref);
     if (pmid) links.push({ kind: 'pubmed', label: 'PubMed', url: pubmedUrl(pmid) });
     const pmcid = ref.identifiers?.pmcid?.trim();
-    if (pmcid) links.push({ kind: 'pmc', label: 'PMC', url: pmcUrl(pmcid) });
+    if (pmcid) links.push({ kind: 'pmc', label: 'PubMed Central', url: pmcUrl(pmcid) });
     const doi = ref.identifiers?.doi?.trim();
-    if (doi) links.push({ kind: 'doi', label: 'DOI', url: doiUrl(doi) });
+    if (doi) links.push({ kind: 'doi', label: 'Publisher', url: doiUrl(doi) });
     const nct = recordNct(ref);
     if (nct) links.push({ kind: 'registry', label: 'ClinicalTrials.gov', url: trialRegistryUrl(nct) });
     if (ref.source_id && isOpenAlexWorkId(ref.source_id)) {
@@ -265,19 +265,23 @@ export function trialEnrollmentLabel(details: TrialDetails): string | null {
     return `${count} ${noun}${estimated}`;
 }
 
-/** "Phase 3 · Interventional · 500 participants (est.)"; empty when none is known. */
-export function trialFactsLine(details: TrialDetails): string {
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** A registry date for display: "2020-04-29" → "Apr 29, 2020", "2020-04" → "Apr 2020". */
+export function formatRegistryDate(value: string | null | undefined): string | null {
+    if (!value) return null;
+    const match = /^(\d{4})-(\d{2})(?:-(\d{2}))?$/.exec(value.trim());
+    if (!match) return value;
+    const month = MONTHS[Number(match[2]) - 1];
+    if (!month) return value;
+    return match[3] ? `${month} ${Number(match[3])}, ${match[1]}` : `${month} ${match[1]}`;
+}
+
+/** "Phase 2/3 · Interventional · 500 participants (est.)": the design at a glance; empty when unknown. */
+export function trialDesignLine(details: TrialDetails): string {
     return [trialPhaseLabel(details.phases), trialStudyTypeLabel(details.study_type), trialEnrollmentLabel(details)]
         .filter(Boolean)
         .join(' · ');
-}
-
-/** "2018-06 → 2020-03"; null when neither date is known. */
-export function trialDateRange(details: TrialDetails): string | null {
-    const start = details.start_date;
-    const end = details.primary_completion_date;
-    if (!start && !end) return null;
-    return `${start ?? '?'} → ${end ?? '?'}`;
 }
 
 /** Whether the registry lists a protocol or a statistical analysis plan. */

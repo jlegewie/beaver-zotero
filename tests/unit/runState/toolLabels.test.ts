@@ -123,9 +123,9 @@ describe('external record tool labels', () => {
 
     it('labels a trial search by its terms and a trial lookup by its id', () => {
         expect(getToolCallLabel(toolCall({ tool_name: 'search_trials', args: { condition: 'obesity', intervention: 'semaglutide' } }), 'in_progress'))
-            .toBe('Trial search: obesity · semaglutide');
+            .toBe('ClinicalTrials.gov search: obesity · semaglutide');
         expect(getToolCallLabel(toolCall({ tool_name: 'get_trial', args: { nct_ids: ['NCT03548935'] } }), 'in_progress'))
-            .toBe('Clinical trial: NCT03548935');
+            .toBe('ClinicalTrials.gov record: NCT03548935');
     });
 });
 

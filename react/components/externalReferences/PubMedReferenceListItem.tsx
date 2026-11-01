@@ -10,7 +10,7 @@ import {
     recordPmid,
 } from '@beaver/agent-core/citations/externalRecordDisplay';
 import { formatAuthors } from './utils';
-import { RecordBadge, RecordLink, RetractedBanner, openExternal } from './ExternalRecordParts';
+import { RecordBadge, RecordLink, RecordTags, openExternal } from './ExternalRecordParts';
 import { ReferenceRowFrame } from './ExternalReferenceListItem';
 
 interface PubMedReferenceListItemProps {
@@ -22,10 +22,44 @@ interface PubMedReferenceListItemProps {
     onMouseLeave: () => void;
 }
 
+/** The record's tags: Retracted, notable publication types, and free full text in PMC. */
+export const PubMedTags: React.FC<{ item: ExternalReference }> = ({ item }) => {
+    const pmcid = item.identifiers?.pmcid;
+    return (
+        <RecordTags>
+            {item.is_retracted && <RecordBadge label="Retracted" tone="red" />}
+            {publicationTypeBadges(item).map((badge) => <RecordBadge key={badge} label={badge} />)}
+            {pmcid && isFreePmcArticle(item) && (
+                <RecordLink url={pmcUrl(pmcid)}><RecordBadge label="Free PMC article" tone="green" /></RecordLink>
+            )}
+        </RecordTags>
+    );
+};
+
+/** "N Engl J Med. 2021;384(11):989-1002. · PMID 33567185 · PMC" */
+export const PubMedCitationLine: React.FC<{ item: ExternalReference; className?: string }> = ({ item, className = '' }) => {
+    const line = citationLine(item);
+    const pmid = recordPmid(item);
+    const pmcid = item.identifiers?.pmcid;
+    // An embargoed PMC copy is linked plainly; a free one carries the green tag.
+    const plainPmc = pmcid && !isFreePmcArticle(item);
+    if (!line && !pmid && !plainPmc) return null;
+    const parts: React.ReactNode[] = [];
+    if (line) parts.push(<span key="line">{line}</span>);
+    if (pmid) parts.push(<span key="pmid" className="select-text">PMID {pmid}</span>);
+    if (plainPmc) parts.push(<RecordLink key="pmc" url={pmcUrl(pmcid!)}>PMC</RecordLink>);
+    return (
+        <div className={`font-color-secondary text-sm ${className}`}>
+            {parts.map((part, index) => (
+                <React.Fragment key={index}>{index > 0 && ' · '}{part}</React.Fragment>
+            ))}
+        </div>
+    );
+};
+
 /**
- * A PubMed result as PubMed shows it: title, authors, an NLM citation line,
- * the PMID, publication-type badges, the Free PMC article badge and a
- * Retracted banner.
+ * A PubMed result as PubMed lists it: title, tags, authors, and the NLM
+ * citation line with the PMID.
  */
 const PubMedReferenceListItem: React.FC<PubMedReferenceListItemProps> = ({
     item,
@@ -34,17 +68,11 @@ const PubMedReferenceListItem: React.FC<PubMedReferenceListItemProps> = ({
     onMouseEnter,
     onMouseLeave,
 }) => {
-    const pmid = recordPmid(item);
-    const pmcid = item.identifiers?.pmcid;
     const primaryUrl = primaryExternalUrl(item, viewSource);
     const authors = formatAuthors(item.authors);
-    const line = citationLine(item);
-    const badges = publicationTypeBadges(item);
-    const freePmc = isFreePmcArticle(item);
 
     return (
         <ReferenceRowFrame item={item} isHovered={isHovered} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave}>
-            {item.is_retracted && <RetractedBanner />}
             <div className="display-flex flex-col gap-1 min-w-0">
                 <div
                     className={`font-color-primary ${primaryUrl ? 'cursor-pointer' : ''}`}
@@ -52,17 +80,9 @@ const PubMedReferenceListItem: React.FC<PubMedReferenceListItemProps> = ({
                 >
                     {item.title || 'Untitled Item'}
                 </div>
+                <PubMedTags item={item} />
                 {authors && <div className="font-color-secondary truncate">{authors}</div>}
-                {line && <div className="font-color-secondary truncate"><i>{line}</i></div>}
-                {(pmid || badges.length > 0 || pmcid) && (
-                    <div className="display-flex flex-row flex-wrap items-center gap-1 text-sm font-color-tertiary">
-                        {pmid && <span className="select-text">PMID: {pmid}</span>}
-                        {badges.map((badge) => <RecordBadge key={badge} label={badge} />)}
-                        {pmcid && (freePmc
-                            ? <RecordLink url={pmcUrl(pmcid)}><RecordBadge label="Free PMC article" tone="green" /></RecordLink>
-                            : <RecordLink url={pmcUrl(pmcid)}>PMC</RecordLink>)}
-                    </div>
-                )}
+                <PubMedCitationLine item={item} />
             </div>
             {getHost().components?.externalReferenceActions({
                 item,

@@ -99,14 +99,15 @@ describe('ExternalReferenceListResultView', () => {
                 returned: 1,
                 offset: 0,
                 search_url: 'https://pubmed.ncbi.nlm.nih.gov/?term=semaglutide+obesity',
+                attribution: 'Courtesy of the U.S. National Library of Medicine',
             },
         });
-        expect(html).toContain('Showing 1–1 of 155');
+        expect(html).not.toContain('Showing');
         expect(html).toContain('Open in PubMed');
         expect(html).toContain('Search details');
-        expect(html).toContain('Published 2020–2024');
+        expect(html).toContain('Courtesy of the U.S. National Library of Medicine');
         expect(html).toContain('N Engl J Med. 2024;390(9):801-812.');
-        expect(html).toContain('PMID: 41234567');
+        expect(html).toContain('PMID 41234567');
         expect(html).toContain('Randomized Controlled Trial');
         expect(html).toContain('Free PMC article');
         expect(html).toContain('Retracted');
@@ -131,23 +132,24 @@ describe('ExternalReferenceListResultView', () => {
                 search_url: 'https://clinicaltrials.gov/search?cond=obesity',
             },
         });
-        expect(html).toContain('Data as of 2026-10-30 · Source: ClinicalTrials.gov');
+        expect(html).toContain('Data as of Oct 30, 2026 · Source: ClinicalTrials.gov');
         expect(html).toContain('Open on ClinicalTrials.gov');
-        expect(html).toContain('Condition: obesity');
         expect(html).toContain('Semaglutide Trial');
         expect(html).toContain('Terminated');
         expect(html).toContain('Phase 3 · Interventional · 500 participants (est.)');
-        expect(html).toContain('Sponsor: Novo Nordisk A/S');
+        expect(html).toContain('Novo Nordisk A/S');
         expect(html).toContain('A, B, C, D, E +1 more');
         expect(html).toContain('Results posted');
-        expect(html).toContain('Protocol/SAP');
-        expect(html).toContain('2018-06 → 2020-03');
+        expect(html).toContain('Protocol &amp; SAP');
+        expect(html).toContain('Jun 2018');
+        expect(html).toContain('Mar 2020');
         expect(actionProps[0].webUrl).toBe('https://clinicaltrials.gov/study/NCT03548935');
     });
 
-    it('renders get_trial rows as trials without a search header', () => {
+    it('renders get_trial rows as trials with the registry attribution but no search header', () => {
         const html = render({ view_type: 'external_reference_list', tool_name: 'get_trial', references: [trialRecord], found_count: 1 });
         expect(html).toContain('Semaglutide Trial');
+        expect(html).toContain('Source: ClinicalTrials.gov');
         expect(html).not.toContain('Open on');
     });
 
@@ -181,7 +183,7 @@ describe('trial details', () => {
         expect(html).toContain('ClinicalTrials.gov</a>');
         expect(html).toContain('Summary text');
         expect(html).toContain('Study Protocol and Statistical Analysis Plan');
-        expect(html).toContain('Data as of 2026-10-30');
+        expect(html).toContain('Data as of Oct 30, 2026');
     });
 });
 

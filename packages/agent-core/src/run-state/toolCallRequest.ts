@@ -170,8 +170,8 @@ export const TOOL_BASE_LABELS: Record<string, string> = {
     find_related_works: 'Related works',
     find_book_chapters: 'Book chapters',
     pubmed_search: 'PubMed search',
-    search_trials: 'Trial search',
-    get_trial: 'Clinical trial',
+    search_trials: 'ClinicalTrials.gov search',
+    get_trial: 'ClinicalTrials.gov record',
 
     // Batch jobs
     batch_start: 'Batch job',

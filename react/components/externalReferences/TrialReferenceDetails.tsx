@@ -1,14 +1,13 @@
 import React from 'react';
 import { trialDetails, type ExternalReference } from '@beaver/agent-core/types/externalReferences';
 import {
-    recordNct,
+    formatRegistryDate,
     registryText,
-    trialDateRange,
-    trialFactsLine,
     trialDocumentLabel,
-    trialStatusDisplay,
+    trialHeadline,
 } from '@beaver/agent-core/citations/externalRecordDisplay';
-import { DetailsActions, DetailsFrame, DetailsSection, RecordBadge, RecordLink, RecordLinks } from './ExternalRecordParts';
+import { DetailsActions, DetailsFrame, DetailsSection, RecordFacts, RecordLink, RecordLinks } from './ExternalRecordParts';
+import { TrialTags, trialSummaryLine } from './TrialReferenceListItem';
 
 function formatSize(bytes: number | null | undefined): string | null {
     if (!bytes || bytes <= 0) return null;
@@ -16,63 +15,85 @@ function formatSize(bytes: number | null | undefined): string | null {
     return `${Math.max(1, Math.round(bytes / 1024))} KB`;
 }
 
+function interventionLabel(name: string, type: string | null | undefined): string {
+    if (!type) return name;
+    const kind = type.replace(/_/g, ' ').toLowerCase();
+    return `${name} (${kind})`;
+}
+
 /**
- * Trial registration details: the official title, the brief summary, every
- * condition and intervention, the registry's documents, and links.
+ * Trial registration details: the same headline and tags as the row, the
+ * registry facts, the brief summary, every condition and intervention, the
+ * documents on file, and the registry's data date.
  */
 const TrialReferenceDetails: React.FC<{ item: ExternalReference }> = ({ item }) => {
     const details = trialDetails(item)!;
-    const status = trialStatusDisplay(details);
-    const nct = recordNct(item);
-    const facts = trialFactsLine(details);
-    const dates = trialDateRange(details);
+    const headline = trialHeadline(item);
+    const officialTitle = item.title && item.title !== headline ? item.title : null;
     const interventions = (details.interventions ?? []).filter((intervention) => intervention.name);
     const documents = details.documents ?? [];
-    const briefTitle = details.brief_title && details.brief_title !== item.title ? details.brief_title : null;
+    const summary = trialSummaryLine(item, details);
 
     return (
         <DetailsFrame
             header={(
                 <>
-                    <div className="text-lg font-bold font-color-primary leading-tight pr-8">{item.title || briefTitle || nct || 'Untitled trial'}</div>
-                    {briefTitle && <div className="font-color-secondary">{briefTitle}{details.acronym ? ` (${details.acronym})` : ''}</div>}
-                    <div className="display-flex flex-row flex-wrap items-center gap-1 text-sm">
-                        {status && <RecordBadge label={status.label} tone={status.tone} tooltip={status.hint} />}
-                        {details.has_results && <RecordBadge label="Results posted" tone="blue" />}
-                        {nct && <span className="font-color-tertiary select-text">{nct}</span>}
+                    <div className="text-lg font-bold font-color-primary leading-tight pr-8">
+                        {headline}{details.acronym ? ` (${details.acronym})` : ''}
                     </div>
-                    {status?.tone === 'red' && details.why_stopped && (
-                        <div className="text-sm font-color-secondary">Why stopped: {registryText(details.why_stopped)}</div>
-                    )}
-                    {facts && <div className="font-color-secondary text-sm">{facts}</div>}
-                    {details.lead_sponsor && <div className="font-color-secondary text-sm">Sponsor: {details.lead_sponsor}</div>}
-                    {dates && <div className="font-color-tertiary text-sm">{dates}</div>}
+                    <TrialTags details={details} />
+                    {summary && <div className="font-color-secondary text-sm">{summary}</div>}
                     <RecordLinks item={item} />
                 </>
             )}
             footer={<DetailsActions item={item} />}
         >
-            {item.abstract && <DetailsSection title="Brief summary"><div style={{ whiteSpace: 'pre-wrap' }}>{registryText(item.abstract.trim())}</div></DetailsSection>}
+            <DetailsSection title="Study">
+                <RecordFacts facts={[
+                    ['Official title', officialTitle],
+                    ['Sponsor', details.lead_sponsor],
+                    ['Why stopped', details.why_stopped ? registryText(details.why_stopped) : null],
+                    ['Started', formatRegistryDate(details.start_date)],
+                    ['Primary completion', formatRegistryDate(details.primary_completion_date)],
+                    ['First posted', formatRegistryDate(details.first_posted)],
+                    ['Last updated', formatRegistryDate(details.last_update_posted)],
+                ]} />
+            </DetailsSection>
+            {item.abstract && (
+                <DetailsSection title="Brief summary">
+                    <div style={{ whiteSpace: 'pre-wrap' }}>{registryText(item.abstract.trim())}</div>
+                </DetailsSection>
+            )}
             {(details.conditions?.length ?? 0) > 0 && (
-                <DetailsSection title="Conditions">{details.conditions!.join(', ')}</DetailsSection>
+                <DetailsSection title="Conditions">
+                    <div className="display-flex flex-row flex-wrap gap-1">
+                        {details.conditions!.map((condition, index) => (
+                            <span key={`${condition}-${index}`} className="ext-chip">{condition}</span>
+                        ))}
+                    </div>
+                </DetailsSection>
             )}
             {interventions.length > 0 && (
                 <DetailsSection title="Interventions">
-                    {interventions.map((intervention) => intervention.type
-                        ? `${intervention.name} (${intervention.type.replace(/_/g, ' ').toLowerCase()})`
-                        : intervention.name).join(', ')}
+                    <div className="display-flex flex-row flex-wrap gap-1">
+                        {interventions.map((intervention, index) => (
+                            <span key={`${intervention.name}-${index}`} className="ext-chip">
+                                {interventionLabel(intervention.name!, intervention.type)}
+                            </span>
+                        ))}
+                    </div>
                 </DetailsSection>
             )}
             {documents.length > 0 && (
                 <DetailsSection title="Documents">
-                    <div className="display-flex flex-col gap-05">
+                    <div className="display-flex flex-col gap-1 text-sm">
                         {documents.map((document, index) => {
                             const label = trialDocumentLabel(document);
-                            const meta = [document.date, formatSize(document.size)].filter(Boolean).join(', ');
+                            const meta = [formatRegistryDate(document.date), formatSize(document.size)].filter(Boolean).join(' · ');
                             return (
                                 <div key={`${document.url ?? label}-${index}`}>
                                     {document.url ? <RecordLink url={document.url}>{label}</RecordLink> : label}
-                                    {meta && <span className="font-color-tertiary"> ({meta})</span>}
+                                    {meta && <span className="font-color-secondary"> · {meta}</span>}
                                 </div>
                             );
                         })}
@@ -80,7 +101,9 @@ const TrialReferenceDetails: React.FC<{ item: ExternalReference }> = ({ item }) 
                 </DetailsSection>
             )}
             {details.data_as_of && (
-                <div className="text-sm font-color-tertiary">Data as of {details.data_as_of} · Source: ClinicalTrials.gov</div>
+                <div className="text-sm font-color-secondary">
+                    Data as of {formatRegistryDate(details.data_as_of)} · Source: ClinicalTrials.gov
+                </div>
             )}
         </DetailsFrame>
     );

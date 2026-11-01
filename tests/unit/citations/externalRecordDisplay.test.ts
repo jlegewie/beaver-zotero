@@ -7,6 +7,7 @@ import {
     citationLine,
     externalRecordLinks,
     externalRecordPresentation,
+    formatRegistryDate,
     externalSourceLabel,
     isFreePmcArticle,
     primaryExternalUrl,
@@ -126,6 +127,13 @@ describe('trials', () => {
     it('removes the registry\'s markdown escapes for display', () => {
         expect(registryText('\\[stratified as 12-15 or \\>55\\] and 5\\.0')).toBe('[stratified as 12-15 or >55] and 5.0');
         expect(registryText('a \\\\ b')).toBe('a \\ b');
+    });
+
+    it('formats registry dates of any precision', () => {
+        expect(formatRegistryDate('2020-04-29')).toBe('Apr 29, 2020');
+        expect(formatRegistryDate('2020-04')).toBe('Apr 2020');
+        expect(formatRegistryDate('2020')).toBe('2020');
+        expect(formatRegistryDate(null)).toBeNull();
     });
 
     it('labels phases, enrollment and documents', () => {

@@ -523,7 +523,7 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
 
     if (!importError) return buttons;
     return (
-        <div className="display-flex flex-col gap-1">
+        <div className="display-flex flex-col gap-2">
             {buttons}
             <div className="text-sm font-color-red" role="alert">{importError}</div>
         </div>

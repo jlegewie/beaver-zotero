@@ -1,35 +1,70 @@
-import React from 'react';
-import { workDetails, type ExternalReference } from '@beaver/agent-core/types/externalReferences';
-import { citationLine, publicationTypeBadges, recordPmid } from '@beaver/agent-core/citations/externalRecordDisplay';
-import { DetailsActions, DetailsFrame, DetailsSection, RecordBadge, RecordLinks, RetractedBanner } from './ExternalRecordParts';
+import React, { useState } from 'react';
+import { workDetails, type ExternalReference, type MeshTerm } from '@beaver/agent-core/types/externalReferences';
+import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
+import { DetailsActions, DetailsFrame, DetailsSection, ExpandableNames, RecordLinks } from './ExternalRecordParts';
+import { PubMedCitationLine, PubMedTags } from './PubMedReferenceListItem';
+
+const MESH_HELP = 'Medical Subject Headings: the controlled vocabulary NLM indexers assign to each article. '
+    + 'Main topics are what the article is chiefly about.';
+
+function meshTitle(term: MeshTerm): string | undefined {
+    return term.qualifiers?.length ? `${term.descriptor} / ${term.qualifiers.join(', ')}` : undefined;
+}
+
+/** MeSH terms: the main topics, with the other terms one click away. */
+const MeshTerms: React.FC<{ terms: MeshTerm[] }> = ({ terms }) => {
+    const [showAll, setShowAll] = useState(false);
+    const main = terms.filter((term) => term.major);
+    const other = terms.filter((term) => !term.major);
+    const chips = (list: MeshTerm[], muted: boolean) => (
+        <div className="display-flex flex-row flex-wrap gap-1">
+            {list.map((term, index) => (
+                <span key={`${term.descriptor}-${index}`} className="ext-chip" data-muted={muted || undefined} title={meshTitle(term)}>
+                    {term.descriptor}
+                </span>
+            ))}
+        </div>
+    );
+    return (
+        <div className="display-flex flex-col gap-2">
+            {main.length > 0 && (
+                <div className="display-flex flex-col gap-1">
+                    <div className="ext-subheading">Main topics</div>
+                    {chips(main, false)}
+                </div>
+            )}
+            {other.length > 0 && (showAll || !main.length) && (
+                <div className="display-flex flex-col gap-1">
+                    {main.length > 0 && <div className="ext-subheading">Other terms</div>}
+                    {chips(other, true)}
+                </div>
+            )}
+            {other.length > 0 && main.length > 0 && (
+                <a className="text-link-muted text-sm" role="button" tabIndex={0} onClick={() => setShowAll((value) => !value)}>
+                    {showAll ? 'Hide other terms' : `Show ${other.length} other term${other.length === 1 ? '' : 's'}`}
+                </a>
+            )}
+        </div>
+    );
+};
 
 /**
- * PubMed record details: the structured abstract with its section headings,
- * MeSH terms with major topics marked, and PubMed · PMC · DOI links.
+ * PubMed record details: tags, the full author list, the citation line,
+ * links to the record elsewhere, the structured abstract, and MeSH terms.
  */
 const PubMedReferenceDetails: React.FC<{ item: ExternalReference }> = ({ item }) => {
     const details = workDetails(item);
     const sections = (details?.abstract_sections ?? []).filter((section) => section.text?.trim());
     const mesh = (details?.mesh ?? []).filter((term) => term.descriptor);
-    const line = citationLine(item);
-    const pmid = recordPmid(item);
-    const badges = publicationTypeBadges(item);
-    const authors = (item.authors ?? []).join(', ');
 
     return (
         <DetailsFrame
             header={(
                 <>
-                    {item.is_retracted && <RetractedBanner />}
                     <div className="text-lg font-bold font-color-primary leading-tight pr-8">{item.title || 'Untitled Item'}</div>
-                    {authors && <div className="font-color-primary">{authors}</div>}
-                    {line && <div className="font-color-secondary"><i>{line}</i></div>}
-                    {(pmid || badges.length > 0) && (
-                        <div className="display-flex flex-row flex-wrap items-center gap-1 text-sm font-color-tertiary">
-                            {pmid && <span className="select-text">PMID: {pmid}</span>}
-                            {badges.map((badge) => <RecordBadge key={badge} label={badge} />)}
-                        </div>
-                    )}
+                    <PubMedTags item={item} />
+                    <ExpandableNames names={item.authors ?? []} className="font-color-primary" />
+                    <PubMedCitationLine item={item} />
                     <RecordLinks item={item} />
                 </>
             )}
@@ -37,11 +72,11 @@ const PubMedReferenceDetails: React.FC<{ item: ExternalReference }> = ({ item })
         >
             {sections.length > 0 ? (
                 <DetailsSection title="Abstract">
-                    <div className="display-flex flex-col gap-2">
+                    <div className="display-flex flex-col gap-3">
                         {sections.map((section, index) => (
-                            <div key={index}>
-                                {section.label && <span className="font-bold">{section.label}: </span>}
-                                {section.text!.trim()}
+                            <div key={index} className="display-flex flex-col gap-05">
+                                {section.label && <div className="ext-subheading">{section.label}</div>}
+                                <div>{section.text!.trim()}</div>
                             </div>
                         ))}
                     </div>
@@ -50,21 +85,15 @@ const PubMedReferenceDetails: React.FC<{ item: ExternalReference }> = ({ item })
                 <DetailsSection title="Abstract">{item.abstract.trim()}</DetailsSection>
             ) : null}
             {mesh.length > 0 && (
-                <DetailsSection title="MeSH terms">
-                    <div className="display-flex flex-row flex-wrap gap-1">
-                        {mesh.map((term, index) => (
-                            <span
-                                key={`${term.descriptor}-${index}`}
-                                className={term.major ? 'font-bold' : 'font-color-secondary'}
-                                title={term.major ? 'Major topic' : undefined}
-                            >
-                                {term.descriptor}{term.major ? '*' : ''}
-                                {term.qualifiers?.length ? `/${term.qualifiers.join('/')}` : ''}
-                                {index < mesh.length - 1 ? ';' : ''}
-                            </span>
-                        ))}
-                    </div>
-                    <div className="text-sm font-color-tertiary mt-1">* Major topic</div>
+                <DetailsSection
+                    title="MeSH terms"
+                    aside={(
+                        <Tooltip content={MESH_HELP}>
+                            <span className="font-color-secondary text-sm cursor-default">What are these?</span>
+                        </Tooltip>
+                    )}
+                >
+                    <MeshTerms terms={mesh} />
                 </DetailsSection>
             )}
         </DetailsFrame>

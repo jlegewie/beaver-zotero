@@ -6,7 +6,7 @@ import { useItemContextMenu } from '@beaver/agent-ui/chat/useItemContextMenu';
 import { externalReferenceItemMappingAtom } from '@beaver/agent-core/citations/externalReferences';
 import { primaryExternalUrl } from '@beaver/agent-core/citations/externalRecordDisplay';
 import ReferenceMetadataDisplay from './ReferenceMetadataDisplay';
-import { RetractedBanner } from './ExternalRecordParts';
+import { RecordBadge, RecordTags } from './ExternalRecordParts';
 
 interface ReferenceRowFrameProps {
     item: ExternalReference;
@@ -76,13 +76,13 @@ const ExternalReferenceListItem: React.FC<ExternalReferenceListItemProps> = ({
         onMouseLeave={onMouseLeave}
         className={className}
     >
-        {item.is_retracted && <RetractedBanner />}
         <ReferenceMetadataDisplay
             title={item.title}
             authors={item.authors}
             publicationTitle={item.journal?.name || item.venue}
             year={item.year}
         />
+        {item.is_retracted && <RecordTags><RecordBadge label="Retracted" tone="red" /></RecordTags>}
         {getHost().components?.externalReferenceActions({
             item,
             detailsButtonMode: 'icon-only',
