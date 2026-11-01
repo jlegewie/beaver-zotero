@@ -28,6 +28,10 @@ describe("the change list of an edit", () => {
         expect(tableChangeLines([change])).toEqual([
             { tone: "change", text: "Changed column “Design” (options) · 2 answers cleared, 1 of them yours" },
         ]);
+        expect(tableChangeLines([{ ...change, cleared: 1 }, { ...change, user_cleared: 2 }]).map((line) => line.text)).toEqual([
+            "Changed column “Design” (options) · 1 answer cleared, yours",
+            "Changed column “Design” (options) · 2 answers cleared, all yours",
+        ]);
     });
     it("reads title, description and row removals", () => {
         expect(tableChangeLines([{ op: "title", title: "X" }, { op: "description" }, { op: "remove_rows", rows: 1 }])).toEqual([

@@ -28,6 +28,13 @@ function sourceLabel(change: { type?: string; kind?: string | null; name?: strin
     return change.name ? `${kind} ${quoted(change.name)}` : kind;
 }
 
+/** ", 1 of them yours", ", yours" or ", all yours": which cleared answers were the user's. */
+function yours(cleared: number, userCleared: number): string {
+    if (!userCleared) return "";
+    if (userCleared < cleared) return `, ${userCleared} of them yours`;
+    return cleared === 1 ? ", yours" : ", all yours";
+}
+
 /** One line per change, in the order applied. */
 export function tableChangeLines(changes: readonly TableChange[]): TableChangeLine[] {
     const lines: TableChangeLine[] = [];
@@ -49,9 +56,7 @@ export function tableChangeLines(changes: readonly TableChange[]): TableChangeLi
                 const effects = [
                     change.stale ? `${plural(change.stale, "answer")} out of date` : null,
                     change.relabelled ? `${plural(change.relabelled, "answer")} relabelled` : null,
-                    change.cleared
-                        ? `${plural(change.cleared, "answer")} cleared${change.user_cleared ? `, ${change.user_cleared} of them yours` : ""}`
-                        : null,
+                    change.cleared ? `${plural(change.cleared, "answer")} cleared${yours(change.cleared, change.user_cleared)}` : null,
                 ].filter(Boolean);
                 lines.push({
                     tone: "change",
@@ -60,10 +65,9 @@ export function tableChangeLines(changes: readonly TableChange[]): TableChangeLi
                 break;
             }
             case "remove_column": {
-                const yours = change.user_cleared ? `, ${change.user_cleared} of them yours` : "";
                 lines.push({
                     tone: "remove",
-                    text: `Removed column ${quoted(change.header)}${change.cleared ? ` · ${plural(change.cleared, "answer")}${yours}` : ""}`,
+                    text: `Removed column ${quoted(change.header)}${change.cleared ? ` · ${plural(change.cleared, "answer")}${yours(change.cleared, change.user_cleared)}` : ""}`,
                 });
                 break;
             }
