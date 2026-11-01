@@ -109,12 +109,12 @@ it.each([
         const button = container.querySelector<HTMLButtonElement>(
             "button[aria-expanded]",
         )!;
-        expect(store.get(toolExpandedAtom)["run:0:call"]).toBeUndefined();
+        expect(store.get(toolExpandedAtom("run:0:call"))).toBeUndefined();
         expect(button.getAttribute("aria-expanded")).toBe(String(expanded));
 
         act(() => button.click());
         expect(button.getAttribute("aria-expanded")).toBe(String(!expanded));
-        expect(store.get(toolExpandedAtom)["run:0:call"]).toBe(!expanded);
+        expect(store.get(toolExpandedAtom("run:0:call"))).toBe(!expanded);
         expect(!!container.querySelector("#tool-result-call")).toBe(!expanded);
 
         act(() => button.click());

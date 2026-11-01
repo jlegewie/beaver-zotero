@@ -151,11 +151,11 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         && runIsStreamable;
 
     const expansionKey = `${runId}:${responseIndex}:${toolcallId}`;
-    const expansionState = useAtomValue(toolExpandedAtom);
+    const storedExpanded = useAtomValue(useMemo(() => toolExpandedAtom(expansionKey), [expansionKey]));
     const setExpanded = useSetAtom(setToolExpandedAtom);
-    const hasExistingState = expansionState[expansionKey] !== undefined;
+    const hasExistingState = storedExpanded !== undefined;
     const neverAutoCollapse = NEVER_AUTO_COLLAPSE_TOOLS.has(toolName);
-    const isExpanded = expansionState[expansionKey] ?? (isAwaitingApproval || neverAutoCollapse);
+    const isExpanded = storedExpanded ?? (isAwaitingApproval || neverAutoCollapse);
 
     // The footer's buttons never wrap; when the row is too narrow for them,
     // the permission trigger drops to its icon.

@@ -349,12 +349,12 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
 
     // Use global Jotai atom for expansion state (persists across re-renders and syncs between panes)
     const expansionKey = `${runId}:${responseIndex}:${part.tool_call_id}`;
-    const expansionState = useAtomValue(toolExpandedAtom);
+    const storedExpanded = useAtomValue(useMemo(() => toolExpandedAtom(expansionKey), [expansionKey]));
     const setExpanded = useSetAtom(setToolExpandedAtom);
     // A failed table read can still carry recovery status worth opening.
     const hasTableStatus = isTableToolName(part.tool_name) && !!result
         && tableResultMessages(result.content, part.tool_name).length > 0;
-    const isExpanded = expansionState[expansionKey] ?? hasTableStatus;
+    const isExpanded = storedExpanded ?? hasTableStatus;
     const wasConfirmApprovalRef = useRef(isConfirmApproval);
 
     // When extract/external_search approval resolves, collapse once so the completed result

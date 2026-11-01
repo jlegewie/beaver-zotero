@@ -96,9 +96,8 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
     // run surfaces so a tool call opened here does not open the in-stream card
     // too; one tool call is never on both of those surfaces, so one scope does.
     const expansionKey = `${runId}:changes:${row.toolcallId}`;
-    const expansionState = useAtomValue(toolExpandedAtom);
+    const isExpanded = useAtomValue(useMemo(() => toolExpandedAtom(expansionKey), [expansionKey])) ?? false;
     const setExpanded = useSetAtom(setToolExpandedAtom);
-    const isExpanded = expansionState[expansionKey] ?? false;
 
     // Read-only: the in-stream card resolves and caches the title under the same
     // run-scoped key, so this surface shares that one fetch without colliding

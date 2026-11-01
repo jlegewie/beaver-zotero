@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import type { AgentRunStatus, ToolCallPart } from '@beaver/agent-core/agents/types';
 import { getToolCallStatusFromResult, type ToolResult } from '@beaver/agent-core/run-state/atoms';
@@ -69,10 +69,10 @@ export const TableToolCallView: React.FC<TableToolCallViewProps> = ({
     const notices = isReturn ? tableMessages(result) : [];
 
     const expansionKey = `${runId}:${responseIndex}:${part.tool_call_id}`;
-    const expansionState = useAtomValue(toolExpandedAtom);
+    const storedExpanded = useAtomValue(useMemo(() => toolExpandedAtom(expansionKey), [expansionKey]));
     const setExpanded = useSetAtom(setToolExpandedAtom);
     const canExpand = record !== null;
-    const isExpanded = (expansionState[expansionKey] ?? false) && canExpand;
+    const isExpanded = (storedExpanded ?? false) && canExpand;
     const toggleExpanded = () => {
         if (canExpand) setExpanded({ key: expansionKey, expanded: !isExpanded });
     };

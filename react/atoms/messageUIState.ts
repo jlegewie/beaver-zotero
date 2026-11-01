@@ -22,34 +22,70 @@ export const defaultAnnotationPanelState: AnnotationPanelState = {
 };
 
 // ---------------------------------------------------------------------------
-// Tool call expansion state
+// Keyed atom caches
 // ---------------------------------------------------------------------------
 
 /**
- * Tracks expansion state of tool call views by key (runId:toolCallId)
+ * Per-card UI state in which every key is its own atom.
+ *
+ * A thread can hold hundreds of cards that each keep a value under their own
+ * key. Kept in a single map atom, every card would subscribe to the whole map,
+ * and each value written would re-render every card — quadratic in the cards
+ * mounted. With a per-key atom a write re-renders only the surfaces showing
+ * that key.
  */
-export const toolExpandedAtom = atom<BooleanMap>({});
+function createKeyedAtomCache<T>(initial: T) {
+    const atoms = new Map<string, PrimitiveAtom<T>>();
+
+    return {
+        /** The atom holding `key`'s value; `initial` until one is written. */
+        entry: (key: string): PrimitiveAtom<T> => {
+            let cached = atoms.get(key);
+            if (!cached) {
+                cached = atom<T>(initial);
+                atoms.set(key, cached);
+            }
+            return cached;
+        },
+        /**
+         * Reset every value and forget the keys. Readers hold the atom they were
+         * given, so this is only safe once they unmount — when a new thread
+         * replaces the one whose cards read these values.
+         */
+        clear: (set: Setter) => {
+            for (const cached of atoms.values()) set(cached, initial);
+            atoms.clear();
+        },
+    };
+}
+
+// ---------------------------------------------------------------------------
+// Tool call expansion state
+// ---------------------------------------------------------------------------
+
+const toolExpansion = createKeyedAtomCache<boolean | undefined>(undefined);
 
 /**
- * Toggle expansion of a tool call view
+ * Expansion state of one tool-call surface, keyed by its scoped expansion key
+ * (e.g. `runId:responseIndex:toolCallId`). Undefined until written, so the
+ * surface shows its own default.
  */
-export const toggleToolExpandedAtom = atom(
-    null,
-    (get, set, key: string) => {
-        const current = get(toolExpandedAtom);
-        const next = !(current[key] ?? false);
-        set(toolExpandedAtom, { ...current, [key]: next });
-    }
-);
+export const toolExpandedAtom = (key: string): Atom<boolean | undefined> => toolExpansion.entry(key);
+
+/**
+ * Counts expansion writes. For layout watchers that react to any card opening
+ * or closing, without subscribing to every card's state.
+ */
+export const toolExpansionRevisionAtom = atom(0);
 
 /**
  * Set expansion state of a tool call view
  */
 export const setToolExpandedAtom = atom(
     null,
-    (get, set, { key, expanded }: { key: string; expanded: boolean }) => {
-        const current = get(toolExpandedAtom);
-        set(toolExpandedAtom, { ...current, [key]: expanded });
+    (_get, set, { key, expanded }: { key: string; expanded: boolean }) => {
+        set(toolExpansion.entry(key), expanded);
+        set(toolExpansionRevisionAtom, (revision) => revision + 1);
     }
 );
 
@@ -184,44 +220,19 @@ export const annotationBusyAtom = atom<AnnotationBusyStateMap>({});
 /** The value read for an absent key, shared so it never re-renders a reader. */
 const NO_TITLE_ATOM: Atom<string | null> = atom(() => null);
 
-/**
- * A cache of display titles in which every key is its own atom.
- *
- * A thread can hold hundreds of cards that each cache one title. Kept in a
- * single map atom, every card would subscribe to the whole map, and each title
- * written would re-render every card — quadratic in the cards mounted. With a
- * per-key atom a write re-renders only the surfaces showing that key.
- */
+/** A keyed cache of display titles (see `createKeyedAtomCache`). */
 function createTitleCache() {
-    const atoms = new Map<string, PrimitiveAtom<string | null>>();
-
-    const entry = (key: string): PrimitiveAtom<string | null> => {
-        let cached = atoms.get(key);
-        if (!cached) {
-            cached = atom<string | null>(null);
-            atoms.set(key, cached);
-        }
-        return cached;
-    };
-
+    const cache = createKeyedAtomCache<string | null>(null);
     return {
         /** The cached title for `key`; null until one is written, or for a null key. */
-        titleAtom: (key: string | null): Atom<string | null> => (key === null ? NO_TITLE_ATOM : entry(key)),
+        titleAtom: (key: string | null): Atom<string | null> => (key === null ? NO_TITLE_ATOM : cache.entry(key)),
         setTitleAtom: atom(
             null,
             (_get, set, { key, title }: { key: string; title: string | null }) => {
-                set(entry(key), title);
+                set(cache.entry(key), title);
             }
         ),
-        /**
-         * Empty every title and forget the keys. Readers hold the atom they were
-         * given, so this is only safe once they unmount — when a new thread
-         * replaces the one whose cards read these titles.
-         */
-        clear: (set: Setter) => {
-            for (const cached of atoms.values()) set(cached, null);
-            atoms.clear();
-        },
+        clear: cache.clear,
     };
 }
 
@@ -305,7 +316,8 @@ export const setAnnotationBusyStateAtom = atom(
 export const resetMessageUIStateAtom = atom(
     null,
     (_get, set) => {
-        set(toolExpandedAtom, {});
+        toolExpansion.clear(set);
+        set(toolExpansionRevisionAtom, (revision) => revision + 1);
         set(messageSourcesVisibilityAtom, {});
         set(thinkingVisibilityAtom, {});
         set(runErrorVisibilityAtom, {});

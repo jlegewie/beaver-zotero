@@ -285,12 +285,12 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
     const aggregateStatus: ActionStatus | 'awaiting' = getOverallEditNoteDisplayStatus(rowStatuses);
 
     const expansionKey = getEditNoteGroupExpansionKey(runId, responseIndex, parts);
-    const expansionState = useAtomValue(toolExpandedAtom);
+    const storedExpanded = useAtomValue(useMemo(() => toolExpandedAtom(expansionKey), [expansionKey]));
     const setExpanded = useSetAtom(setToolExpandedAtom);
-    const hasExistingExpandState = expansionState[expansionKey] !== undefined;
+    const hasExistingExpandState = storedExpanded !== undefined;
     const isExpanded = hasStreamingChild
         ? false
-        : (expansionState[expansionKey]
+        : (storedExpanded
             ?? (hasPendingApprovals || (errorCount > 0 && reapplicableActions.length === 0 && appliedCount === 0)));
 
     const prevHasPendingApprovalsRef = useRef(hasPendingApprovals);
