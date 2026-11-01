@@ -2672,15 +2672,30 @@
 .beaver-root .rt-inline-field {
     width: 100%;
     box-sizing: border-box;
-    padding: 0.1rem 0.4rem;
-    margin-left: -0.4rem;
+    /* The field sits where the text was: the border takes no room of its own
+     * (negative margins), and the text keeps its place and typography. */
+    padding: 0 0.4rem;
+    margin: -1px 0 -1px calc(-0.4rem - 1px);
     border: 1px solid var(--accent-blue);
     border-radius: 0.4rem;
     outline: none;
     background: var(--material-background);
     color: var(--fill-primary);
-    font: inherit;
+    font-family: inherit;
+    font-size: 1rem;
     white-space: normal;
+}
+
+/* A field takes no font from its parent by itself: the title's size and
+ * weight are restated so the text does not change when editing starts. */
+.beaver-root .rt-inline-field.rt-title {
+    font-size: 1.31rem;
+    line-height: 1.7rem;
+    font-weight: 600;
+}
+
+.beaver-root .rt-inline-field.rt-description {
+    line-height: 1.4rem;
 }
 
 .beaver-root textarea.rt-inline-field {

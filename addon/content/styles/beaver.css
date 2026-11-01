@@ -63,6 +63,12 @@
     --beaver-surface-overlay: var(--material-background);
 }
 
+/* Beaver tabs (a stored table) sit on the plain background too: their menus
+ * and tooltips lift to it, as in the preferences and the separate window. */
+.beaver-root.beaver-tab {
+    --beaver-surface-overlay: var(--material-background);
+}
+
 /* Preferences window: two-column shell. The sidebar keeps the window's
  * sidepane material; the settings column sits on the plain background so the
  * cards read against it the way they do in Zotero's own settings. */
@@ -5418,6 +5424,50 @@
 
 [id^="beaver-pane-"] .table-record-row + .table-record-row {
     border-top: 1px solid var(--fill-quarternary);
+}
+
+/* A change in an edit card's list: its mark, then the sentence with its
+   effects in quieter text. The mark carries the colour; the text does not. */
+[id^="beaver-pane-"] .table-record-change {
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 0.5rem;
+}
+
+[id^="beaver-pane-"] .table-record-mark {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 1.15rem;
+    height: 1.15rem;
+    margin-top: 0.05rem;
+    border-radius: 50%;
+}
+
+[id^="beaver-pane-"] .table-record-mark svg {
+    width: 0.7rem;
+    height: 0.7rem;
+}
+
+[id^="beaver-pane-"] .table-record-mark-add {
+    color: var(--tag-green-primary);
+    background: var(--tag-green-quarternary);
+}
+
+[id^="beaver-pane-"] .table-record-mark-change {
+    color: var(--tag-orange-primary);
+    background: var(--tag-orange-quarternary);
+}
+
+[id^="beaver-pane-"] .table-record-mark-remove {
+    color: var(--tag-red-primary);
+    background: var(--tag-red-quarternary);
+}
+
+[id^="beaver-pane-"] .table-record-change-text {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 
 [id^="beaver-pane-"] .table-card-problem {

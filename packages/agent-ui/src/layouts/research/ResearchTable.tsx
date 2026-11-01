@@ -1,19 +1,27 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { toPlainText, type Column, type Row, type TableSpec } from "@beaver/agent-core/layouts/table";
 import {
+    ArrowUpIcon,
+    CalendarIcon,
     CancelIcon,
+    CheckmarkCircleIcon,
     ChevronIcon,
     ClockIcon,
     CopyIcon,
+    DeleteIcon,
     DownloadIcon,
+    EditIcon,
     FileIcon,
     FilterIcon,
     Icon,
     LayersIcon,
     LibraryIcon,
+    ListBulletIcon,
     MoreHorizontalIcon,
     SearchIcon,
     TableIcon,
+    TextIcon,
+    ViewIcon,
 } from "../../icons";
 import MenuButton from "../../primitives/MenuButton";
 import type { MenuItem } from "../../primitives/ContextMenu";
@@ -41,12 +49,12 @@ export interface NewPapersNotice {
 /** The column types a user may change a question column to. */
 export type ResearchColumnType = "text" | "boolean" | "select" | "date";
 
-/** Named and ordered as the column editor and the create card name them. */
-const COLUMN_TYPE_LABELS: Array<{ type: ResearchColumnType; label: string }> = [
-    { type: "text", label: "Text" },
-    { type: "date", label: "Date" },
-    { type: "boolean", label: "Yes / no" },
-    { type: "select", label: "Category" },
+/** Named, ordered and drawn as the column editor and the create card show them. */
+const COLUMN_TYPE_LABELS: Array<{ type: ResearchColumnType; label: string; icon: React.ComponentType<React.SVGProps<SVGSVGElement>> }> = [
+    { type: "text", label: "Text", icon: TextIcon },
+    { type: "date", label: "Date", icon: CalendarIcon },
+    { type: "boolean", label: "Yes / no", icon: CheckmarkCircleIcon },
+    { type: "select", label: "Category", icon: ListBulletIcon },
 ];
 
 /**
@@ -219,29 +227,40 @@ export function ResearchTable({
             const items: MenuItem[] = [];
             const disabled = !!editing?.disabledReason;
             if (editing?.onEditColumn)
-                items.push({ label: "Edit column…", disabled, onClick: () => editing.onEditColumn!(column) });
+                items.push({ label: "Edit column…", icon: EditIcon, disabled, onClick: () => editing.onEditColumn!(column) });
             if (items.length) items.push({ label: "", isDivider: true, onClick: () => {} });
             items.push({
                 label: "Sort A → Z",
+                icon: ArrowUpIcon,
                 onClick: () => state.setSort({ column_id: column.id, direction: "asc" }),
             });
-            items.push({ label: "Hide column", onClick: () => state.toggleColumn(column.id) });
-            if (editing?.onChangeType)
+            items.push({ label: "Hide column", icon: ViewIcon, onClick: () => state.toggleColumn(column.id) });
+            if (editing?.onChangeType) {
+                const current = COLUMN_TYPE_LABELS.find((entry) => entry.type === column.type);
                 items.push({
                     label: "Change type",
+                    icon: current?.icon ?? TextIcon,
                     disabled,
                     onClick: () => {},
                     submenu: COLUMN_TYPE_LABELS.filter((entry) => entry.type !== column.type).map((entry) => ({
                         label: entry.label,
+                        icon: entry.icon,
                         onClick: () => editing.onChangeType!(column, entry.type),
                     })),
                 });
+            }
             if (editing?.onRemoveColumn) {
                 items.push({ label: "", isDivider: true, onClick: () => {} });
                 items.push({
                     label: "Remove column",
                     disabled,
-                    customContent: <span className="rt-menu-danger">Remove column</span>,
+                    // Drawn like an item's own icon and label, in the danger colour.
+                    customContent: (
+                        <span className="display-flex items-center gap-2 w-full min-w-0 rt-menu-danger">
+                            <Icon icon={DeleteIcon} size={14} className="flex-shrink-0" />
+                            <span className="flex-1 text-base truncate">Remove column</span>
+                        </span>
+                    ),
                     onClick: () => editing.onRemoveColumn!(column),
                 });
             }
