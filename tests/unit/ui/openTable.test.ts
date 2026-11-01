@@ -65,6 +65,10 @@ beforeEach(() => {
     run = vi.fn().mockResolvedValue({ recovered: [], sha256: 'a'.repeat(64) });
     (Zotero as any).Beaver = { ...(Zotero as any).Beaver, libraryOperations: { run } };
     (Zotero as any).Promise = { delay: vi.fn(async () => {}) };
+    (Zotero as any).Sync = {
+        Storage: { Local: { getEnabledForLibrary: vi.fn(() => false) } },
+        Runner: { downloadFile: vi.fn(async () => ({ localChanges: true })) },
+    };
 });
 
 describe('openTable', () => {
@@ -157,6 +161,26 @@ describe('openTable', () => {
         expect(outcome).toEqual({ error: `Could not open table ${REF.key} — it has no file on disk.` });
         expect(openTableTab).not.toHaveBeenCalled();
         expect(resolveNavigationWindow).not.toHaveBeenCalled();
+    });
+
+    it('downloads a table synced on demand before opening it', async () => {
+        (Zotero as any).Sync.Storage.Local.getEnabledForLibrary.mockReturnValue(true);
+        readTableItemSpec
+            .mockResolvedValueOnce({ ok: false, code: 'no_file', message: 'Table TABLEKEY has no file on disk.' })
+            .mockResolvedValueOnce({ ok: true, spec: SPEC, file: { spec: SPEC } });
+        await expect(openTable(REF, { window: main })).resolves.toMatchObject({ ok: true, tabID: 'tab-1' });
+        expect((Zotero as any).Sync.Runner.downloadFile).toHaveBeenCalledWith(ITEM);
+        expect(openTableTab).toHaveBeenCalledOnce();
+    });
+
+    it('says the files are missing when the download fails', async () => {
+        (Zotero as any).Sync.Storage.Local.getEnabledForLibrary.mockReturnValue(true);
+        (Zotero as any).Sync.Runner.downloadFile.mockRejectedValueOnce(new Error('offline'));
+        readTableItemSpec.mockResolvedValue({ ok: false, code: 'no_file', message: 'Table TABLEKEY has no file on disk.' });
+        await expect(openTable(REF, { window: main })).resolves.toEqual({
+            error: `Could not open table ${REF.key} — it has no file on disk.`,
+        });
+        expect(openTableTab).not.toHaveBeenCalled();
     });
 
     it('opens nothing for a table that cannot be read, and says why', async () => {

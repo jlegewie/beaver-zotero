@@ -31,6 +31,7 @@
  * to look at.
  */
 
+import { logger } from '@beaver/agent-core/platform/logger';
 import { snapshotIsCurrent } from '../services/artifacts/tableRenderer';
 import {
     readTableItemSpec,
@@ -112,6 +113,22 @@ async function repairOnOpen(item: Zotero.Item, ref: TableRef): Promise<string | 
 }
 
 /**
+ * Downloads a table synced on demand, whose files are not on this device yet,
+ * as Zotero does before opening any attachment. False when file syncing is off
+ * for its library or the download fails.
+ */
+async function downloadTableFiles(item: Zotero.Item): Promise<boolean> {
+    if (!Zotero.Sync.Storage.Local.getEnabledForLibrary(item.libraryID)) return false;
+    try {
+        await Zotero.Sync.Runner.downloadFile(item);
+        return true;
+    } catch (error) {
+        logger(`openTable: could not download table ${item.key}: ${String(error)}`, 2);
+        return false;
+    }
+}
+
+/**
  * Shows a stored table in the Beaver tab, or selects the tab already showing
  * it, then runs the store's open repair.
  *
@@ -122,8 +139,12 @@ export async function openTable(ref: TableRef, options: OpenTableOptions = {}): 
     try {
         const item = await resolveTableItem(ref);
         // Read before choosing a window: a table whose files have not reached
-        // this device, or that cannot be read at all, opens nothing.
-        const read = await readTableItemSpec(item);
+        // this device and cannot be downloaded, or that cannot be read at all,
+        // opens nothing.
+        let read = await readTableItemSpec(item);
+        if (!read.ok && read.code === 'no_file' && (await downloadTableFiles(item))) {
+            read = await readTableItemSpec(item);
+        }
         if (!read.ok) {
             if (read.code === 'no_file') return { error: `Could not open table ${ref.key} — it has no file on disk.` };
             const recovery = await unreadableTableRecovery(ref);
