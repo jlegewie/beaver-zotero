@@ -138,6 +138,35 @@ describe('BeaverDB background queue', () => {
         expect(rows[0].availableAt).toBe(3_000);
     });
 
+    it('keeps an explicit cache-preparation request when a merge replaces the payload', async () => {
+        await db.enqueueBackgroundJob(makeInput({ priority: 110, payload: makePayload({ prepare_cache: true }) }));
+        await db.enqueueBackgroundJob(makeInput({ priority: 102, payload: makePayload({ maxPages: null }) }));
+
+        const [job] = await db.peekBackgroundJobs();
+        expect(job.priority).toBe(102);
+        expect(job.payload).toEqual(makePayload({ maxPages: null, prepare_cache: true }));
+
+        // A different content kind is new work and does not inherit the request.
+        await db.enqueueBackgroundJob(makeInput({
+            priority: 90, contentKind: 'epub', payload: { content_kind: 'epub' } as BackgroundJobPayload,
+        }));
+        expect((await db.peekBackgroundJobs())[0].payload).toEqual({ content_kind: 'epub' });
+    });
+
+    it('retires budget-limited preparation only above the local extraction band', async () => {
+        await db.enqueueBackgroundJob(makeInput({ priority: 110, payload: makePayload({ prepare_cache: true }) }));
+        const [claimed] = await db.peekBackgroundJobs();
+        // The embedding index requested the same attachment while the job ran.
+        await db.enqueueBackgroundJob(makeInput({ priority: 102 }));
+
+        expect(await db.completeBackgroundPreparationJob(claimed.id, 2_000_000)).toBe(false);
+        expect(await db.peekBackgroundJobs()).toHaveLength(1);
+
+        await db.enqueueBackgroundJob(makeInput({ zoteroKey: 'EFGH5678', priority: 110 }));
+        const other = (await db.peekBackgroundJobs()).find((job) => job.zoteroKey === 'EFGH5678')!;
+        expect(await db.completeBackgroundPreparationJob(other.id, 2_000_000)).toBe(true);
+    });
+
     it('keeps separate rows for different payload kinds on the same attachment', async () => {
         await db.enqueueBackgroundJob(
             makeInput({ payloadKind: 'structured', priority: 100 }),

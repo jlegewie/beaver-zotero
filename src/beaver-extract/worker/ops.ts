@@ -64,6 +64,7 @@ import { bboxToRect } from "../schema/bbox";
 import { ERROR_CODES, postLog, workerError } from "./errors";
 import { isRecoverablePageError } from "../wasmFatal";
 import { acquireDoc, releaseDoc } from "./docCache";
+import type { DocumentLike } from "./mupdfApi";
 import { ensureApi } from "./wasmInit";
 import { ensureSentencex } from "./sentencexInit";
 import { resolveSplitter } from "./splitterResolver";
@@ -520,8 +521,8 @@ interface StructuredRunOptions {
 
 /**
  * Runs one extraction (`runExtraction`) in a single doc-open and hands the
- * internal result and the schema preset to `finish` while the document is
- * open.
+ * internal result, the schema preset, and the document to `finish` while the
+ * document is open.
  *
  * Fuses page-count + page-labels + OCR check + extract. Uses the strict
  * resolvers — explicit-but-all-invalid page inputs throw PAGE_OUT_OF_RANGE
@@ -532,7 +533,7 @@ interface StructuredRunOptions {
 async function withExtractionRun<T>(
     args: ExtractionRunArgs,
     engine: ExtractionEngine,
-    finish: (internal: InternalExtractionResult, preset: PdfExtractionPreset) => T,
+    finish: (internal: InternalExtractionResult, preset: PdfExtractionPreset, doc: DocumentLike) => T,
     structuredRun: StructuredRunOptions = {},
 ): Promise<T> {
     const isStructured = engine === "structured";
@@ -644,7 +645,7 @@ async function withExtractionRun<T>(
             internal.metadata.timings.docOpenMs = docOpenMs;
             internal.metadata.timings.totalMs = performance.now() - tOpStart;
         }
-        return finish(internal, preset);
+        return finish(internal, preset, doc);
     } catch (e) {
         docFailed = true;
         throw e;
@@ -712,11 +713,13 @@ export async function opExtract(
     //   markdown mode: explicit `markdown.engine` wins; default "paragraph".
     const engine: ExtractionEngine = isStructured ? "structured" : (explicitEngine ?? "paragraph");
     const includeDiagnostics = args.includeDiagnostics ?? false;
-    return withExtractionRun(args, engine, (internal, preset) => ({
-        result: isStructured
-            ? project(internal, preset, args.structured?.bboxPrecision ?? 1, includeDiagnostics)
-            : toMarkdownExtractResult(internal, preset, includeDiagnostics),
-    }));
+    return withExtractionRun(args, engine, (internal, preset, doc) => {
+        if (!isStructured) return { result: toMarkdownExtractResult(internal, preset, includeDiagnostics) };
+        const result = project(internal, preset, args.structured?.bboxPrecision ?? 1, includeDiagnostics);
+        const infoTitle = collectDocumentInfo(doc).title?.trim();
+        if (infoTitle) result.infoTitle = infoTitle;
+        return { result };
+    });
 }
 
 export async function opExtractSerialized(
