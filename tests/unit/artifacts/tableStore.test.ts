@@ -36,6 +36,8 @@ import {
     writeTable,
     trimTable,
     applyTableEdit,
+    undoTableEdit,
+    TABLE_UNDO_CHANGED,
     createTableFromRequest,
     TABLE_VERSION_RETENTION,
     type TableHistory,
@@ -43,6 +45,7 @@ import {
 } from '../../../src/services/artifacts/tableStore';
 import { getTableLocalCommands, getTableShadowRestore, tableLocalCommands, tableWriteLocks } from '../../../src/services/artifacts/tablesApi';
 import * as recoveryShadow from '../../../src/services/artifacts/recoveryShadow';
+import { applyUserTableEditUncoordinated as applyUserEdit } from '../../../src/services/artifacts/tableUserEdits';
 
 // ---------------------------------------------------------------------------
 // A temp directory standing in for the attachment's storage directory
@@ -1033,6 +1036,23 @@ describe('applyTableEdit', () => {
         expect([sameKey.version, sameKey.collapsed]).toEqual([5, false]);
     });
 
+    it('collapses a tab edit into its session and seals a destructive one, with no replay record', async () => {
+        const user = { actor: 'user' as const };
+        const first = await applyTableEdit(ref, retitle('One'), { ...user, collapse_key: 'tab:s1' });
+        expect(first).toMatchObject({ ok: true, committed: true, version: 2 });
+        const second = await applyTableEdit(ref, retitle('Two'), { ...user, collapse_key: 'tab:s1' });
+        expect(second).toMatchObject({ ok: true, committed: true, version: 2 });
+        const sealed = await applyTableEdit(ref, retitle('Three'), { ...user, seal: true });
+        expect(sealed).toMatchObject({ ok: true, committed: true, version: 3 });
+        const entries = await listVersions(ref);
+        expect(entries.at(-1)).toMatchObject({ version: 3, sealed: true });
+        expect(entries.at(-1)).not.toHaveProperty('operation_id');
+        // Nothing collapses onto the sealed version, not even the same session.
+        expect(await applyTableEdit(ref, retitle('Four'), { ...user, collapse_key: 'tab:s1' })).toMatchObject({ version: 4 });
+        // A build that changes nothing writes nothing and says so.
+        expect(await applyTableEdit(ref, (spec) => ({ ok: true, spec: { ...spec }, changes: [] }), user)).toMatchObject({ committed: false, version: 4 });
+    });
+
     it('keeps the edit record through an open that repairs the version entry', async () => {
         await applyTableEdit(ref, retitle('Edited'), meta, operation);
         await writeFile(sidecar('v2.json'), '{"damaged":true}', 'utf8');
@@ -1055,6 +1075,96 @@ describe('applyTableEdit', () => {
         await applyTableEdit(ref, retitle('Edited'), meta, operation);
         await applyTableEdit(ref, retitle('Edited'), meta, operation);
         expect(publish).toHaveBeenCalledTimes(1);
+    });
+});
+
+
+describe("the tab's structural edits", () => {
+    it('collapse into the session, seal a removal, and resolve added papers before the write', async () => {
+        const first = await applyUserEdit(ref, { title: 'Renamed' }, { seal: false, session: 's1' });
+        expect(first).toMatchObject({ ok: true, committed: true, version: 2, changes: [{ op: 'title', title: 'Renamed' }] });
+        expect(await applyUserEdit(ref, { description: 'About it' }, { seal: false, session: 's1' })).toMatchObject({ version: 2 });
+        expect((await listVersions(ref)).at(-1)).toMatchObject({ version: 2, actor: 'user', collapse_key: 'tab:s1' });
+
+        resolvedSources.resolveSource.mockResolvedValueOnce({
+            entry: { id: 'new', type: 'items', ids: ['u-AAAAAAAA'] },
+            papers: [{ row: { id: 'r2', ref: { kind: 'item', library_ref: 'u', zotero_key: 'AAAAAAAA' }, cells: {} }, mode: 'title_abstract' }],
+            total: 1,
+            truncated: false,
+            rejected: [],
+        });
+        const added = await applyUserEdit(ref, { add_sources: [{ type: 'items', ids: ['u-AAAAAAAA'] }] }, { seal: false, session: 's1' });
+        expect(resolvedSources.resolveSource).toHaveBeenCalledWith({ type: 'items', ids: ['u-AAAAAAAA'], id: 'new' });
+        expect(added).toMatchObject({ ok: true, version: 2, changes: [{ op: 'add_source', rows_added: 1 }] });
+
+        const removed = await applyUserEdit(ref, { remove_columns: ['note'] }, { seal: true, change: 'Removed column “Note”' });
+        expect(removed).toMatchObject({ ok: true, committed: true, version: 3, changes: [{ op: 'remove_column', cleared: 1 }] });
+        expect((await listVersions(ref)).at(-1)).toMatchObject({ version: 3, sealed: true, change: 'Removed column “Note”' });
+    });
+
+    it('refuse an id the table does not have, writing nothing', async () => {
+        const before = await readFile(tablePath(), 'utf8');
+        expect(await applyUserEdit(ref, { remove_rows: ['r9'] }, { seal: true })).toMatchObject({ ok: false, code: 'unknown_row' });
+        expect(await readFile(tablePath(), 'utf8')).toBe(before);
+    });
+});
+
+describe('undoTableEdit', () => {
+    const user = { actor: 'user' as const };
+    const retitle = (title: string) =>
+        vi.fn((spec: TableSpec) => ({ ok: true as const, spec: { ...spec, title }, changes: [{ op: 'title', title }] }));
+
+    it('restores the version before a sealed edit as a new sealed version', async () => {
+        const before = (await readTable(ref)).spec;
+        const edit = await applyTableEdit(ref, retitle('Removed'), { ...user, seal: true });
+        if (!edit.ok) throw new Error('edit failed');
+        const undone = await undoTableEdit(ref, { version: edit.version, sha256: edit.sha256 }, user);
+        expect(undone).toMatchObject({ ok: true, version: 3 });
+        expect((await readTable(ref)).spec.title).toBe(before.title);
+        expect((await listVersions(ref)).at(-1)).toMatchObject({ version: 3, sealed: true, change: 'Undid an edit' });
+    });
+
+    it('refuses once anything was written after the edit', async () => {
+        const edit = await applyTableEdit(ref, retitle('Removed'), { ...user, seal: true });
+        if (!edit.ok) throw new Error('edit failed');
+        await editTable(ref, [{ op: 'set_meta', title: 'Later' }], { actor: 'agent', run_id: 'fill', thread_id: 't' });
+        expect(await undoTableEdit(ref, { version: edit.version, sha256: edit.sha256 }, user)).toEqual({
+            ok: false,
+            code: 'changed',
+            message: TABLE_UNDO_CHANGED,
+        });
+        expect((await readTable(ref)).spec.title).toBe('Later');
+    });
+
+    it('refuses when the table no longer has the hash the edit produced', async () => {
+        const edit = await applyTableEdit(ref, retitle('Removed'), { ...user, seal: true });
+        if (!edit.ok) throw new Error('edit failed');
+        expect(await undoTableEdit(ref, { version: edit.version, sha256: 'f'.repeat(64) }, user)).toMatchObject({ ok: false, code: 'changed' });
+    });
+
+    it('undoes a model edit only for the run that made it', async () => {
+        const meta = { actor: 'agent' as const, run_id: 'run-1', thread_id: 'thread' };
+        const edit = await applyTableEdit(ref, retitle('Model'), meta, { operation_id: 'op-1', request_sha256: 'a'.repeat(64) });
+        if (!edit.ok) throw new Error('edit failed');
+        expect(await undoTableEdit(ref, { version: edit.version, run_id: 'run-2' }, user)).toMatchObject({ ok: false, code: 'changed' });
+        expect(await undoTableEdit(ref, { version: edit.version, run_id: 'run-1' }, user)).toMatchObject({ ok: true });
+    });
+
+    it('reports no changes for a model edit that changes nothing, so it offers no Undo of an earlier one', async () => {
+        const meta = { actor: 'agent' as const, run_id: 'run-1', thread_id: 'thread' };
+        await applyTableEdit(ref, retitle('Model'), meta, { operation_id: 'op-1', request_sha256: 'a'.repeat(64) });
+        const same = await applyTableEdit(ref, retitle('Model'), meta, { operation_id: 'op-2', request_sha256: 'b'.repeat(64) });
+        expect(same).toMatchObject({ ok: true, committed: false, version: 2, changes: [] });
+    });
+
+    it('refuses a version that was not a model edit when asked for a run', async () => {
+        const edit = await applyTableEdit(ref, retitle('Tab'), { ...user, seal: true });
+        if (!edit.ok) throw new Error('edit failed');
+        expect(await undoTableEdit(ref, { version: edit.version, run_id: 'run-1' }, user)).toMatchObject({ ok: false, code: 'changed' });
+    });
+
+    it('refuses the creation version, which has nothing before it', async () => {
+        await expect(undoTableEdit(ref, { version: 1 }, user)).rejects.toMatchObject({ code: 'invalid_request' });
     });
 });
 

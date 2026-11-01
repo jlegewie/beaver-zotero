@@ -113,6 +113,17 @@ export interface NavigationHost {
         origin?: Window | null,
         options?: { onDownload?: () => void },
     ): Promise<{ ok: true; warning?: string } | { error: string }>;
+    /**
+     * Takes back one model edit of a stored table (the `edit_table` tool
+     * display's Undo): restores the version before it, only while the table
+     * is exactly as that edit left it. `version` is the version the edit
+     * committed, `runId` the run that made it.
+     */
+    undoTableEdit?(
+        key: string,
+        edit: { version: number; runId: string },
+        origin?: Window | null,
+    ): Promise<{ ok: true } | { error: string }>;
     /** Reveal/select the referenced item in the library view. */
     revealInLibrary(ref: ZoteroItemReference): void;
     /** Reveal/select the referenced library in the library view. */

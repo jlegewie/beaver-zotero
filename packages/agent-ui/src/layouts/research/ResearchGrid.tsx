@@ -10,8 +10,9 @@ import {
     type Row,
     type TableSpec,
 } from "@beaver/agent-core/layouts/table";
-import { Icon, RepeatIcon, TickIcon } from "../../icons";
+import { ArrowDownIcon, Icon, PlusSignIcon, RepeatIcon, TickIcon } from "../../icons";
 import type { MenuItem } from "../../primitives/ContextMenu";
+import MenuButton from "../../primitives/MenuButton";
 import { useHoverAnchor, useHoverLayer } from "../../primitives/HoverLayer";
 import type { TextRenderer } from "../tableView";
 import type { TableState } from "../useTableState";
@@ -43,6 +44,12 @@ export interface ResearchGridProps {
     selected: CellAddress | null;
     onSelectCell(address: CellAddress): void;
     rowMenuItems(row: Row): MenuItem[];
+    /** A question column's menu (on hover over its header). */
+    columnMenuItems?(column: Column): MenuItem[];
+    /** The (+) after the last column; absent, no add column. */
+    onAddColumn?(): void;
+    /** Why the (+) is disabled (a read-only library). */
+    editDisabledReason?: string;
     /** Window the rows, for a long table. */
     virtualize?: boolean;
     emptyText: string;
@@ -83,6 +90,9 @@ export function ResearchGrid({
     selected,
     onSelectCell,
     rowMenuItems,
+    columnMenuItems,
+    onAddColumn,
+    editDisabledReason,
     virtualize = false,
     emptyText,
     filteredEmptyText,
@@ -110,10 +120,11 @@ export function ResearchGrid({
         layoutKey: `${state.density}|${questions.map((column) => column.id).join(",")}`,
     });
     const windowRows = virtualize ? state.rows.slice(rowWindow.start, rowWindow.end) : state.rows;
-    const minWidth = `calc(2.75rem + 20rem + ${columns.year ? "4.5rem + " : ""}${questions
+    const addColumn = !!onAddColumn;
+    const minWidth = `calc(2.75rem + 20rem + ${columns.year ? "4.5rem + " : ""}${addColumn ? `${ADD_WIDTH} + ` : ""}${questions
         .map((column) => questionWidth(column) ?? FLEX_MIN)
         .join(" + ") || "0px"})`;
-    const columnCount = 2 + (columns.year ? 1 : 0) + questions.length;
+    const columnCount = 2 + (columns.year ? 1 : 0) + questions.length + (addColumn ? 1 : 0);
     const selectable = table.rows.length > 0;
 
     return (
@@ -126,6 +137,7 @@ export function ResearchGrid({
                     {questions.map((column) => (
                         <col key={column.id} style={{ width: questionWidth(column) }} />
                     ))}
+                    {addColumn ? <col style={{ width: ADD_WIDTH }} /> : null}
                 </colgroup>
                 <thead>
                     <tr className="rt-head-row">
@@ -147,8 +159,27 @@ export function ResearchGrid({
                             </th>
                         ) : null}
                         {questions.map((column) => (
-                            <QuestionHeader key={column.id} column={column} badges={badges.get(column.id)!} />
+                            <QuestionHeader
+                                key={column.id}
+                                column={column}
+                                badges={badges.get(column.id)!}
+                                menuItems={columnMenuItems}
+                            />
                         ))}
+                        {addColumn ? (
+                            <th className="rt-th rt-th-add" scope="col">
+                                <button
+                                    type="button"
+                                    className="rt-icon-button rt-add-column"
+                                    aria-label="Add column"
+                                    title={editDisabledReason ?? "Add column"}
+                                    disabled={!!editDisabledReason}
+                                    onClick={onAddColumn}
+                                >
+                                    <Icon icon={PlusSignIcon} size={14} />
+                                </button>
+                            </th>
+                        ) : null}
                     </tr>
                 </thead>
                 <tbody ref={bodyRef}>
@@ -170,6 +201,7 @@ export function ResearchGrid({
                             onToggleSelect={state.toggleRowSelection}
                             onSelectCell={onSelectCell}
                             menuItems={rowMenuItems}
+                            addColumn={addColumn}
                         />
                     ))}
                     {rowWindow.padBottom > 0 ? <Spacer height={rowWindow.padBottom} /> : null}
@@ -187,6 +219,7 @@ export function ResearchGrid({
 }
 
 const EMPTY: ReadonlySet<string> = new Set();
+const ADD_WIDTH = "3.25rem";
 
 function Spacer({ height }: { height: number }): React.ReactElement {
     return (
@@ -249,16 +282,41 @@ function SelectBox({
     );
 }
 
-/** A question column's header: its name and badges over its question. */
+/**
+ * A question column's header: its name and badges over its question, and the
+ * column menu's button on hover.
+ */
 function QuestionHeader({
     column,
     badges,
+    menuItems,
 }: {
     column: Column;
     badges: ReturnType<typeof columnBadges>;
+    menuItems?(column: Column): MenuItem[];
 }): React.ReactElement {
+    // The menu renders inside this sticky cell, which stacks on its own: while
+    // it is open the cell is raised over its neighbours, or the next header
+    // would paint over the menu and take its clicks.
+    const [menuOpen, setMenuOpen] = React.useState(false);
     return (
-        <th className="rt-th rt-th-question" scope="col" data-column-id={column.id}>
+        <th
+            className={`rt-th rt-th-question${menuOpen ? " rt-th-menu-open" : ""}`}
+            scope="col"
+            data-column-id={column.id}
+        >
+            {menuItems ? (
+                <span className="rt-column-menu">
+                    <MenuButton
+                        menuItems={menuItems(column)}
+                        variant="ghost-secondary"
+                        icon={ArrowDownIcon}
+                        ariaLabel={`Column menu: ${column.header}`}
+                        width="13rem"
+                        toggleCallback={setMenuOpen}
+                    />
+                </span>
+            ) : null}
             <div className="rt-th-top">
                 <span className="rt-th-label">{column.header}</span>
                 {badges.staleCells > 0 ? (
@@ -317,6 +375,7 @@ interface ResearchRowProps {
     onToggleSelect(rowId: string): void;
     onSelectCell(address: CellAddress): void;
     menuItems(row: Row): MenuItem[];
+    addColumn: boolean;
 }
 
 const ResearchRow = React.memo(function ResearchRow({
@@ -334,6 +393,7 @@ const ResearchRow = React.memo(function ResearchRow({
     onToggleSelect,
     onSelectCell,
     menuItems,
+    addColumn,
 }: ResearchRowProps): React.ReactElement {
     return (
         <tr
@@ -370,6 +430,7 @@ const ResearchRow = React.memo(function ResearchRow({
                     onSelect={onSelectCell}
                 />
             ))}
+            {addColumn ? <td className="rt-td rt-td-add" aria-hidden="true" /> : null}
         </tr>
     );
 });

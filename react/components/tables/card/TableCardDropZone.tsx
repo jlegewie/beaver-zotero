@@ -111,6 +111,8 @@ export interface TableCardDropZoneProps {
     onAddScopes: (scopes: TableCardLibraryScope[]) => void;
     /** A note about the last drop for the card to show (items it left out), or null to clear it. */
     onNotice: (notice: string | null) => void;
+    /** Classes of the drop target's root; it wraps the card by default. */
+    className?: string;
 }
 
 /**
@@ -126,6 +128,7 @@ export const TableCardDropZone: React.FC<TableCardDropZoneProps> = ({
     onAddItems,
     onAddScopes,
     onNotice,
+    className = 'relative min-w-0',
 }) => {
     const [plan, setPlan] = useState<DropPlan | null>(null);
     const [error, setError] = useState<string | null>(null);
@@ -181,7 +184,7 @@ export const TableCardDropZone: React.FC<TableCardDropZoneProps> = ({
     return (
         <div
             ref={rootRef}
-            className="relative min-w-0"
+            className={className}
             onDragEnter={onDragOver}
             onDragOver={onDragOver}
             onDragLeave={onDragLeave}

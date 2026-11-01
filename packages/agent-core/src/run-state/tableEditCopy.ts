@@ -50,9 +50,7 @@ export function tableChangeLines(changes: readonly TableChange[]): TableChangeLi
                 lines.push({ tone: "add", text: `Added column ${quoted(change.header)}` });
                 break;
             case "update_column": {
-                const what = change.fields.length
-                    ? change.fields.map((field) => (field === "header" ? "header" : field === "question" ? "question" : "options")).join(", ")
-                    : "no change";
+                const what = change.fields.length ? change.fields.join(", ") : "no change";
                 const effects = [
                     change.stale ? `${plural(change.stale, "answer")} out of date` : null,
                     change.relabelled ? `${plural(change.relabelled, "answer")} relabelled` : null,

@@ -2633,3 +2633,164 @@
     font-size: 0.92rem;
     color: var(--fill-secondary);
 }
+
+/* ==========================================================================
+ * Research table — structural edit controls: the title and description in
+ * place, the sources chip's popover, the column menu and (+)
+ * ========================================================================== */
+
+.beaver-root .rt-inline {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    min-width: 0;
+}
+
+.beaver-root .rt-inline-editable > .rt-title,
+.beaver-root .rt-inline-editable > .rt-description {
+    cursor: text;
+    min-width: 0;
+}
+
+.beaver-root .rt-inline-placeholder {
+    color: var(--fill-tertiary);
+}
+
+/* The pencil shows on hover and on keyboard focus, and takes its room always,
+ * so nothing moves. */
+.beaver-root .rt-inline-pencil {
+    width: 1.5rem;
+    height: 1.5rem;
+    opacity: 0;
+}
+
+.beaver-root .rt-identity:hover .rt-inline-pencil,
+.beaver-root .rt-inline-pencil:focus-visible {
+    opacity: 1;
+}
+
+.beaver-root .rt-inline-field {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.1rem 0.4rem;
+    margin-left: -0.4rem;
+    border: 1px solid var(--accent-blue);
+    border-radius: 0.4rem;
+    outline: none;
+    background: var(--material-background);
+    color: var(--fill-primary);
+    font: inherit;
+    white-space: normal;
+}
+
+.beaver-root textarea.rt-inline-field {
+    resize: vertical;
+}
+
+.beaver-root .rt-popover-anchor {
+    position: relative;
+    display: inline-flex;
+}
+
+.beaver-root .rt-popover {
+    position: absolute;
+    top: calc(100% + 0.4rem);
+    left: 0;
+    z-index: 30;
+    border: 1px solid var(--color-border50);
+    border-radius: 0.75rem;
+    background: var(--material-background);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.16);
+}
+
+.beaver-root .rt-sources-popover {
+    width: 25rem;
+    max-height: 32rem;
+    overflow-y: auto;
+}
+
+.beaver-root .rt-sources-button {
+    background: transparent;
+    font: inherit;
+    cursor: pointer;
+}
+
+.beaver-root .rt-sources-button:hover,
+.beaver-root .rt-sources-button[aria-expanded="true"] {
+    background: var(--fill-quinary);
+}
+
+.beaver-root .rt-sources-chip .rt-chip-chevron {
+    color: var(--fill-tertiary);
+}
+
+.beaver-root .rt-new-papers-add {
+    height: 1.55rem;
+    margin-right: -0.4rem;
+    padding: 0 0.6rem;
+    border: 0;
+    border-radius: 0.4rem;
+    background: var(--accent-blue);
+    color: #fff;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.beaver-root .rt-new-papers-add:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.beaver-root .rt-hidden-columns {
+    height: 2.15rem;
+    padding: 0 0.7rem;
+    border: 1px dashed var(--rt-border);
+    border-radius: 0.55rem;
+    background: transparent;
+    color: var(--fill-secondary);
+    font: inherit;
+    cursor: pointer;
+}
+
+.beaver-root .rt-menu-danger {
+    color: var(--tag-red-primary);
+}
+
+/* The column menu's button floats at the header's top right on hover. */
+.beaver-root .rt-th-question {
+    padding-right: 2.2rem;
+}
+
+.beaver-root .rt-column-menu {
+    position: absolute;
+    top: 0.55rem;
+    right: 0.35rem;
+    opacity: 0;
+}
+
+.beaver-root .rt-th-question:hover .rt-column-menu,
+.beaver-root .rt-column-menu:focus-within,
+.beaver-root .rt-th-menu-open .rt-column-menu {
+    opacity: 1;
+}
+
+/* Each sticky header stacks on its own; the one with its menu open goes over
+ * the headers after it. */
+.beaver-root .rt-th-menu-open {
+    z-index: 3;
+}
+
+.beaver-root .rt-th-add {
+    padding: 0.6rem 0 0;
+    text-align: center;
+    border-right: 0;
+}
+
+.beaver-root .rt-add-column {
+    margin: 0 auto;
+}
+
+.beaver-root .rt-td-add {
+    border-right: 0;
+}

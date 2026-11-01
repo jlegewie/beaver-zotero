@@ -261,3 +261,52 @@ describe("option edits in the change list", () => {
         expect(added.ok && added.changes[0]).toMatchObject({ fields: ["question", "options"] });
     });
 });
+
+describe("the tab's column edits", () => {
+    const withDesign = (): TableSpec => {
+        const built = buildTable(
+            {
+                id: "t",
+                title: "T",
+                columns: [{ header: "Design", type: "select", description: "What is the design?", options: [{ label: "RCT" }, { label: "Other" }] }],
+            },
+            [source("s1", [paper("AAAAAAAA"), paper("BBBBBBBB")])],
+            "2026-10-30",
+        );
+        if (!built.ok) throw new Error(built.message);
+        const [a, b] = built.spec.rows;
+        a.cells.design = { outcome: "answered", provenance: "model", value: { kind: "select", label: "RCT" } };
+        b.cells.design = { outcome: "answered", provenance: "user", value: { kind: "select", label: "Other" } };
+        return built.spec;
+    };
+    const none = { added: [], refreshed: new Map() };
+
+    it("changes a type, clearing every answer and naming the type in the change", () => {
+        const result = applyEdit(withDesign(), { update_columns: [{ id: "design", type: "boolean" }] }, none, NOW);
+        if (!result.ok) throw new Error(result.message);
+        expect(result.changes[0]).toMatchObject({ op: "update_column", fields: ["type"], cleared: 2, user_cleared: 1 });
+        const column = result.spec.columns.find((c) => c.id === "design")!;
+        expect(column.type).toBe("boolean");
+        expect(column.options).toBeUndefined();
+        expect(result.spec.rows.every((row) => !row.cells.design)).toBe(true);
+    });
+
+    it("keeps the answers fresh when the user keeps them through a new question", () => {
+        const kept = applyEdit(
+            withDesign(),
+            { update_columns: [{ id: "design", description: "Which design was used?", existing_answers: "keep" }] },
+            none,
+            NOW,
+        );
+        if (!kept.ok) throw new Error(kept.message);
+        expect(kept.changes[0]).toMatchObject({ fields: ["question"], stale: 0 });
+        expect(kept.spec.rows.some((row) => row.cells.design?.stale)).toBe(false);
+        const marked = applyEdit(withDesign(), { update_columns: [{ id: "design", description: "Which design was used?" }] }, none, NOW);
+        expect(marked.ok && marked.changes[0]).toMatchObject({ fields: ["question"], stale: 2 });
+    });
+
+    it("ignores a type equal to the column's own", () => {
+        const result = applyEdit(withDesign(), { update_columns: [{ id: "design", type: "select", header: "Study design" }] }, none, NOW);
+        expect(result.ok && result.changes[0]).toMatchObject({ fields: ["header"], cleared: 0 });
+    });
+});

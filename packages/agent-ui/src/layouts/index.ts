@@ -81,6 +81,8 @@ export type { ExtractionTableProps } from "./surfaces/ExtractionTable";
 export { ResearchTable } from "./research/ResearchTable";
 export type {
     NewPapersNotice,
+    ResearchColumnType,
+    ResearchTableEditing,
     ResearchTableFocus,
     ResearchTableProps,
 } from "./research/ResearchTable";

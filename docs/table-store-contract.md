@@ -126,6 +126,26 @@ unchanged and a build that changes nothing commits nothing. The backend repeats
 only immediately, so retention never decides a replay. Column revisions come from
 the build.
 
+### Tab edits and Undo
+
+The table tab's structural edits take the model edit's path without its
+operation identity: `applyUserTableEdit(ref, operations, { seal, session })`
+(`table_applyUserEdit`, through the renderer's table commands) resolves the
+sources an edit adds or refreshes, then calls `applyTableEdit` with the same
+builder and no `operation`. An ordinary edit collapses into the tab session's
+version (`collapse_key: tab:<session>`); a destructive one (a removal, a type
+change, a removed option) passes `seal`. The result says whether a version was
+`committed`, so a no-op edit offers no Undo. An `operation` seals by default.
+
+`undoTableEdit(ref, { version, sha256?, run_id? }, meta)` takes one edit back.
+Under the lock it requires that `version` is still the tip and that the
+current spec hash equals `sha256` (absent: that version's log entry's hash);
+with `run_id`, the entry must be that run's model edit. It then commits the
+newest retained version below it as a new, sealed version, carrying column
+revisions. Anything written after the edit (a fill commit, another edit, a
+sync) refuses with `changed`; the tab and the `edit_table` tool display point
+the user to version history instead.
+
 `editTable` applies mutations inside the lock. A persistent editor passes an
 optional `{version, sha256}` fourth argument from the displayed snapshot; a
 stale draft is rejected before its mutations are applied. `writeTable` is the

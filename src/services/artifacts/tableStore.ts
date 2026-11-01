@@ -1765,6 +1765,8 @@ export type TableApplyEditResult =
           ok: true;
           /** A repeat answered from the version the first call committed. */
           replayed: boolean;
+          /** Whether this call wrote a version (not a replay, not a no-op). */
+          committed: boolean;
           version: number;
           sha256: string;
           spec: TableSpec;
@@ -1774,62 +1776,70 @@ export type TableApplyEditResult =
     | { ok: false; code: string; message: string };
 
 /**
- * One model edit (`apply_edit`): build the new spec from the current one and
- * commit it as one sealed version, under the lock.
+ * One structural edit: build the new spec from the current one and commit it,
+ * under the lock. A model edit (`apply_edit`, with an `operation`) and a
+ * destructive edit in the tab (`meta.seal`) commit a version of their own; an
+ * ordinary tab edit passes its session's `collapse_key` and collapses like
+ * any write.
  *
- * The version entry records the edit's `operation_id`, request fingerprint
- * and change list. A repeat with the same id finds that entry among the
- * retained versions and answers the current state with the recorded changes,
- * writing nothing; the same id with a different request is
- * `operation_mismatch`. A failed build, or one that changes nothing, writes
- * nothing. Column revisions come from the build, not from the store.
+ * With an `operation`, the version entry records the edit's `operation_id`,
+ * request fingerprint and change list. A repeat with the same id finds that
+ * entry among the retained versions and answers the current state with the
+ * recorded changes, writing nothing; the same id with a different request is
+ * `operation_mismatch`. The tab's edits are local and never repeated, so they
+ * pass none. A failed build writes nothing; a build that changes nothing
+ * writes nothing and reports no changes.
+ * Column revisions come from the build, not from the store.
  */
 export async function applyTableEditUncoordinated(
     ref: TableRef,
     build: TableEditBuild,
     meta: TableWriteMeta,
-    operation: TableEditOperation,
+    operation?: TableEditOperation,
     accessGuard?: TableAccessGuard
 ): Promise<TableApplyEditResult> {
     requireWritable(ref);
     if (
-        typeof operation?.operation_id !== 'string' || !operation.operation_id.trim() ||
-        typeof operation.request_sha256 !== 'string' || !operation.request_sha256
+        operation !== undefined &&
+        (typeof operation?.operation_id !== 'string' || !operation.operation_id.trim() ||
+            typeof operation.request_sha256 !== 'string' || !operation.request_sha256)
     ) {
         throw new TableItemError('An edit requires operation_id and request_sha256.', 'invalid_request');
     }
-    let committed = false;
     const result = await withTableLock(ref, async (): Promise<TableApplyEditResult> => {
         const { item, current } = await prepareWrite(ref);
         const spec = requireCurrentSpec(ref, current);
         accessGuard?.(spec);
         const sha256 = await tableSpecHash(spec);
 
-        const prior = current.history.versions.find((e) => e.operation_id === operation.operation_id);
-        if (prior) {
+        const prior = operation && current.history.versions.find((e) => e.operation_id === operation.operation_id);
+        if (operation && prior) {
             if (prior.request_sha256 !== operation.request_sha256) {
                 throw new TableItemError('Operation identity was reused with a different request.', 'operation_mismatch');
             }
             // A repeat may follow a render that never finished.
             const saved = (await renderIsCurrent(item)) || (await renderCommitted(ref));
-            return { ok: true, replayed: true, version: current.version, sha256, spec, saved, changes: prior.changes ?? [] };
+            return { ok: true, replayed: true, committed: false, version: current.version, sha256, spec, saved, changes: prior.changes ?? [] };
         }
 
         const built = build(spec);
         if (!built.ok) return { ok: false, code: built.code, message: built.message };
         if ((await tableOperationHash(unstampedSpec(built.spec))) === (await tableOperationHash(unstampedSpec(spec)))) {
-            return { ok: true, replayed: false, version: current.version, sha256, spec, saved: true, changes: built.changes };
+            // Nothing changed, so nothing is reported: a change list here would
+            // offer an Undo of whatever version is current.
+            return { ok: true, replayed: false, committed: false, version: current.version, sha256, spec, saved: true, changes: [] };
         }
-        const written = await commitWrite(ref, item, current, built.spec, { ...meta, seal: true }, {
+        // A model edit (one with an operation identity) always seals.
+        const written = await commitWrite(ref, item, current, built.spec, { ...meta, seal: meta.seal ?? operation !== undefined }, {
             accessGuard,
-            record: { ...operation, changes: built.changes },
+            ...(operation ? { record: { ...operation, changes: built.changes } } : {}),
         });
         // Without an expected version the write cannot conflict.
         if (!written.ok) throw new TableItemError(`Table ${ref.key} could not be written.`, 'corrupt');
-        committed = true;
         return {
             ok: true,
             replayed: false,
+            committed: true,
             version: written.version,
             sha256: written.sha256,
             spec: written.spec,
@@ -1837,7 +1847,7 @@ export async function applyTableEditUncoordinated(
             changes: built.changes,
         };
     });
-    if (committed && result.ok) emitTableUpdated(ref, result.version, meta);
+    if (result.ok && result.committed) emitTableUpdated(ref, result.version, meta);
     return result;
 }
 
@@ -2132,6 +2142,76 @@ export async function revertTableUncoordinated(
         return commitWrite(ref, item, current, spec, revertMeta, { accessGuard, carryRevisions: true });
     });
     if (result.ok) emitTableUpdated(ref, result.version, revertMeta);
+    return result;
+}
+
+/** Which edit {@link undoTableEditUncoordinated} takes back. */
+export interface TableUndoTarget {
+    /** The version the edit committed. */
+    version: number;
+    /**
+     * The spec hash that version had; absent, its log entry's. The tab passes
+     * the hash its edit returned.
+     */
+    sha256?: string;
+    /**
+     * The agent run that made the edit (the `edit_table` tool display): the
+     * version must be that run's model edit.
+     */
+    run_id?: string;
+}
+
+export type TableUndoResult =
+    | TableWriteOk
+    | { ok: false; code: 'changed' | 'not_found'; message: string };
+
+/** What Undo says when the table moved on after the edit. */
+export const TABLE_UNDO_CHANGED = 'The table has changed since; use version history.';
+
+/**
+ * Undo of one edit: restores the version before it as a new, sealed version,
+ * but only while the table is exactly as the edit left it — the edit's
+ * version is still the newest and the table's spec hash still equals the
+ * hash that version recorded. Anything written since (a fill, another edit,
+ * a sync) refuses with `changed`, and the user goes to version history.
+ * The check and the restore happen under the table's lock.
+ */
+export async function undoTableEditUncoordinated(
+    ref: TableRef,
+    target: TableUndoTarget,
+    meta: TableWriteMeta,
+): Promise<TableUndoResult> {
+    requireWritable(ref);
+    if (!Number.isInteger(target?.version) || target.version < 2) {
+        throw new TableItemError('Undo requires the version an edit committed.', 'invalid_request');
+    }
+    const result = await withTableLock(ref, async (): Promise<TableUndoResult> => {
+        const { item, current } = await prepareWrite(ref);
+        const spec = requireCurrentSpec(ref, current);
+        const entry = current.history.versions.find((e) => e.version === target.version);
+        const changed = { ok: false, code: 'changed', message: TABLE_UNDO_CHANGED } as const;
+        if (!entry) return { ok: false, code: 'not_found', message: 'This edit is no longer in the table\'s history.' };
+        if (target.run_id !== undefined && (entry.run_id !== target.run_id || !entry.operation_id)) return changed;
+        if (current.version !== target.version) return changed;
+        const sha256 = await tableSpecHash(spec);
+        if (sha256 !== (target.sha256 ?? entry.sha256)) return changed;
+        // The log is oldest first: the last entry below the edit is the version before it.
+        const before = current.history.versions.filter((e) => e.version < target.version).at(-1);
+        if (!before) return { ok: false, code: 'not_found', message: 'The version before this edit is no longer kept.' };
+        const restored = await readStoredVersion(ref, item, current, before.version);
+        const written = await commitWrite(
+            ref,
+            item,
+            current,
+            restored,
+            { ...meta, change: meta.change ?? 'Undid an edit', run_id: undefined, collapse_key: undefined, seal: true },
+            { carryRevisions: true },
+        );
+        // Without an expected version the write cannot conflict.
+        if (!written.ok) throw new TableItemError(`Table ${ref.key} could not be written.`, 'corrupt');
+        return written;
+    });
+    if (result.ok) emitTableUpdated(ref, result.version, meta);
     return result;
 }
 
@@ -2454,6 +2534,8 @@ export function registerTableLocalCommands(
         read: async (ref: TableRef) => Zotero.Beaver.libraryOperations.run('table_openTable', [ref], { owner }),
         history: async (ref: TableRef) => (await Zotero.Beaver.libraryOperations.run('table_openTable', [ref], { owner })).history,
         revert: (ref: TableRef, version: number) => Zotero.Beaver.libraryOperations.run('table_revertTable', [ref, version, { actor: 'user' }], { owner }),
+        edit: (ref, operations, options) => Zotero.Beaver.libraryOperations.run('table_applyUserEdit', [ref, operations, options], { owner }),
+        undo: (ref, target) => Zotero.Beaver.libraryOperations.run('table_undoTableEdit', [ref, target, { actor: 'user' }], { owner }),
         restoreShadow: (ref: TableRef) => Zotero.Beaver.libraryOperations.run('table_restoreShadowVersion', [ref], { owner }),
     };
     const entries = tableLocalCommands();
@@ -2524,6 +2606,10 @@ export function applyTableEdit(...args: Parameters<typeof applyTableEditUncoordi
 
 export function writeTable(...args: Parameters<typeof writeTableUncoordinated>): ReturnType<typeof writeTableUncoordinated> {
     return Zotero.Beaver.libraryOperations.run('table_writeTable', args);
+}
+
+export function undoTableEdit(...args: Parameters<typeof undoTableEditUncoordinated>): ReturnType<typeof undoTableEditUncoordinated> {
+    return Zotero.Beaver.libraryOperations.run('table_undoTableEdit', args);
 }
 
 export function editTable(...args: Parameters<typeof editTableUncoordinated>): ReturnType<typeof editTableUncoordinated> {
