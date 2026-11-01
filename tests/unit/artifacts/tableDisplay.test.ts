@@ -6,6 +6,7 @@ const deps = vi.hoisted(() => ({
     subscribe: vi.fn(),
     unsubscribe: vi.fn(),
     lookup: vi.fn(),
+    fileSync: vi.fn(),
     register: vi.fn(),
     unregister: vi.fn(),
     addEvent: vi.fn(),
@@ -19,9 +20,13 @@ vi.mock("../../../src/utils/libraryIdentity", () => ({
     resolveLibraryRef: (ref: { library_ref: string }) =>
         ref.library_ref === "u" ? 1 : 7,
 }));
-vi.mock("../../../src/services/artifacts/tableItemIdentity", () => ({
-    readTableItemSpec: deps.read,
-}));
+vi.mock("../../../src/services/artifacts/tableItemIdentity", async (importOriginal) => {
+    const original = await importOriginal<typeof import("../../../src/services/artifacts/tableItemIdentity")>();
+    return {
+        readTableItemSpec: deps.read,
+        missingTableFileMessage: original.missingTableFileMessage,
+    };
+});
 vi.mock("../../../src/services/artifacts/tablesApi", () => ({
     getTablesApi: deps.api,
 }));
@@ -67,7 +72,9 @@ beforeEach(() => {
             unregisterObserver: deps.unregister,
         },
         Beaver: { runtime: { subscribeWindow: deps.subscribe } },
+        Sync: { Storage: { Local: { getEnabledForLibrary: deps.fileSync } } },
     });
+    deps.fileSync.mockReturnValue(false);
 });
 
 describe("current table display and snapshot navigation", () => {
@@ -96,6 +103,12 @@ describe("current table display and snapshot navigation", () => {
         expect(await resolveTableDisplay("u-ABCDEFGH")).toHaveProperty(
             "reason",
             "Table file is missing on this device.",
+        );
+        deps.fileSync.mockReturnValueOnce(true);
+        deps.read.mockResolvedValueOnce({ ok: false, code: "no_file" });
+        expect(await resolveTableDisplay("u-ABCDEFGH")).toHaveProperty(
+            "reason",
+            "Table files are not on this device yet. Opening the table downloads them.",
         );
         deps.api.mockReturnValue(null);
         expect(await resolveTableDisplay("u-ABCDEFGH")).toHaveProperty(

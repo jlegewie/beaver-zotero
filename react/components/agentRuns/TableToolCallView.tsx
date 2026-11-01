@@ -91,7 +91,7 @@ export const TableToolCallView: React.FC<TableToolCallViewProps> = ({
             setOpenMessage('Table provider unavailable.');
             return;
         }
-        const outcome = await open(tableKey, origin)
+        const outcome = await open(tableKey, origin, { onDownload: () => setOpenMessage('Downloading table…') })
             .catch(() => ({ error: 'Table provider unavailable.' }));
         setOpenMessage('error' in outcome ? outcome.error : (outcome.warning ?? ''));
     }, [tableKey]);

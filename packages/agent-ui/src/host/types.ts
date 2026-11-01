@@ -105,11 +105,13 @@ export interface NavigationHost {
      * Opens a stored table in the client's table view. `origin` is the window
      * the interaction happened in — derive it from the clicked element's
      * `ownerDocument` — so the table opens beside the surface the user is
-     * looking at rather than in whichever window is newest.
+     * looking at rather than in whichever window is newest. `onDownload`
+     * fires when the table's files must be downloaded before it can open.
      */
     openTable?(
         key: string,
         origin?: Window | null,
+        options?: { onDownload?: () => void },
     ): Promise<{ ok: true; warning?: string } | { error: string }>;
     /** Reveal/select the referenced item in the library view. */
     revealInLibrary(ref: ZoteroItemReference): void;

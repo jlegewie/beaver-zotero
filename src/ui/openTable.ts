@@ -37,6 +37,7 @@ import {
     readTableItemSpec,
     resolveTableItem,
     TABLE_REPAIR_SKIPPED,
+    tableFilesDownloadable,
     tableRepairAllowed,
     unreadableTableRecovery,
     type TableRef,
@@ -58,6 +59,8 @@ export interface OpenTableOptions {
     background?: boolean;
     /** Tab position, for reopening a closed tab where it was. */
     index?: number;
+    /** Called when the table's files have to be downloaded before it opens. */
+    onDownload?: () => void;
 }
 
 /** How long to wait for a main window's Beaver renderer to come up. */
@@ -112,20 +115,32 @@ async function repairOnOpen(item: Zotero.Item, ref: TableRef): Promise<string | 
     return undefined;
 }
 
+/** Downloads in flight, so a second click waits for the first one's download. */
+const downloads = new Map<string, Promise<boolean>>();
+
 /**
  * Downloads a table synced on demand, whose files are not on this device yet,
- * as Zotero does before opening any attachment. False when file syncing is off
- * for its library or the download fails.
+ * as Zotero does before opening any attachment. False when the download did
+ * not run or failed.
  */
-async function downloadTableFiles(item: Zotero.Item): Promise<boolean> {
-    if (!Zotero.Sync.Storage.Local.getEnabledForLibrary(item.libraryID)) return false;
-    try {
-        await Zotero.Sync.Runner.downloadFile(item);
-        return true;
-    } catch (error) {
-        logger(`openTable: could not download table ${item.key}: ${String(error)}`, 2);
-        return false;
+function downloadTableFiles(item: Zotero.Item): Promise<boolean> {
+    const id = `${item.libraryID}/${item.key}`;
+    let download = downloads.get(id);
+    if (!download) {
+        download = (async () => {
+            try {
+                // False, without throwing, when Zotero is offline, not signed
+                // in, or cannot verify the library's file storage.
+                if (await Zotero.Sync.Runner.downloadFile(item)) return true;
+                logger(`openTable: download of table ${item.key} did not run`, 2);
+            } catch (error) {
+                logger(`openTable: could not download table ${item.key}: ${String(error)}`, 2);
+            }
+            return false;
+        })().finally(() => downloads.delete(id));
+        downloads.set(id, download);
     }
+    return download;
 }
 
 /**
@@ -142,11 +157,20 @@ export async function openTable(ref: TableRef, options: OpenTableOptions = {}): 
         // this device and cannot be downloaded, or that cannot be read at all,
         // opens nothing.
         let read = await readTableItemSpec(item);
-        if (!read.ok && read.code === 'no_file' && (await downloadTableFiles(item))) {
-            read = await readTableItemSpec(item);
+        const download = !read.ok && read.code === 'no_file' && tableFilesDownloadable(item);
+        if (download) {
+            options.onDownload?.();
+            if (await downloadTableFiles(item)) {
+                read = await readTableItemSpec(item);
+                if (!read.ok && read.code === 'no_file')
+                    logger(`openTable: table ${item.key} still has no file after its download`, 2);
+            }
         }
         if (!read.ok) {
-            if (read.code === 'no_file') return { error: `Could not open table ${ref.key} — it has no file on disk.` };
+            if (read.code === 'no_file') {
+                if (!download) return { error: `Could not open table ${ref.key} — it has no file on disk.` };
+                return { error: `Could not open table ${ref.key} — its files could not be downloaded to this device.` };
+            }
             const recovery = await unreadableTableRecovery(ref);
             return {
                 error: `Could not open table ${ref.key} — ${read.message.replace(/\.$/, '')}.${recovery ? ` ${recovery}` : ''}`,
