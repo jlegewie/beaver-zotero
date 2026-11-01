@@ -119,7 +119,7 @@ vi.mock('../../src/modules/readerIntegration', () => ({ initReaderIntegration: v
 vi.mock('../../src/modules/readerToolbarMenu', () => ({ initReaderToolbarMenu: vi.fn(), cleanupReaderToolbarMenu: vi.fn() }));
 vi.mock('../../src/modules/noteEditorExportMenu', () => ({ initNoteEditorExportMenu: vi.fn(), cleanupNoteEditorExportMenu: vi.fn() }));
 vi.mock('../../src/services/artifacts/view/readerTableView', () => ({
-    initReaderTableViews: vi.fn(), cleanupReaderTableViews: vi.fn(), cleanupReaderTableViewsForWindow: vi.fn(),
+    initTableReaderRedirect: vi.fn(), cleanupTableReaderRedirect: vi.fn(),
 }));
 vi.mock('../../src/ui/tableItemPane', () => ({ initTableItemPane: vi.fn(), cleanupTableItemPane: vi.fn() }));
 vi.mock('../../src/ui/tableTab', () => ({ initTableTabs: vi.fn(), cleanupTableTabs: vi.fn() }));

@@ -4,7 +4,7 @@ import { handleTestVoiceHttpRequest } from './handlers/testVoiceHandlers';
 import { handleTestExportHttpRequest, handleTestExportNoteHttpRequest } from './handlers/testExportHandlers';
 import { handleTestNoteCreateHttpRequest, handleTestNoteDeleteHttpRequest, handleTestNoteReadHttpRequest } from './handlers/testNoteHandlers';
 import { handleTestTableFillHttpRequest, handleTestTablePendingHttpRequest } from './handlers/testTableFillHandlers';
-import { handleTestTableCreateHttpRequest, handleTestTableReadHttpRequest, handleTestTableListHttpRequest, handleTestTableWriteHttpRequest, handleTestTableEditHttpRequest, handleTestTableVersionsHttpRequest, handleTestTableRevertHttpRequest, handleTestTableDeleteHttpRequest, handleTestTableOpenHttpRequest, handleTestTableCorruptHttpRequest, handleTestTableShadowHttpRequest, handleTestTableRestoreShadowHttpRequest, handleTestTableTrimHttpRequest, handleTestTableViewStateHttpRequest, handleTestTableItemPaneHttpRequest } from './handlers/testTableHandlers';
+import { handleTestTableCreateHttpRequest, handleTestTableReadHttpRequest, handleTestTableListHttpRequest, handleTestTableWriteHttpRequest, handleTestTableEditHttpRequest, handleTestTableVersionsHttpRequest, handleTestTableRevertHttpRequest, handleTestTableDeleteHttpRequest, handleTestTableOpenHttpRequest, handleTestTableCorruptHttpRequest, handleTestTableShadowHttpRequest, handleTestTableRestoreShadowHttpRequest, handleTestTableTrimHttpRequest, handleTestTableItemPaneHttpRequest } from './handlers/testTableHandlers';
 import {
     handleTestAttachmentImageHttpRequest,
     handleTestExcludedLibrariesHttpRequest,
@@ -1210,13 +1210,6 @@ export function registerEndpoints(): (() => void) | undefined {
         endpoints['/beaver/test/table-shadow'] = createEndpoint(handleTestTableShadowHttpRequest);
 
         endpoints['/beaver/test/table-restore-shadow'] = createEndpoint(handleTestTableRestoreShadowHttpRequest);
-
-        // The reader host (dev-only): open a stored table in the reader and
-        // report which of the enhancer's seams attached, and list every table
-        // document currently enhanced in either host.
-        endpoints['/beaver/test/table-open-reader'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/table-open-reader', request));
-
-        endpoints['/beaver/test/table-view-state'] = createEndpoint(handleTestTableViewStateHttpRequest);
 
         // The item-pane section (dev-only): whether it is registered, and the
         // fields it would render for one table.

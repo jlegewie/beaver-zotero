@@ -7,6 +7,7 @@ import { revealSource } from '../../utils/sourceUtils';
 import { navigateToAnnotation } from '../../utils/readerUtils';
 import { selectItemById } from '../../utils/selectItem';
 import { resolveLibraryRef } from '../../../src/utils/libraryIdentity';
+import { isTableItem, loadTableItemFields } from '../../../src/services/artifacts/tableItemIdentity';
 
 const READER_TYPE_LABELS: Record<string, string> = { pdf: 'PDF', epub: 'EPUB', snapshot: 'Snapshot' };
 
@@ -71,7 +72,9 @@ async function annotationEntries(annotation: Zotero.Item): Promise<MenuItem[]> {
  * New Tab / New Window" (a single "Open <type>" when an external viewer is set
  * for the type, "Open Attachment" for a file without a built-in reader); and
  * "Show in Finder" / "Show File". Regular items act on their
- * best attachment, like Zotero. Annotations get {@link annotationEntries}.
+ * best attachment, like Zotero. Annotations get {@link annotationEntries}. A
+ * stored table gets "Open Table": Zotero's own open, which downloads a file
+ * synced on demand, and whose reader is handed to the Beaver tab.
  *
  * Local reveal/open actions over persisted history, so deliberately not gated
  * on library exclusion.
@@ -88,6 +91,14 @@ export async function itemMenuItems(ref: ZoteroItemReference): Promise<MenuItem[
         icon: LibraryIcon,
         onClick: () => revealSource({ ...ref, library_id: libraryID }),
     }];
+
+    if (item.isAttachment()) {
+        await loadTableItemFields([item]);
+        if (isTableItem(item)) {
+            entries.push({ label: 'Open Table', icon: FileViewIcon, onClick: () => void viewAttachment(item.id) });
+            return entries;
+        }
+    }
 
     if (item.isNote()) {
         if (typeof (Zotero as any).Notes?.open === 'function') {

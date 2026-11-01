@@ -591,10 +591,9 @@ export default tseslint.config(
     // `src/hooks.ts`. Importing one from the webpack bundle does not fail
     // anything; it silently creates a SECOND copy of whatever state it keeps.
     // The esbuild copy does the real work while the webpack copy stays empty,
-    // so `/beaver/test/table-view-state` reports no views for readers that are
-    // demonstrably enhanced, and a view registered through the webpack copy is
-    // invisible to `cleanupReaderTableViews()` — leaking the reader's document
-    // and the window it lives in.
+    // so a dev endpoint reports no tabs that are demonstrably open, and a
+    // listener registered through the webpack copy is invisible to the cleanup
+    // `hooks.ts` runs — leaking the window realm it closes over.
     //
     // `openTable.ts` keeps no state of its own and is listed for the other half
     // of the rule: `Zotero.__beaverTables` is the single seam every caller of a
@@ -630,7 +629,7 @@ export default tseslint.config(
                             ],
                             allowTypeImports: true,
                             message:
-                                "This module owns stored-table runtime state and is compiled into the esbuild bundle. Importing it here creates a second, permanently empty copy of that state (empty registries, leaked reader views). Use `getTablesApi()` from src/services/artifacts/tablesApi.ts; import stateless helpers from artifacts/view/tableLinks.ts instead.",
+                                "This module owns stored-table runtime state and is compiled into the esbuild bundle. Importing it here creates a second, permanently empty copy of that state (empty registries, leaked listeners). Use `getTablesApi()` from src/services/artifacts/tablesApi.ts; import stateless helpers from artifacts/view/tableLinks.ts instead.",
                         },
                     ],
                 },

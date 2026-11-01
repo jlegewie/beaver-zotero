@@ -15,9 +15,8 @@ import {
     unregisterTablesApi
 } from "./services/artifacts/tablesApiHost";
 import {
-    cleanupReaderTableViews,
-    cleanupReaderTableViewsForWindow,
-    initReaderTableViews,
+    cleanupTableReaderRedirect,
+    initTableReaderRedirect,
 } from "./services/artifacts/view/readerTableView";
 import { BackgroundExtractor } from "./services/backgroundExtractor";
 import { NewItemWatcher } from "./services/backgroundProcessing/newItemWatcher";
@@ -463,10 +462,10 @@ async function onStartup() {
         // -------- "Export with Beaver" in the note editor's More menu --------
         initNoteEditorExportMenu();
 
-        // -------- Enhance stored tables opened in a reader window --------
-        // Reader tabs on a table are replaced by the Beaver tab
-        // (`initTableTabs` above); reader windows keep the enhanced snapshot.
-        initReaderTableViews();
+        // -------- Readers on a stored table go to the Beaver tab --------
+        // A reader tab is replaced when it is added (`initTableTabs`); this
+        // catches restored reader tabs and reader windows as they load.
+        initTableReaderRedirect();
 
         // -------- Describe a stored table in the item pane --------
         // Registered once, globally: Zotero re-creates the section in every
@@ -474,8 +473,8 @@ async function onStartup() {
         initTableItemPane();
 
         // -------- Publish the table surfaces to the other bundle --------
-        // The reader views and the item-pane registration keep module state, so
-        // they live in this bundle only. Anything on the webpack side reaches
+        // The reader redirect and the item-pane registration keep module state,
+        // so they live in this bundle only. Anything on the webpack side reaches
         // them through `Zotero.__beaverTables` rather than importing them,
         // which would give it a second, permanently empty copy.
         registerTablesApi();
@@ -720,13 +719,6 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         // next popup translation, breaking Zotero's right-click menu.
         unregisterMainWindowFtl(win);
 
-        // Release this window's table views. Window-specific, so it runs on
-        // every unload and not only during global cleanup: a reader-hosted
-        // table left behind holds the closed window's iframe and its rendered
-        // document — a dead realm kept alive, which on macOS (close the last
-        // window, app keeps running) survives indefinitely.
-        cleanupReaderTableViewsForWindow(win);
-
         if (!isLastWindow) {
             ztoolkit.log("onMainWindowUnload: Other windows remain, skipping global cleanup");
             return;
@@ -805,16 +797,15 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         // 11. Unregister context menus
         cleanupContextMenus();
 
-        // 12. Unregister reader integration listeners, and release the table
-        //     views: one left behind holds its reader, that reader's document
-        //     and the window both live in.
+        // 12. Unregister reader integration listeners, including the redirect
+        //     of readers on a table.
         cleanupReaderIntegration();
         // The tabs close (and are remembered) while their kinds are still registered.
         cleanupBeaverTabs();
         cleanupTableTabs();
         stopTableTabProbe();
         unregisterTablesApi();
-        cleanupReaderTableViews();
+        cleanupTableReaderRedirect();
         cleanupTableItemPane();
 
         // 13. Unregister reader toolbar menu and the note editor export entry
@@ -1110,7 +1101,7 @@ async function disposePlugin(): Promise<void> {
         cleanupTableTabs();
         stopTableTabProbe();
         unregisterTablesApi();
-        cleanupReaderTableViews();
+        cleanupTableReaderRedirect();
         cleanupTableItemPane();
         cleanupReaderToolbarMenu();
         cleanupNoteEditorExportMenu();

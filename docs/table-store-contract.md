@@ -24,22 +24,34 @@ failed render never fails a write: the write returns `saved: false`, and the nex
 open renders again.
 
 The render is synchronous because a render deferred past the write would need
-its own mutation admission, permission rechecks, shutdown flushes and reader
-staleness tracking to be safe.
+its own mutation admission, permission rechecks, shutdown flushes and a flush
+before Zotero syncs the attachment to be safe.
 
-Opening a table re-renders a snapshot whose hash or bookkeeping does not match
-the committed `table.json` (reported as `rerendered`; a render that fails again
-reports `bookkeeping_pending`). A reader opened without the product Open (a
-double-click or a restored session) compares its document with the committed
-spec when it mounts, marks itself outdated on a mismatch and runs the same open
-repair. A missing snapshot is regenerated on the next open in a library
+The snapshot is a static page for readers without Beaver (Zotero without the
+plugin, the web library, the mobile apps, a browser) and for Zotero's full-text
+index (`tableDocument.ts`). It has no script and no controls: rows are emitted
+in the spec's sort order, each row expands with `<details>` to its answers in
+full and their evidence (quote, table context, a citation marker linking to the
+cited page), the cited works are listed under the table, row verbs and markers
+are plain `zotero://` links, and a dismissible notice says the table was made
+with Beaver. A cell's reasoning and evidence boxes are not in the page; both
+stay in `table.json`. Every commit re-renders, re-indexes and re-uploads the
+page, which is about 1.2–1.3 times the size of `table.json`.
+
+With Beaver running, no reader shows a table: a reader tab is replaced by the
+Beaver tab when it is added, and a restored reader tab or a reader window is
+handed to it when it loads (`view/readerTableView.ts`), so a reader never
+presents an older render as current. Opening a table re-renders a snapshot
+whose hash or bookkeeping does not match the committed `table.json` (reported
+as `rerendered`; a render that fails again reports `bookkeeping_pending`), and
+the tab warns that Zotero without Beaver shows an earlier version when the
+render still fails. A missing snapshot is regenerated on the next open in a library
 Beaver may write to, because Zotero treats an attachment without its main file
 as one to download. Reads never write. `table.json` is written atomically and
 syncs with its history, so a `table.json` missing beside a retained history is
 damage from outside: the table reads as `corrupt`, nothing rebuilds it, and
 restoring a retained version (revert, or the item pane's restore of this
 device's version) writes a new one. A
-A
 storage directory with no table, no history and no snapshot is a table whose
 files have not arrived yet (`file_missing`); a snapshot without a table is
 `no_spec`.
@@ -237,9 +249,7 @@ write can therefore lose that recovery insurance while leaving the table intact.
 Cells carry item-less evidence (`locator`, `quote`, `page`, `boxes`, or a metadata
 `field`); there is no table-level citation list. `layouts/tableCitations.ts`
 assembles a chat citation from a row's reference cell and one evidence entry; the
-React surfaces, the reader enhancement and the snapshot's source list all use it.
-Snapshot markers carry `data-cite-key="<row>|<column>|<index>"`, and the reader
-enhancement resolves them against the spec read through the store.
+React surfaces and the snapshot's markers and source list all use it.
 
 `tests/fixtures/artifacts/table-mutations`, `table-summaries`, `table-merges` and
 `table-negative-reads` (which values head their passages "Related passages") are
@@ -294,8 +304,8 @@ returning history. Missing or corrupt older versions remain unavailable.
 
 The item-pane Edit action opens one persistent React editor in the existing Beaver
 window. Ordinary Open shows the table in the Beaver tab (`src/ui/tableTab.ts`), which
-reads the committed `table.json` and re-reads it on the store's update event; a reader tab
-opened on a table is replaced by that tab. Local edits, explicit
+reads the committed `table.json` and re-reads it on the store's update event; a reader
+opened on a table, in a tab or a window, is replaced by that tab. Local edits, explicit
 history restore, and resets do not call the backend. Notifications reload current
 content, while unsaved drafts require an explicit reload after concurrent changes.
 Saving one editor section refreshes its saved fields and revision without discarding
