@@ -1,5 +1,5 @@
-import { DEMO_ROW_LIMIT, TABLES_API_MISSING, OpenTableRequest, DemoItem, collectDemoItems, yearOf, evidenceFor, sentence, textCell, typeColumn, typeLabelFor, typeCell, buildDemoTable, referenceRow, buildSearchDemo, buildExtractionDemo, selectLabelFor, TableCreateRequest, handleTestTableCreateHttpRequest, TableReadRequest, handleTestTableReadHttpRequest, handleTestTableListHttpRequest, errorResponse, TableStoreRequest, tableRefFrom, writeMetaFrom, MISSING_KEY, writeResponse, TableWriteRequest, handleTestTableWriteHttpRequest, TableEditRequest, handleTestTableEditHttpRequest, handleTestTableVersionsHttpRequest, TableRevertRequest, handleTestTableRevertHttpRequest, TableDeleteRequest, handleTestTableDeleteHttpRequest, handleTestTableOpenHttpRequest, TableCorruptRequest, handleTestTableCorruptHttpRequest, rollBackWholeDirectory, handleTestTableShadowHttpRequest, handleTestTableRestoreShadowHttpRequest, handleTestTableViewStateHttpRequest, handleTestTableItemPaneHttpRequest, handleTestTableTrimHttpRequest } from '../../../src/services/localEndpoints/handlers/testTableHandlers';
-export { handleTestTableCreateHttpRequest, handleTestTableReadHttpRequest, handleTestTableListHttpRequest, handleTestTableWriteHttpRequest, handleTestTableEditHttpRequest, handleTestTableVersionsHttpRequest, handleTestTableRevertHttpRequest, handleTestTableDeleteHttpRequest, handleTestTableOpenHttpRequest, handleTestTableCorruptHttpRequest, handleTestTableShadowHttpRequest, handleTestTableRestoreShadowHttpRequest, handleTestTableTrimHttpRequest, handleTestTableViewStateHttpRequest, handleTestTableItemPaneHttpRequest } from '../../../src/services/localEndpoints/handlers/testTableHandlers';
+import { DEMO_ROW_LIMIT, TABLES_API_MISSING, OpenTableRequest, DemoItem, collectDemoItems, yearOf, evidenceFor, sentence, textCell, typeColumn, typeLabelFor, typeCell, buildDemoTable, referenceRow, buildSearchDemo, buildExtractionDemo, selectLabelFor, TableCreateRequest, handleTestTableCreateHttpRequest, TableReadRequest, handleTestTableReadHttpRequest, handleTestTableListHttpRequest, errorResponse, TableStoreRequest, tableRefFrom, writeMetaFrom, MISSING_KEY, writeResponse, TableWriteRequest, handleTestTableWriteHttpRequest, TableEditRequest, handleTestTableEditHttpRequest, handleTestTableVersionsHttpRequest, TableRevertRequest, handleTestTableRevertHttpRequest, TableDeleteRequest, handleTestTableDeleteHttpRequest, handleTestTableOpenHttpRequest, TableCorruptRequest, handleTestTableCorruptHttpRequest, rollBackWholeDirectory, handleTestTableShadowHttpRequest, handleTestTableRestoreShadowHttpRequest, handleTestTableItemPaneHttpRequest, handleTestTableTrimHttpRequest } from '../../../src/services/localEndpoints/handlers/testTableHandlers';
+export { handleTestTableCreateHttpRequest, handleTestTableReadHttpRequest, handleTestTableListHttpRequest, handleTestTableWriteHttpRequest, handleTestTableEditHttpRequest, handleTestTableVersionsHttpRequest, handleTestTableRevertHttpRequest, handleTestTableDeleteHttpRequest, handleTestTableOpenHttpRequest, handleTestTableCorruptHttpRequest, handleTestTableShadowHttpRequest, handleTestTableRestoreShadowHttpRequest, handleTestTableTrimHttpRequest, handleTestTableItemPaneHttpRequest } from '../../../src/services/localEndpoints/handlers/testTableHandlers';
 import { isTableItemError } from '../../../src/services/artifacts/tableItemIdentity';
 /**
  * Dev-only HTTP handlers for looking at the table renderer.
@@ -184,72 +184,4 @@ export async function handleTestOpenStoredTableHttpRequest(
 export async function handleTestCloseTableHttpRequest(): Promise<any> {
     await BeaverUIFactory.commandBeaverWindow("show-chat");
     return { ok: true, window_open: !!BeaverUIFactory.findBeaverWindow() };
-}
-
-// ---------------------------------------------------------------------------
-// The reader host (dev-only)
-// ---------------------------------------------------------------------------
-
-/**
- * Opens a stored table in the reader and reports what the enhancer attached.
- *
- * The report is deliberately literal: every step has its own field, and
- * `failures` names the ones that did not come up. A table that renders as a
- * plain static page is a supported outcome, so `ok: true` here means "the
- * attempt ran", not "everything attached" — read `enhanced`. `tab_id` is null
- * for a table opened in a reader *window* rather than a tab.
- */
-export async function handleTestTableOpenReaderHttpRequest(
-    request: { key?: string; libraryID?: number; timeoutMs?: number } = {}
-): Promise<any> {
-    if (!request.key) return MISSING_KEY;
-    const api = getTablesApi();
-    if (!api) return TABLES_API_MISSING;
-
-    const libraryID = request.libraryID ?? Zotero.Libraries.userLibraryID;
-    const item = Zotero.Items.getByLibraryAndKey(libraryID, request.key) as
-        | Zotero.Item
-        | false;
-    if (!item) {
-        return {
-            ok: false,
-            code: 'not_found',
-            error: `No item ${request.key} in library ${libraryID}`,
-        };
-    }
-    await loadTableItemFields([item]);
-    if (!isTableItem(item)) {
-        return {
-            ok: false,
-            code: 'not_a_table',
-            error: `Item ${request.key} is not a Beaver table.`,
-        };
-    }
-
-    const report = await api.openInReader(item, { timeoutMs: request.timeoutMs });
-    return {
-        ok: true,
-        key: report.itemKey,
-        library_id: report.libraryID,
-        enhanced: report.enhanced,
-        reader_type: report.readerType,
-        tab_id: report.tabID,
-        is_table_item: report.isTableItem,
-        // The document's own mark, carrying the format version it was written
-        // with; null means the document was not one of ours (or not found).
-        data_beaver_table: report.beaverTableAttribute,
-        internal_reader_found: report.internalReaderFound,
-        primary_view_found: report.primaryViewFound,
-        view_initialized: report.viewInitialized,
-        document_found: report.documentFound,
-        card_mounted: report.cardMounted,
-        listeners_attached: report.listenersAttached,
-        // False can mean either "already read-only" or "this build has no
-        // setReadOnly"; `failures` says which.
-        annotations_disabled: report.annotationsDisabled,
-        markers: report.markers,
-        links: report.links,
-        failures: report.failures,
-        views: api.listViews(),
-    };
 }

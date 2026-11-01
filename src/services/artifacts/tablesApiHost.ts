@@ -5,7 +5,7 @@ import { checkShadowRestore, registerTableShadowRestore } from './tableStore';
  * The counterpart to `tablesApi.ts`: that module is the seam both bundles may
  * hold (types and an accessor, no value imports), this one is the half only the
  * esbuild bundle may load, because it imports the modules that own the state —
- * the enhanced-reader registry and the item-pane registration.
+ * the open tabs and the item-pane registration.
  *
  * Nothing here adds behaviour. It is a binding: every method forwards to the
  * module that already owns the surface, so there is exactly one registry per
@@ -32,7 +32,6 @@ import {
     tableWriteLocks,
     type TablesApi,
 } from './tablesApi';
-import { listReaderTableViews, openTableInReader, markTableReadersStale } from './view/readerTableView';
 
 /**
  * Registers the namespace. Safe to call twice — a plugin reload replaces the
@@ -42,10 +41,7 @@ export function registerTablesApi(): void {
     registerTableShadowRestore();
     const api: TablesApi = {
         openTable,
-        tableChanged: markTableReadersStale,
         local: { commands: getTableLocalCommands },
-        listViews: () => listReaderTableViews(),
-        openInReader: (item, options) => openTableInReader(item, options),
         tabs: {
             list: () => listTableTabs(),
         },

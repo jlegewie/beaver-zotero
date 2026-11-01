@@ -311,6 +311,24 @@ export async function handleTableTabProbe(request: ProbeRequest = {}): Promise<a
             await sleep(300);
             return { ...result, stats: tableTabStats(), tabs: tabsSummary(win) };
         }
+        case 'reader-window': {
+            // A reader window on the table, as Zotero opens one with
+            // "Open in new window" set: it lands in the Beaver tab instead.
+            const ref = refOf(request);
+            const item = itemOf(ref);
+            const t0 = Date.now();
+            await (Zotero.Reader as any).open(item.id, null, { openInWindow: true });
+            const result = await landed(win, ref, t0, timeoutMs);
+            await sleep(300);
+            const readers = ((Zotero.Reader as any)._readers ?? []).filter((r: any) => r?.itemID === item.id);
+            return {
+                ...result,
+                readersLeft: readers.length,
+                readerWindowsOpen: readers.filter((r: any) => !r.tabID && r._window && !r._window.closed).length,
+                stats: tableTabStats(),
+                tabs: tabsSummary(win),
+            };
+        }
         case 'item-pane': {
             // The item pane's "Open table" button, clicked.
             const ref = refOf(request);

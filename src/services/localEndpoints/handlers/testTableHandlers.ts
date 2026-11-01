@@ -1043,12 +1043,6 @@ export async function handleTestTableRestoreShadowHttpRequest(
     }
 }
 
-export async function handleTestTableViewStateHttpRequest(): Promise<any> {
-    const api = getTablesApi();
-    if (!api) return TABLES_API_MISSING;
-    return { ok: true, views: api.listViews() };
-}
-
 export async function handleTestTableItemPaneHttpRequest(
     request: { key?: string; libraryID?: number } = {}
 ): Promise<any> {

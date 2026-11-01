@@ -23,19 +23,20 @@
  *
  * A reader opened on a table — double-click, `zotero://open`, anything that
  * calls `Zotero.Reader.open` while no table tab is open — is closed and the
- * table tab opened instead. It is heard on the `tab` notifier's `add`, which
- * Zotero fires inside `Zotero_Tabs.add`, before the reader loads, so the
- * snapshot never paints. The observer stays short and never awaits the
+ * table tab opened instead. A reader tab is heard on the `tab` notifier's
+ * `add`, which Zotero fires inside `Zotero_Tabs.add`, before the reader loads,
+ * so the snapshot never paints. The observer stays short and never awaits the
  * reader's initialisation: the notifier runs its observers one after another.
- * Restored, unloaded reader tabs load without an `add`; `readerTableView`'s
- * toolbar hook hands those over through the same redirect. Reader *windows*
- * keep the snapshot and its enhancement.
+ * Restored, unloaded reader tabs and reader *windows* load without an `add`;
+ * `readerTableView`'s toolbar hook hands those over through
+ * {@link redirectLoadedReader}. A reader window is closed and the tab opens in
+ * the most recent main window, as for any command without an origin.
  */
 
 import { TABLE_TAB_TYPE, collapseTableTabContextPane, isBeaverChatOpen } from './tableTabContextPane';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { isTableItem, loadTableItemFields, type TableRef } from '../services/artifacts/tableItemIdentity';
-import { isTableReaderOptedIn, setTableReaderRedirect } from '../services/artifacts/view/readerTableView';
+import { setTableReaderRedirect } from '../services/artifacts/view/readerTableView';
 import {
     addBeaverTab,
     beaverTabWindow,
@@ -76,11 +77,14 @@ interface TableTabEntry {
     renders: TableTabRenderReport[];
 }
 
-/** Opens a table the way the product does: `openTable` with its repair. */
+/**
+ * Opens a table the way the product does: `openTable` with its repair. No
+ * `window` is a command without an origin (a reader window being replaced).
+ */
 export type TableTabOpener = (
     ref: TableRef,
-    options: { window: Window; background?: boolean; index?: number }
-) => Promise<{ error: string } | { ok: true }>;
+    options: { window?: Window; background?: boolean; index?: number }
+) => Promise<{ error: string } | { ok: true; tabID: string }>;
 
 const entries = new Map<string, TableTabEntry>();
 const stats = { opened: 0, reused: 0, closed: 0, unmounted: 0, redirected: 0 };
@@ -275,7 +279,6 @@ function replaceReaderTab(win: Window, tabID: string, item: Zotero.Item): void {
 
 async function onTabAdded(tabID: string, extra: { type?: string; itemID?: number } | undefined): Promise<void> {
     if (extra?.type !== 'reader' || !extra.itemID || !opener) return;
-    if (isTableReaderOptedIn(extra.itemID)) return;
     const item = Zotero.Items.get(extra.itemID) as Zotero.Item | false;
     if (!mayBeTable(item)) return;
     await loadTableItemFields([item]);
@@ -292,9 +295,44 @@ function closeTableTabsForItems(ids: Array<string | number>): void {
     }
 }
 
-/** For `readerTableView`'s toolbar hook: a restored reader tab that loaded. */
-function redirectLoadedReader(reader: { tabID?: string; _window?: Window }, item: Zotero.Item): boolean {
-    if (!reader?.tabID || !opener || isTableReaderOptedIn(item.id)) return false;
+/**
+ * Closes a reader window on a table item and opens the table tab in the most
+ * recent main window (opening one if none is left), then brings that window
+ * forward. The open is not awaited, as for a reader tab.
+ */
+function replaceReaderWindow(reader: { close?: () => void }, item: Zotero.Item): boolean {
+    if (!opener || typeof reader?.close !== 'function') return false;
+    try {
+        reader.close();
+    } catch (error) {
+        logger(`tableTab: could not close the reader window on ${item.key}: ${String(error)}`, 1);
+        return false;
+    }
+    stats.redirected += 1;
+    void opener({ libraryID: item.libraryID, key: item.key }, {}).then(
+        (outcome) => {
+            if (!('error' in outcome)) {
+                windowOfTab(outcome.tabID)?.focus();
+                return;
+            }
+            logger(`tableTab: redirect to the table tab failed: ${outcome.error}`, 1);
+            Zotero.alert(Zotero.getMainWindow() ?? null, 'Beaver', outcome.error);
+        },
+        (error) => logger(`tableTab: redirect to the table tab failed: ${String(error)}`, 1),
+    );
+    return true;
+}
+
+/**
+ * For `readerTableView`'s toolbar hook: a reader on a table that loaded
+ * without a tab `add` — a restored reader tab, or a reader window.
+ */
+function redirectLoadedReader(
+    reader: { tabID?: string; _window?: Window; close?: () => void },
+    item: Zotero.Item,
+): boolean {
+    if (!opener) return false;
+    if (!reader?.tabID) return replaceReaderWindow(reader, item);
     const win = reader._window && tabsOf(reader._window) ? reader._window : windowOfTab(reader.tabID);
     if (!win) return false;
     replaceReaderTab(win, reader.tabID, item);

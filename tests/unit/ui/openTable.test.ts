@@ -12,7 +12,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const resolveTableItem = vi.hoisted(() => vi.fn());
 const readTableItemSpec = vi.hoisted(() => vi.fn());
 const snapshotIsCurrent = vi.hoisted(() => vi.fn());
-const closeStaleTableReaders = vi.hoisted(() => vi.fn(async () => {}));
 const contextMainWindow = vi.hoisted(() => vi.fn());
 const resolveNavigationWindow = vi.hoisted(() => vi.fn());
 const canHostTableTab = vi.hoisted(() => vi.fn(() => true));
@@ -36,7 +35,6 @@ vi.mock('../../../src/services/artifacts/tablesApi', () => ({
     getTablesApi: () => ({ shadow: { check: restoreCheck } }),
 }));
 vi.mock('../../../src/services/artifacts/tableRenderer', () => ({ snapshotIsCurrent }));
-vi.mock('../../../src/services/artifacts/view/readerTableView', () => ({ closeStaleTableReaders }));
 vi.mock('../../../src/ui/tableTab', () => ({ canHostTableTab, openTableTab, setTableTabWarning }));
 vi.mock('../../../src/runtime/navigation', async (importOriginal) => ({
     ...(await importOriginal<typeof import('../../../src/runtime/navigation')>()),
@@ -177,11 +175,6 @@ describe('openTable', () => {
                 error: `Could not open table ${REF.key} — The table is corrupted.`,
             });
         }
-    });
-
-    it('replaces a reader showing an outdated snapshot', async () => {
-        await openTable(REF, { window: main });
-        expect(closeStaleTableReaders).toHaveBeenCalledWith(42);
     });
 
     it('never retargets a click from a window that closed while the table was read', async () => {

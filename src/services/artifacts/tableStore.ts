@@ -130,7 +130,7 @@ import {
     type TableRef,
     type TableVersionEntry,
 } from './tableItem';
-import { getTablesApi, setTableShadowRestore, tableWriteLocks, tableLocalCommands, type TableLocalCommands } from './tablesApi';
+import { setTableShadowRestore, tableWriteLocks, tableLocalCommands, type TableLocalCommands } from './tablesApi';
 
 // ---------------------------------------------------------------------------
 // Shape
@@ -2371,7 +2371,6 @@ function emitTableUpdated(
             actor: meta.actor,
             ...(meta.run_id ? { run_id: meta.run_id } : {}),
         };
-        getTablesApi()?.tableChanged(ref);
         Zotero.Beaver?.runtime?.publish(TABLE_UPDATED_EVENT, detail);
     } catch (error) {
         logger(`tableStore: table-updated dispatch failed: ${String(error)}`, 2);
