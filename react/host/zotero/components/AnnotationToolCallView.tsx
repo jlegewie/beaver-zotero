@@ -4,7 +4,7 @@ import { AgentRunStatus, ToolCallPart } from '@beaver/agent-core/agents/types';
 import { getToolCallStatusFromResult, toolResultAtom } from '@beaver/agent-core/run-state/atoms';
 import {
     AgentAction,
-    getAgentActionsByToolcallAtom,
+    agentActionsForToolcallAtom,
     isAnnotationAgentAction,
     isNoteAnnotationAgentAction,
     ackAgentActionsAtom,
@@ -367,8 +367,11 @@ export const AnnotationToolCallView: React.FC<AnnotationToolCallViewProps> = ({ 
     const isError = status === 'error';
 
     // Get annotations from agent actions
-    const getAgentActionsByToolcall = useAtomValue(getAgentActionsByToolcallAtom);
-    const annotations = getAgentActionsByToolcall(toolCallId, isAnnotationAgentAction) as AnnotationAgentAction[];
+    const toolcallActions = useAtomValue(useMemo(() => agentActionsForToolcallAtom(toolCallId), [toolCallId]));
+    const annotations = useMemo(
+        () => toolcallActions.filter(isAnnotationAgentAction) as AnnotationAgentAction[],
+        [toolcallActions],
+    );
     const totalAnnotations = annotations.length;
 
     // Current reader state

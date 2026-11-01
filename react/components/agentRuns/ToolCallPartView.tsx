@@ -13,7 +13,7 @@ import { ToolResultView, hasRenderableResult } from './ToolResultView';
 import { GenericAgentActionView } from './GenericAgentActionView';
 import { TableToolCallView } from './TableToolCallView';
 import { getHost } from '@beaver/agent-ui/host';
-import { getPendingApprovalForToolcallAtom, getAgentActionsByToolcallAtom } from '../../agents/agentActions';
+import { pendingApprovalForToolcallAtom, agentActionsForToolcallAtom } from '../../agents/agentActions';
 import {
     Spinner,
     AlertIcon,
@@ -279,13 +279,15 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
     }, [part.tool_call_id, part.args, view]);
 
     // Check for pending approval for this tool call
-    const getPendingApproval = useAtomValue(getPendingApprovalForToolcallAtom);
-    const pendingApproval = getPendingApproval(part.tool_call_id);
+    const pendingApproval = useAtomValue(
+        useMemo(() => pendingApprovalForToolcallAtom(part.tool_call_id), [part.tool_call_id]),
+    );
     const isAwaitingApproval = pendingApproval !== null;
 
     // Check for agent actions associated with this tool call
-    const getAgentActionsByToolcall = useAtomValue(getAgentActionsByToolcallAtom);
-    const agentActions = getAgentActionsByToolcall(part.tool_call_id);
+    const agentActions = useAtomValue(
+        useMemo(() => agentActionsForToolcallAtom(part.tool_call_id), [part.tool_call_id]),
+    );
     const hasAgentAction = agentActions.length > 0;
 
     // Determine if this tool should use AgentActionView

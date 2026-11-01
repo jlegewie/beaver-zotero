@@ -4,8 +4,11 @@ import { AgentRunStatus, ToolCallPart } from '@beaver/agent-core/agents/types';
 import { getToolCallStatus, runToolResultsAtom } from '@beaver/agent-core/run-state/atoms';
 import {
     AgentAction,
-    agentActionsByToolcallAtom,
+    agentActionsForToolcallsAtom,
+    noPendingApprovalsCoveredCountAtom,
     pendingApprovalsAtom,
+    pendingApprovalsCoveredByFullAccessCountAtom,
+    pendingApprovalsForToolcallsAtom,
 } from '../../../agents/agentActions';
 import type { EditNoteResolvedTarget, PendingApproval } from '@beaver/agent-ui/host';
 import {
@@ -22,7 +25,6 @@ import {
     setToolExpandedAtom,
 } from '../../../atoms/messageUIState';
 import {
-    getPendingApprovalIdsCoveredByFullAccess,
     isFullAccessGrantedForRun,
     runApprovalPolicyAtom,
 } from '../../../atoms/runApprovalPolicy';
@@ -74,7 +76,6 @@ import {
 import {
     deriveEditNoteRows,
     type EditNoteRowDescriptor,
-    findPendingApprovalForToolcall,
     getEditNoteDisplayStatus,
     getEffectiveEditNotePendingApproval,
     getEditNoteGroupExpansionKey,
@@ -110,12 +111,16 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
     // Scoped to this run: every call in the group belongs to it, and a
     // thread-wide subscription would re-render the group on every streamed frame.
     const resultsMap = useAtomValue(useMemo(() => runToolResultsAtom(runId), [runId]));
-    // Subscribe to the grouped-actions map itself (not the stable getter atom)
-    // so partStates re-derives whenever any agent action changes — the getter's
-    // identity never changes, which would leave memoized rows showing stale
-    // action state after a local apply/retry.
-    const actionsByToolcall = useAtomValue(agentActionsByToolcallAtom);
-    const allPendingApprovals = useAtomValue(pendingApprovalsAtom);
+    // The actions and live approvals of this group's calls only, one entry per
+    // part: partStates re-derives when one of them changes, and an action or
+    // approval elsewhere in the thread leaves the group alone.
+    const toolcallIds = useMemo(() => parts.map((part) => part.tool_call_id), [parts]);
+    const groupActions = useAtomValue(
+        useMemo(() => agentActionsForToolcallsAtom(toolcallIds), [toolcallIds]),
+    );
+    const groupPendingApprovals = useAtomValue(
+        useMemo(() => pendingApprovalsForToolcallsAtom(toolcallIds), [toolcallIds]),
+    );
     const setPendingApprovals = useSetAtom(pendingApprovalsAtom);
     const sendApprovalResponse = useSetAtom(sendApprovalResponseAtom);
     const isRunPending = useAtomValue(isWSChatPendingAtom);
@@ -127,15 +132,12 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
     const runApprovalPolicy = useAtomValue(runApprovalPolicyAtom);
 
     const partStates = useMemo(() => {
-        return parts.map((part) => {
-            const actions = (actionsByToolcall.get(part.tool_call_id) ?? []).filter((a) => a.run_id === runId);
+        return parts.map((part, index) => {
+            const actions = groupActions[index].filter((a) => a.run_id === runId);
             // A single tool call always produces exactly one AgentAction, even for
             // an edit_note_batch call (the whole batch is one action).
             const action = actions.length > 0 ? actions[0] : null;
-            const rawPendingApproval = findPendingApprovalForToolcall(
-                part.tool_call_id,
-                allPendingApprovals.values(),
-            );
+            const rawPendingApproval = groupPendingApprovals[index];
             const pendingApproval = getEffectiveEditNotePendingApproval(action, rawPendingApproval);
             const toolCallStatus = getToolCallStatus(part.tool_call_id, resultsMap, runStatus);
             const effectiveStatus = getEditNoteDisplayStatus({
@@ -173,7 +175,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                 undoByIndex,
             };
         });
-    }, [parts, runId, actionsByToolcall, allPendingApprovals, resultsMap, runStatus]);
+    }, [parts, runId, groupActions, groupPendingApprovals, resultsMap, runStatus]);
 
     const allActions: AgentAction[] = useMemo(
         () => partStates.flatMap((state) => state.actions),
@@ -725,10 +727,11 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
     const runPermissionMode: RunPermissionMode =
         isFullAccessGrantedForRun(runApprovalPolicy, runId) ? 'full_access' : 'ask';
     // Every card a switch to full access would answer, not only this group's,
-    // so the menu row can say how far the switch reaches.
-    const pendingCoveredCount = useMemo(
-        () => getPendingApprovalIdsCoveredByFullAccess(allPendingApprovals.values()).length,
-        [allPendingApprovals],
+    // so the menu row can say how far the switch reaches. The row shows only
+    // while this group awaits approval, so only then does the count need
+    // following.
+    const pendingCoveredCount = useAtomValue(
+        hasPendingApprovals ? pendingApprovalsCoveredByFullAccessCountAtom : noPendingApprovalsCoveredCountAtom,
     );
     const showCollapsedHeaderActions =
         !isProcessing && !hasStreamingChild && (aggregateStatus === 'awaiting' || aggregateStatus === 'pending') && !isExpanded;

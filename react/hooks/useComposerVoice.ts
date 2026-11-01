@@ -221,6 +221,20 @@ export function useComposerVoice(
         win.addEventListener("keydown", key, true);
         // Also catch a composer hidden without unmounting and pending insertion during IME.
         const timer = win.setInterval(() => {
+            // Nothing to cancel or insert unless this composer is setting up,
+            // owns a running session, or owns a result not yet inserted; a
+            // finished session keeps its owner. Skipping then matters:
+            // `visible()` forces a style and layout flush, which in a long
+            // thread restyles the whole chat.
+            const state = service?.controller.getSnapshot();
+            if (
+                !preparingRef.current &&
+                !(
+                    state?.owner?.output.id === id &&
+                    (isBusyPhase(state.phase) || pendingResult(state))
+                )
+            )
+                return;
             if (!visible()) {
                 cancel();
                 return;

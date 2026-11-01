@@ -9,8 +9,8 @@ vi.mock("@beaver/agent-core/run-state/atoms", () => ({
     getToolCallStatusFromResult: () => "completed",
 }));
 vi.mock("../../../react/agents/agentActions", () => ({
-    getPendingApprovalForToolcallAtom: atom(() => () => null),
-    getAgentActionsByToolcallAtom: atom(() => () => []),
+    pendingApprovalForToolcallAtom: () => atom(null),
+    agentActionsForToolcallAtom: () => atom([]),
 }));
 vi.mock("../../../react/utils/toolCallLabelEnrich", () => ({
     resolveToolCallLabelEnrich: async () => null,

@@ -1,4 +1,5 @@
-import { atom, type Getter, type Setter } from 'jotai';
+import { atom, type Atom, type Getter, type Setter } from 'jotai';
+import { selectAtom } from 'jotai/utils';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { isLibraryReferencePortable, resolveItemReference, resolveLibraryRef } from '../../src/utils/libraryIdentity';
 import { checkLibraryExcluded, getLibraryRevocations } from '../../src/services/agentDataProvider/utils';
@@ -30,6 +31,8 @@ import {
     isUnconfirmedAction,
 } from '@beaver/agent-core/agents/agentActionTypes';
 import { activeRunAtom, threadRunsAtom } from '@beaver/agent-core/run-state/atoms';
+import { getPendingApprovalIdsCoveredByFullAccess } from '../atoms/runApprovalPolicy';
+import { findPendingApprovalForToolcall } from '../components/agentRuns/editNoteShared';
 
 export * from '@beaver/agent-core/agents/agentActionTypes';
 
@@ -166,11 +169,6 @@ export const agentActionsByToolcallAtom = atom<Map<string, AgentAction[]>>((get)
     return groupActionsByToolcall(actions);
 });
 
-export const getAgentActionsByToolcallAtom = atom(
-    (get) => (toolcallId: string, filter: (action: AgentAction) => boolean = () => true) => 
-        get(agentActionsByToolcallAtom).get(toolcallId)?.filter(filter) || []
-);
-
 // =============================================================================
 // Derived Atoms - Group by run_id
 // =============================================================================
@@ -193,10 +191,135 @@ export const agentActionsByRunAtom = atom<Map<string, AgentAction[]>>((get) => {
     return groupActionsByRun(actions);
 });
 
-export const getAgentActionsByRunAtom = atom(
-    (get) => (runId: string, filter: (action: AgentAction) => boolean = () => true) => 
-        get(agentActionsByRunAtom).get(runId)?.filter(filter) || []
-);
+// =============================================================================
+// Scoped selectors
+// =============================================================================
+//
+// A long thread mounts hundreds of cards, and every agent action written —
+// streamed, applied, undone — replaces the thread's action list, as every
+// pending approval added or answered replaces the approval map. A card that
+// subscribes to the whole list or map re-renders on each of those writes. The
+// selectors below narrow a subscription to what one card or one run renders and
+// hold their previous value while it is unchanged, so jotai skips the update.
+//
+// The comparisons rely on unchanged entries keeping their object identity: every
+// action and approval write replaces only the entries it changes. Selectors are
+// cached per key; the caches are dropped with the run selectors when the open
+// thread changes (`resetAgentActionSelectorCaches`).
+
+const EMPTY_ACTIONS: AgentAction[] = [];
+
+function sameItems<T>(left: readonly T[], right: readonly T[]): boolean {
+    return left === right
+        || (left.length === right.length && left.every((item, index) => item === right[index]));
+}
+
+function sameMembers<T>(left: ReadonlySet<T>, right: ReadonlySet<T>): boolean {
+    if (left === right) return true;
+    if (left.size !== right.size) return false;
+    for (const item of left) if (!right.has(item)) return false;
+    return true;
+}
+
+function sameNestedItems<T>(left: readonly (readonly T[])[], right: readonly (readonly T[])[]): boolean {
+    return left === right
+        || (left.length === right.length && left.every((items, index) => sameItems(items, right[index])));
+}
+
+const toolcallActionsAtoms = new Map<string, Atom<AgentAction[]>>();
+const toolcallsActionsAtoms = new Map<string, Atom<AgentAction[][]>>();
+const runsActionsAtoms = new Map<string, Atom<AgentAction[][]>>();
+const toolcallApprovalAtoms = new Map<string, Atom<PendingApproval | null>>();
+const toolcallsApprovalAtoms = new Map<string, Atom<(PendingApproval | null)[]>>();
+const runsLiveApprovalAtoms = new Map<string, Atom<ReadonlySet<string>>>();
+
+function cached<T>(cache: Map<string, Atom<T>>, key: string, create: () => Atom<T>): Atom<T> {
+    let value = cache.get(key);
+    if (!value) {
+        value = create();
+        cache.set(key, value);
+    }
+    return value;
+}
+
+/** The agent actions of one tool call, in thread order. */
+export function agentActionsForToolcallAtom(toolcallId: string): Atom<AgentAction[]> {
+    return cached(toolcallActionsAtoms, toolcallId, () => selectAtom(
+        agentActionsByToolcallAtom,
+        (byToolcall) => byToolcall.get(toolcallId) ?? EMPTY_ACTIONS,
+        sameItems,
+    ));
+}
+
+/** The agent actions of several tool calls, one array per id, in the order given. */
+export function agentActionsForToolcallsAtom(toolcallIds: readonly string[]): Atom<AgentAction[][]> {
+    const ids = [...toolcallIds];
+    return cached(toolcallsActionsAtoms, ids.join('\n'), () => selectAtom(
+        agentActionsByToolcallAtom,
+        (byToolcall) => ids.map((id) => byToolcall.get(id) ?? EMPTY_ACTIONS),
+        sameNestedItems,
+    ));
+}
+
+/** The agent actions of several runs, one array per id, in the order given. */
+export function agentActionsForRunsAtom(runIds: readonly string[]): Atom<AgentAction[][]> {
+    const ids = [...runIds];
+    return cached(runsActionsAtoms, ids.join('\n'), () => selectAtom(
+        agentActionsByRunAtom,
+        (byRun) => ids.map((id) => byRun.get(id) ?? EMPTY_ACTIONS),
+        sameNestedItems,
+    ));
+}
+
+/** The live approval awaiting a decision on one tool call, or null. */
+export function pendingApprovalForToolcallAtom(toolcallId: string): Atom<PendingApproval | null> {
+    return cached(toolcallApprovalAtoms, toolcallId, () => atom(
+        (get) => findPendingApprovalForToolcall(toolcallId, get(pendingApprovalsAtom).values()),
+    ));
+}
+
+/** The live approvals of several tool calls, one entry per id, in the order given. */
+export function pendingApprovalsForToolcallsAtom(toolcallIds: readonly string[]): Atom<(PendingApproval | null)[]> {
+    const ids = [...toolcallIds];
+    return cached(toolcallsApprovalAtoms, ids.join('\n'), () => selectAtom(
+        pendingApprovalsAtom,
+        (pending) => ids.map((id) => findPendingApprovalForToolcall(id, pending.values())),
+        sameItems,
+    ));
+}
+
+/** The ids of these runs' actions that a live approval is waiting on. */
+export function liveApprovalActionIdsForRunsAtom(runIds: readonly string[]): Atom<ReadonlySet<string>> {
+    const ids = [...runIds];
+    return cached(runsLiveApprovalAtoms, ids.join('\n'), () => selectAtom(
+        atom((get) => {
+            const pending = get(pendingApprovalsAtom);
+            const live = new Set<string>();
+            for (const actions of get(agentActionsForRunsAtom(ids))) {
+                for (const action of actions) {
+                    if (pending.has(action.id)) live.add(action.id);
+                }
+            }
+            return live as ReadonlySet<string>;
+        }),
+        (live) => live,
+        sameMembers,
+    ));
+}
+
+/**
+ * Drop the scoped selector caches. Call when the open thread changes, with
+ * `resetRunSelectorCaches`: the cached atoms are keyed by that thread's ids and
+ * hold their last value. Readers still holding a dropped atom keep working.
+ */
+export function resetAgentActionSelectorCaches(): void {
+    toolcallActionsAtoms.clear();
+    toolcallsActionsAtoms.clear();
+    runsActionsAtoms.clear();
+    toolcallApprovalAtoms.clear();
+    toolcallsApprovalAtoms.clear();
+    runsLiveApprovalAtoms.clear();
+}
 
 export const getAgentActionByIdAtom = atom(
     (get) => (actionId: string): AgentAction | null => {
@@ -968,20 +1091,15 @@ export const clearAllPendingApprovalsAtom = atom(
 // deliberately NOT agent actions (no apply/undo/validate lifecycle).
 
 /**
- * Get pending approval for a specific toolcall_id.
- * Searches the map for an approval matching the toolcall_id.
+ * How many pending approvals a switch to full access would answer at once. A
+ * number, so its readers re-render only when the count changes.
  */
-export const getPendingApprovalForToolcallAtom = atom(
-    (get) => (toolcallId: string): PendingApproval | null => {
-        const pendingMap = get(pendingApprovalsAtom);
-        for (const pending of pendingMap.values()) {
-            if (pending.toolcallId === toolcallId) {
-                return pending;
-            }
-        }
-        return null;
-    }
+export const pendingApprovalsCoveredByFullAccessCountAtom = atom(
+    (get) => getPendingApprovalIdsCoveredByFullAccess(get(pendingApprovalsAtom).values()).length
 );
+
+/** Stands in for the count above on surfaces that show it only while awaiting. */
+export const noPendingApprovalsCoveredCountAtom: Atom<number> = atom(() => 0);
 
 /**
  * Check if there are any pending approvals.
