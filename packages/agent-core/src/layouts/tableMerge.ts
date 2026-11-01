@@ -221,9 +221,8 @@ export function identityOf(row: Row, identifiers?: RawIdentifiers | null): RowId
     let section = false;
     const ref = row.ref;
     if (ref) {
-        if (ref.kind === "item" || ref.kind === "attachment" || ref.kind === "annotation") {
+        if (ref.kind === "item") {
             keys.add(zoteroKey(ref));
-            if (ref.kind === "attachment" && ref.parent_item) keys.add(zoteroKey(ref.parent_item));
         } else if (ref.kind === "external") {
             keys.add(`external:${ref.source_id}`);
             const reference = ref.reference as
@@ -234,8 +233,6 @@ export function identityOf(row: Row, identifiers?: RawIdentifiers | null): RowId
                     add(kind as IdentifierKind, values!);
                 section = (reference.publication_types ?? []).some((t) => SECTION_TYPES.has(t));
             }
-        } else if (ref.kind === "file") {
-            keys.add(`file:${ref.ext_key}`);
         }
     }
     const pair = identifierFromCell(row.cells[IDENTIFIER_COLUMN_ID]);
@@ -310,8 +307,7 @@ function clone<T>(value: T): T {
 }
 
 function isZotero(row: Row): boolean {
-    const kind = row.ref?.kind;
-    return kind === "item" || kind === "attachment" || kind === "annotation";
+    return row.ref?.kind === "item";
 }
 
 function unionOrigins(first: RowOrigin[] | undefined, second: RowOrigin[] | undefined): RowOrigin[] | undefined {

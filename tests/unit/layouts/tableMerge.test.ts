@@ -10,8 +10,21 @@ import { mergeRows, normalizeDoi, normalizeIdentifiers, identifierCell } from "@
 import type { Row } from "@beaver/agent-core/layouts/table";
 
 const dir = fileURLToPath(new URL("../../fixtures/artifacts/table-merges/", import.meta.url));
+// Tables hold Zotero regular items and external works only: the attachment,
+// annotation and file row kinds are being removed (K1/K2), and the merge no
+// longer gives them an identity of their own.
+const OTHER_ROW_KINDS = new Set([
+    "annotation-annotation-same-key.json",
+    "annotation-item.json",
+    "attachment-external.json",
+    "attachment-item-parent.json",
+    "attachment-item-unrelated.json",
+    "file-external.json",
+    "file-file-same-key.json",
+    "file-item.json",
+]);
 const cases = readdirSync(dir)
-    .filter((file) => file.endsWith(".json"))
+    .filter((file) => file.endsWith(".json") && !OTHER_ROW_KINDS.has(file))
     .sort()
     .map((file) => ({ file, fixture: JSON.parse(readFileSync(path.join(dir, file), "utf8")) }));
 
