@@ -13,12 +13,9 @@ export interface RowDocumentChoice {
     /** Portable id (`u-KEY`, `g<id>-KEY`), as rows name documents. */
     id: string;
     name: string;
-    kind: string;
     /** Zotero's primary attachment of the item. */
     primary: boolean;
 }
-
-const KIND_LABELS: Record<string, string> = { pdf: 'PDF', epub: 'EPUB', snapshot: 'Snapshot', text: 'Text' };
 
 /**
  * The readable attachments of a row's item, from Zotero's metadata (no file
@@ -40,8 +37,7 @@ export async function rowDocumentChoices(row: Row): Promise<RowDocumentChoice[]>
     const choices: RowDocumentChoice[] = [];
     for (const attachment of attachments) {
         if (!attachment || attachment.deleted) continue;
-        const kind = getReadableContentKind(attachment);
-        if (!isRowDocumentKind(kind)) continue;
+        if (!isRowDocumentKind(getReadableContentKind(attachment))) continue;
         let title = '';
         try {
             title = attachment.getField('title') as string;
@@ -51,7 +47,6 @@ export async function rowDocumentChoices(row: Row): Promise<RowDocumentChoice[]>
         choices.push({
             id: `${libraryRef}-${attachment.key}`,
             name: safeAttachmentFilename(attachment) || title || 'Document',
-            kind,
             primary: !!best && best.id === attachment.id,
         });
     }
@@ -142,11 +137,6 @@ export function TableDocumentChooser({
                                         onChange={() => setPicked(entry.id)}
                                     />
                                     <span className="rt-document-choice-name">{entry.name}</span>
-                                    <span className="rt-hint">
-                                        {[KIND_LABELS[entry.kind] ?? entry.kind, entry.id === current ? 'Current' : null]
-                                            .filter(Boolean)
-                                            .join(' · ')}
-                                    </span>
                                 </label>
                             ))}
                         </div>

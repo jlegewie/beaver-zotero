@@ -438,7 +438,7 @@ describe('cell edits', () => {
             'Baird_2011.pdf',
             'Baird_2011_appendix.pdf',
         ]);
-        expect(dialog.textContent).toContain('PDF · Current');
+        expect(dialog.querySelector<HTMLInputElement>('input[type="radio"]:checked')?.closest('label')?.textContent).toBe('Baird_2011.pdf');
         await click(dialog.querySelectorAll<HTMLInputElement>('input[type="radio"]')[1]);
         await click(Array.from(dialog.querySelectorAll('button')).find((b) => b.textContent === 'Use this document'));
         expect(commands.editCells).toHaveBeenCalledWith(

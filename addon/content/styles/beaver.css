@@ -5659,12 +5659,14 @@
 }
 
 /* Choose document…: the paper's readable attachments, one to read the row from. */
+[id^="beaver-pane-"] .rt-document-chooser .rt-dialog-title {
+    font-size: 1.15rem;
+}
+
 [id^="beaver-pane-"] .rt-document-paper {
-    margin-top: -0.5rem;
+    margin-top: -0.45rem;
+    line-height: 1.4;
     color: var(--fill-secondary);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
 }
 
 [id^="beaver-pane-"] .rt-document-choices {
@@ -5693,9 +5695,9 @@
 [id^="beaver-pane-"] .rt-document-choice-name {
     flex: 1 1 auto;
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    padding: 0.35rem 0;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
 }
 
 /* The Fill menu's closing note. */
