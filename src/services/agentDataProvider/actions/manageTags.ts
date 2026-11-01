@@ -26,6 +26,7 @@ import {
 } from '@beaver/agent-core/protocol/agentProtocol';
 import { libraryRefForLibraryID, modelObjectId, resolveWriteTargetLibrary, writeTargetLibraryError } from '../../../utils/libraryIdentity';
 import { removeTagFromLibrary } from '../../../utils/zoteroTags';
+import { rebuildTagCache, rebuildTagCacheQueued } from '../../tagCache';
 import { checkAborted, TimeoutContext, TimeoutError } from '../timeout';
 import { checkLibraryExcluded, getDeferredToolPreference, validateLibraryAccess } from '../utils';
 
@@ -102,36 +103,20 @@ export function suggestionTagForm(name: string): string {
 }
 
 
-// Shared in-flight rebuild promise. If multiple concurrent callers miss the
-// cache at once (e.g. 10 parallel manage_tags calls), they all await the same
-// Zotero.Tags.init() rather than queuing N sequential rebuilds.
-let _pendingCacheRebuild: Promise<void> | null = null;
-
-function rebuildTagCache(): Promise<void> {
-    if (!_pendingCacheRebuild) {
-        _pendingCacheRebuild = Zotero.Tags.init()
-            .finally(() => {
-                _pendingCacheRebuild = null;
-            });
-    }
-    return _pendingCacheRebuild;
-}
-
-
 /**
  * Resolve a tag name to its tagID. `libraryID` scopes the "Did you mean"
  * suggestion probe so we don't cross-pollinate from other libraries
  * (Zotero.Tags and the `tags` table are global; itemTags is what scopes a
  * tag to a library).
  */
-async function resolveTagByName(name: string, libraryID: number): Promise<TagResolution> {
+async function resolveTagByName(name: string, libraryID: number, rebuild: () => Promise<void>): Promise<TagResolution> {
     const cacheID = Zotero.Tags.getID(name);
     if (cacheID !== false && cacheID != null) {
         return { tagID: cacheID, source: 'cache', resolvedName: name };
     }
 
     // Cache miss → rebuild (shared across concurrent callers) and retry.
-    await rebuildTagCache();
+    await rebuild();
     const retryID = Zotero.Tags.getID(name);
     if (retryID !== false && retryID != null) {
         return { tagID: retryID, source: 'cache_rebuilt', resolvedName: name };
@@ -287,7 +272,8 @@ export async function validateManageTagsAction(
     // validation response instead of breaking the caller contract.
     let resolution: TagResolution;
     try {
-        resolution = await resolveTagByName(name, libraryID);
+        // Validation runs outside the library mutation queue.
+        resolution = await resolveTagByName(name, libraryID, rebuildTagCacheQueued);
     } catch (e) {
         logger(`validateManageTagsAction: resolveTagByName threw: ${e}`, 1);
         return {
@@ -486,7 +472,8 @@ export async function executeManageTagsAction(
         // Re-snapshot the authoritative pre-apply state at execute time.
         // This ensures a re-apply after manual library edits produces a fresh
         // snapshot that the next undo can correctly reverse.
-        const resolution = await resolveTagByName(name, resolvedLibraryId);
+        // Execute already runs in the library mutation queue; queueing again would deadlock.
+        const resolution = await resolveTagByName(name, resolvedLibraryId, rebuildTagCache);
         const tagID = resolution.tagID;
         const resolvedName = resolution.tagID !== null ? resolution.resolvedName : name;
         if (resolution.tagID !== null && resolution.source === 'cache_rebuilt') {

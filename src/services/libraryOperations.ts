@@ -19,6 +19,7 @@ import * as manageCollections from './manualActions/manageCollectionsActions';
 import * as manageTags from './manualActions/manageTagsActions';
 import * as organizeItems from './manualActions/organizeItemsActions';
 import { savePreparedNote } from './savePreparedNote';
+import { rebuildTagCache } from './tagCache';
 
 const operations = {
     executeMergeItemsAction: duplicates.executeMergeItemsAction,
@@ -26,6 +27,7 @@ const operations = {
     artifact_request: handleArtifactRequestUncoordinated,
     executeRequest,
     savePreparedNote,
+    rebuildTagCache,
     ensureReaderContentType: ensureReaderContentTypeForItem,
     createZoteroItem: imports.createZoteroItem,
     applyCreateItemData: imports.applyCreateItemData,

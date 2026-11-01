@@ -160,3 +160,61 @@ describe('handleAgentActionExecuteRequest queue phase', () => {
 });
 
 beforeEach(installMutationInstance);
+
+describe('handleAgentActionExecuteRequest stale tag cache', () => {
+    const staleTagError = 'Error(s) encountered during statement execution: FOREIGN KEY constraint failed '
+        + '[QUERY: INSERT OR REPLACE INTO itemTags (itemID, tagID, type) VALUES (?, ?, ?)] [PARAMS: 417, 210, 0]';
+
+    beforeEach(() => {
+        vi.useRealTimers();
+        executors.editMetadata.mockReset();
+        (Zotero as any).DB = { executeTransaction: vi.fn(async (work: () => Promise<unknown>) => work()) };
+        (Zotero as any).Tags = { init: vi.fn(async () => {}) };
+    });
+
+    it('rebuilds the cache and tells the model to retry instead of returning the SQL error', async () => {
+        executors.editMetadata.mockResolvedValue({
+            type: 'agent_action_execute_response', request_id: 'req-1', success: false, error: staleTagError, error_code: 'create_failed',
+        });
+
+        const response = await handleAgentActionExecuteRequest(request, { reportPhase: () => {} });
+
+        expect(response.success).toBe(false);
+        expect(response.error_code).toBe('tag_cache_out_of_sync');
+        expect(response.error).toMatch(/retry the same action once/);
+        expect(response.error).not.toMatch(/FOREIGN KEY/);
+        expect((Zotero as any).Tags.init).toHaveBeenCalledOnce();
+    });
+
+    it('handles a stale-tag error the executor throws', async () => {
+        executors.editMetadata.mockRejectedValue(new Error(staleTagError));
+
+        const response = await handleAgentActionExecuteRequest(request, { reportPhase: () => {} });
+
+        expect(response.error_code).toBe('tag_cache_out_of_sync');
+        expect((Zotero as any).Tags.init).toHaveBeenCalledOnce();
+    });
+
+    it('tells the model not to retry when the cache cannot be rebuilt', async () => {
+        (Zotero as any).Tags.init.mockRejectedValue(new Error('database is locked'));
+        executors.editMetadata.mockResolvedValue({
+            type: 'agent_action_execute_response', request_id: 'req-1', success: false, error: staleTagError,
+        });
+
+        const response = await handleAgentActionExecuteRequest(request, { reportPhase: () => {} });
+
+        expect(response.error_code).toBe('tag_cache_out_of_sync');
+        expect(response.error).toMatch(/do not retry/);
+    });
+
+    it('leaves other failures unchanged', async () => {
+        executors.editMetadata.mockResolvedValue({
+            type: 'agent_action_execute_response', request_id: 'req-1', success: false, error: 'Item not found', error_code: 'item_not_found',
+        });
+
+        const response = await handleAgentActionExecuteRequest(request, { reportPhase: () => {} });
+
+        expect(response).toMatchObject({ error: 'Item not found', error_code: 'item_not_found' });
+        expect((Zotero as any).Tags.init).not.toHaveBeenCalled();
+    });
+});

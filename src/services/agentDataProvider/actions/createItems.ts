@@ -258,6 +258,7 @@ async function executeCreateItemAction(
                 runId: request.run_id,
                 onAttachmentResolved: request.operation?.onAttachmentResolved,
                 threadId: request.thread_id,
+                assertCurrent: () => checkAborted(ctx, 'create_item:before_retry'),
             })
         );
 

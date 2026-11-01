@@ -29,6 +29,11 @@ const queryAsyncMock = vi.fn(async (_sql: string, _params: unknown[], opts?: { o
     dbRows.length = 0;
 });
 
+const libraryOperationsRun = vi.fn(async (name: string) => {
+    if (name !== 'rebuildTagCache') throw new Error(`unexpected operation ${name}`);
+    await (globalThis as any).Zotero.Tags.init();
+});
+
 function queueDbRow(values: unknown[]) {
     dbRows.push({ getResultByIndex: (i: number) => values[i] });
 }
@@ -54,6 +59,12 @@ function queueDbRow(values: unknown[]) {
     },
     DB: {
         queryAsync: queryAsyncMock,
+        executeTransaction: vi.fn(async (fn: () => unknown) => fn()),
+    },
+    // Validation queues its cache rebuild as the named plugin operation.
+    Beaver: {
+        ...((globalThis as any).Zotero?.Beaver ?? {}),
+        libraryOperations: { run: libraryOperationsRun },
     },
 };
 
@@ -267,6 +278,8 @@ describe('validateManageTagsAction', () => {
         } as any);
         expect(resp.valid).toBe(true);
         expect(Zot.Tags.init).toHaveBeenCalledTimes(1);
+        // Validation runs outside the mutation queue, so the rebuild waits its turn there.
+        expect(libraryOperationsRun).toHaveBeenCalledWith('rebuildTagCache', []);
         // Cache rebuild produced a hit — no DB probe needed.
         expect(queryAsyncMock).not.toHaveBeenCalled();
     });
@@ -603,6 +616,8 @@ describe('executeManageTagsAction', () => {
         } as any, ctx);
         expect(resp.success).toBe(true);
         expect(Zot.Tags.init).toHaveBeenCalledTimes(1);
+        // Execute already holds the mutation queue: re-entering it would deadlock.
+        expect(libraryOperationsRun).not.toHaveBeenCalled();
         expect(Zot.Tags.rename).toHaveBeenCalledWith(1, 'Arts', 'arts');
         expect(resp.result_data?.items_affected).toBe(2);
     });
