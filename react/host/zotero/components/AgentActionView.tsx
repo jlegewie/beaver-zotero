@@ -19,7 +19,7 @@ import {
     sendApprovalResponseAtom,
 } from '../../../atoms/agentRunAtoms';
 import {
-    agentActionItemTitlesAtom,
+    agentActionItemTitleAtom,
     getAgentActionItemTitleKey,
     setAgentActionItemTitleAtom,
     toolExpandedAtom,
@@ -214,8 +214,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     // Shared with the terminal review row for this tool call. The run belongs
     // in the identity because continuation runs may reuse tool-call ids.
     const itemTitleKey = getAgentActionItemTitleKey(runId, toolcallId);
-    const itemTitleMap = useAtomValue(agentActionItemTitlesAtom);
-    const itemTitle = itemTitleMap[itemTitleKey] ?? null;
+    const itemTitle = useAtomValue(useMemo(() => agentActionItemTitleAtom(itemTitleKey), [itemTitleKey]));
     const setItemTitle = useSetAtom(setAgentActionItemTitleAtom);
 
     const hasAssociatedItem =

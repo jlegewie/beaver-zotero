@@ -15,7 +15,7 @@ import {
     staleApprovalActionIdsAtom,
 } from '../../../atoms/agentRunAtoms';
 import {
-    agentActionItemTitlesAtom,
+    agentActionItemTitleAtom,
     getAgentActionItemTitleKey,
     setAgentActionItemTitleAtom,
     toolExpandedAtom,
@@ -226,8 +226,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
     const itemTitleKey = resolvedTarget
         ? `${runId}:${responseIndex}:group:${resolvedTarget.libraryId}-${resolvedTarget.zoteroKey}`
         : null;
-    const itemTitleMap = useAtomValue(agentActionItemTitlesAtom);
-    const noteTitle = itemTitleKey ? (itemTitleMap[itemTitleKey] ?? null) : null;
+    const noteTitle = useAtomValue(useMemo(() => agentActionItemTitleAtom(itemTitleKey), [itemTitleKey]));
     const setItemTitle = useSetAtom(setAgentActionItemTitleAtom);
 
     const pendingApprovalCount = pendingApprovalsForGroup.length;

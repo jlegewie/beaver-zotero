@@ -1,4 +1,4 @@
-import { atom } from 'jotai';
+import { atom, type Atom, type PrimitiveAtom, type Setter } from 'jotai';
 
 /**
  * Shared UI atoms keep view state (expansion toggles, busy flags, etc.)
@@ -15,7 +15,6 @@ type AnnotationPanelState = {
 
 type AnnotationPanelStateMap = Record<string, AnnotationPanelState>;
 type AnnotationBusyStateMap = Record<string, Record<string, boolean>>;
-type AnnotationAttachmentTitleMap = Record<string, string | null>;
 
 export const defaultAnnotationPanelState: AnnotationPanelState = {
     resultsVisible: false,
@@ -178,16 +177,64 @@ export const annotationPanelStateAtom = atom<AnnotationPanelStateMap>({});
  */
 export const annotationBusyAtom = atom<AnnotationBusyStateMap>({});
 
+// ---------------------------------------------------------------------------
+// Keyed title caches
+// ---------------------------------------------------------------------------
+
+/** The value read for an absent key, shared so it never re-renders a reader. */
+const NO_TITLE_ATOM: Atom<string | null> = atom(() => null);
+
 /**
- * Caches attachment titles for annotation groups by groupId
+ * A cache of display titles in which every key is its own atom.
+ *
+ * A thread can hold hundreds of cards that each cache one title. Kept in a
+ * single map atom, every card would subscribe to the whole map, and each title
+ * written would re-render every card — quadratic in the cards mounted. With a
+ * per-key atom a write re-renders only the surfaces showing that key.
  */
-export const annotationAttachmentTitlesAtom = atom<AnnotationAttachmentTitleMap>({});
+function createTitleCache() {
+    const atoms = new Map<string, PrimitiveAtom<string | null>>();
+
+    const entry = (key: string): PrimitiveAtom<string | null> => {
+        let cached = atoms.get(key);
+        if (!cached) {
+            cached = atom<string | null>(null);
+            atoms.set(key, cached);
+        }
+        return cached;
+    };
+
+    return {
+        /** The cached title for `key`; null until one is written, or for a null key. */
+        titleAtom: (key: string | null): Atom<string | null> => (key === null ? NO_TITLE_ATOM : entry(key)),
+        setTitleAtom: atom(
+            null,
+            (_get, set, { key, title }: { key: string; title: string | null }) => {
+                set(entry(key), title);
+            }
+        ),
+        /**
+         * Empty every title and forget the keys. Readers hold the atom they were
+         * given, so this is only safe once they unmount — when a new thread
+         * replaces the one whose cards read these titles.
+         */
+        clear: (set: Setter) => {
+            for (const cached of atoms.values()) set(cached, null);
+            atoms.clear();
+        },
+    };
+}
+
+const annotationAttachmentTitles = createTitleCache();
+
+/** Caches the attachment title of an annotation tool call, keyed by its tool-call id. */
+export const annotationAttachmentTitleAtom = annotationAttachmentTitles.titleAtom;
+
+export const setAnnotationAttachmentTitleAtom = annotationAttachmentTitles.setTitleAtom;
 
 // ---------------------------------------------------------------------------
 // Agent action item titles
 // ---------------------------------------------------------------------------
-
-type AgentActionItemTitleMap = Record<string, string | null>;
 
 /**
  * Cache identity for a tool call's item title. Tool-call ids are unique only
@@ -197,16 +244,12 @@ export function getAgentActionItemTitleKey(runId: string, toolcallId: string): s
     return `${runId}:${toolcallId}`;
 }
 
-/** Caches item titles for agent-action surfaces by their scoped cache key. */
-export const agentActionItemTitlesAtom = atom<AgentActionItemTitleMap>({});
+const agentActionItemTitles = createTitleCache();
 
-export const setAgentActionItemTitleAtom = atom(
-    null,
-    (get, set, { key, title }: { key: string; title: string | null }) => {
-        const current = get(agentActionItemTitlesAtom);
-        set(agentActionItemTitlesAtom, { ...current, [key]: title });
-    }
-);
+/** Caches the item title of an agent-action surface by its scoped cache key. */
+export const agentActionItemTitleAtom = agentActionItemTitles.titleAtom;
+
+export const setAgentActionItemTitleAtom = agentActionItemTitles.setTitleAtom;
 
 // ---------------------------------------------------------------------------
 // Note panels (button + visibility)
@@ -248,14 +291,6 @@ export const setAnnotationBusyStateAtom = atom(
     }
 );
 
-export const setAnnotationAttachmentTitleAtom = atom(
-    null,
-    (get, set, { key, title }: { key: string; title: string | null }) => {
-        const current = get(annotationAttachmentTitlesAtom);
-        set(annotationAttachmentTitlesAtom, { ...current, [key]: title });
-    }
-);
-
 // ---------------------------------------------------------------------------
 // Lifecycle helpers
 // ---------------------------------------------------------------------------
@@ -276,7 +311,7 @@ export const resetMessageUIStateAtom = atom(
         set(runErrorVisibilityAtom, {});
         set(annotationPanelStateAtom, {});
         set(annotationBusyAtom, {});
-        set(annotationAttachmentTitlesAtom, {});
-        set(agentActionItemTitlesAtom, {});
+        annotationAttachmentTitles.clear(set);
+        agentActionItemTitles.clear(set);
     }
 );

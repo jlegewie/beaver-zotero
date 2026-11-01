@@ -1,8 +1,8 @@
 import { useSurfaceWindow } from '../../../../runtime/SurfaceWindowContext';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import {
-    agentActionItemTitlesAtom,
+    agentActionItemTitleAtom,
     getAgentActionItemTitleKey,
     toolExpandedAtom,
     setToolExpandedAtom,
@@ -104,7 +104,7 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
     // run-scoped key, so this surface shares that one fetch without colliding
     // with an identically named tool call from a continuation run.
     const itemTitleKey = getAgentActionItemTitleKey(runId, row.toolcallId);
-    const itemTitle = useAtomValue(agentActionItemTitlesAtom)[itemTitleKey] ?? null;
+    const itemTitle = useAtomValue(useMemo(() => agentActionItemTitleAtom(itemTitleKey), [itemTitleKey]));
 
     // Read the executor's claim rather than a card-local flag: it is the only
     // signal that sees a write started from another surface (the in-stream card),
