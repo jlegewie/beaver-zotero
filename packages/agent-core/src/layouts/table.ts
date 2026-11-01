@@ -202,7 +202,8 @@ export interface ColumnProgress {
     total: number;
 }
 
-export type ExternalReferenceSource = "openalex";
+/** Who supplied an external row's record ("openalex", "pubmed", ...); an open string. */
+export type ExternalReferenceSource = string;
 
 /**
  * A Zotero object as a stored table names it. `library_ref` (`u` /

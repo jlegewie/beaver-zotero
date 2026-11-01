@@ -571,6 +571,11 @@ export interface ExternalReferenceActionsProps {
     pdfButtonMode?: ExternalReferenceActionMode;
     /** Whether to show the citation count. */
     showCitationCount?: boolean;
+    /**
+     * The link the Web button opens. Defaults to the record's primary link
+     * from its identifiers; a results view passes the link for its source.
+     */
+    webUrl?: string;
 }
 
 /**

@@ -104,6 +104,7 @@
     "./src/icons/DatabaseIcon.tsx",
     "./src/icons/DeleteIcon.tsx",
     "./src/icons/DocumentValidationIcon.tsx",
+    "./src/icons/MedicalFileIcon.tsx",
     "./src/icons/DollarCircleIcon.tsx",
     "./src/icons/DownloadIcon.tsx",
     "./src/icons/EditIcon.tsx",

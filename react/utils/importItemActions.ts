@@ -30,6 +30,20 @@ export async function executeImportItemActions(
     return runWindowOperation('executeImportItemActions', [actions, resolved], owner);
 }
 
+/**
+ * Import an external record with no pending action (a result row's Import)
+ * into the library and collection being viewed. The backend prepares the
+ * proposal at this click; a failure rejects with a message to retry.
+ */
+export async function importExternalReference(
+    externalId: string,
+    options: ExecuteOptions & { provider?: string } = {},
+): ReturnType<typeof operations.importExternalReference> {
+    const owner = captureWindowMutationOptions();
+    const resolved = await withContextTarget({ ...options, onAttachmentResolved: captureAttachmentCompletion() });
+    return runWindowOperation('importExternalReference', [externalId, resolved], owner);
+}
+
 export function undoImportItemActions(...args: Parameters<typeof operations.undoImportItemActions>): ReturnType<typeof operations.undoImportItemActions> {
     return runWindowOperation('undoImportItemActions', args);
 }

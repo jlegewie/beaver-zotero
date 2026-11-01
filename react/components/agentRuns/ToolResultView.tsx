@@ -14,8 +14,16 @@ import { TableResultView } from './toolResultViews/TableResultView';
 import { tableResultMessages } from '@beaver/agent-core/run-state/toolResultViews';
 import { isTableToolName, tableResultBody } from '@beaver/agent-core/run-state/tableResults';
 
+/** The search-details panel a source search shows at the top of its results, opened from the card header. */
+export interface SearchDetailsDisclosure {
+    open: boolean;
+    /** Element id of the panel, for the header button's aria-controls. */
+    id: string;
+}
+
 interface ToolResultViewProps {
     result: ToolReturnPart;
+    searchDetails?: SearchDetailsDisclosure;
 }
 
 /**
@@ -23,7 +31,7 @@ interface ToolResultViewProps {
  *
  * Returns null for view types this client does not render.
  */
-function renderFromView(view: ToolResultViewModel): React.ReactNode | null {
+function renderFromView(view: ToolResultViewModel, searchDetails?: SearchDetailsDisclosure): React.ReactNode | null {
     switch (view.view_type) {
         case 'duplicates': return <DuplicatesResultView view={view} />;
         case 'table':
@@ -31,7 +39,7 @@ function renderFromView(view: ToolResultViewModel): React.ReactNode | null {
         case 'item_list':
             return <ItemListResultView view={view} />;
         case 'external_reference_list':
-            return <ExternalReferenceListResultView view={view} />;
+            return <ExternalReferenceListResultView view={view} searchDetails={searchDetails} />;
         case 'collection_list':
             return <CollectionListResultView view={view} />;
         case 'tag_list':
@@ -78,12 +86,12 @@ export function hasRenderableResult(result: ToolReturnPart): boolean {
  * Note: Annotation tools are handled separately by AnnotationToolCallView
  * and don't go through this dispatcher.
  */
-export const ToolResultView: React.FC<ToolResultViewProps> = ({ result }) => {
+export const ToolResultView: React.FC<ToolResultViewProps> = ({ result, searchDetails }) => {
     const view = result.metadata?.view;
     const notices = tableMessages(result).map((message, index) => (
         <div key={index} role="status" className="px-3 py-2 text-sm font-color-secondary">{message}</div>
     ));
-    const fromView = isToolResultView(view) ? renderFromView(view) : null;
+    const fromView = isToolResultView(view) ? renderFromView(view, searchDetails) : null;
     if (!fromView && notices.length === 0) return null;
     return <>{fromView}{notices}</>;
 };

@@ -5,10 +5,16 @@ import { getToolCallStatusFromResult, toolResultAtom } from '@beaver/agent-core/
 import { isTableToolName, isTableWriteToolName, tableResultMessages } from '@beaver/agent-core/run-state/tableResults';
 import { getToolCallLabel, type ToolCallLabelEnrich } from '@beaver/agent-core/run-state/toolLabels';
 import {
+    isExternalReferenceListView,
     isToolResultView,
     getToolResultRenderableCount,
+    searchHasDetails,
+    searchSiteLabel,
+    searchViewInfo,
     type ToolResultView as ToolResultViewModel,
 } from '@beaver/agent-core/run-state/toolResultViews';
+import IconButton from '@beaver/agent-ui/primitives/IconButton';
+import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import { ToolResultView, hasRenderableResult } from './ToolResultView';
 import { GenericAgentActionView } from './GenericAgentActionView';
 import { TableToolCallView } from './TableToolCallView';
@@ -44,6 +50,8 @@ import {
     TableIcon,
     BookCopyIcon,
     BookSearchIcon,
+    MedicalFileIcon,
+    ArrowUpRightIcon,
 } from '../icons/icons';
 import { toolExpandedAtom, setToolExpandedAtom } from '../../atoms/messageUIState';
 import { resolveToolCallLabelEnrich } from '../../utils/toolCallLabelEnrich';
@@ -107,6 +115,9 @@ const TOOL_ICONS: Record<string, IconComponent> = {
     lookup_work: GlobalSearchIcon,
     find_related_works: FlowConnectionIcon,
     find_book_chapters: BookSearchIcon,
+    pubmed_search: GlobalSearchIcon,
+    search_trials: MedicalFileIcon,
+    get_trial: MedicalFileIcon,
 
     // Create item tool
     create_zotero_item: DocumentValidationIcon,
@@ -263,6 +274,11 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
         : result?.part_kind === 'tool-return'
             ? result.metadata?.summary?.result_count ?? null
             : null;
+    // A source search (PubMed, ClinicalTrials.gov) can show what it searched for,
+    // and run the same search on the source's site, from its header.
+    const searchInfo = view && isExternalReferenceListView(view) ? searchViewInfo(view) : null;
+    const hasSearchDetails = !!searchInfo && searchHasDetails(searchInfo);
+    const searchUrl = searchInfo?.search_url || null;
 
     // Host-resolved request-side display names for the parts the view model does
     // not cover (pending/failed item names, list_* library/collection scope names).
@@ -382,8 +398,10 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
         // payload. Keep it collapsed so it reads as a failed call, not a result —
         // unless it is a table status the user can act on.
         (!isUnsuccessfulToolReturn(result) || hasTableStatus) &&
-        // If we can compute a count (search-like tools), block expansion for 0 results.
-        (renderableCount === null || renderableCount > 0) &&
+        // If we can compute a count (search-like tools), block expansion for 0
+        // results, unless the search has details: what it ran is most useful
+        // when nothing came back.
+        (renderableCount === null || renderableCount > 0 || hasSearchDetails) &&
         !NON_EXPANDABLE_TOOLS.has(part.tool_name) &&
         // Only a view this client renders is shown; a raw return (unknown tool,
         // missing or unsupported view) stays collapsed.
@@ -395,6 +413,16 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
         !showAgentActionView; // Don't allow expand toggle for agent action tools
 
     const effectiveExpanded = isExpanded && canExpand;
+
+    // The search-details panel: closed by default, open for a search that found
+    // nothing, and reset whenever the card collapses.
+    const [searchDetailsChoice, setSearchDetailsChoice] = useState<boolean | null>(null);
+    useEffect(() => {
+        if (!effectiveExpanded) setSearchDetailsChoice(null);
+    }, [effectiveExpanded]);
+    const searchDetailsOpen = hasSearchDetails && (searchDetailsChoice ?? renderableCount === 0);
+    const searchDetailsId = `search-details-${part.tool_call_id}`;
+    const showSearchActions = effectiveExpanded && (hasSearchDetails || !!searchUrl);
 
     const handleToggleExpanded = () => {
         if (canExpand) {
@@ -487,14 +515,15 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
             <div
                 className={`
                     display-flex flex-row py-15
-                    ${effectiveExpanded ? 'border-bottom-quinary bg-senary' : ''}
+                    ${effectiveExpanded ? 'bg-senary' : ''}
+                    ${effectiveExpanded && !searchDetailsOpen ? 'border-bottom-quinary' : ''}
                 `}
                 onMouseEnter={() => setIsHovered(true)}
                 onMouseLeave={() => setIsHovered(false)}
             >
                 <button
                     type="button"
-                    className={`variant-ghost-secondary display-flex flex-row py-15 gap-2 w-full text-left min-w-0 ${canExpand ? 'cursor-pointer' : ''}`}
+                    className={`variant-ghost-secondary display-flex flex-row py-15 gap-2 flex-1 text-left min-w-0 ${canExpand ? 'cursor-pointer' : ''}`}
                     style={{ fontSize: '0.95rem', background: 'transparent', border: 0, padding: 0 }}
                     aria-expanded={effectiveExpanded}
                     aria-controls={`tool-result-${part.tool_call_id}`}
@@ -515,13 +544,48 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
                         </div>
                     </div>
                 </button>
-                <div className="flex-1"/>
+                {/* Siblings of the header button, not children: a control nested
+                    in a native button is neither focusable nor keyboard-activable.
+                    Only an expanded card carries actions; a collapsed read tool
+                    stays a plain line. */}
+                {showSearchActions && (
+                    <div className="display-flex flex-row items-center gap-05 mr-2 flex-none">
+                        {hasSearchDetails && (
+                            <Tooltip content="Search details" showArrow singleLine>
+                                <IconButton
+                                    icon={SearchIcon}
+                                    variant="ghost-secondary"
+                                    iconClassName={`${searchDetailsOpen ? 'font-color-primary' : 'font-color-secondary'} scale-90`}
+                                    className="tool-header-toggle"
+                                    onClick={() => setSearchDetailsChoice(!searchDetailsOpen)}
+                                    ariaLabel="Search details"
+                                    ariaExpanded={searchDetailsOpen}
+                                    ariaControls={searchDetailsId}
+                                />
+                            </Tooltip>
+                        )}
+                        {searchUrl && searchInfo && (
+                            <Tooltip content={searchSiteLabel(searchInfo)} showArrow singleLine>
+                                <IconButton
+                                    icon={ArrowUpRightIcon}
+                                    variant="ghost-secondary"
+                                    iconClassName="font-color-secondary scale-10"
+                                    onClick={() => getHost().navigation?.openExternalUrl(searchUrl)}
+                                    ariaLabel={searchSiteLabel(searchInfo)}
+                                />
+                            </Tooltip>
+                        )}
+                    </div>
+                )}
             </div>
 
             {/* Expanded result view */}
             {hasExpandedResult && (
                 <div id={`tool-result-${part.tool_call_id}`}>
-                    <ToolResultView result={result} />
+                    <ToolResultView
+                        result={result}
+                        searchDetails={hasSearchDetails ? { open: searchDetailsOpen, id: searchDetailsId } : undefined}
+                    />
                 </div>
             )}
         </div>

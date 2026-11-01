@@ -1,0 +1,56 @@
+{
+  "expected": {
+    "abstract": null,
+    "authors": null,
+    "citation_count": 0,
+    "fields_of_study": null,
+    "id": null,
+    "identifiers": null,
+    "influential_citation_count": null,
+    "is_open_access": false,
+    "is_retracted": true,
+    "journal": null,
+    "library_checked_at": "2026-11-02T15:00:00Z",
+    "library_items": [],
+    "oa_candidates": [],
+    "open_access_url": null,
+    "publication_date": null,
+    "publication_types": null,
+    "publication_url": null,
+    "raw_publication_types": null,
+    "reference_count": null,
+    "retrieved_at": "2026-11-02T14:00:00Z",
+    "source": "pubmed",
+    "source_id": "W4390000001",
+    "title": null,
+    "url": null,
+    "venue": null,
+    "year": null
+  },
+  "snapshots": [
+    {
+      "citation_count": 0,
+      "is_retracted": false,
+      "library_checked_at": "2026-11-02T15:00:00Z",
+      "library_items": [],
+      "retrieved_at": "2026-11-02T14:00:00Z",
+      "source": "pubmed",
+      "source_id": "W4390000001"
+    },
+    {
+      "citation_count": 0,
+      "is_open_access": false,
+      "is_retracted": true,
+      "library_items": [
+        {
+          "library_id": 1,
+          "library_ref": "u",
+          "zotero_key": "ABCD2345"
+        }
+      ],
+      "retrieved_at": "2026-11-02T13:00:00Z",
+      "source": "openalex",
+      "source_id": "W4390000001"
+    }
+  ]
+}

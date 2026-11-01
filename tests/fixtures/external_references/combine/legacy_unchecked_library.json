@@ -1,0 +1,56 @@
+{
+  "expected": {
+    "abstract": null,
+    "authors": null,
+    "citation_count": null,
+    "fields_of_study": null,
+    "id": null,
+    "identifiers": null,
+    "influential_citation_count": null,
+    "is_open_access": null,
+    "journal": null,
+    "library_items": [
+      {
+        "fulltext_status": null,
+        "item_id": null,
+        "library_id": 1,
+        "library_ref": "u",
+        "zotero_key": "ABCD2345"
+      }
+    ],
+    "oa_candidates": [],
+    "open_access_url": null,
+    "publication_date": null,
+    "publication_types": null,
+    "publication_url": null,
+    "raw_publication_types": null,
+    "reference_count": null,
+    "retrieved_at": "2026-11-02T14:00:00Z",
+    "source": "pubmed",
+    "source_id": "W4390000001",
+    "title": "New",
+    "url": null,
+    "venue": null,
+    "year": null
+  },
+  "snapshots": [
+    {
+      "library_items": [
+        {
+          "library_id": 1,
+          "library_ref": "u",
+          "zotero_key": "ABCD2345"
+        }
+      ],
+      "source": "openalex",
+      "source_id": "W4390000001",
+      "title": "Legacy"
+    },
+    {
+      "retrieved_at": "2026-11-02T14:00:00Z",
+      "source": "pubmed",
+      "source_id": "W4390000001",
+      "title": "New"
+    }
+  ]
+}

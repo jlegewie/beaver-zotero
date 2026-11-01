@@ -1,0 +1,106 @@
+{
+  "expected": {
+    "abstract": "From a source this backend does not rank.",
+    "authors": [
+      "Novo Nordisk A/S"
+    ],
+    "citation_count": null,
+    "creators": [
+      {
+        "creatorType": "author",
+        "firstName": null,
+        "lastName": null,
+        "name": "Novo Nordisk A/S"
+      }
+    ],
+    "details": {
+      "acronym": null,
+      "brief_title": null,
+      "conditions": [],
+      "data_as_of": null,
+      "documents": [],
+      "enrollment_count": null,
+      "enrollment_type": null,
+      "first_posted": null,
+      "first_submitted": null,
+      "has_results": null,
+      "interventions": [],
+      "kind": "trial",
+      "last_update_posted": null,
+      "last_update_submitted": null,
+      "lead_sponsor": null,
+      "phases": [
+        "PHASE3"
+      ],
+      "primary_completion_date": null,
+      "start_date": null,
+      "status": "COMPLETED",
+      "study_type": null,
+      "why_stopped": null
+    },
+    "fields_of_study": null,
+    "id": null,
+    "identifiers": null,
+    "influential_citation_count": null,
+    "is_open_access": null,
+    "item_type": "report",
+    "journal": null,
+    "library_items": [],
+    "oa_candidates": [],
+    "open_access_url": null,
+    "publication_date": null,
+    "publication_types": null,
+    "publication_url": null,
+    "raw_publication_types": null,
+    "reference_count": null,
+    "retrieved_at": "2026-11-02T14:06:00Z",
+    "source": "clinicaltrials",
+    "source_id": "NCT03548935",
+    "title": "Official title",
+    "url": null,
+    "venue": null,
+    "year": null,
+    "zotero_fields": {
+      "reportNumber": "NCT03548935"
+    }
+  },
+  "snapshots": [
+    {
+      "authors": [
+        "Novo Nordisk A/S"
+      ],
+      "creators": [
+        {
+          "creatorType": "author",
+          "name": "Novo Nordisk A/S"
+        }
+      ],
+      "details": {
+        "kind": "trial",
+        "phases": [
+          "PHASE3"
+        ],
+        "status": "COMPLETED"
+      },
+      "item_type": "report",
+      "retrieved_at": "2026-11-02T14:05:00Z",
+      "source": "clinicaltrials",
+      "source_id": "NCT03548935",
+      "title": "Official title",
+      "zotero_fields": {
+        "reportNumber": "NCT03548935"
+      }
+    },
+    {
+      "abstract": "From a source this backend does not rank.",
+      "details": {
+        "kind": "webpage",
+        "site": "x"
+      },
+      "retrieved_at": "2026-11-02T14:06:00Z",
+      "source": "eric",
+      "source_id": "NCT03548935",
+      "title": "Other title"
+    }
+  ]
+}

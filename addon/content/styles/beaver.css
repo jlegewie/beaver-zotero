@@ -5925,3 +5925,91 @@
     opacity: 0.5;
     cursor: default;
 }
+
+/* External records (PubMed, ClinicalTrials.gov): tags, facts, search header, details. */
+.beaver-root .ext-badge {
+    display: inline-block;
+    font-size: 11px;
+    line-height: 1.4;
+    padding: 0 5px;
+    border-radius: 4px;
+    white-space: nowrap;
+    color: var(--fill-secondary);
+    background-color: var(--beaver-fill-chip);
+    border: 1px solid var(--beaver-border-subtle);
+}
+.beaver-root .ext-badge[data-tone="green"] {
+    color: var(--tag-green-primary);
+    background-color: var(--tag-green-quinary);
+    border-color: var(--tag-green-tertiary);
+}
+.beaver-root .ext-badge[data-tone="blue"] {
+    color: var(--tag-blue-primary);
+    background-color: var(--tag-blue-quinary);
+    border-color: var(--tag-blue-tertiary);
+}
+.beaver-root .ext-badge[data-tone="red"] {
+    font-weight: 600;
+    color: var(--tag-red-primary);
+    background-color: var(--tag-red-quarternary);
+    border-color: var(--tag-red-tertiary);
+}
+/* Labelled facts: a narrow label column and a value column. */
+.beaver-root .ext-facts {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    column-gap: 10px;
+    row-gap: 3px;
+    font-size: 0.875rem;
+    line-height: 1.35;
+}
+.beaver-root .ext-facts > .ext-fact-label {
+    color: var(--fill-secondary);
+}
+.beaver-root .ext-facts > .ext-fact-value {
+    color: var(--fill-primary);
+    min-width: 0;
+}
+.beaver-root .ext-chip {
+    display: inline-block;
+    font-size: 11px;
+    line-height: 1.5;
+    padding: 0 6px;
+    border-radius: 10px;
+    color: var(--fill-primary);
+    background-color: var(--beaver-fill-chip);
+    white-space: nowrap;
+}
+.beaver-root .ext-chip[data-muted] {
+    color: var(--fill-secondary);
+}
+.beaver-root .ext-query-translation {
+    font-family: var(--beaver-font-mono, monospace);
+    font-size: 11px;
+    line-height: 1.45;
+    color: var(--fill-secondary);
+    word-break: break-word;
+    white-space: pre-wrap;
+    padding-left: 8px;
+    border-left: 2px solid var(--fill-quinary);
+    /* Long field-tagged queries scroll after about eight lines. */
+    max-height: calc(1.45em * 8);
+    overflow-y: auto;
+}
+/* Details: one heading level for sections, a smaller one inside them. */
+.beaver-root .ext-section-title {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--fill-primary);
+}
+.beaver-root .ext-subheading {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--fill-secondary);
+}
+/* A header button that discloses a panel looks pressed while it is open. */
+.beaver-root .tool-header-toggle[aria-expanded="true"] {
+    background-color: var(--fill-quinary);
+}

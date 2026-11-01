@@ -2,8 +2,8 @@ import { ToolCallStatus } from './atoms';
 import { ToolCallPart } from '../agents/types';
 import { getToolBaseLabel, parseArgs } from './toolCallRequest';
 import { textAnnotationStyle } from '../types/agentActions/createAnnotations';
-import { isExternalReferenceListView, isItemRow, type ToolResultView } from './toolResultViews';
-import { extractAuthorLastName, type ExternalReference } from '../types/externalReferences';
+import { isExternalReferenceListView, isItemRow, relatedWorksViewInfo, searchViewInfo, type ToolResultView } from './toolResultViews';
+import { authorLastNames, type ExternalReference } from '../types/externalReferences';
 import { LISTABLE_SPECIAL_COLLECTION_NAMES } from '../protocol/agentProtocol';
 
 // The request-side reference extraction lives in `toolCallRequest`; re-exported
@@ -164,7 +164,7 @@ export function getToolResultLabelSuffix(
             return n ? ` (${plural(n, 'annotation')})` : null;
         }
         case 'external_reference_list': {
-            if (toolName === 'lookup_work') {
+            if (toolName === 'lookup_work' || toolName === 'get_trial') {
                 const n = view.found_count ?? view.references.length;
                 return n != null ? ` (${n} found)` : null;
             }
@@ -172,10 +172,12 @@ export function getToolResultLabelSuffix(
                 const n = view.found_count ?? view.references.length;
                 return n ? ` (${plural(n, 'chapter')})` : null;
             }
-            // find_related_works: the page is a window into a larger set.
-            if (view.tool_info) {
+            // find_related_works and source searches: the page is a window
+            // into a larger set.
+            const windowInfo = relatedWorksViewInfo(view) ?? searchViewInfo(view);
+            if (windowInfo) {
                 const shown = view.references.length;
-                const total = view.tool_info.total_count;
+                const total = windowInfo.total_count;
                 // Empty pages (not_found, page beyond the end) get no count.
                 if (!total || !shown) return null;
                 return total > shown ? ` (${shown} of ${total})` : ` (${plural(total, 'result')})`;
@@ -295,8 +297,9 @@ function skillNameFromPath(path: string): string {
  */
 /** Compact citation-style label for a work: "Vaswani et al. 2017". */
 function relatedWorkShortLabel(work: ExternalReference): string {
-    const first = work.authors?.[0] ? extractAuthorLastName(work.authors[0]) : undefined;
-    const name = first ? ((work.authors?.length ?? 0) > 1 ? `${first} et al.` : first) : null;
+    const lastNames = authorLastNames(work);
+    const first = lastNames[0];
+    const name = first ? (lastNames.length > 1 ? `${first} et al.` : first) : null;
     if (name) return work.year ? `${name} ${work.year}` : name;
     if (work.title) return truncate(work.title, 40);
     return 'work';
@@ -723,7 +726,7 @@ function computeMainLabel(
         case 'find_related_works': {
             const relation = args.relation as string | undefined;
             const work =
-                view && isExternalReferenceListView(view) ? (view.tool_info?.work ?? null) : null;
+                view && isExternalReferenceListView(view) ? (relatedWorksViewInfo(view)?.work ?? null) : null;
             const workLabel = work ? relatedWorkShortLabel(work) : null;
             if (relation === 'references') {
                 if (workLabel) return `References in ${workLabel}`;
@@ -737,6 +740,24 @@ function computeMainLabel(
         }
 
         // === External search tools ===
+        case 'pubmed_search':
+        case 'search_trials': {
+            const searchLabel = args.search_label as string | undefined;
+            const terms = toolName === 'pubmed_search'
+                ? [args.query]
+                : [args.query, args.condition, args.intervention, args.sponsor, args.location];
+            const query = terms.filter((term): term is string => typeof term === 'string' && !!term.trim()).join(' · ');
+            const label = searchLabel || (query ? truncate(query, 60) : null);
+            return label ? `${baseLabel}: ${label}` : baseLabel;
+        }
+
+        case 'get_trial': {
+            const ids = normalizeListParam(args.nct_ids) ?? [];
+            if (ids.length === 1) return `${baseLabel}: ${truncate(ids[0], 40)}`;
+            if (ids.length > 1 && status !== 'completed') return `${baseLabel}: ${ids.length} trials`;
+            return baseLabel;
+        }
+
         case 'external_search': {
             const searchLabel = args.search_label as string | undefined;
             const query = args.query as string | undefined;

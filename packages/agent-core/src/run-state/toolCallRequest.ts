@@ -169,6 +169,9 @@ export const TOOL_BASE_LABELS: Record<string, string> = {
     lookup_work: 'Lookup work',
     find_related_works: 'Related works',
     find_book_chapters: 'Book chapters',
+    pubmed_search: 'PubMed search',
+    search_trials: 'ClinicalTrials.gov search',
+    get_trial: 'ClinicalTrials.gov record',
 
     // Batch jobs
     batch_start: 'Batch job',

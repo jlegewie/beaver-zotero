@@ -10,7 +10,11 @@
  * Citation-derived actions carry no item yet (`pending_resolution`): they are
  * resolved here, at the user's click, and fail with `already_in_library` if
  * the work is already there — nothing is adopted, so undo can never erase a
- * pre-existing item.
+ * pre-existing item. An external record among them is first prepared afresh
+ * by the backend (`importProposals`); if that fails, the import fails.
+ *
+ * Files a proposal names (`attachments`) are attached in order
+ * (`attachInOrder`) instead of running PDF discovery.
  *
  * Must run in the plugin realm (through `addon.libraryOperations`).
  */
@@ -19,6 +23,7 @@ import type {
     ImportItemProposedData,
     ImportItemResultData,
     ImportItemSpec,
+    ResolvedItem,
     ZoteroItemJson,
 } from '@beaver/agent-core/types/itemImport';
 import { logger } from '@beaver/agent-core/platform/logger';
@@ -33,7 +38,11 @@ import { coordinateLibraryMutation } from '../libraryMutations';
 import { runCommittedTransaction } from '../committedTransaction';
 import { isPdfDocument } from '../../utils/attachmentFiles';
 import { WEB_CONTENT_ITEM_TYPES } from './duplicates';
+import { ImportItemError } from './errors';
 import { filterPdfAttachments, schedulePdfFetchTask } from './pdfFetch';
+import { scheduleAttachInOrderTask } from './attachInOrder';
+import { fetchImportProposal } from './importProposals';
+import type { PdfCandidate } from '@beaver/agent-core/types/agentActions/items';
 import { BEAVER_PROVENANCE_MARKER, stampBeaverProvenanceExtra } from './provenance';
 import { locateImportFile, type LocatedFile } from './recognizeFile';
 import { resolveImportItems } from './resolve';
@@ -54,19 +63,21 @@ export interface WriteImportOptions {
     timing?: TimingAccumulator;
 }
 
-/** A write failure with a stable code; `details` carries e.g. the existing item. */
-export class ImportItemError extends Error {
-    constructor(public readonly code: string, message: string, public readonly details?: Record<string, unknown>) {
-        super(message);
-        this.name = 'ImportItemError';
-    }
-}
+export { ImportItemError };
 
 const SNAPSHOT_BUDGET_MS = 60_000;
 const BEAVER_METADATA_LINE: Record<string, string> = {
     model_metadata: 'Beaver Metadata: written by Beaver from the conversation',
     fallback_metadata: 'Beaver Metadata: search-result metadata (identifier lookup failed)',
 };
+/** A record with no identifier or URL to look up (e.g. a trial registration) is its own metadata. */
+const RECORD_METADATA_LINE = 'Beaver Metadata: search-result metadata';
+
+/** The Extra line naming where unchecked metadata came from, or undefined for checked metadata. */
+function metadataSourceLine(method: string | undefined, lookupAttempted: boolean): string | undefined {
+    if (method === 'fallback_metadata' && !lookupAttempted) return RECORD_METADATA_LINE;
+    return method ? BEAVER_METADATA_LINE[method] : undefined;
+}
 
 function track<T>(timing: TimingAccumulator | undefined, name: string, fn: () => Promise<T>): Promise<T> {
     return timing ? timing.track(name, fn) : fn();
@@ -344,10 +355,9 @@ function resultFor(
 }
 
 /** Extra with Beaver's provenance line and, for unchecked metadata, its source line. */
-function withProvenanceLines(extra: string, method: string | undefined): string {
+function withProvenanceLines(extra: string, sourceLine: string | undefined): string {
     const lines = extra ? [extra] : [];
     if (!extra.includes(BEAVER_PROVENANCE_MARKER)) lines.push(`${BEAVER_PROVENANCE_MARKER}: ${new Date().toISOString().slice(0, 10)}`);
-    const sourceLine = method ? BEAVER_METADATA_LINE[method] : undefined;
     if (sourceLine && !extra.includes(sourceLine)) lines.push(sourceLine);
     return lines.join('\n');
 }
@@ -357,10 +367,9 @@ function withProvenanceLines(extra: string, method: string | undefined): string 
  * them, and add the optional provenance note. Both are already in the first
  * save, so the stamp normally saves nothing.
  */
-async function finishItem(item: Zotero.Item, method: string | undefined, options: WriteImportOptions): Promise<void> {
+async function finishItem(item: Zotero.Item, sourceLine: string | undefined, options: WriteImportOptions): Promise<void> {
     if (item.isAttachment()) return;
     let needsSave = stampBeaverProvenanceExtra(item);
-    const sourceLine = method ? BEAVER_METADATA_LINE[method] : undefined;
     const extra = (item.getField('extra') as string) || '';
     if (sourceLine && !extra.includes(sourceLine)) {
         item.setField('extra', extra ? `${extra}\n${sourceLine}` : sourceLine);
@@ -376,6 +385,48 @@ async function finishItem(item: Zotero.Item, method: string | undefined, options
             (note) => runCommittedTransaction(() => note.save(), { timing: options.timing, label: 'import_item provenance note' }),
         );
     }
+}
+
+/**
+ * An external record without an approved item (a citation's Import, or a
+ * result row's): prepared by the backend when the user clicks.
+ */
+function isUnresolvedExternal(data: ImportItemProposedData): boolean {
+    return !data.item && data.source?.kind === 'external' && !!data.source.external_id;
+}
+
+/** A fresh proposal, written to the action's library, collections and tags. */
+function withActionTarget(fresh: ImportItemProposedData, action: ImportItemProposedData): ImportItemProposedData {
+    return {
+        ...fresh,
+        library_id: action.library_id,
+        library_ref: action.library_ref,
+        library_name: action.library_name,
+        collection_keys: action.collection_keys,
+        collection_ids: action.collection_ids,
+        tags: action.tags,
+    };
+}
+
+/** PDF links a translator returned, as download candidates. */
+function translatorPdfCandidates(attachments: ResolvedItem['attachment_urls']): PdfCandidate[] {
+    return (attachments ?? [])
+        .filter((attachment) => !attachment.snapshot && ((attachment.mime_type ?? '').toLowerCase() === 'application/pdf'
+            || /\.pdf($|[?#])/i.test(attachment.url)))
+        .map((attachment) => ({ url: attachment.url, access_method: 'translator' }));
+}
+
+/** Candidate lists joined in order, each URL once. */
+function mergePdfCandidates(...groups: Array<PdfCandidate[] | undefined>): PdfCandidate[] {
+    const seen = new Set<string>();
+    const merged: PdfCandidate[] = [];
+    for (const candidate of groups.flatMap((group) => group ?? [])) {
+        const key = candidate.url || candidate.page_url || '';
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        merged.push(candidate);
+    }
+    return merged;
 }
 
 /** Write one approved `import_item` action. */
@@ -408,12 +459,25 @@ export async function writeImportItem(data: ImportItemProposedData, options: Wri
 
     let json = data.item;
     let method = data.resolution?.method;
-    let snapshotUrl = data.snapshot_url;
-    if (!json && data.pending_resolution) {
-        const resolved = await track(options.timing, 'resolve_ms', () => resolvePending(data, libraryID, options.threadId));
+    // What the item's files come from: the approved proposal, or for an
+    // unresolved external record the proposal prepared at this click.
+    let plan: ImportItemProposedData = data;
+    if (!json && isUnresolvedExternal(data)) {
+        const fresh = await track(options.timing, 'proposal_ms', () =>
+            fetchImportProposal(data.source.external_id!, data.source.provider));
+        options.assertCurrent?.();
+        plan = withActionTarget(fresh, data);
+        json = plan.item;
+    }
+    let snapshotUrl = plan.snapshot_url;
+    let pdfCandidates = plan.pdf_candidates;
+    if (!json && plan.pending_resolution) {
+        const resolved = await track(options.timing, 'resolve_ms', () => resolvePending(plan, libraryID, options.threadId));
         json = resolved.item;
         method = resolved.method;
         snapshotUrl = resolved.snapshot_url;
+        // Translator PDF links first, then the record's candidates.
+        pdfCandidates = mergePdfCandidates(translatorPdfCandidates(resolved.attachment_urls), plan.pdf_candidates);
     }
 
     options.assertCurrent?.();
@@ -431,11 +495,15 @@ export async function writeImportItem(data: ImportItemProposedData, options: Wri
     // Provenance goes into the first save: other plugins that react to new items
     // (title linters, arXiv helpers) may re-save the item from their own copy,
     // which would drop a stamp added in a second save.
-    toSave.extra = withProvenanceLines(typeof json.extra === 'string' ? json.extra : '', method);
+    const source = plan.source;
+    const lookupAttempted = !!(plan.pending_resolution?.identifier || plan.pending_resolution?.url
+        || source?.identifier || source?.url || source?.kind === 'identifier' || source?.kind === 'url');
+    const sourceLine = metadataSourceLine(method, lookupAttempted);
+    toSave.extra = withProvenanceLines(typeof json.extra === 'string' ? json.extra : '', sourceLine);
 
     const item = await track(options.timing, 'save_ms', () => saveItemJson(toSave, libraryID, collectionIDs, data.tags, options.timing));
     try {
-        await finishItem(item, method, options);
+        await finishItem(item, sourceLine, options);
 
         let fileAttachment: Zotero.Item | null = null;
         if (file) fileAttachment = await track(options.timing, 'attach_file_ms', () => attachFile(item, file!));
@@ -447,6 +515,20 @@ export async function writeImportItem(data: ImportItemProposedData, options: Wri
         }
         if (pdfs.length) return resultFor(item, collections, 'available', pdfs[0]);
 
+        const filesEditable = (Zotero.Libraries.get(libraryID) as any)?.filesEditable !== false;
+        // Files the record names are attached exactly, in order; PDF discovery
+        // runs only for records that name none.
+        const recordFiles = Array.isArray(plan.attachments) ? plan.attachments : null;
+        if (recordFiles?.length && filesEditable) {
+            scheduleAttachInOrderTask(libraryID, item.key, recordFiles, {
+                actionId: options.actionId,
+                runId: options.runId,
+                threadId: options.threadId ?? undefined,
+                onAttachmentResolved: options.onAttachmentResolved,
+            });
+            return resultFor(item, collections, 'pending');
+        }
+
         // Web content gets a snapshot, following Zotero's own "Take automatic snapshots" setting.
         const snapshotEnabled = !!snapshotUrl && Zotero.Prefs.get('automaticSnapshots') !== false
             && isApiAvailable('importFromDocument') && isApiAvailable('remoteTranslate');
@@ -454,16 +536,16 @@ export async function writeImportItem(data: ImportItemProposedData, options: Wri
             scheduleSnapshotTask(libraryID, item.key, snapshotUrl!, options);
             return resultFor(item, collections, 'pending');
         }
-        const filesEditable = (Zotero.Libraries.get(libraryID) as any)?.filesEditable !== false;
+        if (recordFiles) return resultFor(item, collections, 'none');
         // Zotero's own resolvers work from a DOI or URL; with neither and no
         // candidates there is nowhere to look.
-        const hasPdfSource = (data.pdf_candidates?.length ?? 0) > 0
+        const hasPdfSource = (pdfCandidates?.length ?? 0) > 0
             || (typeof json.DOI === 'string' && !!json.DOI.trim())
             || (typeof json.url === 'string' && !!json.url.trim())
             || /(^|\n)\s*DOI:/i.test(typeof json.extra === 'string' ? json.extra : '');
         if (!WEB_CONTENT_ITEM_TYPES.has(json.itemType) && filesEditable && hasPdfSource) {
             schedulePdfFetchTask(libraryID, item.key, {
-                pdfCandidates: data.pdf_candidates,
+                pdfCandidates,
                 actionId: options.actionId,
                 runId: options.runId,
                 threadId: options.threadId ?? undefined,

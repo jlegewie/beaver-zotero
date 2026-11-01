@@ -709,14 +709,15 @@ export const loadThreadAtom = atom(
                     .filter((action) => action.proposed_data?.source?.external_id
                         && !mapping[action.proposed_data.source.external_id])
                     .map((action) => importActionReference(action.proposed_data, mapping));
-                if (createItemActions.length > 0 || importReferences.length > 0) {
+                // Action payloads are derived copies, not source snapshots: they
+                // only stand in for ids no search result supplied.
+                const createItemReferences = (createItemActions
+                    .map((action: AgentAction) => action.proposed_data?.item)
+                    .filter(Boolean) as ExternalReference[])
+                    .filter((reference) => !reference.source_id || !mapping[reference.source_id]);
+                if (createItemReferences.length > 0 || importReferences.length > 0) {
                     logger(`loadThreadAtom: Adding external references from agent actions to mapping`, 1);
-                    const references = [
-                        ...(createItemActions
-                            .map((action: AgentAction) => action.proposed_data?.item)
-                            .filter(Boolean) as ExternalReference[]),
-                        ...importReferences,
-                    ];
+                    const references = [...createItemReferences, ...importReferences];
                     set(addExternalReferencesToMappingAtom, references);
                     set(checkExternalReferencesAtom, references);
                 }

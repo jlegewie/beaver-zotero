@@ -68,6 +68,8 @@
     "./src/citations/citationGrammar.ts",
     "./src/citations/atoms.ts",
     "./src/citations/externalReferences.ts",
+    "./src/citations/externalRecords.ts",
+    "./src/citations/externalRecordDisplay.ts",
 
     // Reached through the inline `import('../agents/agentActionTypes')` type
     // references in agentProtocol.ts, and from there the agent-action payload

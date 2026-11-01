@@ -1,5 +1,5 @@
 import { atom } from 'jotai';
-import { ExternalReference, extractAuthorLastName } from '@beaver/agent-core/types/externalReferences';
+import { ExternalReference, authorLastNames } from '@beaver/agent-core/types/externalReferences';
 import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { findExistingReference, FindReferenceData } from '../utils/findExistingReference';
 import { logger } from '@beaver/agent-core/platform/logger';
@@ -21,6 +21,25 @@ import {
  * read-only derivations and the display formatter live there; only the lookups
  * that need Zotero live here.
  */
+
+/**
+ * What the library is searched for: the record's identifiers (DOI, ISBN,
+ * PubMed id, trial registry URL and report number), title, date, and its
+ * authors' last names (organizations by their whole name).
+ */
+export function referenceMatchData(ref: ExternalReference): FindReferenceData {
+    const lastNames = authorLastNames(ref);
+    return {
+        title: ref.title,
+        date: ref.publication_date ?? (ref.year != null ? String(ref.year) : undefined),
+        DOI: ref.identifiers?.doi,
+        ISBN: ref.identifiers?.isbn,
+        creators: lastNames.length ? lastNames : undefined,
+        PMID: ref.identifiers?.pmid ?? undefined,
+        url: ref.url,
+        reportNumber: ref.zotero_fields?.reportNumber,
+    };
+}
 
 /**
  * Check if external reference exists in Zotero library
@@ -98,13 +117,7 @@ export const checkExternalReferenceAtom = atom(
             if (!result) {
                 logger(`checkExternalReference: Searching for ${refId}`, 1);
                 try {
-                    const existingItem = await findExistingReference(1, {
-                        title: externalRef.title,
-                        date: externalRef.publication_date,
-                        DOI: externalRef.identifiers?.doi,
-                        ISBN: externalRef.identifiers?.isbn,
-                        creators: externalRef.authors?.map(author => extractAuthorLastName(author))
-                    } as FindReferenceData);
+                    const existingItem = await findExistingReference(1, referenceMatchData(externalRef));
 
                     if (existingItem) {
                         result = {
@@ -156,10 +169,13 @@ export const checkExternalReferencesAtom = atom(
         const cache = get(externalReferenceItemMappingAtom);
         const checking = get(checkingExternalReferencesAtom);
         
-        // Filter out already cached or currently checking references
+        // Filter out already cached or currently checking references. A cached
+        // "not in library" is checked again when a newer record of the same id
+        // (another source's snapshot) lists a library copy.
         const refsToCheck = externalRefs.filter(ref => {
             const refId = ref.source_id;
-            return refId && !(refId in cache) && !checking.has(refId);
+            if (!refId || checking.has(refId)) return false;
+            return !(refId in cache) || (cache[refId] === null && (ref.library_items?.length ?? 0) > 0);
         });
         
         logger(`checkExternalReferences: After filtering, ${refsToCheck.length} refs to check (${externalRefs.length - refsToCheck.length} already cached/checking)`, 1);
@@ -226,14 +242,9 @@ export const checkExternalReferencesAtom = atom(
                         // Fall back to findExistingReference
                         if (!result) {
                             try {
-                                logger(`checkExternalReferences: Searching for ${refId}`, { title: ref.title, date: ref.publication_date, DOI: ref.identifiers?.doi, ISBN: ref.identifiers?.isbn, creators: ref.authors?.map(author => extractAuthorLastName(author)) }, 1);
-                                const existingItem = await findExistingReference(1, {
-                                    title: ref.title,
-                                    date: ref.publication_date,
-                                    DOI: ref.identifiers?.doi,
-                                    ISBN: ref.identifiers?.isbn,
-                                    creators: ref.authors?.map(author => extractAuthorLastName(author))
-                                } as FindReferenceData);
+                                const matchData = referenceMatchData(ref);
+                                logger(`checkExternalReferences: Searching for ${refId}`, matchData, 1);
+                                const existingItem = await findExistingReference(1, matchData);
                                 if (existingItem) {
                                     result = {
                                         library_id: existingItem.libraryID,

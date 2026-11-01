@@ -7,6 +7,7 @@
  */
 
 import { ExternalReference } from "../types/externalReferences";
+import { supplierForExternalId } from "../citations/externalRecords";
 import { ZoteroItemReference, CollectionReference, AttachmentInfo } from "../types/zotero";
 import { ToolReturnPart } from "../agents/types";
 import { logger } from "../platform/logger";
@@ -300,7 +301,8 @@ export interface ExternalReferenceResultContent {
  */
 export interface ExternalReferenceResultSupplement {
     external_id?: string;
-    source: "semantic_scholar" | "openalex";
+    /** Who supplied the record; an open string. */
+    source?: string;
     publication_date?: string;
     publication_url?: string;
     url?: string;
@@ -1057,7 +1059,7 @@ export function mergeExternalReferenceContents(
             abstract: ref.abstract,
             fields_of_study: ref.fields_of_study,
             citation_count: ref.citation_count,
-            source: supp?.source ?? "openalex",
+            source: supp?.source ?? supplierForExternalId(ref.external_id) ?? "",
             id: supp?.external_id,
             publication_date: supp?.publication_date,
             publication_url: supp?.publication_url,
