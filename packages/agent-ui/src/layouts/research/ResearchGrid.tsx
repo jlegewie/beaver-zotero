@@ -126,7 +126,6 @@ export function ResearchGrid({
     const rowWindow = useRowWindow({
         enabled: virtualize,
         rows: state.rows,
-        expandedRows: EMPTY,
         rootRef,
         bodyRef,
         layoutKey: `${state.density}|${questions.map((column) => column.id).join(",")}`,
@@ -284,7 +283,6 @@ function CellEditorLayer({
     );
 }
 
-const EMPTY: ReadonlySet<string> = new Set();
 const ADD_WIDTH = "3.25rem";
 
 function Spacer({ height }: { height: number }): React.ReactElement {

@@ -4,26 +4,23 @@
  * An evidence entry says which document a passage is in and where, and the row
  * says which work it is and how it is cited. Joining the two gives a citation the chat's `Citation`
  * component renders and navigates, with nothing loaded from Zotero — the table
- * view, the reader enhancement and the static document's reference list all
- * build their citations here. Surfaces hand the assembled citation to the
+ * view and the static document's reference list build their citations here. Surfaces hand the assembled citation to the
  * component directly: a tag names only a work and a locator, so it cannot
  * tell two quotes of one work apart.
  */
 
-import type { Citation, CitationType, ContentKind } from "../types/citations";
+import type { Citation, ContentKind } from "../types/citations";
 import {
     locatorValues,
     parseLoc,
-    type CitationRef,
     type Locator,
     type ZoteroCitationRef,
 } from "../citations/citationGrammar";
 import { parseExtractIdValue } from "../extract/ids";
 import { UNRESOLVED_LIBRARY_ID } from "../identity/libraryRef";
-import { documentReference } from "./rowKinds";
+import { documentReference } from "./rowActions";
 import {
     REFERENCE_COLUMN_ID,
-    isZoteroRowRef,
     type CellValue,
     type Evidence,
     type Row,
@@ -57,15 +54,6 @@ function pageOfLocator(raw: string | undefined): number | undefined {
     return page && page > 0 ? page : undefined;
 }
 
-/** The source label an annotation row's anchor carries, when it has one. */
-function annotationSource(row: Row): string | undefined {
-    for (const cell of Object.values(row.cells)) {
-        if (cell.value?.kind === "annotation" && cell.value.source_display_name)
-            return cell.value.source_display_name;
-    }
-    return undefined;
-}
-
 function zoteroRef(ref: ZoteroRowReference, loc?: Locator): ZoteroCitationRef {
     return {
         kind: "zotero",
@@ -76,34 +64,21 @@ function zoteroRef(ref: ZoteroRowReference, loc?: Locator): ZoteroCitationRef {
     };
 }
 
+/** The cited attachment, and the item above it when the row has one. */
 interface Target {
-    resolved: CitationRef;
+    resolved: ZoteroCitationRef;
     parent?: ZoteroCitationRef;
-    type: CitationType;
-}
-
-/** The work above the document: the item of an item row, the parent of an attachment or annotation. */
-function parentOf(row: Row): ZoteroCitationRef | undefined {
-    const ref = row.ref;
-    if (ref?.kind === "item") return zoteroRef(ref);
-    if (ref?.kind === "attachment" || ref?.kind === "annotation")
-        return ref.parent_item ? zoteroRef(ref.parent_item) : undefined;
-    return undefined;
 }
 
 /**
  * The local rowid the row already knows for a document's library: the row's
- * own reference names the same library (`library_ref`) on this device.
+ * item names the same library (`library_ref`) on this device.
  */
 function knownLibraryId(
-    row: Row,
+    ref: ZoteroRowReference | undefined,
     file: { library_ref?: string; zotero_key: string },
 ): number | undefined {
-    const ref = row.ref;
-    if (!ref || !isZoteroRowRef(ref)) return undefined;
-    if (ref.kind === "annotation" && ref.attachment.zotero_key === file.zotero_key)
-        return ref.attachment.library_id;
-    return file.library_ref && ref.library_ref === file.library_ref
+    return ref && file.library_ref && ref.library_ref === file.library_ref
         ? ref.library_id
         : undefined;
 }
@@ -115,34 +90,24 @@ function knownLibraryId(
  */
 function targetOf(row: Row, evidence: Evidence): Target | undefined {
     if (!row.ref) return undefined;
-    const document = evidence.document ?? row.documents?.[0];
+    // The work above the document: the row's item. An external work has none.
+    const item = row.ref.kind === "item" ? row.ref : undefined;
+    const file = documentReference(evidence.document ?? row.documents?.[0]);
+    if (!file) return undefined;
     // Page-only evidence still names its page, so its tag stays its own.
     const loc = parseLoc(
         evidence.locator ??
             (evidence.page != null ? `page${evidence.page + 1}` : undefined),
     );
-    if (document?.startsWith("ext-"))
-        return {
-            resolved: {
-                kind: "external_file",
-                ext_key: document.slice("ext-".length),
-                ...(loc ? { loc } : {}),
-            },
-            type: "external_file",
-        };
-    const file = documentReference(document);
-    if (!file) return undefined;
-    const parent = parentOf(row);
     return {
         resolved: {
             kind: "zotero",
-            library_id: knownLibraryId(row, file) ?? file.library_id,
+            library_id: knownLibraryId(item, file) ?? file.library_id,
             ...(file.library_ref ? { library_ref: file.library_ref } : {}),
             zotero_key: file.zotero_key,
             ...(loc ? { loc } : {}),
         },
-        ...(parent ? { parent } : {}),
-        type: "attachment",
+        ...(item ? { parent: zoteroRef(item) } : {}),
     };
 }
 
@@ -151,21 +116,14 @@ function targetOf(row: Row, evidence: Evidence): Target | undefined {
  * that resolves tags against a citation store finds the assembled citation
  * under it, so table evidence can render through the chat's own markers.
  */
-export function citationTagFor(ref: CitationRef): string {
+export function citationTagFor(ref: ZoteroCitationRef): string {
     const loc = ref.loc ? ` loc="${ref.loc.raw}"` : "";
-    if (ref.kind === "zotero")
-        return `<citation id="${ref.library_ref ?? ref.library_id}-${ref.zotero_key}"${loc}/>`;
-    if (ref.kind === "external")
-        return `<citation external_id="${ref.external_id}"${loc}/>`;
-    return `<citation id="ext-${ref.ext_key}"${loc}/>`;
+    return `<citation id="${sourceKeyOf(ref)}"${loc}/>`;
 }
 
 /** The cited source, so ids from different tables that share a row id stay apart. */
-function sourceKeyOf(ref: CitationRef): string {
-    if (ref.kind === "zotero")
-        return `${ref.library_ref ?? ref.library_id}-${ref.zotero_key}`;
-    if (ref.kind === "external") return `${ref.source}:${ref.external_id}`;
-    return `ext-${ref.ext_key}`;
+function sourceKeyOf(ref: ZoteroCitationRef): string {
+    return `${ref.library_ref ?? ref.library_id}-${ref.zotero_key}`;
 }
 
 /** FNV-1a 32 over UTF-16 code units, as hex: tells evidence at one place apart. */
@@ -221,26 +179,16 @@ export function citationForEvidence(
         citation_id: citationIdFor(row, target, evidence),
         requested_ref: target.resolved,
         resolved_ref: target.resolved,
-        citation_type: target.type,
+        citation_type: "attachment",
         preview: evidence.quote,
         raw_tag: citationTagFor(target.resolved),
     };
     if (target.parent) citation.parent_ref = target.parent;
-    // Without a reference cell, the row's own label: an annotation's source,
-    // a file's name (or its key), so the marker always has something to show.
-    const displayName =
-        reference?.display_name ??
-        annotationSource(row) ??
-        (row.ref?.kind === "file"
-            ? (row.ref.label ?? row.ref.ext_key)
-            : undefined);
-    if (displayName) citation.display_name = displayName;
+    if (reference?.display_name) citation.display_name = reference.display_name;
     if (reference?.formatted_citation)
         citation.formatted_citation = reference.formatted_citation;
     if (reference?.item_type) citation.item_type = reference.item_type;
-    const contentKind =
-        options.contentKind ??
-        (reference?.content_kind as Citation["content_kind"] | undefined);
+    const contentKind = options.contentKind;
     if (contentKind) citation.content_kind = contentKind;
     // The locator's page (`page12`, `s5.6`) when the evidence names no other.
     // A snapshot has no pages: its passage is found by its text.

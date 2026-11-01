@@ -605,8 +605,8 @@ source Zotero). `fix-db` applies the same treatment to an already-created clone.
 The standalone survives main-window closure. Its context follows activation of a live main
 window and becomes empty when none remain. Rebinding replaces context observers, preserving
 its chat and explicit attachments. Preferences borrows the actual initiating renderer and
-closes with it. Use `BeaverUIFactory.commandBeaverWindow` with `open-chat`, `show-table`, or
-`show-chat`; commands pass persisted thread ids or plain table data, never stores or atoms.
+closes with it. Use `BeaverUIFactory.commandBeaverWindow` with `open-chat`; commands pass
+persisted thread ids, never stores or atoms.
 Ordinary window opening only focuses it. Explicit chat opening requires settled history,
 preserves a same-chat draft, and confirms replacement of user-authored drafts. It never
 stops a response in the destination; guarded loads commit only while the destination and

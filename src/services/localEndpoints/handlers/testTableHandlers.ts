@@ -23,18 +23,6 @@ export const TABLES_API_MISSING = {
     error: TABLES_API_UNAVAILABLE,
 };
 
-export interface OpenTableRequest {
-    variant?: 'search' | 'extraction';
-    /** A spec to render as-is. Omit it and one is built from the library. */
-    table?: TableSpec;
-    title?: string;
-    subtitle?: string;
-    /** How many library items the built spec should cover. */
-    limit?: number;
-    /** Pass false to leave the window closed and only set the surface. */
-    open?: boolean;
-}
-
 export interface DemoItem {
     libraryID: number;
     key: string;
@@ -144,7 +132,6 @@ export function typeColumn(items: DemoItem[]): Column {
         id: '_type',
         header: 'Type',
         type: 'select',
-        role: 'row_type',
         system: true,
         priority: 'secondary',
         options: labels.map((label) => ({ label, color: 'gray' })),
@@ -413,10 +400,17 @@ export function selectLabelFor(itemType: string): string {
     return 'Other';
 }
 
-export interface TableCreateRequest extends OpenTableRequest {
+export interface TableCreateRequest {
     operation_id?: string;
     /** The spec to store. Omit it and a demo spec is built from the library. */
     spec?: TableSpec;
+    /** Alias of `spec`. */
+    table?: TableSpec;
+    /** Which demo to build when no spec is given. */
+    variant?: 'search' | 'extraction';
+    /** How many library items the demo should cover. */
+    limit?: number;
+    title?: string;
     libraryID?: number;
     collectionID?: number;
     actor?: string;

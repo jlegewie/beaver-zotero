@@ -39,7 +39,7 @@ import { getItemDisplayName } from '../../utils/itemDisplayName';
 import { formatItemReference } from '../../utils/itemReference';
 
 const DOCUMENT_KINDS = new Set(['pdf', 'epub', 'snapshot']);
-const NOT_A_ROW = 'not a regular item; standalone attachments, notes and annotations are not table rows yet';
+const NOT_A_ROW = 'not a regular item; standalone attachments, notes and annotations cannot be table rows';
 const NOT_FOUND = 'not found in the library (or in the trash)';
 const EXCLUDED = 'in a library Beaver cannot access';
 const LOOKUP_CHUNK = 200;

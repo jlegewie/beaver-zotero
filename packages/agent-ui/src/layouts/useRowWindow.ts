@@ -32,7 +32,6 @@ export interface UseRowWindowOptions {
     enabled: boolean;
     /** Rows in display order. */
     rows: Row[];
-    expandedRows: ReadonlySet<string>;
     /** The grid root; its closest `.bt-scroll` ancestor is the viewport. */
     rootRef: React.RefObject<HTMLElement | null>;
     /** The `<tbody>` whose direct `<tr>`s are measured. */
@@ -63,13 +62,13 @@ function sameWindow(a: RowWindow, b: RowWindow): boolean {
  * DOM, so a thousand tall rows open as fast as forty.
  *
  * Rows are nearly uniform (the density fixes their height), but nothing here
- * assumes it: every rendered row, and every expanded row's detail, is
- * measured after the commit and remembered by row id, and a row not yet
+ * assumes it: every rendered row is measured after the commit and
+ * remembered by row id, and a row not yet
  * measured counts as the height of the first one that was. The window is
  * recomputed from those heights on scroll, on resize (after measuring the
  * rows on screen again, since a narrower viewport rewraps them without a
- * render), and after every render, so filters, sorts, expansion and a changed
- * spec all settle before paint.
+ * render), and after every render, so filters, sorts and a changed spec all
+ * settle before paint.
  *
  * The scroll handler commits synchronously (`flushSync`): a scroll that
  * reached a spacer before React rendered the rows behind it would paint a
@@ -82,7 +81,6 @@ function sameWindow(a: RowWindow, b: RowWindow): boolean {
 export function useRowWindow({
     enabled,
     rows,
-    expandedRows,
     rootRef,
     bodyRef,
     layoutKey = '',
@@ -102,17 +100,13 @@ export function useRowWindow({
     winRef.current = win;
     const rowsRef = useRef(rows);
     rowsRef.current = rows;
-    const expandedRef = useRef(expandedRows);
-    expandedRef.current = expandedRows;
 
     const heights = useRef(new Map<string, number>());
-    const detailHeights = useRef(new Map<string, number>());
     const estimate = useRef(0);
     const measuredFor = useRef(layoutKey);
     if (measuredFor.current !== layoutKey) {
         measuredFor.current = layoutKey;
         heights.current = new Map();
-        detailHeights.current = new Map();
         estimate.current = 0;
     }
     const scrollerRef = useRef<HTMLElement | null>(null);
@@ -124,14 +118,10 @@ export function useRowWindow({
         if (!enabled || !scroller || !body) return fullWindow(list);
 
         const est = estimate.current || FALLBACK_ROW_PX;
-        const expanded = expandedRef.current;
         const offsets = new Array<number>(list.length + 1);
         offsets[0] = 0;
         for (let i = 0; i < list.length; i++) {
-            const id = list[i].id;
-            let h = heights.current.get(id) ?? est;
-            if (expanded.has(id)) h += detailHeights.current.get(id) ?? est * 2;
-            offsets[i + 1] = offsets[i] + h;
+            offsets[i + 1] = offsets[i] + (heights.current.get(list[i].id) ?? est);
         }
         const total = offsets[list.length];
 
@@ -160,23 +150,16 @@ export function useRowWindow({
         };
     };
 
-    /** Remembers the height of every row and detail row now in the DOM. */
+    /** Remembers the height of every row now in the DOM. */
     const measure = () => {
         const body = bodyRef.current;
         if (!body) return;
         for (const tr of Array.from(body.children) as HTMLElement[]) {
             const rowId = tr.getAttribute("data-row-id");
-            if (rowId) {
-                const h = tr.offsetHeight;
-                if (h > 0) {
-                    heights.current.set(rowId, h);
-                    if (!estimate.current) estimate.current = h;
-                }
-                continue;
-            }
-            const detailFor = tr.getAttribute("data-detail-for");
-            if (detailFor && tr.offsetHeight > 0)
-                detailHeights.current.set(detailFor, tr.offsetHeight);
+            const h = tr.offsetHeight;
+            if (!rowId || h <= 0) continue;
+            heights.current.set(rowId, h);
+            if (!estimate.current) estimate.current = h;
         }
     };
 

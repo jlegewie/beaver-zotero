@@ -34,7 +34,6 @@ export function fillDocumentRequest(documentId: string): WSZoteroDocumentRequest
         max_payload_bytes: FILL_MAX_PAYLOAD_BYTES,
         timeout_seconds: MAX_PDF_TIMEOUT_SECONDS,
     };
-    if (documentId.startsWith('ext-')) return { ...base, external_file_key: documentId.slice(4) };
     const parsed = parseItemReference(documentId);
     if (!parsed) return null;
     const libraryID = resolveLibraryRef(parsed);

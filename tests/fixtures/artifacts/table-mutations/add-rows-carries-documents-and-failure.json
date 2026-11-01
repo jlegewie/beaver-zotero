@@ -210,11 +210,12 @@
                 {
                     "id": "r4",
                     "ref": {
-                        "kind": "file",
-                        "ext_key": "F1"
+                        "kind": "item",
+                        "library_ref": "u",
+                        "zotero_key": "DDD"
                     },
                     "documents": [
-                        "ext-F1"
+                        "u-DDDPDF"
                     ],
                     "failure": {
                         "code": "no_source",
@@ -429,11 +430,12 @@
             {
                 "id": "r4",
                 "ref": {
-                    "kind": "file",
-                    "ext_key": "F1"
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "DDD"
                 },
                 "documents": [
-                    "ext-F1"
+                    "u-DDDPDF"
                 ],
                 "failure": {
                     "code": "no_source",

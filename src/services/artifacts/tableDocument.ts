@@ -49,18 +49,13 @@
 
 import {
     anchorColumn,
-    annotationComment,
-    annotationTitle,
-    annotationTypeLabel,
     categoriesText,
-    cellExpandedFields,
     defaultHiddenColumnIds,
     columnAlign,
     evidenceHeading,
     isUncitedAnswer,
     isTitleAbstractOnly,
     rowActions,
-    rowPrimaryAction,
     selectOption,
     sortRows,
     staleReason,
@@ -190,11 +185,6 @@ function selectHue(option: SelectOption | undefined): string {
         : 'gray';
 }
 
-/** A colour is inlined into a style attribute, so only a hex literal passes. */
-function safeColor(color: string): string | null {
-    return /^#[0-9a-f]{3,8}$/i.test(color) ? color : null;
-}
-
 /** Only `zotero:` and `https:` become links; anything else renders as text. */
 function safeHref(uri: string | null | undefined): string | null {
     if (!uri) return null;
@@ -218,19 +208,16 @@ function rowFailureLabel(failure: RowFailure): string {
 /**
  * One cell's value, followed by the markers of its evidence (given `cites`)
  * and its state: staleness with what changed, an answer from title and
- * abstract, and who edited it. The expanded row (`detail`) passes no `cites`,
- * since its markers follow their quotes, and there an annotation names only
- * what it is and where it sits: its passage and comment are listed as fields
- * of their own (`cellExpandedFields`).
+ * abstract, and who edited it. The expanded row passes no `cites`, since its
+ * markers follow their quotes.
  */
 function renderCellValue(
     row: Row,
     cell: Cell | undefined,
     column: Column,
-    cites?: CitationNumbering,
-    variant: 'cell' | 'detail' = 'cell'
+    cites?: CitationNumbering
 ): string {
-    const html = renderCellValueInner(cell, column, variant);
+    const html = renderCellValueInner(cell, column);
     if (!cell) return html;
     const markers = cites ? cites.markers(row, column.id) : '';
     const stale = staleReason(row, cell);
@@ -253,11 +240,7 @@ function displayTitle(display: string | undefined): string {
     return display ? ` title="${escapeHtml(display)}"` : '';
 }
 
-function renderCellValueInner(
-    cell: Cell | undefined,
-    column: Column,
-    variant: 'cell' | 'detail' = 'cell'
-): string {
+function renderCellValueInner(cell: Cell | undefined, column: Column): string {
     if (cell?.outcome === 'failed') {
         return `<span class="bt-err">${escapeHtml(cell.error ?? 'Could not be answered')}</span>`;
     }
@@ -298,40 +281,6 @@ function renderCellValueInner(
             const meta =
                 authors || venue ? `<span class="bt-sub">${authors}${venue}</span>` : '';
             return `<span class="bt-ref"><span class="bt-title">${escapeHtml(value.title ?? value.display_name)}</span>${meta}</span>`;
-        }
-
-        case 'annotation': {
-            // Same frame as a reference: the passage where the title goes,
-            // drawn as a quote with a bar in the annotation's colour, the
-            // source and page where the authors go, the comment in plain type
-            // below. Expanded, the passage and comment are fields of their own.
-            const detail = variant === 'detail';
-            const meta = [
-                value.source_display_name,
-                value.page_label ? `p. ${value.page_label}` : undefined,
-            ]
-                .filter(Boolean)
-                .join(' · ');
-            const sub = meta ? `<span class="bt-sub">${escapeHtml(meta)}</span>` : '';
-            if (detail) {
-                return `<span class="bt-ref"><span class="bt-title">${escapeHtml(
-                    annotationTypeLabel(value.annotation_type)
-                )}</span>${sub}</span>`;
-            }
-            const quoted =
-                !!value.text &&
-                value.annotation_type !== 'note' &&
-                value.annotation_type !== 'image' &&
-                value.annotation_type !== 'ink';
-            const color = quoted && value.color ? safeColor(value.color) : null;
-            const title = `<span class="bt-title${quoted ? ' bt-ann-quote' : ''}"${
-                color ? ` style="border-color:${color}"` : ''
-            }>${escapeHtml(annotationTitle(value))}</span>`;
-            const secondary = annotationComment(value);
-            const comment = secondary
-                ? `<span class="bt-ann-comment">${escapeHtml(secondary)}</span>`
-                : '';
-            return `<span class="bt-ref">${title}${sub}${comment}</span>`;
         }
 
         case 'link': {
@@ -536,20 +485,19 @@ const ACTION_LINKS: Partial<Record<RowAction, { glyph: string; label: string }>>
 };
 
 /**
- * The link for the row's primary verb, drawn at the edge of its anchor cell —
- * the sticky cell that never scrolls away, and where the React grid puts the
- * same control. Every verb is also listed in the expanded detail.
+ * The row's Reveal link, drawn at the edge of its anchor cell — the sticky
+ * cell that never scrolls away. Every verb is also listed in the expanded
+ * detail.
  */
 function renderPrimaryAction(
     row: Row,
     spec: TableSpec,
     links: TableHtmlLinks | null
 ): string {
-    const primary = rowPrimaryAction(row);
-    if (!links || !primary || !rowActions(spec, row).includes(primary)) return '';
-    const link = ACTION_LINKS[primary];
-    const href = safeHref(links[primary]);
-    if (!link || !href) return '';
+    if (!links || !rowActions(spec, row).includes('reveal')) return '';
+    const link = ACTION_LINKS.reveal!;
+    const href = safeHref(links.reveal);
+    if (!href) return '';
     return `<a class="bt-act bt-ref-act" href="${escapeHtml(href)}" title="${link.label}" aria-label="${link.label}">${link.glyph}</a>`;
 }
 
@@ -594,20 +542,13 @@ function renderDetail(
     links: TableHtmlLinks | null,
     cites: CitationNumbering
 ): string {
-    const renderDetails = (details: { kind: 'text'; text: string } | { kind: 'list'; items: string[] }): string =>
-        details.kind === 'text'
-            ? `<div class="bt-d-extra">${escapeHtml(details.text)}</div>`
-            : `<ul class="bt-d-list">${details.items
-                  .map((item) => `<li>${escapeHtml(item)}</li>`)
-                  .join('')}</ul>`;
     const fields = spec.columns
         .filter((column) => !!row.cells[column.id])
         .map((column) => {
             const cell = row.cells[column.id];
             // The answer's evidence sits under it, headed by the cell's
             // outcome, each passage followed by its marker; an answer read
-            // from a document that cites nothing says so. An annotation's
-            // passage and comment are fields of their own.
+            // from a document that cites nothing says so.
             const evidence = cell?.evidence?.length
                 ? `<div class="bt-d-h">${evidenceHeading(cell)}</div><ul class="bt-d-list">${cell.evidence
                       .map((entry) => renderEvidenceLine(entry, cites.markerFor(row, entry)))
@@ -615,16 +556,9 @@ function renderDetail(
                 : isUncitedAnswer(cell)
                   ? '<div class="bt-d-uncited">No passage cited</div>'
                   : '';
-            const own = cellExpandedFields(cell)
-                .map(
-                    (field) =>
-                        `<dt>${escapeHtml(field.label)}</dt><dd>${renderDetails(field.details)}</dd>`
-                )
-                .join('');
             return [
                 `<dt>${escapeHtml(column.header)}</dt>`,
-                `<dd>${renderCellValue(row, cell, column, undefined, 'detail')}${evidence}</dd>`,
-                own,
+                `<dd>${renderCellValue(row, cell, column)}${evidence}</dd>`,
             ].join('');
         })
         .join('');
@@ -645,8 +579,8 @@ export function renderTableHtml(spec: TableSpec, options: TableHtmlOptions = {})
     const cites = new CitationNumbering(options.citationScopeFor);
     const rows = sortRows(spec, spec.sort);
 
-    // System columns stay out of the grid unless the table mixes row kinds;
-    // a static document has no toggle, so the expanded row is where they show.
+    // System columns stay out of the grid; a static document has no toggle,
+    // so the expanded row is where they show.
     const hidden = new Set(defaultHiddenColumnIds(spec));
     const gridColumns = spec.columns.filter((c) => !hidden.has(c.id) || c.id === anchor?.id);
     const hasQuestions = gridColumns.some((c) => !!c.description);
@@ -693,8 +627,7 @@ export function renderTableHtml(spec: TableSpec, options: TableHtmlOptions = {})
             const cells = gridColumns
                 .map((column) => {
                     const isAnchor = column.id === anchor?.id;
-                    // The anchor cell carries the row's primary verb, where the
-                    // React grid draws it too.
+                    // The anchor cell carries the row's Reveal link.
                     const action = isAnchor ? renderPrimaryAction(row, spec, links) : '';
                     return `<span class="bt-c bt-${columnAlign(column)} bt-k-${column.type}${isAnchor ? ' bt-anchor' : ''}" id="${escapeHtml(row.id)}/${escapeHtml(column.id)}">${renderCellValue(row, row.cells[column.id], column, cites)}${action}</span>`;
                 })
@@ -887,11 +820,6 @@ export const TABLE_CSS = `
 /* Italic, because it is a publication name and not another author; on a line
    of its own under the authors. */
 .bt-venue { display: block; font-style: italic; }
-/* An annotation's passage is a quotation, marked by a bar in the colour it has
-   in the reader; the comment follows in plain type. */
-.bt-ann-quote { padding-left: 6px; border-left: 3px solid var(--t-line); font-weight: 400; }
-.bt-ann-comment { display: block; font-size: 13px; color: var(--t-mut); white-space: nowrap;
-  overflow: hidden; text-overflow: ellipsis; }
 .bt-pill { display: inline-block; max-width: 100%; padding: 1px 8px; border-radius: 999px;
   font-size: 12px; line-height: 17px; white-space: nowrap; overflow: hidden;
   text-overflow: ellipsis; border: 1px solid transparent; }
@@ -916,7 +844,6 @@ export const TABLE_CSS = `
 .bt-d-fields dd { margin: 0; min-width: 0; }
 .bt-d .bt-clamp, .bt-d .bt-title { display: block; -webkit-line-clamp: unset; color: var(--t-fg); }
 .bt-d .bt-sub { white-space: normal; }
-.bt-d-extra { margin-top: 4px; }
 .bt-d-list { margin: 4px 0 0; padding-left: 18px; }
 .bt-d-h { margin-top: 4px; font-size: 12px; color: var(--t-fade); }
 .bt-d-uncited { margin-top: 4px; font-size: 12px; color: var(--t-fade); }

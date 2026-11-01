@@ -18,7 +18,6 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 // The handler module's webpack-side dependencies, none of which these tests
 // exercise. Stubbed so it can be imported outside a browser bundle.
 vi.mock('../../../react/store', () => ({ store: { get: vi.fn(), set: vi.fn() } }));
-vi.mock('../../../react/atoms/windowSurface', () => ({ windowSurfaceAtom: {} }));
 vi.mock('../../../src/ui/ui', () => ({
     BeaverUIFactory: { openBeaverWindow: vi.fn(), findBeaverWindow: vi.fn(() => null) },
 }));

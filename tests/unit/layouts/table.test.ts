@@ -3,9 +3,6 @@ import type { ExternalReference } from "@beaver/agent-core/types/externalReferen
 import {
     allocateRowId,
     anchorColumn,
-    annotationComment,
-    annotationTitle,
-    cellExpandedFields,
     cellIdFor,
     cellInvariantError,
     cellSortKey,
@@ -31,8 +28,6 @@ import {
     rowDecision,
     rowInvariantError,
     rowInScope,
-    rowPrimaryAction,
-    rowTypeLabel,
     selectLabelsInColumn,
     sortRows,
     staleReason,
@@ -1122,71 +1117,6 @@ describe("row actions", () => {
             in_library: false,
         });
         expect(rowActions(spec, gone)).toEqual([]);
-        expect(
-            rowActions(
-                spec,
-                mkRow({
-                    ref: {
-                        kind: "annotation",
-                        library_ref: "u",
-                        library_id: 1,
-                        zotero_key: "A",
-                        attachment: file,
-                    },
-                    in_library: false,
-                }),
-            ),
-        ).toEqual([]);
-    });
-
-    it("opens an attachment row itself and reveals it in the library", () => {
-        const row = mkRow({
-            ref: { kind: "attachment", ...file, parent_item: item },
-        });
-        expect(rowActions(spec, row)).toEqual(["reveal", "open"]);
-        expect(rowActionTarget(row, "open")?.kind).toBe("open_file");
-        expect(rowActionTarget(row, "reveal")?.ref.zotero_key).toBe("F");
-    });
-
-    it("opens an annotation in the reader and reveals its bibliographic item", () => {
-        const annotation = { library_ref: "u", library_id: 1, zotero_key: "A" };
-        const row = mkRow({
-            ref: {
-                kind: "annotation",
-                ...annotation,
-                attachment: file,
-                parent_item: item,
-            },
-        });
-        expect(rowPrimaryAction(row)).toBe("open");
-        expect(rowActionTarget(row, "open")).toEqual({
-            kind: "open_annotation",
-            ref: annotation,
-            attachment: file,
-        });
-        expect(rowActionTarget(row, "reveal")).toEqual({
-            kind: "reveal_item",
-            ref: item,
-        });
-        // Without a bibliographic item, the attachment is what there is to reveal.
-        const standalone = mkRow({
-            ref: { kind: "annotation", ...annotation, attachment: file },
-        });
-        expect(rowActionTarget(standalone, "reveal")?.ref).toEqual(file);
-    });
-
-    it("offers a context-file row only its file: neither in the library nor importable", () => {
-        const contextFile = mkRow({
-            id: "file",
-            ref: { kind: "file", ext_key: "AB12CD34", label: "notes.pdf" },
-        });
-        expect(isRowInLibrary(contextFile)).toBe(false);
-        expect(rowActions(spec, contextFile)).toEqual(["open"]);
-        expect(rowActionTarget(contextFile, "open")).toEqual({
-            kind: "open_external_file",
-            ext_key: "AB12CD34",
-        });
-        expect(rowPrimaryAction(contextFile)).toBe("open");
     });
 
     it("lets a row narrow the table's verbs, and offers none without a ref", () => {
@@ -1196,246 +1126,56 @@ describe("row actions", () => {
         });
         expect(rowActions(spec, inLib)).toEqual(["reveal"]);
         expect(rowActions(spec, mkRow({ in_library: true }))).toEqual([]);
-        expect(rowPrimaryAction(mkRow({}))).toBeUndefined();
-    });
-});
-
-describe("row types and expanded fields", () => {
-    const typeColumn = {
-        id: "_type",
-        header: "Type",
-        type: "select" as const,
-        role: "row_type" as const,
-        system: true as const,
-    };
-    const item = (id: string): Row => ({
-        id,
-        ref: { kind: "item", library_ref: "u", library_id: 1, zotero_key: id },
-        cells: {},
-    });
-    const annotation: Row = {
-        id: "a",
-        ref: {
-            kind: "annotation",
-            library_ref: "u",
-            library_id: 1,
-            zotero_key: "A",
-            attachment: { library_ref: "u", library_id: 1, zotero_key: "F" },
-        },
-        cells: {},
-    };
-
-    it("hides system columns until the table mixes row kinds, then shows the type column", () => {
-        const uniform: TableSpec = {
-            id: "t",
-            columns: [
-                { id: "ref", header: "Item", type: "reference" },
-                typeColumn,
-                { id: "_year", header: "Year", type: "date", system: true },
-            ],
-            rows: [item("K1"), item("K2")],
-        };
-        expect(defaultHiddenColumnIds(uniform)).toEqual(["_type", "_year"]);
-        const mixed = { ...uniform, rows: [item("K1"), annotation] };
-        expect(defaultHiddenColumnIds(mixed)).toEqual(["_year"]);
-    });
-
-    it("labels non-item rows by kind and leaves item types to the producer", () => {
-        expect(rowTypeLabel(item("K"), undefined)).toBeUndefined();
-        expect(
-            rowTypeLabel(annotation, {
-                kind: "annotation",
-                annotation_type: "underline",
-            }),
-        ).toBe("Underline");
-        expect(
-            rowTypeLabel(
-                {
-                    id: "f",
-                    ref: {
-                        kind: "attachment",
-                        library_ref: "u",
-                        library_id: 1,
-                        zotero_key: "F",
-                    },
-                    cells: {},
-                },
-                { kind: "reference", display_name: "x", content_kind: "pdf" },
-            ),
-        ).toBe("PDF");
-        expect(
-            rowTypeLabel(
-                {
-                    id: "e",
-                    ref: {
-                        kind: "external",
-                        source: "openalex",
-                        source_id: "W",
-                    },
-                    cells: {},
-                },
-                undefined,
-            ),
-        ).toBe("Search result");
-        expect(
-            rowTypeLabel(
-                {
-                    id: "x",
-                    ref: { kind: "file", ext_key: "AB12CD34" },
-                    cells: {},
-                },
-                undefined,
-            ),
-        ).toBe("Local file");
-    });
-
-    it("titles an annotation by what it has: passage, comment, or its place", () => {
-        expect(
-            annotationTitle({
-                kind: "annotation",
-                annotation_type: "highlight",
-                text: "A passage",
-                comment: "A note",
-            }),
-        ).toBe("A passage");
-        expect(
-            annotationTitle({
-                kind: "annotation",
-                annotation_type: "note",
-                comment: "A note",
-            }),
-        ).toBe("A note");
-        expect(
-            annotationTitle({
-                kind: "annotation",
-                annotation_type: "image",
-                page_label: "4",
-            }),
-        ).toBe("Area on p. 4");
-        expect(annotationTitle({ kind: "annotation" })).toBe("Annotation");
-    });
-
-    it("shows a comment under the title only when the title is something else", () => {
-        // A highlight's comment is a second voice under the passage…
-        expect(
-            annotationComment({
-                kind: "annotation",
-                annotation_type: "highlight",
-                text: "A passage",
-                comment: "A note",
-            }),
-        ).toBe("A note");
-        // …a note's comment is already its title…
-        expect(
-            annotationComment({
-                kind: "annotation",
-                annotation_type: "note",
-                text: "Selected text",
-                comment: "A note",
-            }),
-        ).toBeUndefined();
-        // …and so is a highlight's when it has no passage of its own.
-        expect(
-            annotationComment({
-                kind: "annotation",
-                annotation_type: "highlight",
-                comment: "A note",
-            }),
-        ).toBeUndefined();
-        // An area mark is titled by its place, so its comment is worth a line.
-        expect(
-            annotationComment({
-                kind: "annotation",
-                annotation_type: "image",
-                comment: "Figure 2",
-            }),
-        ).toBe("Figure 2");
-    });
-
-    it("lists an annotation's parts as fields of their own and nothing for other cells", () => {
-        expect(
-            cellExpandedFields(
-                answered({ kind: "reference", display_name: "x" }, "system"),
-            ),
-        ).toEqual([]);
-        expect(cellExpandedFields(undefined)).toEqual([]);
-        expect(
-            cellExpandedFields(
-                answered(
-                    {
-                        kind: "annotation",
-                        annotation_type: "highlight",
-                        text: "A passage",
-                        comment: "A note",
-                    },
-                    "system",
-                ),
-            ).map((f) => [
-                f.label,
-                f.details.kind === "text" && f.details.text,
-            ]),
-        ).toEqual([
-            ["Highlighted text", "A passage"],
-            ["Comment", "A note"],
-        ]);
     });
 });
 
 describe("anchor cells and row kinds", () => {
-    const passage = answered(
-        { kind: "annotation", text: "A passage" },
-        "system",
-    );
-    const spec: TableSpec = {
-        id: "t",
-        columns: [{ id: "item", header: "Item", type: "reference" }],
-        rows: [
-            {
-                id: "rK",
-                ref: {
-                    kind: "item",
-                    library_ref: "u",
-                    library_id: 1,
-                    zotero_key: "K",
-                },
-                cells: { item: passage },
-            },
-            {
-                id: "rA",
-                ref: {
-                    kind: "annotation",
-                    library_ref: "u",
-                    library_id: 1,
-                    zotero_key: "A",
-                    attachment: {
-                        library_ref: "u",
-                        library_id: 1,
-                        zotero_key: "F",
-                    },
-                },
-                cells: { item: passage },
-            },
-        ],
-    };
+    const item = { library_ref: "u", library_id: 1, zotero_key: "K" };
+    const reference = answered({ kind: "reference", display_name: "Alpha 2020" }, "system");
 
-    it("accepts an annotation value in a reference column only under an annotation ref", () => {
-        const issues = validateTableSpec(spec);
-        expect(issues.map((i) => [i.code, i.row_id])).toEqual([
+    it("hides system columns until asked", () => {
+        const spec: TableSpec = {
+            id: "t",
+            columns: [
+                { id: "ref", header: "Item", type: "reference" },
+                { id: "_year", header: "Year", type: "date", system: true },
+            ],
+            rows: [],
+        };
+        expect(defaultHiddenColumnIds(spec)).toEqual(["_year"]);
+    });
+
+    it("accepts only a reference in the anchor cell of an item row", () => {
+        const spec: TableSpec = {
+            id: "t",
+            anchor_column_id: "title",
+            columns: [{ id: "title", header: "Title", type: "text" }],
+            rows: [
+                {
+                    id: "rK",
+                    ref: { kind: "item", ...item },
+                    cells: { title: answered({ kind: "text", text: "Alpha" }, "system") },
+                },
+            ],
+        };
+        expect(validateTableSpec(spec).map((i) => [i.code, i.row_id])).toEqual([
             ["anchor_kind_mismatch", "rK"],
         ]);
     });
 
-    it("sorts, filters and exports an annotation by its passage", () => {
-        const cell = answered(
-            {
-                kind: "annotation",
-                text: "Bold claim",
-                comment: "Check this",
-            },
-            "system",
-        );
-        expect(cellSortKey(cell)).toBe("bold claim");
-        expect(cellValueText(cell.value)).toBe("Bold claim — Check this");
+    it("rejects a row that is neither a Zotero item nor an external work", () => {
+        for (const ref of [
+            { kind: "attachment", ...item },
+            { kind: "annotation", ...item, attachment: item },
+            { kind: "file", ext_key: "AB12CD34" },
+        ]) {
+            const spec: TableSpec = {
+                id: "t",
+                columns: [{ id: "item", header: "Item", type: "reference" }],
+                rows: [{ id: "r", ref: ref as never, cells: { item: reference } }],
+            };
+            expect(validateTableSpec(spec).map((i) => i.code)).toEqual(["invalid_row"]);
+        }
     });
 
     it("includes a reference's title in its text, for search and export", () => {
@@ -1454,17 +1194,6 @@ describe("anchor cells and row kinds", () => {
                 title: "Same",
             }),
         ).toBe("Same");
-        expect(
-            cellSortKey(
-                answered(
-                    { kind: "annotation", comment: "Only a note" },
-                    "system",
-                ),
-            ),
-        ).toBe("only a note");
-        expect(
-            cellSortKey(answered({ kind: "annotation" }, "system")),
-        ).toBeNull();
     });
 });
 
