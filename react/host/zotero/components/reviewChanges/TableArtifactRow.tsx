@@ -57,7 +57,7 @@ export const TableArtifactRow: React.FC<TableArtifactRowProps> = ({ row }) => {
             setOpenMessage('Table provider unavailable.');
             return;
         }
-        const outcome = await open(record.reference.key, surfaceWindow)
+        const outcome = await open(record.reference.key, surfaceWindow, { onDownload: () => setOpenMessage('Downloading table…') })
             .catch(() => ({ error: 'Table provider unavailable.' }));
         setOpenMessage('error' in outcome ? outcome.error : (outcome.warning ?? ''));
     }, [record.reference.key, surfaceWindow]);

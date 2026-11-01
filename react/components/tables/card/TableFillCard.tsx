@@ -80,7 +80,8 @@ export const TableFillCard: React.FC<TableFillCardProps> = ({ request, onSubmit,
             setOpenMessage('Table provider unavailable.');
             return;
         }
-        const outcome = await open(request.table.key, origin).catch(() => ({ error: 'Table provider unavailable.' }));
+        const outcome = await open(request.table.key, origin, { onDownload: () => setOpenMessage('Downloading table…') })
+            .catch(() => ({ error: 'Table provider unavailable.' }));
         setOpenMessage('error' in outcome ? outcome.error : (outcome.warning ?? ''));
     }, [request.table.key]);
 

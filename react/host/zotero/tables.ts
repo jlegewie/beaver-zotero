@@ -3,7 +3,7 @@ import {
     parseItemReference,
     resolveLibraryRef,
 } from "../../../src/utils/libraryIdentity";
-import { readTableItemSpec } from "../../../src/services/artifacts/tableItemIdentity";
+import { missingTableFileMessage, readTableItemSpec } from "../../../src/services/artifacts/tableItemIdentity";
 import { getTablesApi } from "../../../src/services/artifacts/tablesApi";
 import { tryGetWindowRuntime } from "../../runtime/windowRuntime";
 
@@ -16,13 +16,22 @@ function resolveTableRef(key: string) {
 /**
  * Opens a stored table in the Beaver tab of `origin`'s main window. With
  * `background`, the tab opens behind the selected one, so the chat stays in view.
+ * `onDownload` fires when the table's files must be downloaded first.
  */
-export async function openStoredTable(key: string, origin?: Window | null, options: { background?: boolean } = {}) {
+export async function openStoredTable(
+    key: string,
+    origin?: Window | null,
+    options: { background?: boolean; onDownload?: () => void } = {},
+) {
     const api = getTablesApi();
     const ref = resolveTableRef(key);
     if (!api) return { error: "Table provider unavailable." };
     if (!ref) return { error: "Table library unavailable on this device." };
-    return api.openTable(ref, { window: origin ?? null, ...(options.background ? { background: true } : {}) });
+    return api.openTable(ref, {
+        window: origin ?? null,
+        ...(options.background ? { background: true } : {}),
+        ...(options.onDownload ? { onDownload: options.onDownload } : {}),
+    });
 }
 
 /** Local display only; submission validates access through the provider separately. */
@@ -50,7 +59,7 @@ export async function resolveTableDisplay(key: string): Promise<TableDisplay> {
                 status: "unavailable",
                 reason:
                     result.code === "no_file"
-                        ? "Table file is missing on this device."
+                        ? missingTableFileMessage(item)
                         : "Table document is unavailable.",
             };
         return {

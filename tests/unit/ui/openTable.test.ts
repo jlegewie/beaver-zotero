@@ -29,6 +29,7 @@ vi.mock('../../../src/services/artifacts/tableItemIdentity', async (importOrigin
         unreadableTableRecovery: original.unreadableTableRecovery,
         resolveTableItem,
         readTableItemSpec,
+        tableFilesDownloadable: original.tableFilesDownloadable,
     };
 });
 vi.mock('../../../src/services/artifacts/tablesApi', () => ({
@@ -173,14 +174,53 @@ describe('openTable', () => {
         expect(openTableTab).toHaveBeenCalledOnce();
     });
 
-    it('says the files are missing when the download fails', async () => {
+    it.each([
+        ['throws', () => Promise.reject(new Error('offline'))],
+        ['does not run', () => Promise.resolve(false)],
+    ])('says the download failed when it %s', async (_label, download) => {
         (Zotero as any).Sync.Storage.Local.getEnabledForLibrary.mockReturnValue(true);
-        (Zotero as any).Sync.Runner.downloadFile.mockRejectedValueOnce(new Error('offline'));
+        (Zotero as any).Sync.Runner.downloadFile.mockImplementationOnce(download);
         readTableItemSpec.mockResolvedValue({ ok: false, code: 'no_file', message: 'Table TABLEKEY has no file on disk.' });
         await expect(openTable(REF, { window: main })).resolves.toEqual({
+            error: `Could not open table ${REF.key} — its files could not be downloaded to this device.`,
+        });
+        expect(readTableItemSpec).toHaveBeenCalledOnce();
+        expect(openTableTab).not.toHaveBeenCalled();
+    });
+
+    it('reports a download only when one starts', async () => {
+        const onDownload = vi.fn();
+        readTableItemSpec.mockResolvedValue({ ok: false, code: 'no_file', message: 'Table TABLEKEY has no file on disk.' });
+        await expect(openTable(REF, { window: main, onDownload })).resolves.toEqual({
             error: `Could not open table ${REF.key} — it has no file on disk.`,
         });
-        expect(openTableTab).not.toHaveBeenCalled();
+        expect(onDownload).not.toHaveBeenCalled();
+        expect((Zotero as any).Sync.Runner.downloadFile).not.toHaveBeenCalled();
+
+        (Zotero as any).Sync.Storage.Local.getEnabledForLibrary.mockReturnValue(true);
+        readTableItemSpec
+            .mockResolvedValueOnce({ ok: false, code: 'no_file', message: 'Table TABLEKEY has no file on disk.' })
+            .mockResolvedValueOnce({ ok: true, spec: SPEC, file: { spec: SPEC } });
+        await openTable(REF, { window: main, onDownload });
+        expect(onDownload).toHaveBeenCalledOnce();
+    });
+
+    it('shares one download between opens of the same table', async () => {
+        (Zotero as any).Sync.Storage.Local.getEnabledForLibrary.mockReturnValue(true);
+        let finish!: (result: unknown) => void;
+        (Zotero as any).Sync.Runner.downloadFile.mockImplementationOnce(
+            () => new Promise((resolve) => { finish = resolve; })
+        );
+        readTableItemSpec
+            .mockResolvedValueOnce({ ok: false, code: 'no_file', message: 'Table TABLEKEY has no file on disk.' })
+            .mockResolvedValueOnce({ ok: false, code: 'no_file', message: 'Table TABLEKEY has no file on disk.' })
+            .mockResolvedValue({ ok: true, spec: SPEC, file: { spec: SPEC } });
+        const first = openTable(REF, { window: main });
+        const second = openTable(REF, { window: main });
+        await vi.waitFor(() => expect(readTableItemSpec).toHaveBeenCalledTimes(2));
+        finish({ localChanges: true });
+        await expect(Promise.all([first, second])).resolves.toMatchObject([{ ok: true }, { ok: true }]);
+        expect((Zotero as any).Sync.Runner.downloadFile).toHaveBeenCalledOnce();
     });
 
     it('opens nothing for a table that cannot be read, and says why', async () => {

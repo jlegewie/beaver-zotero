@@ -428,6 +428,21 @@ async function missingTableFile(item: Zotero.Item): Promise<ReadTableItemResult>
     return { ok: false, code: 'no_file', message: `Table ${item.key} has no file on disk.` };
 }
 
+/**
+ * Whether opening a `no_file` table downloads its files first: file syncing is
+ * on for its library, so the files can still arrive from the server.
+ */
+export function tableFilesDownloadable(item: Zotero.Item): boolean {
+    return Zotero.Sync.Storage.Local.getEnabledForLibrary(item.libraryID);
+}
+
+/** What to show for a `no_file` table: its files are absent or still to come. */
+export function missingTableFileMessage(item: Zotero.Item): string {
+    return tableFilesDownloadable(item)
+        ? 'Table files are not on this device yet. Opening the table downloads them.'
+        : 'Table file is missing on this device.';
+}
+
 // ---------------------------------------------------------------------------
 // The version log
 // ---------------------------------------------------------------------------
