@@ -60,7 +60,9 @@ it('disables the button with a percentage while indexing and shows the card only
         await act(async () => store.set(embeddingIndexStateAtom, {
             ...store.get(embeddingIndexStateAtom), status: 'updating', phase: 'incremental', progress: 0,
         }));
-        expect(button(container).textContent?.trimStart().startsWith('Indexing\n')).toBe(true);
+        // No percentage for an incremental update: the label alone, beside the spinner.
+        expect(button(container).textContent?.trim()).toBe('Indexing');
+        expect(button(container).querySelector('svg')).not.toBeNull();
         expect(container.querySelector('[data-progress-card]')).toBeNull();
     });
 });
