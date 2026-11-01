@@ -101,6 +101,7 @@ export function storedSpecVersion(spec: Pick<TableSpec, 'spec_version'>): number
 export type {
     ReadTableItemResult,
     TableCreationState,
+    TableEditMarker,
     TableFile,
     TableActor,
     TableHistory,

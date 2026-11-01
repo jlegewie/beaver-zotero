@@ -2286,6 +2286,8 @@
         }
       ],
       "replayed": false,
+      "edit_version": 5,
+      "edit_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "saved": true
     }
   },
@@ -3099,6 +3101,8 @@
         }
       ],
       "replayed": false,
+      "edit_version": 5,
+      "edit_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "saved": true
     }
   },
@@ -3866,6 +3870,8 @@
         }
       ],
       "replayed": false,
+      "edit_version": 5,
+      "edit_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "saved": true
     }
   },
@@ -4599,6 +4605,8 @@
         }
       ],
       "replayed": false,
+      "edit_version": 6,
+      "edit_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "saved": true
     }
   },
@@ -5356,6 +5364,8 @@
         }
       ],
       "replayed": false,
+      "edit_version": 5,
+      "edit_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "saved": true
     }
   },
@@ -5839,6 +5849,8 @@
         }
       ],
       "replayed": true,
+      "edit_version": 4,
+      "edit_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "saved": true
     }
   },

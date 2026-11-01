@@ -244,6 +244,13 @@ export interface ArtifactResponse {
     zotero_item?: ArtifactItem;
     /** `create` and `apply_edit`: the operation had already committed. */
     replayed?: boolean;
+    /**
+     * `apply_edit`: the version this call's edit committed and its hash, the
+     * identity an Undo of the edit must name. `version`/`sha256` describe the
+     * table now; the two differ only on a replay after later writes.
+     */
+    edit_version?: number;
+    edit_sha256?: string;
     saved?: boolean;
     outcome?: "unchanged" | "trimmed" | "trashed";
     trimmed_versions?: number[];

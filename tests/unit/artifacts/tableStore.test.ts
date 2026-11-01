@@ -1061,6 +1061,71 @@ describe('applyTableEdit', () => {
         expect(await applyTableEdit(ref, retitle('Edited'), meta, operation)).toMatchObject({ ok: true, replayed: true });
     });
 
+    const failHistoryWrites = (): (() => void) => {
+        const move = (globalThis as any).IOUtils.move;
+        (globalThis as any).IOUtils.move = async (from: string, to: string) => {
+            if (to === sidecar('history.json')) throw new Error('disk is full');
+            return move(from, to);
+        };
+        return () => {
+            (globalThis as any).IOUtils.move = move;
+        };
+    };
+
+    it('replays a committed edit whose version log was never written', async () => {
+        const restore = failHistoryWrites();
+        const first = await applyTableEdit(ref, retitle('Edited'), meta, operation);
+        restore();
+        expect(first).toMatchObject({ ok: true, committed: true, saved: false, version: 2 });
+        expect(existsSync(sidecar('history.json'))).toBe(false);
+        // The edit's identity committed with the table itself.
+        expect(JSON.parse(await readFile(tablePath(), 'utf8')).edit).toMatchObject({ operation_id: 'edit-1', version: 2 });
+
+        const again = retitle('Edited');
+        const replay = await applyTableEdit(ref, again, meta, operation);
+        expect(again).not.toHaveBeenCalled();
+        expect(replay).toMatchObject({
+            ok: true,
+            replayed: true,
+            version: 2,
+            edit: { version: 2 },
+            changes: [{ kind: 'renamed', title: 'Edited' }],
+        });
+        expect(await storedVersion()).toBe(2);
+        // The replay repaired the log, with the edit's run, so an Undo finds it.
+        expect((await listVersions(ref)).at(-1)).toMatchObject({ version: 2, run_id: 'run', operation_id: 'edit-1', sealed: true });
+    });
+
+    it('rebuilds a lost log entry of a model edit with its identity on open', async () => {
+        const restore = failHistoryWrites();
+        await applyTableEdit(ref, retitle('Edited'), meta, operation);
+        restore();
+        expect((await openTable(ref)).recovered).toContainEqual({ kind: 'history_appended', version: 2 });
+        expect((await listVersions(ref)).at(-1)).toMatchObject({
+            version: 2,
+            actor: 'agent',
+            run_id: 'run',
+            operation_id: 'edit-1',
+            request_sha256: operation.request_sha256,
+            changes: [{ kind: 'renamed', title: 'Edited' }],
+        });
+    });
+
+    it('answers a replay after a later write with the edit identity it committed', async () => {
+        const first = await applyTableEdit(ref, retitle('A'), meta, operation);
+        const later = await applyTableEdit(ref, retitle('B'), meta, { operation_id: 'edit-2', request_sha256: 'b'.repeat(64) });
+        if (!first.ok || !later.ok) throw new Error('edit failed');
+        const replay = await applyTableEdit(ref, retitle('A'), meta, operation);
+        if (!replay.ok) throw new Error('replay failed');
+        // The current state is the later edit's; the edit identity is the first's.
+        expect([replay.version, replay.sha256]).toEqual([later.version, later.sha256]);
+        expect(replay.edit).toEqual({ version: first.version, sha256: first.sha256 });
+        // An Undo naming the replayed edit refuses rather than reverting the later one.
+        expect(await undoTableEdit(ref, { version: replay.edit!.version, run_id: 'run' }, { actor: 'user' }))
+            .toMatchObject({ ok: false, code: 'changed' });
+        expect((await readTable(ref)).spec.title).toBe('B');
+    });
+
     it('applies the access guard to the current and the resulting table', async () => {
         const guard = vi.fn((spec: TableSpec) => {
             if (spec.title === 'Forbidden') throw new Error('excluded source');
