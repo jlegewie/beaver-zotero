@@ -18,7 +18,7 @@ import { getHost } from '../host';
 import type { CitationExportRender } from '../host/types';
 import { useCitationViewModel, type CitationViewModel } from './useCitationViewModel';
 import { hasAlternateModifier, useAlternateActivation } from './useAlternateActivation';
-import { Icon, LibraryIcon, PdfIcon, FileIcon, GlobalSearchIcon, NoteIcon, HighlighterIcon, TextAlignLeftIcon, ExternalLinkIcon } from '../icons';
+import { Icon, LibraryIcon, PdfIcon, FileIcon, GlobalSearchIcon, NoteIcon, HighlighterIcon, TextAlignLeftIcon, ExternalLinkIcon, TableIcon, ArrowUpRightIcon } from '../icons';
 const TOOLTIP_WIDTH = '250px';
 
 /**
@@ -99,6 +99,8 @@ export interface CitationTargetFlags {
     isSnapshotCitation: boolean;
     hasSnapshotSymbolicLocator: boolean;
     hasBoundingBoxes: boolean;
+    /** A research table's cell or row: the click opens the table at it. */
+    isTableCitation: boolean;
     /** A PDF or EPUB page-or-box locator: the click lands inside the document. */
     hasLocator: boolean;
     /** Whether alternate activation (reveal the cited work) changes anything. */
@@ -108,6 +110,7 @@ export interface CitationTargetFlags {
 export function citationTargetFlags(vm: CitationViewModel): CitationTargetFlags {
     const metadata = vm.metadata;
     const isNoteCitation = metadata?.citation_type === 'note';
+    const isTableCitation = !!vm.table;
     const isAnnotationCitation = metadata?.citation_type === 'annotation';
     const contentKind = getContentKind(metadata);
     const symbolic = getSymbolicLocation(metadata);
@@ -131,6 +134,7 @@ export function citationTargetFlags(vm: CitationViewModel): CitationTargetFlags 
     // locator-less item is already revealed in the library by an ordinary
     // click. What is left is exactly the set whose click it redirects.
     const defaultRevealsItem = !hasLocator
+        && !isTableCitation
         && !isSnapshotCitation
         && !isTextCitation
         && !isNoteCitation
@@ -150,6 +154,7 @@ export function citationTargetFlags(vm: CitationViewModel): CitationTargetFlags 
         isSnapshotCitation,
         hasSnapshotSymbolicLocator,
         hasBoundingBoxes,
+        isTableCitation,
         hasLocator,
         canRevealItem,
     };
@@ -360,6 +365,12 @@ const Citation: React.FC<CitationProps> = (props) => {
             return (<span>{`(${fileLabel}${locatorSuffix})`}</span>);
         }
 
+        // A table cell names no work a bibliography could format: it exports
+        // as its row's paper.
+        if (citationMetadata?.citation_type === 'table') {
+            return (<span>{` (${citation})`}</span>);
+        }
+
         // For library citations, delegate host-native formatting (CSL for
         // Zotero) to the host. The host returns formatted HTML; the wrapping
         // element shape stays here so this component owns all the JSX.
@@ -385,6 +396,7 @@ const Citation: React.FC<CitationProps> = (props) => {
         isSnapshotCitation,
         hasSnapshotSymbolicLocator,
         hasBoundingBoxes,
+        isTableCitation,
         hasLocator,
         canRevealItem,
     } = flags;
@@ -415,7 +427,7 @@ const Citation: React.FC<CitationProps> = (props) => {
     // whose click reveals its item is drawn.
     const citationClassBase = isExternal && !mappedZoteroItem
         ? "zotero-citation external-citation"
-        : (hasLocator || isAnnotationCitation || hasSnapshotSymbolicLocator) && !isExternalFile && !showItemInfo
+        : (hasLocator || isAnnotationCitation || hasSnapshotSymbolicLocator || isTableCitation) && !isExternalFile && !showItemInfo
         ? "zotero-citation with-locator"
         : "zotero-citation";
     const citationClass = isStreaming
@@ -560,7 +572,7 @@ const Citation: React.FC<CitationProps> = (props) => {
                         </span>
                     </span>
                 )}
-                {!hasLocator && !isSnapshotCitation && !isExternalFile && !isTextCitation && !isNoteCitation && !isAnnotationCitation && (!isExternal || !!mappedZoteroItem) && (
+                {!hasLocator && !isTableCitation && !isSnapshotCitation && !isExternalFile && !isTextCitation && !isNoteCitation && !isAnnotationCitation && (!isExternal || !!mappedZoteroItem) && (
                     <span className={`px-3 py-15 block ${showPreviewText ? 'border-top-quinary' : ''}`}>
                         <span className="display-flex flex-row items-center gap-15">
                             <Icon icon={LibraryIcon} className="font-color-secondary" />
@@ -574,6 +586,53 @@ const Citation: React.FC<CitationProps> = (props) => {
             )}
         </span>
     )
+
+    // A table citation's tooltip: the table in the header, the cell's answer
+    // as it was when cited, and the paper and column it belongs to. From the
+    // citation alone.
+    const table = vm.table;
+    const tableCell = !!table?.column_header;
+    const tableText = !table
+        ? ''
+        : !tableCell
+        ? citation
+        : table.value ?? (table.provenance === 'user' ? 'Cleared by you' : 'No answer yet');
+    const tableSource = table && tableCell
+        ? [citation, table.column_header, table.value && table.provenance === 'user' ? 'Edited by you' : '']
+            .filter(Boolean)
+            .join(' · ')
+        : '';
+    const tablePreview = table ? (
+        <span className="block" style={{ overflow: 'hidden' }}>
+            <span className="px-3 py-15 display-flex flex-row items-center border-bottom-quinary gap-15">
+                <Icon icon={TableIcon} className="font-color-secondary" style={{ flexShrink: 0 }} />
+                <span className="font-color-primary text-sm" style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {table.title}
+                </span>
+            </span>
+            <span className="px-3 py-15 block">
+                <span
+                    className="font-color-primary text-sm"
+                    style={{ display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 6, overflow: 'hidden', wordBreak: 'break-word', overflowWrap: 'anywhere' }}
+                >
+                    {tableText}
+                </span>
+                {tableSource && (
+                    <span className="block font-color-secondary text-xs mt-1" style={{ wordBreak: 'break-word' }}>
+                        {tableSource}
+                    </span>
+                )}
+            </span>
+            <span className="px-3 py-15 block border-top-quinary">
+                <span className="display-flex flex-row items-center gap-15">
+                    <Icon icon={ArrowUpRightIcon} className="font-color-secondary" />
+                    <span className="text-sm font-color-secondary">
+                        {tableCell ? 'Opens cell in table' : 'Opens row in table'}
+                    </span>
+                </span>
+            </span>
+        </span>
+    ) : null;
 
     // Return the citation with tooltip and click handler
     // - Streaming state: no tooltip (metadata not available yet)
@@ -598,7 +657,7 @@ const Citation: React.FC<CitationProps> = (props) => {
                 :
                     <Tooltip
                         content={previewText}
-                        customContent={citationPreview}
+                        customContent={tablePreview && !showItemInfo ? tablePreview : citationPreview}
                         contentKey={showItemInfo ? 'item' : 'passage'}
                         width={TOOLTIP_WIDTH}
                         padding={false}

@@ -31,7 +31,9 @@ import { navigateToEpubCitation } from '../../utils/epubVisualizer/epubCitationN
 import { navigateToSnapshotCitation } from '../../utils/snapshotVisualizer/snapshotCitationNavigation';
 import { resolvePageLabelFromLabels } from '@beaver/agent-ui/utils/pageLabels';
 import { getPageLabelsForItem } from './itemData';
-import { launchExternalFile, notifyReferenceUnavailable } from './sourceActions';
+import { launchExternalFile, notifyReferenceUnavailable, notifyTableOpenFailed } from './sourceActions';
+import { getResolvedRef, parseTableLocator } from '@beaver/agent-core/citations/citationGrammar';
+import { getTablesApi } from '../../../src/services/artifacts/tablesApi';
 import { getPref } from '../../../src/utils/prefs';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { selectItemById } from '../../utils/selectItem';
@@ -116,6 +118,32 @@ async function epubLocationOfPart(
 }
 
 /**
+ * Opens the table a cell or row citation names, at that cell or row, as the
+ * table is now. A row or column removed since the citation was made opens the
+ * table without a focus and says so.
+ */
+async function openCitedTable(citation: Citation, ownerDocument: Document): Promise<void> {
+    const ref = getResolvedRef(citation);
+    const api = getTablesApi();
+    if (ref?.kind !== 'zotero' || !api) return;
+    const resolved = await resolveItemReference(ref);
+    if (resolved.status !== 'found') {
+        notifyReferenceUnavailable('item', resolved.status === 'library_unavailable' ? 'library_unavailable' : 'missing');
+        return;
+    }
+    const focus = parseTableLocator(ref.loc);
+    const outcome = await api.openTable(
+        { libraryID: resolved.item.libraryID, key: resolved.item.key },
+        { window: ownerDocument.defaultView, ...(focus ? { focus } : {}) },
+    );
+    if ('error' in outcome) {
+        notifyTableOpenFailed(outcome.error);
+        return;
+    }
+    if (outcome.focus === 'missing') notifyReferenceUnavailable('table_cell');
+}
+
+/**
  * Zotero implementation of citation activation: navigate to / open the cited
  * location. Mirrors the citation click behavior across all content kinds (note,
  * annotation, text, EPUB, PDF) and reference types (external, external file).
@@ -160,6 +188,13 @@ export async function activateCitation(activation: CitationActivation): Promise<
         logger(`Citation activation: External file citation (ext-${externalFileKey})`);
         if (!externalFileKey) return;
         await launchExternalFile(externalFileKey);
+        return;
+    }
+
+    // Alternate activation reveals the table item, through the item path below.
+    if (metadata?.citation_type === 'table' && intent !== 'item') {
+        logger('Citation activation: table cell or row');
+        await openCitedTable(metadata, ownerDocument);
         return;
     }
 

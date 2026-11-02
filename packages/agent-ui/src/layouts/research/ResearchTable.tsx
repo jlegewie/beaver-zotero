@@ -376,19 +376,31 @@ export function ResearchTable({
         scrollRowIntoView(scrollRef.current, next.id, rowIndex + delta);
     };
 
-    // A focus request from outside: clear what hides the row, scroll to it
-    // and open its cell.
+    // A focus request from outside: show what hides the row or the cell (a
+    // filter, a hidden column), then, once that view has rendered, scroll to
+    // the row and open its cell.
     const lastFocus = useRef<ResearchTableFocus["token"] | null>(null);
+    const revealedFor = useRef<ResearchTableFocus["token"] | null>(null);
     useLayoutEffect(() => {
         if (!focus || focus.token === lastFocus.current) return;
+        // A row or column not rendered yet (a reused tab still reading the
+        // table) waits for the table that has it.
         const row = table.rows.find((candidate) => candidate.id === focus.rowId);
-        if (!row) return;
-        lastFocus.current = focus.token;
+        if (!row || (focus.columnId && !table.columns.some((column) => column.id === focus.columnId))) return;
+        const columnId = columns.questions.some((column) => column.id === focus.columnId) ? focus.columnId : undefined;
         const viewIndex = state.rows.findIndex((candidate) => candidate.id === row.id);
-        if (viewIndex < 0) state.clearFilters();
-        if (focus.columnId && columns.questions.some((column) => column.id === focus.columnId))
-            setPanel({ kind: "cell", address: { rowId: row.id, columnId: focus.columnId }, view: "cell" });
-        scrollRowIntoView(scrollRef.current, row.id, viewIndex >= 0 ? viewIndex : table.rows.indexOf(row));
+        const hidden = columnId !== undefined && state.hiddenColumns.has(columnId);
+        if ((viewIndex < 0 || hidden) && revealedFor.current !== focus.token) {
+            revealedFor.current = focus.token;
+            if (viewIndex < 0) state.clearFilters();
+            if (hidden) state.toggleColumn(columnId);
+            return;
+        }
+        lastFocus.current = focus.token;
+        // A row cited alone closes a cell inspector, which would show another cell.
+        if (columnId) setPanel({ kind: "cell", address: { rowId: row.id, columnId }, view: "cell" });
+        else setPanel((current) => (current?.kind === "cell" ? null : current));
+        scrollRowIntoView(scrollRef.current, row.id, viewIndex >= 0 ? viewIndex : undefined);
     }, [focus, table, state, columns.questions]);
 
     // The inspector's controls for the cell: Edit, and on the user's own

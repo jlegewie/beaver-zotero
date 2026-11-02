@@ -16,12 +16,13 @@ function resolveTableRef(key: string) {
 /**
  * Opens a stored table in the Beaver tab of `origin`'s main window. With
  * `background`, the tab opens behind the selected one, so the chat stays in view.
- * `onDownload` fires when the table's files must be downloaded first.
+ * `onDownload` fires when the table's files must be downloaded first. `focus`
+ * brings a row or cell into view.
  */
 export async function openStoredTable(
     key: string,
     origin?: Window | null,
-    options: { background?: boolean; onDownload?: () => void } = {},
+    options: { background?: boolean; onDownload?: () => void; focus?: { rowId: string; columnId?: string } } = {},
 ) {
     const api = getTablesApi();
     const ref = resolveTableRef(key);
@@ -31,6 +32,7 @@ export async function openStoredTable(
         window: origin ?? null,
         ...(options.background ? { background: true } : {}),
         ...(options.onDownload ? { onDownload: options.onDownload } : {}),
+        ...(options.focus ? { focus: options.focus } : {}),
     });
 }
 

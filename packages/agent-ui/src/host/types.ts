@@ -107,12 +107,14 @@ export interface NavigationHost {
      * `ownerDocument` — so the table opens beside the surface the user is
      * looking at rather than in whichever window is newest. `onDownload`
      * fires when the table's files must be downloaded before it can open.
+     * `focus` brings a row (and a cell, with a column) into view; the result's
+     * `focus` is `missing` when the table no longer has it.
      */
     openTable?(
         key: string,
         origin?: Window | null,
-        options?: { onDownload?: () => void },
-    ): Promise<{ ok: true; warning?: string } | { error: string }>;
+        options?: { onDownload?: () => void; focus?: { rowId: string; columnId?: string } },
+    ): Promise<{ ok: true; warning?: string; focus?: 'found' | 'missing' } | { error: string }>;
     /**
      * Takes back one model edit of a stored table (the `edit_table` tool
      * display's Undo): restores the version before it, only while the table

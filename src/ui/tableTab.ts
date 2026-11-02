@@ -49,7 +49,7 @@ import {
     unregisterBeaverTabKind,
 } from './beaverTabs';
 import type { TableSpec } from '@beaver/agent-core/layouts/table';
-import type { RenderTableTab, TableTabHandle, TableTabRenderReport } from './tableTabTypes';
+import type { RenderTableTab, TableFocusTarget, TableTabHandle, TableTabRenderReport } from './tableTabTypes';
 
 export { TABLE_TAB_TYPE };
 /** The Beaver tab kind of a table tab. */
@@ -135,6 +135,8 @@ export interface OpenTableTabOptions {
     background?: boolean;
     /** Tab position (1 is right after the library tab). */
     index?: number;
+    /** A row or cell to bring into view. */
+    focus?: TableFocusTarget;
 }
 
 /**
@@ -162,7 +164,9 @@ export function openTableTab(
         // A sync can replace the table without a local update event; the
         // open that reused the tab has just read it, so the tab reads again.
         try {
-            entries.get(existing)?.handle?.reload();
+            const handle = entries.get(existing)?.handle;
+            handle?.reload();
+            if (options.focus) handle?.focus(options.focus);
         } catch (error) {
             Zotero.debug(`Beaver: reloading table tab ${existing} failed: ${String(error)}`);
         }
@@ -196,6 +200,7 @@ export function openTableTab(
     try {
         owned.handle = renderer.renderTableTab(reactContainer, ref, {
             initial: options.initial,
+            focus: options.focus,
             onTitle: (next) => {
                 if (entries.has(owned.tabID) && next) renameBeaverTab(owned.tabID, next);
             },

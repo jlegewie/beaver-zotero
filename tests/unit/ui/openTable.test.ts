@@ -113,6 +113,26 @@ describe('openTable', () => {
         expect(run).toHaveBeenCalledWith('table_openTable', [REF]);
     });
 
+    it('brings a cited row and cell into view when the table has them', async () => {
+        const spec = { ...SPEC, columns: [{ id: 'design', header: 'Design', type: 'select' }], rows: [{ id: 'r1', cells: {} }] };
+        readTableItemSpec.mockResolvedValue({ ok: true, spec, file: { spec } });
+        await expect(openTable(REF, { window: main, focus: { rowId: 'r1', columnId: 'design' } }))
+            .resolves.toMatchObject({ ok: true, focus: 'found' });
+        expect(openTableTab).toHaveBeenLastCalledWith(main, ITEM, REF, expect.objectContaining({
+            focus: { rowId: 'r1', columnId: 'design' },
+        }));
+        await expect(openTable(REF, { window: main, focus: { rowId: 'r1' } })).resolves.toMatchObject({ focus: 'found' });
+    });
+
+    it('opens the table without a focus when the cited row or column is gone', async () => {
+        const spec = { ...SPEC, columns: [{ id: 'design', header: 'Design', type: 'select' }], rows: [{ id: 'r1', cells: {} }] };
+        readTableItemSpec.mockResolvedValue({ ok: true, spec, file: { spec } });
+        for (const focus of [{ rowId: 'r9', columnId: 'design' }, { rowId: 'r1', columnId: 'country' }]) {
+            await expect(openTable(REF, { window: main, focus })).resolves.toMatchObject({ ok: true, focus: 'missing' });
+            expect(openTableTab.mock.lastCall?.[3]).not.toHaveProperty('focus');
+        }
+    });
+
     it('reports a reused tab', async () => {
         openTableTab.mockReturnValue({ tabID: 'tab-1', reused: true });
         await expect(openTable(REF, { window: main })).resolves.toMatchObject({ ok: true, reused: true });

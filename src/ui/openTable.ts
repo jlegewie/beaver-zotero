@@ -44,9 +44,14 @@ import {
 } from '../services/artifacts/tableItemIdentity';
 import { contextMainWindow, resolveNavigationWindow, WindowUnavailableError } from '../runtime/navigation';
 import { canHostTableTab, openTableTab, setTableTabWarning } from './tableTab';
+import type { TableFocusTarget } from './tableTabTypes';
 
 export type OpenTableOutcome =
-    | { ok: true; tabID: string; reused: boolean; warning?: string }
+    /**
+     * `focus` answers a focus request: `missing` when the table no longer
+     * has that row or column, and then nothing is focused.
+     */
+    | { ok: true; tabID: string; reused: boolean; warning?: string; focus?: 'found' | 'missing' }
     | { error: string };
 
 export interface OpenTableOptions {
@@ -61,6 +66,8 @@ export interface OpenTableOptions {
     index?: number;
     /** Called when the table's files have to be downloaded before it opens. */
     onDownload?: () => void;
+    /** A row (and a cell, with a column) to bring into view: a citation's target. */
+    focus?: TableFocusTarget;
 }
 
 /** How long to wait for a main window's Beaver renderer to come up. */
@@ -177,14 +184,25 @@ export async function openTable(ref: TableRef, options: OpenTableOptions = {}): 
             };
         }
         const win = await tableTabWindow(options.window);
+        const target = options.focus;
+        const found = target
+            && read.spec.rows.some((row) => row.id === target.rowId)
+            && (!target.columnId || read.spec.columns.some((column) => column.id === target.columnId));
         const { tabID, reused } = openTableTab(win, item, ref, {
             initial: { spec: read.spec, version: read.spec.version ?? 0 },
             background: options.background,
             index: options.index,
+            ...(found ? { focus: target } : {}),
         });
         const warning = await repairOnOpen(item, ref);
         setTableTabWarning(tabID, warning ?? null);
-        return { ok: true, tabID, reused, ...(warning ? { warning } : {}) };
+        return {
+            ok: true,
+            tabID,
+            reused,
+            ...(warning ? { warning } : {}),
+            ...(target ? { focus: found ? 'found' : 'missing' } : {}),
+        };
     } catch (error) {
         if (error instanceof WindowUnavailableError) {
             return { error: `Could not open table ${ref.key} — no Zotero window is available to show it.` };
