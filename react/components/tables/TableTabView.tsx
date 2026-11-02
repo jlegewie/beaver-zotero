@@ -1,6 +1,6 @@
 import React from 'react';
 import { isTitleAbstractOnly, type TableSpec } from '@beaver/agent-core/layouts/table';
-import { ResearchTable } from '@beaver/agent-ui/layouts';
+import { ResearchTable, type ResearchTableFocus } from '@beaver/agent-ui/layouts';
 import MarkdownRenderer from '../messages/MarkdownRenderer';
 import {
     isTableItemError,
@@ -14,7 +14,7 @@ import { TableFillBanner, TableFillButton, useTableFillJob, type TableFillButton
 import type { TableFillScope } from '@beaver/agent-core/protocol/tableFillProtocol';
 import type { ResearchTableFill } from '@beaver/agent-ui/layouts';
 import { TABLE_UPDATED_EVENT, type TableUpdatedDetail } from '../../../src/services/artifacts/tableStore';
-import type { TableTabMountOptions, TableTabRenderReport } from '../../../src/ui/tableTabTypes';
+import type { TableFocusTarget, TableTabMountOptions, TableTabRenderReport } from '../../../src/ui/tableTabTypes';
 import { getWindowRuntime } from '../../runtime/windowRuntime';
 import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
 import { selectItemById } from '../../utils/selectItem';
@@ -34,6 +34,8 @@ export interface TableTabWarningSource {
     subscribe(listener: () => void): () => void;
     /** Called when the tab is asked to read the table again. */
     onReload(listener: () => void): () => void;
+    /** Called when the tab is asked to bring a row or cell into view. */
+    onFocus(listener: (target: TableFocusTarget) => void): () => void;
 }
 
 type Loaded = { spec: TableSpec; version: number };
@@ -231,6 +233,12 @@ export default function TableTabView({
     // Callbacks come from the esbuild side with the mount; keep the latest.
     const optionsRef = React.useRef(options);
     optionsRef.current = options;
+    // The row or cell a citation asked for; each request gets a new token, so
+    // the same cell asked for again is focused again.
+    const focusRequests = React.useRef(0);
+    const [focus, setFocus] = React.useState<ResearchTableFocus | null>(() =>
+        options.focus ? { ...options.focus, token: ++focusRequests.current } : null,
+    );
 
     React.useEffect(() => {
         let live = true;
@@ -329,6 +337,15 @@ export default function TableTabView({
     React.useEffect(() => {
         if (!finishedJob) setShowFailed(false);
     }, [finishedJob]);
+    React.useEffect(
+        () =>
+            warnings.onFocus((target) => {
+                // A row outside "failed rows only" could not be shown.
+                setShowFailed(false);
+                setFocus({ ...target, token: ++focusRequests.current });
+            }),
+        [warnings],
+    );
 
     React.useEffect(() => {
         if (table) optionsRef.current.onTitle(table.spec.title || 'Table');
@@ -428,6 +445,7 @@ export default function TableTabView({
                         ) : undefined
                     }
                     onlyRows={failedRows}
+                    focus={focus}
                     onCopy={(text) => Zotero.Utilities.Internal.copyTextToClipboard(text)}
                     onExport={() => {
                         const win = surfaceWindow;

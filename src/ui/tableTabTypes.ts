@@ -9,6 +9,12 @@
 import type { TableSpec } from '@beaver/agent-core/layouts/table';
 import type { TableRef } from '../services/artifacts/tableItemIdentity';
 
+/** A row (and a cell, with a column) to bring into view: a citation's target. */
+export interface TableFocusTarget {
+    rowId: string;
+    columnId?: string;
+}
+
 /** What one committed load of the table cost, for diagnostics. */
 export interface TableTabRenderReport {
     /** `open` for the first load, `update` for a re-read after a store update. */
@@ -26,6 +32,8 @@ export interface TableTabRenderReport {
 export interface TableTabMountOptions {
     /** The spec the open just read, so the first paint needs no second read. */
     initial?: { spec: TableSpec; version: number };
+    /** A row or cell to bring into view once the table is on screen. */
+    focus?: TableFocusTarget;
     /** The spec's title changed; the tab and the window title follow it. */
     onTitle(title: string): void;
     onRendered?(report: TableTabRenderReport): void;
@@ -37,6 +45,8 @@ export interface TableTabHandle {
     setWarning(warning: string | null): void;
     /** Reads the table again: an open that reused the tab may have found newer content. */
     reload(): void;
+    /** Brings a row or cell into view, clearing filters that hide it. */
+    focus(target: TableFocusTarget): void;
 }
 
 export type RenderTableTab = (

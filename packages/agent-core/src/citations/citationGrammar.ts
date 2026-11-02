@@ -40,6 +40,9 @@ export type LocatorKind =
     | 'table'
     | 'margin'
     | 'reference'
+    /** A research table's cell (`cell:<row>/<column>`) or row (`row:<row>`). */
+    | 'cell'
+    | 'row'
     | 'unknown';
 
 export interface Locator {
@@ -209,9 +212,27 @@ export function locatorValues(locator: Locator): string[] {
     return locator.kind === 'sentence' ? locator.value.split(',') : [locator.value];
 }
 
+// Table locators name a row by its address and a column by its id; neither
+// contains `/` or whitespace.
+const TABLE_CELL_LOC_RE = /^cell:([^/\s]+)\/([^/\s]+)$/;
+const TABLE_ROW_LOC_RE = /^row:([^/\s]+)$/;
+
+/** The row and column a table locator names (no column for a row citation). */
+export function parseTableLocator(locator: Locator | undefined): { rowId: string; columnId?: string } | null {
+    if (locator?.kind === 'row') return { rowId: locator.value };
+    if (locator?.kind !== 'cell') return null;
+    const slash = locator.value.indexOf('/');
+    return slash > 0 ? { rowId: locator.value.slice(0, slash), columnId: locator.value.slice(slash + 1) } : null;
+}
+
 /** Parse one compact locator token (no lists). */
 function parseSingleLoc(raw: string): Locator {
     if (!raw) return { kind: 'unknown', value: raw, raw };
+
+    const cell = TABLE_CELL_LOC_RE.exec(raw);
+    if (cell) return { kind: 'cell', value: `${cell[1]}/${cell[2]}`, raw };
+    const row = TABLE_ROW_LOC_RE.exec(raw);
+    if (row) return { kind: 'row', value: row[1], raw };
 
     const first = locPrefixFor(raw);
     if (!first || !first.value) {

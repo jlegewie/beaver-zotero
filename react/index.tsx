@@ -50,7 +50,7 @@ import ReaderSidebar from './components/ReaderSidebar';
 import WindowSidebar from './components/WindowSidebar';
 import TableTabView from './components/tables/TableTabView';
 import type { TableRef } from '../src/services/artifacts/tableItemIdentity';
-import type { TableTabHandle, TableTabMountOptions } from '../src/ui/tableTabTypes';
+import type { TableFocusTarget, TableTabHandle, TableTabMountOptions } from '../src/ui/tableTabTypes';
 import { eventManager } from './events/eventManager';
 import { useAuth } from './hooks/useAuth';
 import { useBackgroundProcessingStatus } from './hooks/useBackgroundProcessingStatus';
@@ -300,6 +300,7 @@ export function renderTableTab(
     let warning: string | null = null;
     const listeners = new Set<() => void>();
     const reloadListeners = new Set<() => void>();
+    const focusListeners = new Set<(target: TableFocusTarget) => void>();
     const warnings = {
         get: () => warning,
         subscribe(listener: () => void) {
@@ -309,6 +310,10 @@ export function renderTableTab(
         onReload(listener: () => void) {
             reloadListeners.add(listener);
             return () => { reloadListeners.delete(listener); };
+        },
+        onFocus(listener: (target: TableFocusTarget) => void) {
+            focusListeners.add(listener);
+            return () => { focusListeners.delete(listener); };
         },
     };
     mountSurface(domElement, <TableTabView tableRef={tableRef} options={options} warnings={warnings} />);
@@ -320,6 +325,9 @@ export function renderTableTab(
         },
         reload() {
             for (const listener of reloadListeners) listener();
+        },
+        focus(target) {
+            for (const listener of focusListeners) listener(target);
         },
     };
 }

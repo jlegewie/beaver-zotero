@@ -10,6 +10,7 @@ import {
     CITATION_TAG_PATTERN,
     normalizeCitationTag,
     parseRawCitationAttributes,
+    parseTableLocator,
     requestedCitationKey,
     unwrapBacktickedCitations,
 } from '@beaver/agent-core/citations/citationGrammar';
@@ -85,8 +86,11 @@ export function preprocessCitationMatch(
 ): PreprocessedCitation {
     const rawAttrs = parseRawCitationAttributes(attributesStr);
     const normalized = normalizeCitationTag(rawAttrs);
+    // A table cell or row cites its row's paper: the same table with another
+    // row is another source.
+    const tableRow = normalized.ok ? parseTableLocator(normalized.ref.loc)?.rowId : undefined;
     const identityKey = normalized.ok
-        ? baseCitationKey(normalized.ref)
+        ? baseCitationKey(normalized.ref) + (tableRow ? `:row:${tableRow}` : '')
         : (normalized.requestedKey || '');
     
     // Check if this citation references the same item as the previous one

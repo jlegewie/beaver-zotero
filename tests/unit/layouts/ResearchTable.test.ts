@@ -241,6 +241,49 @@ describe('the cell inspector', () => {
         expect(inspector()!.getAttribute('data-row-id')).toBe('r2');
         expect(inspector()!.textContent).toContain('Not reported');
     });
+
+    it('closes the cell inspector when a whole row is asked for', () => {
+        mount();
+        click(cell('r1', 'effect'));
+        expect(inspector()).not.toBeNull();
+        act(() => root?.render(h(ResearchTable, { table: table(), focus: { rowId: 'r2', token: 1 } })));
+        expect(inspector()).toBeNull();
+    });
+
+    it('waits for a column the table on screen does not have yet', () => {
+        const focus = { rowId: 'r2', columnId: 'country', token: 1 };
+        mount({ focus });
+        expect(inspector()).toBeNull();
+        const next = table();
+        next.columns = [...next.columns, { id: 'country', header: 'Country', type: 'text' }];
+        act(() => root?.render(h(ResearchTable, { table: next, focus })));
+        expect(inspector()!.getAttribute('data-row-id')).toBe('r2');
+        expect(inspector()!.getAttribute('data-column-id')).toBe('country');
+    });
+
+    it('shows a filtered-out row and a hidden column before focusing the cell asked for', () => {
+        mount();
+        click(container!.querySelector('button[aria-label="Column menu: Design"]')!);
+        click(Array.from(document.querySelectorAll<HTMLElement>('*')).find((el) => el.textContent === 'Hide column' && el.children.length === 0)!);
+        const search = container!.querySelector<HTMLInputElement>('input[aria-label="Search rows"]')!;
+        act(() => {
+            Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, 'no row matches this');
+            search.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+        expect(container!.querySelector('tr[data-row-id="r2"]')).toBeNull();
+
+        act(() =>
+            root?.render(
+                h(ResearchTable, {
+                    table: table(),
+                    documents: new Map([[pdf, { name: 'Baird_2011.pdf', kind: 'pdf' }]]),
+                    focus: { rowId: 'r2', columnId: 'design', token: 1 },
+                }),
+            ),
+        );
+        expect(cell('r2', 'design').classList.contains('rt-cell-selected')).toBe(true);
+        expect(inspector()!.getAttribute('data-row-id')).toBe('r2');
+    });
 });
 
 describe('structural edit controls', () => {

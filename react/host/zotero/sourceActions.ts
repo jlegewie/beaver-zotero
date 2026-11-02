@@ -21,7 +21,7 @@ function notifyExternalFileUnavailable(): void {
  * object an in-prose link names) that was rendered from persisted run history
  * but does not exist on this computer.
  */
-export type UnavailableReferenceKind = 'item' | 'collection' | 'search' | 'view' | 'annotation' | 'action' | 'tag' | 'link';
+export type UnavailableReferenceKind = 'item' | 'collection' | 'search' | 'view' | 'annotation' | 'action' | 'tag' | 'link' | 'table_cell';
 export type UnavailableReferenceCause = 'missing' | 'library_unavailable';
 
 const UNAVAILABLE_REFERENCE_COPY: Record<UnavailableReferenceKind, { title: string; text: string }> = {
@@ -53,6 +53,10 @@ const UNAVAILABLE_REFERENCE_COPY: Record<UnavailableReferenceKind, { title: stri
         title: 'Tag Not Available',
         text: 'This tag is no longer on any item in your Zotero libraries. It may have been renamed or removed.',
     },
+    table_cell: {
+        title: 'Cell Not Available',
+        text: 'This paper or question is no longer in the table. It may have been removed.',
+    },
     // The link was written by the model, so unlike the other kinds the target
     // may never have existed.
     link: {
@@ -61,7 +65,7 @@ const UNAVAILABLE_REFERENCE_COPY: Record<UnavailableReferenceKind, { title: stri
     },
 };
 
-const LIBRARY_UNAVAILABLE_COPY: Record<Exclude<UnavailableReferenceKind, 'action'>, { title: string; text: string }> = {
+const LIBRARY_UNAVAILABLE_COPY: Record<Exclude<UnavailableReferenceKind, 'action' | 'table_cell'>, { title: string; text: string }> = {
     item: {
         title: 'Item Not Available',
         text: "This item is in a library that isn't available on this computer. It may be a group library you haven't joined on this device.",
@@ -103,7 +107,7 @@ export function notifyReferenceUnavailable(
     kind: UnavailableReferenceKind,
     cause: UnavailableReferenceCause = 'missing',
 ): void {
-    const copy = cause === 'library_unavailable' && kind !== 'action'
+    const copy = cause === 'library_unavailable' && kind !== 'action' && kind !== 'table_cell'
         ? LIBRARY_UNAVAILABLE_COPY[kind]
         : UNAVAILABLE_REFERENCE_COPY[kind];
     const { title, text } = copy;
@@ -116,6 +120,20 @@ export function notifyReferenceUnavailable(
         });
     } catch (e) {
         logger(`notifyReferenceUnavailable: failed to surface popup: ${e}`, 2);
+    }
+}
+
+/** Say why a cited table could not be opened (no file, unreadable, no window). */
+export function notifyTableOpenFailed(message: string): void {
+    try {
+        store.set(addPopupMessageAtom, {
+            id: 'table-open-failed',
+            type: 'warning',
+            title: 'Table Not Available',
+            text: message,
+        });
+    } catch (e) {
+        logger(`notifyTableOpenFailed: failed to surface popup: ${e}`, 2);
     }
 }
 

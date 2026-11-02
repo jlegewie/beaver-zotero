@@ -8,6 +8,7 @@ import {
     getContentKind,
     isExternalCitation,
     isExternalFileCitation,
+    type TableCitation,
 } from '@beaver/agent-core/types/citations';
 import {
     baseCitationKey,
@@ -185,6 +186,11 @@ export interface CitationViewModel {
     /** The cited pages for prose ("page 12", "PDF page 5"); "" without pages. */
     pageReference: string;
     pages: number[];
+    /**
+     * A table cell or row citation's stored preview. Its column header is the
+     * citation's locator ("Smith et al. 2021, Design").
+     */
+    table?: TableCitation;
 }
 
 /**
@@ -368,6 +374,9 @@ export function useCitationViewModel(props: Record<string, unknown>): CitationVi
         };
     }, [metadata, isExternalFile]);
 
+    // A table citation's column header is its locator, in place of pages.
+    const table = metadata?.citation_type === 'table' ? metadata.table : undefined;
+
     // Resolve page labels separately so page-label preload updates don't force
     // the citation/preview/HTML-stripping work above to recompute. The legacy
     // fallback (loading labels from the cited Zotero item) is delegated to the
@@ -379,6 +388,10 @@ export function useCitationViewModel(props: Record<string, unknown>): CitationVi
         let pageLabels: string[] = rawPages.map((p) => String(p));
         const contentKind = getContentKind(metadata);
         const noPages = { locatorDisplay: '', pageReference: '' };
+
+        if (table) {
+            return { pageLabels: [], locatorDisplay: table.column_header ?? '', pageReference: '', pages: [] };
+        }
 
         if (contentKind === 'snapshot') {
             // Synthetic page numbers are a logical coordinate only; the snapshot
@@ -427,7 +440,7 @@ export function useCitationViewModel(props: Record<string, unknown>): CitationVi
             pageReference: display.reference,
             pages: rawPages,
         };
-    }, [rawPages, usePageLabels, resolvedRef, labelsByAttachmentId, metadata]);
+    }, [rawPages, usePageLabels, resolvedRef, labelsByAttachmentId, metadata, table]);
 
     return {
         metadata,
@@ -457,5 +470,6 @@ export function useCitationViewModel(props: Record<string, unknown>): CitationVi
         locatorDisplay,
         pageReference,
         pages,
+        table,
     };
 }

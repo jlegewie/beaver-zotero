@@ -131,6 +131,17 @@ describe('opening', () => {
         expect(win.Zotero_Tabs.tabs.filter((t: FakeTab) => t.type === TABLE_TAB_TYPE)).toHaveLength(1);
     });
 
+    it('brings a cited cell into view in a new tab and in the one already open', () => {
+        const win = windows[0];
+        const focus = { rowId: 'r1', columnId: 'design' };
+        openTableTab(win, tableItem(), REF, { focus });
+        expect(win.BeaverReact.renderTableTab.mock.calls[0][2].focus).toEqual(focus);
+
+        openTableTab(win, tableItem(), REF, { focus: { rowId: 'r2' } });
+        expect(win.handle.focus).toHaveBeenCalledWith({ rowId: 'r2' });
+        expect(win.BeaverReact.renderTableTab).toHaveBeenCalledTimes(1);
+    });
+
     it('opens behind the selected tab when asked', () => {
         const win = windows[0];
         openTableTab(win, tableItem(), REF, { background: true });
