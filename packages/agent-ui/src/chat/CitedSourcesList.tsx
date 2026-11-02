@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAtomValue } from 'jotai';
-import { ExternalLinkIcon, FileIcon, Icon, LibraryIcon, PdfIcon, TableIcon } from '../icons';
+import { ArrowUpRightIcon, ExternalLinkIcon, FileIcon, Icon, LibraryIcon, PdfIcon, TableIcon } from '../icons';
 import IconButton from '../primitives/IconButton';
 import {
     CitedSource,
@@ -166,8 +166,8 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                                     <div className="display-flex flex-1 min-w-0 p-2">
                                         {/* Icon */}
                                         {table ? (
-                                            <span className="mr-2 flex-shrink-0" style={{ transform: 'translateY(-2px)' }}>
-                                                <Icon icon={TableIcon} className="scale-85" />
+                                            <span className="mr-2 flex-shrink-0 display-flex items-center font-color-secondary">
+                                                <Icon icon={TableIcon} />
                                             </span>
                                         ) : iconName && (
                                             <span className="mr-2 flex-shrink-0" style={{ transform: 'translateY(-2px)' }}>
@@ -237,7 +237,7 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                                                 {table && zoteroRef && (
                                                     <Tooltip content="Open table" singleLine>
                                                         <IconButton
-                                                            icon={TableIcon}
+                                                            icon={ArrowUpRightIcon}
                                                             variant="ghost-secondary"
                                                             onClick={(event) => {
                                                                 void getHost().navigation?.openTable?.(

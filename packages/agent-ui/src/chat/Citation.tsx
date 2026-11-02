@@ -18,7 +18,7 @@ import { getHost } from '../host';
 import type { CitationExportRender } from '../host/types';
 import { useCitationViewModel, type CitationViewModel } from './useCitationViewModel';
 import { hasAlternateModifier, useAlternateActivation } from './useAlternateActivation';
-import { Icon, LibraryIcon, PdfIcon, FileIcon, GlobalSearchIcon, NoteIcon, HighlighterIcon, TextAlignLeftIcon, ExternalLinkIcon, TableIcon } from '../icons';
+import { Icon, LibraryIcon, PdfIcon, FileIcon, GlobalSearchIcon, NoteIcon, HighlighterIcon, TextAlignLeftIcon, ExternalLinkIcon, TableIcon, ArrowUpRightIcon } from '../icons';
 const TOOLTIP_WIDTH = '250px';
 
 /**
@@ -366,9 +366,9 @@ const Citation: React.FC<CitationProps> = (props) => {
         }
 
         // A table cell names no work a bibliography could format: it exports
-        // as its text, the paper and the column.
+        // as its row's paper.
         if (citationMetadata?.citation_type === 'table') {
-            return (<span>{` (${citation}${hasLocatorDisplay ? `, ${locatorDisplay}` : ''})`}</span>);
+            return (<span>{` (${citation})`}</span>);
         }
 
         // For library citations, delegate host-native formatting (CSL for
@@ -587,35 +587,47 @@ const Citation: React.FC<CitationProps> = (props) => {
         </span>
     )
 
-    // A table citation's tooltip: the cell as it was when cited, from the
+    // A table citation's tooltip: the table in the header, the cell's answer
+    // as it was when cited, and the paper and column it belongs to. From the
     // citation alone.
     const table = vm.table;
+    const tableCell = !!table?.column_header;
+    const tableText = !table
+        ? ''
+        : !tableCell
+        ? citation
+        : table.value ?? (table.provenance === 'user' ? 'Cleared by you' : 'No answer yet');
+    const tableSource = table && tableCell
+        ? [citation, table.column_header, table.value && table.provenance === 'user' ? 'Edited by you' : '']
+            .filter(Boolean)
+            .join(' · ')
+        : '';
     const tablePreview = table ? (
         <span className="block" style={{ overflow: 'hidden' }}>
-            <span className="px-3 py-15 display-flex flex-row border-bottom-quinary gap-2">
-                <span className="font-color-primary text-sm" style={{ minWidth: 0, wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
-                    {citation}
+            <span className="px-3 py-15 display-flex flex-row items-center border-bottom-quinary gap-15">
+                <Icon icon={TableIcon} className="font-color-secondary" style={{ flexShrink: 0 }} />
+                <span className="font-color-primary text-sm" style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {table.title}
                 </span>
-                <span className="flex-1" />
-                {table.column_header && (
-                    <span className="font-color-secondary text-sm" style={{ flexShrink: 0, maxWidth: '50%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {table.column_header}
+            </span>
+            <span className="px-3 py-15 block">
+                <span
+                    className="font-color-primary text-sm"
+                    style={{ display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 6, overflow: 'hidden', wordBreak: 'break-word', overflowWrap: 'anywhere' }}
+                >
+                    {tableText}
+                </span>
+                {tableSource && (
+                    <span className="block font-color-secondary text-xs mt-1" style={{ wordBreak: 'break-word' }}>
+                        {tableSource}
                     </span>
                 )}
             </span>
-            {table.column_header && (
-                <span className="font-color-secondary text-sm px-3 py-15 block" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>
-                    {table.value ?? (table.provenance === 'user' ? 'Cleared by you' : 'No answer yet')}
-                    {table.value && table.provenance === 'user' && (
-                        <span className="block font-color-tertiary">Edited by you</span>
-                    )}
-                </span>
-            )}
-            <span className={`px-3 py-15 block ${table.column_header ? 'border-top-quinary' : ''}`}>
+            <span className="px-3 py-15 block border-top-quinary">
                 <span className="display-flex flex-row items-center gap-15">
-                    <Icon icon={TableIcon} className="font-color-secondary" />
-                    <span className="text-sm font-color-secondary" style={{ minWidth: 0, wordBreak: 'break-word' }}>
-                        {`Opens ${table.column_header ? 'cell' : 'row'} in ${table.title}`}
+                    <Icon icon={ArrowUpRightIcon} className="font-color-secondary" />
+                    <span className="text-sm font-color-secondary">
+                        {tableCell ? 'Opens cell in table' : 'Opens row in table'}
                     </span>
                 </span>
             </span>

@@ -143,11 +143,10 @@ export function renderToMarkdown(
             return page ? ` (${name}, p. ${page})` : ` (${name})`;
         }
 
-        // 2c. A table's cell or row: the paper and the column, as the chip
-        // shows them. The table item is not a source to list.
+        // 2c. A table's cell or row: the row's paper, as the chip shows it.
+        // The table item is not a source to list.
         if (ref.loc?.kind === 'cell' || ref.loc?.kind === 'row') {
-            const meta = citationByKey[requestedCitationKey(ref)];
-            const label = [meta?.display_name, meta?.table?.column_header].filter(Boolean).join(', ');
+            const label = citationByKey[requestedCitationKey(ref)]?.display_name;
             return label ? ` (${label})` : '';
         }
 

@@ -31,7 +31,7 @@ describe('renderToMarkdownAsync', () => {
 });
 
 describe('renderToMarkdown', () => {
-    it('writes a table cell citation as the paper and the column, with no source entry', () => {
+    it('writes a table cell citation as its paper, with no source entry', () => {
         const tag = '<citation id="u-TABLEKEY" loc="cell:u-PAPERAAA/design"/>';
         const loc = { kind: 'cell' as const, value: 'u-PAPERAAA/design', raw: 'cell:u-PAPERAAA/design' };
         const citation = {
@@ -48,6 +48,6 @@ describe('renderToMarkdown', () => {
             externalReferenceMapping: {},
             externalItemMapping: {},
         });
-        expect(markdown).toBe('Most are surveys (Smith et al. 2021, Design).');
+        expect(markdown).toBe('Most are surveys (Smith et al. 2021).');
     });
 });

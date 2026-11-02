@@ -187,8 +187,8 @@ export interface CitationViewModel {
     pageReference: string;
     pages: number[];
     /**
-     * A table cell or row citation's stored preview. Its column header is the
-     * citation's locator ("Smith et al. 2021, Design").
+     * A table cell or row citation's stored preview. The chip names only the
+     * row's paper ("Smith et al. 2021"); the tooltip shows the rest.
      */
     table?: TableCitation;
 }
@@ -374,7 +374,7 @@ export function useCitationViewModel(props: Record<string, unknown>): CitationVi
         };
     }, [metadata, isExternalFile]);
 
-    // A table citation's column header is its locator, in place of pages.
+    // A table citation shows no locator: its chip names the row's paper.
     const table = metadata?.citation_type === 'table' ? metadata.table : undefined;
 
     // Resolve page labels separately so page-label preload updates don't force
@@ -390,7 +390,7 @@ export function useCitationViewModel(props: Record<string, unknown>): CitationVi
         const noPages = { locatorDisplay: '', pageReference: '' };
 
         if (table) {
-            return { pageLabels: [], locatorDisplay: table.column_header ?? '', pageReference: '', pages: [] };
+            return { pageLabels: [], ...noPages, pages: [] };
         }
 
         if (contentKind === 'snapshot') {

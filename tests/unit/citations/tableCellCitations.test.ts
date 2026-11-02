@@ -88,20 +88,20 @@ describe('a table citation', () => {
         return React.createElement('span', null, `${vm.displayState}|${vm.locatorDisplay}|${vm.pages.length}`);
     }
 
-    it('takes its column as the locator', () => {
-        expect(render(React.createElement(Probe, { citation: cell }))).toContain('ready|Costs|0');
+    it('shows no locator: the chip names the paper', () => {
+        expect(render(React.createElement(Probe, { citation: cell }))).toContain('ready||0');
         expect(render(React.createElement(Probe, { citation: row }))).toContain('ready||0');
     });
 
-    it('renders its chip from the stored preview, as the paper and the column', () => {
+    it('renders its chip from the stored preview, as the paper', () => {
         const html = render(React.createElement(Citation, { citation: cell }));
-        expect(html).toContain('Smith et al. 2021, Costs');
+        expect(html).toContain('>Smith et al. 2021<');
         expect(html).toContain('with-locator');
     });
 
     it('exports as plain text, not as a citation of the table item', () => {
         const html = render(React.createElement(Citation, { citation: cell, exportRendering: true }));
-        expect(html).toContain('(Smith et al. 2021, Costs)');
+        expect(html).toContain('(Smith et al. 2021)');
         expect(html).not.toContain('data-citation');
     });
 
