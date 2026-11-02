@@ -23,7 +23,7 @@ import { libraryRefForLibraryID } from '../../../src/utils/libraryIdentity';
 import { exportTableCsv, renderTableDocumentActions, tableActionErrorMessage } from '../../../src/ui/tableDocumentActions';
 import { getTablesApi } from '../../../src/services/artifacts/tablesApi';
 import { useNewPapers, useTableDocuments } from './tableTabData';
-import { useTableEditing } from './useTableEditing';
+import { FILL_RUNNING_REASON, useTableEditing } from './useTableEditing';
 import TableCardDropZone from './card/TableCardDropZone';
 import { useAtomValue } from 'jotai';
 import { searchableLibraryIdsAtom } from '../../atoms/profile';
@@ -309,7 +309,7 @@ export default function TableTabView({
         () =>
             fillEnabled
                 ? {
-                      disabledReason: editDisabledReason ?? (fillRunning ? 'A fill of this table is running.' : undefined),
+                      disabledReason: editDisabledReason ?? (fillRunning ? FILL_RUNNING_REASON : undefined),
                       onFillRows: (rowIds) => requestFill({ kind: 'cells', rows: rowIds }),
                       onFillColumn: (column) => requestFill({ kind: 'cells', columns: [column.id] }),
                   }

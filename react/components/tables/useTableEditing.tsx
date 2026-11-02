@@ -47,6 +47,9 @@ interface EditorState {
     error?: string | null;
 }
 
+/** Why an action waits while this table's fill runs. */
+export const FILL_RUNNING_REASON = 'A fill of this table is running.';
+
 /** Each tab mount is one editing session: its ordinary edits collapse into one version. */
 function newSessionId(): string {
     return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -79,7 +82,7 @@ export function useTableEditing({
     spec: TableSpec;
     /** Why the table cannot be edited (a read-only library). */
     disabledReason?: string;
-    /** A fill of this table is running: Undo waits for it to end. */
+    /** A fill of this table is running: Undo and question changes wait for it to end. */
     fillRunning: boolean;
     surfaceWindow: Window | null;
     portalContainer: HTMLElement | null;
@@ -381,6 +384,7 @@ export function useTableEditing({
 
     const editing: ResearchTableEditing = {
         disabledReason,
+        questionDisabledReason: fillRunning ? FILL_RUNNING_REASON : undefined,
         onTitle: (title) => void run({ title }, { change: 'Renamed the table' }),
         onDescription: (description) => void run({ description }, { change: 'Edited the description' }),
         onEditColumn: (column) => setEditor({ column, initial: columnEditorDraft(column) }),
