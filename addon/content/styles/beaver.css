@@ -67,6 +67,11 @@
  * and tooltips lift to it, as in the preferences and the separate window. */
 .beaver-root.beaver-tab {
     --beaver-surface-overlay: var(--material-background);
+    /* Zotero's tab deck sizes a tab to its content's minimum width, so a wide
+     * table would widen the whole tab and push the header and toolbar
+     * off-screen. Its width comes from the deck instead; wide content scrolls
+     * inside its own area. */
+    contain: inline-size;
 }
 
 /* Preferences window: two-column shell. The sidebar keeps the window's

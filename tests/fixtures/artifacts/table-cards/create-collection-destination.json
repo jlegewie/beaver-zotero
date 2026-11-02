@@ -51,7 +51,7 @@
       "rows": 2,
       "duplicates": 0
     },
-    "row_cap": 1000,
+    "row_cap": 500,
     "total": 2,
     "criteria": [],
     "columns": [

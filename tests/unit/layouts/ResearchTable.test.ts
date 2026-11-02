@@ -188,7 +188,81 @@ describe('the grid', () => {
     });
 });
 
+describe('pinned columns', () => {
+    it('pins the rail and Paper column only while the grid has as much room again beside them', () => {
+        let width = 1000;
+        let resized: (() => void) | undefined;
+        const win = window as unknown as { ResizeObserver?: unknown };
+        const originalObserver = win.ResizeObserver;
+        win.ResizeObserver = class {
+            constructor(callback: () => void) {
+                resized = callback;
+            }
+            observe() {}
+            disconnect() {}
+        };
+        const offset = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetWidth');
+        const client = Object.getOwnPropertyDescriptor(Element.prototype, 'clientWidth');
+        Object.defineProperty(HTMLElement.prototype, 'offsetWidth', {
+            configurable: true,
+            get(this: HTMLElement) {
+                return this.classList.contains('rt-th-rail') ? 40 : this.classList.contains('rt-th-paper') ? 320 : 0;
+            },
+        });
+        Object.defineProperty(Element.prototype, 'clientWidth', {
+            configurable: true,
+            get(this: Element) {
+                return this.classList.contains('rt-scroll') ? width : 0;
+            },
+        });
+        try {
+            mount();
+            const scroller = container!.querySelector('.rt-scroll')!;
+            expect(scroller.hasAttribute('data-pinned')).toBe(true);
+            // 700 px is less than twice the pinned 360 px: nothing stays put.
+            width = 700;
+            act(() => resized?.());
+            expect(scroller.hasAttribute('data-pinned')).toBe(false);
+        } finally {
+            win.ResizeObserver = originalObserver;
+            if (offset) Object.defineProperty(HTMLElement.prototype, 'offsetWidth', offset);
+            if (client) Object.defineProperty(Element.prototype, 'clientWidth', client);
+        }
+    });
+});
+
+describe('row menus', () => {
+    it("raises the row's Paper cell while its menu is open", () => {
+        mount({ fill: { onFillRows: vi.fn(), onFillColumn: vi.fn() } });
+        const paper = () => container!.querySelector('tr[data-row-id="r1"] .rt-td-paper')!;
+        expect(paper().classList.contains('rt-td-menu-open')).toBe(false);
+        click(container!.querySelector('tr[data-row-id="r1"] button[aria-label="Row actions"]')!);
+        expect(paper().classList.contains('rt-td-menu-open')).toBe(true);
+        // Choosing an entry closes the menu.
+        const refill = Array.from(document.querySelectorAll<HTMLElement>('*')).find(
+            (el) => el.textContent === 'Refill row' && el.children.length === 0,
+        );
+        click(refill!);
+        expect(paper().classList.contains('rt-td-menu-open')).toBe(false);
+    });
+});
+
 describe('the cell inspector', () => {
+    it('scrolls its cell into view beside the inspector', () => {
+        const scrolled: Array<[string | null, unknown]> = [];
+        const original = HTMLElement.prototype.scrollIntoView;
+        HTMLElement.prototype.scrollIntoView = function (this: HTMLElement, options?: unknown) {
+            scrolled.push([this.getAttribute('data-column-id'), options]);
+        };
+        try {
+            mount();
+            click(cell('r1', 'effect'));
+            expect(scrolled).toContainEqual(['effect', { block: 'nearest', inline: 'nearest' }]);
+        } finally {
+            HTMLElement.prototype.scrollIntoView = original;
+        }
+    });
+
     it("shows a model answer with its source, reasoning and passages, and the row's document", () => {
         mount();
         click(cell('r1', 'effect'));

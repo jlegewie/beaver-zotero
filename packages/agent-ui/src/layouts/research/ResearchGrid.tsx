@@ -463,6 +463,9 @@ const ResearchRow = React.memo(function ResearchRow({
     onEditCell,
     editDisabledReason,
 }: ResearchRowProps): React.ReactElement {
+    // A pinned Paper cell stacks on its own, so the one whose menu is open
+    // goes over the next rows' pinned cells.
+    const [menuOpen, setMenuOpen] = useState(false);
     return (
         <tr
             className={["rt-row", isSelected ? "rt-row-selected" : "", row.failure ? "rt-row-failed" : ""]
@@ -479,8 +482,16 @@ const ResearchRow = React.memo(function ResearchRow({
                     />
                 </span>
             </td>
-            <td className="rt-td rt-td-paper">
-                <PaperCell table={table} row={row} anchorColumnId={paperColumnId} isNew={isNew} documents={documents} menuItems={menuItems(row)} />
+            <td className={`rt-td rt-td-paper${menuOpen ? " rt-td-menu-open" : ""}`}>
+                <PaperCell
+                    table={table}
+                    row={row}
+                    anchorColumnId={paperColumnId}
+                    isNew={isNew}
+                    documents={documents}
+                    menuItems={menuItems(row)}
+                    onMenuToggle={setMenuOpen}
+                />
             </td>
             {showYear ? (
                 <td className="rt-td rt-td-year">

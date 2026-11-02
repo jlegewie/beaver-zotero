@@ -25,6 +25,7 @@ import type {
 import {
     codePointLength,
     MAX_MODEL_COLUMNS,
+    MAX_QUESTION_CELLS,
     MAX_SELECT_DEFINITION_CHARS,
     MAX_SELECT_DEFINITIONS_CHARS,
     normalizeSelectLabel,
@@ -680,6 +681,12 @@ export function createBlockerReason(
     // No columns is allowed: the table is created without questions.
     if (draft.columns.length > MAX_MODEL_COLUMNS)
         return { message: `A table holds at most ${MAX_MODEL_COLUMNS} question columns.`, part: 'columns' };
+    const rows = cardRowCount(draft, request);
+    if (rows * draft.columns.length > MAX_QUESTION_CELLS)
+        return {
+            message: `${plural(rows, 'item')} × ${plural(draft.columns.length, 'question')} would be ${format(rows * draft.columns.length)} answers; a table holds at most ${format(MAX_QUESTION_CELLS)}. Remove sources or questions to continue.`,
+            part: 'columns',
+        };
     const incomplete = draft.columns.filter((column) => columnProblem(column));
     if (incomplete.length === 1) {
         const [column] = incomplete;

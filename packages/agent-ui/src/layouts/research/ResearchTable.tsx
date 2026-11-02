@@ -234,6 +234,41 @@ export function ResearchTable({
     useEffect(() => {
         if (panel?.kind === "cell" && (!selectedRow || !selectedColumn)) setPanel(null);
     }, [panel, selectedRow, selectedColumn]);
+    // The rail and Paper column are pinned only while the grid leaves at least
+    // as much room beside them for answers; a narrow grid (a small window, the
+    // inspector open) scrolls them away like any other column.
+    const [pinned, setPinned] = useState(false);
+    useLayoutEffect(() => {
+        const scroller = scrollRef.current;
+        const Observer = scroller?.ownerDocument.defaultView?.ResizeObserver;
+        if (!scroller || !Observer) return;
+        const update = () => {
+            const width = ["rt-th-rail", "rt-th-paper"].reduce(
+                (sum, name) => sum + (scroller.querySelector<HTMLElement>(`.${name}`)?.offsetWidth ?? 0),
+                0,
+            );
+            setPinned(width > 0 && scroller.clientWidth >= 2 * width);
+        };
+        const observer = new Observer(update);
+        observer.observe(scroller);
+        update();
+        return () => observer.disconnect();
+    }, []);
+    // The inspector narrows the grid: keep its cell in view beside it, and
+    // clear of the pinned Paper column.
+    useEffect(() => {
+        const scroller = scrollRef.current;
+        if (!selected || !scroller) return;
+        const esc = (value: string) => value.replace(/["\\]/g, "\\$&");
+        const cell = scroller.querySelector<HTMLElement>(
+            `tr[data-row-id="${esc(selected.rowId)}"] td[data-column-id="${esc(selected.columnId)}"]`,
+        );
+        cell?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+        const paper = pinned ? cell?.parentElement?.querySelector<HTMLElement>(".rt-td-paper") : null;
+        if (!cell || !paper) return;
+        const covered = paper.getBoundingClientRect().right - cell.getBoundingClientRect().left;
+        if (covered > 0) scroller.scrollLeft -= covered;
+    }, [selected?.rowId, selected?.columnId]);
 
     // The editor follows its cell the same way, and closes when editing ends.
     const editingRow = editingCell ? table.rows.find((row) => row.id === editingCell.rowId) : undefined;
@@ -713,7 +748,7 @@ export function ResearchTable({
                 ) : null}
 
                 <div className="rt-body">
-                    <div ref={scrollRef} className="bt-scroll rt-scroll">
+                    <div ref={scrollRef} className="bt-scroll rt-scroll" data-pinned={pinned || undefined}>
                         <ResearchGrid
                             table={table}
                             state={state}

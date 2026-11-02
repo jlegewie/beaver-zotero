@@ -72,7 +72,7 @@
       "rows": 2,
       "duplicates": 1
     },
-    "row_cap": 1000,
+    "row_cap": 500,
     "total": 3,
     "criteria": [],
     "columns": [

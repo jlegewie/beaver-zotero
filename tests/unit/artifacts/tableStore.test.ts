@@ -2713,7 +2713,7 @@ describe('the edit operations', () => {
         });
         expect(response).toMatchObject({
             ok: true,
-            preview: { rows: 1, documents: 1, duplicates: 0, row_cap: 1000, sources: [{ count: 1, rejected: [{ id: 'u-NOTE1111' }] }] },
+            preview: { rows: 1, documents: 1, duplicates: 0, row_cap: 500, sources: [{ count: 1, rejected: [{ id: 'u-NOTE1111' }] }] },
         });
         expect(run).not.toHaveBeenCalled();
         run.mockRestore();
