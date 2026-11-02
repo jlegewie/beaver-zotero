@@ -870,17 +870,6 @@ describe("cell states", () => {
         expect(html).not.toMatch(/<script\b/i);
     });
 
-    it("never counts a column as filling in the footer", () => {
-        const html = renderTableHtml({
-            id: "f",
-            columns: [
-                { id: "a", header: "Answer", type: "text", status: "filling", progress: { done: 1, total: 3 } },
-            ],
-            rows: [{ id: "r", cells: {} }],
-        });
-        const footer = /<footer class="bt-foot">([^<]*)<\/footer>/.exec(html)![1];
-        expect(footer).toBe("1 row");
-    });
 });
 
 describe("how answers read", () => {
@@ -1083,7 +1072,6 @@ const fullSpec: TableSpec = {
             id: "ref",
             header: "Item",
             type: "reference",
-            details: { kind: "text", text: "The paper as it was found." },
         },
         {
             id: "decision",
@@ -1103,17 +1091,13 @@ const fullSpec: TableSpec = {
             align: "end",
             width: 120,
         },
-        { id: "when", header: "Published", type: "date", priority: "primary" },
+        { id: "when", header: "Published", type: "date" },
         { id: "oa", header: "OA", type: "boolean" },
         {
             id: "finding",
             header: "Finding",
             type: "text",
             description: "What did it find?",
-            details: { kind: "list", items: ["Read the results section"] },
-            status: "filling",
-            progress: { done: 2, total: 3 },
-            wrap: "clamp",
         },
         {
             id: "url",
@@ -1122,8 +1106,6 @@ const fullSpec: TableSpec = {
             system: true,
             sortable: false,
             filterable: false,
-            wrap: "nowrap",
-            priority: "secondary",
             width: "fill",
         },
     ],
@@ -1233,15 +1215,7 @@ const fullSpec: TableSpec = {
         },
     ],
     sort: { column_id: "when", direction: "asc" },
-    capabilities: {
-        sortable: true,
-        filterable: true,
-        expandable_rows: true,
-        row_actions: ["reveal", "open", "import"],
-        allow_add_column: true,
-        allow_add_row: true,
-    },
-    cost_estimate: { per_row_credits: 2, estimated_seconds: 45 },
+    capabilities: { row_actions: ["reveal", "open", "import"] },
 };
 
 describe("a stored table's rendering", () => {

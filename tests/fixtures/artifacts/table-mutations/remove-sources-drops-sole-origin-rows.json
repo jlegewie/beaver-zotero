@@ -38,15 +38,13 @@
                 "id": "_year",
                 "header": "Year",
                 "type": "date",
-                "system": true,
-                "priority": "secondary"
+                "system": true
             },
             {
                 "id": "_identifier",
                 "header": "Identifier",
                 "type": "link",
-                "system": true,
-                "priority": "secondary"
+                "system": true
             },
             {
                 "id": "method",
@@ -282,15 +280,13 @@
                 "id": "_year",
                 "header": "Year",
                 "type": "date",
-                "system": true,
-                "priority": "secondary"
+                "system": true
             },
             {
                 "id": "_identifier",
                 "header": "Identifier",
                 "type": "link",
-                "system": true,
-                "priority": "secondary"
+                "system": true
             },
             {
                 "id": "method",

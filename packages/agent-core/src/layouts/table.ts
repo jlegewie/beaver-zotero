@@ -2,8 +2,8 @@
  * Table layout spec.
  *
  * A `TableSpec` is the client-agnostic data model behind every table Beaver
- * renders: the compact sidebar table, the full-width window table and the
- * static snapshot HTML all consume the same object. The rule that makes that
+ * renders: the research table tab and the static snapshot HTML consume the
+ * same object. The rule that makes that
  * possible is that the spec is **self-contained**: every cell carries what it
  * needs to render, so no renderer looks anything up at render time.
  *
@@ -146,8 +146,6 @@ export interface Column {
      * Changing it marks the column's cells stale.
      */
     description?: string;
-    /** The long form behind `description`, revealed from the header. */
-    details?: Details;
     /** What this column is for in a workflow; absent ⇒ an ordinary column. */
     role?: ColumnRole;
     /**
@@ -165,21 +163,11 @@ export interface Column {
     sortable?: boolean;
     /** Default true. */
     filterable?: boolean;
-    /** Reserved for cell editing; default false. */
-    editable?: boolean;
     /**
      * Rendered width in CSS px, or `"fill"` to take the remaining space. Absent
      * ⇒ the renderer's default for this `type`.
      */
     width?: number | "fill";
-    /**
-     * How a value longer than the row handles the overflow. Default `"clamp"`:
-     * clamped to the row height and revealed on expand. `"nowrap"` keeps a value
-     * on one line and ellipsises it.
-     */
-    wrap?: "clamp" | "nowrap";
-    /** Compact renderings show only `primary` columns; the rest appear on row expand. */
-    priority?: "primary" | "secondary";
     /** Overrides {@link columnAlign}, which centres a boolean and ends a number or date. */
     align?: "start" | "end";
     /**
@@ -191,15 +179,6 @@ export interface Column {
      * option without a definition). See {@link questionHash}.
      */
     revision?: number;
-    /** Absent ⇒ ready. `"filling"` means a producer is populating this column now. */
-    status?: "filling";
-    /** Progress of a `filling` column, so a header can show "6 of 9". */
-    progress?: ColumnProgress;
-}
-
-export interface ColumnProgress {
-    done: number;
-    total: number;
 }
 
 /** Who supplied an external row's record ("openalex", "pubmed", ...); an open string. */
@@ -328,13 +307,6 @@ export type CellValue =
           formatted_citation?: string;
       }
     | { kind: "link"; url: string; label?: string };
-
-export type CellValueKind = CellValue["kind"];
-
-/** Secondary content of a column header, revealed on expand. */
-export type Details =
-    | { kind: "text"; text: string; label?: string }
-    | { kind: "list"; items: string[]; label?: string };
 
 /**
  * One cited passage. `document` + `locator` identify it; the row supplies the
@@ -504,29 +476,8 @@ export interface SourceEntry {
 }
 
 export interface TableCapabilities {
-    /** Default true. */
-    sortable?: boolean;
-    /** Default true. */
-    filterable?: boolean;
-    /** Compact renderings may expand a row to show secondary columns. */
-    expandable_rows?: boolean;
     /** Verbs the host may offer per row — see {@link rowActions}. */
     row_actions?: RowAction[];
-    /**
-     * The table may gain a column the user defines. The affordance must show
-     * `TableSpec.cost_estimate` before anything runs.
-     */
-    allow_add_column?: boolean;
-    /** The table may gain rows after it was first produced. */
-    allow_add_row?: boolean;
-}
-
-/** What a run over this table costs, stated before anything is spent. */
-export interface TableCostEstimate {
-    /** Credits per row for one column-wide run. */
-    per_row_credits: number;
-    /** Rough wall clock for the whole run, in seconds. */
-    estimated_seconds?: number;
 }
 
 export interface TableSort {
@@ -571,8 +522,6 @@ export interface TableSpec {
     /** Initial sort. Static renderings bake it in. */
     sort?: TableSort;
     capabilities?: TableCapabilities;
-    /** Cost of one column-wide run; required wherever `allow_add_column` is set. */
-    cost_estimate?: TableCostEstimate;
 }
 
 // ---------------------------------------------------------------------------
@@ -678,10 +627,6 @@ export function isColumnSortable(column: Column): boolean {
     return column.sortable ?? true;
 }
 
-export function columnWrap(column: Column): "clamp" | "nowrap" {
-    return column.wrap ?? "clamp";
-}
-
 /**
  * The column that owns row identity. Explicit when the producer says so,
  * otherwise the first `reference` column and finally the first column, so a
@@ -775,11 +720,6 @@ export function columnAlign(column: Column): "start" | "end" | "center" {
     if (column.align) return column.align;
     if (column.type === "boolean") return "center";
     return column.type === "date" ? "end" : "start";
-}
-
-/** True when the cell holds no answer: unattempted, failed or cleared. */
-export function isCellEmpty(cell: Cell | undefined): boolean {
-    return cell?.value == null && cell?.outcome !== "not_reported";
 }
 
 /**
@@ -1387,8 +1327,6 @@ export interface TableSpecIssue {
         | "unknown_select_label"
         | "unknown_sort_column"
         | "unknown_anchor_column"
-        | "invalid_column_progress"
-        | "missing_cost_estimate"
         | "invalid_cell"
         | "invalid_row"
         | "invalid_cell_value"
@@ -1572,33 +1510,6 @@ export function validateTableSpec(spec: TableSpec): TableSpecIssue[] {
             });
         }
         columns.set(column.id, column);
-    }
-
-    for (const column of spec.columns) {
-        const progress = column.progress;
-        if (!progress) continue;
-        if (
-            !Number.isFinite(progress.done) ||
-            !Number.isFinite(progress.total) ||
-            progress.total < 0 ||
-            progress.done < 0 ||
-            progress.done > progress.total
-        ) {
-            issues.push({
-                code: "invalid_column_progress",
-                column_id: column.id,
-                message: `Column "${column.id}" has progress ${progress.done}/${progress.total}`,
-            });
-        }
-    }
-
-    // An add-column affordance bills per row, so a table that offers one and
-    // cannot state the price is a spec error, not a rendering choice.
-    if (spec.capabilities?.allow_add_column && !spec.cost_estimate) {
-        issues.push({
-            code: "missing_cost_estimate",
-            message: "Table allows adding columns but carries no cost_estimate",
-        });
     }
 
     if (spec.anchor_column_id && !columns.has(spec.anchor_column_id)) {
