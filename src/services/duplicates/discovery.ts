@@ -256,6 +256,137 @@ async function nativeGroups(libraryID: number): Promise<number[][]> {
             await Zotero.DB.queryAsync(`DROP TABLE IF EXISTS ${table}`);
     }
 }
+/** Ordered duplicate groups (item ids, sorted by key) and their population hash. */
+interface DuplicateScan {
+    groups: number[][];
+    snapshot_id: string;
+}
+interface CachedScan {
+    fingerprint: string;
+    startedAt: number;
+    promise: Promise<DuplicateScan>;
+    result?: DuplicateScan;
+}
+/** How long a scan can serve continuation pages for its snapshot_id. */
+const SCAN_TTL_MS = 5 * 60 * 1000;
+/**
+ * Scans keyed by library and resolved collection. Each bundle has its own
+ * copy while merges run in the plugin realm, so entries are validated against
+ * the library fingerprint instead of being cleared by writers.
+ */
+const scans = new Map<string, CachedScan>();
+
+/**
+ * Changes whenever a regular item in the library is added, edited, trashed,
+ * restored or erased: every save and trash stamps `clientDateModified`.
+ */
+async function libraryFingerprint(libraryID: number): Promise<string> {
+    let fingerprint = "";
+    await Zotero.DB.queryAsync(
+        "SELECT COUNT(*), MAX(clientDateModified) FROM items WHERE libraryID=? " +
+            "AND itemTypeID NOT IN (SELECT itemTypeID FROM itemTypes " +
+            "WHERE typeName IN ('attachment', 'note', 'annotation'))",
+        [libraryID],
+        {
+            onRow: (row: any) => {
+                fingerprint = `${row.getResultByIndex(0)}:${row.getResultByIndex(1)}`;
+            },
+        },
+    );
+    return fingerprint;
+}
+
+/**
+ * Existing, untrashed members of each group, sorted by key, in one batched
+ * load. Groups left with fewer than two members drop out.
+ */
+async function liveGroups(groups: number[][]): Promise<Zotero.Item[][]> {
+    const loaded = await Zotero.Items.getAsync(groups.flat());
+    const byID = new Map(loaded.filter(Boolean).map((i) => [i.id, i]));
+    return groups
+        .map((ids) =>
+            ids
+                .map((id) => byID.get(id))
+                .filter((i): i is Zotero.Item => !!i && !i.deleted)
+                .sort((a, b) => a.key.localeCompare(b.key)),
+        )
+        .filter((g) => g.length > 1);
+}
+
+async function scanDuplicates(
+    libraryID: number,
+    collectionKey: string | null,
+): Promise<DuplicateScan> {
+    let population = await nativeGroups(libraryID);
+    if (collectionKey) {
+        const search = new Zotero.Search();
+        (search as any).libraryID = libraryID;
+        search.addCondition("collection", "is", collectionKey);
+        search.addCondition("recursive", "true");
+        const scopeIDs = new Set<number>((await search.search()) || []);
+        population = population.filter((group) =>
+            group.some((id) => scopeIDs.has(id)),
+        );
+    }
+    const groups = await liveGroups(population);
+    groups.sort((a, b) => a[0].key.localeCompare(b[0].key));
+    const signature = stableJSON([
+        libraryRefForLibraryID(libraryID),
+        collectionKey,
+        groups.map((g) => g.map((i) => i.key)),
+    ]);
+    // The model copies this id into every continuation request, so keep it
+    // short: 48 bits detects a changed population, and a full 32-char hash
+    // invites transcription errors.
+    const snapshot_id = Zotero.Utilities.Internal.md5(signature).slice(
+        0,
+        SNAPSHOT_ID_LENGTH,
+    );
+    return { groups: groups.map((g) => g.map((i) => i.id)), snapshot_id };
+}
+
+/**
+ * Return a scan for the library and collection. A scan in flight for an
+ * unchanged library is shared by every request; a finished one serves only
+ * continuations that carry its snapshot_id, so a first page always rescans.
+ */
+async function getScan(
+    libraryID: number,
+    collectionKey: string | null,
+    continuationSnapshot: string | null,
+): Promise<DuplicateScan> {
+    const key = `${libraryID}:${collectionKey ?? ""}`;
+    const fingerprint = await libraryFingerprint(libraryID);
+    const now = Date.now();
+    const cached = scans.get(key);
+    if (
+        cached &&
+        cached.fingerprint === fingerprint &&
+        now - cached.startedAt < SCAN_TTL_MS &&
+        (!cached.result ||
+            (continuationSnapshot &&
+                cached.result.snapshot_id === continuationSnapshot))
+    )
+        return cached.promise;
+    for (const [k, entry] of scans)
+        if (now - entry.startedAt >= SCAN_TTL_MS) scans.delete(k);
+    const entry: CachedScan = {
+        fingerprint,
+        startedAt: now,
+        promise: scanDuplicates(libraryID, collectionKey),
+    };
+    scans.set(key, entry);
+    entry.promise.then(
+        (result) => {
+            entry.result = result;
+        },
+        () => {
+            if (scans.get(key) === entry) scans.delete(key);
+        },
+    );
+    return entry.promise;
+}
+
 export async function handleDuplicatesRequest(
     request: DuplicatesRequest,
 ): Promise<DuplicatesResponse> {
@@ -274,7 +405,6 @@ export async function handleDuplicatesRequest(
         const scope = validateLibraryAccess(request.library);
         if (!scope.valid) throw duplicateError(scope.error!, scope.error_code);
         const libraryID = scope.library!.libraryID;
-        let population = await nativeGroups(libraryID);
         // Pages are bound to the resolved collection, so a key and a name for
         // the same collection share one snapshot.
         let collectionKey: string | null = null;
@@ -288,38 +418,8 @@ export async function handleDuplicatesRequest(
                     "Collection not found in the requested library.",
                     "collection_not_found",
                 );
-            const search = new Zotero.Search();
-            (search as any).libraryID = libraryID;
             collectionKey = collection.collection.key;
-            search.addCondition("collection", "is", collectionKey);
-            search.addCondition("recursive", "true");
-            const scopeIDs = new Set<number>((await search.search()) || []);
-            population = population.filter((group) =>
-                group.some((id) => scopeIDs.has(id)),
-            );
         }
-        const loadedGroups = await Promise.all(
-            population.map(async (ids) => {
-                const items = await Zotero.Items.getAsync(ids);
-                return items
-                    .filter((i) => i && !i.deleted)
-                    .sort((a, b) => a.key.localeCompare(b.key));
-            }),
-        );
-        const groups = loadedGroups.filter((g) => g.length > 1);
-        groups.sort((a, b) => a[0].key.localeCompare(b[0].key));
-        const signature = stableJSON([
-            libraryRefForLibraryID(libraryID),
-            collectionKey,
-            groups.map((g) => g.map((i) => i.key)),
-        ]);
-        // The model copies this id into every continuation request, so keep it
-        // short: 48 bits detects a changed population, and a full 32-char hash
-        // invites transcription errors.
-        const snapshot_id = Zotero.Utilities.Internal.md5(signature).slice(
-            0,
-            SNAPSHOT_ID_LENGTH,
-        );
         const offset = Math.max(0, Math.trunc(request.offset || 0));
         const limit = Math.max(
             1,
@@ -330,6 +430,11 @@ export async function handleDuplicatesRequest(
                 "Pass snapshot_id from the first page when using offset.",
                 "snapshot_required",
             );
+        const { groups, snapshot_id } = await getScan(
+            libraryID,
+            collectionKey,
+            offset ? request.snapshot_id! : null,
+        );
         if (request.snapshot_id && request.snapshot_id !== snapshot_id)
             throw duplicateError(
                 "snapshot_id does not match the current duplicate groups. Either it " +
@@ -339,11 +444,10 @@ export async function handleDuplicatesRequest(
                     "find_duplicates at offset 0.",
                 "stale_snapshot",
             );
-        const page = await Promise.all(
-            groups
-                .slice(offset, offset + limit)
-                .map((g) => describeGroup(g)),
-        );
+        // A cached page can hold members trashed since the scan. Paging stays
+        // on the scan's population.
+        const live = await liveGroups(groups.slice(offset, offset + limit));
+        const page = await Promise.all(live.map((g) => describeGroup(g)));
         const excluded = checkLibraryExcluded(libraryID);
         if (excluded)
             throw duplicateError(excluded.message, "library_excluded");
