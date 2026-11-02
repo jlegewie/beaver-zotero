@@ -61,6 +61,32 @@ describe("extractEpubDocument", () => {
         (globalThis as any).IOUtils.stat.mockResolvedValue({ lastModified: 0, size: 0 });
     });
 
+    it("loads Zotero 7's EPUB.jsm when EPUB.mjs is missing", async () => {
+        const close = vi.fn();
+        const jsm = vi.fn(() => ({
+            EPUB: class {
+                getSectionDocuments() {
+                    return sections([{ href: "EPUB/index.xhtml", doc: parseXhtml("<p>Only.</p>") }]);
+                }
+                close = close;
+            },
+        }));
+        (globalThis as any).ChromeUtils = {
+            importESModule: vi.fn((url: string) => { throw new Error(`Failed to load ${url}`); }),
+            import: jsm,
+        };
+
+        const doc = await extractEpubDocument({
+            isAttachment: () => true,
+            attachmentContentType: "application/epub+zip",
+            getFilePathAsync: vi.fn().mockResolvedValue("/tmp/book.epub"),
+        } as any);
+
+        expect(jsm).toHaveBeenCalledWith("chrome://zotero/content/EPUB.jsm");
+        expect(close).toHaveBeenCalledTimes(1);
+        expect(doc.sections[0].items[0]).toMatchObject({ text: "Only." });
+    });
+
     it("extracts sections in order and closes the EPUB handle on success", async () => {
         const close = vi.fn();
         const importESModule = vi.fn(() => ({
