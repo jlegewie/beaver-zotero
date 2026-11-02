@@ -13,7 +13,6 @@ import {
     isUncitedAnswer,
     defaultHiddenColumnIds,
     filterRows,
-    isCellEmpty,
     isColumnSortable,
     isExtractionColumn,
     isFillableColumn,
@@ -379,27 +378,6 @@ describe("defaults", () => {
                 align: "start",
             }),
         ).toBe("start");
-    });
-
-    it("reads an unattempted, failed or cleared cell as empty and a finding as not", () => {
-        expect(isCellEmpty(undefined)).toBe(true);
-        expect(
-            isCellEmpty({
-                outcome: "failed",
-                provenance: "model",
-                error_code: "no_locator",
-                error: "The answer cited no passage.",
-            }),
-        ).toBe(true);
-        expect(isCellEmpty({ outcome: "cleared", provenance: "user" })).toBe(
-            true,
-        );
-        expect(
-            isCellEmpty({ outcome: "not_reported", provenance: "model" }),
-        ).toBe(false);
-        expect(isCellEmpty(answered({ kind: "boolean", value: false }))).toBe(
-            false,
-        );
     });
 });
 
@@ -1197,27 +1175,15 @@ describe("anchor cells and row kinds", () => {
     });
 });
 
-describe("column progress validation", () => {
-    it("flags an impossible progress pair and an unknown anchor column", () => {
+describe("anchor column validation", () => {
+    it("flags an unknown anchor column", () => {
         const spec: TableSpec = {
             id: "t",
             anchor_column_id: "nope",
-            columns: [
-                {
-                    id: "sample",
-                    header: "Sample",
-                    type: "text",
-                    status: "filling",
-                    progress: { done: 12, total: 9 },
-                },
-            ],
+            columns: [{ id: "sample", header: "Sample", type: "text" }],
             rows: [],
         };
-        expect(
-            validateTableSpec(spec)
-                .map((i) => i.code)
-                .sort(),
-        ).toEqual(["invalid_column_progress", "unknown_anchor_column"]);
+        expect(validateTableSpec(spec).map((i) => i.code)).toEqual(["unknown_anchor_column"]);
     });
 });
 

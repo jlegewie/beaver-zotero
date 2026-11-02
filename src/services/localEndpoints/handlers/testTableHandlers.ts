@@ -133,7 +133,6 @@ export function typeColumn(items: DemoItem[]): Column {
         header: 'Type',
         type: 'select',
         system: true,
-        priority: 'secondary',
         options: labels.map((label) => ({ label, color: 'gray' })),
     };
 }
@@ -192,10 +191,10 @@ export function referenceRow(item: DemoItem): Row {
 
 export function buildSearchDemo(items: DemoItem[]): TableSpec {
     const columns: Column[] = [
-        { id: 'ref', header: 'Item', type: 'reference', priority: 'primary' },
+        { id: 'ref', header: 'Item', type: 'reference' },
         typeColumn(items),
-        { id: 'year', header: 'Year', type: 'date', priority: 'primary' },
-        { id: 'cites', header: 'Citations', type: 'text', priority: 'primary' },
+        { id: 'year', header: 'Year', type: 'date' },
+        { id: 'cites', header: 'Citations', type: 'text' },
         {
             id: 'type',
             header: 'Type',
@@ -281,21 +280,14 @@ export function buildSearchDemo(items: DemoItem[]): TableSpec {
 
 export function buildExtractionDemo(items: DemoItem[]): TableSpec {
     const columns: Column[] = [
-        { id: 'ref', header: 'Item', type: 'reference', priority: 'primary' },
+        { id: 'ref', header: 'Item', type: 'reference' },
         typeColumn(items),
-        { id: 'year', header: 'Year', type: 'date', priority: 'primary' },
+        { id: 'year', header: 'Year', type: 'date' },
         {
             id: 'sample',
             header: 'Sample & setting',
             type: 'text',
             description: 'What was the sample and the setting? Report N and the population studied.',
-            details: {
-                kind: 'list',
-                items: [
-                    'Report the analytic N, not the recruited N.',
-                    'Name the country and the years covered.',
-                ],
-            },
         },
         {
             id: 'design',
@@ -320,8 +312,6 @@ export function buildExtractionDemo(items: DemoItem[]): TableSpec {
             header: 'Attrition & retention',
             type: 'text',
             description: 'Any reported effect on quitting, attrition or retention.',
-            status: 'filling',
-            progress: { done: Math.min(3, items.length), total: items.length || 1 },
         },
     ];
 
@@ -371,7 +361,7 @@ export function buildExtractionDemo(items: DemoItem[]): TableSpec {
                 : i === 3
                   ? { outcome: 'failed', provenance: 'model', error_code: 'no_locator', error: 'The answer cited no passage.' }
                   : answer(1));
-        // The filling column: the first few are done, the rest unattempted.
+        // A column still to fill: the first few are done, the rest unattempted.
         if (i < 3) put(row, 'retention', answer(2));
         return row;
     });
@@ -384,12 +374,7 @@ export function buildExtractionDemo(items: DemoItem[]): TableSpec {
         anchor_column_id: 'ref',
         columns,
         rows,
-        capabilities: {
-            row_actions: ['reveal'],
-            allow_add_column: true,
-            allow_add_row: true,
-        },
-        cost_estimate: { per_row_credits: 1, estimated_seconds: 40 },
+        capabilities: { row_actions: ['reveal'] },
     };
 }
 

@@ -40,15 +40,13 @@
             "id": "_year",
             "header": "Year",
             "type": "date",
-            "system": true,
-            "priority": "secondary"
+            "system": true
           },
           {
             "id": "_identifier",
             "header": "Identifier",
             "type": "link",
-            "system": true,
-            "priority": "secondary"
+            "system": true
           },
           {
             "id": "topic",
@@ -663,15 +661,13 @@
             "id": "_year",
             "header": "Year",
             "type": "date",
-            "system": true,
-            "priority": "secondary"
+            "system": true
           },
           {
             "id": "_identifier",
             "header": "Identifier",
             "type": "link",
-            "system": true,
-            "priority": "secondary"
+            "system": true
           },
           {
             "id": "design",
@@ -1054,15 +1050,13 @@
             "id": "_year",
             "header": "Year",
             "type": "date",
-            "system": true,
-            "priority": "secondary"
+            "system": true
           },
           {
             "id": "_identifier",
             "header": "Identifier",
             "type": "link",
-            "system": true,
-            "priority": "secondary"
+            "system": true
           },
           {
             "id": "design",
@@ -1509,15 +1503,13 @@
           "id": "_year",
           "header": "Year",
           "type": "date",
-          "system": true,
-          "priority": "secondary"
+          "system": true
         },
         {
           "id": "_identifier",
           "header": "Identifier",
           "type": "link",
-          "system": true,
-          "priority": "secondary"
+          "system": true
         },
         {
           "id": "design",
@@ -1865,15 +1857,13 @@
             "id": "_year",
             "header": "Year",
             "type": "date",
-            "system": true,
-            "priority": "secondary"
+            "system": true
           },
           {
             "id": "_identifier",
             "header": "Identifier",
             "type": "link",
-            "system": true,
-            "priority": "secondary"
+            "system": true
           },
           {
             "id": "design",
@@ -2330,15 +2320,13 @@
           "id": "_year",
           "header": "Year",
           "type": "date",
-          "system": true,
-          "priority": "secondary"
+          "system": true
         },
         {
           "id": "_identifier",
           "header": "Identifier",
           "type": "link",
-          "system": true,
-          "priority": "secondary"
+          "system": true
         },
         {
           "id": "design",
@@ -2710,15 +2698,13 @@
             "id": "_year",
             "header": "Year",
             "type": "date",
-            "system": true,
-            "priority": "secondary"
+            "system": true
           },
           {
             "id": "_identifier",
             "header": "Identifier",
             "type": "link",
-            "system": true,
-            "priority": "secondary"
+            "system": true
           },
           {
             "id": "design",
@@ -3145,15 +3131,13 @@
           "id": "_year",
           "header": "Year",
           "type": "date",
-          "system": true,
-          "priority": "secondary"
+          "system": true
         },
         {
           "id": "_identifier",
           "header": "Identifier",
           "type": "link",
-          "system": true,
-          "priority": "secondary"
+          "system": true
         },
         {
           "id": "design",
@@ -3503,15 +3487,13 @@
             "id": "_year",
             "header": "Year",
             "type": "date",
-            "system": true,
-            "priority": "secondary"
+            "system": true
           },
           {
             "id": "_identifier",
             "header": "Identifier",
             "type": "link",
-            "system": true,
-            "priority": "secondary"
+            "system": true
           },
           {
             "id": "design",
@@ -3914,15 +3896,13 @@
           "id": "_year",
           "header": "Year",
           "type": "date",
-          "system": true,
-          "priority": "secondary"
+          "system": true
         },
         {
           "id": "_identifier",
           "header": "Identifier",
           "type": "link",
-          "system": true,
-          "priority": "secondary"
+          "system": true
         },
         {
           "id": "design",
@@ -4240,15 +4220,13 @@
             "id": "_year",
             "header": "Year",
             "type": "date",
-            "system": true,
-            "priority": "secondary"
+            "system": true
           },
           {
             "id": "_identifier",
             "header": "Identifier",
             "type": "link",
-            "system": true,
-            "priority": "secondary"
+            "system": true
           },
           {
             "id": "design",
@@ -4649,15 +4627,13 @@
           "id": "_year",
           "header": "Year",
           "type": "date",
-          "system": true,
-          "priority": "secondary"
+          "system": true
         },
         {
           "id": "_identifier",
           "header": "Identifier",
           "type": "link",
-          "system": true,
-          "priority": "secondary"
+          "system": true
         },
         {
           "id": "design",
@@ -4956,15 +4932,13 @@
             "id": "_year",
             "header": "Year",
             "type": "date",
-            "system": true,
-            "priority": "secondary"
+            "system": true
           },
           {
             "id": "_identifier",
             "header": "Identifier",
             "type": "link",
-            "system": true,
-            "priority": "secondary"
+            "system": true
           },
           {
             "id": "design",
@@ -5431,15 +5405,13 @@
             "id": "_year",
             "header": "Year",
             "type": "date",
-            "system": true,
-            "priority": "secondary"
+            "system": true
           },
           {
             "id": "_identifier",
             "header": "Identifier",
             "type": "link",
-            "system": true,
-            "priority": "secondary"
+            "system": true
           },
           {
             "id": "design",
@@ -5996,15 +5968,13 @@
             "id": "_year",
             "header": "Year",
             "type": "date",
-            "system": true,
-            "priority": "secondary"
+            "system": true
           },
           {
             "id": "_identifier",
             "header": "Identifier",
             "type": "link",
-            "system": true,
-            "priority": "secondary"
+            "system": true
           },
           {
             "id": "topic",

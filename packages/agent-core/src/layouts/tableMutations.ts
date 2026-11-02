@@ -64,8 +64,6 @@ import {
     type SelectColor,
     type SelectOption,
     type SourceEntry,
-    type TableCapabilities,
-    type TableCostEstimate,
     type TableSort,
     type TableSpec,
 } from "./table";
@@ -116,7 +114,6 @@ export interface UpdateColumnMutation {
      * are deleted (user cells included).
      */
     options?: UpdateColumnOption[] | null;
-    priority?: "primary" | "secondary" | null;
     /**
      * A new type (the user's change only): every cell of the column is
      * deleted, since a value's kind must equal the column type.
@@ -229,8 +226,6 @@ export interface SetMetaMutation {
     title?: string | null;
     description?: string | null;
     sort?: TableSort | null;
-    capabilities?: TableCapabilities | null;
-    cost_estimate?: TableCostEstimate | null;
 }
 
 /**
@@ -1055,8 +1050,6 @@ function updateColumn(
         setOptional(column, "description", mutation.description);
     if (options) applyOptions(draft, column, options);
     else if (mutation.options === null || (typeChange && type !== "select")) delete column.options;
-    if (mutation.priority !== undefined)
-        setOptional(column, "priority", mutation.priority);
 
     // A write planned against the column before this change no longer
     // lands: its type, its question or a label it may write moved.
@@ -1610,14 +1603,6 @@ function setMeta(draft: Draft, mutation: SetMetaMutation): Failure | undefined {
         setOptional(draft.spec, "description", mutation.description);
     if (mutation.sort !== undefined)
         setOptional(draft.spec, "sort", copied(mutation.sort));
-    if (mutation.capabilities !== undefined)
-        setOptional(draft.spec, "capabilities", copied(mutation.capabilities));
-    if (mutation.cost_estimate !== undefined)
-        setOptional(
-            draft.spec,
-            "cost_estimate",
-            copied(mutation.cost_estimate),
-        );
     return undefined;
 }
 

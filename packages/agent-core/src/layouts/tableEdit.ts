@@ -108,8 +108,8 @@ const SAMPLE_SIZE = 5;
 export function systemColumns(): Column[] {
     return [
         { id: REFERENCE_COLUMN_ID, header: "Reference", type: "reference", system: true },
-        { id: YEAR_COLUMN_ID, header: "Year", type: "date", system: true, priority: "secondary" },
-        { id: IDENTIFIER_COLUMN_ID, header: "Identifier", type: "link", system: true, priority: "secondary" },
+        { id: YEAR_COLUMN_ID, header: "Year", type: "date", system: true },
+        { id: IDENTIFIER_COLUMN_ID, header: "Identifier", type: "link", system: true },
     ];
 }
 

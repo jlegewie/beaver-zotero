@@ -37,8 +37,7 @@
                 "id": "_year",
                 "header": "Year",
                 "type": "date",
-                "system": true,
-                "priority": "secondary"
+                "system": true
             },
             {
                 "id": "design",
