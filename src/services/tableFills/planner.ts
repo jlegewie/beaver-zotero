@@ -45,6 +45,8 @@ export interface DocumentCandidate {
     kind: RowDocumentKind;
     /** Zotero's primary attachment of the item. */
     primary: boolean;
+    /** Its file is not on this computer, and Zotero cannot download it. */
+    missing?: boolean;
 }
 
 /** What Zotero says about an item row, from metadata only. */
@@ -64,7 +66,7 @@ export type RowMode =
     | 'metadata'
     /** Neither exists: the row gets `no_source`, with no request. */
     | 'no_input'
-    /** The row cannot be filled (its item is gone, its document is gone, an excluded library). */
+    /** The row cannot be filled (its item or document is gone, its file is missing, an excluded library). */
     | 'unavailable';
 
 export interface RowPlan {
@@ -281,9 +283,15 @@ export function buildPlan(
             } else {
                 const abstract = text(lookup.abstract, ABSTRACT_MAX_CHARS);
                 if (abstract) plan.abstract = abstract;
-                if (named !== undefined) {
+                const document = named !== undefined ? lookup.documents.find((d) => d.id === named) : undefined;
+                if (document?.missing) {
+                    // Reading would fail: the row gets the failure without a
+                    // request, and later fills check the file again.
+                    plan.mode = 'unavailable';
+                    plan.error = 'file_missing';
+                } else if (named !== undefined) {
                     plan.mode = 'document';
-                    plan.document = { id: named, kind: lookup.documents.find((d) => d.id === named)?.kind };
+                    plan.document = { id: named, kind: document?.kind };
                 }
             }
         } else if (ref?.kind === 'external') {
@@ -300,7 +308,10 @@ export function buildPlan(
         // v1 reads one document per row: a row naming several is never sent,
         // since answers read from one would be stale against the others.
         // An item-level failure (gone, excluded) still says more than this.
-        if ((before.get(row.id)?.length ?? 0) > 1 && (plan.mode !== 'unavailable' || plan.error === 'not_found')) {
+        if (
+            (before.get(row.id)?.length ?? 0) > 1 &&
+            (plan.mode !== 'unavailable' || plan.error === 'not_found' || plan.error === 'file_missing')
+        ) {
             plan.mode = 'unavailable';
             plan.error = 'multiple_documents';
             delete plan.document;

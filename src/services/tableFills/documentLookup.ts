@@ -1,12 +1,14 @@
 /**
- * What Zotero says about a fill's item rows, from metadata only: whether the
- * item is there and readable by Beaver, its abstract, and its readable
- * document attachments. No file is opened.
+ * What Zotero says about a fill's item rows: whether the item is there and
+ * readable by Beaver, its abstract, and its readable document attachments,
+ * each with whether its file can be read here. No file is opened.
  */
 
 import type { Row } from '@beaver/agent-core/layouts/table';
 import { getReadableContentKind } from '../documentExtraction/attachmentResolution';
 import { getBestAttachmentBatch } from '../documentExtraction/attachmentInfoBatch';
+import { isRemoteAccessAvailable } from '../documentExtraction/attachmentSource';
+import { safeFileExists } from '../../utils/attachmentFiles';
 import { isLibrarySearchable } from '../agentDataProvider/utils';
 import { libraryRefForLibraryID, parseItemReference, resolveLibraryRef } from '../../utils/libraryIdentity';
 import { isRowDocumentKind, type DocumentCandidate, type RowLookup } from './planner';
@@ -76,6 +78,7 @@ async function lookupChunk(rows: readonly Row[], out: Map<string, RowLookup>): P
     if (attachments.length) await Zotero.Items.loadDataTypes(attachments, ['itemData']);
     const byId = new Map(attachments.filter(Boolean).map((attachment) => [attachment.id, attachment]));
     const primary = await getBestAttachmentBatch(parents.map((item) => item.id));
+    const fileChecks: Promise<void>[] = [];
     for (const [rowId, item] of items) {
         const libraryRef = libraryRefForLibraryID(item.libraryID) ?? String(item.libraryID);
         const documents: DocumentCandidate[] = [];
@@ -84,13 +87,25 @@ async function lookupChunk(rows: readonly Row[], out: Map<string, RowLookup>): P
             if (!attachment || attachment.deleted) continue;
             const kind = getReadableContentKind(attachment);
             if (!isRowDocumentKind(kind)) continue;
-            documents.push({
+            const candidate: DocumentCandidate = {
                 id: `${libraryRef}-${attachment.key}`,
                 kind,
                 primary: primary.get(item.id) === attachment.id,
-            });
+            };
+            documents.push(candidate);
+            // A check that throws leaves the document to the read, which
+            // reports its own failure.
+            fileChecks.push(
+                safeFileExists(attachment).then(
+                    (exists) => {
+                        if (!exists && !isRemoteAccessAvailable(attachment)) candidate.missing = true;
+                    },
+                    () => {},
+                ),
+            );
         }
         const abstract = (item.getField('abstractNote') as string) || undefined;
         out.set(rowId, { documents, ...(abstract ? { abstract } : {}) });
     }
+    await Promise.all(fileChecks);
 }

@@ -242,6 +242,17 @@ describe('destructive edits and Undo', () => {
         expect(undo.title).toBe('Undo is available when the fill ends.');
     });
 
+    it("keeps a column's question and type while a fill runs, but not its other edits", async () => {
+        mount({ fillRunning: true });
+        await openColumnMenu('Effect');
+        const disabled = (label: string) => menuItem(label)!.closest('[role="menuitem"]')!.className.includes('cursor-not-allowed');
+        expect([disabled('Edit column…'), disabled('Change type'), disabled('Remove column')]).toEqual([true, true, false]);
+        await click(menuItem('Edit column…'));
+        expect($('textarea[aria-label="Column question"]')).toBeNull();
+        await click(menuItem('Change type'));
+        expect(menuItem('Date')).toBeUndefined();
+    });
+
     it('asks before removing rows that hold the user’s answers, and writes nothing when declined', async () => {
         confirm.mockReturnValue(false);
         mount();

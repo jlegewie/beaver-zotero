@@ -168,6 +168,24 @@ describe("buildPlan", () => {
         ]);
     });
 
+    it("fails a row whose document's file is missing without reading it, and names the document", () => {
+        const pdf = { id: "u-PDF", kind: "pdf" as const, primary: true, missing: true };
+        const spec = table([itemRow("new"), itemRow("named", { documents: ["u-PDF"] })]);
+        const plan = buildPlan(spec, {}, new Map([["new", lookup([pdf])], ["named", lookup([pdf])]]));
+        expect(plan.rows.map((row) => [row.row, row.mode, row.error, row.document])).toEqual([
+            ["new", "unavailable", "file_missing", undefined],
+            ["named", "unavailable", "file_missing", undefined],
+        ]);
+        // The row still names the document, so a later fill reads it once the file is here.
+        expect(plan.documentUpdates).toEqual([{ row: "new", documents: ["u-PDF"], before: [] }]);
+    });
+
+    it("says a row names several documents before saying the first one's file is missing", () => {
+        const spec = table([itemRow("two", { documents: ["u-P1", "u-P2"] })]);
+        const plan = buildPlan(spec, { rows: ["two"] }, new Map([["two", lookup([{ id: "u-P1", kind: "pdf", primary: true, missing: true }, { id: "u-P2", kind: "pdf", primary: false }])]]));
+        expect(plan.rows.map((row) => [row.mode, row.error])).toEqual([["unavailable", "multiple_documents"]]);
+    });
+
     it("records each column's revision and question hash as planned", () => {
         const spec = table([itemRow("a")]);
         const plan = buildPlan(spec, {}, new Map([["a", lookup([], "x")]]));
