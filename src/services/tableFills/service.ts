@@ -138,7 +138,7 @@ export interface TableFillSettings {
 }
 
 export const DEFAULT_TABLE_FILL_SETTINGS: TableFillSettings = {
-    concurrency: 3,
+    concurrency: 5,
     commitRows: 10,
     commitSeconds: 20,
     planTtlMs: 60 * 60_000,

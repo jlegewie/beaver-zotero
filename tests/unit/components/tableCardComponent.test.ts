@@ -245,10 +245,10 @@ describe('TableCard', () => {
 
     it('warns on the over-cap card and keeps Create disabled', async () => {
         render(fixture('create-over-cap'));
-        expect(container.textContent).toContain('This table would have 1,840 items; the maximum is 1,000. Remove sources to continue.');
+        expect(container.textContent).toContain('This table would have 1,840 items; the maximum is 500. Remove sources to continue.');
         await click('Next');
         expect(button('Create')!.disabled).toBe(true);
-        expect(button('Create')!.title).toBe('This table would have 1,840 items; the maximum is 1,000. Remove sources to continue.');
+        expect(button('Create')!.title).toBe('This table would have 1,840 items; the maximum is 500. Remove sources to continue.');
     });
 
     it('declines from the cancel view and sends typed instructions with it', async () => {
@@ -544,7 +544,7 @@ describe('TableCard', () => {
         render(fixture('create-over-cap'));
         await act(async () => {});
         const alert = container.querySelector('.table-card-step [role="alert"]');
-        expect(alert?.textContent).toBe('This table would have 1,840 items; the maximum is 1,000. Remove sources to continue.');
+        expect(alert?.textContent).toBe('This table would have 1,840 items; the maximum is 500. Remove sources to continue.');
         // The source is not opened for the warning; its count is marked instead.
         const toggle = container.querySelector('.table-card-source-toggle') as HTMLButtonElement;
         expect(toggle.getAttribute('aria-expanded')).toBe('false');

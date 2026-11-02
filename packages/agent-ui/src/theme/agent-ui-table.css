@@ -666,6 +666,42 @@
     background: var(--rt-selected);
 }
 
+/* The checkbox rail and the Paper column stay put while a wide table scrolls
+ * sideways, so every answer keeps its paper in view — while the grid is wide
+ * enough (`data-pinned`, set by ResearchTable). Pinned cells are opaque (the
+ * answers scroll beneath them); the Paper column's left edge is the rail's
+ * width in the grid's colgroup. */
+.beaver-root .rt-scroll[data-pinned] .rt-td-rail,
+.beaver-root .rt-scroll[data-pinned] .rt-td-paper {
+    position: sticky;
+    z-index: 1;
+    background: var(--material-background);
+}
+.beaver-root .rt-scroll[data-pinned] .rt-th-rail,
+.beaver-root .rt-scroll[data-pinned] .rt-th-paper {
+    z-index: 3;
+}
+/* A row's menu opens inside its pinned Paper cell: that cell goes over the
+ * next rows' pinned cells (but stays under the sticky headers). */
+.beaver-root .rt-scroll[data-pinned] .rt-td-menu-open {
+    z-index: 2;
+}
+.beaver-root .rt-scroll[data-pinned] .rt-td-rail,
+.beaver-root .rt-scroll[data-pinned] .rt-th-rail {
+    left: 0;
+}
+.beaver-root .rt-scroll[data-pinned] .rt-td-paper,
+.beaver-root .rt-scroll[data-pinned] .rt-th-paper {
+    left: 2.75rem;
+    border-right-color: var(--rt-border);
+}
+.beaver-root .rt-scroll[data-pinned] .rt-row-selected > .rt-td-rail,
+.beaver-root .rt-scroll[data-pinned] .rt-row-selected > .rt-td-paper {
+    background:
+        linear-gradient(var(--rt-selected), var(--rt-selected)),
+        var(--material-background);
+}
+
 .beaver-root .rt-checkbox {
     display: inline-grid;
     place-items: center;
@@ -1542,9 +1578,9 @@
 }
 
 /* Each sticky header stacks on its own; the one with its menu open goes over
- * the headers after it. */
+ * the headers after it and the pinned ones. */
 .beaver-root .rt-th-menu-open {
-    z-index: 3;
+    z-index: 4;
 }
 
 .beaver-root .rt-th-add {

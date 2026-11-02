@@ -79,8 +79,13 @@ export const IDENTIFIER_COLUMN_ID = "_identifier";
  * Limits shared with the backend. A write that grows a table past one is
  * refused with `too_large`; shrinking is always allowed.
  */
-export const MAX_ROWS = 1000;
-export const MAX_MODEL_COLUMNS = 30;
+export const MAX_ROWS = 500;
+export const MAX_MODEL_COLUMNS = 20;
+/**
+ * Question cells: rows × question columns. A filled cell takes about 1.5 KB
+ * of spec, so this keeps a filled table well inside {@link MAX_SPEC_BYTES}.
+ */
+export const MAX_QUESTION_CELLS = 5000;
 /** Compact JSON of one cell's evidence list. */
 export const MAX_EVIDENCE_BYTES = 6000;
 /** UTF-8 bytes of one cell's reasoning. */

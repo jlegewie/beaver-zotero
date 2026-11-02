@@ -1,5 +1,5 @@
 {
-    "name": "add_columns refuses to grow past 30 question columns; system columns do not count",
+    "name": "add_columns refuses to grow past 20 question columns; system columns do not count",
     "before": {
         "id": "t1",
         "spec_version": 2,

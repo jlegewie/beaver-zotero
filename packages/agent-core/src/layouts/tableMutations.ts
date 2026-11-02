@@ -45,6 +45,7 @@ import {
     utf8Length,
     MAX_EVIDENCE_BYTES,
     MAX_MODEL_COLUMNS,
+    MAX_QUESTION_CELLS,
     MAX_REASONING_BYTES,
     MAX_ROWS,
     MAX_SELECT_DEFINITION_CHARS,
@@ -508,6 +509,12 @@ function capacityFailure(
         return fail(
             "too_large",
             `This change would give the table ${columns} question columns; a table holds at most ${MAX_MODEL_COLUMNS}. Remove columns first or start a second table.`,
+        );
+    const cells = rows * columns;
+    if (cells > MAX_QUESTION_CELLS && cells > before.rows * before.columns)
+        return fail(
+            "too_large",
+            `This change would give the table ${rows} rows × ${columns} question columns = ${cells} question cells; a table holds at most ${MAX_QUESTION_CELLS}. Remove rows or columns first, or start a second table.`,
         );
     const size = jsonBytes(spec);
     if (size > MAX_SPEC_BYTES && size > jsonBytes(original))

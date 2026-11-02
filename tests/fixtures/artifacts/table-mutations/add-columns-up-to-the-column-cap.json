@@ -1,5 +1,5 @@
 {
-    "name": "thirty question columns are allowed",
+    "name": "twenty question columns are allowed",
     "before": {
         "id": "t1",
         "spec_version": 2,
@@ -299,56 +299,6 @@
                     "id": "q19",
                     "header": "Q19",
                     "type": "text"
-                },
-                {
-                    "id": "q20",
-                    "header": "Q20",
-                    "type": "text"
-                },
-                {
-                    "id": "q21",
-                    "header": "Q21",
-                    "type": "text"
-                },
-                {
-                    "id": "q22",
-                    "header": "Q22",
-                    "type": "text"
-                },
-                {
-                    "id": "q23",
-                    "header": "Q23",
-                    "type": "text"
-                },
-                {
-                    "id": "q24",
-                    "header": "Q24",
-                    "type": "text"
-                },
-                {
-                    "id": "q25",
-                    "header": "Q25",
-                    "type": "text"
-                },
-                {
-                    "id": "q26",
-                    "header": "Q26",
-                    "type": "text"
-                },
-                {
-                    "id": "q27",
-                    "header": "Q27",
-                    "type": "text"
-                },
-                {
-                    "id": "q28",
-                    "header": "Q28",
-                    "type": "text"
-                },
-                {
-                    "id": "q29",
-                    "header": "Q29",
-                    "type": "text"
                 }
             ]
         }
@@ -488,56 +438,6 @@
             {
                 "id": "q19",
                 "header": "Q19",
-                "type": "text"
-            },
-            {
-                "id": "q20",
-                "header": "Q20",
-                "type": "text"
-            },
-            {
-                "id": "q21",
-                "header": "Q21",
-                "type": "text"
-            },
-            {
-                "id": "q22",
-                "header": "Q22",
-                "type": "text"
-            },
-            {
-                "id": "q23",
-                "header": "Q23",
-                "type": "text"
-            },
-            {
-                "id": "q24",
-                "header": "Q24",
-                "type": "text"
-            },
-            {
-                "id": "q25",
-                "header": "Q25",
-                "type": "text"
-            },
-            {
-                "id": "q26",
-                "header": "Q26",
-                "type": "text"
-            },
-            {
-                "id": "q27",
-                "header": "Q27",
-                "type": "text"
-            },
-            {
-                "id": "q28",
-                "header": "Q28",
-                "type": "text"
-            },
-            {
-                "id": "q29",
-                "header": "Q29",
                 "type": "text"
             }
         ],

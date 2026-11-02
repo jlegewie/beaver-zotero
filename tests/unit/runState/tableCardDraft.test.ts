@@ -248,7 +248,7 @@ describe('table card draft', () => {
         const [key] = overCapSources(draft, request);
         expect(key).toBe(draft.sources[0].key);
         expect(overCapMessage(draft, request)).toBe(
-            'This table would have 1,840 items; the maximum is 1,000. Remove sources to continue.',
+            'This table would have 1,840 items; the maximum is 500. Remove sources to continue.',
         );
         expect(createBlocker(draft, request)).toBe(overCapMessage(draft, request));
         // The step reports the source's full size, not the rows the cap left.
@@ -266,7 +266,7 @@ describe('table card draft', () => {
         expect(overCapSources(draft, request)).toEqual([a.key]);
         // The same neutral message, whichever source tipped the table over.
         expect(overCapMessage(draft, request)).toBe(
-            'This table would have 1,102 items; the maximum is 1,000. Remove sources to continue.',
+            'This table would have 1,102 items; the maximum is 500. Remove sources to continue.',
         );
     });
 
@@ -420,11 +420,28 @@ describe('table card draft', () => {
         it('blocks Create above the question-column cap', () => {
             const { request } = fixture('create-items');
             let draft = initialTableCardDraft(request);
-            while (draft.columns.length <= 30) {
+            while (draft.columns.length <= 20) {
                 const added = addColumn(draft);
                 draft = updateColumn(added.draft, added.key, { header: 'H', description: 'Q?' });
             }
-            expect(createBlocker(draft, request)).toContain('at most 30 question columns');
+            expect(createBlocker(draft, request)).toContain('at most 20 question columns');
+        });
+
+        it('blocks Create when the papers times the questions exceed the answer cap', () => {
+            const { request } = fixture('create-items');
+            const wide = { ...request, merge: { ...request.merge, rows: 400 } };
+            let draft = initialTableCardDraft(wide);
+            while (draft.columns.length < 12) {
+                const added = addColumn(draft);
+                draft = updateColumn(added.draft, added.key, { header: 'H', description: 'Q?' });
+            }
+            // 400 × 12 = 4,800 is within the cap; a thirteenth question is not.
+            expect(createBlocker(draft, wide) ?? '').not.toContain('answers');
+            const added = addColumn(draft);
+            draft = updateColumn(added.draft, added.key, { header: 'H', description: 'Q?' });
+            expect(createBlocker(draft, wide)).toBe(
+                '400 items × 13 questions would be 5,200 answers; a table holds at most 5,000. Remove sources or questions to continue.',
+            );
         });
     });
 

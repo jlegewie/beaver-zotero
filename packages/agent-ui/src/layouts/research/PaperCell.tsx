@@ -89,6 +89,7 @@ export function PaperCell({
     isNew,
     documents,
     menuItems,
+    onMenuToggle,
 }: {
     /** The table, for the row actions it declares (import). */
     table?: TableSpec;
@@ -98,6 +99,8 @@ export function PaperCell({
     documents?: TableDocuments;
     /** The row's actions; the menu is omitted when there are none. */
     menuItems: MenuItem[];
+    /** Told when the row's menu opens and closes. */
+    onMenuToggle?: (open: boolean) => void;
 }): React.ReactElement {
     const { title, meta } = paperText(row, anchorColumnId);
     const hover = useHoverAnchor({
@@ -141,6 +144,7 @@ export function PaperCell({
                     icon={MoreHorizontalIcon}
                     className="rt-row-menu"
                     ariaLabel="Row actions"
+                    toggleCallback={onMenuToggle}
                 />
             ) : null}
         </div>

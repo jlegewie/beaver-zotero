@@ -470,7 +470,7 @@
         "documents": 1,
         "title_abstract": 1,
         "no_input": 1,
-        "row_cap": 1000
+        "row_cap": 500
       }
     }
   },
@@ -556,7 +556,7 @@
         "documents": 1,
         "title_abstract": 1,
         "no_input": 1,
-        "row_cap": 1000
+        "row_cap": 500
       }
     }
   },
@@ -5920,7 +5920,7 @@
       "ok": false,
       "conflict": false,
       "error_code": "too_large",
-      "error": "add_sources[0]: this change would give the table 1,204 rows; a table holds at most 1,000. Narrow the source or start a second table."
+      "error": "add_sources[0]: this change would give the table 1,204 rows; a table holds at most 500. Narrow the source or start a second table."
     }
   },
   {

@@ -515,6 +515,26 @@ describe("applyMutations", () => {
         ]);
         expect(shrunk.ok).toBe(true);
     });
+
+    it("refuses to grow past the question-cell cap by rows or by columns, but lets it shrink", () => {
+        const questions = (n: number): Column[] =>
+            Array.from({ length: n }, (_, i) => ({ id: `q${i}`, header: `Q${i}`, type: "text" }));
+        const rows = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `r${i}`, cells: {} }));
+        // 10 questions × 500 rows is exactly the cap.
+        const atCap: TableSpec = { id: "t", columns: questions(10), rows: rows(500) };
+        const byColumn = applyMutations(atCap, [
+            { op: "add_columns", columns: [{ id: "q10", header: "Q10", type: "text" }] },
+        ]);
+        expect(byColumn.ok ? null : byColumn.error.code).toBe("too_large");
+        const byRow = applyMutations({ ...atCap, rows: rows(499) }, [{ op: "add_rows", rows: [{ id: "r499", cells: {} }] }]);
+        expect(byRow.ok).toBe(true);
+        const wide: TableSpec = { id: "t", columns: questions(20), rows: rows(250) };
+        const grown = applyMutations(wide, [{ op: "add_rows", rows: [{ id: "r250", cells: {} }] }]);
+        expect(grown.ok ? null : grown.error.message).toMatch(/251 rows × 20 question columns = 5020 question cells/);
+        // A table already over the cap (written under older limits) may still shrink.
+        const over: TableSpec = { id: "t", columns: questions(20), rows: rows(300) };
+        expect(applyMutations(over, [{ op: "remove_rows", rows: ["r0"] }]).ok).toBe(true);
+    });
 });
 
 describe("column revision", () => {
