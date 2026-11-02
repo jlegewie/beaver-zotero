@@ -31,6 +31,7 @@ import {
 import { effectiveMaxFileSizeMB } from "@beaver/agent-core/transport/attachmentLimits";
 import { isRemoteAccessAvailable } from "../attachmentSource";
 import { isEpubDocument } from "../../../utils/attachmentFiles";
+import { importZoteroModule, ZOTERO_MODULES } from "../../../utils/zoteroModules";
 import { logger } from "@beaver/agent-core/platform/logger";
 
 // Coverage below this fraction means the walk dropped a meaningful share of the
@@ -284,9 +285,7 @@ async function extractEpubDocumentFromOpenFile(
     options?: ExtractEpubFromFileOptions,
 ): Promise<EpubDocument> {
     throwIfAborted(options?.abortSignal);
-    const { EPUB } = (globalThis as any).ChromeUtils.importESModule(
-        "chrome://zotero/content/EPUB.mjs",
-    ) as ZoteroEpubModule;
+    const { EPUB } = importZoteroModule<ZoteroEpubModule>(ZOTERO_MODULES.epub);
     const epub = new EPUB(filePath);
     const counters = createDomCounters();
     const sections: DomSection[] = [];

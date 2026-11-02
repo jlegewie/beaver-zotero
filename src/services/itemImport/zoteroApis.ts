@@ -18,6 +18,7 @@
 
 import { logger } from '@beaver/agent-core/platform/logger';
 import { getSystemTimers } from '../../utils/systemTimers';
+import { getZoteroConfig, importZoteroModule, ZOTERO_MODULES, type ZoteroModuleUrls } from '../../utils/zoteroModules';
 
 export type ZoteroApiName =
     | 'translateSearch'
@@ -65,11 +66,11 @@ export function withTimeout<T>(work: Promise<T>, ms: number, label: string): Pro
     });
 }
 
-function importModule<T = any>(url: string): T | null {
+function importModule<T = any>(urls: ZoteroModuleUrls): T | null {
     try {
-        return ChromeUtils.importESModule(url) as T;
+        return importZoteroModule<T>(urls);
     } catch (error) {
-        logger(`itemImport/zoteroApis: could not import ${url}: ${error}`, 1);
+        logger(`itemImport/zoteroApis: could not import ${urls.esm}: ${error}`, 1);
         return null;
     }
 }
@@ -85,11 +86,11 @@ function probe(name: ZoteroApiName): ZoteroApiStatus {
                 ? { available: true }
                 : { available: false, reason: 'Zotero.Translate.Search is missing setIdentifier/getTranslators' };
         case 'remoteTranslate': {
-            const remote = importModule<any>('chrome://zotero/content/RemoteTranslate.mjs');
-            const hidden = importModule<any>('chrome://zotero/content/HiddenBrowser.mjs');
+            const remote = importModule<any>(ZOTERO_MODULES.remoteTranslate);
+            const hidden = importModule<any>(ZOTERO_MODULES.hiddenBrowser);
             return fn(remote?.RemoteTranslate) && fn(hidden?.HiddenBrowser)
                 ? { available: true }
-                : { available: false, reason: 'RemoteTranslate.mjs / HiddenBrowser.mjs did not import' };
+                : { available: false, reason: 'RemoteTranslate / HiddenBrowser module did not import' };
         }
         case 'pdfRecognizerData':
             return fn(Z.PDFWorker?._enqueue) && fn(Z.PDFWorker?._query)
@@ -100,10 +101,10 @@ function probe(name: ZoteroApiName): ZoteroApiStatus {
                 ? { available: true }
                 : { available: false, reason: 'No API client or recognizer URL' };
         case 'epub': {
-            const epub = importModule<any>('chrome://zotero/content/EPUB.mjs');
+            const epub = importModule<any>(ZOTERO_MODULES.epub);
             return fn(epub?.EPUB) && fn(epub.EPUB.prototype?.getMetadataRDF) && fn(epub.EPUB.prototype?.getSectionDocuments)
                 ? { available: true }
-                : { available: false, reason: 'EPUB.mjs did not import or lacks getMetadataRDF/getSectionDocuments' };
+                : { available: false, reason: 'EPUB module did not import or lacks getMetadataRDF/getSectionDocuments' };
         }
         case 'rdfImport':
             return fn(Z.Translate?.Import) && typeof Z.Translators?.TRANSLATOR_ID_RDF === 'string'
@@ -181,15 +182,15 @@ function logUnavailable(name: ZoteroApiName, reason?: string): void {
 
 export function loadWebTranslationModules(): { RemoteTranslate: any; HiddenBrowser: any } | null {
     if (!isApiAvailable('remoteTranslate')) return null;
-    const remote = importModule<any>('chrome://zotero/content/RemoteTranslate.mjs');
-    const hidden = importModule<any>('chrome://zotero/content/HiddenBrowser.mjs');
+    const remote = importModule<any>(ZOTERO_MODULES.remoteTranslate);
+    const hidden = importModule<any>(ZOTERO_MODULES.hiddenBrowser);
     if (!remote?.RemoteTranslate || !hidden?.HiddenBrowser) return null;
     return { RemoteTranslate: remote.RemoteTranslate, HiddenBrowser: hidden.HiddenBrowser };
 }
 
 export function loadEpubModule(): any | null {
     if (!isApiAvailable('epub')) return null;
-    return importModule<any>('chrome://zotero/content/EPUB.mjs')?.EPUB ?? null;
+    return importModule<any>(ZOTERO_MODULES.epub)?.EPUB ?? null;
 }
 
 /** The recognizer endpoint Zotero itself uses: `recognize.url`, else `services.url` + `recognizer/`. */
@@ -199,9 +200,7 @@ export function recognizerBaseUrl(): string | null {
         if (!url) {
             url = Zotero.Prefs.get('services.url') as string | undefined;
             if (!url) {
-                // ZOTERO_CONFIG is an ES module export, not a global in the plugin realm.
-                const config = importModule<any>('resource://zotero/config.mjs');
-                url = config?.ZOTERO_CONFIG?.SERVICES_URL;
+                url = getZoteroConfig().SERVICES_URL;
             }
             if (!url) return null;
             if (!url.endsWith('/')) url += '/';

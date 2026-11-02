@@ -74,6 +74,22 @@ describe('printHtmlToPdf', () => {
         expect(state.destroyed).toBe(2);
     });
 
+    it('loads HiddenBrowser from the Zotero 7 JSM when the ES module is missing', async () => {
+        const { printHtmlToPdf } = await import('../../../src/services/export/printPdf');
+        const jsm = vi.fn(() => ({ HiddenBrowser: FakeHiddenBrowser }));
+        vi.stubGlobal('ChromeUtils', {
+            importESModule: (url: string) => {
+                if (url.includes('HiddenBrowser')) throw new Error(`Failed to load ${url}`);
+                return { setTimeout, clearTimeout };
+            },
+            import: jsm,
+        });
+        state.loads = [true];
+        await printHtmlToPdf('<p>x</p>', '/out/z7.pdf', { title: 'Z7', page });
+        expect(jsm).toHaveBeenCalledWith('chrome://zotero/content/HiddenBrowser.jsm');
+        expect(files.has('/out/z7.pdf')).toBe(true);
+    });
+
     it('gives up after the second failed load and says so', async () => {
         const { printHtmlToPdf } = await import('../../../src/services/export/printPdf');
         state.loads = [false, false];

@@ -64,6 +64,27 @@ describe('API probes', () => {
         expect(apiStatus('epub')).toMatchObject({ available: false });
     });
 
+    it('loads remoteTranslate and epub from their Zotero 7 JSMs when the ES modules are missing', () => {
+        const jsm = vi.fn((url: string) => {
+            if (url === 'chrome://zotero/content/EPUB.jsm') {
+                return { EPUB: class { getMetadataRDF() {} getSectionDocuments() {} } };
+            }
+            if (url === 'chrome://zotero/content/RemoteTranslate.jsm') return { RemoteTranslate: class {} };
+            if (url === 'chrome://zotero/content/HiddenBrowser.jsm') return { HiddenBrowser: class {} };
+            throw new Error(`unexpected ${url}`);
+        });
+        vi.stubGlobal('ChromeUtils', {
+            importESModule: vi.fn((url: string) => {
+                if (url.includes('Timer.sys.mjs')) return { setTimeout, clearTimeout };
+                throw new Error(`Failed to load ${url}`);
+            }),
+            import: jsm,
+        });
+        expect(apiStatus('epub')).toEqual({ available: true });
+        expect(apiStatus('remoteTranslate')).toEqual({ available: true });
+        expect(jsm).toHaveBeenCalledWith('chrome://zotero/content/EPUB.jsm');
+    });
+
     it('treats a probe that throws as unavailable', () => {
         Object.defineProperty(Z, 'Translate', { configurable: true, get() { throw new Error('boom'); } });
         try {
