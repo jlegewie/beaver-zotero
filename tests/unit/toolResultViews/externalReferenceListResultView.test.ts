@@ -134,7 +134,7 @@ describe('ExternalReferenceListResultView', () => {
                 search_url: 'https://clinicaltrials.gov/search?cond=obesity',
             },
         });
-        expect(html).toContain('Data as of Oct 30, 2026 · Source: ClinicalTrials.gov');
+        expect(html).toContain('Source: ClinicalTrials.gov (Oct 30, 2026)');
         expect(html).toContain('Semaglutide Trial');
         expect(html).toContain('Terminated');
         expect(html).toContain('Phase 3 · Interventional · 500 participants (est.)');

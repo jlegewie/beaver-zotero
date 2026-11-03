@@ -205,14 +205,14 @@ const SourceNotice: React.FC<{ text: string }> = ({ text }) => (
 );
 
 function searchNotice(info: SearchViewInfo): string | null {
+    if (!info.attribution) return null;
     const date = formatRegistryDate(info.data_as_of);
-    const text = [date ? `Data as of ${date}` : null, info.attribution].filter(Boolean).join(' · ');
-    return text || null;
+    return `${info.attribution} ${date ? `(${date})` : ''}`;
 }
 
 function registryNotice(dataAsOf: string | null | undefined): string {
     const date = formatRegistryDate(dataAsOf);
-    return `${date ? `Data as of ${date} · ` : ''}Source: ClinicalTrials.gov`;
+    return `Source: ClinicalTrials.gov ${date ? `(${date})` : ''}`;
 }
 
 /**
