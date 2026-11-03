@@ -131,6 +131,14 @@ describe("citationForEvidence", () => {
         expectTagResolves(citation);
     });
 
+    it("leaves the id empty and the citation otherwise unchanged when asked to omit it", () => {
+        const citation = citationForEvidence(paper, pdfEvidence)!;
+        expect(citationForEvidence(paper, pdfEvidence, { omitId: true })).toEqual({
+            ...citation,
+            citation_id: "",
+        });
+    });
+
     it("cites the document the evidence names, not the one the row names now", () => {
         // The row moved on to another attachment; the passage is still in the first.
         const moved: Row = { ...paper, documents: ["u-ATT00002"] };

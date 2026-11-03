@@ -333,6 +333,9 @@ function citationSourceKey(citation: Citation): string {
  */
 class CitationNumbering {
     private readonly sources = new Map<string, CitedSource>();
+    /** The current row's built markers; a row's cells and expansion render back to back. */
+    private readonly builtMarkers = new Map<Evidence, string>();
+    private markersRow: Row | null = null;
     private readonly scopeFor: (libraryId: number) => string;
     /** Every cited source, in the order its marker was assigned. */
     readonly cited: CitedSource[] = [];
@@ -390,8 +393,7 @@ class CitationNumbering {
             this.sources.set(sourceKey, source);
             this.cited.push(source);
         }
-        if (!source.citations.some((known) => known.citation_id === citation.citation_id))
-            source.citations.push(citation);
+        source.citations.push(citation);
         return source.marker;
     }
 
@@ -401,9 +403,27 @@ class CitationNumbering {
         return evidence.map((entry) => this.markerFor(row, entry)).join('');
     }
 
-    /** The marker of one evidence entry, or nothing when it names no source. */
+    /**
+     * The marker of one evidence entry, or nothing when it names no source.
+     * Each entry is rendered twice (in its cell and in the expanded row) and
+     * its citation id hashes the whole passage, so the marker is built once.
+     */
     markerFor(row: Row, evidence: Evidence): string {
-        const citation = citationForEvidence(row, evidence);
+        if (row !== this.markersRow) {
+            this.builtMarkers.clear();
+            this.markersRow = row;
+        }
+        let marker = this.builtMarkers.get(evidence);
+        if (marker === undefined) {
+            marker = this.buildMarker(row, evidence);
+            this.builtMarkers.set(evidence, marker);
+        }
+        return marker;
+    }
+
+    private buildMarker(row: Row, evidence: Evidence): string {
+        // No ids: nothing here tells two citations apart by one.
+        const citation = citationForEvidence(row, evidence, { omitId: true });
         if (!citation) return '';
         const marker = this.numberFor(citation);
         const href = this.hrefFor(citation);

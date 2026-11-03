@@ -161,6 +161,12 @@ export interface EvidenceCitationOptions {
      * through its own reader only when this is given.
      */
     contentKind?: ContentKind;
+    /**
+     * Leave `citation_id` empty. The id hashes the whole passage, the costly
+     * part of citing a large table; a caller that never tells citations apart
+     * by id (the static snapshot) skips it.
+     */
+    omitId?: boolean;
 }
 
 /**
@@ -176,7 +182,7 @@ export function citationForEvidence(
     if (!target) return null;
     const reference = rowReference(row);
     const citation: Citation = {
-        citation_id: citationIdFor(row, target, evidence),
+        citation_id: options.omitId ? "" : citationIdFor(row, target, evidence),
         requested_ref: target.resolved,
         resolved_ref: target.resolved,
         citation_type: "attachment",

@@ -4,7 +4,7 @@
  * authenticated Zotero.
  *
  * What only a real instance can show: that the shadow is a real row in
- * `beaver.sqlite` with a real gzipped spec beside it under the profile, written
+ * `beaver.sqlite` with a real compressed spec beside it under the profile, written
  * as a side effect of the ordinary write path; that a table whose whole storage
  * directory has been rolled back — the state a Zotero file conflict resolved
  * toward another device leaves, with the document, the log and the version
@@ -199,7 +199,7 @@ describe('the shadow of an ordinary table', () => {
     });
     afterAll(async () => dropTable(table));
 
-    it('records each write, newest first, with a gzipped spec on disk', () => {
+    it('records each write, newest first, with a compressed spec on disk', () => {
         expect(shadow.ok, `${shadow.code}: ${shadow.error}`).toBe(true);
         expect(shadow.entries.map((entry) => entry.version)).toEqual([2, 1]);
         expect(shadow.last!.version).toBe(2);
@@ -209,6 +209,8 @@ describe('the shadow of an ordinary table', () => {
         // storage directory is what a sync conflict replaces.
         expect(existsSync(shadow.last!.payloadPath!)).toBe(true);
         expect(shadow.last!.payloadPath!.startsWith(table!.storageDir)).toBe(false);
+        // Gecko's LZ4, written off the main thread.
+        expect(shadow.last!.payloadPath!.endsWith('.json.lz4')).toBe(true);
         expect(shadow.total_bytes).toBeGreaterThan(0);
     });
 

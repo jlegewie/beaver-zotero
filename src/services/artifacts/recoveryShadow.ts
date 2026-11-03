@@ -18,7 +18,7 @@
  * disagree with.
  *
  * The shadow is the thing that survives, because it is not in the storage
- * directory: a SQLite row plus a gzipped spec under the profile, neither of
+ * directory: a SQLite row plus a compressed spec under the profile, neither of
  * which Zotero syncs or overwrites. On the next open the table's version is
  * compared against it, and a table that has gone *backwards* is reported.
  *
@@ -41,7 +41,7 @@
 
 import { logger } from '@beaver/agent-core/platform/logger';
 import { readSpec, type TableSpec } from '@beaver/agent-core/layouts/table';
-import { gunzipToString, gzipUtf8BytesChunked } from '../../utils/gzip';
+import { gunzipToString } from '../../utils/gzip';
 import { sha256Hex } from '../../utils/hash';
 import type { TableRef } from './tableItemIdentity';
 
@@ -67,10 +67,10 @@ type ShadowDB = NonNullable<typeof Zotero.Beaver.db>;
 export const TABLE_SHADOW_RETENTION = 3;
 
 /**
- * The largest gzipped spec worth retaining, per version.
+ * The largest compressed spec worth retaining, per version.
  *
  * A table's spec is JSON with one entry per cell; a large one is a megabyte or
- * so raw, which gzips to a fraction of that. This cap is not a tuning knob but
+ * so raw, which compresses to a fraction of that. This cap is not a tuning knob but
  * a refusal: past it the shadow records the version and its digest — so the
  * conflict is still *detected* — and simply has nothing to restore. Reporting
  * a conflict it cannot undo is strictly better than silently filling the
@@ -82,14 +82,15 @@ export const TABLE_SHADOW_MAX_PAYLOAD_BYTES = 4 * 1024 * 1024;
  * The most one table may hold across all its retained versions.
  *
  * Deliberately less than {@link TABLE_SHADOW_RETENTION} times the per-version
- * cap, so it is a real limit rather than arithmetic that can never bind: an
- * ordinary table is nowhere near it and keeps all three versions, while a table
- * whose specs are megabytes each keeps fewer. Bounded either way, which is what
- * a directory nothing else ever cleans up needs.
+ * cap, so it is a real limit rather than arithmetic that can never bind: a
+ * table of ordinary text up to the spec's size cap (about 3.2 MB compressed per
+ * version) keeps all three versions, while one whose specs compress poorly
+ * keeps fewer. Bounded either way, which is what a directory nothing else ever
+ * cleans up needs.
  */
-export const TABLE_SHADOW_MAX_TABLE_BYTES = 2 * TABLE_SHADOW_MAX_PAYLOAD_BYTES;
+export const TABLE_SHADOW_MAX_TABLE_BYTES = 10 * 1024 * 1024;
 
-/** Where the gzipped specs live, under the Zotero profile. */
+/** Where the compressed specs live, under the Zotero profile. */
 const SHADOW_DIR_NAME = 'table-shadow';
 
 // ---------------------------------------------------------------------------
@@ -105,7 +106,7 @@ export interface TableShadowEntry {
     sha256: string;
     /** ISO timestamp of the write. */
     writtenAt: string;
-    /** The gzipped spec, or null when it exceeded the per-version cap. */
+    /** The compressed spec, or null when it exceeded the per-version cap. */
     payloadPath: string | null;
     payloadBytes: number;
 }
@@ -201,8 +202,11 @@ async function shadowDirectory(libraryID: number): Promise<string> {
  * else still points at.
  */
 function payloadName(key: string, version: number, sha256: string): string {
-    return `${key}.v${version}.${sha256}.json.gz`;
+    return `${key}.v${version}.${sha256}.json.lz4`;
 }
+
+/** Payloads written by earlier builds are gzip; they stay readable until replaced. */
+const GZIP_PAYLOAD_SUFFIX = '.gz';
 
 async function removeQuietly(path: string): Promise<void> {
     await IOUtils.remove(path, { ignoreAbsent: true }).catch((error) =>
@@ -307,12 +311,12 @@ export async function recordTableShadow(
 }
 
 /**
- * The gzipped spec on disk, or `{ path: null }` when it is over the cap.
+ * The compressed spec on disk, or `{ path: null }` when it is over the cap.
  *
- * Compression comes first so the cap applies to what is actually stored, and
- * it is the shared chunked deflate the document cache uses — this runs on the
- * main thread right after a write, and a multi-megabyte spec compressed in one
- * synchronous pass is a visible stall.
+ * Compression comes first so the cap applies to what is actually stored. It is
+ * Gecko's LZ4 (`IOUtils`' `compress`), which runs on the I/O thread: this
+ * follows every table write, and compressing a multi-megabyte spec in script
+ * on the main thread is a visible stall.
  */
 async function writePayload(
     ref: TableRef,
@@ -320,25 +324,31 @@ async function writePayload(
     serialized: string,
     sha256: string
 ): Promise<{ path: string | null; bytes: number }> {
-    const bytes = await gzipUtf8BytesChunked(new TextEncoder().encode(serialized));
-    if (bytes.byteLength > TABLE_SHADOW_MAX_PAYLOAD_BYTES) {
-        logger(
-            `recoveryShadow: ${ref.key} v${version} is ${bytes.byteLength} gzipped bytes, ` +
-                `over the ${TABLE_SHADOW_MAX_PAYLOAD_BYTES}-byte cap; recording it without a spec`,
-            2
-        );
-        return { path: null, bytes: 0 };
-    }
-
     const directory = await shadowDirectory(ref.libraryID);
     const path = PathUtils.join(directory, payloadName(ref.key, version, sha256));
     const temp = `${path}.${Date.now().toString(16)}.tmp`;
     // Temp file and rename, so a reader never meets a half-written payload: a
     // restore trusts these bytes, and a truncated one would fail its digest
     // check instead of being obviously absent.
-    await IOUtils.write(temp, bytes);
+    const bytes = await IOUtils.writeUTF8(temp, serialized, { compress: true });
+    if (bytes > TABLE_SHADOW_MAX_PAYLOAD_BYTES) {
+        await removeQuietly(temp);
+        logger(
+            `recoveryShadow: ${ref.key} v${version} is ${bytes} compressed bytes, ` +
+                `over the ${TABLE_SHADOW_MAX_PAYLOAD_BYTES}-byte cap; recording it without a spec`,
+            2
+        );
+        return { path: null, bytes: 0 };
+    }
     await IOUtils.move(temp, path);
-    return { path, bytes: bytes.byteLength };
+    return { path, bytes };
+}
+
+/** A payload's spec text, in whichever format it was written. */
+async function readPayload(path: string): Promise<string> {
+    return path.endsWith(GZIP_PAYLOAD_SUFFIX)
+        ? gunzipToString(await IOUtils.read(path))
+        : IOUtils.readUTF8(path, { decompress: true });
 }
 
 /**
@@ -465,7 +475,7 @@ export async function readTableShadowSpec(
     if (!entry.payloadPath) return null;
     try {
         if (!(await IOUtils.exists(entry.payloadPath))) return null;
-        const serialized = gunzipToString(await IOUtils.read(entry.payloadPath));
+        const serialized = await readPayload(entry.payloadPath);
         if ((await sha256Hex(serialized)) !== entry.sha256) {
             logger(
                 `recoveryShadow: ${entry.key} v${entry.version} no longer matches its digest`,

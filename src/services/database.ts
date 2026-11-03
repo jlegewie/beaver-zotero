@@ -1085,7 +1085,7 @@ export class BeaverDB {
         // than in the table's storage directory: that directory is what syncs,
         // and a Zotero file-conflict resolution replaces it whole. A row per
         // retained version, newest first by `written_at`; `payload_path` points
-        // at the gzipped spec so a version lost to a conflict can be restored
+        // at the compressed spec so a version lost to a conflict can be restored
         // rather than only reported. See artifacts/recoveryShadow.ts.
         await this.queryAsync(`
             CREATE TABLE IF NOT EXISTS table_recovery_shadow (
