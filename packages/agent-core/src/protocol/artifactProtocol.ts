@@ -88,7 +88,8 @@ export interface TableFillRecord {
     rows_failed: number;
     /**
      * Rows never started, by reason: stopped, insufficient_credits,
-     * price_changed, account_changed, changed, unavailable, shutdown.
+     * price_changed, account_changed, changed, unavailable, shutdown,
+     * library_excluded, table_unavailable, read_only.
      */
     rows_not_started: Record<string, number>;
     /** Rows with neither a document nor an abstract (failure `no_source`). */

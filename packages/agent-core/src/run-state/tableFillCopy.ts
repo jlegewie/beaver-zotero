@@ -9,6 +9,7 @@ import type {
     TableFillJobSnapshot,
     TableFillPlanSummary,
     TableFillPricing,
+    TableFillResult,
 } from "../protocol/tableFillProtocol";
 
 /** Credits as a short number: `9.2`, `0.05`, `6`. */
@@ -186,26 +187,44 @@ export function runningLabel(job: TableFillJobSnapshot): string {
     return `Stop · ${job.rows_done}/${job.rows_total}`;
 }
 
-/** The result line of a finished fill. */
-export function resultText(job: TableFillJobSnapshot): string {
-    const result = job.result;
-    if (!result) return runningLabel(job);
+/** Why a fill stopped before running out of rows; null when it did not. */
+function stoppedText(job: TableFillJobSnapshot, result: TableFillResult): string | null {
     const credits = creditsText(result.credits_charged);
-    const papers = (n: number) => count(n, "paper");
+    const after = `after ${job.rows_done} of ${count(job.rows_total, "paper")}`;
     switch (result.stopped_by) {
         case "insufficient_credits":
-            return `Out of credits after ${job.rows_done} of ${papers(job.rows_total)} · ${credits}`;
+            return `Out of credits ${after} · ${credits}`;
         case "price_changed":
             return "Prices changed; fill again to see the new cost";
         case "account_changed":
             return "The fill stopped because the account changed";
         case "unavailable":
-            return `The fill stopped: Beaver could not reach its server after ${job.rows_done} of ${papers(job.rows_total)}`;
+            return `The fill stopped: Beaver could not reach its server ${after}`;
         case "shutdown":
-            return `The fill stopped when Beaver closed, after ${job.rows_done} of ${papers(job.rows_total)}`;
+            return `The fill stopped when Beaver closed, ${after}`;
+        case "library_excluded":
+            return `The fill stopped ${after} because a library was excluded from Beaver`;
+        case "read_only":
+            return `The fill stopped ${after} because the library became read-only`;
+        case "table_unavailable":
+            return `The fill stopped ${after} because the table is no longer available`;
         case "stopped":
-            return `Stopped after ${job.rows_done} of ${papers(job.rows_total)} · ${credits}`;
+            return `Stopped ${after} · ${credits}`;
     }
+    return null;
+}
+
+/** The result line of a finished fill. */
+export function resultText(job: TableFillJobSnapshot): string {
+    const result = job.result;
+    if (!result) return runningLabel(job);
+    const stopped = stoppedText(job, result);
+    // A stop counts the papers it worked on, saved or not: name the unsaved ones.
+    if (stopped)
+        return result.not_written
+            ? `${stopped}; ${count(result.not_written, "paper")} could not be saved`
+            : stopped;
+    const credits = creditsText(result.credits_charged);
     const failed = result.failed_row_ids.length;
     const parts = [`Filled ${count(result.rows_answered, "row")}`];
     if (failed) parts.push(`${failed.toLocaleString("en-US")} couldn't be read`);

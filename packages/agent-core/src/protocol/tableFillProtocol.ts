@@ -138,12 +138,14 @@ export interface TableFillPlanSummary {
     expires_at: number;
 }
 
+/** Why a table cannot take a fill's answers now: excluded, gone, or read-only. */
+export type TableFillWriteRefusal = "library_excluded" | "table_unavailable" | "read_only";
+
 export type TableFillPlanError =
     | "unknown_row"
     | "unknown_column"
     | "invalid_column"
-    | "table_unavailable"
-    | "read_only"
+    | TableFillWriteRefusal
     | "pricing_unavailable"
     | "signed_out";
 
@@ -158,8 +160,15 @@ export type TableFillNotStartedReason =
     | "price_changed"
     | "account_changed"
     | "changed"
+    /** The fill server could not be reached, or kept failing. */
     | "unavailable"
-    | "shutdown";
+    | "shutdown"
+    /**
+     * The table stopped taking answers: its library (or one its questions
+     * refer to) was excluded, the table was deleted or became unreadable, or
+     * its library became read-only.
+     */
+    | TableFillWriteRefusal;
 
 export interface TableFillOrigin {
     kind: "user" | "agent";
@@ -224,8 +233,7 @@ export type TableFillStartError =
     | "plan_not_found"
     | "plan_expired"
     | "fill_in_progress"
-    | "table_unavailable"
-    | "read_only"
+    | TableFillWriteRefusal
     | "signed_out"
     | "nothing_to_fill"
     /** A chat run's fill: the user stopped the run before the job started. */

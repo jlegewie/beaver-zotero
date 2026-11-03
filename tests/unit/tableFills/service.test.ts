@@ -472,7 +472,27 @@ describe("the send and commit checks", () => {
         // No further row is sent once its answer could not be saved.
         expect(state.requests).toHaveLength(1);
         expect(state.table.rows.every((row) => !row.cells.method)).toBe(true);
-        expect(done?.result).toMatchObject({ stopped_by: "unavailable", not_written: 1 });
+        expect(done?.result).toMatchObject({ stopped_by: "read_only", not_written: 1, not_started: { read_only: 2 } });
+    });
+
+    it("stops as the table no longer available when it cannot be read mid-fill, not as a server failure", async () => {
+        const rows = Array.from({ length: 3 }, (_, i) => itemRow(`r${i}`, { documents: [`u-PDFr${i}`] }));
+        const { state, fills, deps } = harness(rows);
+        const read = deps.readTable;
+        let gone = false;
+        deps.readTable = async (target) => {
+            if (gone) throw new Error("The table was deleted.");
+            return read(target);
+        };
+        state.respond = async (request) => {
+            gone = true;
+            return answer(request);
+        };
+        const { job } = await planAndStart(fills);
+        const done = await fills.wait(job.job_id);
+        expect(state.requests).toHaveLength(1);
+        expect(done?.result).toMatchObject({ stopped_by: "table_unavailable" });
+        expect(done?.result?.not_started.unavailable).toBeUndefined();
     });
 
     it("runs the commit check inside the store, after the queue admitted the commit", async () => {
@@ -509,7 +529,7 @@ describe("the table context bound for the backend", () => {
         const { job } = await planAndStart(fills);
         const done = await fills.wait(job.job_id);
         expect(state.requests).toHaveLength(1);
-        expect(done?.result).toMatchObject({ stopped_by: "unavailable" });
+        expect(done?.result).toMatchObject({ stopped_by: "library_excluded" });
     });
 
     it("never sends a row whose own fields name an item of an excluded library", async () => {
@@ -811,11 +831,11 @@ describe("failed requests", () => {
         expect(pricing).toHaveBeenCalledTimes(2);
     });
 
-    it("stops before sending more rows once the table's own library is excluded", async () => {
+    it("stops before sending more rows once the table's own library is excluded, and writes nothing more to it", async () => {
         const rows = Array.from({ length: 3 }, (_, i) => itemRow(`r${i}`, { documents: [`u-PDFr${i}`] }));
         const { state, fills, deps } = harness(rows);
         let refused = false;
-        deps.writeRefusal = () => (refused ? "table_unavailable" : null);
+        deps.writeRefusal = () => (refused ? "library_excluded" : null);
         state.respond = async (request) => {
             refused = true;
             return answer(request);
@@ -823,7 +843,29 @@ describe("failed requests", () => {
         const { job } = await planAndStart(fills);
         const done = await fills.wait(job.job_id);
         expect(state.requests).toHaveLength(1);
-        expect(done?.result).toMatchObject({ stopped_by: "unavailable" });
+        // The answer that arrived after the exclusion is not written to the excluded library.
+        expect(state.table.rows.every((row) => !row.cells.method)).toBe(true);
+        expect(done?.result).toMatchObject({ stopped_by: "library_excluded", not_written: 1, not_started: { library_excluded: 2 } });
+        expect(done?.result?.not_started.unavailable).toBeUndefined();
+    });
+
+    it("counts a row whose document read the exclusion cut off as stopped by it, not as failed", async () => {
+        const rows = Array.from({ length: 3 }, (_, i) => itemRow(`r${i}`, { documents: [`u-PDFr${i}`] }));
+        const { state, fills, deps } = harness(rows);
+        let excluded = false;
+        deps.writeRefusal = () => (excluded ? "library_excluded" : null);
+        const read = deps.readDocument;
+        deps.readDocument = async (documentId) => {
+            if (documentId === "u-PDFr1") {
+                excluded = true;
+                throw new Error("DocumentAccessRevokedError: Document access was revoked");
+            }
+            return read(documentId);
+        };
+        const { job } = await planAndStart(fills);
+        const done = await fills.wait(job.job_id);
+        expect(state.requests.map((r) => r.row_id)).toEqual(["r0"]);
+        expect(done?.result).toMatchObject({ stopped_by: "library_excluded", row_failures: {}, failed_row_ids: [], not_started: { library_excluded: 2 } });
     });
 
     it("fails the row on 413 as a document too large", async () => {
@@ -1134,12 +1176,12 @@ describe("a chat run's fill_plan and fill", () => {
         const { deps, fills } = harness([itemRow("a")]);
         const lookup = deps.lookupRows;
         deps.lookupRows = async (rows) => {
-            deps.writeRefusal = (target) => (target.key === TARGET.key ? "table_unavailable" : null);
+            deps.writeRefusal = (target) => (target.key === TARGET.key ? "library_excluded" : null);
             return lookup(rows);
         };
         // The service's own check ran before the lookup; the handler checks again after.
         const answered = await fills.agent.plan(request("fill_plan", { key: "u-TABLE001" }), TARGET);
-        expect(answered).toMatchObject({ ok: false, error_code: "table_unavailable" });
+        expect(answered).toMatchObject({ ok: false, error_code: "library_excluded" });
         expect(answered.plan).toBeUndefined();
     });
 
@@ -1148,10 +1190,43 @@ describe("a chat run's fill_plan and fill", () => {
         const wire = await plan(fills);
         const fill = request("fill", { plan_id: wire.plan_id, tool_call_id: "call-1", wait: true });
         await fills.agent.fill(fill, context());
+        deps.writeRefusal = () => "library_excluded";
+        const replay = await fills.agent.fill({ ...fill, request_id: "replay" }, context());
+        expect(replay).toMatchObject({
+            ok: false,
+            error_code: "library_excluded",
+            error: "This table is in a library Beaver cannot access.",
+        });
+        expect(replay.result).toBeUndefined();
+    });
+
+    it("answers a fill whose table was deleted while it filled as unavailable, with nothing of it", async () => {
+        const { deps, fills } = harness([itemRow("a")]);
+        const wire = await plan(fills);
+        const fill = request("fill", { plan_id: wire.plan_id, tool_call_id: "call-1", wait: true });
+        await fills.agent.fill(fill, context());
         deps.writeRefusal = () => "table_unavailable";
         const replay = await fills.agent.fill({ ...fill, request_id: "replay" }, context());
         expect(replay).toMatchObject({ ok: false, error_code: "table_unavailable" });
         expect(replay.result).toBeUndefined();
+    });
+
+    it("tells the model a fill stopped because the library became read-only", async () => {
+        const { state, deps, fills } = harness([itemRow("a"), itemRow("b"), itemRow("c")]);
+        fills.settings.commitRows = 1;
+        let readOnly = false;
+        deps.writeRefusal = () => (readOnly ? "read_only" : null);
+        state.respond = async (r) => {
+            readOnly = true;
+            return answer(r);
+        };
+        const wire = await plan(fills);
+        const answered = await fills.agent.fill(request("fill", { plan_id: wire.plan_id, tool_call_id: "call-1", wait: true }), context());
+        expect(answered).toMatchObject({
+            ok: true,
+            status: "done",
+            result: { stopped_by: "read_only", not_written: 1, not_started: { read_only: 2 } },
+        });
     });
 
     it("starts each approved plan even when a model reuses the tool call id", async () => {

@@ -161,4 +161,22 @@ describe("table fill copy", () => {
             "Filled 44 rows · 1 paper could not be saved · 8.8 credits",
         );
     });
+
+    it("says why a fill stopped: the server, an excluded library, a read-only library, a missing table", () => {
+        const stopped = (stopped_by: TableFillResult["stopped_by"]) =>
+            resultText(job({ state: "done", rows_done: 2, rows_total: 3, result: result({ stopped_by }) }));
+        expect(stopped("unavailable")).toBe("The fill stopped: Beaver could not reach its server after 2 of 3 papers");
+        expect(stopped("library_excluded")).toBe("The fill stopped after 2 of 3 papers because a library was excluded from Beaver");
+        expect(stopped("read_only")).toBe("The fill stopped after 2 of 3 papers because the library became read-only");
+        expect(stopped("table_unavailable")).toBe("The fill stopped after 2 of 3 papers because the table is no longer available");
+    });
+
+    it("names the papers a stopped fill answered but could not save", () => {
+        expect(resultText(job({ state: "done", rows_done: 3, rows_total: 3, result: result({ stopped_by: "read_only", not_written: 1 }) }))).toBe(
+            "The fill stopped after 3 of 3 papers because the library became read-only; 1 paper could not be saved",
+        );
+        expect(resultText(job({ state: "done", rows_done: 30, result: result({ stopped_by: "stopped", credits_charged: 6, not_written: 2 }) }))).toBe(
+            "Stopped after 30 of 46 papers · 6 credits; 2 papers could not be saved",
+        );
+    });
 });

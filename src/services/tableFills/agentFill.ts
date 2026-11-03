@@ -50,6 +50,7 @@ const REFUSALS: Record<string, string> = {
     unknown_column: 'A column of the fill is not in the table.',
     invalid_column: 'Only question columns are filled.',
     table_unavailable: 'The table is not available for filling.',
+    library_excluded: 'This table is in a library Beaver cannot access.',
     read_only: 'This library is read-only.',
     pricing_unavailable: 'Could not get the price of a fill.',
     signed_out: 'Beaver is not signed in, or the account changed.',
@@ -98,7 +99,8 @@ export class AgentTableFills {
         const result = await this.fills.plan(target, scope);
         if (!result.ok) return failure(request, result.code);
         // The library may have been excluded while the plan was built.
-        if (!this.fills.tableAvailable(target)) return failure(request, 'table_unavailable');
+        const gone = this.fills.tableRefusal(target);
+        if (gone) return failure(request, gone);
         const summary = result.plan;
         // The pending work names every pending column, not only the planned
         // ones the plan's own check covered.
@@ -187,7 +189,8 @@ export class AgentTableFills {
         status: 'done' | 'running',
     ): ArtifactResponse {
         // A table whose library was excluded since the fill started sends nothing of itself.
-        if (!this.fills.tableAvailable(snapshot.table)) return failure(request, 'table_unavailable');
+        const gone = this.fills.tableRefusal(snapshot.table);
+        if (gone) return failure(request, gone);
         const result = snapshot.result;
         // Nothing naming an excluded library's item leaves the device: a
         // pending column's header, or a row id.

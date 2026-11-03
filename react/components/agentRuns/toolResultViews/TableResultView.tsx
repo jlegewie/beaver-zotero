@@ -159,6 +159,9 @@ const NOT_STARTED_REASONS: Record<string, string> = {
     changed: "they changed while the fill started",
     unavailable: "Beaver could not reach its server",
     shutdown: "Zotero was closed",
+    library_excluded: "a library was excluded from Beaver",
+    read_only: "the library became read-only",
+    table_unavailable: "the table is no longer available",
     // Records of fills that ran inside the chat run.
     deadline: "the fill ran out of time",
     credits: "more credits were not approved",
