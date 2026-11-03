@@ -3,7 +3,6 @@ import { toPlainText, type Column, type Row, type TableSpec } from "@beaver/agen
 import { cellsToFill } from "@beaver/agent-core/layouts/tableFill";
 import {
     ArrowUpIcon,
-    CalendarIcon,
     CancelIcon,
     CheckmarkCircleIcon,
     ChevronIcon,
@@ -51,12 +50,11 @@ export interface NewPapersNotice {
 }
 
 /** The column types a user may change a question column to. */
-export type ResearchColumnType = "text" | "boolean" | "select" | "date";
+export type ResearchColumnType = "text" | "boolean" | "select";
 
 /** Named, ordered and drawn as the column editor and the create card show them. */
 const COLUMN_TYPE_LABELS: Array<{ type: ResearchColumnType; label: string; icon: React.ComponentType<React.SVGProps<SVGSVGElement>> }> = [
     { type: "text", label: "Text", icon: TextIcon },
-    { type: "date", label: "Date", icon: CalendarIcon },
     { type: "boolean", label: "Yes / no", icon: CheckmarkCircleIcon },
     { type: "select", label: "Category", icon: ListBulletIcon },
 ];

@@ -36,7 +36,7 @@ function table(): TableSpec {
                     { label: 'Cohort', color: 'blue' },
                 ],
             },
-            { id: 'year', header: 'Published', type: 'date', description: 'When?' },
+            { id: 'period', header: 'Data years', type: 'text', description: 'In which years were the data collected?' },
         ],
         rows: [
             {
@@ -80,17 +80,27 @@ describe('the user edits a value', () => {
         const spec = edit(table(), { op: 'answer', row: 'r1', column: 'sample', value: { kind: 'text', text: 'Mine' } });
         expect(cells(spec)).not.toContain('r1/sample');
         expect(cells(spec, { columns: ['sample'] })).toEqual(['r2/sample']);
-        expect(cells(spec, { rows: ['r1'] })).toEqual(['r1/design', 'r1/year']);
+        expect(cells(spec, { rows: ['r1'] })).toEqual(['r1/design', 'r1/period']);
         expect(pendingWork(spec).columns.some((c) => c.id === 'sample')).toBe(false);
     });
 
     it('refuses a value that does not fit the column', () => {
         const spec = table();
         expect(cellEditMutations(spec, { op: 'answer', row: 'r1', column: 'design', value: { kind: 'select', label: 'Survey' } })).toMatchObject({ ok: false });
-        expect(cellEditMutations(spec, { op: 'answer', row: 'r1', column: 'year', value: { kind: 'date', value: 'last May' } })).toMatchObject({ ok: false });
+        expect(cellEditMutations(spec, { op: 'answer', row: 'r1', column: 'period', value: { kind: 'date', value: '2004' } })).toMatchObject({ ok: false });
         expect(cellEditMutations(spec, { op: 'answer', row: 'r1', column: 'sample', value: { kind: 'text', text: '  ' } })).toMatchObject({ ok: false });
         expect(cellEditMutations(spec, { op: 'answer', row: 'r1', column: '_reference', value: { kind: 'text', text: 'x' } })).toMatchObject({ ok: false });
         expect(cellEditMutations(spec, { op: 'clear', row: 'gone', column: 'sample' })).toMatchObject({ ok: false, code: 'unknown_row' });
+    });
+});
+
+describe('a stored date question column', () => {
+    it('is neither filled nor edited: a time is a text column', () => {
+        const spec = table();
+        spec.columns.push({ id: 'published', header: 'Published', type: 'date', description: 'When?' });
+        expect(cellEditMutations(spec, { op: 'answer', row: 'r1', column: 'published', value: { kind: 'date', value: '2020' } }))
+            .toMatchObject({ ok: false, code: 'invalid_edit' });
+        expect(cells(spec).some((cell) => cell.endsWith('/published'))).toBe(false);
     });
 });
 

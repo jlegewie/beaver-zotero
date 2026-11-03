@@ -138,8 +138,6 @@ function columnWidth(column: Column, isAnchor: boolean): string {
     switch (column.type) {
         case 'reference':
             return 'minmax(11rem, 1fr)';
-        case 'date':
-            return '7rem';
         case 'boolean':
             return '5rem';
         case 'select':
@@ -235,11 +233,6 @@ function renderCellValue(
     return html + markers + (states.length ? `<small class="bt-cell-state"> · ${states.join(' · ')}</small>` : '');
 }
 
-/** The tooltip carrying a date's `display` in full, which the grid may cut short. */
-function displayTitle(display: string | undefined): string {
-    return display ? ` title="${escapeHtml(display)}"` : '';
-}
-
 function renderCellValueInner(cell: Cell | undefined, column: Column): string {
     if (cell?.outcome === 'failed') {
         return `<span class="bt-err">${escapeHtml(cell.error ?? 'Could not be answered')}</span>`;
@@ -256,7 +249,8 @@ function renderCellValueInner(cell: Cell | undefined, column: Column): string {
 
 
         case 'date':
-            return `<span class="bt-num"${displayTitle(value.display)}>${escapeHtml(value.display ?? value.value)}</span>`;
+            // The Year column, shown in the expanded row.
+            return `<span class="bt-num">${escapeHtml(value.value)}</span>`;
 
         case 'boolean':
             // A check for yes and the word in muted text for no: a blank no
@@ -825,11 +819,7 @@ export const TABLE_CSS = `
 .bt-r[open] > .bt-row .bt-chev { transform: rotate(90deg); }
 .bt-start { text-align: left; }
 .bt-end { text-align: right; }
-/* A long display ellipsises to one line in the grid, whole in its tooltip, and
-   wraps in full in the expanded row. */
-.bt-num { display: inline-block; max-width: 100%; vertical-align: top; overflow: hidden;
-  text-overflow: ellipsis; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.bt-d .bt-num { display: inline; white-space: normal; }
+.bt-num { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .bt-clamp { display: -webkit-box; -webkit-line-clamp: var(--lines);
   -webkit-box-orient: vertical; overflow: hidden; color: var(--t-mut); }
 .bt-ref { display: block; min-width: 0; }

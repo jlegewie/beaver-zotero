@@ -500,6 +500,28 @@ describe("applyMutations", () => {
         expect(result.skipped).toEqual([]);
     });
 
+    it("refuses a date question column, added or changed to, but adds the system Year column", () => {
+        const added = applyMutations(spec, [
+            {
+                op: "add_columns",
+                columns: [{ id: "end", header: "Data end", type: "date", description: "In which year does the data end?" }],
+            },
+        ]);
+        if (added.ok) throw new Error("a date question column was added");
+        expect(added.error.code).toBe("invalid_mutation");
+        expect(added.error.message).toContain("a date is a text column that asks for a year or a range");
+
+        const changed = applyMutations(spec, [{ op: "update_column", column: "method", type: "date" }]);
+        if (changed.ok) throw new Error("a column became a date question column");
+        expect(changed.error.code).toBe("invalid_mutation");
+        expect(changed.error.message).toContain("a date is a text column");
+
+        const year = applyMutations(spec, [
+            { op: "add_columns", columns: [{ id: "_year", header: "Year", type: "date", system: true }] },
+        ]);
+        expect(year.ok).toBe(true);
+    });
+
     it("refuses to grow a table past the row cap but lets it shrink", () => {
         const rows = Array.from({ length: 1001 }, (_, i) => ({
             id: `r${i}`,

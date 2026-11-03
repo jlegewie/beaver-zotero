@@ -267,9 +267,18 @@ describe('destructive edits and Undo', () => {
         mount();
         await openColumnMenu('Effect');
         await act(async () => menuItem('Change type')!.click());
-        await click(menuItem('Date'));
-        expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Change “Effect” to Date?' }));
-        expect(commands.edit).toHaveBeenCalledWith(ref, { update_columns: [{ id: 'effect', type: 'date' }] }, expect.objectContaining({ seal: true }));
+        await click(menuItem('Yes / no'));
+        expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Change “Effect” to Yes / no?' }));
+        expect(commands.edit).toHaveBeenCalledWith(ref, { update_columns: [{ id: 'effect', type: 'boolean' }] }, expect.objectContaining({ seal: true }));
+    });
+
+    it('offers no Date type: a time is a text column', async () => {
+        mount();
+        await openColumnMenu('Effect');
+        await act(async () => menuItem('Change type')!.click());
+        expect(menuItem('Yes / no')).toBeDefined();
+        expect(menuItem('Category')).toBeDefined();
+        expect(menuItem('Date')).toBeUndefined();
     });
 
     it('opens the editor on the options when the new type is a category', async () => {

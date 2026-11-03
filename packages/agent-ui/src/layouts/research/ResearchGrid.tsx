@@ -73,8 +73,6 @@ function questionWidth(column: Column): string | undefined {
             return "11.5rem";
         case "boolean":
             return "8.5rem";
-        case "date":
-            return "9rem";
         default:
             return undefined;
     }

@@ -587,6 +587,17 @@ function applyOne(draft: Draft, mutation: TableMutation): Failure | undefined {
     }
 }
 
+/**
+ * Why a column cannot be a question column of `type`, or null. Only system
+ * columns hold `reference`, `date` (Year) and `link` values.
+ */
+function questionTypeProblem(type: ColumnType): string | null {
+    if (MODEL_COLUMN_TYPES.includes(type)) return null;
+    return type === "date"
+        ? "a date is a text column that asks for a year or a range"
+        : "a question column is text, boolean or select";
+}
+
 function addColumns(
     draft: Draft,
     mutation: AddColumnsMutation,
@@ -606,6 +617,13 @@ function addColumns(
             return fail(
                 "duplicate_column",
                 `add_columns: column "${column.id}" already exists`,
+            );
+        }
+        const typeProblem = column.system ? null : questionTypeProblem(column.type);
+        if (typeProblem) {
+            return fail(
+                "invalid_mutation",
+                `add_columns: column "${column.id}" cannot be a ${column.type} column: ${typeProblem}`,
             );
         }
         const clash = duplicateOptionLabels(column.options);
@@ -999,10 +1017,15 @@ function updateColumn(
         );
     }
     const typeChange = mutation.type !== undefined && mutation.type !== column.type;
-    if (typeChange && (column.system || !MODEL_COLUMN_TYPES.includes(mutation.type!))) {
+    const typeProblem = typeChange
+        ? column.system
+            ? "it is a system column"
+            : questionTypeProblem(mutation.type!)
+        : null;
+    if (typeProblem) {
         return fail(
             "invalid_mutation",
-            `update_column: column "${column.id}" cannot become a ${mutation.type} column`,
+            `update_column: column "${column.id}" cannot become a ${mutation.type} column: ${typeProblem}`,
         );
     }
     const type = typeChange ? mutation.type! : column.type;

@@ -62,8 +62,8 @@ export interface TableCardSource {
     resolved?: TableCardResolved | null;
 }
 
-/** A question's type; a quantity is a text question that names its unit. */
-export type TableCardColumnType = 'text' | 'date' | 'boolean' | 'select';
+/** A question's type; a quantity is a text question that names its unit, a time one that asks for a year or a range. */
+export type TableCardColumnType = 'text' | 'boolean' | 'select';
 
 /** A select category on the card: its label and, optionally, its definition. */
 export interface TableCardOption {
