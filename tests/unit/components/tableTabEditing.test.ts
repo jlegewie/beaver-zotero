@@ -43,7 +43,7 @@ vi.mock('../../../src/ui/tableDocumentActions', () => ({
 
 import { setHost } from '@beaver/agent-ui/host';
 import { ResearchTable } from '@beaver/agent-ui/layouts/research/ResearchTable';
-import { useTableEditing } from '../../../react/components/tables/useTableEditing';
+import { FILL_RUNNING_REASON, useTableEditing } from '../../../react/components/tables/useTableEditing';
 
 const h = React.createElement;
 const ref = { libraryID: 1, key: 'TABLEKEY' };
@@ -97,7 +97,8 @@ function Harness({ table, readOnly, fillRunning }: { table: TableSpec; readOnly?
     const edits = useTableEditing({
         tableRef: ref,
         spec: table,
-        disabledReason: readOnly ? 'This library is read-only.' : undefined,
+        // As the table tab wires it: a running fill disables editing too.
+        disabledReason: readOnly ? 'This library is read-only.' : fillRunning ? FILL_RUNNING_REASON : undefined,
         fillRunning: !!fillRunning,
         surfaceWindow: window,
         portalContainer: null,
@@ -122,11 +123,17 @@ function Harness({ table, readOnly, fillRunning }: { table: TableSpec; readOnly?
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
 
+let store: ReturnType<typeof createStore>;
 function mount(props: { table?: TableSpec; readOnly?: boolean; fillRunning?: boolean } = {}) {
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
-    act(() => root!.render(h(Provider, { store: createStore() }, h(Harness, { table: props.table ?? spec(), ...props }))));
+    store = createStore();
+    rerender(props);
+}
+/** Renders the mounted harness again with new props, keeping its state. */
+function rerender(props: { table?: TableSpec; readOnly?: boolean; fillRunning?: boolean } = {}) {
+    act(() => root!.render(h(Provider, { store }, h(Harness, { table: props.table ?? spec(), ...props }))));
 }
 
 const $ = <T extends Element = HTMLElement>(selector: string) => container!.querySelector<T>(selector);
@@ -234,23 +241,27 @@ describe('destructive edits and Undo', () => {
 
     it('waits for a running fill before Undo', async () => {
         commands.edit.mockResolvedValue(committed([{ op: 'remove_rows', rows: 1 }]));
-        mount({ fillRunning: true });
+        mount();
         await click($('tr[data-row-id="r1"] button[aria-label="Row actions"]'));
         await click(menuItem('Remove from table'));
+        // A fill started after the edit.
+        rerender({ fillRunning: true });
         const undo = $<HTMLButtonElement>('.rt-toast-action')!;
         expect(undo.disabled).toBe(true);
         expect(undo.title).toBe('Undo is available when the fill ends.');
     });
 
-    it("keeps a column's question and type while a fill runs, but not its other edits", async () => {
+    it('offers no edits while a fill runs', async () => {
         mount({ fillRunning: true });
         await openColumnMenu('Effect');
         const disabled = (label: string) => menuItem(label)!.closest('[role="menuitem"]')!.className.includes('cursor-not-allowed');
-        expect([disabled('Edit column…'), disabled('Change type'), disabled('Remove column')]).toEqual([true, true, false]);
+        expect([disabled('Edit column…'), disabled('Change type'), disabled('Remove column')]).toEqual([true, true, true]);
         await click(menuItem('Edit column…'));
         expect($('textarea[aria-label="Column question"]')).toBeNull();
-        await click(menuItem('Change type'));
-        expect(menuItem('Date')).toBeUndefined();
+        await click(menuItem('Remove column'));
+        await click($('tr[data-row-id="r1"] button[aria-label="Row actions"]'));
+        await click(menuItem('Remove from table'));
+        expect(commands.edit).not.toHaveBeenCalled();
     });
 
     it('asks before removing rows that hold the user’s answers, and writes nothing when declined', async () => {

@@ -246,7 +246,7 @@ describe('openTable', () => {
     it('opens nothing for a table that cannot be read, and says why', async () => {
         readTableItemSpec.mockResolvedValue({ ok: false, code: 'corrupt', message: 'The table is corrupted.' });
         await expect(openTable(REF, { window: main })).resolves.toEqual({
-            error: `Could not open table ${REF.key} — The table is corrupted. Select the table in your library and use “Restore my version” in its Beaver Table section to write back the last version this device saved.`,
+            error: `Could not open table ${REF.key} — The table is corrupted. Select the table in your library and use “Recover my version” in its Beaver Table section to write back the last version this device saved.`,
         });
         expect(openTableTab).not.toHaveBeenCalled();
     });

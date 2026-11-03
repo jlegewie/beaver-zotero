@@ -305,21 +305,24 @@ export default function TableTabView({
     const fillButton = React.useRef<TableFillButtonHandle>(null);
     const requestFill = React.useCallback((scope: TableFillScope) => fillButton.current?.openPlan(scope), []);
     const fillRunning = !!fillJob && fillJob.state !== 'done';
+    // A fill commits one version; an edit between its commits would split it,
+    // so the table is not editable while one runs.
+    const tableDisabledReason = editDisabledReason ?? (fillRunning ? FILL_RUNNING_REASON : undefined);
     const fill = React.useMemo<ResearchTableFill | undefined>(
         () =>
             fillEnabled
                 ? {
-                      disabledReason: editDisabledReason ?? (fillRunning ? FILL_RUNNING_REASON : undefined),
+                      disabledReason: tableDisabledReason,
                       onFillRows: (rowIds) => requestFill({ kind: 'cells', rows: rowIds }),
                       onFillColumn: (column) => requestFill({ kind: 'cells', columns: [column.id] }),
                   }
                 : undefined,
-        [fillEnabled, editDisabledReason, fillRunning, requestFill],
+        [fillEnabled, tableDisabledReason, requestFill],
     );
     const edits = useTableEditing({
         tableRef,
         spec: table?.spec ?? EMPTY_SPEC,
-        disabledReason: editDisabledReason,
+        disabledReason: tableDisabledReason,
         fillRunning,
         surfaceWindow,
         portalContainer: hostRef.current,

@@ -10,7 +10,8 @@
  * nothing of the window crosses into the write.
  *
  * Unlike a model edit, a tab edit is local and is never repeated, so it
- * carries no operation identity. An ordinary edit (a title, a new column, a
+ * carries no operation identity. While a fill of the table runs, the store
+ * refuses it (`fill_running`): it would split the fill's single version. An ordinary edit (a title, a new column, a
  * reworded question, added papers) collapses into the tab session's version;
  * a destructive one (a removal, a type change, a removed option) seals a
  * version of its own, which Undo restores from.

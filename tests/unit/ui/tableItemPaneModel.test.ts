@@ -495,7 +495,7 @@ describe('a table another device\'s copy replaced', () => {
         expect(fields.conflictLine).toContain('version 5 from another device');
         expect(fields.conflictLine).toContain('this device last wrote version 7');
         expect(fields.conflictLine).toContain('Nothing was merged and nothing was overwritten');
-        expect(fields.conflictLine).toContain('can be restored as a new version');
+        expect(fields.conflictLine).toContain('can be recovered as a new version');
     });
 
     it('does not offer a restore it cannot perform', () => {
@@ -507,12 +507,12 @@ describe('a table another device\'s copy replaced', () => {
         expect(fields.conflictLine).not.toContain('can be restored');
     });
 
-    it('says why a kept version cannot be restored into a library Beaver cannot write', () => {
+    it('says why a kept version cannot be recovered into a library Beaver cannot write', () => {
         const fields = buildTableSectionFields(
             input({ conflict: { ...conflict, writable: false } })
         );
 
-        expect(fields.conflictLine).toContain('cannot write to this library to restore it');
+        expect(fields.conflictLine).toContain('cannot write to this library to recover it');
         expect(fields.conflictLine).not.toContain('can be restored');
     });
 

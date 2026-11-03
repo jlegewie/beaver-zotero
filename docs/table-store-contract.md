@@ -9,6 +9,11 @@ older build wrote (`receipts` in `table.json`, `ledger` in `history.json`), and
 the next commit drops them. Table chat remains development-only; group support does not
 change that gate.
 
+`beaver/history.json` lists the retained versions. `beaver/v<N>.json` holds each
+retained version below the tip; the tip has no version file, because `table.json`
+carries it. A write that takes a new number copies the outgoing tip to its version
+file before the commit; a write that collapses onto the tip writes no version file.
+
 ## The snapshot renderer
 
 Every write of any kind renders the snapshot inside the write itself
@@ -49,9 +54,9 @@ render still fails. A missing snapshot is regenerated on the next open in a libr
 Beaver may write to, because Zotero treats an attachment without its main file
 as one to download. Reads never write. `table.json` is written atomically and
 syncs with its history, so a `table.json` missing beside a retained history is
-damage from outside: the table reads as `corrupt`, nothing rebuilds it, and
-restoring a retained version (revert, or the item pane's restore of this
-device's version) writes a new one. A
+damage from outside: the table reads as `corrupt` and nothing rebuilds it. The
+tip's content went with `table.json`; reverting to an older retained version, or
+the item pane's "Recover my version" (this device's last write), writes a new one. A
 storage directory with no table, no history and no snapshot is a table whose
 files have not arrived yet (`file_missing`); a snapshot without a table is
 `no_spec`.
@@ -85,7 +90,8 @@ still require an isolated sync-enabled test setup.
 
 `openTable(ref)` returns `version`, `sha256`, `spec` and history. `sha256` is an
 opaque SHA-256 digest of the stored spec's JSON bytes, including store-assigned
-stamps — the bytes of `beaver/v<N>.json` and the snapshot's root attribute.
+stamps — the bytes a version's `beaver/v<N>.json` holds once it is no longer the
+tip, and the snapshot's root attribute.
 
 ### Collapse keys and sealing
 
@@ -137,6 +143,13 @@ version (`collapse_key: tab:<session>`); a destructive one (a removal, a type
 change, a removed option) passes `seal`. The result says whether a version was
 `committed`, so a no-op edit offers no Undo. An `operation` seals by default.
 
+While a fill of the table runs, the tab offers no edits and Undo waits: a fill
+commits one version, and a write between its commits would split it in two.
+The store refuses every user write meanwhile (tab and cell edits, revert, Undo,
+recovery) with `fill_running`, checked under the table lock, so a write queued
+behind a fill commit does not land. The fill's commits and model edits are the
+agent's and are not refused.
+
 The tab's cell edits go through `applyUserCellEdit(ref, edits, { session })`
 (`table_applyUserCellEdit`), with the same `applyTableEdit` and the tab
 session's collapse key. Each edit becomes engine mutations under the lock:
@@ -160,18 +173,30 @@ the user to version history instead.
 `editTable` applies mutations inside the lock. A persistent editor passes an
 optional `{version, sha256}` fourth argument from the displayed snapshot; a
 stale draft is rejected before its mutations are applied. `writeTable` is the
-local whole-spec write behind a restore and the development endpoints.
+local whole-spec write behind a recovery and the development endpoints.
 
 `saved: false` means content committed but a step after the commit point (the
-version file, the version log, or the render with its indexing, upload mark and
+version log, or the render with its indexing, upload mark and
 item save) needs repair. It never means the caller should repeat the mutation.
 
 Version retention always keeps the newest three versions, whatever their size,
 so even a table near the spec cap can be reverted; beyond those it is bounded by
-count (20) and by bytes (16 MiB of version files). Whole-spec writes and edits enforce the shared
+count (10, the tip included) and by bytes (4 MiB of version files; the tip, which
+`table.json` carries, does not count). Whole-spec writes and edits enforce the shared
 cell and table limits and refuse growth past them with `too_large`. An edit
 returns the `set_cells` writes the engine skipped (user cells, changed
 questions) in `skipped`.
+
+Outside the storage directory, the recovery shadow (`recoveryShadow.ts`) keeps
+one compressed copy per table: the version this device wrote last. Opening a
+table compares against it to detect a sync conflict that replaced the directory
+with an older copy, and the item pane's "Recover my version" writes it back as a
+new version. Every write replaces it, so recover before editing again.
+
+User-facing verbs stay distinct: Undo takes back one edit, Revert writes a
+retained version back from version history, Recover writes this device's copy
+back after a sync conflict, Restore takes a table out of the trash, and Reset
+puts Beaver's answer back in a cell.
 
 ## Creation
 

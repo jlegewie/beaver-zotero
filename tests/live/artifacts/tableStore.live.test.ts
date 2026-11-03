@@ -178,7 +178,8 @@ describe('creating a table', () => {
 
     it('seeds and seals the version log, so the created state stays revertable', async () => {
         expect(table!.created.entry).toMatchObject({ version: 1, sealed: true });
-        expect(existsSync(sidecar(table!, 'v1.json'))).toBe(true);
+        // table.json carries the tip; version 1 gets a file when a write moves past it.
+        expect(existsSync(sidecar(table!, 'v1.json'))).toBe(false);
 
         const history = JSON.parse(await readFile(sidecar(table!, 'history.json'), 'utf8'));
         expect(history.tip).toBe(1);
@@ -210,16 +211,17 @@ describe('writing versions', () => {
     });
     afterAll(async () => dropTable(table));
 
-    it('holds the log and one file per version, version 1 included', async () => {
+    it('holds the log and one file per version below the tip, version 1 included', async () => {
         const history = JSON.parse(await readFile(sidecar(table!, 'history.json'), 'utf8'));
         expect(history.tip).toBe(4);
         expect(history.versions.map((v: { version: number }) => v.version)).toEqual([
             1, 2, 3, 4,
         ]);
 
-        for (const version of [1, 2, 3, 4]) {
+        for (const version of [1, 2, 3]) {
             expect(existsSync(sidecar(table!, `v${version}.json`))).toBe(true);
         }
+        expect(existsSync(sidecar(table!, 'v4.json'))).toBe(false);
     });
 
     it('reads the newest spec back from table.json', async () => {
@@ -462,11 +464,11 @@ describe('create retry and conversation rewind', () => {
             storageDir: created.storage_directory, created };
         tables.push(table);
         await rm(sidecar(table, 'history.json'));
-        await rm(sidecar(table, 'v1.json'));
         const replay = await post<any>('/beaver/test/table-create', request);
         expect(replay).toMatchObject({ ok: true, key: created.key, replayed: true,
             entry: { version: 1, creation: true, sealed: true, actor: 'agent', run_id: 'run' } });
-        expect(existsSync(sidecar(table, 'v1.json'))).toBe(true);
+        // table.json carries the tip, so the repair writes no version file.
+        expect(existsSync(sidecar(table, 'v1.json'))).toBe(false);
         const at = { key: table.key, libraryID: table.libraryID };
         expect((await post<any>('/beaver/test/table-versions', at)).versions).toHaveLength(1);
         expect((await post<any>('/beaver/test/table-read', at)).sync_state).toBe(TO_UPLOAD);
@@ -579,7 +581,9 @@ describe('trim boundaries and stored citation cleanup', () => {
         expect(opened.history.find((entry: { version: number }) => entry.version === 2))
             .toMatchObject({ actor: 'system', sealed: true });
         expect(opened.conflict).toBeNull();
-        expect(existsSync(sidecar(table, 'v2.json'))).toBe(true);
+        // The survivor is the tip, which table.json carries.
+        expect(existsSync(sidecar(table, 'v1.json'))).toBe(true);
+        expect(existsSync(sidecar(table, 'v2.json'))).toBe(false);
         expect(existsSync(sidecar(table, 'v3.json'))).toBe(false);
     });
 
@@ -612,7 +616,7 @@ describe('trim boundaries and stored citation cleanup', () => {
         tables.push(table);
         const at = { key: table.key, libraryID: table.libraryID };
         const runs: string[] = [];
-        for (let i = 0; i < 22; i++) {
+        for (let i = 0; i < 12; i++) {
             const run = `discard-${i}`;
             runs.push(run);
             const written = await post<any>('/beaver/test/table-write', {

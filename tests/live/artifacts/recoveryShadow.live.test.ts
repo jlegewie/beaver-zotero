@@ -199,9 +199,9 @@ describe('the shadow of an ordinary table', () => {
     });
     afterAll(async () => dropTable(table));
 
-    it('records each write, newest first, with a compressed spec on disk', () => {
+    it('records the latest write, with a compressed spec on disk', () => {
         expect(shadow.ok, `${shadow.code}: ${shadow.error}`).toBe(true);
-        expect(shadow.entries.map((entry) => entry.version)).toEqual([2, 1]);
+        expect(shadow.entries.map((entry) => entry.version)).toEqual([2]);
         expect(shadow.last!.version).toBe(2);
         expect(shadow.last!.sha256).toMatch(/^[0-9a-f]{64}$/);
         expect(shadow.last!.payloadPath).toBeTruthy();
@@ -223,8 +223,8 @@ describe('the shadow of an ordinary table', () => {
         expect(opened.recovered).toEqual([]);
     });
 
-    it('keeps only the last few versions', () => {
-        expect(shadow.retention).toBeGreaterThanOrEqual(3);
+    it('keeps only the last version', () => {
+        expect(shadow.retention).toBe(1);
         expect(shadow.entries.length).toBeLessThanOrEqual(shadow.retention);
     });
 });
@@ -235,9 +235,10 @@ describe('a table a sync conflict rolled back', () => {
     let table: Table | null = null;
     let corrupted: CorruptResponse;
     /**
-     * Whether the rolled-back version files were gone *at that moment*. Sampled
-     * in setup rather than asserted later, because the restore below writes a
-     * new version 3 — so by the end of the sequence `v3.json` exists again, and
+     * Which version files the rolled-back directory held *at that moment*.
+     * Sampled in setup rather than asserted later, because the restore below
+     * writes a new version 3 and copies the other device's version 2 out of
+     * `table.json` — so by the end of the sequence `v2.json` exists, and
      * legitimately so.
      */
     let sidecarAfterConflict: { v3: boolean; v2: boolean };
@@ -286,9 +287,10 @@ describe('a table a sync conflict rolled back', () => {
     it('leaves the table internally consistent, so nothing looks damaged', () => {
         expect(corrupted.from_version).toBe(3);
         expect(corrupted.version).toBe(2);
-        expect(corrupted.removed_versions).toEqual([3]);
+        // The other device's tip is version 2, which its table.json carries.
+        expect(corrupted.removed_versions).toEqual([2]);
         expect(sidecarAfterConflict.v3).toBe(false);
-        expect(sidecarAfterConflict.v2).toBe(true);
+        expect(sidecarAfterConflict.v2).toBe(false);
     });
 
     it('reports the loss as a conflict rather than as something it repaired', () => {
@@ -321,6 +323,6 @@ describe('a table a sync conflict rolled back', () => {
         // user can go back to it as easily as they came from it.
         const theirs = JSON.parse(await readFile(sidecar(table!, 'v2.json'), 'utf8'));
         expect(theirs.rows[0].cells.note.value.text).toBe('Two');
-        expect(versions.versions[2].change).toMatch(/Restored/);
+        expect(versions.versions[2].change).toMatch(/Recovered/);
     });
 });

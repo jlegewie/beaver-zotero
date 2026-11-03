@@ -46,7 +46,7 @@ export async function exportTableCsv(
 
 /**
  * The table's local actions: Export CSV, Version history (the retained
- * versions, and restoring one), and Check / repair. `historyOnly` renders the
+ * versions, and reverting to one), and Check / repair. `historyOnly` renders the
  * version history alone and loads it at once, for the table tab's Version
  * history panel.
  */
@@ -78,7 +78,9 @@ export function renderTableDocumentActions(
         try {
             await operation();
         } catch (error) {
-            status.textContent = `${tableActionErrorMessage(error, ref)}${restoring ? " Restore was not confirmed. Check the current table before trying again." : ""}`;
+            // A refusal (a fill is running) wrote nothing, so there is nothing to check.
+            const refused = (error as { code?: string } | null)?.code === "fill_running";
+            status.textContent = `${tableActionErrorMessage(error, ref)}${restoring && !refused ? " Revert was not confirmed. Check the current table before trying again." : ""}`;
         } finally {
             busy = false;
             controls.forEach((control) => {
@@ -131,27 +133,27 @@ export function renderTableDocumentActions(
         status.textContent = !entries.length
             ? "No retained versions are available."
             : writable
-              ? "Restoring a retained version creates a new current version."
-              : "This library is read-only, so a retained version cannot be restored here.";
+              ? "Reverting to a retained version saves it as a new current version."
+              : "This library is read-only, so it cannot be reverted to a retained version here.";
     };
     const history = action("history", "Version history", loadHistory);
     const restore = action(
         "restore-version",
-        "Restore selected version",
+        "Revert to selected version",
         async () => {
             const version = Number(versions.value);
             if (!Number.isInteger(version) || version < 1) return;
             const result = await commands().revert(ref, version);
             if (!result.ok) {
                 status.textContent =
-                    "The table changed. Reload version history before restoring. No automatic retry was made.";
+                    "The table changed. Reload version history before reverting. No automatic retry was made.";
                 return;
             }
             versions.value = "";
-            status.textContent = `Restored version ${version} as version ${result.version}. ${
+            status.textContent = `Reverted to version ${version}, saved as version ${result.version}. ${
                 result.saved
                     ? "Close and reopen any open snapshot to see the current table."
-                    : "The content is saved, but bookkeeping is incomplete. Reopen the table to repair it; do not repeat the restore."
+                    : "The content is saved, but bookkeeping is incomplete. Reopen the table to repair it; do not repeat the revert."
             }`;
         },
         true,

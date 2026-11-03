@@ -56,18 +56,17 @@ type ShadowDB = NonNullable<typeof Zotero.Beaver.db>;
 // ---------------------------------------------------------------------------
 
 /**
- * How many written versions one table keeps a spec for.
+ * How many written versions one table keeps a spec for: the last, which
+ * {@link recordTableShadow} keeps by replacing every other row.
  *
- * Three, because the point is to be able to hand back a *lost* version, and
- * the one a conflict took is not always the very last: a device can write,
- * sync, write again and only then lose the pair. Beyond three it stops being
- * insurance and starts being a second copy of the version log — which the
- * table already carries, inside the directory this exists to survive.
+ * Detection and restore both use only the version this device wrote last
+ * ({@link lastTableShadow}), and every later write replaces it as the last. An
+ * older row could never be reached, so keeping one would only take space.
  */
-export const TABLE_SHADOW_RETENTION = 3;
+export const TABLE_SHADOW_RETENTION = 1;
 
 /**
- * The largest compressed spec worth retaining, per version.
+ * The largest compressed spec worth retaining.
  *
  * A table's spec is JSON with one entry per cell; a large one is a megabyte or
  * so raw, which compresses to a fraction of that. This cap is not a tuning knob but
@@ -77,18 +76,6 @@ export const TABLE_SHADOW_RETENTION = 3;
  * profile directory.
  */
 export const TABLE_SHADOW_MAX_PAYLOAD_BYTES = 4 * 1024 * 1024;
-
-/**
- * The most one table may hold across all its retained versions.
- *
- * Deliberately less than {@link TABLE_SHADOW_RETENTION} times the per-version
- * cap, so it is a real limit rather than arithmetic that can never bind: a
- * table of ordinary text up to the spec's size cap (about 3.2 MB compressed per
- * version) keeps all three versions, while one whose specs compress poorly
- * keeps fewer. Bounded either way, which is what a directory nothing else ever
- * cleans up needs.
- */
-export const TABLE_SHADOW_MAX_TABLE_BYTES = 10 * 1024 * 1024;
 
 /** Where the compressed specs live, under the Zotero profile. */
 const SHADOW_DIR_NAME = 'table-shadow';
@@ -106,7 +93,7 @@ export interface TableShadowEntry {
     sha256: string;
     /** ISO timestamp of the write. */
     writtenAt: string;
-    /** The compressed spec, or null when it exceeded the per-version cap. */
+    /** The compressed spec, or null when it exceeded the payload cap. */
     payloadPath: string | null;
     payloadBytes: number;
 }
@@ -239,19 +226,18 @@ function toEntry(record: {
 // ---------------------------------------------------------------------------
 
 /**
- * Records a version this device wrote, and applies the budget.
+ * Records a version this device wrote, replacing what was retained.
  *
- * `serialized` must be the exact string whose digest is `sha256` — the bytes
- * the store put in `beaver/v<N>.json` — because that digest is what a later
+ * `serialized` must be the exact string whose digest is `sha256` — the
+ * serialized spec the version log records — because that digest is what a later
  * open compares the document against. Re-serialising here would make the two
  * sides of that comparison different computations, and any drift between them
  * would report a conflict on every ordinary open.
  *
- * One row per version number, so a run that collapses a hundred cell writes onto
- * one version keeps one row rather than a hundred. The cost of that choice is
- * that writing the same number again replaces what was retained under it: after
- * a conflict has been detected, an ordinary edit — which takes the number the
- * lost version had — ends the chance to restore it. Detect, then restore.
+ * Every write replaces what was retained: a run that collapses a hundred cell
+ * writes onto one version keeps one row rather than a hundred, and after a
+ * conflict has been detected, any edit ends the chance to restore the lost
+ * version. Detect, then restore.
  *
  * Never throws: the caller is past its commit point, so a shadow that could
  * fail a write would trade a real table for a bookkeeping error.
@@ -269,14 +255,11 @@ export async function recordTableShadow(
     }
 
     try {
-        // What this version pointed at before, so a collapsing write does not
-        // strand it. An agent run filling a column reuses one version number a
-        // hundred times, and each of those writes has different bytes and so a
-        // different content-addressed name: one row, a hundred files.
-        const superseded =
-            (await db.getTableShadows(ref.libraryID, ref.key)).find(
-                (row) => row.version === version
-            )?.payloadPath ?? null;
+        // What this write replaces. An agent run filling a column reuses one
+        // version number a hundred times, and each of those writes has different
+        // bytes and so a different content-addressed name: one row, a hundred
+        // files, unless each write takes the previous file away.
+        const previous = await db.getTableShadows(ref.libraryID, ref.key);
 
         const payload = await writePayload(ref, version, serialized, sha256);
         const entry: TableShadowEntry = {
@@ -297,9 +280,14 @@ export async function recordTableShadow(
             payloadPath: entry.payloadPath,
             payloadSizeBytes: entry.payloadBytes,
         });
-        await enforceBudget(ref);
-        // After the budget, so the survivors this is checked against are final.
-        await removeUnreferencedPayloads(ref, [superseded]);
+        // Only this row survives. Its payload can be the file a previous row
+        // named — the same version and bytes resolve to the same name — so that
+        // one path stays.
+        const dropped = previous.filter((row) => row.version !== version).map((row) => row.version);
+        if (dropped.length) await db.deleteTableShadowVersions(ref.libraryID, ref.key, dropped);
+        for (const path of new Set(previous.map((row) => row.payloadPath))) {
+            if (path && path !== payload.path) await removeQuietly(path);
+        }
         return entry;
     } catch (error) {
         logger(
@@ -349,69 +337,6 @@ async function readPayload(path: string): Promise<string> {
     return path.endsWith(GZIP_PAYLOAD_SUFFIX)
         ? gunzipToString(await IOUtils.read(path))
         : IOUtils.readUTF8(path, { decompress: true });
-}
-
-/**
- * Deletes the payloads among `paths` that no surviving row points at.
- *
- * The single rule for taking a payload away, used by everything that can leave
- * one behind — a row that was dropped, and a row whose `payload_path` was
- * replaced. The survivor check is what makes it safe rather than tidy: names
- * are content-addressed, so a rewrite that produces the bytes the version
- * already held resolves to the same file, and the path a row is recorded as
- * giving up can be the path it still has. Only a path no surviving row names
- * may go.
- *
- * A row without a file is a restore that promises a spec it cannot produce, and
- * a file without a row is a byte nothing will ever collect — the shadow lives
- * under the profile, where nothing else cleans up after it.
- */
-async function removeUnreferencedPayloads(
-    ref: TableRef,
-    paths: Array<string | null>
-): Promise<void> {
-    const candidates = paths.filter((path): path is string => !!path);
-    if (candidates.length === 0) return;
-    const db = shadowDb();
-    if (!db) return;
-
-    const referenced = new Set(
-        (await db.getTableShadows(ref.libraryID, ref.key))
-            .map((row) => row.payloadPath)
-            .filter((path): path is string => !!path)
-    );
-    for (const path of candidates) {
-        if (!referenced.has(path)) await removeQuietly(path);
-    }
-}
-
-/** Drops retained versions until the table is inside both caps. */
-async function enforceBudget(ref: TableRef): Promise<void> {
-    const db = shadowDb();
-    if (!db) return;
-
-    // `rows` is newest first, so the budget keeps a prefix and drops the rest:
-    // once a version has fallen out, everything older than it goes too. Keeping
-    // a smaller older version because it happened to fit would leave a gap in
-    // the retained range, which is not a thing to reason about.
-    const rows = await db.getTableShadows(ref.libraryID, ref.key);
-    const doomed: number[] = [];
-    let total = 0;
-    let full = false;
-    for (const [index, row] of rows.entries()) {
-        full ||=
-            index >= TABLE_SHADOW_RETENTION ||
-            total + row.payloadSizeBytes > TABLE_SHADOW_MAX_TABLE_BYTES;
-        if (full) doomed.push(row.version);
-        else total += row.payloadSizeBytes;
-    }
-    if (doomed.length === 0) return;
-
-    const removed = await db.deleteTableShadowVersions(ref.libraryID, ref.key, doomed);
-    await removeUnreferencedPayloads(
-        ref,
-        removed.map((row) => row.payloadPath)
-    );
 }
 
 /**
