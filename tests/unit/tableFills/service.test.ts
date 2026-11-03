@@ -104,6 +104,8 @@ function harness(
         requests: [] as TableFillRequest[],
         bodies: [] as string[],
         commits: [] as { mutations: TableMutation[]; meta: Record<string, unknown> }[],
+        /** The number of commits that had landed at each render. */
+        renders: [] as number[],
         snapshots: [] as TableFillJobSnapshot[],
         excluded: new Set<string>(),
         signedIn: true,
@@ -142,6 +144,9 @@ function harness(
             if (!result.ok) return { ok: false, error: result.error };
             state.table = result.spec;
             return { ok: true, skipped: result.skipped };
+        },
+        render: async () => {
+            state.renders.push(state.commits.length);
         },
         account: {
             generation: () => state.generation,
@@ -332,6 +337,37 @@ describe("a fill", () => {
         await fills.wait(job.job_id);
         expect(state.table.rows[0].failure).toBeUndefined();
         expect(state.table.rows[1].failure?.code).toBe("no_answer");
+    });
+});
+
+describe("rendering the snapshot", () => {
+    it("renders once, after the job's last commit and before the job reads as done", async () => {
+        const rows = Array.from({ length: 23 }, (_, i) => itemRow(`r${i}`, { documents: [`u-PDFr${i}`] }));
+        const { state, fills } = harness(rows);
+        const { job } = await planAndStart(fills);
+        const done = await fills.wait(job.job_id);
+        expect(done?.state).toBe("done");
+        expect(state.commits.length).toBeGreaterThan(1);
+        expect(state.renders).toEqual([state.commits.length]);
+    });
+
+    it("renders nothing when no commit landed", async () => {
+        const { state, fills, deps } = harness([itemRow("a")]);
+        deps.commit = async () => ({ ok: false, error: { code: "invalid_mutation", message: "refused" } });
+        const { job } = await planAndStart(fills);
+        await fills.wait(job.job_id);
+        expect(state.renders).toEqual([]);
+    });
+
+    it("still finishes the job when the render fails", async () => {
+        const { state, fills, deps } = harness([itemRow("a"), itemRow("b")]);
+        deps.render = async () => {
+            throw new Error("library is read-only");
+        };
+        const { job } = await planAndStart(fills);
+        const done = await fills.wait(job.job_id);
+        expect(done).toMatchObject({ state: "done", result: { rows_answered: 2, not_written: 0 } });
+        expect(state.table.rows[1].cells.method).toBeDefined();
     });
 });
 
@@ -895,6 +931,8 @@ describe("shutdown", () => {
         expect(state.table.rows[1].cells.method).toBeUndefined();
         // Nothing of the abandoned job reaches a plugin that may have reloaded.
         expect(state.snapshots.length).toBe(published);
+        // Not even a render: the next open of the table catches the snapshot up.
+        expect(state.renders).toEqual([]);
     });
 });
 

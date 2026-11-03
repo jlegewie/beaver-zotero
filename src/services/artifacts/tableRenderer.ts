@@ -6,14 +6,16 @@
  * full-text index. The store renders inside every write, right after the
  * commit and under the same lock and admitted mutation, so a render never
  * overlaps another operation and a snapshot is never behind a write that has
- * returned. A failed render never fails the write: the store reports it as
- * bookkeeping, and opening the table notices the stale HTML and renders again.
+ * returned. The exception is a fill: its commits skip the render and the job
+ * renders once when it ends. A failed render never fails the write: the store
+ * reports it as bookkeeping, and opening the table notices the stale HTML and
+ * renders again.
  *
  * The render is also what makes a change sync. Zotero notices a modified
  * attachment by its main file, so a change that touched only `table.json`
  * would never leave the device; the HTML carries the digests of the spec and
- * of the whole `table.json` as root attributes, so every commit changes the
- * main file. After writing it the renderer queues full-text indexing, marks
+ * of the whole `table.json` as root attributes, so every render changes the
+ * main file, and a fill syncs once, when it ends. After writing it the renderer queues full-text indexing, marks
  * the attachment for upload and saves the item, then records both digests in
  * `bookkeeping.json`.
  */

@@ -105,6 +105,12 @@ export interface TableFillDeps {
         /** The job's commit check, run at queue admission and by the store just before the write. */
         mayCommit: () => void,
     ): Promise<TableFillCommitResult>;
+    /**
+     * Renders the table's snapshot if it is behind. Commits do not render (each
+     * render rebuilds the whole snapshot and marks the table for upload), so a
+     * job that wrote calls this once when it ends.
+     */
+    render(target: TableFillTarget): Promise<void>;
     account: {
         generation(): number;
         signedIn(): boolean;
@@ -242,6 +248,8 @@ class FillJob {
     private pendingCommit: PendingRow[] = [];
     private commitTimer?: ReturnType<typeof setTimeout>;
     private commitChain: Promise<void> = Promise.resolve();
+    /** A commit landed, so the snapshot is behind until the job renders it. */
+    private wrote = false;
     private wakers = new Set<() => void>();
     private finished!: Promise<void>;
     private result: TableFillResult = {
@@ -757,6 +765,7 @@ class FillJob {
                 logger(`tableFills: commit refused for ${this.plan.target.key}: ${result.error.code} ${result.error.message}`, 1);
                 return 'refused';
             }
+            this.wrote = true;
             for (const skip of result.skipped) {
                 if (!skip.column) continue;
                 this.result.skipped_cells[skip.reason] = (this.result.skipped_cells[skip.reason] ?? 0) + 1;
@@ -798,6 +807,10 @@ class FillJob {
 
     private async finish(): Promise<void> {
         if (this.stopReason) this.result.stopped_by = this.stopReason;
+        // Commits skip the render; the snapshot, and with it the table's sync,
+        // catches up once here, before the job reads as done. After a shutdown
+        // the next open of the table renders instead.
+        if (this.wrote && !this.abandoned) await this.renderSnapshot();
         if (!this.abandoned) {
             try {
                 const { spec } = await this.deps.readTable(this.plan.target);
@@ -812,6 +825,14 @@ class FillJob {
         // A chat run's tool call keeps the result, whether or not a request still waits on it.
         this.owner.agent.noteEnded(this.snapshot);
         if (this.charged > 0 && !this.abandoned) this.deps.account.refreshProfile();
+    }
+
+    private async renderSnapshot(): Promise<void> {
+        try {
+            await this.deps.render(this.plan.target);
+        } catch (error) {
+            logger(`tableFills: the end-of-fill render of ${this.plan.target.key} failed: ${String(error)}`, 1);
+        }
     }
 }
 
