@@ -143,6 +143,13 @@ version (`collapse_key: tab:<session>`); a destructive one (a removal, a type
 change, a removed option) passes `seal`. The result says whether a version was
 `committed`, so a no-op edit offers no Undo. An `operation` seals by default.
 
+While a fill of the table runs, the tab offers no edits and Undo waits: a fill
+commits one version, and a write between its commits would split it in two.
+The store refuses every user write meanwhile (tab and cell edits, revert, Undo,
+recovery) with `fill_running`, checked under the table lock, so a write queued
+behind a fill commit does not land. The fill's commits and model edits are the
+agent's and are not refused.
+
 The tab's cell edits go through `applyUserCellEdit(ref, edits, { session })`
 (`table_applyUserCellEdit`), with the same `applyTableEdit` and the tab
 session's collapse key. Each edit becomes engine mutations under the lock:

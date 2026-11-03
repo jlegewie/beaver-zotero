@@ -95,7 +95,9 @@ export type TableItemErrorCode =
     /** A stored version's file disagrees with what the version log recorded. */
     | 'version_corrupt'
     /** An `edit` whose `seq` is older than its session's last commit. */
-    | 'stale_seq';
+    | 'stale_seq'
+    /** A user's write while a fill of the table runs. */
+    | 'fill_running';
 
 export class TableItemError extends Error {
     readonly code: TableItemErrorCode;

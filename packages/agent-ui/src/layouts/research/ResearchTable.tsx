@@ -63,16 +63,11 @@ const COLUMN_TYPE_LABELS: Array<{ type: ResearchColumnType; label: string; icon:
 
 /**
  * The structural edit controls. Each is offered when its callback is
- * present; with `disabledReason` (a read-only library) they show disabled
- * with that reason.
+ * present; with `disabledReason` (a read-only library, a running fill) they
+ * show disabled with that reason.
  */
 export interface ResearchTableEditing {
     disabledReason?: string;
-    /**
-     * Why a column's question cannot change now (a fill is answering it):
-     * disables Edit column… and Change type.
-     */
-    questionDisabledReason?: string;
     onTitle?(title: string): void;
     onDescription?(description: string): void;
     /** The column menu's Edit column…; also the (+) after the last column. */
@@ -354,9 +349,8 @@ export function ResearchTable({
         (column: Column): MenuItem[] => {
             const items: MenuItem[] = [];
             const disabled = !!editing?.disabledReason;
-            const questionDisabled = disabled || !!editing?.questionDisabledReason;
             if (editing?.onEditColumn)
-                items.push({ label: "Edit column…", icon: EditIcon, disabled: questionDisabled, onClick: () => editing.onEditColumn!(column) });
+                items.push({ label: "Edit column…", icon: EditIcon, disabled, onClick: () => editing.onEditColumn!(column) });
             if (fill) {
                 const cells = fillable.get(column.id) ?? 0;
                 items.push({
@@ -378,7 +372,7 @@ export function ResearchTable({
                 items.push({
                     label: "Change type",
                     icon: current?.icon ?? TextIcon,
-                    disabled: questionDisabled,
+                    disabled,
                     onClick: () => {},
                     submenu: COLUMN_TYPE_LABELS.filter((entry) => entry.type !== column.type).map((entry) => ({
                         label: entry.label,

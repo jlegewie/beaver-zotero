@@ -39,6 +39,7 @@ import {
     applyTableEdit,
     undoTableEdit,
     TABLE_UNDO_CHANGED,
+    TABLE_FILL_RUNNING_MESSAGE,
     createTableFromRequest,
     TABLE_VERSION_RETENTION,
     type TableHistory,
@@ -46,7 +47,10 @@ import {
 } from '../../../src/services/artifacts/tableStore';
 import { getTableLocalCommands, getTableShadowRestore, tableLocalCommands, tableWriteLocks } from '../../../src/services/artifacts/tablesApi';
 import * as recoveryShadow from '../../../src/services/artifacts/recoveryShadow';
-import { applyUserTableEditUncoordinated as applyUserEdit } from '../../../src/services/artifacts/tableUserEdits';
+import {
+    applyUserCellEditUncoordinated as applyUserCellEdit,
+    applyUserTableEditUncoordinated as applyUserEdit,
+} from '../../../src/services/artifacts/tableUserEdits';
 
 // ---------------------------------------------------------------------------
 // A temp directory standing in for the attachment's storage directory
@@ -1223,6 +1227,27 @@ describe("the tab's structural edits", () => {
         const removed = await applyUserEdit(ref, { remove_columns: ['note'] }, { seal: true, change: 'Removed column “Note”' });
         expect(removed).toMatchObject({ ok: true, committed: true, version: 3, changes: [{ op: 'remove_column', cleared: 1 }] });
         expect((await listVersions(ref)).at(-1)).toMatchObject({ version: 3, sealed: true, change: 'Removed column “Note”' });
+    });
+
+    it('refuse every user write while a fill of the table runs, writing nothing', async () => {
+        expectOk(await writeTable(ref, demoSpec('Two'), { actor: 'user' }));
+        const jobForTable = vi.fn(() => ({ state: 'running' }));
+        (Zotero as any).Beaver = { ...(Zotero as any).Beaver, tableFills: { jobForTable } };
+        const before = await readFile(tablePath(), 'utf8');
+        const refused = { code: 'fill_running', message: TABLE_FILL_RUNNING_MESSAGE };
+        await expect(applyUserEdit(ref, { title: 'Renamed' }, { seal: false, session: 's1' })).rejects.toMatchObject(refused);
+        await expect(applyUserCellEdit(ref, [{ op: 'clear', row: 'r1', column: 'note' }], { session: 's1' })).rejects.toMatchObject(refused);
+        await expect(revertTable(ref, 1, { actor: 'user' })).rejects.toMatchObject(refused);
+        await expect(undoTableEdit(ref, { version: 2 }, { actor: 'user' })).rejects.toMatchObject(refused);
+        expect(await readFile(tablePath(), 'utf8')).toBe(before);
+        expect(jobForTable).toHaveBeenCalledWith(ref);
+
+        // The fill's own commits are the agent's.
+        expectOk(await writeTable(ref, demoSpec('Filled'), { actor: 'agent', collapse_key: 'job-1' }));
+
+        // Once the fill ends, the user's edit lands.
+        jobForTable.mockReturnValue({ state: 'done' });
+        expect(await applyUserEdit(ref, { title: 'Renamed' }, { seal: false, session: 's1' })).toMatchObject({ ok: true, committed: true });
     });
 
     it('refuse an id the table does not have, writing nothing', async () => {

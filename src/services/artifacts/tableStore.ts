@@ -357,6 +357,9 @@ export const TABLE_VERSION_RETENTION_BYTES = 4 * 1024 * 1024;
  */
 export const TABLE_VERSION_RETENTION_FLOOR = 3;
 
+/** What a user's write answers while a fill of the table runs. */
+export const TABLE_FILL_RUNNING_MESSAGE = 'A fill of this table is running. Try again when it ends.';
+
 /** The line version 1 carries when the caller does not supply one. */
 const CREATED_CHANGE = 'Created the table';
 
@@ -1481,6 +1484,15 @@ async function commitWrite(
     options: CommitOptions = {}
 ): Promise<TableWriteResult> {
     const { expectedVersion, accessGuard, carryRevisions = false, record, render = true } = options;
+    // A fill commits one version, under its job's collapse key; a user's write
+    // between two of its commits (a tab edit, a revert, an Undo, a recovery)
+    // would split it. Checked under the lock, so a write queued behind a fill
+    // commit is refused too. The fill's own commits and model edits are the
+    // agent's.
+    if (meta.actor === 'user') {
+        const job = Zotero.Beaver?.tableFills?.jobForTable(ref);
+        if (job && job.state !== 'done') throw new TableItemError(TABLE_FILL_RUNNING_MESSAGE, 'fill_running');
+    }
     const reconciled = await reconcileLog(item, current);
     if (reconciled.repairs.length) {
         logger(

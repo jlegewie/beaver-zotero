@@ -78,7 +78,9 @@ export function renderTableDocumentActions(
         try {
             await operation();
         } catch (error) {
-            status.textContent = `${tableActionErrorMessage(error, ref)}${restoring ? " Revert was not confirmed. Check the current table before trying again." : ""}`;
+            // A refusal (a fill is running) wrote nothing, so there is nothing to check.
+            const refused = (error as { code?: string } | null)?.code === "fill_running";
+            status.textContent = `${tableActionErrorMessage(error, ref)}${restoring && !refused ? " Revert was not confirmed. Check the current table before trying again." : ""}`;
         } finally {
             busy = false;
             controls.forEach((control) => {

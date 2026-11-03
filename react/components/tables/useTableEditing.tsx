@@ -80,9 +80,9 @@ export function useTableEditing({
 }: {
     tableRef: TableRef;
     spec: TableSpec;
-    /** Why the table cannot be edited (a read-only library). */
+    /** Why the table cannot be edited (a read-only library, a running fill). */
     disabledReason?: string;
-    /** A fill of this table is running: Undo and question changes wait for it to end. */
+    /** A fill of this table is running: Undo waits for it to end. */
     fillRunning: boolean;
     surfaceWindow: Window | null;
     portalContainer: HTMLElement | null;
@@ -384,7 +384,6 @@ export function useTableEditing({
 
     const editing: ResearchTableEditing = {
         disabledReason,
-        questionDisabledReason: fillRunning ? FILL_RUNNING_REASON : undefined,
         onTitle: (title) => void run({ title }, { change: 'Renamed the table' }),
         onDescription: (description) => void run({ description }, { change: 'Edited the description' }),
         onEditColumn: (column) => setEditor({ column, initial: columnEditorDraft(column) }),

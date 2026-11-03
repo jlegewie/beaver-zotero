@@ -211,6 +211,13 @@ it("selects a live renderer for a standalone reader and never calls a closed own
     expect(() => getTableLocalCommands(origin)).toThrow("unavailable");
 });
 
+it("says plainly that a revert waits for a running fill", async () => {
+    await selectVersion();
+    revert.mockRejectedValueOnce({ code: "fill_running", message: "A fill of this table is running. Try again when it ends." });
+    await click("restore-version");
+    expect(root.textContent).toContain("A fill of this table is running. Try again when it ends.");
+    expect(root.textContent).not.toContain("Revert was not confirmed");
+});
 it("addresses exclusion errors to the user during version restore", async () => {
     await selectVersion();
     revert.mockRejectedValueOnce({ code: "library_excluded", message: "Tell the user to re-enable access." });
