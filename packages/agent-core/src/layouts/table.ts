@@ -1185,9 +1185,18 @@ export function utf8Length(text: string): number {
     return bytes;
 }
 
-/** UTF-8 length of the compact JSON form, the measure behind every byte cap. */
+/**
+ * UTF-8 length of the compact JSON form, the measure behind every byte cap.
+ *
+ * Runs on every write of a whole table, so the ASCII runs are stripped by a
+ * regular expression and only the rest is counted in script. Stripping never
+ * joins two halves of a surrogate pair, because `JSON.stringify` escapes lone
+ * surrogates.
+ */
 export function jsonBytes(value: unknown): number {
-    return utf8Length(JSON.stringify(value) ?? "");
+    const json = JSON.stringify(value) ?? "";
+    const wide = json.replace(/[^\u0080-\uffff]+/g, "");
+    return json.length - wide.length + utf8Length(wide);
 }
 
 /** Length in code points, the unit the backend's character caps count in. */

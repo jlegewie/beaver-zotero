@@ -54,8 +54,11 @@ import {
     detectTableSyncConflict,
     lastTableShadow,
     readTableShadow,
+    readTableShadowSpec,
+    TABLE_SHADOW_MAX_PAYLOAD_BYTES,
     TABLE_SHADOW_RETENTION,
 } from '../../../src/services/artifacts/recoveryShadow';
+import { gzipString } from '../../../src/utils/gzip';
 import {
     checkShadowRestore,
     createTable,
@@ -87,18 +90,28 @@ let savedIOUtils: any;
 let savedPathUtils: any;
 let savedZotero: any;
 
+const LZ4_MARKER = 'mozLz40\0';
+
 /** Real file I/O, so the payloads are genuinely written, moved and deleted. */
 const realIOUtils = {
     exists: async (path: string) => existsSync(path),
     read: async (path: string) => new Uint8Array(await readFile(path)),
-    readUTF8: async (path: string) => readFile(path, 'utf8'),
+    // `compress` stands in for Gecko's LZ4 with a marker, so a payload read
+    // without `decompress` does not parse.
+    readUTF8: async (path: string, options?: { decompress?: boolean }) => {
+        const text = await readFile(path, 'utf8');
+        if (!options?.decompress) return text;
+        if (!text.startsWith(LZ4_MARKER)) throw new Error(`${path} is not compressed`);
+        return text.slice(LZ4_MARKER.length);
+    },
     write: async (path: string, bytes: Uint8Array) => {
         await writeFile(path, bytes);
         return bytes.byteLength;
     },
-    writeUTF8: async (path: string, text: string) => {
-        await writeFile(path, text, 'utf8');
-        return text.length;
+    writeUTF8: async (path: string, text: string, options?: { compress?: boolean }) => {
+        const stored = options?.compress ? LZ4_MARKER + text : text;
+        await writeFile(path, stored, 'utf8');
+        return Buffer.byteLength(stored);
     },
     move: async (from: string, to: string) => rename(from, to),
     remove: async (path: string, options?: { ignoreAbsent?: boolean }) => {
@@ -469,6 +482,47 @@ describe('recording what this device wrote', () => {
         const after = await readTableShadow(ref);
         expect(after.find((entry) => entry.version === 2)!.payloadPath).toBe(payload);
         expect(existsSync(payload)).toBe(true);
+    });
+
+    it('stores the spec compressed and reads it back', async () => {
+        await createTable({ spec: demoSpec('One') });
+        const written = expectOk(await writeTable(ref, demoSpec('Two'), { actor: 'user' }));
+
+        const shadow = (await lastTableShadow(ref))!;
+        expect(shadow.payloadPath!.endsWith('.json.lz4')).toBe(true);
+        expect((await readFile(shadow.payloadPath!, 'utf8')).startsWith(LZ4_MARKER)).toBe(true);
+        expect(shadow.payloadBytes).toBe((await readFile(shadow.payloadPath!)).byteLength);
+        expect(await readTableShadowSpec(shadow)).toEqual(written.spec);
+    });
+
+    it('still restores a payload an earlier build gzipped', async () => {
+        await createTable({ spec: demoSpec('One') });
+        const written = expectOk(await writeTable(ref, demoSpec('Two'), { actor: 'user' }));
+        const shadow = (await lastTableShadow(ref))!;
+        const legacy = shadow.payloadPath!.replace(/\.lz4$/, '.gz');
+        await writeFile(legacy, gzipString(JSON.stringify(written.spec)));
+
+        expect(await readTableShadowSpec({ ...shadow, payloadPath: legacy })).toEqual(written.spec);
+    });
+
+    it('records a version over the size cap without a payload, and leaves no file behind', async () => {
+        await createTable({ spec: demoSpec('One') });
+        const directory = join(profileDir, 'beaver', 'table-shadow', String(LIBRARY_ID));
+        const before = await readdir(directory);
+        const writeUTF8 = (globalThis as any).IOUtils.writeUTF8;
+        (globalThis as any).IOUtils.writeUTF8 = async (path: string, text: string, options?: unknown) => {
+            await writeUTF8(path, text, options);
+            return TABLE_SHADOW_MAX_PAYLOAD_BYTES + 1;
+        };
+        try {
+            expectOk(await writeTable(ref, demoSpec('Two'), { actor: 'user' }));
+        } finally {
+            (globalThis as any).IOUtils.writeUTF8 = writeUTF8;
+        }
+
+        const shadow = (await lastTableShadow(ref))!;
+        expect(shadow).toMatchObject({ version: 2, payloadPath: null, payloadBytes: 0 });
+        expect(await readdir(directory)).toEqual(before);
     });
 
     it('does not fail a write when the shadow cannot be recorded', async () => {

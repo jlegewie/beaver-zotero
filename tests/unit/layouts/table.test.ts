@@ -41,6 +41,7 @@ import {
     type Column,
     type Row,
     type TableSpec,
+    jsonBytes,
 } from "@beaver/agent-core/layouts/table";
 
 function row(id: string, cells: Row["cells"]): Row {
@@ -1342,5 +1343,23 @@ describe("coverage", () => {
             filled: 1,
             empty: 0,
         });
+    });
+});
+
+describe("jsonBytes", () => {
+    it("counts the UTF-8 bytes of the compact JSON form", () => {
+        const values: unknown[] = [
+            "plain ascii",
+            "café — naïve",
+            "日本語のテキスト",
+            "emoji 🦫 and 𝔘𝔫𝔦𝔠𝔬𝔡𝔢",
+            "lone \ud800 high, lone \udc00 low, and a\ud800b",
+            { quote: "Zoë said “hi”", boxes: [[1, 2, 3, 4]], n: null },
+            [],
+            undefined,
+        ];
+        for (const value of values) {
+            expect(jsonBytes(value)).toBe(Buffer.byteLength(JSON.stringify(value) ?? ""));
+        }
     });
 });
