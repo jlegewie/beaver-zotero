@@ -76,6 +76,8 @@ describe('DocumentExtractExecutor OCR continuation', () => {
                 key: 'SCANNED1',
                 loadAllData: async () => undefined,
                 isRegularItem: () => false,
+                isAttachment: () => true,
+                attachmentContentType: 'application/pdf',
                 attachmentHash: Promise.resolve('a'.repeat(32)),
             })),
         };

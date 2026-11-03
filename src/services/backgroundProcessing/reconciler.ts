@@ -23,6 +23,7 @@ import type { AttachmentRef } from './issues';
 import { enqueueOcrJob, maybeEnqueueOcrJob } from '../ocr/enqueueOcr';
 import { getSystemIdleTimeMs } from '../../utils/idleService';
 import { safeIsInTrash } from '../../utils/zoteroItemUtils';
+import { loadIsTableAttachment, tableAttachmentSql } from '../artifacts/tableItemIdentity';
 import { processableAttachmentSql } from '../../utils/attachmentFiles';
 import { logger } from '@beaver/agent-core/platform/logger';
 import {
@@ -57,7 +58,7 @@ interface LibraryCursor {
 
 const IDLE_THRESHOLD_MS = 30_000;
 /** Attachments a library scan enumerates; `getReadableContentKind()` makes the final call. */
-const PROCESSABLE_ATTACHMENT_SQL = processableAttachmentSql('IA.contentType', 'IA.path');
+const PROCESSABLE_ATTACHMENT_SQL = processableAttachmentSql('IA');
 
 /**
  * Terminal reasons that say "the bytes were not reachable", not "these bytes
@@ -246,8 +247,11 @@ export class ReconcilerService {
                 const kind = item && safeIsInTrash(item) === false ? getReadableContentKind(item) : null;
                 // Text has independent reading outcomes; only stale processing state needs cleanup.
                 if (kind === 'text' && !await db.getAttachmentProcessingState(ref.libraryID, ref.key)) continue;
-                if (!item || (kind !== 'pdf' && kind !== 'epub' && kind !== 'snapshot')) {
-                    await this.removeAttachment(db, ref.libraryID, ref.key);
+                // A Beaver table's snapshot is rewritten on every table write and is
+                // never processed; removal clears state recorded before that rule.
+                if (!item || (kind !== 'pdf' && kind !== 'epub' && kind !== 'snapshot')
+                    || (kind === 'snapshot' && await loadIsTableAttachment(item))) {
+                    await this.removeAttachments(db, ref.libraryID, [ref.key]);
                     continue;
                 }
                 if (!backgroundProcessingEnabled()) continue;
@@ -264,9 +268,10 @@ export class ReconcilerService {
         }
     }
 
-    private async removeAttachment(db: QueueDB, libraryId: number, key: string): Promise<void> {
-        await db.retireAttachmentProcessingStates(libraryId, [key]);
-        await Zotero.Beaver?.documentCache?.invalidate(libraryId, key);
+    /** Retire processing state (queueing remote untag) and drop cached content. */
+    private async removeAttachments(db: QueueDB, libraryId: number, keys: string[]): Promise<void> {
+        await db.retireAttachmentProcessingStates(libraryId, keys);
+        for (const key of keys) await Zotero.Beaver?.documentCache?.invalidate(libraryId, key);
     }
 
     /** Forced full pass, awaited: used by the dev endpoint and live tests. */
@@ -628,7 +633,7 @@ export class ReconcilerService {
 
         // Heal missed delete notifications while a full enumeration is already
         // happening. Untag work is persisted with the local ledger rows' removal.
-        await db.retireAttachmentProcessingStates(libraryId, ledgerRows
+        await this.removeAttachments(db, libraryId, ledgerRows
             .filter((row) => !liveKeys.has(row.zoteroKey)).map((row) => row.zoteroKey));
 
         if (!isBackgroundProcessingLibraryEnabled(libraryId)) return;
@@ -923,7 +928,11 @@ export class ReconcilerService {
         }
     }
 
-    /** Heal missed deletions for on-demand reads, including attachments outside the index pipeline. */
+    /**
+     * Heal missed deletions for on-demand reads, including attachments outside
+     * the index pipeline. Beaver tables count as gone, so state recorded for
+     * one before tables were excluded is dropped even while processing is paused.
+     */
     private async reconcileReadingState(db: QueueDB, libraryId: number, generation: number): Promise<void> {
         const readingKeys = await db.getAttachmentReadingKeysByLibrary(libraryId);
         if (readingKeys.length === 0) return;
@@ -933,7 +942,8 @@ export class ReconcilerService {
              JOIN itemAttachments IA USING (itemID)
              WHERE I.libraryID = ?
                AND I.itemID NOT IN (SELECT itemID FROM deletedItems)
-               AND NOT EXISTS (SELECT 1 FROM deletedItems D WHERE D.itemID = IA.parentItemID)`,
+               AND NOT EXISTS (SELECT 1 FROM deletedItems D WHERE D.itemID = IA.parentItemID)
+               AND NOT ${tableAttachmentSql('IA')}`,
             [libraryId],
             { onRow: (row: any) => liveKeys.add(row.getResultByIndex(0)) },
         );
@@ -941,8 +951,7 @@ export class ReconcilerService {
             if (this.cancelled(generation) || !isBackgroundProcessingLibraryEnabled(libraryId)) return;
             if (!liveKeys.has(key)) {
                 // Preserve remote cleanup while dropping either local observation.
-                await db.retireAttachmentProcessingStates(libraryId, [key]);
-                await Zotero.Beaver?.documentCache?.invalidate(libraryId, key);
+                await this.removeAttachments(db, libraryId, [key]);
             }
         }
     }

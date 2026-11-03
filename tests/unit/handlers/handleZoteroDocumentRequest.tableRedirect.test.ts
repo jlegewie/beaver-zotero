@@ -36,7 +36,7 @@ import { resolveToReadableAttachment } from '../../../src/services/documentExtra
 import { getReadableContentKind } from '../../../src/services/documentExtraction/attachmentResolution';
 import { TABLE_TAG, TABLE_URL_PREFIX } from '../../../src/services/artifacts/tableItemIdentity';
 
-/** An item that satisfies the real `isTableItem` marks. */
+/** An item that satisfies the real `isTableItem` marks (and so `isTableAttachment`). */
 function makeTableItem(overrides: Record<string, unknown> = {}) {
     return {
         id: 7,
@@ -100,11 +100,24 @@ describe('handleZoteroDocumentRequest table redirect', () => {
         expect(getReadableContentKind(makeTableItem() as any)).toBe('snapshot');
     });
 
-    it('leaves an ordinary snapshot attachment on the extraction path', async () => {
-        // Same item without the tag: not one of ours, so the redirect must not fire.
+    it('redirects a table whose cosmetic tag was removed', async () => {
         (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi
             .fn()
             .mockResolvedValue(makeTableItem({ hasTag: () => false }));
+
+        const response = await handleZoteroDocumentRequest(documentRequest());
+
+        expect(response.error_code).toBe('beaver_table');
+    });
+
+    it('leaves an ordinary snapshot attachment on the extraction path', async () => {
+        // Same shape with a web URL: not one of ours, so the redirect must not fire.
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi
+            .fn()
+            .mockResolvedValue(makeTableItem({
+                hasTag: () => false,
+                getField: (field: string) => (field === 'url' ? 'https://example.org/page' : ''),
+            }));
 
         const response = await handleZoteroDocumentRequest(documentRequest());
 

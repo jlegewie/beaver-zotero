@@ -215,14 +215,55 @@ export function isTableItem(item: Zotero.Item | null | undefined): boolean {
     return isTableAttachment(item) && !!item?.hasTag(TABLE_TAG);
 }
 
-/** Candidate attachment for explicit addressing; the embedded document is checked on read. */
+/** The primary-data half of {@link isTableAttachment}: a top-level HTML snapshot. */
+function hasTableShape(item: Zotero.Item): boolean {
+    return item.isAttachment()
+        && item.attachmentContentType === 'text/html'
+        && item.isTopLevelItem()
+        && item.attachmentLinkMode === Zotero.Attachments.LINK_MODE_IMPORTED_URL;
+}
+
+/**
+ * Candidate attachment for explicit addressing; the embedded document is checked on read.
+ *
+ * Also the boundary of Beaver's document processing: a table is never
+ * extracted, cached or indexed by Beaver, because its state is `table.json`
+ * and the snapshot only renders it. Zotero's own full-text index of the
+ * snapshot is separate and unaffected.
+ */
 export function isTableAttachment(item: Zotero.Item | null | undefined): boolean {
-    if (!item || !item.isAttachment() || item.attachmentContentType !== 'text/html') return false;
-    if (!item.isTopLevelItem()) return false;
-    if (item.attachmentLinkMode !== Zotero.Attachments.LINK_MODE_IMPORTED_URL)
-        return false;
-    if (item.attachmentContentType !== 'text/html') return false;
+    if (!item || !hasTableShape(item)) return false;
     return tableUrlField(item)?.startsWith(TABLE_URL_PREFIX) ?? false;
+}
+
+/**
+ * {@link isTableAttachment} for an item from a lazy path (a Notifier event, a
+ * queued job): loads `itemData` first when the item has a table's shape, so
+ * an unloaded table is not mistaken for an ordinary snapshot.
+ */
+export async function loadIsTableAttachment(item: Zotero.Item): Promise<boolean> {
+    if (!hasTableShape(item)) return false;
+    await item.loadDataType('itemData');
+    return isTableAttachment(item);
+}
+
+/** `itemAttachments.linkMode` of `Zotero.Attachments.LINK_MODE_IMPORTED_URL`; a stored value, so fixed. */
+const IMPORTED_URL_LINK_MODE = 1;
+
+/**
+ * SQL condition matching {@link isTableAttachment} over Zotero's
+ * `itemAttachments` table, for scans that must leave tables out without
+ * loading each item. Built from constants only, so it is safe to inline.
+ *
+ * @param alias - alias of the `itemAttachments` table in the query, e.g. `IA`
+ */
+export function tableAttachmentSql(alias: string): string {
+    return `(${alias}.parentItemID IS NULL AND ${alias}.linkMode = ${IMPORTED_URL_LINK_MODE}`
+        + ` AND ${alias}.contentType = 'text/html' AND EXISTS (SELECT 1 FROM itemData TD`
+        + ` JOIN fields TF ON TF.fieldID = TD.fieldID JOIN itemDataValues TV ON TV.valueID = TD.valueID`
+        + ` WHERE TD.itemID = ${alias}.itemID AND TF.fieldName = 'url'`
+        // Not LIKE: Firefox's SQLite layer rejects a LIKE whose pattern is not a bound parameter.
+        + ` AND SUBSTR(TV.value, 1, ${TABLE_URL_PREFIX.length}) = '${TABLE_URL_PREFIX}'))`;
 }
 
 // ---------------------------------------------------------------------------

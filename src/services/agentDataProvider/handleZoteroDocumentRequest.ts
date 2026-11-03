@@ -56,7 +56,7 @@ import { EXTERNAL_LIBRARY_ID, resolveExternalFile } from '../externalFiles';
 // Identification only — `tableItemIdentity` is the esbuild-safe half of the
 // stored-table subsystem (see its module comment); `tableItem`/`tableStore`
 // must never be imported from here.
-import { isTableItem } from '../artifacts/tableItemIdentity';
+import { isTableAttachment } from '../artifacts/tableItemIdentity';
 import { effectiveMaxFileSizeMB } from '@beaver/agent-core/transport/attachmentLimits';
 import { withWorkerDiagnostics } from './workerDiagnostics';
 import type { ExternalFileRecord } from '../database';
@@ -492,10 +492,12 @@ export async function handleZoteroDocumentRequest(
         // A Beaver table is a snapshot attachment, so search surfaces it and the
         // model reads it like any other document. Extracting it would hand back
         // the rendered HTML instead of the table, so answer with the table's
-        // handle and let the backend point at `read_table`. A table is always a
-        // top-level attachment, so it is the requested item and `loadAllData`
-        // above has loaded the tags and `itemData` that `isTableItem` reads.
-        if (contentKind === 'snapshot' && isTableItem(resolvedItem)) {
+        // handle and let the backend point at `read_table`. The check is the one
+        // `read_table` resolves a table with, so a table whose cosmetic tag was
+        // removed is still never extracted. A table is always a top-level
+        // attachment, so it is the requested item and `loadAllData` above has
+        // loaded the `itemData` that `isTableAttachment` reads.
+        if (contentKind === 'snapshot' && isTableAttachment(resolvedItem)) {
             const handle = modelObjectId(resolvedItem.libraryID, resolvedItem.key);
             return errorResponse(
                 `Attachment '${handle}' is a Beaver table, not a readable document.`,
