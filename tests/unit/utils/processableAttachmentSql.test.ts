@@ -6,6 +6,7 @@ import {
     processableKindFromStoredFields,
 } from '../../../src/utils/attachmentFiles';
 import { getReadableContentKind } from '../../../src/services/documentExtraction/attachmentResolution';
+import { isTableAttachment, TABLE_URL_PREFIX } from '../../../src/services/artifacts/tableItemIdentity';
 
 type ReadableItem = Parameters<typeof getReadableContentKind>[0];
 
@@ -37,8 +38,12 @@ describe('processable attachment SQL', () => {
 
     beforeEach(async () => {
         db = new MockDBConnection();
-        await db.queryAsync('CREATE TABLE itemAttachments (itemID INTEGER PRIMARY KEY, contentType TEXT, path TEXT)');
-        (globalThis as any).Zotero.Attachments = { LINK_MODE_LINKED_URL: 3 };
+        await db.queryAsync(`CREATE TABLE itemAttachments (itemID INTEGER PRIMARY KEY,
+            parentItemID INTEGER, linkMode INTEGER, contentType TEXT, path TEXT)`);
+        await db.queryAsync('CREATE TABLE fields (fieldID INTEGER PRIMARY KEY, fieldName TEXT)');
+        await db.queryAsync('CREATE TABLE itemDataValues (valueID INTEGER PRIMARY KEY, value)');
+        await db.queryAsync('CREATE TABLE itemData (itemID INT, fieldID INT, valueID, PRIMARY KEY (itemID, fieldID))');
+        await db.queryAsync("INSERT INTO fields VALUES (1, 'url'), (2, 'title')");
     });
     afterEach(async () => { await db.closeDatabase(); });
 
@@ -48,12 +53,12 @@ describe('processable attachment SQL', () => {
             for (const path of PATHS) {
                 const id = cases.length + 1;
                 cases.push({ id, contentType, path });
-                await db.queryAsync('INSERT INTO itemAttachments (itemID, contentType, path) VALUES (?, ?, ?)', [id, contentType, path]);
+                await db.queryAsync('INSERT INTO itemAttachments (itemID, linkMode, contentType, path) VALUES (?, 0, ?, ?)', [id, contentType, path]);
             }
         }
         const selected = new Set<number>();
         await db.queryAsync(
-            `SELECT IA.itemID FROM itemAttachments IA WHERE ${processableAttachmentSql('IA.contentType', 'IA.path')}`,
+            `SELECT IA.itemID FROM itemAttachments IA WHERE ${processableAttachmentSql('IA')}`,
             [],
             { onRow: (row: any) => selected.add(row.getResultByIndex(0)) },
         );
@@ -65,6 +70,41 @@ describe('processable attachment SQL', () => {
             expect({ contentType, path, selected: selected.has(id) })
                 .toEqual({ contentType, path, selected: storedKind !== null });
         }
+    });
+
+    it('leaves out exactly the snapshots isTableAttachment identifies as Beaver tables', async () => {
+        const tableUrl = `${TABLE_URL_PREFIX}my-table`;
+        const cases = [
+            { id: 1, parent: null, linkMode: 1, contentType: 'text/html', url: tableUrl },
+            { id: 2, parent: null, linkMode: 1, contentType: 'text/html', url: 'https://example.org/page' },
+            { id: 3, parent: null, linkMode: 1, contentType: 'text/html', url: null },
+            { id: 4, parent: 99, linkMode: 1, contentType: 'text/html', url: tableUrl },
+            { id: 5, parent: null, linkMode: 0, contentType: 'text/html', url: tableUrl },
+            { id: 6, parent: null, linkMode: 1, contentType: 'application/xhtml+xml', url: tableUrl },
+        ];
+        for (const { id, parent, linkMode, contentType, url } of cases) {
+            await db.queryAsync('INSERT INTO itemAttachments VALUES (?, ?, ?, ?, ?)',
+                [id, parent, linkMode, contentType, 'storage:page.html']);
+            if (url) {
+                await db.queryAsync('INSERT INTO itemDataValues VALUES (?, ?)', [id, url]);
+                await db.queryAsync('INSERT INTO itemData VALUES (?, 1, ?)', [id, id]);
+            }
+        }
+        const selected = new Set<number>();
+        await db.queryAsync(`SELECT IA.itemID FROM itemAttachments IA WHERE ${processableAttachmentSql('IA')}`, [],
+            { onRow: (row: any) => selected.add(row.getResultByIndex(0)) });
+
+        for (const { id, parent, linkMode, contentType, url } of cases) {
+            const item = {
+                isAttachment: () => true,
+                isTopLevelItem: () => parent === null,
+                attachmentLinkMode: linkMode,
+                attachmentContentType: contentType,
+                getField: (field: string) => (field === 'url' ? url ?? '' : ''),
+            } as unknown as Zotero.Item;
+            expect({ id, selected: selected.has(id) }).toEqual({ id, selected: !isTableAttachment(item) });
+        }
+        expect(selected.has(1)).toBe(false);
     });
 
     it('classifies mislabelled documents from the stored path extension', () => {
