@@ -99,10 +99,13 @@ const deps: TableFillDeps = {
         // before the commit lands, after its own asynchronous preparation.
         const result = await Zotero.Beaver.libraryOperations.run(
             'table_editTableSession',
-            [target, commit, meta, () => mayCommit()],
+            [target, { ...commit, deferRender: true }, meta, () => mayCommit()],
             { assertCurrent: mayCommit },
         );
         return result.ok ? { ok: true, skipped: result.skipped } : { ok: false, error: result.error };
+    },
+    render: async (target) => {
+        await Zotero.Beaver.libraryOperations.run('table_renderTableIfStale', [target]);
     },
     account: {
         generation: () => Zotero.Beaver.account?.getGeneration() ?? -1,

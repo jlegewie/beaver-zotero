@@ -71,6 +71,7 @@ const operations = {
     table_writeTable: tables.writeTableUncoordinated,
     table_editTable: tables.editTableUncoordinated,
     table_editTableSession: tables.editTableSessionUncoordinated,
+    table_renderTableIfStale: tables.renderTableIfStaleUncoordinated,
     table_openTable: tables.openTableUncoordinated,
     table_restoreShadowVersion: tables.restoreShadowVersionUncoordinated,
     table_revertTable: tables.revertTableUncoordinated,

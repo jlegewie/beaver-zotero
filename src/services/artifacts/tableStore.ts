@@ -22,7 +22,8 @@
  * A write commits in a fixed order: the version file (for a new number),
  * `table.json` — the commit point, after which nothing rejects — then the
  * history and the recovery shadow. The snapshot follows through the renderer,
- * which every write schedules and which never takes this module's lock.
+ * which never takes this module's lock: every write renders, except a fill's
+ * commits, whose job renders once at its end.
  *
  * `beaver/`, not `.beaver/`. The storage directory as a whole is what syncs for
  * a stored file attachment, and Zotero's zip writer (`Zotero.File`'s
@@ -1476,6 +1477,8 @@ interface CommitOptions {
     carryRevisions?: boolean;
     /** The model edit this version records. */
     record?: TableEditRecord;
+    /** Render the snapshot after the commit (default). A fill's commits do not. */
+    render?: boolean;
 }
 
 /**
@@ -1490,7 +1493,7 @@ async function commitWrite(
     meta: TableWriteMeta,
     options: CommitOptions = {}
 ): Promise<TableWriteResult> {
-    const { expectedVersion, accessGuard, carryRevisions = false, record } = options;
+    const { expectedVersion, accessGuard, carryRevisions = false, record, render = true } = options;
     const reconciled = await reconcileLog(item, current);
     if (reconciled.repairs.length) {
         logger(
@@ -1617,7 +1620,7 @@ async function commitWrite(
         )
     );
 
-    if (!(await renderCommitted(ref))) saved = false;
+    if (render && !(await renderCommitted(ref))) saved = false;
 
     return {
         ok: true,
@@ -1701,6 +1704,14 @@ export async function editTableUncoordinated(
 /** One commit of a fill job: its cell writes and row updates. */
 export interface TableEditSessionRequest {
     mutations: TableMutation[];
+    /**
+     * Commit without rendering the snapshot. A fill commits every few rows,
+     * and each render rebuilds the whole snapshot and marks the table for
+     * upload, so the job renders once when it ends
+     * ({@link renderTableIfStaleUncoordinated}). Until then the snapshot is
+     * behind, which opening the table repairs.
+     */
+    deferRender?: boolean;
 }
 
 export type TableEditSessionResult =
@@ -1745,7 +1756,10 @@ export async function editTableSessionUncoordinated(
         const { item, current } = await prepareWrite(ref);
         const applied = applyMutations(requireCurrentSpec(ref, current), request.mutations, { skipMissing: true });
         if (!applied.ok) return { ok: false, error: applied.error };
-        const written = await commitWrite(ref, item, current, applied.spec, meta, { accessGuard });
+        const written = await commitWrite(ref, item, current, applied.spec, meta, {
+            accessGuard,
+            render: !request.deferRender,
+        });
         // Without an expected version the write cannot conflict; an unreadable
         // table was refused above.
         if (!written.ok) throw new TableItemError(`Table ${ref.key} could not be written.`, 'corrupt');
@@ -1760,6 +1774,20 @@ export async function editTableSessionUncoordinated(
     });
     if (result.ok) emitTableUpdated(ref, result.version, meta);
     return result;
+}
+
+/**
+ * Renders the snapshot when its last render does not cover the committed
+ * table: how a fill job brings the snapshot, the upload mark and the item up
+ * to date once at its end. Returns whether the snapshot is current afterwards.
+ */
+export async function renderTableIfStaleUncoordinated(ref: TableRef): Promise<boolean> {
+    requireWritable(ref);
+    return withTableLock(ref, async () => {
+        const item = await resolveTableItem(ref);
+        requireWritable(ref);
+        return (await renderIsCurrent(item)) || renderCommitted(ref);
+    });
 }
 
 /** The identity of a model edit, so a repeat of it applies once. */

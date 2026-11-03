@@ -29,6 +29,7 @@ import {
     createTable,
     editTable,
     editTableSessionUncoordinated,
+    renderTableIfStaleUncoordinated,
     listVersions,
     openTable,
     readTable,
@@ -2768,6 +2769,30 @@ describe('fill commits', () => {
         expect(spec.rows[0].cells.note.value).toEqual({ kind: 'text', text: 'Filled' });
         const html = await readFile(htmlPath, 'utf8');
         expect(html).toContain(`data-beaver-file-sha256="${await sha256(await readFile(tablePath(), 'utf8'))}"`);
+    });
+
+    it('leaves the snapshot behind on a commit that defers its render, until the job renders it once', async () => {
+        const before = await readFile(htmlPath, 'utf8');
+        item.saveTx.mockClear();
+        const result = await editTableSessionUncoordinated(
+            ref,
+            { mutations: [{ op: 'set_cells', cells: [answer('r1', 'Deferred')] }] as any, deferRender: true },
+            meta as any,
+        );
+        expect(result).toMatchObject({ ok: true, version: 2, saved: true });
+        expect((await readTable(ref)).spec.rows[0].cells.note.value).toEqual({ kind: 'text', text: 'Deferred' });
+        expect(await readFile(htmlPath, 'utf8')).toBe(before);
+        expect(item.saveTx).not.toHaveBeenCalled();
+
+        expect(await renderTableIfStaleUncoordinated(ref)).toBe(true);
+        const fileSha = await sha256(await readFile(tablePath(), 'utf8'));
+        expect(await readFile(htmlPath, 'utf8')).toContain(`data-beaver-file-sha256="${fileSha}"`);
+        expect(item.attachmentSyncState).toBe(0);
+        expect(item.saveTx).toHaveBeenCalledTimes(1);
+
+        // Already current: nothing to render again.
+        expect(await renderTableIfStaleUncoordinated(ref)).toBe(true);
+        expect(item.saveTx).toHaveBeenCalledTimes(1);
     });
 
     it('collapses every commit of one job into one retained version', async () => {
