@@ -69,18 +69,12 @@ function describeFilter(filter: Filter): string {
             return filter.value ? "yes" : "no";
         case "empty":
             return filter.empty ? "no value" : "has a value";
-        case "range":
-            return [filter.min, filter.max]
-                .filter((v) => v != null)
-                .join(" – ");
     }
 }
 
 /**
  * The filter menu is built from the spec, not configured per surface: a select
- * column offers its categories, a boolean column offers yes/no. Range filters
- * exist in the state hook but have no control yet — an honest gap rather than
- * a half-built one.
+ * column offers its categories, a boolean column offers yes/no.
  */
 export function buildFilterMenu(
     table: TableSpec,

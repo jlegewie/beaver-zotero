@@ -43,7 +43,7 @@ export function columnEditorDraft(column: Column): ColumnEditorDraft {
         column: {
             key: column.id,
             header: column.header,
-            type: isEditableType(column.type) ? column.type : 'text',
+            type: columnTypeOf(column.type).value,
             description: column.description ?? '',
             options,
         },
@@ -54,10 +54,6 @@ export function columnEditorDraft(column: Column): ColumnEditorDraft {
 /** An empty draft for a new column. */
 export function newColumnDraft(type: TableEditColumnType = 'text'): ColumnEditorDraft {
     return { column: { key: 'new', header: '', type, description: '', options: [] }, labels: {} };
-}
-
-function isEditableType(type: string): type is TableEditColumnType {
-    return type === 'text' || type === 'date' || type === 'boolean' || type === 'select';
 }
 
 function draftOptions(draft: DraftColumn) {

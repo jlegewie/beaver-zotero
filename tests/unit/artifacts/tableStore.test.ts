@@ -2656,6 +2656,13 @@ describe('the edit operations', () => {
         expect(versions.at(-1)).toMatchObject({ version: 2, sealed: true, operation_id: 'edit-1' });
     });
 
+    it('refuse a date question column: a time is a text column', async () => {
+        const response = await edit({ add_columns: [{ header: 'Data end', type: 'date', description: 'In which year does the data end?' }] }, 'edit-date');
+        expect(response).toMatchObject({ ok: false });
+        expect((response as { error?: string }).error).toContain('a date is a text column');
+        expect((await listVersions(ref)).at(-1)?.operation_id).not.toBe('edit-date');
+    });
+
     it('answer a repeat with the same id from its version, and refuse the id reused for another edit', async () => {
         await edit({ title: 'Once' });
         const repeat = await edit({ title: 'Once' });
@@ -2718,6 +2725,18 @@ describe('the edit operations', () => {
         });
         expect(run).not.toHaveBeenCalled();
         run.mockRestore();
+    });
+
+    it('refuse a preview with a date question column', async () => {
+        const response = await handleArtifactRequest({
+            event: 'artifact_request',
+            request_id: 'preview-date',
+            op: 'preview',
+            sources: [{ id: 's1', type: 'items', ids: ['u-AAAAAAAA'] }],
+            columns: [{ header: 'Data end', type: 'date', description: 'In which year does the data end?' }],
+        });
+        expect(response).toMatchObject({ ok: false, error_code: 'invalid_edit' });
+        expect((response as { error?: string }).error).toContain('a date is a text column');
     });
 
     it('refuse a preview whose column the engine refuses', async () => {

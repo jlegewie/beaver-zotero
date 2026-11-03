@@ -19,8 +19,8 @@ export function editsAsList(column: Column): boolean {
 }
 
 /**
- * The editor that opens on a cell (section 5's user cells). A text or date
- * cell gets the answer, an optional note ("Why you changed it"), the promise
+ * The editor that opens on a cell (section 5's user cells). A text cell
+ * gets the answer, an optional note ("Why you changed it"), the promise
  * that fills won't change it, Cancel and Save; a Choice or Yes / no cell gets
  * its options, "Not reported" and "Clear cell", each saving at once.
  *
@@ -64,10 +64,7 @@ function useOutsidePress(ref: React.RefObject<HTMLElement>, onPress: () => void)
 
 function initialText(cell: Cell | undefined): string {
     const value = cell?.outcome === "answered" ? cell.value : undefined;
-    if (!value) return "";
-    if (value.kind === "text") return value.text;
-    if (value.kind === "date") return value.value;
-    return "";
+    return value?.kind === "text" ? value.text : "";
 }
 
 function TextEditor({
@@ -82,14 +79,13 @@ function TextEditor({
     onCancel(): void;
 }): React.ReactElement {
     const rootRef = useRef<HTMLDivElement>(null);
-    const answerRef = useRef<HTMLTextAreaElement & HTMLInputElement>(null);
+    const answerRef = useRef<HTMLTextAreaElement>(null);
     const initial = initialText(cell);
     const initialNote = cell?.provenance === "user" ? (cell.reasoning ?? "") : "";
     const [answer, setAnswer] = useState(initial);
     const [note, setNote] = useState(initialNote);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const isDate = column.type === "date";
     const changed = answer !== initial || note !== initialNote;
 
     useLayoutEffect(() => {
@@ -119,7 +115,7 @@ function TextEditor({
         if (!trimmed) return;
         void save({
             op: "answer",
-            value: isDate ? { kind: "date", value: trimmed } : { kind: "text", text: trimmed },
+            value: { kind: "text", text: trimmed },
             note: noteText,
         });
     };
@@ -129,7 +125,7 @@ function TextEditor({
             event.preventDefault();
             event.stopPropagation();
             onCancel();
-        } else if (event.key === "Enter" && (event.metaKey || event.ctrlKey || (isDate && event.target === answerRef.current))) {
+        } else if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
             event.preventDefault();
             submit();
         }
@@ -146,26 +142,14 @@ function TextEditor({
         >
             <label className="rt-cell-editor-field">
                 <span className="rt-cell-editor-label">Answer</span>
-                {isDate ? (
-                    <input
-                        ref={answerRef}
-                        type="text"
-                        className="rt-cell-editor-input"
-                        value={answer}
-                        placeholder="YYYY-MM-DD"
-                        disabled={saving}
-                        onChange={(event) => setAnswer(event.target.value)}
-                    />
-                ) : (
-                    <textarea
-                        ref={answerRef}
-                        className="rt-cell-editor-input rt-cell-editor-answer"
-                        rows={4}
-                        value={answer}
-                        disabled={saving}
-                        onChange={(event) => setAnswer(event.target.value)}
-                    />
-                )}
+                <textarea
+                    ref={answerRef}
+                    className="rt-cell-editor-input rt-cell-editor-answer"
+                    rows={4}
+                    value={answer}
+                    disabled={saving}
+                    onChange={(event) => setAnswer(event.target.value)}
+                />
             </label>
             <label className="rt-cell-editor-field">
                 <span className="rt-cell-editor-label">Note</span>

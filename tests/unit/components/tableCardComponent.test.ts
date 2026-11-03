@@ -649,6 +649,18 @@ describe('TableCard', () => {
         expect(container.querySelector('input[aria-label="Column 1 name"]')).toBeNull();
     });
 
+    it('offers Text, Yes / no and Category as a column type, and no Date', async () => {
+        render(fixture('create-items'));
+        await click('Next');
+        await clickElement(container.querySelectorAll('.table-card-column')[0]);
+        await clickElement(container.querySelector('button[aria-label="Column 1 type"]'));
+        const labels = (text: string) =>
+            [...document.querySelectorAll<HTMLElement>('*')].filter((el) => el.children.length === 0 && el.textContent === text);
+        expect(labels('Yes / no').length).toBeGreaterThan(0);
+        expect(labels('Category').length).toBeGreaterThan(0);
+        expect(labels('Date')).toEqual([]);
+    });
+
     it('moves the editor to the column pressed below the open one', async () => {
         render(fixture('create-items'));
         await click('Next');

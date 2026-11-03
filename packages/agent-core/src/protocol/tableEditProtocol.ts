@@ -13,7 +13,7 @@
 
 import type { LibraryScope } from "../layouts/table";
 
-export type TableEditColumnType = "text" | "boolean" | "select" | "date";
+export type TableEditColumnType = "text" | "boolean" | "select";
 
 /** A source entry to resolve, without its id: the plugin assigns ids. */
 export type TableSourceDraft =

@@ -699,8 +699,6 @@ function userValueProblem(column: Column, value: CellValue | undefined): string 
     switch (value.kind) {
         case "text":
             return value.text.trim() ? null : "Write an answer, or clear the cell.";
-        case "date":
-            return /^\d{4}(-\d{2}(-\d{2})?)?$/.test(value.value) ? null : "Write the date as YYYY, YYYY-MM or YYYY-MM-DD.";
         case "boolean":
             return typeof value.value === "boolean" ? null : "Choose Yes or No.";
         case "select":

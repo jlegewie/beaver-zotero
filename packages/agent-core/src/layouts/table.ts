@@ -62,10 +62,13 @@ export type ColumnType =
     | "reference"
     | "link";
 
-/** Column types a filler answers; `reference` and `link` belong to system columns. */
+/**
+ * Column types a filler answers; `reference`, `date` and `link` belong to
+ * system columns. A question about a time is a text column that asks for a
+ * year or a range.
+ */
 export const MODEL_COLUMN_TYPES: readonly ColumnType[] = [
     "text",
-    "date",
     "boolean",
     "select",
 ];
@@ -287,8 +290,8 @@ export interface Row {
 export type CellValue =
     /** Inline markdown. */
     | { kind: "text"; text: string }
-    /** ISO `YYYY`, `YYYY-MM` or `YYYY-MM-DD`; sorts lexically. */
-    | { kind: "date"; value: string; display?: string }
+    /** The system Year column's value: ISO `YYYY`, `YYYY-MM` or `YYYY-MM-DD`; sorts lexically. */
+    | { kind: "date"; value: string }
     | { kind: "boolean"; value: boolean }
     /** One category; must be in `Column.options` when those are declared. */
     | { kind: "select"; label: string }
@@ -717,14 +720,13 @@ export function categoriesText(
 /**
  * Alignment of a column's values and its header.
  *
- * Boolean centres (a single glyph); a date ends; everything else
- * starts. Header and cell, in both the React grid and the HTML snapshot, must
- * call this — a local copy is how they start to disagree.
+ * Boolean centres (a single glyph); everything else starts. Header and
+ * cell, in both the React grid and the HTML snapshot, must call this — a
+ * local copy is how they start to disagree.
  */
 export function columnAlign(column: Column): "start" | "end" | "center" {
     if (column.align) return column.align;
-    if (column.type === "boolean") return "center";
-    return column.type === "date" ? "end" : "start";
+    return column.type === "boolean" ? "center" : "start";
 }
 
 /**
@@ -824,7 +826,7 @@ export function cellValueText(value: CellValue | undefined): string {
         case "text":
             return stripCitationTags(value.text);
         case "date":
-            return value.display ?? value.value;
+            return value.value;
         case "boolean":
             return value.value ? "true" : "false";
         case "select":
@@ -1043,15 +1045,8 @@ export function sortRows(spec: TableSpec, sort: TableSort | undefined): Row[] {
 // ---------------------------------------------------------------------------
 
 export type Filter =
-    /** Case-insensitive substring match on the value's text form (text and number columns). */
+    /** Case-insensitive substring match on the value's text form. */
     | { column_id: string; kind: "contains"; text: string }
-    /** Inclusive range on date values; either bound may be open. */
-    | {
-          column_id: string;
-          kind: "range";
-          min?: number | string;
-          max?: number | string;
-      }
     /** Value's select label is one of `labels`. */
     | { column_id: string; kind: "in"; labels: string[] }
     | { column_id: string; kind: "equals"; value: boolean }
@@ -1067,15 +1062,6 @@ function matchesFilter(cell: Cell | undefined, filter: Filter): boolean {
             return cellValueText(value)
                 .toLocaleLowerCase()
                 .includes(filter.text.toLocaleLowerCase());
-        case "range": {
-            const key = value.kind === "date" ? value.value : null;
-            if (key == null) return false;
-            if (filter.min != null && compareSortKeys(key, filter.min) < 0)
-                return false;
-            if (filter.max != null && compareSortKeys(key, filter.max) > 0)
-                return false;
-            return true;
-        }
         case "in":
             return (
                 value.kind === "select" && filter.labels.includes(value.label)

@@ -364,9 +364,9 @@ describe("defaults", () => {
         );
     });
 
-    it("right-aligns dates by default", () => {
-        expect(columnAlign({ id: "d", header: "", type: "date" })).toBe(
-            "end",
+    it("centres yes/no, starts everything else, and honours an explicit align", () => {
+        expect(columnAlign({ id: "b", header: "", type: "boolean" })).toBe(
+            "center",
         );
         expect(columnAlign({ id: "t", header: "", type: "text" })).toBe(
             "start",
@@ -375,10 +375,10 @@ describe("defaults", () => {
             columnAlign({
                 id: "n",
                 header: "",
-                type: "date",
-                align: "start",
+                type: "text",
+                align: "end",
             }),
-        ).toBe("start");
+        ).toBe("end");
     });
 });
 
@@ -502,23 +502,12 @@ describe("filterRows", () => {
         ).toEqual(["a"]);
     });
 
-    it("filters a quantity column as text, and ranges only dates", () => {
+    it("filters a quantity column as text", () => {
         expect(
             filterRows(spec, [
                 { column_id: "cites", kind: "contains", text: "12" },
             ]).map((r) => r.id),
         ).toEqual(["a"]);
-        // A range is for dates: a quantity's text is not compared as a number.
-        expect(
-            filterRows(spec, [
-                { column_id: "cites", kind: "range", min: 7, max: 119 },
-            ]).map((r) => r.id),
-        ).toEqual([]);
-        expect(
-            filterRows(spec, [
-                { column_id: "year", kind: "range", min: "2020" },
-            ]).map((r) => r.id),
-        ).toEqual(["a", "c"]);
     });
 
     it("filters select membership and boolean equality", () => {

@@ -1091,7 +1091,7 @@ const fullSpec: TableSpec = {
             align: "end",
             width: 120,
         },
-        { id: "when", header: "Published", type: "date" },
+        { id: "when", header: "Year", type: "date", system: true },
         { id: "oa", header: "OA", type: "boolean" },
         {
             id: "finding",
@@ -1148,7 +1148,7 @@ const fullSpec: TableSpec = {
                         },
                     ],
                 }),
-                when: answered({ kind: "date", value: "2015-02", display: "Feb 2015" }, "model"),
+                when: answered({ kind: "date", value: "2015" }, "system"),
                 oa: answered({ kind: "boolean", value: false }, "model", {
                     documents: ["u-A1"],
                     reasoning: "No open-access statement anywhere in the paper.",
@@ -1201,7 +1201,7 @@ const fullSpec: TableSpec = {
                     provenance: "model",
                     reasoning: "The abstract gives no sample size.",
                 },
-                when: answered({ kind: "date", value: "2019" }, "model"),
+                when: answered({ kind: "date", value: "2019" }, "system"),
                 oa: { outcome: "cleared", provenance: "user" },
                 finding: { outcome: "failed", provenance: "model", error_code: "no_locator", error: "Extraction failed" },
             },
