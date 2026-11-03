@@ -203,6 +203,12 @@ export function resultText(job: TableFillJobSnapshot): string {
             return `The fill stopped: Beaver could not reach its server after ${job.rows_done} of ${papers(job.rows_total)}`;
         case "shutdown":
             return `The fill stopped when Beaver closed, after ${job.rows_done} of ${papers(job.rows_total)}`;
+        case "library_excluded":
+            return `The fill stopped after ${job.rows_done} of ${papers(job.rows_total)} because a library was excluded from Beaver`;
+        case "read_only":
+            return `The fill stopped after ${job.rows_done} of ${papers(job.rows_total)} because the library became read-only`;
+        case "table_unavailable":
+            return `The fill stopped after ${job.rows_done} of ${papers(job.rows_total)} because the table is no longer available`;
         case "stopped":
             return `Stopped after ${job.rows_done} of ${papers(job.rows_total)} · ${credits}`;
     }

@@ -49,6 +49,7 @@ import {
     type TableFillScope,
     type TableFillStartResult,
     type TableFillTarget,
+    type TableFillWriteRefusal,
 } from '@beaver/agent-core/protocol/tableFillProtocol';
 import type { Row } from '@beaver/agent-core/layouts/table';
 import {
@@ -84,7 +85,7 @@ export type TableFillDocumentRead =
 export interface TableFillDeps {
     readTable(target: TableFillTarget): Promise<TableFillTableRead>;
     /** Why the table cannot be written, or null. */
-    writeRefusal(target: TableFillTarget): 'read_only' | 'table_unavailable' | null;
+    writeRefusal(target: TableFillTarget): TableFillWriteRefusal | null;
     lookupRows(rows: readonly Row[]): Promise<Map<string, RowLookup>>;
     /** Whether the row may be sent off the device (library exclusions). */
     rowSendable(row: Pick<Row, 'ref'>): boolean;
@@ -200,6 +201,13 @@ function documentKinds(rows: readonly RowPlan[]): TableFillPlanSummary['document
     }
     return kinds;
 }
+
+/** What a plan or start refused by {@link TableFillDeps.writeRefusal} says. */
+const WRITE_REFUSAL_MESSAGES: Record<TableFillWriteRefusal, string> = {
+    library_excluded: 'This library is excluded from Beaver.',
+    table_unavailable: 'The table is not available.',
+    read_only: 'This library is read-only.',
+};
 
 /** A row's writes waiting for the next commit, and the answers they carry. */
 interface PendingRow {
@@ -351,9 +359,10 @@ class FillJob {
         if (this.deps.account.generation() !== this.generation || !this.deps.account.signedIn())
             return { scope: 'job', reason: 'account_changed' };
         // An answer that cannot be saved must not be paid for.
-        if (this.deps.writeRefusal(this.plan.target)) return { scope: 'job', reason: 'unavailable' };
+        const write = this.deps.writeRefusal(this.plan.target);
+        if (write) return { scope: 'job', reason: write };
         // Every request carries the table's title, description and questions.
-        if (!this.deps.contextSendable(this.plan.context)) return { scope: 'job', reason: 'unavailable' };
+        if (!this.deps.contextSendable(this.plan.context)) return { scope: 'job', reason: 'library_excluded' };
         if (!this.deps.rowSendable({ ref: row.ref })) return { scope: 'row', code: 'library_excluded' };
         if (!this.deps.contextSendable({ reference: row.reference, abstract: row.abstract }))
             return { scope: 'row', code: 'library_excluded' };
@@ -372,8 +381,8 @@ class FillJob {
     private commitRefusal(): Refusal | null {
         if (this.deps.account.generation() !== this.generation || !this.deps.account.signedIn())
             return { scope: 'job', reason: 'account_changed' };
-        if (this.deps.writeRefusal(this.plan.target)) return { scope: 'job', reason: 'unavailable' };
-        return null;
+        const write = this.deps.writeRefusal(this.plan.target);
+        return write ? { scope: 'job', reason: write } : null;
     }
 
     private assertMaySend(row: RowPlan): void {
@@ -416,8 +425,8 @@ class FillJob {
         if (initial.length) {
             const skipped = await this.commitNow(initial, this.initialRows.length);
             if (!Array.isArray(skipped)) {
-                this.stop(this.stopReason ?? 'unavailable');
-                this.addNotStarted(this.stopReason ?? 'unavailable', this.initialRows.length);
+                this.stop(this.stopReason ?? 'table_unavailable');
+                this.addNotStarted(this.stopReason ?? 'table_unavailable', this.initialRows.length);
                 return;
             }
             // A row another writer gave other documents keeps them and is left
@@ -448,8 +457,11 @@ class FillJob {
             try {
                 await this.processRow(row);
             } catch (error) {
-                if (error instanceof JobRefused) {
-                    this.refuse(row, error.refusal);
+                // A document read cut off by an exclusion throws its own error:
+                // a refusal that now applies explains it, not a failed read.
+                const refusal = error instanceof JobRefused ? error.refusal : this.sendRefusal(row);
+                if (refusal) {
+                    this.refuse(row, refusal);
                 } else {
                     // An unexpected error (a database lookup while reading the
                     // document): the row fails, retryable, rather than vanish
@@ -578,7 +590,7 @@ class FillJob {
         try {
             spec = (await this.deps.readTable(this.plan.target)).spec;
         } catch {
-            throw new JobRefused({ scope: 'job', reason: 'unavailable' });
+            throw new JobRefused({ scope: 'job', reason: 'table_unavailable' });
         }
         const { rows } = validatePlan(
             {
@@ -774,8 +786,8 @@ class FillJob {
         } catch (error) {
             logger(`tableFills: commit failed for ${this.plan.target.key}: ${String(error)}`, 1);
             const refusal =
-                error instanceof JobRefused ? error.refusal : (this.commitRefusal() ?? { scope: 'job', reason: 'unavailable' });
-            this.stop(refusal.scope === 'job' ? refusal.reason : 'unavailable');
+                error instanceof JobRefused ? error.refusal : (this.commitRefusal() ?? { scope: 'job', reason: 'table_unavailable' });
+            this.stop(refusal.scope === 'job' ? refusal.reason : 'table_unavailable');
             return 'failed';
         }
     }
@@ -892,12 +904,7 @@ export class InstanceTableFills {
             return { ok: false, code: 'signed_out', message: 'Sign in to Beaver to fill tables.' };
         const generation = this.deps.account.generation();
         const refusal = this.deps.writeRefusal(target);
-        if (refusal)
-            return {
-                ok: false,
-                code: refusal,
-                message: refusal === 'read_only' ? 'This library is read-only.' : 'The table is not available.',
-            };
+        if (refusal) return { ok: false, code: refusal, message: WRITE_REFUSAL_MESSAGES[refusal] };
         let read: TableFillTableRead;
         try {
             read = await this.deps.readTable(target);
@@ -1022,7 +1029,7 @@ export class InstanceTableFills {
         const holder = this.leases.get(key);
         if (holder) return { ok: false, code: 'fill_in_progress', message: 'This table is already being filled.', job_id: holder.id };
         const refusal = this.deps.writeRefusal(plan.target);
-        if (refusal) return { ok: false, code: refusal, message: refusal === 'read_only' ? 'This library is read-only.' : 'The table is not available.' };
+        if (refusal) return { ok: false, code: refusal, message: WRITE_REFUSAL_MESSAGES[refusal] };
         let spec: TableSpec;
         try {
             spec = (await this.deps.readTable(plan.target)).spec;
@@ -1073,11 +1080,12 @@ export class InstanceTableFills {
     }
 
     /**
-     * Whether a table's data may still leave the device: its library is not
-     * excluded and the table still exists.
+     * Why a table's data may no longer leave the device (its library was
+     * excluded, or the table is gone), or null. A read-only table's may.
      */
-    tableAvailable(target: TableFillTarget): boolean {
-        return this.deps.writeRefusal(target) !== 'table_unavailable';
+    tableRefusal(target: TableFillTarget): Exclude<TableFillWriteRefusal, 'read_only'> | null {
+        const refusal = this.deps.writeRefusal(target);
+        return refusal === 'read_only' ? null : refusal;
     }
 
     /** The question columns a stored plan answers, in table order. */

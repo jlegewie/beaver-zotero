@@ -57,7 +57,7 @@ function balanceOf(): number | null {
 const deps: TableFillDeps = {
     readTable: (target) => readTable(target),
     writeRefusal: (target) => {
-        if (checkLibraryExcluded(target.libraryID)) return 'table_unavailable';
+        if (checkLibraryExcluded(target.libraryID)) return 'library_excluded';
         const library = Zotero.Libraries.get(target.libraryID);
         if (!library) return 'table_unavailable';
         // A table moved to the trash or deleted mid-fill cannot take answers.
