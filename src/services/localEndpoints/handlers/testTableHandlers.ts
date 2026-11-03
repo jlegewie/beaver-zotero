@@ -880,7 +880,6 @@ export async function rollBackWholeDirectory(
     const sha256 = await sha256Hex(serialized);
 
     await IOUtils.makeDirectory(sidecar, { createAncestors: true, ignoreExisting: true });
-    await IOUtils.writeUTF8(targetPath, serialized);
 
     // The other device's `table.json`, which is the table: a download replaces
     // the whole directory, so the table itself goes back to the target too. It
@@ -926,7 +925,8 @@ export async function rollBackWholeDirectory(
     const removed: number[] = [];
     for (const child of await IOUtils.getChildren(sidecar).catch(() => [])) {
         const match = /^v(\d+)\.json$/.exec(PathUtils.filename(child));
-        if (match && Number(match[1]) > target) {
+        // The target is the other device's tip, which its `table.json` carries.
+        if (match && Number(match[1]) >= target) {
             await IOUtils.remove(child, { ignoreAbsent: true });
             removed.push(Number(match[1]));
         }

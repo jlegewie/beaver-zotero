@@ -258,8 +258,8 @@ async function storedText(): Promise<string | undefined> {
 
 /**
  * Replaces the whole storage directory with `spec` at `version`, the way Zotero
- * does when the user keeps the remote copy: table, snapshot, log and version
- * files all from the same source, agreeing with each other and mentioning
+ * does when the user keeps the remote copy: table, snapshot, log and older
+ * version files all from the same source, agreeing with each other and mentioning
  * nothing about what this device had.
  */
 async function resolveConflictTowardRemote(
@@ -270,7 +270,6 @@ async function resolveConflictTowardRemote(
     const serialized = JSON.stringify(stored);
 
     await mkdir(sidecar(), { recursive: true });
-    await writeFile(sidecar(`v${version}.json`), serialized, 'utf8');
 
     const history = await readHistory().catch(() => ({ tip: 0, versions: [] }));
     const versions = history.versions.filter((entry) => entry.version < version);
@@ -291,7 +290,8 @@ async function resolveConflictTowardRemote(
 
     for (const name of await readdir(sidecar())) {
         const match = /^v(\d+)\.json$/.exec(name);
-        if (match && Number(match[1]) > version) await rm(sidecar(name));
+        // The remote tip has no version file: its `table.json` carries it.
+        if (match && Number(match[1]) >= version) await rm(sidecar(name));
     }
 
     const hash = await sha256(serialized);
@@ -422,12 +422,13 @@ describe('recording what this device wrote', () => {
     it('records every successful write, with the digest of the bytes it stored', async () => {
         await createTable({ spec: demoSpec('One') });
         const second = expectOk(await writeTable(ref, demoSpec('Two'), { actor: 'user' }));
+        expect((await readTableShadow(ref)).map((entry) => [entry.version, entry.sha256])).toEqual([
+            [2, second.entry.sha256],
+        ]);
         const third = expectOk(await writeTable(ref, demoSpec('Three'), { actor: 'user' }));
 
         const entries = await readTableShadow(ref);
-        expect(entries.map((entry) => entry.version)).toEqual([3, 2, 1]);
-        expect(entries[0].sha256).toBe(third.entry.sha256);
-        expect(entries[1].sha256).toBe(second.entry.sha256);
+        expect(entries.map((entry) => [entry.version, entry.sha256])).toEqual([[3, third.entry.sha256]]);
     });
 
     it('updates the row in place when a run collapses onto its own version', async () => {
@@ -440,7 +441,7 @@ describe('recording what this device wrote', () => {
         expect(collapsed.collapsed).toBe(true);
         const entries = await readTableShadow(ref);
         // One row for version 2, holding the newest content, not two.
-        expect(entries.map((entry) => entry.version)).toEqual([2, 1]);
+        expect(entries.map((entry) => entry.version)).toEqual([2]);
         expect(entries[0].sha256).toBe(collapsed.entry.sha256);
     });
 
@@ -454,7 +455,7 @@ describe('recording what this device wrote', () => {
         }
 
         const entries = await readTableShadow(ref);
-        expect(entries.map((entry) => entry.version)).toEqual([2, 1]);
+        expect(entries.map((entry) => entry.version)).toEqual([2]);
 
         // Rows are not enough: the budget is computed from rows, so a payload
         // no row names is invisible to it and nothing else under the profile
@@ -522,7 +523,9 @@ describe('recording what this device wrote', () => {
 
         const shadow = (await lastTableShadow(ref))!;
         expect(shadow).toMatchObject({ version: 2, payloadPath: null, payloadBytes: 0 });
-        expect(await readdir(directory)).toEqual(before);
+        // Version 1's payload went with its row; version 2 wrote none.
+        expect(before).toHaveLength(1);
+        expect(await readdir(directory)).toEqual([]);
     });
 
     it('does not fail a write when the shadow cannot be recorded', async () => {
@@ -543,7 +546,7 @@ describe('recording what this device wrote', () => {
 // ---------------------------------------------------------------------------
 
 describe('the storage budget', () => {
-    it('keeps only the last few versions, and deletes the payloads it drops', async () => {
+    it('keeps only the last version, and deletes the payloads it drops', async () => {
         await createTable({ spec: demoSpec('v1') });
         for (const text of ['v2', 'v3', 'v4', 'v5', 'v6']) {
             expectOk(await writeTable(ref, demoSpec(text), { actor: 'user' }));
@@ -551,7 +554,7 @@ describe('the storage budget', () => {
 
         const entries = await readTableShadow(ref);
         expect(entries).toHaveLength(TABLE_SHADOW_RETENTION);
-        expect(entries.map((entry) => entry.version)).toEqual([6, 5, 4]);
+        expect(entries.map((entry) => entry.version)).toEqual([6]);
 
         // The dropped versions' payloads are gone, not merely unreferenced: the
         // shadow lives under the profile, where nothing else would collect it.

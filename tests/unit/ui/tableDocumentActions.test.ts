@@ -160,11 +160,11 @@ it("loads retained versions on request and restores only the explicit selection"
     expect(history).not.toHaveBeenCalled();
     await selectVersion();
     expect(root.textContent).toContain("Version 1 · Initial comparison");
-    expect(root.textContent).toContain("creates a new current version");
+    expect(root.textContent).toContain("saves it as a new current version");
     expect(revert).not.toHaveBeenCalled();
     await click("restore-version");
     expect(revert).toHaveBeenCalledExactlyOnceWith(ref, 1);
-    expect(root.textContent).toContain("Restored version 1 as version 3");
+    expect(root.textContent).toContain("Reverted to version 1, saved as version 3");
 });
 it.each([
     "Version is unavailable",
@@ -187,7 +187,7 @@ it("reports committed content with incomplete bookkeeping as saved", async () =>
     expect(root.textContent).toContain(
         "content is saved, but bookkeeping is incomplete",
     );
-    expect(root.textContent).toContain("do not repeat the restore");
+    expect(root.textContent).toContain("do not repeat the revert");
 });
 it("reports unavailable store/history instead of exposing an editor", async () => {
     history.mockRejectedValueOnce(new Error("History is unavailable"));

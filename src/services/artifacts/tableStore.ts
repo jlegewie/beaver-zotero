@@ -15,11 +15,12 @@
  * table.json             { spec, creation } — the table
  * <slug>.html            the snapshot rendered from it (`tableRenderer.ts`)
  * beaver/history.json    { tip, versions: [ … ] }
- * beaver/v<N>.json       the full spec of version N
+ * beaver/v<N>.json       the full spec of each retained version below the tip
  * beaver/bookkeeping.json  the spec and table.json digests the last completed render covered
  * ```
  *
- * A write commits in a fixed order: the version file (for a new number),
+ * The tip has no version file: `table.json` carries it. A write that takes a
+ * new number first copies the outgoing tip to its `v<N>.json`, then writes
  * `table.json` — the commit point, after which nothing rejects — then the
  * history and the recovery shadow. The snapshot follows through the renderer,
  * which never takes this module's lock: every write renders, except a fill's
@@ -194,11 +195,14 @@ export type TableRecovery =
     | { kind: 'history_appended'; version: number }
     /** The log claimed versions the document never committed. */
     | { kind: 'history_truncated'; versions: number[] }
-    /** Version files at or below the commit point the log had lost track of. */
+    /** Version files below the commit point the log had lost track of. */
     | { kind: 'history_adopted'; versions: number[] }
-    /** The tip's version file disagreed with its entry and was rewritten. */
-    | { kind: 'version_file_repaired'; version: number }
-    /** Version files above the commit point: writes that never committed. */
+    /** The tip's log entry disagreed with `table.json` and was refreshed from it. */
+    | { kind: 'tip_entry_repaired'; version: number }
+    /**
+     * Version files nothing refers to: above the commit point (writes that
+     * never committed), or a copy of the tip, which `table.json` carries.
+     */
     | { kind: 'orphan_removed'; versions: number[] }
     /** Versions the retention cap dropped while the log was being rewritten. */
     | { kind: 'pruned'; versions: number[] }
@@ -334,18 +338,18 @@ export type TableShadowRestoreResult =
 // ---------------------------------------------------------------------------
 
 /**
- * How many version files a table keeps. Older entries fall out of the log and
- * their files are deleted, so a long-lived table's storage directory — which is
- * uploaded whole on every sync — stays bounded.
+ * How many versions a table keeps, the tip included. Older entries fall out of
+ * the log and their files are deleted, so a long-lived table's storage
+ * directory — which is uploaded whole on every sync — stays bounded.
  */
-export const TABLE_VERSION_RETENTION = 20;
+export const TABLE_VERSION_RETENTION = 10;
 
 /**
  * The bytes of version files a table keeps beyond {@link TABLE_VERSION_RETENTION_FLOOR}.
- * A large table keeps fewer versions, so twenty copies of it never become a
- * multi-megabyte upload.
+ * A large table keeps fewer versions, so its history never becomes a
+ * multi-megabyte upload. The tip lives in `table.json` and does not count.
  */
-export const TABLE_VERSION_RETENTION_BYTES = 16 * 1024 * 1024;
+export const TABLE_VERSION_RETENTION_BYTES = 4 * 1024 * 1024;
 
 /**
  * The newest versions a table always keeps, whatever their size, so even a
@@ -675,23 +679,15 @@ function seal(entry: TableVersionEntry): TableVersionEntry {
 /**
  * The entry for a version the document committed but the log never recorded,
  * rebuilt from the document — which is the only description of that version
- * that survived.
- *
- * The version file is written unconditionally rather than only when absent: an
- * existing one may hold something else entirely, and an entry whose `sha256`
- * described the document while different bytes sat beside it would bake a
- * mismatch into a log that looks freshly written. The document is authoritative,
- * so the file is made to match it.
+ * that survived. Nothing is written: the version is the tip, which
+ * `table.json` carries.
  */
 async function reconstructEntry(
-    item: Zotero.Item,
     spec: TableSpec,
     version: number,
     known?: { creation: TableWriteMeta } | { edit: TableEditMarker }
 ): Promise<TableVersionEntry> {
     const serialized = JSON.stringify(spec);
-    await ensureSidecarDirectory(item);
-    await writeAtomic(versionPathOf(item, version), serialized, tableTempPath(item));
     const meta: TableWriteMeta = known
         ? 'creation' in known ? known.creation : known.edit.meta
         : { actor: 'system', change: RECOVERED_CHANGE };
@@ -703,7 +699,7 @@ async function reconstructEntry(
 }
 
 /**
- * The entry a version file implies, for a file at or below the commit point the
+ * The entry a version file implies, for a file below the commit point the
  * log has lost track of. Null when the file is not a readable spec.
  *
  * Nothing is written: the file is already a complete spec and knows its own
@@ -759,11 +755,12 @@ async function commitHistory(
             }
         })
     );
-    // Newest first: the floor always stays, then either bound stops it.
+    // Newest first: the floor always stays, then either bound stops it. The tip
+    // has no version file, so only the files below it count toward the bytes.
     let kept = 0;
     let bytes = 0;
     for (let i = sorted.length - 1; i >= 0; i -= 1) {
-        const size = sorted[i].bytes ?? 0;
+        const size = i === sorted.length - 1 ? 0 : sorted[i].bytes ?? 0;
         if (
             kept >= TABLE_VERSION_RETENTION_FLOOR &&
             (kept >= TABLE_VERSION_RETENTION || bytes + size > TABLE_VERSION_RETENTION_BYTES)
@@ -776,6 +773,7 @@ async function commitHistory(
     const versions = sorted.slice(sorted.length - kept);
     const tip = versions.length ? versions[versions.length - 1].version : 0;
 
+    await ensureSidecarDirectory(item);
     await writeAtomic(
         historyPathOf(item),
         JSON.stringify({ tip, versions } satisfies TableHistory),
@@ -849,11 +847,30 @@ async function reconcileLog(
                 : edit?.version === tableVersion && edit.sha256 === (await tableSpecHash(current.spec))
                   ? { edit }
                   : undefined;
-        versions = [...versions, await reconstructEntry(item, current.spec, tableVersion, known)];
+        versions = [...versions, await reconstructEntry(current.spec, tableVersion, known)];
         repairs.push({ kind: 'history_appended', version: tableVersion });
     }
 
     return { versions, repairs };
+}
+
+/**
+ * The tip's entry describing `spec`, the document that carries it, or null when
+ * it already does.
+ */
+async function refreshedTipEntry(
+    entry: TableVersionEntry,
+    spec: TableSpec,
+    serialized = JSON.stringify(spec)
+): Promise<TableVersionEntry | null> {
+    const sha256 = await sha256Hex(serialized);
+    if (sha256 === entry.sha256) return null;
+    return {
+        ...entry,
+        sha256,
+        bytes: new TextEncoder().encode(serialized).length,
+        summary: summarize(spec),
+    };
 }
 
 /**
@@ -863,20 +880,21 @@ async function reconcileLog(
  * write does not otherwise need. Three rules, and the distinction between them
  * is the point:
  *
- * - **The tip's file must match its entry.** It is the only file a collapsing
- *   write rewrites in place, so it is the only one whose bytes can drift from
- *   what the log says they are. On a mismatch the document wins: the file is
- *   rewritten from it and the entry's digest and summary are refreshed.
- * - **A file at or below the commit point is adopted, not deleted.** It is a
+ * - **The tip's entry must match `table.json`.** The tip has no version file,
+ *   and `table.json` is what a collapsing write rewrites in place. On a
+ *   mismatch the document wins: the entry's digest and summary are refreshed.
+ * - **A file below the commit point is adopted, not deleted.** It is a
  *   complete spec that knows its own version — a state the user may well want
  *   back, and the log having lost track of it is a reason to rebuild the entry,
  *   not to destroy the evidence.
- * - **Only a file above the commit point is garbage.** It can only have come
- *   from a write that stopped before the commit, so nothing ever referred to
- *   it and nothing ever will.
+ * - **A file at or above the commit point is garbage.** One above it can only
+ *   have come from a write that stopped before the commit, so nothing ever
+ *   referred to it; one at it is a copy of what `table.json` carries (a write
+ *   that stopped after copying the outgoing tip, or a table an earlier build
+ *   wrote).
  *
- * A file at or below the commit point that is not a readable spec is garbage
- * too: it cannot be restored and cannot be described.
+ * A file below the commit point that is not a readable spec is garbage too: it
+ * cannot be restored and cannot be described.
  */
 async function auditSidecar(
     item: Zotero.Item,
@@ -890,35 +908,19 @@ async function auditSidecar(
     const tip = versions.length ? versions[versions.length - 1].version : 0;
     if (tip <= 0) return { versions, repairs };
 
-    // --- the tip's file against its entry
+    // --- the tip's entry against the document
     //
-    // Only when the tip is the version `table.json` carries, since that is the
-    // spec the repair would write. After {@link reconcileLog} that is the
-    // normal case; it is not one on a table whose version stamp was lost, and
-    // writing this spec under someone else's number would be worse than the
-    // mismatch it was meant to fix.
-    const tipEntry = versions[versions.length - 1];
-    const tipPath = versionPathOf(item, tip);
-    const stored = tableVersion === tip ? await readText(tipPath) : undefined;
-    if (
-        stored !== undefined &&
-        (stored === null ||
-            (await sha256Hex(stored)) !== tipEntry.sha256 ||
-            (await tableSpecHash(spec)) !== tipEntry.sha256)
-    ) {
-        const serialized = JSON.stringify(spec);
-        await ensureSidecarDirectory(item);
-        await writeAtomic(tipPath, serialized, tableTempPath(item));
-        versions = [
-            ...versions.slice(0, -1),
-            {
-                ...tipEntry,
-                sha256: await sha256Hex(serialized),
-                bytes: new TextEncoder().encode(serialized).length,
-                summary: summarize(spec),
-            },
-        ];
-        repairs.push({ kind: 'version_file_repaired', version: tip });
+    // Only when the tip is the version `table.json` carries. After
+    // {@link reconcileLog} that is the normal case; it is not one on a table
+    // whose version stamp was lost, and describing this spec under someone
+    // else's number would be worse than the mismatch it was meant to fix.
+    const carriesTip = tableVersion === tip;
+    if (carriesTip) {
+        const refreshed = await refreshedTipEntry(versions[versions.length - 1], spec);
+        if (refreshed) {
+            versions = [...versions.slice(0, -1), refreshed];
+            repairs.push({ kind: 'tip_entry_repaired', version: tip });
+        }
     }
 
     // --- files the log has lost track of, and files nothing can refer to
@@ -927,7 +929,7 @@ async function auditSidecar(
     const adopted: number[] = [];
     const garbage: number[] = [];
     for (const version of onDisk) {
-        if (version > tip) {
+        if (version > tip || (carriesTip && version === tip)) {
             garbage.push(version);
             continue;
         }
@@ -972,20 +974,15 @@ async function auditSidecar(
  * table created through it directly has a version 1 that is neither logged nor
  * revertable. Since the state a table was created in is the one a user is most
  * likely to want back after an agent has filled it, that is the worst version
- * to be missing — so creation seeds `beaver/v1.json` and a `history.json`
- * holding one entry, through the same helpers every later write uses. The
- * seeded entry therefore has the same shape as any other: `actor`, `at`,
- * `sha256` over the exact bytes beside it, and `summary`.
+ * to be missing — so creation seeds a `history.json` holding one entry, through
+ * the same helpers every later write uses. The seeded entry therefore has the
+ * same shape as any other: `actor`, `at`, `sha256` over the spec `table.json`
+ * carries, and `summary`. Version 1 has no file of its own until the next
+ * write copies it out of `table.json`.
  *
  * The entry keeps the creating run's `run_id` — that is real provenance — and
  * is {@link seal}ed, which is what stops that run's next write from collapsing
  * onto it and overwriting the state the seed exists to preserve.
- *
- * **The seed is a copy, not a re-derivation.** `v1.json` holds the spec
- * `createTableItem` stamped and committed, serialised here. The two agree today
- * because both serialise the same object; if that two-phase stamp ever came to
- * differ from what the store would have written, this file — not the store's
- * idea of it — is what a revert to version 1 restores.
  */
 /** A collection a new table can be filed into: in the library and not in the trash. */
 function collectionIDForCreate(libraryID: number, key: string): number {
@@ -1197,7 +1194,7 @@ async function replayTableCreation(
             // Beside a retained history the creation committed and the file
             // was lost since; without one the import never got that far.
             if ((await readTableHistory(item)).versions.length)
-                throw new TableItemError(`Table ${item.key} has no table.json; restore a retained version to repair it.`, 'corrupt');
+                throw new TableItemError(`Table ${item.key} has no table.json; recover this device's version or revert to a retained version to repair it.`, 'corrupt');
             throw new TableItemError('The earlier import has no committed table yet.', 'operation_pending');
         }
         const opened = await readCurrentState(item);
@@ -1303,12 +1300,6 @@ async function createTableOnce(options: CreateTableOptions): Promise<CreatedTabl
                 creation: true as const,
             };
 
-            await ensureSidecarDirectory(created.item);
-            await writeAtomic(
-                versionPathOf(created.item, version),
-                serialized,
-                tableTempPath(created.item)
-            );
             await commitHistory(created.item, [seeded]);
             // Version 1 is a write like any other as far as the shadow is
             // concerned, and it is the state most likely to be wanted back.
@@ -1375,8 +1366,9 @@ function unstampedSpec(spec: TableSpec): Omit<TableSpec, 'key' | 'version'> {
  * 3. Refuse with a conflict when the tip is not `expectedVersion`, handing back
  *    the current spec so the caller can rebase. `expectedVersion` undefined
  *    means "no guard".
- * 4. Write `beaver/v<N>.json`, temp file + rename — but only *before* the
- *    commit when this write is taking a new number. See below.
+ * 4. When this write takes a new number, copy the outgoing tip — the spec
+ *    `table.json` still carries — to its `beaver/v<N>.json`, temp file +
+ *    rename. A collapsing write skips this: the tip stays the tip.
  * 5. Write `table.json`, temp file + rename. **This is the commit point** —
  *    the moment it lands the table is the new one whatever happens next.
  * 6. Rewrite `beaver/history.json`, applying the retention bounds and deleting
@@ -1389,20 +1381,19 @@ function unstampedSpec(spec: TableSpec): Omit<TableSpec, 'key' | 'version'> {
  *
  * ## Nothing after step 5 may reject
  *
- * Step 6 — and the version file a *collapsing* write defers past the commit —
- * run when the table on disk is already the new one. So they are not allowed
- * to fail the call in either of the two ways they could: not by crashing (the
- * next open reconciles what they left behind) and not by throwing, which is the
- * worse half, because it tells the caller the write did not happen while it
- * did. A retrying agent would then apply its mutations to an already-mutated
+ * Step 6 and the rest run when the table on disk is already the new one. So
+ * they are not allowed to fail the call in either of the two ways they could:
+ * not by crashing (the next open reconciles what they left behind) and not by
+ * throwing, which is the worse half, because it tells the caller the write did
+ * not happen while it did. A retrying agent would then apply its mutations to an already-mutated
  * table. They report through `saved: false` instead, and the call still
  * succeeds. A failed render never reaches the caller at all.
  *
  * ## Writes with one collapse key collapse
  *
  * When the tip was written under this write's collapse key by the same actor
- * and is not sealed, the version file and the log entry are overwritten in
- * place and the number does not advance. The key is `meta.collapse_key` (a
+ * and is not sealed, `table.json` and the log entry are overwritten in place
+ * and the number does not advance. The key is `meta.collapse_key` (a
  * fill's job id, a tab's editing session) or, for an agent write without one,
  * its run and thread. A fill that commits every few rows would otherwise issue
  * a hundred versions nobody wants to revert to individually.
@@ -1413,14 +1404,10 @@ function unstampedSpec(spec: TableSpec): Omit<TableSpec, 'key' | 'version'> {
  * the user could still be looking at or reverting to** — which is why a user
  * write without a key is its own version, and why a sealed version (creation,
  * a model edit, a destructive edit, a restore, a reconstructed entry) is never
- * reused. A sealed write never collapses onto the tip either.
- *
- * A collapsing write also inverts steps 4 and 5. Its version file is one the
- * log already points at, so overwriting it before the commit lands would leave
- * a file describing neither the old state nor the new one; writing it after
- * means the worst a crash can leave is a file holding an earlier moment of the
- * same writer's working version. The sidecar audit compares both the retained
- * file and the current spec against the log digest and repairs either mismatch.
+ * reused. A sealed write never collapses onto the tip either. A crash between
+ * a collapsing commit and its log rewrite leaves the tip's entry describing an
+ * earlier moment of the same version; the sidecar audit refreshes it from
+ * `table.json`.
  *
  * This is the local whole-spec write (a restore, development tooling). It may
  * replace an unreadable `table.json`; edits go through {@link editTable},
@@ -1503,7 +1490,7 @@ async function commitWrite(
             2
         );
     }
-    const versions = reconciled.versions;
+    let versions = reconciled.versions;
 
     // After reconciliation the log's last entry is the committed version. With
     // an unreadable or unstamped table there is nothing to reconcile against,
@@ -1545,9 +1532,35 @@ async function commitWrite(
     const serialized = JSON.stringify(stored);
     const entry = await versionEntry(version, stored, serialized, meta, record);
 
-    await ensureSidecarDirectory(item);
-    const temp = tableTempPath(item);
-    const versionPath = versionPathOf(item, version);
+    // A write that takes a new number moves the tip out of `table.json`, so the
+    // tip is copied to its version file first. The copy is the document's
+    // bytes. Should its entry have drifted from them, the refreshed entry is
+    // logged before the commit: once `table.json` moves on, nothing could tell
+    // that copy from a damaged file.
+    let outgoing: string | null = null;
+    if (!collapse && current.spec && tipEntry && current.version === tip) {
+        outgoing = JSON.stringify(current.spec);
+        const refreshed = await refreshedTipEntry(tipEntry, current.spec, outgoing);
+        if (refreshed) {
+            versions = mergeEntry(versions, refreshed);
+            await commitHistory(item, versions);
+        }
+    }
+
+    // A `table.json` lost beside its history took the tip with it, since the
+    // tip has no version file: its entry describes a state nothing can read
+    // back, so the write that replaces the table retires it — in the log,
+    // before the commit, so a failed rewrite after it cannot bring it back.
+    if (
+        !current.spec &&
+        tipEntry &&
+        !collapse &&
+        !(await IOUtils.exists(versionPathOf(item, tip)))
+    ) {
+        versions = versions.filter((e) => e.version !== tip);
+        await commitHistory(item, versions);
+    }
+
     // A model edit's identity commits with the table, not only with the log
     // rewritten after it: a retry after a lost log write must still replay.
     const file: TableFile = {
@@ -1565,11 +1578,13 @@ async function commitWrite(
             : {}),
     };
 
-    if (!collapse) {
-        // Nothing points at this number yet, so a crash between the two leaves
-        // a file the next open deletes as garbage and a table nobody touched.
-        // Still before the commit point, so a failure here is a failed write.
-        await writeAtomic(versionPath, serialized, temp);
+    if (outgoing !== null) {
+        // Until the commit, `table.json` still carries this version, so a crash
+        // between the two leaves a copy the next open deletes as garbage and a
+        // table nobody touched. Still before the commit point, so a failure
+        // here is a failed write.
+        await ensureSidecarDirectory(item);
+        await writeAtomic(versionPathOf(item, tip), outgoing, tableTempPath(item));
     }
     requireWritable(ref);
     if (current.spec) accessGuard?.(current.spec);
@@ -1590,15 +1605,6 @@ async function commitWrite(
             1
         );
     };
-
-    if (collapse) {
-        // The version file is already referenced by the log, so it goes last.
-        try {
-            await writeAtomic(versionPath, serialized, temp);
-        } catch (error) {
-            bookkeepingFailed('rewriting its version file', error);
-        }
-    }
 
     let pruned: number[] = [];
     try {
@@ -2163,7 +2169,7 @@ export async function restoreShadowVersionUncoordinated(
         ...meta,
         run_id: undefined,
         seal: true,
-        change: meta.change ?? `Restored this device's version ${shadow.version}`,
+        change: meta.change ?? `Recovered this device's version ${shadow.version}`,
     });
     if (!result.ok) {
         return {
@@ -2295,13 +2301,18 @@ export async function undoTableEditUncoordinated(
     return result;
 }
 
-/** The spec of a stored version, verified against its log entry. */
+/**
+ * The spec of a retained version: the tip from `table.json`, which is
+ * authoritative, and an older one from its version file, verified against its
+ * log entry.
+ */
 async function readStoredVersion(
     ref: TableRef,
     item: Zotero.Item,
     current: CurrentState,
     version: number
 ): Promise<TableSpec> {
+    if (current.spec && version === current.version) return current.spec;
     const serialized = await readText(versionPathOf(item, version));
     if (serialized === null) {
         throw new TableItemError(
@@ -2485,7 +2496,8 @@ export async function trimTableUncoordinated(
         let saved = true;
         try {
             await commitHistory(item, versions.slice(0, keep));
-            for (const version of dropped)
+            // The survivor is the tip now, which `table.json` carries.
+            for (const version of [...dropped, target!])
                 await IOUtils.remove(versionPathOf(item, version), { ignoreAbsent: true });
             try {
                 await recordTableShadow(ref, target!, JSON.stringify(spec), await tableSpecHash(spec));
@@ -2642,7 +2654,8 @@ async function guardStoredTable(ref: TableRef, item: Zotero.Item, current: Curre
     // the audit might adopt. Digests are enforced after the canonical tip has had
     // a chance to repair its interrupted write; older damaged history still fails.
     for (const version of await versionFilesOnDisk(item)) {
-        if (version > current.version) continue;
+        // A file at the tip is a stray copy the audit deletes; nothing reads it.
+        if (version >= current.version) continue;
         const raw = await readJson<unknown>(versionPathOf(item, version));
         const read = readSpec(raw);
         if (read.ok) guard(read.spec);

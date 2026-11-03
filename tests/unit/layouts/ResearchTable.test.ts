@@ -534,15 +534,15 @@ describe('editing cells and filling from rows and columns', () => {
         expect(editor()).toBeNull();
     });
 
-    it("offers Edit on Beaver's answer, and Edit, Clear and Restore Beaver's answer on the user's", async () => {
+    it("offers Edit on Beaver's answer, and Edit, Clear and Reset to Beaver's answer on the user's", async () => {
         const cellEditing = editing();
         mount({ cellEditing });
         click(cell('r1', 'effect'));
         expect(Array.from(inspector()!.querySelectorAll('.rt-inspector-action')).map((b) => b.textContent)).toEqual(['Edit', 'Change']);
         click(cell('r2', 'effect'));
         const actions = () => Array.from(inspector()!.querySelectorAll<HTMLButtonElement>('.rt-inspector-action'));
-        expect(actions().map((b) => b.textContent)).toEqual(['Edit', 'Clear', 'Restore Beaver’s answer', 'Change']);
-        click(actions().find((b) => b.textContent === 'Restore Beaver’s answer')!);
+        expect(actions().map((b) => b.textContent)).toEqual(['Edit', 'Clear', 'Reset to Beaver’s answer', 'Change']);
+        click(actions().find((b) => b.textContent === 'Reset to Beaver’s answer')!);
         expect(cellEditing.onRestore).toHaveBeenCalledWith(expect.objectContaining({ id: 'r2' }), expect.objectContaining({ id: 'effect' }));
         click(actions().find((b) => b.textContent === 'Clear')!);
         await flush();

@@ -1781,7 +1781,7 @@
     padding: 0.3rem 0.55rem;
 }
 
-/* The inspector's Edit, Clear, Restore Beaver's answer and Change. */
+/* The inspector's Edit, Clear, Reset to Beaver's answer and Change. */
 .beaver-root .rt-inspector-action {
     height: 1.85rem;
     padding: 0 0.7rem;

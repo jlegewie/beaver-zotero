@@ -131,9 +131,9 @@ export function tableRepairAllowed(libraryID: number): boolean {
 export const TABLE_REPAIR_SKIPPED =
     'Local bookkeeping needs repair, but Beaver does not modify tables in a read-only library or one excluded from Beaver.';
 
-/** Where an unreadable table can be recovered: the item pane's restore. */
+/** Where an unreadable table can be recovered: the item pane's recovery. */
 export const UNREADABLE_TABLE_RECOVERY =
-    'Select the table in your library and use “Restore my version” in its Beaver Table section to write back the last version this device saved.';
+    'Select the table in your library and use “Recover my version” in its Beaver Table section to write back the last version this device saved.';
 
 /**
  * The recovery hint for an unreadable table, or '' when the item pane would
@@ -302,7 +302,7 @@ export function tableHistoryPath(item: Zotero.Item): string | null {
     return dir ? PathUtils.join(dir, 'history.json') : null;
 }
 
-/** Where revision `version` of the spec goes. */
+/** Where retained version `version` of the spec goes once it is no longer the tip. */
 export function tableVersionPath(
     item: Zotero.Item,
     version: number
@@ -515,7 +515,7 @@ async function missingTableFile(item: Zotero.Item): Promise<ReadTableItemResult>
         return {
             ok: false,
             code: 'corrupt',
-            message: `Table ${item.key} has no table.json; restore a retained version to repair it.`,
+            message: `Table ${item.key} has no table.json; recover this device's version or revert to a retained version to repair it.`,
         };
     }
     const snapshot = await item.getFilePathAsync();
@@ -566,11 +566,12 @@ export interface TableVersionEntry {
     /** ISO timestamp of the write. */
     at: string;
     /**
-     * SHA-256 of the serialised spec exactly as it was written to
-     * `beaver/v<N>.json`. Not a security claim: it is how a later read notices
-     * that a file changed behind our back (a sync conflict resolved by copying,
-     * a hand-edited sidecar, a write interrupted mid-sequence) rather than
-     * silently trusting it. The store verifies it when opening a table and
+     * SHA-256 of the serialised spec: the bytes of `beaver/v<N>.json`, or for
+     * the tip, which has no version file, of the spec `table.json` carries.
+     * Not a security claim: it is how a later read notices that a file changed
+     * behind our back (a sync conflict resolved by copying, a hand-edited
+     * sidecar, a write interrupted mid-sequence) rather than silently trusting
+     * it. The store verifies it when opening a table and
      * refuses to revert to a version that fails it.
      */
     sha256: string;

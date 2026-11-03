@@ -200,7 +200,7 @@ export interface TableSectionData {
      */
     canOpen: boolean;
     /**
-     * The table went backwards or cannot be read, and "Restore my version"
+     * The table went backwards or cannot be read, and "Recover my version"
      * would write this device's last version back as a new version.
      */
     canRestore?: boolean;
@@ -570,7 +570,7 @@ async function restoreShadow(ref: TableRef): Promise<string> {
     if (!api) return 'Table document actions are unavailable.';
     const result = await api.shadow.restore(ref);
     if (!result.ok) return tableActionErrorMessage(result, ref);
-    return `Restored this device's version ${result.restoredFrom} as version ${result.version}. Close and reopen any open snapshot to see the current table.`;
+    return `Recovered this device's version ${result.restoredFrom} as version ${result.version}. Close and reopen any open snapshot to see the current table.`;
 }
 
 function showInLibrary(win: Window | null, item: Zotero.Item): void {
@@ -611,7 +611,7 @@ function renderActions(doc: Document, item: Zotero.Item): HTMLElement {
         // table, so it starts disabled and the async half enables it only for a
         // table that is actually in the conflicted state.
         hidden(
-            button(doc, 'restore-shadow', 'Restore my version', false, () => {
+            button(doc, 'restore-shadow', 'Recover my version', false, () => {
                 const restore = wrapper.querySelector<HTMLButtonElement>('[data-beaver-action="restore-shadow"]')!;
                 restore.disabled = true;
                 void restoreShadow(ref).then((message) => { status.textContent = message; })

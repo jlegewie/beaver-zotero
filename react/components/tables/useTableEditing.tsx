@@ -208,7 +208,7 @@ export function useTableEditing({
                 input.op === 'clear' ? `Cleared a cell in “${column.header}”` : `Edited a cell in “${column.header}”`,
             ),
         onRestore: (row: Row, column: Column) =>
-            void editCells([{ op: 'restore', row: row.id, column: column.id }], `Restored Beaver’s answer in “${column.header}”`),
+            void editCells([{ op: 'restore', row: row.id, column: column.id }], `Reset “${column.header}” to Beaver’s answer`),
         onChooseDocument: (row: Row) => setChooser({ row }),
     };
 

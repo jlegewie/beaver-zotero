@@ -299,7 +299,7 @@ function expectOk(result: TableWriteResult) {
 // ---------------------------------------------------------------------------
 
 describe('createTable', () => {
-    it('starts the version log at 1, with a version file beside it', async () => {
+    it('starts the version log at 1, with table.json carrying version 1 until the next write', async () => {
         const created = await createTable({ spec: demoSpec('Created') });
 
         expect(created.version).toBe(1);
@@ -315,8 +315,12 @@ describe('createTable', () => {
         expect(history.tip).toBe(1);
         expect(history.versions.map((v) => v.version)).toEqual([1]);
 
+        // The tip has no version file; the next write copies it out.
+        expect(existsSync(sidecar('v1.json'))).toBe(false);
+        expectOk(await writeTable(ref, demoSpec('Next'), { actor: 'user' }));
         const seeded = JSON.parse(await readFile(sidecar('v1.json'), 'utf8'));
         expect(seeded).toEqual(created.spec);
+        expect(existsSync(sidecar('v2.json'))).toBe(false);
     });
 
     it('seals version 1 so the creating run cannot collapse onto it', async () => {
@@ -467,24 +471,77 @@ describe('writeTable', () => {
         expect((await readHistory()).tip).toBe(2);
     });
 
-    it('reports a collapsing write whose version file could not be rewritten', async () => {
+    it('writes no version file for a collapsing write', async () => {
         await writeTable(ref, demoSpec('Two'), { actor: 'agent', run_id: 'run-1' });
-
-        // A collapsing write writes its version file *after* the document, so
-        // this failure is past the commit point too.
-        const move = (globalThis as any).IOUtils.move;
-        (globalThis as any).IOUtils.move = async (from: string, to: string) => {
-            if (to === sidecar('v2.json')) throw new Error('disk is full');
-            return move(from, to);
-        };
+        const before = await readdir(sidecar());
 
         const written = expectOk(
             await writeTable(ref, demoSpec('Three'), { actor: 'agent', run_id: 'run-1' })
         );
 
-        expect(written.saved).toBe(false);
-        expect(written.collapsed).toBe(true);
+        expect(written).toMatchObject({ collapsed: true, saved: true, version: 2 });
+        expect(await readdir(sidecar())).toEqual(before);
+        expect(existsSync(sidecar('v2.json'))).toBe(false);
+    });
+
+    it('fails a write whose copy of the outgoing tip could not be written, leaving the table as it was', async () => {
+        await writeTable(ref, demoSpec('Two'), { actor: 'user' });
+
+        // The copy goes before the commit point, so this failure is a failed write.
+        const move = (globalThis as any).IOUtils.move;
+        (globalThis as any).IOUtils.move = async (from: string, to: string) => {
+            if (to === sidecar('v2.json')) throw new Error('disk is full');
+            return move(from, to);
+        };
+        try {
+            await expect(writeTable(ref, demoSpec('Three'), { actor: 'user' })).rejects.toThrow('disk is full');
+        } finally {
+            (globalThis as any).IOUtils.move = move;
+        }
+
         expect(await storedVersion()).toBe(2);
+        expect((await readHistory()).tip).toBe(2);
+        expect(existsSync(sidecar('v2.json'))).toBe(false);
+    });
+
+    it('copies the outgoing tip under an entry that describes it, even when the log had drifted', async () => {
+        const meta = { actor: 'agent' as const, run_id: 'run-1' };
+        expectOk(await writeTable(ref, demoSpec('Working'), meta));
+        // A collapsing commit whose log rewrite was lost: the entry describes
+        // an earlier moment of the version table.json now carries.
+        const history = await readHistory();
+        history.versions[history.versions.length - 1].sha256 = 'e'.repeat(64);
+        await writeFile(sidecar('history.json'), JSON.stringify(history), 'utf8');
+
+        expectOk(await writeTable(ref, demoSpec('Next'), { actor: 'user' }));
+
+        const copied = await readFile(sidecar('v2.json'), 'utf8');
+        expect((await listVersions(ref)).find((entry) => entry.version === 2)!.sha256).toBe(await sha256(copied));
+        const reverted = expectOk(await revertTable(ref, 2, { actor: 'user' }));
+        expect(reverted.spec.rows[0].cells.note?.value).toMatchObject({ text: 'Working' });
+    });
+
+    it('logs a drifted outgoing tip before the commit, so a failed log rewrite after it cannot strand the copy', async () => {
+        expectOk(await writeTable(ref, demoSpec('Working'), { actor: 'agent', run_id: 'run-1' }));
+        const history = await readHistory();
+        history.versions[history.versions.length - 1].sha256 = 'e'.repeat(64);
+        await writeFile(sidecar('history.json'), JSON.stringify(history), 'utf8');
+        // The refreshed entry lands; the rewrite after the commit does not.
+        const move = (globalThis as any).IOUtils.move;
+        let historyWrites = 0;
+        (globalThis as any).IOUtils.move = async (from: string, to: string) => {
+            if (to === sidecar('history.json') && ++historyWrites === 2) throw new Error('disk is full');
+            return move(from, to);
+        };
+        try {
+            expect(expectOk(await writeTable(ref, demoSpec('Next'), { actor: 'user' })).saved).toBe(false);
+        } finally {
+            (globalThis as any).IOUtils.move = move;
+        }
+
+        await openTable(ref);
+        const reverted = expectOk(await revertTable(ref, 2, { actor: 'user' }));
+        expect(reverted.spec.rows[0].cells.note?.value).toMatchObject({ text: 'Working' });
     });
 
     it('records a summary and a digest of the spec it wrote', async () => {
@@ -499,8 +556,9 @@ describe('writeTable', () => {
         });
         expect(written.entry.summary.rows).toBe(1);
         expect(written.entry.sha256).toMatch(/^[0-9a-f]{64}$/);
-        const stored = JSON.parse(await readFile(sidecar('v2.json'), 'utf8'));
+        const stored = (await readTableFile()).spec;
         expect(stored.version).toBe(2);
+        expect(written.entry.sha256).toBe(await recoveryShadow.tableSpecHash(stored));
     });
 
     it('collapses a second write from the same run onto the version it owns', async () => {
@@ -643,8 +701,10 @@ describe('writeTable', () => {
         const files = await readdir(sidecar());
         expect(files).toContain(`v${history.versions[0].version}.json`);
         expect(files).not.toContain(`v${history.versions[0].version - 1}.json`);
+        // Every retained version but the tip, which table.json carries.
+        expect(files).not.toContain(`v${last}.json`);
         expect(files.filter((name) => name.startsWith('v'))).toHaveLength(
-            TABLE_VERSION_RETENTION
+            TABLE_VERSION_RETENTION - 1
         );
     });
 
@@ -743,14 +803,10 @@ describe('editTable', () => {
         const { spec } = await readTable(ref);
         expect(spec.columns.map((c) => c.id)).toEqual(['note', 'a', 'b']);
         // Both collapsed onto the run's working version, and the log agrees
-        // with the file it points at.
-        expect((await readHistory()).versions.map((v) => v.version)).toEqual([1, 2]);
-        const stored = JSON.parse(await readFile(sidecar('v2.json'), 'utf8'));
-        expect(stored.columns.map((c: { id: string }) => c.id)).toEqual([
-            'note',
-            'a',
-            'b',
-        ]);
+        // with the table that carries it.
+        const history = await readHistory();
+        expect(history.versions.map((v) => v.version)).toEqual([1, 2]);
+        expect(history.versions[1].sha256).toBe(await recoveryShadow.tableSpecHash(spec));
     });
 });
 
@@ -809,8 +865,9 @@ describe('openTable recovery', () => {
             version: 3,
         });
         expect(opened.history.map((v) => v.version)).toEqual([1, 2, 3]);
-        // The version file the interrupted write never got to keep.
-        expect(existsSync(sidecar('v3.json'))).toBe(true);
+        // The rebuilt tip describes the document, which carries it.
+        expect(opened.history.at(-1)!.sha256).toBe(opened.sha256);
+        expect(existsSync(sidecar('v3.json'))).toBe(false);
     });
 
     it('deletes only the version files above the commit point', async () => {
@@ -876,7 +933,7 @@ describe('openTable recovery', () => {
         expect(existsSync(sidecar('v1.json'))).toBe(true);
     });
 
-    it('records the size of a repaired tip version, for retention', async () => {
+    it('records the size of a repaired tip entry, for retention', async () => {
         const written = expectOk(await writeTable(ref, demoSpec('One'), { actor: 'user' }));
         // A collapsing write that grew the table and committed, then failed to
         // update its log entry.
@@ -885,15 +942,17 @@ describe('openTable recovery', () => {
 
         const opened = await openTable(ref);
 
-        expect(opened.recovered).toContainEqual({ kind: 'version_file_repaired', version: written.version });
+        expect(opened.recovered).toContainEqual({ kind: 'tip_entry_repaired', version: written.version });
         const tip = (await readHistory()).versions.at(-1)!;
-        expect(tip.bytes).toBe(Buffer.byteLength(await readFile(sidecar(`v${written.version}.json`), 'utf8')));
+        expect(tip.bytes).toBe(Buffer.byteLength(JSON.stringify(grown)));
         expect(tip.bytes).toBeGreaterThan(4096);
+        expect(tip.sha256).toBe(opened.sha256);
     });
 
-    it('repairs the tip version file when it disagrees with its entry', async () => {
+    it('removes a version file that copies the tip, which table.json carries', async () => {
         await writeTable(ref, demoSpec('One'), { actor: 'user' });
-        // What a collapsing write interrupted between its two renames leaves.
+        // What a write interrupted after copying the outgoing tip leaves, or a
+        // table an earlier build wrote with a file for every version.
         await writeFile(
             sidecar('v2.json'),
             JSON.stringify({ ...demoSpec('Tampered'), key: KEY, version: 2 }),
@@ -902,16 +961,12 @@ describe('openTable recovery', () => {
 
         const opened = await openTable(ref);
 
-        expect(opened.recovered).toContainEqual({
-            kind: 'version_file_repaired',
-            version: 2,
-        });
-        // The document is authoritative, so the file is made to match it.
-        const repaired = JSON.parse(await readFile(sidecar('v2.json'), 'utf8'));
-        expect(repaired.rows[0].cells.note.value.text).toBe('One');
-        expect(await sha256(JSON.stringify(repaired))).toBe(
-            opened.history[opened.history.length - 1].sha256
-        );
+        expect(opened.recovered).toContainEqual({ kind: 'orphan_removed', versions: [2] });
+        expect(existsSync(sidecar('v2.json'))).toBe(false);
+        // The document is authoritative.
+        expect(opened.spec.rows[0].cells.note?.value).toMatchObject({ text: 'One' });
+        expect(opened.history.at(-1)!.sha256).toBe(opened.sha256);
+        expect(existsSync(sidecar('v1.json'))).toBe(true);
     });
 
     it('reports nothing to recover on a table that was written cleanly', async () => {
@@ -1056,8 +1111,10 @@ describe('applyTableEdit', () => {
 
     it('keeps the edit record through an open that repairs the version entry', async () => {
         await applyTableEdit(ref, retitle('Edited'), meta, operation);
-        await writeFile(sidecar('v2.json'), '{"damaged":true}', 'utf8');
-        expect((await openTable(ref)).recovered).toContainEqual({ kind: 'version_file_repaired', version: 2 });
+        const history = await readHistory();
+        history.versions[history.versions.length - 1].sha256 = 'f'.repeat(64);
+        await writeFile(sidecar('history.json'), JSON.stringify(history), 'utf8');
+        expect((await openTable(ref)).recovered).toContainEqual({ kind: 'tip_entry_repaired', version: 2 });
         expect((await listVersions(ref)).at(-1)).toMatchObject({ operation_id: 'edit-1', changes: [{ kind: 'renamed', title: 'Edited' }] });
         expect(await applyTableEdit(ref, retitle('Edited'), meta, operation)).toMatchObject({ ok: true, replayed: true });
     });
@@ -1294,7 +1351,9 @@ describe('conversation rewind', () => {
         expect((await openTable(ref)).spec.rows[0].cells.note.value).toMatchObject({ text: 'protected' });
         expect((await listVersions(ref)).find((entry) => entry.version === 2))
             .toMatchObject({ actor: 'system', sealed: true });
-        expect(existsSync(sidecar('v2.json'))).toBe(true);
+        // The survivor is the tip, which table.json carries.
+        expect(existsSync(sidecar('v1.json'))).toBe(true);
+        expect(existsSync(sidecar('v2.json'))).toBe(false);
         expect(existsSync(sidecar('v3.json'))).toBe(false);
     });
 
@@ -1437,10 +1496,12 @@ describe('conversation rewind', () => {
     it('does not acknowledge a trim retry while sidecar deletion still fails', async () => {
         await createTable({ spec: demoSpec(), actor: 'user' });
         await writeTable(ref, demoSpec('discarded'), owner);
+        // The survivor's version file becomes a copy of the tip, which the
+        // trim deletes once table.json carries it.
         (globalThis as any).IOUtils = {
             ...realIOUtils,
             remove: async (path: string, options: any) => {
-                if (path.endsWith('v2.json')) throw new Error('cleanup failed');
+                if (path.endsWith('v1.json')) throw new Error('cleanup failed');
                 await realIOUtils.remove(path, options);
             },
         };
@@ -1448,12 +1509,12 @@ describe('conversation rewind', () => {
         const document = await readFile(htmlPath, 'utf8');
         for (let attempt = 0; attempt < 2; attempt++) {
             await expect(trimTable(ref, request)).rejects.toThrow('cleanup failed');
-            expect(existsSync(sidecar('v2.json'))).toBe(true);
+            expect(existsSync(sidecar('v1.json'))).toBe(true);
             expect(await readFile(htmlPath, 'utf8')).toBe(document);
         }
         (globalThis as any).IOUtils = realIOUtils;
         expect(await trimTable(ref, request)).toMatchObject({ outcome: 'unchanged', saved: true });
-        expect(existsSync(sidecar('v2.json'))).toBe(false);
+        expect(existsSync(sidecar('v1.json'))).toBe(false);
     });
 
     it.each(['index', 'save'])('renders an unchanged retry again while %s keeps failing', async (stage) => {
@@ -1566,7 +1627,7 @@ describe('retriable creation', () => {
         expect(Zotero.Attachments.importFromSnapshotContent).not.toHaveBeenCalled();
     });
 
-    it('refuses a retry as corrupt when table.json is gone beside its history, until a restore repairs it', async () => {
+    it('refuses a retry as corrupt when table.json is gone beside its history, until a recovery repairs it', async () => {
         const created = await createTable(options);
         await rm(tablePath());
         tableWriteLocks().clear();
@@ -1574,7 +1635,10 @@ describe('retriable creation', () => {
         await expect(createTable({ ...options, spec: demoSpec('different') })).rejects.toMatchObject({ code: 'corrupt' });
         expect(existsSync(tablePath())).toBe(false);
         expect(Zotero.Attachments.importFromSnapshotContent).toHaveBeenCalledTimes(1);
-        expect(await revertTable(ref, 1, { actor: 'user' })).toMatchObject({ ok: true, version: 2 });
+        // The tip had no version file: table.json carried it, so only a
+        // whole-spec write (or this device's recovery copy) brings it back.
+        await expect(revertTable(ref, 1, { actor: 'user' })).rejects.toMatchObject({ code: 'not_found' });
+        expectOk(await writeTable(ref, created.spec, { actor: 'user' }));
         const restored = await readTable(ref);
         expect([restored.version, restored.spec.key]).toEqual([2, created.key]);
         expect((await openTable(ref)).recovered).toEqual([]);
@@ -1695,7 +1759,8 @@ describe('retriable creation', () => {
         expect(Zotero.Attachments.importFromSnapshotContent).toHaveBeenCalledTimes(1);
     });
 
-    it.each(['v1.json', 'history.json'])('reports committed creation after a failed %s seed and repairs locally', async (failedFile) => {
+    it('reports committed creation after a failed history.json seed and repairs locally', async () => {
+        const failedFile = 'history.json';
         const publish = vi.fn();
         (Zotero as any).Beaver = { ...(Zotero as any).Beaver, runtime: { publish } };
         (globalThis as any).IOUtils = {
@@ -1710,7 +1775,7 @@ describe('retriable creation', () => {
         expect(publish).toHaveBeenCalledTimes(1);
         (globalThis as any).IOUtils = realIOUtils;
         await openTable(ref);
-        expect(existsSync(sidecar('v1.json'))).toBe(true);
+        expect(existsSync(sidecar('v1.json'))).toBe(false);
         expect((await listVersions(ref))).toMatchObject([{ version: 1, creation: true, actor: 'agent', run_id: 'run' }]);
         expect(publish).toHaveBeenCalledTimes(1);
         expect(await trimTable(ref, { thread_id: 'thread', run_ids: ['run'] })).toMatchObject({ outcome: 'trashed' });
@@ -1774,7 +1839,7 @@ it('repairs a collapsed commit even when both its old sidecars still agree', asy
     const meta = { actor: 'agent' as const, run_id: 'run', thread_id: 'thread' };
     await writeTable(ref, demoSpec('old'), meta);
     const base = await openTable(ref);
-    // Everything after the commit point fails: the version file and the log.
+    // Everything after the commit point fails: the log.
     (globalThis as any).IOUtils = {
         ...realIOUtils,
         move: async (from: string, to: string) => {
@@ -1787,11 +1852,10 @@ it('repairs a collapsed commit even when both its old sidecars still agree', asy
     ).toMatchObject({ ok: true, saved: false });
     (globalThis as any).IOUtils = realIOUtils;
     const opened = await openTable(ref);
+    expect(opened.recovered).toContainEqual({ kind: 'tip_entry_repaired', version: base.version });
     expect(opened.history.at(-1)?.sha256).toBe(opened.sha256);
-    expect(
-        JSON.parse(await readFile(sidecar(`v${base.version}.json`), 'utf8')).rows[0].cells.note
-            .value.text
-    ).toBe('new');
+    expect(opened.spec.rows[0].cells.note?.value).toMatchObject({ text: 'new' });
+    expect(existsSync(sidecar(`v${base.version}.json`))).toBe(false);
 });
 
 describe('artifact provider through the real file store', () => {
@@ -1805,10 +1869,9 @@ describe('artifact provider through the real file store', () => {
         expect(restored).toMatchObject({ ok: true, spec: { title: 'Demo table' } });
         expect(restored.version).toBe(3);
     });
-    it.each(['read', 'list'].flatMap(op => ['missing', 'digest', 'log-digest'].map(damage => [op, damage])))('repairs interrupted tip bookkeeping before provider %s (%s)', async (op, damage) => {
+    it.each(['read', 'list'].flatMap(op => ['stray-copy', 'log-digest'].map(damage => [op, damage])))('repairs interrupted tip bookkeeping before provider %s (%s)', async (op, damage) => {
         const before = await openTable(ref);
-        if (damage === 'missing') await rm(sidecar(`v${before.version}.json`));
-        else if (damage === 'digest') await writeFile(sidecar(`v${before.version}.json`), JSON.stringify({ ...before.spec, title: 'Interrupted sidecar' }));
+        if (damage === 'stray-copy') await writeFile(sidecar(`v${before.version}.json`), JSON.stringify({ ...before.spec, title: 'Interrupted sidecar' }));
         else {
             const history = await readHistory();
             history.versions[history.versions.length - 1].sha256 = '0'.repeat(64);
@@ -1819,7 +1882,8 @@ describe('artifact provider through the real file store', () => {
             : {});
         if (op === 'list') expect(response.items[0]).toMatchObject({ unavailable: false });
         else expect(response.ok).toBe(true);
-        expect(JSON.parse(await readFile(sidecar(`v${before.version}.json`), 'utf8'))).toEqual(before.spec);
+        expect(existsSync(sidecar(`v${before.version}.json`))).toBe(false);
+        expect((await readHistory()).versions.at(-1)!.sha256).toBe(before.sha256);
     });
     it('does not expose missing older history or repair around excluded retained content', async () => {
         const old = await openTable(ref);
@@ -1829,10 +1893,11 @@ describe('artifact provider through the real file store', () => {
         expect(await request('read')).toMatchObject({ ok: false });
         const excluded = { ...old.spec, rows: [{ ...old.spec.rows[0], ref: { kind: 'item', library_id: 7, zotero_key: 'SOURCEAB' } }] };
         await writeFile(sidecar(`v${old.version}.json`), JSON.stringify(excluded));
-        await rm(sidecar(`v${current.version}.json`));
+        // A stray copy of the tip, which a repair would remove.
+        await writeFile(sidecar(`v${current.version}.json`), JSON.stringify(current.spec));
         checkLibraryExcluded.mockImplementation((id) => id === 7 ? { message: 'excluded' } : null);
         expect(await request('read')).toMatchObject({ ok: false, error_code: 'library_excluded' });
-        expect(existsSync(sidecar(`v${current.version}.json`))).toBe(false);
+        expect(existsSync(sidecar(`v${current.version}.json`))).toBe(true);
     });
     it('serves valid tables after tag removal but rejects a snapshot that carries no table', async () => {
         item.hasTag = () => false;
@@ -2352,21 +2417,21 @@ describe('table.json storage', () => {
         expect((await openTable(ref)).spec).toEqual(spec);
     });
 
-    it('commits in order: version file, table.json, history; then renders', async () => {
+    it('commits in order: the outgoing tip\'s copy, table.json, history; then renders', async () => {
         // Reconcile the seeded table's missing log first, so only the write moves.
         await openTable(ref);
         const order = moves();
         expectOk(await writeTable(ref, demoSpec('Two'), { actor: 'user' }));
-        expect(order.slice(0, 3)).toEqual(['v2.json', 'table.json', 'history.json']);
+        expect(order.slice(0, 3)).toEqual(['v1.json', 'table.json', 'history.json']);
         expect(order.slice(3)).toEqual([basename(htmlPath), 'bookkeeping.json']);
     });
 
-    it('writes a collapsing write’s version file after the commit', async () => {
+    it('writes no version file for a collapsing write', async () => {
         const meta = { actor: 'agent' as const, run_id: 'run', thread_id: 'thread' };
         expectOk(await writeTable(ref, demoSpec('first'), meta));
         const order = moves();
         expectOk(await writeTable(ref, demoSpec('second'), meta));
-        expect(order).toEqual(['table.json', 'v2.json', 'history.json', basename(htmlPath), 'bookkeeping.json']);
+        expect(order).toEqual(['table.json', 'history.json', basename(htmlPath), 'bookkeeping.json']);
     });
 
     it('renders the snapshot after every kind of write, with the spec hash on its root', async () => {
@@ -2449,11 +2514,43 @@ describe('table.json storage', () => {
         await expect(editTable(ref, [{ op: 'set_meta', title: 'X' }], { actor: 'user' })).rejects.toMatchObject({ code: 'corrupt' });
         expect(existsSync(tablePath())).toBe(false);
 
-        expect(await revertTable(ref, written.version, { actor: 'user' })).toMatchObject({ ok: true, version: 3 });
+        // The lost tip had no version file; an older retained version does.
+        await expect(revertTable(ref, written.version, { actor: 'user' })).rejects.toMatchObject({ code: 'not_found' });
+        expect(await revertTable(ref, 1, { actor: 'user' })).toMatchObject({ ok: true, version: 3 });
         const restored = await openTable(ref);
-        expect(restored.spec.rows[0].cells.note?.value).toEqual({ kind: 'text', text: 'Two' });
+        expect(restored.spec.rows[0].cells.note?.value).toEqual({ kind: 'text', text: 'One' });
         expect(restored.version).toBe(3);
         expect(restored.history.at(-1)).toMatchObject({ version: 3, sealed: true });
+    });
+
+    it('retires the lost tip\'s entry when a revert replaces a missing table.json', async () => {
+        const written = expectOk(await writeTable(ref, demoSpec('Two'), { actor: 'user' }));
+        await rm(tablePath());
+
+        expect(await revertTable(ref, 1, { actor: 'user' })).toMatchObject({ ok: true, version: written.version + 1 });
+        // The lost version is gone from the log, so reads that verify every
+        // retained version succeed.
+        expect((await listVersions(ref)).map((entry) => entry.version)).toEqual([1, written.version + 1]);
+        expect((await openTable(ref)).recovered).toEqual([]);
+    });
+
+    it('keeps the lost tip retired when the log rewrite after the replacing commit fails', async () => {
+        const written = expectOk(await writeTable(ref, demoSpec('Two'), { actor: 'user' }));
+        await rm(tablePath());
+        const move = (globalThis as any).IOUtils.move;
+        let historyWrites = 0;
+        (globalThis as any).IOUtils.move = async (from: string, to: string) => {
+            if (to === sidecar('history.json') && ++historyWrites === 2) throw new Error('disk is full');
+            return move(from, to);
+        };
+        try {
+            expect(expectOk(await revertTable(ref, 1, { actor: 'user' })).saved).toBe(false);
+        } finally {
+            (globalThis as any).IOUtils.move = move;
+        }
+
+        await openTable(ref);
+        expect((await listVersions(ref)).map((entry) => entry.version)).toEqual([1, written.version + 1]);
     });
 
     it('regenerates a missing or stale snapshot on the next read', async () => {
@@ -2502,7 +2599,7 @@ describe('table.json storage', () => {
     });
 
     it('measures versions logged without a size before applying the byte bound', async () => {
-        const big = (label: string) => demoSpec(`${label} ${'x'.repeat(3 * 1024 * 1024)}`);
+        const big = (label: string) => demoSpec(`${label} ${'x'.repeat(900 * 1024)}`);
         for (const label of ['two', 'three', 'four']) {
             expectOk(await writeTable(ref, big(label), { actor: 'user' }));
         }
@@ -2519,20 +2616,21 @@ describe('table.json storage', () => {
         expect(kept.every((entry) => typeof entry.bytes === 'number')).toBe(true);
         // Counted as zero, the unsized versions would all have been kept.
         expect(kept.map((entry) => entry.version)).toEqual([3, 4, 5, 6, 7]);
-        expect(kept.reduce((sum, entry) => sum + (entry.bytes ?? 0), 0)).toBeLessThanOrEqual(16 * 1024 * 1024);
+        // The tip lives in table.json and does not count.
+        expect(kept.slice(0, -1).reduce((sum, entry) => sum + (entry.bytes ?? 0), 0)).toBeLessThanOrEqual(4 * 1024 * 1024);
     });
 
     it('bounds retained versions by bytes beyond the floor', async () => {
-        const big = (label: string) => demoSpec(`${label} ${'x'.repeat(3 * 1024 * 1024)}`);
+        const big = (label: string) => demoSpec(`${label} ${'x'.repeat(900 * 1024)}`);
         for (const label of ['two', 'three', 'four', 'five', 'six', 'seven']) {
             expectOk(await writeTable(ref, big(label), { actor: 'user' }));
         }
         const versions = (await readHistory()).versions.map((entry) => entry.version);
-        // Five 3 MiB versions fit in 16 MiB; a sixth would not.
+        // Below the tip, four 0.9 MiB version files fit in 4 MiB; a fifth would not.
         expect(versions).toEqual([3, 4, 5, 6, 7]);
         expect(existsSync(sidecar('v2.json'))).toBe(false);
-        const sizes = (await readHistory()).versions.map((entry) => entry.bytes ?? 0);
-        expect(sizes.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(16 * 1024 * 1024);
+        const sizes = (await readHistory()).versions.slice(0, -1).map((entry) => entry.bytes ?? 0);
+        expect(sizes.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(4 * 1024 * 1024);
     });
 
     it('always keeps the last three versions, even when they exceed the byte bound', async () => {

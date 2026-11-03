@@ -36,7 +36,7 @@ export interface CellInspectorProps {
     documents?: TableDocuments;
     /**
      * Controls under the cell's answer (Edit; on the user's answer also Clear
-     * and Restore Beaver's answer) and beside the document line (Change).
+     * and Reset to Beaver's answer) and beside the document line (Change).
      * Absent in a read-only view.
      */
     cellActions?: (row: Row, column: Column) => React.ReactNode;

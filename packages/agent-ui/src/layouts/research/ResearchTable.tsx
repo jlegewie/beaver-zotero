@@ -90,7 +90,7 @@ export interface ResearchTableEditing {
 
 /**
  * Editing cells (section 5's user cells): the editor on a cell, the
- * inspector's Edit, Clear and Restore Beaver's answer, and Choose document.
+ * inspector's Edit, Clear and Reset to Beaver's answer, and Choose document.
  * With `disabledReason` (a read-only library) the controls show disabled.
  */
 export interface ResearchCellEditing {
@@ -445,7 +445,7 @@ export function ResearchTable({
     }, [focus, table, state, columns.questions]);
 
     // The inspector's controls for the cell: Edit, and on the user's own
-    // answer Clear and Restore Beaver's answer; Change beside the document.
+    // answer Clear and Reset to Beaver's answer; Change beside the document.
     const cellActions = cellEditing
         ? (row: Row, column: Column): React.ReactNode => {
               const disabled = !!cellEditing.disabledReason;
@@ -482,7 +482,7 @@ export function ResearchTable({
                               title={title ?? (cell.replaced ? undefined : "Beaver fills this cell again on the next Fill.")}
                               onClick={() => cellEditing.onRestore(row, column)}
                           >
-                              {cell.replaced ? "Restore Beaver’s answer" : "Reset"}
+                              {cell.replaced ? "Reset to Beaver’s answer" : "Reset"}
                           </button>
                       ) : null}
                   </>
