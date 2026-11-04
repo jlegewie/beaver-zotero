@@ -183,11 +183,20 @@ export interface ImportItemProposedData {
     warnings?: string[];
 }
 
-/** A file an import attaches from a known URL. */
+/**
+ * Something an import attaches: a file downloaded from a known URL, or a
+ * registry record rendered by the backend and saved as an HTML snapshot.
+ */
 export interface ImportAttachment {
+    /** `file`: the download URL. `record`: the record's canonical URL. */
     url: string;
     title?: string | null;
+    /** `record`: `text/html`. */
     content_type?: string | null;
+    /** Absent or null: `file`. */
+    kind?: 'file' | 'record' | null;
+    /** `record`: the external id whose record is rendered, e.g. `NCT04292899`. */
+    external_id?: string | null;
 }
 
 /** Result data of an applied `import_item` action; same shape as `create_item`'s plus the file. */

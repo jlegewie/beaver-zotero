@@ -1,18 +1,21 @@
 /**
- * Attaching the files an import proposal names, in the proposal's order.
+ * Attaching what an import proposal names, in the proposal's order.
  *
  * A record that knows its files (a trial's protocol and statistical analysis
  * plan) lists them in `attachments`. They are downloaded through the same
  * controlled path as PDF discovery (no CAPTCHA window, the user's filename
  * template, source URL and title kept on the attachment) and saved in list
- * order, so the first file becomes the item's best attachment, the one a
- * double-click opens.
+ * order, so the first one saved becomes the item's best attachment, the one a
+ * double-click opens. A `record` entry is not downloaded: the backend renders
+ * the registry record, saved as an HTML snapshot (`recordSnapshot`).
  *
- * Zotero orders a parent's attachments by content type, then by whether the
- * attachment's URL equals the parent's, then by `dateAdded` (stored to the
- * second). Every file here is a PDF whose URL differs from the parent's, so
- * `dateAdded` decides; files saved within the same second would tie, which is
- * why each save is pushed at least one second past the previous one.
+ * Zotero orders a parent's attachments by content type (PDFs first), then by
+ * whether the attachment's URL equals the parent's, then by `dateAdded`
+ * (stored to the second). The record files are PDFs whose URLs differ from the
+ * parent's, so `dateAdded` decides among them; files saved within the same
+ * second would tie, which is why each save is pushed at least one second past
+ * the previous one. A record snapshot ranks after any PDF and, since its URL
+ * is the record's canonical URL (normally the item's own), first among the rest.
  *
  * Esbuild-safe: no `react/*` imports, no bare `addon`.
  */
@@ -30,12 +33,13 @@ import {
     type DownloadedFile,
 } from '../pdfAttachmentFetch';
 import { PDF_FETCH_CANCELLED_MESSAGE } from '../pdfFetchDiagnostics';
+import { fetchRecordSnapshot, saveRecordSnapshot, type RecordSnapshotResponse } from './recordSnapshot';
 
 /** Reported as the access method of a file the record named. */
 export const RECORD_ACCESS_METHOD = 'record';
 
 export interface AttachInOrderResult {
-    /** The first file that was attached: the item's best attachment. */
+    /** The first attachment saved: the item's best attachment. */
     primary: Zotero.Item | null;
     attached: Zotero.Item[];
 }
@@ -66,9 +70,34 @@ function attachmentTitle(attachment: ImportAttachment, index: number): string {
     return index === 0 ? Zotero.getString('attachment.fullText') : `Document ${index + 1}`;
 }
 
+/** What was fetched for one entry, ready to save. */
+type Prepared =
+    | { kind: 'file'; file: DownloadedFile }
+    | { kind: 'record'; record: RecordSnapshotResponse };
+
+async function prepare(
+    attachment: ImportAttachment,
+    signal: AbortSignal,
+    assertAccess: () => void,
+): Promise<Prepared | null> {
+    if (attachment.kind === 'record') {
+        const externalId = attachment.external_id?.trim();
+        if (!externalId) throw new Error('record attachment without an external id');
+        assertAccess();
+        const record = await fetchRecordSnapshot(externalId);
+        return { kind: 'record', record };
+    }
+    const file = await downloadAttachmentFile(
+        [{ url: attachment.url, accessMethod: RECORD_ACCESS_METHOD }],
+        signal,
+        assertAccess,
+    );
+    return file ? { kind: 'file', file } : null;
+}
+
 /**
- * Download every attachment (concurrently) and save them as children of
- * `parent` in list order. A file that fails is skipped; the next one that
+ * Fetch every attachment (concurrently) and save them as children of
+ * `parent` in list order. One that fails is skipped; the next one that
  * succeeds becomes the primary.
  */
 export async function attachInOrder(
@@ -81,15 +110,12 @@ export async function attachInOrder(
         if (signal.aborted) throw new Error(PDF_FETCH_CANCELLED_MESSAGE);
         assertAccess();
     };
-    const downloads: Array<DownloadedFile | null> = await Promise.all(attachments.map(async (attachment) => {
+    const prepared: Array<Prepared | null> = await Promise.all(attachments.map(async (attachment) => {
         try {
-            return await downloadAttachmentFile(
-                [{ url: attachment.url, accessMethod: RECORD_ACCESS_METHOD }],
-                signal,
-                assertAccess,
-            );
+            return await prepare(attachment, signal, assertAccess);
         } catch (error) {
-            logger(`itemImport/attachInOrder: download of ${attachment.url} failed: ${error}`, 1);
+            const what = attachment.kind === 'record' ? `record ${attachment.external_id}` : attachment.url;
+            logger(`itemImport/attachInOrder: fetching ${what} failed: ${error}`, 1);
             return null;
         }
     }));
@@ -98,18 +124,27 @@ export async function attachInOrder(
     let previousMs: number | null = null;
     try {
         for (let index = 0; index < attachments.length; index++) {
-            const file = downloads[index];
-            if (!file) continue;
+            const entry = prepared[index];
+            if (!entry) continue;
             assertCurrent();
-            // The save consumes the directory, whether it succeeds or not.
-            downloads[index] = null;
+            // A file save consumes the directory, whether it succeeds or not.
+            prepared[index] = null;
             let attachment: Zotero.Item;
             try {
-                ({ attachment } = await saveDownloadedAttachment(parent, file, {
-                    title: attachmentTitle(attachments[index], index),
-                    signal,
-                    assertCurrent,
-                }));
+                if (entry.kind === 'record') {
+                    attachment = await saveRecordSnapshot(parent, entry.record.html, {
+                        title: entry.record.title?.trim() || attachmentTitle(attachments[index], index),
+                        url: entry.record.url?.trim() || attachments[index].url,
+                        signal,
+                        assertCurrent,
+                    });
+                } else {
+                    ({ attachment } = await saveDownloadedAttachment(parent, entry.file, {
+                        title: attachmentTitle(attachments[index], index),
+                        signal,
+                        assertCurrent,
+                    }));
+                }
             } catch (error) {
                 if (signal.aborted) throw error;
                 logger(`itemImport/attachInOrder: saving ${attachments[index].url} failed: ${error}`, 1);
@@ -127,11 +162,11 @@ export async function attachInOrder(
                 );
             } catch (error) {
                 if (signal.aborted) throw error;
-                logger(`itemImport/attachInOrder: ordering ${attachment.key} after the previous file failed: ${error}`, 1);
+                logger(`itemImport/attachInOrder: ordering ${attachment.key} after the previous attachment failed: ${error}`, 1);
             }
         }
     } finally {
-        await Promise.all(downloads.map((file) => discardDownloadedFile(file)));
+        await Promise.all(prepared.map((entry) => (entry?.kind === 'file' ? discardDownloadedFile(entry.file) : undefined)));
     }
     return { primary: attached[0] ?? null, attached };
 }

@@ -154,6 +154,38 @@ describe('ExternalReferenceListResultView', () => {
         expect(html).not.toContain('Open on');
     });
 
+    it('lists get_trial publications under a subheading after the trials', () => {
+        const html = render({
+            view_type: 'external_reference_list',
+            tool_name: 'get_trial',
+            references: [trialRecord, { ...pubmedRecord, source_id: 'pmid:41234567' }],
+            found_count: 1,
+        });
+        const trialAt = html.indexOf('Semaglutide Trial');
+        const headingAt = html.indexOf('>Publications<');
+        const paperAt = html.indexOf('Semaglutide and weight loss');
+        expect(trialAt).toBeGreaterThanOrEqual(0);
+        expect(headingAt).toBeGreaterThan(trialAt);
+        expect(paperAt).toBeGreaterThan(headingAt);
+        expect(html.match(/>Publications</g)).toHaveLength(1);
+    });
+
+    it('shows no publications subheading for trials alone or outside get_trial', () => {
+        expect(render({ view_type: 'external_reference_list', tool_name: 'get_trial', references: [trialRecord], found_count: 1 }))
+            .not.toContain('>Publications<');
+        expect(render({ view_type: 'external_reference_list', tool_name: 'lookup_work', references: [trialRecord, pubmedRecord] }))
+            .not.toContain('>Publications<');
+    });
+
+    it('counts a trial\'s publications in its summary line', () => {
+        const html = render({
+            view_type: 'external_reference_list',
+            tool_name: 'get_trial',
+            references: [{ ...trialRecord, details: { ...trialRecord.details!, publication_count: 2 } as any }],
+        });
+        expect(html).toContain('500 participants (est.) · 2 publications');
+    });
+
     it('renders unknown details and an unknown info_type as plain cards', () => {
         const html = render({
             view_type: 'external_reference_list',

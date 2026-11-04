@@ -43,9 +43,14 @@ export const TrialTags: React.FC<{ details: TrialDetails }> = ({ details }) => {
     );
 };
 
-/** "NCT04368728 · Phase 2/3 · Interventional · 46,969 participants" */
+/** "NCT04368728 · Phase 2/3 · Interventional · 46,969 participants · 2 publications" */
 export function trialSummaryLine(item: ExternalReference, details: TrialDetails): string {
-    return [recordNct(item), trialDesignLine(details)].filter(Boolean).join(' · ');
+    const publications = details.publication_count ?? 0;
+    return [
+        recordNct(item),
+        trialDesignLine(details),
+        publications ? `${publications} publication${publications === 1 ? '' : 's'}` : null,
+    ].filter(Boolean).join(' · ');
 }
 
 /**

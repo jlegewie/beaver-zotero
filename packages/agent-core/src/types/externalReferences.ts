@@ -102,6 +102,8 @@ export interface TrialDetails {
     last_update_posted?: string | null;
     has_results?: boolean | null;
     documents?: TrialDocument[];
+    /** Registry references that report the trial (RESULT and DERIVED). */
+    publication_count?: number;
     /** Registry data timestamp, in the registry's terms. */
     data_as_of?: string | null;
 }
