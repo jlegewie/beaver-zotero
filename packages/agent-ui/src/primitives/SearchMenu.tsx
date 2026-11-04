@@ -594,7 +594,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                             displayOrderMenuItems.map((item, index) => renderMenuItem(item, index))
                         ) : (
                             <div className="px-2 p-1 py-2 text-sm font-color-tertiary text-center">
-                                {searchQuery.trim() ? "No results found" : "Start typing to search"}
+                                {searchQuery.trim() ? noResultsText : "Start typing to search"}
                             </div>
                         )}
                     </div>

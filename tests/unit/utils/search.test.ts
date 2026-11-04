@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { scoreSearchResult } from '../../../react/utils/search';
+import { normalizeQuickSearchQuery, rankSearchResults, scoreSearchResult } from '../../../react/utils/search';
 import { createMockItem } from '../../helpers/factories';
 
 describe('scoreSearchResult', () => {
@@ -70,5 +70,50 @@ describe('scoreSearchResult', () => {
         expect(scoreSearchResult(titleStartsWithMatch, 'legewie')).toBeGreaterThan(
             scoreSearchResult(laterTitleMatch, 'legewie')
         );
+    });
+});
+
+describe('rankSearchResults', () => {
+    const item = (key: string, title: string, libraryID = 1, publicationTitle = '') => createMockItem({
+        key,
+        libraryID,
+        fields: { title, date: '2020', publicationTitle },
+    }) as Zotero.Item;
+
+    it('keeps a match the scorer cannot read, after the ones it can', () => {
+        const journalOnly = item('JOURNAL1', 'Policing and Schools', 1, 'Sociological Review');
+        const titled = item('TITLED01', 'A Review of Policing');
+
+        expect(rankSearchResults([journalOnly, titled], 'review').map((i) => i.key))
+            .toEqual(['TITLED01', 'JOURNAL1']);
+    });
+
+    it('orders equal scores by library and key, whatever order they arrive in', () => {
+        const groupItem = item('AAAAAAAA', 'Policing', 5);
+        const laterKey = item('BBBBBBBB', 'Policing', 1);
+        const earlierKey = item('AAAAAAAA', 'Policing', 1);
+
+        expect(rankSearchResults([groupItem, laterKey, earlierKey], 'policing').map((i) => `${i.libraryID}/${i.key}`))
+            .toEqual(['1/AAAAAAAA', '1/BBBBBBBB', '5/AAAAAAAA']);
+    });
+});
+
+describe('normalizeQuickSearchQuery', () => {
+    it('turns every comma and ampersand into a word break', () => {
+        expect(normalizeQuickSearchQuery('Smith, Jones, Brown & Lee').split(/\s+/))
+            .toEqual(['Smith', 'Jones', 'Brown', 'Lee']);
+    });
+
+    it('drops joining words between names', () => {
+        expect(normalizeQuickSearchQuery('Smith and Jones 2020').split(/\s+/)).toEqual(['Smith', 'Jones', '2020']);
+    });
+
+    it('splits a year typed straight after a name', () => {
+        expect(normalizeQuickSearchQuery('smith2020')).toBe('smith 2020');
+    });
+
+    it('leaves an item key ending in digits whole', () => {
+        expect(normalizeQuickSearchQuery('2DWQHP99')).toBe('2DWQHP99');
+        expect(normalizeQuickSearchQuery('Smith 2DWQHP99')).toBe('Smith 2DWQHP99');
     });
 });

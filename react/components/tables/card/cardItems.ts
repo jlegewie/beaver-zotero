@@ -7,9 +7,6 @@ import { libraryRefForLibraryID, resolveLibraryRef } from '../../../../src/utils
 /** The Add Sources menu's rows for a table: papers, collections and tags, added rather than filtered. */
 export const TABLE_MENU_ENTRIES: SourcesMenuEntries = { libraries: false, notes: false, files: false, scopeVerb: 'add' };
 
-/** A table's item search runs everywhere, not in the scopes it already has. */
-export const NO_SEARCH_FILTERS: MessageFiltersState = { libraryIds: [], collectionIds: [], tagSelections: [] };
-
 /**
  * The collections and tags a table already has, as the menu's filter state:
  * read only, for the checkmarks.

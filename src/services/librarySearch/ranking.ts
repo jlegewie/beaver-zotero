@@ -56,6 +56,24 @@ export const scoreSearchResult = (item: Zotero.Item, query: string): number => {
 };
 
 /**
+ * Orders quick-search hits best first by {@link scoreSearchResult}. Equal
+ * scores fall back to library and key, so the order does not depend on the
+ * order the libraries were searched in.
+ *
+ * Zero-score hits are kept and sort last: they are real Zotero matches on a
+ * field the scorer does not read (a journal name, a citation key).
+ */
+export const rankSearchResults = (items: Zotero.Item[], query: string): Zotero.Item[] =>
+    items
+        .map((item) => ({ item, score: scoreSearchResult(item, query) }))
+        .sort((a, b) => (
+            b.score - a.score
+            || a.item.libraryID - b.item.libraryID
+            || (a.item.key < b.item.key ? -1 : a.item.key > b.item.key ? 1 : 0)
+        ))
+        .map(({ item }) => item);
+
+/**
  * Builds the ordered metadata text used for source-menu ranking.
  */
 const getRankedMetadataText = (item: Zotero.Item): string => {

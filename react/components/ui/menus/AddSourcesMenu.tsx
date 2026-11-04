@@ -1,5 +1,4 @@
 import { logger } from '@beaver/agent-core/platform/logger';
-import { ItemSearchResult } from '@beaver/agent-core/transport/clients/searchService';
 import { ZoteroTag } from '@beaver/agent-core/types/zotero';
 import { AddSourcesMenuHandle, AddSourcesQuerySource } from '@beaver/agent-ui/composer/useAddSourcesMenu';
 import SearchMenu, { MenuPosition, SearchMenuCloseReason, menuSideWithRoom } from '@beaver/agent-ui/primitives/SearchMenu';
@@ -9,15 +8,13 @@ import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo
 import { EXTERNAL_FILE_PICKER_EXTENSIONS } from '../../../../src/services/externalFiles';
 import { libraryRefForLibraryID, UNRESOLVED_LIBRARY_ID } from '../../../../src/utils/libraryIdentity';
 import { getPref, setPref } from '../../../../src/utils/prefs';
-import { itemSearchResultFromZoteroItem } from '../../../../src/utils/zoteroSerializers';
-import { loadFullItemData } from '../../../../src/utils/zoteroUtils';
 import { addItemToCurrentMessageItemsAtom, currentMessageFiltersAtom, currentMessageItemsAtom, removeItemFromMessageAtom, type MessageFiltersState } from '../../../atoms/messageComposition';
 import { searchableLibraryIdsAtom } from '../../../atoms/profile';
 import { selectedZoteroItemsAtom } from '../../../atoms/zoteroContext';
 import { useAttachExternalFiles } from '../../../hooks/useAttachExternalFiles';
 import { useSurfaceWindow } from '../../../runtime/SurfaceWindowContext';
 import { store } from '../../../store';
-import { scoreSearchResult, searchTitleCreatorYear } from '../../../utils/search';
+import { searchSourceItems } from '../../../utils/search';
 import { getActiveZoteroLibraryId } from '../../../utils/zoteroTargetContext';
 import { Icon, PlusSignIcon } from '../../icons/icons';
 import { useCollectionsMenu } from './hooks/useCollectionsMenu';
@@ -41,8 +38,22 @@ const RECENT_ITEMS_LIMIT = 5;
  * the Zotero selection, or the recently used items when nothing is selected.
  */
 const PROPOSED_ITEMS_LIMIT = 3;
+/** How many search results the menu lists for a typed query. */
+const SEARCH_RESULTS_LIMIT = 10;
+/**
+ * How long typing must pause before the item search runs. Each search scans
+ * every searchable library, so running one per keystroke stacks up in a large
+ * library and delays the result the user is actually waiting for.
+ */
+const SEARCH_DEBOUNCE_MS = 150;
 
 type MenuMode = 'sources' | 'libraries' | 'collections' | 'tags' | 'notes';
+
+interface SearchState {
+    items: Zotero.Item[];
+    matchCount: number;
+}
+const NO_SEARCH: SearchState = { items: [], matchCount: 0 };
 
 interface RecentItem {
     zotero_key: string;
@@ -149,11 +160,6 @@ export interface AddSourcesTarget {
      */
     pickCollection?: (collectionId: number) => void;
     pickTag?: (tag: ZoteroTag) => void;
-    /**
-     * The scope the item search runs in, when it is not `filters`. A target
-     * whose `filters` only mark what it already holds searches everywhere.
-     */
-    searchFilters?: MessageFiltersState;
 }
 
 export interface AddSourcesMenuProps {
@@ -220,8 +226,9 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
     menuAlign = 'start',
 }, ref) {
     const surfaceWindow = useSurfaceWindow();
-    const [isLoading, setIsLoading] = useState(false);
-    const [searchResults, setSearchResults] = useState<ItemSearchResult[]>([]);
+    const [isSearching, setIsSearching] = useState(false);
+    /** The best matches for the last search, and how many items matched in all. */
+    const [search, setSearch] = useState<SearchState>(NO_SEARCH);
     const [menuMode, setMenuMode] = useState<MenuMode>('sources');
     // The side a menu opened from the button chose for the room it has; a
     // menu following a typed `@` keeps the caller's side.
@@ -242,11 +249,6 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
     const currentMessageFilters = target ? target.filters : composerFilters;
     const { libraryIds: currentLibraryIds, collectionIds: currentCollectionIds, tagSelections: currentTagSelections } = currentMessageFilters;
     const setCurrentMessageFilters = target ? target.setFilters : setComposerFilters;
-    // The item search scopes itself to the active filters, and runs from an
-    // effect that must not re-subscribe on every filter change; a ref keeps it
-    // reading the current ones without becoming a dependency.
-    const filtersRef = useRef(target?.searchFilters ?? currentMessageFilters);
-    filtersRef.current = target?.searchFilters ?? currentMessageFilters;
     const composerIsAttached = useCallback(
         (item: Zotero.Item) => currentMessageItems.some((i) => i.id === item.id),
         [currentMessageItems],
@@ -268,7 +270,8 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
     // handled by the caller (left alone on dismiss, consumed on commit).
     const resetMenuState = useCallback(() => {
         currentSearchRef.current = 0;
-        setSearchResults([]);
+        setSearch(NO_SEARCH);
+        setIsSearching(false);
         setMenuMode('sources');
     }, []);
 
@@ -290,74 +293,24 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
         },
     }), [menuMode]);
 
-    // Improved search function with debouncing and cancellation
-    const handleSearch = useCallback(async (query: string, limit: number = 10) => {
-        if (!query.trim()) return [];
-        
-        const searchId = ++searchSequenceRef.current;
-        currentSearchRef.current = searchId;
-        
+    /**
+     * Search every searchable library for `query` and publish the best
+     * `SEARCH_RESULTS_LIMIT` matches. Library, collection and tag filters on
+     * the message do not narrow it: they scope what the agent searches, while
+     * this search picks items to attach, which can come from anywhere.
+     */
+    const handleSearch = useCallback(async (searchId: number, query: string) => {
+        const isCurrent = () => searchId === currentSearchRef.current;
         try {
-            setIsLoading(true);
-
-            // Query formatting
-            query = query.replace(/ (?:&|and) /g, " ");
-            query = query.replace(/,/, ' ');
-            query = query.replace(/&/, ' ');
-            query = query.replace(/ ?(\d{1,4})$/, ' $1');
-            query = query.trim();
-            
-            // Search Zotero items
-            const { libraryIds, tagSelections } = filtersRef.current;
-            const searchLibraryIds = libraryIds.length > 0
-                ? libraryIds
-                : tagSelections.length > 0
-                    ? Array.from(new Set(tagSelections.map((tag: ZoteroTag) => tag.libraryId)))
-                    : searchableLibraryIds;
-            const searchTags = tagSelections.length > 0 ? tagSelections : undefined;
-            logger(`AddSourcesMenu.handleSearch: Searching for '${query}' in libraries: ${searchLibraryIds.join(', ')}${searchTags ? `, tags: ${searchTags.map((tag: ZoteroTag) => `${tag.tag} (lib ${tag.libraryId})`).join('; ')}` : ''}`)
-            const resultsItems = await searchTitleCreatorYear(query, searchLibraryIds, undefined, searchTags);
-
-            // Ensure item data is loaded
-            await loadFullItemData(resultsItems);
-            
-            // Check if this search was cancelled
-            if (searchId !== currentSearchRef.current) {
-                return [];
-            }
-            
-            // Score and sort results
-            const scoredResults = resultsItems
-                .map(item => ({
-                    item,
-                    score: scoreSearchResult(item, query)
-                }))
-                .filter(result => result.score > 0)
-                .sort((a, b) => b.score - a.score)
-                .slice(0, limit)
-                .map(result => result.item);
-            
-            // Final check if search was cancelled
-            if (searchId !== currentSearchRef.current) {
-                return [];
-            }
-            
-            const results = scoredResults.map(itemSearchResultFromZoteroItem).filter(Boolean) as ItemSearchResult[];
-            
-            // Update the search results only if this is still the current search
-            if (searchId === currentSearchRef.current) {
-                setSearchResults(results);
-            }
+            const result = await searchSourceItems(query, searchableLibraryIds, SEARCH_RESULTS_LIMIT, { isCurrent });
+            if (result && isCurrent()) setSearch(result);
         } catch (error) {
-            console.error('Error searching Zotero items:', error);
-            return [];
+            logger(`AddSourcesMenu.handleSearch: ${error}`, 1);
+            if (isCurrent()) setSearch(NO_SEARCH);
         } finally {
-            // Only update loading state if this is still the current search
-            if (searchId === currentSearchRef.current) {
-                setIsLoading(false);
-            }
+            if (isCurrent()) setIsSearching(false);
         }
-    }, [scoreSearchResult, searchableLibraryIds]);
+    }, [searchableLibraryIds]);
 
     const handleNavigateToLibraries = useCallback(() => {
         onResetQuery();
@@ -519,17 +472,27 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
         if (!isMenuOpen || menuMode !== 'sources') return;
         if (!searchQuery.trim()) {
             currentSearchRef.current = 0;
-            setSearchResults([]);
-            setIsLoading(false);
+            setSearch(NO_SEARCH);
+            setIsSearching(false);
             return;
         }
-        handleSearch(searchQuery);
+        // Claim the search now, so results from an earlier query that land
+        // during the pause are dropped rather than shown for this one.
+        const searchId = ++searchSequenceRef.current;
+        currentSearchRef.current = searchId;
+        setIsSearching(true);
+        const timer = setTimeout(() => {
+            void handleSearch(searchId, searchQuery);
+        }, SEARCH_DEBOUNCE_MS);
+        return () => clearTimeout(timer);
     }, [isMenuOpen, menuMode, searchQuery, handleSearch]);
 
     const sourcesMenu = useSourcesMenu({
         isActive: isMenuOpen && menuMode === 'sources',
         searchQuery,
-        searchResults,
+        searchResults: search.items,
+        searchMatchCount: search.matchCount,
+        isSearching,
         selectedZoteroItems,
         proposedItemsLimit: PROPOSED_ITEMS_LIMIT,
         sourceMenuItemContext,
@@ -613,7 +576,7 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
     };
 
     const noResultsText = menuMode === 'sources'
-        ? "No results found"
+        ? (isSearching || sourcesMenu.isBuilding ? "Searching…" : "No results found")
         : menuMode === 'libraries'
             ? "No libraries found"
             : menuMode === 'collections'

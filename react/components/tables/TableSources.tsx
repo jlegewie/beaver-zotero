@@ -10,7 +10,6 @@ import { searchableLibraryIdsAtom } from '../../atoms/profile';
 import { resolveLibraryRef } from '../../../src/utils/libraryIdentity';
 import { getItemDisplayName } from '../../../src/utils/itemDisplayName';
 import {
-    NO_SEARCH_FILTERS,
     TABLE_MENU_ENTRIES,
     paperOf,
     pickedCollectionScope,
@@ -108,7 +107,6 @@ export function TableAddSources({
             },
             removeItem: () => {},
             filters,
-            searchFilters: NO_SEARCH_FILTERS,
             setFilters: () => {},
             pickCollection: (collectionId) => {
                 const scope = pickedCollectionScope(collectionId);

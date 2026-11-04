@@ -1,7 +1,5 @@
-import { ItemSearchResult } from '@beaver/agent-core/transport/clients/searchService';
 import { SearchMenuItem } from '@beaver/agent-ui/primitives/SearchMenu';
 import React, { useEffect, useState } from 'react';
-import { UNRESOLVED_LIBRARY_ID } from '../../../../../src/utils/libraryIdentity';
 import { getRecentAsync, loadFullItemData } from '../../../../../src/utils/zoteroUtils';
 import { getActiveZoteroLibraryId } from '../../../../utils/zoteroTargetContext';
 import { ArrowRightIcon, CSSIcon, FileLinkIcon, Icon } from '../../../icons/icons';
@@ -11,7 +9,12 @@ interface UseSourcesMenuOptions {
     isActive: boolean;
     /** Query typed after the `@` in the chat editor; drives `searchResults`. */
     searchQuery: string;
-    searchResults: ItemSearchResult[];
+    /** The best matches for `searchQuery`, best first, loaded for display. */
+    searchResults: Zotero.Item[];
+    /** How many items matched `searchQuery` in all, of which `searchResults` are the best. */
+    searchMatchCount: number;
+    /** Whether a search for `searchQuery` is still running; the rows are from the previous one. */
+    isSearching: boolean;
     /** What is currently selected in Zotero's items tree. */
     selectedZoteroItems: Zotero.Item[];
     /** How many item rows the menu offers before anything is typed. */
@@ -48,15 +51,36 @@ export interface SourcesMenuEntries {
 
 interface UseSourcesMenuResult {
     menuItems: SearchMenuItem[];
+    /**
+     * Whether `menuItems` are still being built for the current
+     * `searchResults`; until they are, an empty list is not "no results".
+     */
+    isBuilding: boolean;
 }
 
 const divider = (): SearchMenuItem => ({ label: '', isDivider: true, onClick: () => {} });
 const header = (label: string): SearchMenuItem => ({ label, isGroupHeader: true, onClick: () => {} });
+/** A non-selectable note that more items matched than the menu lists. */
+const moreMatchesHint = (shown: number, total: number): SearchMenuItem => {
+    const label = `Top ${shown} of ${total.toLocaleString()} matches`;
+    return {
+        label,
+        isGroupHeader: true,
+        onClick: () => {},
+        customContent: (
+            <div className="truncate text-sm font-color-tertiary" style={{ fontWeight: 'normal' }}>
+                {label}
+            </div>
+        ),
+    };
+};
 
 export const useSourcesMenu = ({
     isActive,
     searchQuery,
     searchResults,
+    searchMatchCount,
+    isSearching,
     selectedZoteroItems,
     proposedItemsLimit,
     sourceMenuItemContext,
@@ -75,6 +99,7 @@ export const useSourcesMenu = ({
     const collectionsLabel = entries?.scopeVerb === 'add' ? 'Add Collection' : 'Filter by Collections';
     const tagsLabel = entries?.scopeVerb === 'add' ? 'Add Tag' : 'Filter by Tags';
     const [menuItems, setMenuItems] = useState<SearchMenuItem[]>([]);
+    const [builtFrom, setBuiltFrom] = useState<Zotero.Item[] | null>(null);
 
     const getEffectiveLibraryId = (libraryId: number | null): number | null => {
         if (libraryId && searchableLibraryIds.includes(libraryId)) {
@@ -134,20 +159,20 @@ export const useSourcesMenu = ({
             const items: SearchMenuItem[] = [];
             const seen = new Set<number>();
             for (const result of searchResults) {
-                // A portable library ref that couldn't be resolved on this device
-                // carries library_id 0, which throws synchronously if looked up.
-                if (result.library_id === UNRESOLVED_LIBRARY_ID) {
-                    continue;
-                }
-                const found = await Zotero.Items.getByLibraryAndKeyAsync(result.library_id, result.zotero_key);
-                const item = found ? asOffered([found])[0] : null;
+                const item = asOffered([result])[0];
                 if (!item || !addable(item) || seen.has(item.id)) {
                     continue;
                 }
                 seen.add(item.id);
                 items.push(await createSourceMenuItem(item, sourceMenuItemContext, searchQuery));
             }
-            return itemSection('Search Results', items);
+            // The menu lists only the best matches. Say so after the last of
+            // them, so an item that is not listed reads as "narrow the
+            // search" rather than "not in the library".
+            if (items.length > 0 && searchMatchCount > searchResults.length) {
+                items.push(moreMatchesHint(items.length, searchMatchCount));
+            }
+            return itemSection(isSearching ? 'Searching…' : 'Search Results', items);
         };
 
         /**
@@ -363,7 +388,10 @@ export const useSourcesMenu = ({
             const sections = searchQuery.trim()
                 ? await buildSearchSections()
                 : await buildDefaultSections();
-            if (!isCancelled) setMenuItems(sections);
+            if (!isCancelled) {
+                setMenuItems(sections);
+                setBuiltFrom(searchResults);
+            }
         };
 
         build();
@@ -375,6 +403,8 @@ export const useSourcesMenu = ({
         isActive,
         searchQuery,
         searchResults,
+        searchMatchCount,
+        isSearching,
         selectedZoteroItems,
         proposedItemsLimit,
         sourceMenuItemContext,
@@ -393,5 +423,5 @@ export const useSourcesMenu = ({
         tagsLabel,
     ]);
 
-    return { menuItems };
+    return { menuItems, isBuilding: builtFrom !== searchResults };
 };
