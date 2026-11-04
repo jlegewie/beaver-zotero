@@ -42,7 +42,7 @@ export function watchChatFills(): void {
 }
 
 /**
- * "Create and fill": the new table opens in its tab as the fill starts,
+ * Create table with the fill ticked: the new table opens in its tab as the fill starts,
  * behind the selected tab, so the user can watch it fill. Only the renderer
  * whose run started the fill knows the tool call.
  */

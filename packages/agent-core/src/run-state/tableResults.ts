@@ -150,7 +150,7 @@ export function tableResultMessages(value: unknown, toolName?: string): string[]
             );
             break;
     }
-    // Create and fill: the table was created, and the fill did not run. The
+    // Created with the fill: the table was created, and the fill did not run. The
     // error itself is written for the model.
     if (typeof result.fill_error === "string" && result.fill_error)
         messages.push("The table was created, but the fill did not run. Ask Beaver to fill it.");

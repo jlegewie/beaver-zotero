@@ -4586,8 +4586,197 @@
     border-top: 1px solid var(--fill-quinary);
 }
 
-/* Above the footer's buttons: why Create is disabled, as the same warning the
- * Sources step shows, or a quiet line while a count is in flight. */
+/* The create card's footer stacks its parts, each a full-width row with its
+ * own job: a band for what the user must know first, the decision row (the run
+ * checkbox and its receipt), and the controls. */
+[id^="beaver-pane-"] .table-card-footer-stack {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    gap: 0;
+    padding: 0;
+}
+
+[id^="beaver-pane-"] .table-card-footer-band {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 0.45rem;
+    min-width: 0;
+    padding: 0.5rem 0.8rem;
+    border-bottom: 1px solid var(--fill-quinary);
+    font-size: 0.875rem;
+    line-height: 1.4;
+}
+
+[id^="beaver-pane-"] .table-card-footer-band-pending {
+    align-items: center;
+    color: var(--fill-secondary);
+}
+
+/* A warning band is edged in its own color above and below: it covers the
+ * footer's top rule, and stacked bands share one line. */
+[id^="beaver-pane-"] .table-card-footer-band-warning {
+    margin-top: -1px;
+    border-top: 1px solid var(--tag-orange-tertiary);
+    border-bottom-color: var(--tag-orange-tertiary);
+    background: var(--tag-orange-quinary);
+    color: var(--tag-orange-secondary);
+}
+
+[id^="beaver-pane-"] .table-card-footer-band-warning .table-card-warning-action {
+    font-weight: 600;
+}
+
+/* The decision and its price, side by side: unticking visibly changes it. */
+[id^="beaver-pane-"] .table-card-decision {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+    padding: 0.55rem 0.8rem 0.5rem;
+    border-bottom: 1px solid var(--fill-quinary);
+    font-size: 0.925rem;
+}
+
+/* A held answer keeps the decision in view, quiet. */
+[id^="beaver-pane-"] .table-card-decision-held {
+    opacity: 0.5;
+}
+
+[id^="beaver-pane-"] .table-card-run-option {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.5rem;
+    flex: 1 1 auto;
+    min-width: 0;
+    color: var(--fill-primary);
+    cursor: pointer;
+}
+
+[id^="beaver-pane-"] .table-card-run-option input {
+    flex: none;
+    width: 14px;
+    height: 14px;
+    margin: 0;
+    accent-color: var(--accent-blue);
+    cursor: inherit;
+}
+
+[id^="beaver-pane-"] .table-card-run-option input:disabled,
+[id^="beaver-pane-"] .table-card-decision-held .table-card-run-option {
+    cursor: default;
+}
+
+[id^="beaver-pane-"] .table-card-receipt {
+    flex: none;
+    color: var(--fill-primary);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+[id^="beaver-pane-"] .table-card-receipt strong {
+    font-weight: 600;
+}
+
+[id^="beaver-pane-"] .table-card-receipt-quiet {
+    color: var(--fill-secondary);
+}
+
+[id^="beaver-pane-"] .table-card-receipt-info {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    margin-inline-start: -0.2rem;
+    margin-inline-end: -4px;
+    padding: 2px;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--fill-secondary);
+    cursor: pointer;
+}
+
+[id^="beaver-pane-"] .table-card-receipt-info svg {
+    width: 14px;
+    height: 14px;
+}
+
+[id^="beaver-pane-"] .table-card-receipt-info:hover:not(:disabled),
+[id^="beaver-pane-"] .table-card-receipt-info[aria-expanded="true"] {
+    background: var(--beaver-fill-hover);
+    color: var(--fill-primary);
+}
+
+[id^="beaver-pane-"] .table-card-receipt-info:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: 0;
+}
+
+[id^="beaver-pane-"] .table-card-receipt-info:disabled {
+    cursor: default;
+}
+
+/* What is read once: papers by how they are read, and the rate. Placed in
+ * the window, since the card clips its overflow; drawn as the context's other
+ * overlays (menus, tooltips), whose surface follows the sidebar or tab. */
+[id^="beaver-pane-"] .table-card-pricing-popover {
+    position: fixed;
+    z-index: 100000;
+    box-sizing: border-box;
+    width: max-content;
+    max-width: min(18rem, calc(100vw - 16px));
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    padding: 0.5rem 0.65rem;
+    border: 1px solid var(--beaver-border-strong);
+    border-radius: 6px;
+    background: var(--beaver-surface-overlay);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+    font-size: 0.875rem;
+    line-height: 1.4;
+}
+
+[id^="beaver-pane-"] .table-card-pricing-rows {
+    display: grid;
+    grid-template-columns: auto auto auto;
+    column-gap: 0.9rem;
+    row-gap: 0.15rem;
+    font-variant-numeric: tabular-nums;
+}
+
+[id^="beaver-pane-"] .table-card-pricing-label {
+    color: var(--fill-primary);
+}
+
+[id^="beaver-pane-"] .table-card-pricing-papers,
+[id^="beaver-pane-"] .table-card-pricing-rate {
+    color: var(--fill-secondary);
+    text-align: end;
+    white-space: nowrap;
+}
+
+[id^="beaver-pane-"] .table-card-pricing-note {
+    margin: 0;
+    color: var(--fill-secondary);
+}
+
+/* Ways out on the left, the one way forward on the right. */
+[id^="beaver-pane-"] .table-card-controls {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.25rem;
+    min-width: 0;
+    padding: 0.55rem 0.8rem 0.65rem;
+}
+
+/* Above the footer's buttons: a held answer, on the cards whose footer is
+ * one row (the fill card, the cancel view). */
 [id^="beaver-pane-"] .table-card-notice {
     display: flex;
     flex-direction: row;
@@ -4607,12 +4796,6 @@
 [id^="beaver-pane-"] .table-card-notice-text {
     min-width: 0;
     flex: 1;
-}
-
-[id^="beaver-pane-"] .table-card-footer-warning {
-    flex: 1 0 100%;
-    min-width: 0;
-    box-sizing: border-box;
 }
 
 /* The way to the fix, inside the warning: its own color, underlined on hover. */
@@ -4887,7 +5070,7 @@
     white-space: nowrap;
 }
 
-/* The row line under the columns: what the run would fill and how. */
+/* The fill card's cost under its columns: what the run would fill and how. */
 [id^="beaver-pane-"] .table-card-cost {
     padding-top: 0.15rem;
 }

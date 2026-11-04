@@ -13,8 +13,12 @@ import {
     addColumn,
     addItems,
     addLibrarySource,
-    createActions,
+    balanceNotice,
+    CREATE_TABLE_LABEL,
+    createChoice,
+    createRunOption,
     columnProblem,
+    costNotice,
     createBlocker,
     createBlockerReason,
     cardDestination,
@@ -39,6 +43,7 @@ import {
     sourceTotal,
     setCancelling,
     setDescription,
+    setFillNow,
     setInstructions,
     setSourceName,
     setSourceResolved,
@@ -79,7 +84,8 @@ import {
     TableIcon,
 } from '../../icons/icons';
 import AddSourcesMenu, { type AddSourcesTarget } from '../../ui/menus/AddSourcesMenu';
-import TableCardCostBlock, { useFillPricing } from './TableCardCost';
+import { TableCardReceipt, useCreditBalance, useFillPricing } from './TableCardCost';
+import { openPreferencesWindow } from '../../../ui/openPreferencesWindow';
 import { describeItems, resolveItems, resolveLibraryScope } from './liveSources';
 import { previewFacts } from '@beaver/agent-core/layouts/tableEdit';
 import type { SourceEntry } from '@beaver/agent-core/layouts/table';
@@ -194,9 +200,15 @@ function resolutionKey(source: DraftSource): string {
  * another with Next and Back: Sources first, then Screening when the card has
  * it, then Columns, which is always last because it holds the run choice. A
  * completed step collapses to one line that leads back to it. Step state is
- * local; Create sends every part as edited. Cancel opens a view that asks
- * what Beaver should do instead, so typed instructions only ever travel with
- * a decline.
+ * local; Create table sends every part as edited. Cancel opens a view that
+ * asks what Beaver should do instead, so typed instructions only ever travel
+ * with a decline.
+ *
+ * The footer stacks up to three parts, each with one job: a band for what the
+ * user must know first (a held answer, why Create table is disabled, a balance
+ * that does not reach, papers without full text), the decision row on
+ * the last step (the run checkbox and its receipt), and the controls (ways out
+ * on the left, the one way forward on the right).
  */
 export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disabled = false, heldCaption, onStop }) => {
     // The draft lives in the renderer's store, keyed by card, so a remount
@@ -523,14 +535,18 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
     );
     const blockerReason = createBlockerReason(draft, request, libraryOf);
     const blocker = blockerReason?.message ?? null;
-    const actions = createActions(draft, request);
+    // The run checkbox, when there is something to run, and what Create table sends.
+    const runOption = createRunOption(draft, request);
+    const choice = createChoice(draft, request);
+    const fillNow = choice === 'create_and_run';
 
     // The cost of filling: the backend's for the proposal as sent, then
     // computed here from the edited sources at the user's prices.
     const prices = useFillPricing();
+    const balance = useCreditBalance();
     const { cost, upperBound } = draftCost(draft, request, prices);
     // An edit the card cannot price yet (prices still loading, or unavailable)
-    // holds back the run choice; "Create only" stays.
+    // holds back the run; unticking the checkbox still creates the table.
     const runUnpriced = !!request.cost && draft.columns.length > 0 && !cost;
     const hasInstructions = draft.instructions.trim().length > 0;
 
@@ -808,9 +824,6 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
         </div>
     );
 
-    // What filling would read and cost, under the columns.
-    const costStatus = cost ? <TableCardCostBlock cost={cost} upperBound={upperBound} prices={prices} /> : null;
-
     const columnsStep = (
         <div className="display-flex flex-col min-w-0" style={{ gap: '0.45rem' }}>
             <TableColumnsStep
@@ -821,7 +834,6 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
                 onUpdate={(key, patch) => setDraft((prev) => updateColumn(prev, key, patch))}
                 onRemove={(key) => setDraft((prev) => removeColumn(prev, key))}
             />
-            {costStatus}
         </div>
     );
 
@@ -832,33 +844,93 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
         if (!blockerReason || blockerReason.pending) return null;
         if (blockerReason.part === 'title') return { label: 'Edit title', run: () => titleRef.current?.edit() };
         if (blockerReason.part === 'sources')
-            return draft.step === 'sources' ? null : { label: 'Go to Sources', run: () => setDraft((prev) => goToStep(prev, 'sources')) };
+            return draft.step === 'sources' ? null : { label: 'Edit sources', run: () => setDraft((prev) => goToStep(prev, 'sources')) };
         if (!draft.columns.length) return { label: 'Add column', run: () => columnsRef.current?.add() };
         if (draft.columns.some((column) => columnProblem(column)))
             return { label: 'Show', run: () => columnsRef.current?.openFirstIncomplete() };
         return null;
     })();
-    const notice = disabled && heldCaption ? (
-        <div className="table-card-notice table-card-notice-pending" role="status">
+
+    // The band above the decision: at most one of the held answer, a count
+    // in flight, or why Create table is disabled (blockers only on the last
+    // step, where Create table is). Otherwise, while the run is ticked, the
+    // two facts about the fill that change what the user does: a balance that
+    // does not reach, and papers without full text.
+    const held = disabled && !!heldCaption;
+    const blocked = isLast && !!blockerReason && !disabled;
+    const fillFacts = isLast && !held && !blocked && fillNow && cost && !upperBound ? cost : null;
+    const balanceWarning = fillFacts ? balanceNotice(fillFacts, balance, prices) : null;
+    const readWarning = fillFacts ? costNotice(fillFacts) : null;
+    const bands = held ? (
+        <div className="table-card-footer-band table-card-footer-band-pending" role="status">
             <Spinner size={12} />
             <span className="table-card-notice-text">{heldCaption}</span>
         </div>
-    ) : isLast && blockerReason?.pending && !disabled ? (
-        <div className="table-card-notice table-card-notice-pending" role="status">
+    ) : blocked && blockerReason!.pending ? (
+        <div className="table-card-footer-band table-card-footer-band-pending" role="status">
             <Spinner size={12} />
-            <span className="table-card-notice-text">{blockerReason.message}</span>
+            <span className="table-card-notice-text">{blockerReason!.message}</span>
         </div>
-    ) : isLast && blockerReason && !disabled ? (
+    ) : blocked ? (
         // The same warning as the Sources step's: in both places the user has
         // to change something before the card can go on.
-        <div className="table-card-warning table-card-footer-warning" role="alert">
+        <div className="table-card-footer-band table-card-footer-band-warning" role="alert">
             <Icon icon={SecurityWarningIcon} className="table-card-warning-icon" />
-            <span className="table-card-notice-text">{blockerReason.message}</span>
+            <span className="table-card-notice-text">{blockerReason!.message}</span>
             {blockerAction && (
                 <button type="button" className="table-card-warning-action" onClick={blockerAction.run}>
                     {blockerAction.label}
                 </button>
             )}
+        </div>
+    ) : balanceWarning || readWarning ? (
+        <>
+            {balanceWarning && (
+                <div className="table-card-footer-band table-card-footer-band-warning" role="alert">
+                    <Icon icon={SecurityWarningIcon} className="table-card-warning-icon" />
+                    <span className="table-card-notice-text">{balanceWarning}</span>
+                    <button
+                        type="button"
+                        className="table-card-warning-action"
+                        onClick={() => openPreferencesWindow('billing')}
+                    >
+                        Add credits
+                    </button>
+                </div>
+            )}
+            {readWarning && (
+                <div className="table-card-footer-band table-card-footer-band-warning" role="status">
+                    <Icon icon={SecurityWarningIcon} className="table-card-warning-icon" />
+                    <span className="table-card-notice-text">{readWarning}</span>
+                </div>
+            )}
+        </>
+    ) : null;
+
+    // The decision row: whether Create table also runs, and what that costs,
+    // side by side so unticking visibly changes the price. A blocked card has
+    // no decision to make yet; a held card keeps it, quiet.
+    const decisionRow = isLast && runOption && !blocked ? (
+        <div className={`table-card-decision ${disabled ? 'table-card-decision-held' : ''}`}>
+            <label className="table-card-run-option">
+                <input
+                    type="checkbox"
+                    checked={draft.fillNow}
+                    disabled={locked}
+                    onChange={(e) => {
+                        const checked = e.currentTarget.checked;
+                        setDraft((prev) => setFillNow(prev, checked));
+                    }}
+                />
+                <span>{runOption}</span>
+            </label>
+            {!fillNow ? (
+                <span className="table-card-receipt table-card-receipt-quiet">No credits used yet</span>
+            ) : cost ? (
+                <TableCardReceipt cost={cost} upperBound={upperBound} prices={prices} disabled={locked} />
+            ) : runUnpriced ? (
+                <span className="table-card-receipt table-card-receipt-quiet">Waiting for the price</span>
+            ) : null}
         </div>
     ) : null;
 
@@ -991,74 +1063,65 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
                 </div>
             </div>
 
-            <div className="table-card-footer">
-                {notice}
-                <Button
-                    variant="ghost"
-                    onClick={() => setDraft((prev) => setCancelling(prev, true))}
-                    disabled={locked}
-                    className="flex-none whitespace-nowrap"
-                >
-                    Cancel
-                </Button>
-                {stopButton}
-                {/* "Add screening" joins this footer when screening exists (P4). */}
-                <div className="flex-1" />
-                {stepIndex > 0 && (
+            <div className="table-card-footer table-card-footer-stack">
+                {bands}
+                {decisionRow}
+                <div className="table-card-controls">
+                    {stepIndex > 0 && !disabled && (
+                        <Button
+                            variant="ghost"
+                            icon={ArrowLeftIcon}
+                            onClick={() => setDraft((prev) => previousStep(prev))}
+                            disabled={locked}
+                            className="flex-none whitespace-nowrap"
+                        >
+                            Back
+                        </Button>
+                    )}
                     <Button
-                        variant="outline"
-                        onClick={() => setDraft((prev) => previousStep(prev))}
+                        variant="ghost"
+                        onClick={() => setDraft((prev) => setCancelling(prev, true))}
                         disabled={locked}
                         className="flex-none whitespace-nowrap"
-                        style={{ padding: '2px 6px' }}
                     >
-                        Back
+                        Cancel
                     </Button>
-                )}
-                {!isLast ? (
-                    <Button
-                        variant="solid"
-                        rightIcon={ArrowRightIcon}
-                        onClick={() => setDraft((prev) => nextStep(prev))}
-                        disabled={locked}
-                        className="flex-none whitespace-nowrap"
-                        style={{ padding: '3px 8px' }}
-                    >
-                        Next
-                    </Button>
-                ) : (
-                    <>
-                        {actions.secondary && (
-                            <Button
-                                variant="outline"
-                                onClick={() => decide(actions.secondary!.choice)}
-                                disabled={locked || !!blocker}
-                                className="flex-none whitespace-nowrap"
-                                style={{ padding: '2px 6px' }}
-                            >
-                                {actions.secondary.label}
-                            </Button>
-                        )}
+                    {/* "Add screening" joins this row when screening exists (P4). */}
+                    <div className="flex-1" />
+                    {/* While the answer is held, Stop takes the way forward's place. */}
+                    {stopButton ? (
+                        stopButton
+                    ) : !isLast ? (
                         <Button
                             variant="solid"
-                            ariaLabel={`${actions.primary.label} the table`}
-                            onClick={() => decide(actions.primary.choice)}
-                            disabled={locked || !!blocker || (actions.primary.choice === 'create_and_run' && runUnpriced)}
+                            rightIcon={ArrowRightIcon}
+                            onClick={() => setDraft((prev) => nextStep(prev))}
+                            disabled={locked}
+                            className="flex-none whitespace-nowrap"
+                            style={{ padding: '3px 8px' }}
+                        >
+                            Next
+                        </Button>
+                    ) : (
+                        <Button
+                            variant="solid"
+                            onClick={() => decide(choice)}
+                            disabled={locked || !!blocker || (fillNow && runUnpriced)}
                             title={
                                 blocker ??
                                 (disabled
                                     ? heldCaption
-                                    : actions.primary.choice === 'create_and_run' && runUnpriced
+                                    : fillNow && runUnpriced
                                       ? 'Waiting for the price of the fill'
                                       : undefined)
                             }
                             className="flex-none whitespace-nowrap"
                             style={{ padding: '3px 8px' }}
                         >
-                            {actions.primary.label}
+                            {CREATE_TABLE_LABEL}
                         </Button>
-                    </>
-                )}
+                    )}
+                </div>
             </div>
         </div>
         </TableCardDropZone>

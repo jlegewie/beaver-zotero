@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 
 /**
- * The table card: a single Create while the request has no cost, the
- * destination line, the live count of a collection added on the card, the
- * over-cap warning disabling Create, and the reply it sends; with a cost,
- * "Create and fill" beside "Create only", and the cost computed on the card
- * after an edit at the user's prices.
+ * The table card: one Create table button, the destination line, the live
+ * count of a collection added on the card, the over-cap warning disabling
+ * Create table, and the reply it sends; with a cost, the run checkbox and its
+ * receipt in the footer, the pricing popover, the warnings that appear only
+ * when true, and the cost computed on the card after an edit at the user's
+ * prices.
  */
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -26,6 +27,7 @@ const mocks = vi.hoisted(() => ({
     resolveItems: vi.fn(),
     describeItems: vi.fn(async (ids: string[]) => ids.map((id) => ({ item_id: id, display_name: `Paper ${id}`, has_pdf: true }))),
     target: null as any,
+    openPreferencesWindow: vi.fn(),
 }));
 
 vi.mock('../../../react/components/tables/card/liveSources', () => ({
@@ -50,6 +52,10 @@ vi.mock('../../../react/atoms/profile', async () => {
     };
 });
 
+vi.mock('../../../react/ui/openPreferencesWindow', () => ({
+    openPreferencesWindow: mocks.openPreferencesWindow,
+}));
+
 vi.mock('../../../react/utils/selectItem', () => ({
     selectCollection: vi.fn(),
     selectTagFilter: vi.fn(),
@@ -67,6 +73,7 @@ vi.mock('../../../src/utils/libraryIdentity', () => ({
 
 import { setHost } from '@beaver/agent-ui/host';
 import { tableCardDraftsAtom } from '@beaver/agent-core/run-state/pendingTableCards';
+import { initialTableCardDraft } from '@beaver/agent-core/run-state/tableCardDraft';
 import { TableCard } from '../../../react/components/tables/card/TableCard';
 import { TableFillCard } from '../../../react/components/tables/card/TableFillCard';
 import { searchableLibraryIdsAtom } from '../../../react/atoms/profile';
@@ -183,11 +190,12 @@ describe('TableCard', () => {
         // Screening arrives with P4; until then the card offers no step for it.
         expect(button('Add screening')).toBeUndefined();
         await click('Next');
-        expect(button('Create')).toBeTruthy();
-        expect(button('Create only')).toBeUndefined();
+        expect(button('Create table')).toBeTruthy();
+        // Nothing to run without a cost: no run checkbox, no receipt.
+        expect(container.querySelector('.table-card-decision')).toBeNull();
         expect(button('Back')).toBeTruthy();
         expect(doneStep('Sources')).toBe('2 items from 1 source');
-        await click('Create');
+        await click('Create table');
         expect(sent).toHaveLength(1);
         expect(sent[0]).toMatchObject({
             approved: true,
@@ -207,7 +215,7 @@ describe('TableCard', () => {
             expect.objectContaining({ kind: 'collection', library_ref: 'u', key: 'CASHTRN2' }),
         );
         await click('Next');
-        expect(button('Create')!.disabled).toBe(true);
+        expect(button('Create table')!.disabled).toBe(true);
         expect(container.textContent).toContain('Counting items…');
         // Waiting on a count is a quiet status, not a warning.
         expect(container.querySelector('.table-card-footer [role="status"]')?.textContent).toContain('Counting items…');
@@ -219,9 +227,9 @@ describe('TableCard', () => {
                 name: 'Cash transfers',
             });
         });
-        expect(button('Create')!.disabled).toBe(false);
+        expect(button('Create table')!.disabled).toBe(false);
         expect(doneStep('Sources')).toBe('16 items from 2 sources');
-        await click('Create');
+        await click('Create table');
         expect(sent[0].sources).toHaveLength(2);
     });
 
@@ -247,8 +255,8 @@ describe('TableCard', () => {
         render(fixture('create-over-cap'));
         expect(container.textContent).toContain('This table would have 1,840 items; the maximum is 500. Remove sources to continue.');
         await click('Next');
-        expect(button('Create')!.disabled).toBe(true);
-        expect(button('Create')!.title).toBe('This table would have 1,840 items; the maximum is 500. Remove sources to continue.');
+        expect(button('Create table')!.disabled).toBe(true);
+        expect(button('Create table')!.title).toBe('This table would have 1,840 items; the maximum is 500. Remove sources to continue.');
     });
 
     it('declines from the cancel view and sends typed instructions with it', async () => {
@@ -284,7 +292,7 @@ describe('TableCard', () => {
         expect(instructionsField().value).toBe('Use a note instead');
         await click('Back to table');
         await click('Next');
-        await click('Create');
+        await click('Create table');
         expect(sent).toHaveLength(1);
         expect(sent[0]).toMatchObject({ approved: true, choice: 'create' });
         expect(sent[0]).not.toHaveProperty('user_instructions');
@@ -347,7 +355,7 @@ describe('TableCard', () => {
             // A label with text is edited by Backspace, not removed.
             await press(option(2), 'Backspace');
             expect(labels()).toHaveLength(4);
-            await click('Create');
+            await click('Create table');
             expect(sent[0].columns![1].options).toEqual([
                 { label: 'RCT' }, { label: 'Before, after' }, { label: 'Observational' }, { label: 'Other' },
             ]);
@@ -393,7 +401,7 @@ describe('TableCard', () => {
             await click('Done');
             const chip = [...container.querySelectorAll('.table-card-option')].find((c) => c.textContent === 'RCT')!;
             expect(chip.getAttribute('title')).toBe('RCT: Random assignment to arms.');
-            await click('Create');
+            await click('Create table');
             expect(sent[0].columns![1].options![0]).toEqual({ label: 'RCT', description: 'Random assignment to arms.' });
         });
 
@@ -429,7 +437,7 @@ describe('TableCard', () => {
             await click('Done');
             await clickElement(container.querySelectorAll('.table-card-column')[1]);
             expect(container.querySelector('textarea[aria-label="Definition of RCT"]')).toBeNull();
-            await click('Create');
+            await click('Create table');
             expect(sent[0].columns![1].options).toEqual([
                 { label: 'RCT' },
                 { label: 'Observational', description: 'Exposure is not assigned; the study observes who has it.' },
@@ -456,7 +464,7 @@ describe('TableCard', () => {
         });
         await click('Next');
         expect(doneStep('Sources')).toBe('5 items from 2 sources');
-        await click('Create');
+        await click('Create table');
         expect(sent[0].sources).toEqual([
             { type: 'library', scope: { kind: 'collection', library_ref: 'u', key: 'CASHTRN2', name: 'Cash transfers' } },
             { type: 'library', scope: { kind: 'tag', library_ref: 'u', tag: 'review' } },
@@ -532,7 +540,7 @@ describe('TableCard', () => {
         await act(async () => { mocks.target.pickCollection(42); });
         expect(container.textContent).toContain('No library to save the table in');
         await click('Next');
-        expect(button('Create')!.disabled).toBe(true);
+        expect(button('Create table')!.disabled).toBe(true);
         expect(container.textContent).toContain('My Library cannot hold the table');
     });
 
@@ -769,7 +777,7 @@ describe('TableCard', () => {
         expect(container.querySelector('input[aria-label="Table title"]')).toBeNull();
         expect(container.textContent).toContain(original);
         expect(container.textContent).not.toContain('Unsaved title');
-        expect(button('Create')).toBeTruthy();
+        expect(button('Create table')).toBeTruthy();
     });
 
     it('saves a title edit with Enter or the check, and discards it with the cross', async () => {
@@ -791,7 +799,7 @@ describe('TableCard', () => {
         expect(container.textContent).not.toContain('Thrown away');
 
         await click('Next');
-        await click('Create');
+        await click('Create table');
         expect(sent[0].title).toBe('With the check');
     });
 
@@ -951,7 +959,7 @@ describe('TableCard', () => {
         await press(document.activeElement!, 'Escape');
         const notice = () => container.querySelector('.table-card-footer [role="alert"]');
         expect(notice()?.textContent).toContain('A column needs a name.');
-        expect(button('Create')!.disabled).toBe(true);
+        expect(button('Create table')!.disabled).toBe(true);
         await click('Show');
         const index = container.querySelectorAll('.table-card-column').length;
         expect(document.activeElement).toBe(container.querySelector(`input[aria-label="Column ${index} name"]`));
@@ -1007,30 +1015,137 @@ describe('TableCard', () => {
             delete (globalThis as any).Zotero.Beaver;
         });
 
-        it('offers "Create and fill" beside "Create only" with the cost, the pricing sentence and no estimate', async () => {
-            const request = costedFixture('create-items');
-            render(request);
+        const runOption = () => container.querySelector('.table-card-run-option input') as HTMLInputElement | null;
+        const receipt = () => container.querySelector('.table-card-decision .table-card-receipt')?.textContent ?? null;
+        const bands = () => [...container.querySelectorAll('.table-card-footer-band')].map((band) => band.textContent ?? '');
+        /** The footer's controls row, left to right. */
+        const controls = () => [...container.querySelectorAll('.table-card-controls button')].map((b) => b.textContent?.trim());
+
+        it('offers one Create table with a ticked run checkbox and a pinned receipt', async () => {
+            render(costedFixture('create-items'));
+            // No decision yet on the first step: no checkbox, no price.
+            expect(runOption()).toBeNull();
+            expect(controls()).toEqual(['Cancel', 'Next']);
             await click('Next');
-            expect(button('Create')).toBeUndefined();
-            expect(button('Create only')).toBeTruthy();
-            expect(button('Create and fill')!.disabled).toBe(false);
-            const cost = container.querySelector('.table-card-cost')?.textContent ?? '';
-            expect(cost).toContain("Reads 1 paper: 1 from their documents. 1 paper can't be read and is skipped");
-            expect(cost).toContain('0.2 credits');
-            expect(cost).toContain('Filling costs 0.2 credits per paper, charged as each paper is filled.');
-            await click('Create and fill');
-            expect(sent[0]).toMatchObject({ approved: true, choice: 'create_and_run' });
+            expect(controls()).toEqual(['Back', 'Cancel', 'Create table']);
+            expect(button('Create only')).toBeUndefined();
+            expect(container.querySelector('.table-card-run-option')?.textContent).toBe('Fill the table now');
+            expect(runOption()!.checked).toBe(true);
+            expect(receipt()).toBe('1 paper · 0.2 credits');
+            // The standing rate moved behind the info button.
+            expect(container.textContent).not.toContain('Charged per paper');
+            await click('Create table');
+            expect(sent[0]).toMatchObject({ approved: true, choice: 'create_and_run', cost: { credits: 0.2 } });
             expect(sent[0]).not.toHaveProperty('estimate_id');
         });
 
-        it('says how far the balance reaches when the fill costs more', async () => {
-            const request = costedFixture('create-items');
-            render({ ...request, cost: { rows: 46, documents: 46, title_abstract: 0, no_input: 0, credits: 9.2 } });
+        it('creates without running once the checkbox is unticked, and says nothing is charged', async () => {
+            render(costedFixture('create-items'));
             await click('Next');
-            expect(container.querySelector('.table-card-cost')?.textContent).toContain('Your 6 credits cover about 30 of 46 papers');
+            await clickElement(runOption());
+            expect(runOption()!.checked).toBe(false);
+            expect(receipt()).toBe('No credits used yet');
+            expect(container.querySelector('button[aria-label="How this is priced"]')).toBeNull();
+            // Unticked, the fill's warnings do not apply.
+            expect(bands()).toEqual([]);
+            await click('Create table');
+            expect(sent[0]).toMatchObject({ approved: true, choice: 'create' });
+            expect(sent[0]).not.toHaveProperty('cost');
         });
 
-        it('holds the run choice while an edit cannot be priced, and keeps "Create only"', async () => {
+        it('keeps the checkbox as the user left it when the card mounts again', async () => {
+            const store = createStore();
+            render(costedFixture('create-items'), store);
+            await click('Next');
+            await clickElement(runOption());
+            act(() => root?.unmount());
+            render(costedFixture('create-items'), store);
+            expect(runOption()!.checked).toBe(false);
+        });
+
+        it('shows how the papers are read and the rate behind the info button', async () => {
+            render({ ...costedFixture('create-items'), cost: { rows: 12, documents: 10, title_abstract: 2, no_input: 0, credits: 2.1 } });
+            await click('Next');
+            expect(receipt()).toBe('12 papers · 2.1 credits');
+            const info = container.querySelector('button[aria-label="How this is priced"]') as HTMLButtonElement;
+            expect(info.getAttribute('aria-expanded')).toBe('false');
+            await clickElement(info);
+            const popover = container.querySelector('[role="dialog"][aria-label="How this is priced"]');
+            const rows = [...popover!.querySelectorAll('.table-card-pricing-rows > span')].map((cell) => cell.textContent);
+            expect(rows).toEqual(['Full text', '10 papers', '0.2 each', 'Abstract only', '2 papers', '0.05 each']);
+            expect(popover?.textContent).toContain('Charged per paper as it is filled.');
+            expect(info.getAttribute('aria-expanded')).toBe('true');
+            // Escape closes it and gives focus back to the button.
+            await press(document.activeElement ?? document.body, 'Escape');
+            expect(container.querySelector('[role="dialog"]')).toBeNull();
+            expect(document.activeElement).toBe(info);
+            // A press outside closes it too.
+            await clickElement(info);
+            await act(async () => {
+                document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+            });
+            expect(container.querySelector('[role="dialog"]')).toBeNull();
+        });
+
+        it('keeps the info popover open while an IME composing text owns Escape', async () => {
+            render({ ...costedFixture('create-items'), cost: { rows: 12, documents: 10, title_abstract: 2, no_input: 0, credits: 2.1 } });
+            await click('Next');
+            await clickElement(container.querySelector('button[aria-label="How this is priced"]'));
+            await act(async () => {
+                document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', isComposing: true, bubbles: true, cancelable: true }));
+            });
+            expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+        });
+
+        it('gives papers without full text a line of their own, only when there are some', async () => {
+            render(costedFixture('create-items'));
+            await click('Next');
+            // The fixture's one unreadable paper.
+            expect(bands()).toEqual(['1 paper has no full text or abstract and is skipped.']);
+            act(() => root?.unmount());
+            render({ ...costedFixture('create-items'), cost: { rows: 12, documents: 10, title_abstract: 2, no_input: 0, credits: 2.1 } });
+            await click('Next');
+            expect(bands()).toEqual(['2 papers have no full text and are read from their abstracts.']);
+            act(() => root?.unmount());
+            render({ ...costedFixture('create-items'), cost: { rows: 12, documents: 12, title_abstract: 0, no_input: 0, credits: 2.4 } });
+            await click('Next');
+            expect(bands()).toEqual([]);
+        });
+
+        it('warns when the balance does not reach, with a way to add credits', async () => {
+            render({ ...costedFixture('create-items'), cost: { rows: 46, documents: 46, title_abstract: 0, no_input: 0, credits: 9.2 } });
+            await click('Next');
+            const warning = container.querySelector('.table-card-footer-band[role="alert"]');
+            expect(warning?.textContent).toContain('Your 6 credits cover about 30 of 46 papers.');
+            await click('Add credits');
+            expect(mocks.openPreferencesWindow).toHaveBeenCalledWith('billing');
+            // Creating without the fill costs nothing, so the warning goes.
+            await clickElement(runOption());
+            expect(container.querySelector('.table-card-footer-band')).toBeNull();
+        });
+
+        it('replaces the decision with the blocker and leads to the part that needs the fix', async () => {
+            mocks.resolveLibraryScope.mockResolvedValue({
+                resolved: { count: 1, total: 1, truncated: false, without_pdf: 0, sample: [] },
+                rows: [{ item_id: 'g5-LABPAPR1', display_name: 'L1' }],
+            });
+            (globalThis as any).Zotero.Collections = {
+                get: (id: number) => (id === 42 ? { id: 42, key: 'LABCOLL1', libraryID: 5, name: 'Lab papers' } : false),
+                getByLibraryAndKey: () => false,
+            };
+            const store = createStore();
+            store.set(searchableLibraryIdsAtom, [5]);
+            render(costedFixture('create-items'), store);
+            await act(async () => { mocks.target.pickCollection(42); });
+            await click('Next');
+            expect(container.querySelector('.table-card-footer-band[role="alert"]')?.textContent).toContain('My Library cannot hold the table');
+            expect(container.querySelector('.table-card-decision')).toBeNull();
+            expect(button('Create table')!.disabled).toBe(true);
+            await click('Edit sources');
+            expect(container.querySelector('.table-card-step-head')?.textContent).toContain('Sources');
+        });
+
+        it('holds the run while an edit cannot be priced; unticked, the table can still be created', async () => {
             (globalThis as any).Zotero.Beaver = { tableFills: { pricing: () => Promise.reject(new Error('offline')) } };
             mocks.resolveLibraryScope.mockResolvedValue({
                 resolved: { count: 40, total: 40, truncated: false, without_pdf: 4, sample: [] },
@@ -1042,13 +1157,18 @@ describe('TableCard', () => {
                 mocks.target.pickCollection(41);
             });
             await click('Next');
-            expect(button('Create and fill')!.disabled).toBe(true);
-            expect(button('Create only')!.disabled).toBe(false);
-            await click('Create and fill');
+            expect(receipt()).toBe('Waiting for the price');
+            expect(button('Create table')!.disabled).toBe(true);
+            expect(button('Create table')!.title).toBe('Waiting for the price of the fill');
+            await click('Create table');
             expect(sent).toEqual([]);
+            await clickElement(runOption());
+            expect(button('Create table')!.disabled).toBe(false);
+            await click('Create table');
+            expect(sent[0]).toMatchObject({ choice: 'create' });
         });
 
-        it('asks for the prices again after a failure, and the run choice comes back', async () => {
+        it('asks for the prices again after a failure, and the run comes back', async () => {
             vi.useFakeTimers();
             try {
                 let calls = 0;
@@ -1065,36 +1185,71 @@ describe('TableCard', () => {
                     mocks.target.pickCollection(41);
                 });
                 await click('Next');
-                expect(button('Create and fill')!.disabled).toBe(true);
+                expect(button('Create table')!.disabled).toBe(true);
                 await act(async () => {
                     await vi.advanceTimersByTimeAsync(5_000);
                 });
                 expect(calls).toBeGreaterThanOrEqual(2);
-                expect(button('Create and fill')!.disabled).toBe(false);
+                expect(button('Create table')!.disabled).toBe(false);
             } finally {
                 vi.useRealTimers();
             }
         });
 
-        it('computes the cost on the card after a source edit, without holding the run button', async () => {
+        it('computes the cost on the card after a source edit, as an upper bound', async () => {
             mocks.resolveLibraryScope.mockResolvedValue({
                 resolved: { count: 40, total: 40, truncated: false, without_pdf: 4, sample: [] },
                 rows: Array.from({ length: 40 }, (_, i) => ({ item_id: `u-COLL${String(i).padStart(4, '0')}`, display_name: `C${i}` })),
                 name: 'Cash transfers',
             });
-            const request = costedFixture('create-items');
-            render(request);
+            render(costedFixture('create-items'));
             await act(async () => {
                 mocks.target.pickCollection(41);
             });
             await click('Next');
-            expect(button('Create and fill')!.disabled).toBe(false);
-            const cost = container.querySelector('.table-card-cost')?.textContent ?? '';
-            expect(cost).toContain('Reads up to 42 papers');
-            expect(cost).toContain('Up to 7.65 credits');
-            await click('Create and fill');
+            expect(button('Create table')!.disabled).toBe(false);
+            expect(receipt()).toBe('Up to 42 papers · 7.65 credits');
+            // An estimate makes no claim about which papers lack full text.
+            expect(bands()).toEqual([]);
+            await clickElement(container.querySelector('button[aria-label="How this is priced"]'));
+            expect(container.querySelector('[role="dialog"]')?.textContent).toContain('An estimate.');
+            await click('Create table');
             // The reply names the cost the card showed: the fill's ceiling.
             expect(sent[0]).toMatchObject({ choice: 'create_and_run', cost: { rows: 42, credits: 7.65 } });
+        });
+
+        it('holds the answer while the run reconnects: the decision goes quiet and Stop takes its place', async () => {
+            const onStop = vi.fn();
+            const request = costedFixture('create-items');
+            // The card was answered up to its last step before the connection dropped.
+            const store = createStore();
+            store.set(tableCardDraftsAtom, new Map([[request.card_id, { ...initialTableCardDraft(request), step: 'columns' as const }]]));
+            sent = [];
+            act(() => {
+                root = createRoot(container);
+                root.render(
+                    React.createElement(
+                        Provider,
+                        { store },
+                        React.createElement(TableCard, {
+                            request,
+                            onSubmit: (r: WSTableCardResponse) => sent.push(r),
+                            disabled: true,
+                            heldCaption: 'You can answer as soon as Beaver reconnects.',
+                            onStop,
+                        }),
+                    ),
+                );
+            });
+            expect(bands()).toEqual(['You can answer as soon as Beaver reconnects.']);
+            // The decision stays in view, quiet; Back and Create table make way for Stop.
+            expect(container.querySelector('.table-card-decision-held')).not.toBeNull();
+            expect(runOption()!.disabled).toBe(true);
+            expect(receipt()).toBe('1 paper · 0.2 credits');
+            expect(controls()).toEqual(['Cancel', 'Stop']);
+            expect(button('Cancel')!.disabled).toBe(true);
+            await click('Stop');
+            expect(onStop).toHaveBeenCalled();
         });
     });
 
