@@ -31,7 +31,7 @@ import {
     normalizeSelectLabel,
 } from '../layouts/table';
 import type { TableFillPricing } from '../protocol/tableFillProtocol';
-import { creditsText, planRowLine } from './tableFillCopy';
+import { balanceLine, creditsText, formatCredits, planRowLine } from './tableFillCopy';
 
 export type TableCardStep = 'sources' | 'screening' | 'columns';
 
@@ -91,6 +91,11 @@ export interface TableCardDraft {
     cancelling: boolean;
     /** Sent only with a decline. */
     instructions: string;
+    /**
+     * The run checkbox on the last step ("Fill the table now"): whether Create
+     * table also starts the run. Ticked unless the user unticks it.
+     */
+    fillNow: boolean;
     /** Counter for local keys. */
     nextKey: number;
     /**
@@ -161,6 +166,7 @@ export function initialTableCardDraft(request: WSTableCardRequest): TableCardDra
         sourcesEdited: false,
         cancelling: false,
         instructions: request.user_instructions_prefill ?? '',
+        fillNow: true,
         nextKey,
     };
 }
@@ -210,6 +216,11 @@ export function setDescription(draft: TableCardDraft, description: string): Tabl
 
 export function setInstructions(draft: TableCardDraft, instructions: string): TableCardDraft {
     return { ...draft, instructions };
+}
+
+/** Tick or untick the run checkbox. */
+export function setFillNow(draft: TableCardDraft, fillNow: boolean): TableCardDraft {
+    return { ...draft, fillNow };
 }
 
 /** Open or close the cancel view; the typed text and the edits are kept. */
@@ -708,24 +719,24 @@ export function createBlocker(
     return createBlockerReason(draft, request, libraryOf)?.message ?? null;
 }
 
+/** The last step's one primary button, whatever else it starts. */
+export const CREATE_TABLE_LABEL = 'Create table';
+
 /**
- * The buttons on the last step. Without a cost (the proposal had no columns)
- * or with nothing to run there is one, "Create"; otherwise the primary is
- * named for what runs and "Create only" creates without running.
+ * The run checkbox on the last step, named for what Create table would also
+ * start; null when there is nothing to run (no cost, or no columns or
+ * criteria), and the card only creates.
  */
-export function createActions(
-    draft: TableCardDraft,
-    request: WSTableCreateCardRequest,
-): { primary: { label: string; choice: TableCardChoice }; secondary?: { label: string; choice: TableCardChoice } } {
-    if (!request.cost || (!draft.columns.length && !(draft.criteria ?? []).length))
-        return { primary: { label: 'Create', choice: 'create' } };
+export function createRunOption(draft: TableCardDraft, request: WSTableCreateCardRequest): string | null {
+    if (!request.cost || (!draft.columns.length && !(draft.criteria ?? []).length)) return null;
     const screens = (draft.criteria ?? []).length > 0;
     const fills = draft.columns.length > 0;
-    const label = screens && fills ? 'Create and run' : screens ? 'Create and screen' : 'Create and fill';
-    return {
-        primary: { label, choice: 'create_and_run' },
-        secondary: { label: 'Create only', choice: 'create' },
-    };
+    return screens && fills ? 'Screen and fill now' : screens ? 'Screen the sources now' : 'Fill the table now';
+}
+
+/** What Create table sends: the run too while the card offers it and it is ticked. */
+export function createChoice(draft: TableCardDraft, request: WSTableCreateCardRequest): TableCardChoice {
+    return draft.fillNow && createRunOption(draft, request) ? 'create_and_run' : 'create';
 }
 
 /**
@@ -809,7 +820,7 @@ export function wireColumn(column: DraftColumn): TableCardColumn {
 }
 
 /**
- * The approval: every part as edited, and the choice. "Create and fill"
+ * The approval: every part as edited, and the choice. Creating with the run
  * names the cost the card showed, which bounds the fill it starts.
  */
 export function tableCardResponse(
@@ -943,4 +954,81 @@ export function costLine(cost: TableCardCost | null, upperBound = false): string
 export function costCredits(cost: TableCardCost | null, upperBound = false): string | null {
     if (!cost) return null;
     return `${upperBound ? 'Up to ' : ''}${creditsText(cost.credits)}`;
+}
+
+/** The papers a cost reads (a document, or title and abstract); all rows when none can be read. */
+function costPapers(cost: TableCardCost): number {
+    return cost.documents + cost.title_abstract || cost.rows;
+}
+
+/** The receipt beside the run checkbox: "12 papers" and "2.1 credits", "Up to" while not exact. */
+export function costReceipt(cost: TableCardCost, upperBound = false): { papers: string; credits: string } {
+    return {
+        papers: `${upperBound ? 'Up to ' : ''}${plural(costPapers(cost), 'paper')}`,
+        credits: creditsText(cost.credits),
+    };
+}
+
+/**
+ * The line for papers without full text, or null when every paper has it:
+ * "2 papers have no full text: 1 is read from its abstract, 1 is skipped."
+ * A paper with neither full text nor an abstract cannot be read, so it is
+ * skipped and costs nothing.
+ */
+export function costNotice(cost: TableCardCost): string | null {
+    const abstracts = cost.title_abstract;
+    const skipped = cost.no_input;
+    const total = abstracts + skipped;
+    if (!total) return null;
+    const one = total === 1;
+    const head = `${plural(total, 'paper')} ${one ? 'has' : 'have'} no full text`;
+    if (abstracts && skipped)
+        return `${head}: ${format(abstracts)} ${abstracts === 1 ? 'is read from its abstract' : 'are read from their abstracts'}, ${format(skipped)} ${skipped === 1 ? 'is' : 'are'} skipped.`;
+    if (abstracts) return `${head} and ${one ? 'is read from its abstract' : 'are read from their abstracts'}.`;
+    return `${head} or abstract and ${one ? 'is' : 'are'} skipped.`;
+}
+
+/** One row of the pricing popover: how a group of papers is read, how many, and the rate. */
+export interface CostBreakdownRow {
+    label: string;
+    papers: string;
+    /** "0.2 each", "free"; null while the prices are unknown. */
+    rate: string | null;
+}
+
+/**
+ * The pricing popover's rows: papers read from full text, from their
+ * abstract, and skipped, each with its rate. Only the groups the table has.
+ */
+export function costBreakdown(cost: TableCardCost, prices: TableFillPricing | null): CostBreakdownRow[] {
+    const rows: CostBreakdownRow[] = [];
+    const each = (price: number | undefined) => (price === undefined ? null : `${formatCredits(price)} each`);
+    if (cost.documents) rows.push({ label: 'Full text', papers: plural(cost.documents, 'paper'), rate: each(prices?.document) });
+    if (cost.title_abstract)
+        rows.push({ label: 'Abstract only', papers: plural(cost.title_abstract, 'paper'), rate: each(prices?.title_abstract) });
+    if (cost.no_input) rows.push({ label: 'Skipped', papers: plural(cost.no_input, 'paper'), rate: 'free' });
+    return rows;
+}
+
+/**
+ * The warning when the balance does not cover the fill: "Your 6 credits cover
+ * about 30 of 46 papers." When that estimate would be "about 0", "Your 0.1
+ * credits aren't enough to fill these papers." Null when the balance covers
+ * the fill, or is unknown. A fill stops at the first paper it cannot pay for.
+ */
+export function balanceNotice(cost: TableCardCost, balance: number | null, prices: TableFillPricing | null): string | null {
+    const reach = balanceLine({
+        credits: cost.credits,
+        balance,
+        documents: cost.documents,
+        title_abstract: cost.title_abstract,
+        prices: prices ?? { document: cost.credits, title_abstract: cost.credits },
+    });
+    if (!reach || balance == null) return null;
+    const paying = cost.documents + cost.title_abstract;
+    // The same average per paper the estimate uses.
+    const perPaper = paying > 0 ? cost.credits / paying : Infinity;
+    if (balance + 1e-9 >= perPaper) return `${reach}.`;
+    const text = creditsText(balance);
+    return `Your ${text} ${text.endsWith('credit') ? "isn't" : "aren't"} enough to fill ${paying === 1 ? 'this paper' : 'these papers'}.`;
 }

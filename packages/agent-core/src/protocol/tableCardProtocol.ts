@@ -150,7 +150,7 @@ export interface WSTableCardRequest extends WSBaseEvent {
     /** The Screening part: one statement per criterion. */
     criteria: string[];
     columns: TableCardColumn[];
-    /** Null while nothing can run on approval: the card offers one "Create". */
+    /** Null while nothing can run on approval: the card offers Create table without a run checkbox. */
     cost: TableCardCost | null;
     user_instructions_prefill?: string;
     timeout_seconds: number;

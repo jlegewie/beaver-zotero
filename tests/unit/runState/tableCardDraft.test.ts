@@ -23,8 +23,13 @@ import {
     draftCost,
     fillActionLabel,
     tableFillCardResponse,
+    balanceNotice,
     columnProblem,
-    createActions,
+    costBreakdown,
+    costNotice,
+    costReceipt,
+    createChoice,
+    createRunOption,
     createBlocker,
     createBlockerReason,
     destinationLine,
@@ -46,6 +51,7 @@ import {
     removeItem,
     removeScreening,
     removeSource,
+    setFillNow,
     setInstructions,
     setSourceResolved,
     stepSummary,
@@ -97,7 +103,8 @@ describe('table card draft', () => {
         const { request, reply } = fixture('create-items');
         const uncosted = { ...request, cost: null };
         const draft = initialTableCardDraft(uncosted);
-        expect(createActions(draft, uncosted)).toEqual({ primary: { label: 'Create', choice: 'create' } });
+        expect(createRunOption(draft, uncosted)).toBeNull();
+        expect(createChoice(draft, uncosted)).toBe('create');
         expect(createBlocker(draft, uncosted)).toBeNull();
         const response = tableCardResponse(draft, uncosted, 'create');
         expect(response).toMatchObject({
@@ -119,17 +126,18 @@ describe('table card draft', () => {
         expect(response.choice).toBe(reply!.choice);
     });
 
-    it('names the primary for what runs once the card carries a cost', () => {
+    it('offers the run as a ticked checkbox named for what runs once the card carries a cost', () => {
         const { request } = fixture('create-items');
         const costed = { ...request, cost: { rows: 2, documents: 2, title_abstract: 0, no_input: 0, credits: 0.4 } };
         const draft = initialTableCardDraft(costed);
-        expect(createActions(draft, costed)).toEqual({
-            primary: { label: 'Create and fill', choice: 'create_and_run' },
-            secondary: { label: 'Create only', choice: 'create' },
-        });
+        expect(draft.fillNow).toBe(true);
+        expect(createRunOption(draft, costed)).toBe('Fill the table now');
+        expect(createChoice(draft, costed)).toBe('create_and_run');
+        // Unticked, Create table only creates.
+        expect(createChoice(setFillNow(draft, false), costed)).toBe('create');
         const screening = { ...draft, criteria: ['Adults only'] };
-        expect(createActions(screening, costed).primary.label).toBe('Create and run');
-        expect(createActions({ ...screening, columns: [] }, costed).primary.label).toBe('Create and screen');
+        expect(createRunOption(screening, costed)).toBe('Screen and fill now');
+        expect(createRunOption({ ...screening, columns: [] }, costed)).toBe('Screen the sources now');
     });
 
     it('produces the edited reply the backend fixture expects', () => {
@@ -274,7 +282,8 @@ describe('table card draft', () => {
         const { request } = fixture('create-without-columns');
         let draft = initialTableCardDraft(request);
         expect(createBlocker(draft, request)).toBeNull();
-        expect(createActions(draft, request)).toEqual({ primary: { label: 'Create', choice: 'create' } });
+        expect(createRunOption(draft, request)).toBeNull();
+        expect(createChoice(draft, request)).toBe('create');
         const added = addColumn(draft);
         draft = added.draft;
         // The blocker names the column and what it still needs.
@@ -616,10 +625,58 @@ describe('table card draft', () => {
             const { request } = fixture('create-items');
             const draft = initialTableCardDraft(request);
             expect(draftCost({ ...draft, columns: [] }, request, PRICES).cost).toBeNull();
-            expect(createActions({ ...draft, columns: [] }, request).primary.choice).toBe('create');
+            expect(createChoice({ ...draft, columns: [] }, request)).toBe('create');
             const uncosted = { ...request, cost: null };
             expect(draftCost(addColumn(initialTableCardDraft(uncosted)).draft, uncosted, PRICES).cost).toBeNull();
-            expect(createActions(addColumn(initialTableCardDraft(uncosted)).draft, uncosted).primary.choice).toBe('create');
+            expect(createChoice(addColumn(initialTableCardDraft(uncosted)).draft, uncosted)).toBe('create');
+        });
+
+        it('writes the receipt as papers read and credits, with "Up to" while not exact', () => {
+            const cost = { rows: 180, documents: 150, title_abstract: 18, no_input: 12, credits: 30.9 };
+            expect(costReceipt(cost)).toEqual({ papers: '168 papers', credits: '30.9 credits' });
+            expect(costReceipt(cost, true)).toEqual({ papers: 'Up to 168 papers', credits: '30.9 credits' });
+            expect(costReceipt({ rows: 1, documents: 1, title_abstract: 0, no_input: 0, credits: 0.2 }).papers).toBe('1 paper');
+        });
+
+        it('has a line of its own only for papers without full text', () => {
+            expect(costNotice({ rows: 12, documents: 12, title_abstract: 0, no_input: 0, credits: 2.4 })).toBeNull();
+            expect(costNotice({ rows: 12, documents: 10, title_abstract: 2, no_input: 0, credits: 2.1 })).toBe(
+                '2 papers have no full text and are read from their abstracts.',
+            );
+            expect(costNotice({ rows: 2, documents: 1, title_abstract: 0, no_input: 1, credits: 0.2 })).toBe(
+                '1 paper has no full text or abstract and is skipped.',
+            );
+            // Both kinds lack full text: one line says what happens to each.
+            expect(costNotice({ rows: 3, documents: 1, title_abstract: 1, no_input: 1, credits: 0.25 })).toBe(
+                '2 papers have no full text: 1 is read from its abstract, 1 is skipped.',
+            );
+        });
+
+        it('lists the papers by how they are read, each with its rate, for the pricing popover', () => {
+            expect(costBreakdown({ rows: 3, documents: 1, title_abstract: 1, no_input: 1, credits: 0.25 }, PRICES)).toEqual([
+                { label: 'Full text', papers: '1 paper', rate: '0.2 each' },
+                { label: 'Abstract only', papers: '1 paper', rate: '0.05 each' },
+                { label: 'Skipped', papers: '1 paper', rate: 'free' },
+            ]);
+            // Only the groups the table has; no rate until the prices are known.
+            expect(costBreakdown({ rows: 5, documents: 5, title_abstract: 0, no_input: 0, credits: 1 }, null)).toEqual([
+                { label: 'Full text', papers: '5 papers', rate: null },
+            ]);
+        });
+
+        it('warns only when the balance does not reach the fill', () => {
+            const cost = { rows: 12, documents: 12, title_abstract: 0, no_input: 0, credits: 2.4 };
+            expect(balanceNotice(cost, 1.4, PRICES)).toBe('Your 1.4 credits cover about 7 of 12 papers.');
+            expect(balanceNotice(cost, 5, PRICES)).toBeNull();
+            // Where the estimate would be "about 0", the warning says the balance is not enough.
+            expect(balanceNotice(cost, 0.1, PRICES)).toBe("Your 0.1 credits aren't enough to fill these papers.");
+            const mixed = { rows: 2, documents: 1, title_abstract: 1, no_input: 0, credits: 0.25 };
+            expect(balanceNotice(mixed, 0.1, PRICES)).toBe("Your 0.1 credits aren't enough to fill these papers.");
+            expect(balanceNotice(mixed, 0.15, PRICES)).toBe('Your 0.15 credits cover about 1 of 2 papers.');
+            expect(balanceNotice({ rows: 1, documents: 1, title_abstract: 0, no_input: 0, credits: 0.2 }, 0, PRICES)).toBe(
+                "Your 0 credits aren't enough to fill this paper.",
+            );
+            expect(balanceNotice(cost, null, PRICES)).toBeNull();
         });
     });
 

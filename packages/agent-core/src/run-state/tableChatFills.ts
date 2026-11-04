@@ -20,7 +20,7 @@ export interface ChatFill {
     snapshot: TableFillJobSnapshot;
     /** The thread whose run started the fill. */
     threadId: string;
-    /** The tool call that started it (`fill_table`, or `create_table`'s "Create and fill"). */
+    /** The tool call that started it (`fill_table`, or `create_table` approved with the fill ticked). */
     toolCallId: string;
     /** The user dismissed its result line. */
     dismissed: boolean;
