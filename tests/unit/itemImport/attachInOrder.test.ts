@@ -7,6 +7,8 @@ const mocks = vi.hoisted(() => ({
     saveDownloadedAttachment: vi.fn(),
     discardDownloadedFile: vi.fn(async () => {}),
     scheduleBackgroundTask: vi.fn(),
+    fetchRecordSnapshot: vi.fn(),
+    saveRecordSnapshot: vi.fn(),
 }));
 
 vi.mock('../../../src/services/pdfAttachmentFetch', () => ({
@@ -20,6 +22,10 @@ vi.mock('../../../src/services/libraryMutations', () => ({
 vi.mock('../../../src/services/committedTransaction', () => ({
     runCommittedTransaction: vi.fn(async (work: () => Promise<unknown>) => work()),
 }));
+vi.mock('../../../src/services/itemImport/recordSnapshot', () => ({
+    fetchRecordSnapshot: mocks.fetchRecordSnapshot,
+    saveRecordSnapshot: mocks.saveRecordSnapshot,
+}));
 vi.mock('../../../src/utils/backgroundTasks', () => ({
     generateTaskId: vi.fn(() => 'task'),
     scheduleBackgroundTask: mocks.scheduleBackgroundTask,
@@ -32,6 +38,20 @@ const files = [
     { url: 'https://cdn.example/Prot_002.pdf', title: 'Study Protocol (2019-03-29)', content_type: 'application/pdf' },
     { url: 'https://cdn.example/SAP_003.pdf', title: 'Statistical Analysis Plan (2020-07-03)', content_type: 'application/pdf' },
 ];
+const record = {
+    kind: 'record' as const,
+    url: 'https://clinicaltrials.gov/study/NCT04292899',
+    title: 'ClinicalTrials.gov record',
+    content_type: 'text/html',
+    external_id: 'NCT04292899',
+};
+const rendered = {
+    external_id: 'NCT04292899',
+    title: 'ClinicalTrials.gov record (2026-11-03)',
+    url: 'https://clinicaltrials.gov/study/NCT04292899',
+    html: '<!DOCTYPE html><html><body>Record</body></html>',
+    data_as_of: '2026-10-30',
+};
 const parent = { id: 1, libraryID: 1, key: 'PARENTAA' } as any;
 
 function attachment(key: string, dateAdded: string) {
@@ -120,6 +140,94 @@ describe('attachInOrder', () => {
         });
         await expect(attachInOrder(parent, files, controller.signal, () => {})).rejects.toThrow();
         expect(mocks.discardDownloadedFile).toHaveBeenCalledWith(expect.objectContaining({ url: files[1].url }));
+    });
+});
+
+describe('attachInOrder with a registry record', () => {
+    it('saves the rendered record as a snapshot instead of downloading its URL', async () => {
+        const snapshot = attachment('RECORD01', '2026-11-02 12:00:00');
+        mocks.fetchRecordSnapshot.mockResolvedValueOnce(rendered);
+        mocks.saveRecordSnapshot.mockResolvedValueOnce(snapshot);
+        const result = await attachInOrder(parent, [record], new AbortController().signal, () => {});
+        expect(mocks.downloadAttachmentFile).not.toHaveBeenCalled();
+        expect(mocks.fetchRecordSnapshot).toHaveBeenCalledWith('NCT04292899');
+        expect(mocks.saveRecordSnapshot).toHaveBeenCalledWith(parent, rendered.html, expect.objectContaining({
+            title: rendered.title,
+            url: rendered.url,
+        }));
+        expect(result.primary).toBe(snapshot);
+    });
+
+    it('falls back to the proposal title and URL when the response has none', async () => {
+        mocks.fetchRecordSnapshot.mockResolvedValueOnce({ ...rendered, title: null, url: '' });
+        mocks.saveRecordSnapshot.mockResolvedValueOnce(attachment('RECORD01', '2026-11-02 12:00:00'));
+        await attachInOrder(parent, [record], new AbortController().signal, () => {});
+        expect(mocks.saveRecordSnapshot.mock.calls[0][2]).toMatchObject({ title: record.title, url: record.url });
+    });
+
+    it('fetches the record alongside the downloads and saves it after the files, in list order', async () => {
+        const protocol = attachment('PROT0001', '2026-11-02 12:00:00');
+        const sap = attachment('SAP00001', '2026-11-02 12:00:01');
+        const snapshot = attachment('RECORD01', '2026-11-02 12:00:01');
+        const order: string[] = [];
+        let fetchStartedBeforeDownloadsSettled = false;
+        let downloadsSettled = 0;
+        mocks.downloadAttachmentFile.mockImplementation(async (resolvers: any[]) => {
+            await Promise.resolve();
+            downloadsSettled++;
+            return { directory: `/tmp/${resolvers[0].url}`, url: resolvers[0].url };
+        });
+        mocks.fetchRecordSnapshot.mockImplementationOnce(async () => {
+            fetchStartedBeforeDownloadsSettled = downloadsSettled < files.length;
+            return rendered;
+        });
+        mocks.saveDownloadedAttachment.mockImplementation(async (_parent: unknown, file: any) => {
+            order.push(file.url);
+            return { attachment: file.url === files[0].url ? protocol : sap, created: true };
+        });
+        mocks.saveRecordSnapshot.mockImplementationOnce(async () => {
+            order.push('record');
+            return snapshot;
+        });
+        const result = await attachInOrder(parent, [...files, record], new AbortController().signal, () => {});
+        expect(fetchStartedBeforeDownloadsSettled).toBe(true);
+        expect(order).toEqual([files[0].url, files[1].url, 'record']);
+        expect(result.primary).toBe(protocol);
+        expect(result.attached).toEqual([protocol, sap, snapshot]);
+        // The snapshot still follows the last file by dateAdded.
+        expect(snapshot.setField).toHaveBeenCalledWith('dateAdded', '2026-11-02 12:00:02');
+    });
+
+    it('skips a record the backend cannot render and keeps the files', async () => {
+        const protocol = attachment('PROT0001', '2026-11-02 12:00:00');
+        mocks.fetchRecordSnapshot.mockRejectedValueOnce(Object.assign(new Error('Registry unavailable'), { status: 503 }));
+        mocks.saveDownloadedAttachment.mockResolvedValueOnce({ attachment: protocol, created: true });
+        const result = await attachInOrder(parent, [files[0], record], new AbortController().signal, () => {});
+        expect(mocks.saveRecordSnapshot).not.toHaveBeenCalled();
+        expect(result.attached).toEqual([protocol]);
+    });
+
+    it('promotes the record snapshot when every file fails', async () => {
+        const snapshot = attachment('RECORD01', '2026-11-02 12:00:00');
+        mocks.downloadAttachmentFile.mockRejectedValue(new Error('HTTP 404'));
+        mocks.fetchRecordSnapshot.mockResolvedValueOnce(rendered);
+        mocks.saveRecordSnapshot.mockResolvedValueOnce(snapshot);
+        const result = await attachInOrder(parent, [...files, record], new AbortController().signal, () => {});
+        expect(result.primary).toBe(snapshot);
+    });
+
+    it('skips a record entry without an external id', async () => {
+        const result = await attachInOrder(parent, [{ ...record, external_id: null }], new AbortController().signal, () => {});
+        expect(mocks.fetchRecordSnapshot).not.toHaveBeenCalled();
+        expect(mocks.downloadAttachmentFile).not.toHaveBeenCalled();
+        expect(result.primary).toBeNull();
+    });
+
+    it('does not ask the backend for the record once access is revoked', async () => {
+        const assertAccess = () => { throw new Error('Library is excluded or unavailable'); };
+        await attachInOrder(parent, [record], new AbortController().signal, assertAccess);
+        expect(mocks.fetchRecordSnapshot).not.toHaveBeenCalled();
+        expect(mocks.saveRecordSnapshot).not.toHaveBeenCalled();
     });
 });
 

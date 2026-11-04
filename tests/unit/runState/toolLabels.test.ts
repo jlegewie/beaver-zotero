@@ -127,5 +127,16 @@ describe('external record tool labels', () => {
         expect(getToolCallLabel(toolCall({ tool_name: 'get_trial', args: { nct_ids: ['NCT03548935'] } }), 'in_progress'))
             .toBe('ClinicalTrials.gov record: NCT03548935');
     });
+
+    it('counts the trials of a trial lookup that also lists their publications', () => {
+        const part = toolCall({ tool_name: 'get_trial', args: { nct_ids: ['NCT03548935'] } });
+        const references = [
+            { source: 'clinicaltrials', source_id: 'NCT03548935', details: { kind: 'trial' as const }, library_items: [] },
+            { source: 'pubmed', source_id: 'pmid:1', details: { kind: 'work' as const }, library_items: [] },
+            { source: 'pubmed', source_id: 'pmid:2', library_items: [] },
+        ];
+        const view = { view_type: 'external_reference_list' as const, tool_name: 'get_trial', references };
+        expect(getToolCallLabel(part, 'completed', { view: { ...view, found_count: 1 } })).toBe('ClinicalTrials.gov record: NCT03548935 (1 found)');
+    });
 });
 

@@ -222,7 +222,8 @@ function registryNotice(dataAsOf: string | null | undefined): string {
  *
  * Each row is its reference combined with the view's `extra_snapshots` of
  * the same id. Rows render per source: PubMed and ClinicalTrials.gov have
- * their own rows, every other source the generic card. A search view
+ * their own rows, every other source the generic card. get_trial lists the
+ * requested trials first, then their publications under a subheading. A search view
  * (`tool_info.info_type === 'search'`) gets a results header; an unknown
  * `info_type` renders the plain cards. A nonempty `message` renders as an advisory line above the cards;
  * the lookup_work-only extras (`not_found_queries`, `unavailable_queries`)
@@ -273,8 +274,12 @@ export const ExternalReferenceListResultView: React.FC<{
     }
 
     const inLibraryCount = references.filter((ref) => (ref.library_items?.length ?? 0) > 0).length;
-    const trialRows = references.filter((ref) =>
-        externalRecordPresentation(searchInfo?.source ?? ref.source, ref) === 'trial');
+    const presentations = references.map((ref) => externalRecordPresentation(searchInfo?.source ?? ref.source, ref));
+    const trialRows = references.filter((_, index) => presentations[index] === 'trial');
+    // get_trial follows the trials with their publications.
+    const publicationsStart = view.tool_name === 'get_trial'
+        ? presentations.findIndex((presentation) => presentation !== 'trial')
+        : -1;
 
     return (
         <div className="display-flex flex-col">
@@ -303,14 +308,25 @@ export const ExternalReferenceListResultView: React.FC<{
                     onMouseLeave: () => setHoveredIndex(null),
                 };
                 const key = item.source_id ?? `ref-${index}`;
-                switch (externalRecordPresentation(searchInfo?.source ?? item.source, item)) {
+                let row: React.ReactNode;
+                switch (presentations[index]) {
                     case 'pubmed':
-                        return <PubMedReferenceListItem key={key} {...rowProps} />;
+                        row = <PubMedReferenceListItem {...rowProps} />;
+                        break;
                     case 'trial':
-                        return <TrialReferenceListItem key={key} {...rowProps} />;
+                        row = <TrialReferenceListItem {...rowProps} />;
+                        break;
                     default:
-                        return <ExternalReferenceListItem key={key} {...rowProps} />;
+                        row = <ExternalReferenceListItem {...rowProps} />;
                 }
+                return (
+                    <React.Fragment key={key}>
+                        {index === publicationsStart && (
+                            <div className="px-3 pt-3 pb-1 text-sm font-color-secondary border-top-quinary">Publications</div>
+                        )}
+                        {row}
+                    </React.Fragment>
+                );
             })}
 
 
