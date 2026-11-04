@@ -91,7 +91,6 @@ import { previewFacts } from '@beaver/agent-core/layouts/tableEdit';
 import type { SourceEntry } from '@beaver/agent-core/layouts/table';
 import { resolveSources } from '../../../../src/services/artifacts/tableSources';
 import {
-    NO_SEARCH_FILTERS,
     TABLE_MENU_ENTRIES,
     paperOf,
     pickedCollectionScope,
@@ -509,7 +508,6 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
         // The pickers below say which source they toggle; the composer's
         // exclusive filter state is only read, for the checkmarks.
         filters,
-        searchFilters: NO_SEARCH_FILTERS,
         setFilters: () => {},
         pickCollection: (collectionId) => {
             const scope = pickedCollectionScope(collectionId);

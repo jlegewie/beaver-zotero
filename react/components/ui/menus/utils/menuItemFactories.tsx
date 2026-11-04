@@ -5,6 +5,17 @@ import { getDisplayNameFromItem, isValidZoteroItem } from '../../../../utils/sou
 import { ZoteroTag } from '@beaver/agent-core/types/zotero';
 import { ThreadItemFilter } from '../../../../atoms/ui';
 import { highlightQuery } from './highlightQuery';
+import { normalizeQuickSearchQuery } from '../../../../utils/search';
+import { unrankedMatch, type UnrankedMatchField } from '../../../../../src/services/librarySearch/ranking';
+
+/** How a row introduces the field it matched on, when that is not its title or authors. */
+const UNRANKED_MATCH_PREFIX: Record<UnrankedMatchField, string> = {
+    publicationTitle: 'in ',
+    shortTitle: 'Short title: ',
+    court: 'Court: ',
+    citationKey: 'Citation key: ',
+    key: 'Item key: ',
+};
 
 /**
  * Context for creating source menu items
@@ -69,7 +80,11 @@ export async function createSourceMenuItem(
     const { isAttached, onAdd, onRemove } = context;
     
     const title = item.getDisplayTitle();
-    
+    // A search hit found only through a field the row does not otherwise show
+    // (its journal, its citation key) names that field, so the row explains
+    // why it is listed.
+    const match = searchQuery ? unrankedMatch(item, normalizeQuickSearchQuery(searchQuery)) : null;
+
     // Determine item status
     const { valid: isValid } = await isValidZoteroItem(item);
     const isInCurrentMessageItems = isAttached(item);
@@ -117,6 +132,11 @@ export async function createSourceMenuItem(
                     <span className={`truncate text-sm ${isValid ? 'font-color-tertiary' : 'font-color-red'} min-w-0`}>
                         {highlightQuery(title, searchQuery)}
                     </span>
+                    {match && (
+                        <span className="truncate text-sm font-color-tertiary min-w-0">
+                            {UNRANKED_MATCH_PREFIX[match.field]}{highlightQuery(match.value, searchQuery)}
+                        </span>
+                    )}
                 </div>
             </div>
         ),
