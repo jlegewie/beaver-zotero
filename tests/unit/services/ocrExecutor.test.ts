@@ -136,6 +136,9 @@ beforeEach(() => {
         markAttachmentOcrUnavailable: vi.fn(async () => true),
         clearAttachmentOcrUnavailable: vi.fn(async () => true),
         recordAttachmentReadingOutcome: vi.fn(async () => undefined),
+        upsertAttachmentEmbeddingText: vi.fn(async () => undefined),
+        getAttachmentEmbeddingTexts: vi.fn(async () => new Map()),
+        getUnitIdsBySourceAttachment: vi.fn(async () => []),
     };
 
     (globalThis as any).Zotero.Items = {
@@ -286,6 +289,20 @@ describe('OcrExecutor', () => {
         expect(ctx.runOnMuPDFWorker).toHaveBeenCalledOnce();
         expect(dbStub.clearDocumentProcessingFailure).toHaveBeenCalledWith('hash123', 'ocr', OCR_ENGINE_VERSION);
         expect(outcome).toEqual({ kind: 'complete', reason: 'ocr_ok' });
+    });
+
+    it('stores derived embedding text for the OCR\'d document', async () => {
+        api.requestOcr.mockResolvedValue({ status: 'ready', get_url: 'https://gcs/get' });
+        (Zotero.Beaver!.documentCache as any).getResult = vi.fn(async () => ({
+            mode: 'structured',
+            document: { pageCount: 5, bboxOrigin: 'top-left', bboxPrecision: 1, pages: [] },
+        }));
+
+        expect(await executor.execute(record, makeCtx())).toEqual({ kind: 'complete', reason: 'ocr_ok' });
+
+        expect(dbStub.upsertAttachmentEmbeddingText).toHaveBeenCalledWith(expect.objectContaining({
+            libraryId: 1, zoteroKey: 'AAAAAAAA', contentKind: 'pdf', extractionSource: 'ocr', fileHash: 'hash123',
+        }), expect.any(Number), false);
     });
 
     it('uploads, confirms, defers (slot-free), then finishes on re-claim (pending)', async () => {
