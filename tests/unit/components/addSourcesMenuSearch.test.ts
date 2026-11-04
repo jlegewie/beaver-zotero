@@ -2,7 +2,8 @@
 
 /**
  * The Add Sources menu's item search: it waits for typing to pause, searches
- * every searchable library whatever filters the message carries, says when it
+ * every searchable library whatever filters the message carries, never claims
+ * "no results" for rows it is still preparing, says when it
  * is still searching, and says when more items matched than it lists.
  */
 import React, { act } from 'react';
@@ -84,14 +85,14 @@ const paper = (title: string) => createMockItem({ id: nextId++, key: `ITEM${next
 const answer = (items: any[], matchCount = items.length) =>
     mocks.searchSourceItems.mockResolvedValue({ items, matchCount });
 
-const render = async (searchQuery: string, verticalPosition: 'above' | 'below' = 'below') => {
+const render = async (searchQuery: string, verticalPosition: 'above' | 'below' = 'below', isMenuOpen = true) => {
     await act(async () => {
         root.render(
             React.createElement(
                 Provider,
                 { store },
                 React.createElement(AddSourcesMenu, {
-                    isMenuOpen: true,
+                    isMenuOpen,
                     menuPosition: { x: 0, y: 0 },
                     searchQuery,
                     querySource: 'editor',
@@ -232,5 +233,28 @@ describe('AddSourcesMenu item search', () => {
 
         expect(menuText()).toContain('Search Results');
         expect(menuText()).not.toContain('matches');
+    });
+
+    it.each(['above', 'below'] as const)('shows no empty-state text while preparing the rows for a bare @, on every open (opening %s)', async (side) => {
+        const gateCollections = () => {
+            let release: () => void = () => {};
+            (globalThis as any).Zotero.Collections.getAllIDs = vi.fn(() => new Promise((resolve) => { release = () => resolve([]); }));
+            return () => release();
+        };
+
+        let release = gateCollections();
+        await render('', side);
+        expect(menuText()).not.toMatch(/No results found|Start typing to search/);
+        await act(async () => release());
+        await settle(0);
+        expect(menuText()).toContain('Add Note');
+
+        await render('', side, false);
+        release = gateCollections();
+        await render('', side);
+        expect(menuText()).not.toMatch(/No results found|Start typing to search/);
+        await act(async () => release());
+        await settle(0);
+        expect(menuText()).toContain('Add Note');
     });
 });

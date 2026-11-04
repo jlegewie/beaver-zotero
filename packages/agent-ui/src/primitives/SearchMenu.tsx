@@ -79,6 +79,12 @@ export interface SearchMenuProps {
     onSearch: (query: string) => void;
     /** Text to display when no results are found */
     noResultsText: string;
+    /**
+     * Whether the items are still being prepared. An empty list then reads
+     * "Searching…" for a typed query and stays blank otherwise, rather than
+     * claiming there is nothing to show.
+     */
+    isLoading?: boolean;
     /** Placeholder text for the search input */
     placeholder: string;
     /** Whether to close the menu when an item is selected */
@@ -135,6 +141,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
     verticalPosition = 'below',
     onSearch,
     noResultsText,
+    isLoading = false,
     placeholder,
     closeOnSelect = true,
     searchQuery,
@@ -539,6 +546,9 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
         );
     };
 
+    // While loading, the empty list says so instead of "no results".
+    const emptyStateText = isLoading ? (searchQuery.trim() ? 'Searching…' : '') : null;
+
     const textInput = (
         <div 
             className={`display-flex flex-row items-center gap-05 p-1 px-2 ${
@@ -594,7 +604,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                             displayOrderMenuItems.map((item, index) => renderMenuItem(item, index))
                         ) : (
                             <div className="px-2 p-1 py-2 text-sm font-color-tertiary text-center">
-                                {searchQuery.trim() ? noResultsText : "Start typing to search"}
+                                {emptyStateText ?? (searchQuery.trim() ? noResultsText : "Start typing to search")}
                             </div>
                         )}
                     </div>
@@ -621,7 +631,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                             displayOrderMenuItems.map((item, index) => renderMenuItem(item, index))
                         ) : (
                             <div className="px-2 py-1 text-sm font-color-tertiary text-center">
-                                {noResultsText}
+                                {emptyStateText ?? noResultsText}
                             </div>
                         )}
                     </div>

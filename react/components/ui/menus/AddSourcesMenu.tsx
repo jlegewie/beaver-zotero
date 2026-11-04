@@ -576,7 +576,7 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
     };
 
     const noResultsText = menuMode === 'sources'
-        ? (isSearching || sourcesMenu.isBuilding ? "Searching…" : "No results found")
+        ? "No results found"
         : menuMode === 'libraries'
             ? "No libraries found"
             : menuMode === 'collections'
@@ -662,6 +662,7 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
                 // needs no separate search callback.
                 onSearch={() => {}}
                 noResultsText={noResultsText}
+                isLoading={menuMode === 'sources' && (isSearching || sourcesMenu.isBuilding)}
                 placeholder={ownsSearchField ? placeholderText : ''}
                 closeOnSelect={false}
                 searchQuery={searchQuery}

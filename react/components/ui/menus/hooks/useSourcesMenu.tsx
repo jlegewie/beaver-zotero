@@ -52,8 +52,9 @@ export interface SourcesMenuEntries {
 interface UseSourcesMenuResult {
     menuItems: SearchMenuItem[];
     /**
-     * Whether `menuItems` are still being built for the current
-     * `searchResults`; until they are, an empty list is not "no results".
+     * Whether `menuItems` are still being built, for the current
+     * `searchResults` or since the menu opened; until they are, an empty list
+     * is not "no results".
      */
     isBuilding: boolean;
 }
@@ -114,6 +115,9 @@ export const useSourcesMenu = ({
     useEffect(() => {
         if (!isActive) {
             setMenuItems([]);
+            // Rows built before the menu closed (or entered a submenu) are
+            // gone, so the next open is building again.
+            setBuiltFrom(null);
             return;
         }
 

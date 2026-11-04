@@ -23,7 +23,7 @@ import {
 import { deduplicateItems } from '../../utils/zoteroUtils';
 import { agentItemFilter } from '../../utils/agentItemSupport';
 import { quickSearchItems, QuickSearchItemsOptions } from '../librarySearch/quickSearch';
-import { scoreSearchResult } from '../librarySearch/ranking';
+import { compareRankedResults, scoreSearchResult } from '../librarySearch/ranking';
 import { loadQuickSearchHitData, serializeItemSearchRows, toQuickSearchHit } from './itemSearchSerialization';
 import {
     collectionsFilterError,
@@ -289,13 +289,9 @@ export async function handleItemQuickSearchRequest(
     const ranked = deduplicated
         .filter(item => agentItemFilter(item))
         .map(item => ({ item, score: scoreSearchResult(item, query) }))
-        .sort((a, b) => (
-            b.score - a.score
-            // Deterministic order for equal scores, so `offset` pages a stable
-            // list rather than one that depends on library iteration order.
-            || a.item.libraryID - b.item.libraryID
-            || (a.item.key < b.item.key ? -1 : a.item.key > b.item.key ? 1 : 0)
-        ));
+        // Deterministic for equal scores, so `offset` pages a stable list
+        // rather than one that depends on library iteration order.
+        .sort(compareRankedResults);
 
     const totalCount = ranked.length;
     const page = ranked.slice(offset, offset + limit);
