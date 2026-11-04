@@ -7,17 +7,27 @@
  * itself as the default via `setClientIdentityProvider`.
  */
 
-import { ZOTERO_PLUGIN_CLIENT_TYPE, ZOTERO_PLUGIN_FEATURES } from '@beaver/agent-core/protocol/agentProtocol';
+import { CLIENT_FEATURES, ZOTERO_PLUGIN_CLIENT_TYPE, ZOTERO_PLUGIN_FEATURES } from '@beaver/agent-core/protocol/agentProtocol';
 import { ClientIdentity, setClientIdentityProvider } from '@beaver/agent-core/transport/clientIdentity';
 import { buildZoteroInstanceWire } from './zoteroInstanceWire';
 import { isTableChatEnabled } from './tableCapability';
+import { isExternalRecordsEnabled } from './externalRecordsCapability';
 import { extractSchemaVersionsDeclaration } from './documentExtraction/shared/extractionSchemaVersions';
 
+/**
+ * Features this build implements but withholds from the handshake until the
+ * release opt-in. Withholding the declaration is the whole gate: the backend
+ * offers the matching capabilities only to a client that declares them.
+ */
+const WITHHELD_FEATURES: string[] = isExternalRecordsEnabled() ? [] : [CLIENT_FEATURES.EXTERNAL_RECORDS];
+
 function resolveZoteroClientIdentity(): ClientIdentity {
+    const clientFeatures = ZOTERO_PLUGIN_FEATURES.filter((feature) => !WITHHELD_FEATURES.includes(feature));
+    if (isTableChatEnabled()) clientFeatures.push('tables');
     return {
         frontendVersion: Zotero.Beaver?.pluginVersion || '',
         clientType: ZOTERO_PLUGIN_CLIENT_TYPE,
-        clientFeatures: isTableChatEnabled() ? [...ZOTERO_PLUGIN_FEATURES, 'tables'] : ZOTERO_PLUGIN_FEATURES,
+        clientFeatures,
         zoteroInstance: buildZoteroInstanceWire(Zotero.Beaver?.searchableLibraryIds ?? []),
         extractSchemaVersions: extractSchemaVersionsDeclaration(),
     };

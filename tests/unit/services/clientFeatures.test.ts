@@ -1,10 +1,11 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { version as CURRENT_VERSION } from '../../../package.json';
 import {
     CLIENT_FEATURES,
     ZOTERO_PLUGIN_CLIENT_TYPE,
     ZOTERO_PLUGIN_FEATURES,
 } from '@beaver/agent-core/protocol/agentProtocol';
+import { isExternalRecordsEnabled } from '../../../src/services/externalRecordsCapability';
 
 // Guards the client-feature handshake (Lane C).
 type Op = 'gt' | 'gte';
@@ -284,5 +285,30 @@ describe('version-gate mirror integrity', () => {
         expect(compareVersions('0.22.0-beta.1', '0.22.0b1')).toBe(0);
         expect(compareVersions('0.22.0-beta.1', '0.22.0')).toBe(-1);
         expect(compareVersions('0.22.0-beta.2', '0.22.0-beta.1')).toBe(1);
+    });
+});
+
+// The external-records declaration is withheld from the handshake on release
+// builds (`zoteroClientIdentity.ts` filters it out), while the feature stays in
+// the vocabulary above: the build gate decides what is declared, not what this
+// build knows how to do.
+describe('external records build gate', () => {
+    afterEach(() => vi.unstubAllEnvs());
+
+    it('enables external records only on development and staging builds', () => {
+        vi.stubEnv('NODE_ENV', 'production');
+        vi.stubEnv('BUILD_ENV', '');
+        expect(isExternalRecordsEnabled()).toBe(false);
+
+        vi.stubEnv('NODE_ENV', 'development');
+        expect(isExternalRecordsEnabled()).toBe(true);
+
+        vi.stubEnv('NODE_ENV', 'production');
+        vi.stubEnv('BUILD_ENV', 'staging');
+        expect(isExternalRecordsEnabled()).toBe(true);
+    });
+
+    it('keeps external_records in the declared vocabulary this build implements', () => {
+        expect(ZOTERO_PLUGIN_FEATURES).toContain(CLIENT_FEATURES.EXTERNAL_RECORDS);
     });
 });
