@@ -568,13 +568,14 @@ export const createBoundingBoxHighlights = async (
     boundingBoxData: TemporaryHighlightLocation[],
     previewText: string,
     annotationText: string,
-    options: { color?: string; authorName?: string | null } = {},
+    /** `reader`: the reader to highlight in (already loaded); the selected tab's when omitted. */
+    options: { color?: string; authorName?: string | null; reader?: any } = {},
 ): Promise<ZoteroItemReference[]> => {
     if (boundingBoxData.length === 0) return [];
     
     try {
         // Wait for PDF document to be loaded (required for getPageViewportInfo)
-        const reader = await getCurrentReaderAndWaitForView(undefined, true);
+        const reader = options.reader ?? await getCurrentReaderAndWaitForView(undefined, true);
         if (!reader || !reader._internalReader) {
             logger('createBoundingBoxHighlights: No active reader found for creating bounding box highlights');
             return [];

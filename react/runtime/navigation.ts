@@ -163,6 +163,9 @@ export async function openReader(
     }
     const opened = await Zotero.Reader.open(itemID, location, { ...options, window: win } as any);
     if (win.closed) throw new WindowUnavailableError();
+    // Zotero navigates a reader window already showing the item but only focuses
+    // its content, which leaves the window behind the one the user clicked in.
+    if (options.openInWindow) opened?._window?.focus();
     const reader = opened ?? Zotero.Reader.getByTabID(win.Zotero_Tabs.selectedID);
     if (reader && !options.openInWindow && reader._window && reader._window !== win) {
         throw new WindowUnavailableError();

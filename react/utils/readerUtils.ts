@@ -4,6 +4,7 @@ import { TextSelection } from '@beaver/agent-core/types/attachments/apiTypes';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { ZoteroReader } from './annotationUtils';
 import { waitForPDFDocument } from './pdfUtils';
+import type { CitationReaderTarget } from '@beaver/agent-ui/host/types';
 
 
 /**
@@ -32,6 +33,16 @@ async function getCurrentReaderAndWaitForView(window?: Window, waitForPDF: boole
 
     await waitForReaderView(reader, waitForPDF);
     return reader;
+}
+
+/**
+ * `openReader` options for a reader target. `window` opens the item in a
+ * separate reader window, or brings up the one already showing it, and never
+ * selects a tab: `allowDuplicate` keeps Zotero from selecting an unloaded tab
+ * of the item instead.
+ */
+function readerTargetOptions(target: CitationReaderTarget = 'tab'): Record<string, boolean> {
+    return target === 'window' ? { openInWindow: true, allowDuplicate: true } : {};
 }
 
 async function delay(ms: number): Promise<void> {
@@ -416,5 +427,6 @@ export {
     getSelectedTextAsTextSelection,
     navigateToPageInCurrentReader,
     navigateToAnnotation,
-    isItemActiveTab
+    isItemActiveTab,
+    readerTargetOptions,
 };

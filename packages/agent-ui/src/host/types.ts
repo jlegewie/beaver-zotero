@@ -25,6 +25,13 @@ import type { TableFillViewRequest } from '@beaver/agent-core/protocol/tableFill
 export type CitationActivationIntent = 'passage' | 'item';
 
 /**
+ * Where a citation opens the document it cites: `tab` in the client's main
+ * view (switching to it), `window` in a separate reader window, leaving the
+ * main view where it is.
+ */
+export type CitationReaderTarget = 'tab' | 'window';
+
+/**
  * Everything the host needs to activate (navigate to / open) a cited location.
  *
  * The render layer derives this from the client-agnostic citation view model and
@@ -42,6 +49,8 @@ export interface CitationActivation {
      * before the alternate activation existed.
      */
     intent?: CitationActivationIntent;
+    /** Where to open the cited document. Omitted: the host's default (for Zotero, its "Open PDFs in a new window" setting). */
+    readerTarget?: CitationReaderTarget;
     isExternal: boolean;
     isExternalFile: boolean;
     externalFileKey: string | null;

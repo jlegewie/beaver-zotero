@@ -1,5 +1,5 @@
 import { getContextWindow } from '../../runtime/windowRuntime';
-import { AttachmentFileUnavailableError, openNote, openReader } from '../../runtime/navigation';
+import { AttachmentFileUnavailableError, openNote, openNoteWindow, openReader } from '../../runtime/navigation';
 import { store } from '../../store';
 import { pageLabelsByAttachmentIdAtom } from '@beaver/agent-core/citations/atoms';
 import { externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
@@ -18,7 +18,7 @@ import {
 import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { revealSource } from '../../utils/sourceUtils';
 import { createZoteroURI } from '../../utils/zoteroURI';
-import { getCurrentReaderAndWaitForView } from '../../utils/readerUtils';
+import { getCurrentReaderAndWaitForView, readerTargetOptions, waitForReaderView } from '../../utils/readerUtils';
 import {
     BeaverTemporaryAnnotations,
     createBoundingBoxHighlights,
@@ -47,7 +47,7 @@ import { getParentItemAsync } from '../../../src/utils/zoteroDataLoading';
 import { isPdfDocument } from '../../../src/utils/attachmentFiles';
 import { getReadableContentKind } from '../../../src/services/documentExtraction/attachmentResolution';
 import { extractAndCacheEpubDocument } from '../../../src/services/documentExtractionCore';
-import type { CitationActivation } from '@beaver/agent-ui/host/types';
+import type { CitationActivation, CitationReaderTarget } from '@beaver/agent-ui/host/types';
 
 /**
  * Walk to the top-level item. An annotation or attachment citation names a child
@@ -144,6 +144,41 @@ async function openCitedTable(citation: Citation, ownerDocument: Document): Prom
 }
 
 /**
+ * Where a citation opens its document when the caller did not say: as a
+ * double-click in the items list does, following Zotero's "Open PDFs in a new
+ * window" setting. Always in Zotero's own reader, never an external app.
+ */
+function resolveReaderTarget(requested: CitationReaderTarget | undefined): CitationReaderTarget {
+    return requested ?? (Zotero.Prefs.get('openReaderInNewWindow') === true ? 'window' : 'tab');
+}
+
+/**
+ * The reader to show a cited passage in, with its view (and PDF) loaded. A tab
+ * target reuses the selected tab when it already shows the item; otherwise the
+ * item opens at `location` in a tab or in a separate reader window.
+ */
+async function openCitationReader(
+    itemID: number,
+    location: Record<string, any> | undefined,
+    target: CitationReaderTarget,
+): Promise<any> {
+    if (target === 'tab') {
+        const current = await getCurrentReaderAndWaitForView(undefined, true);
+        logger(`Citation activation: Current Reader (${current?.itemID})`);
+        if (current?.itemID === itemID) return current;
+    }
+    logger(`Citation activation: Opening item ${itemID} in a reader ${target}`);
+    const opened = await openReader(itemID, location, readerTargetOptions(target));
+    if (target === 'window') {
+        if (opened) await waitForReaderView(opened, true);
+        return opened;
+    }
+    // Let the newly selected tab settle before navigating it.
+    await new Promise(resolve => setTimeout(resolve, 300));
+    return getCurrentReaderAndWaitForView(undefined, true);
+}
+
+/**
  * Zotero implementation of citation activation: navigate to / open the cited
  * location. Mirrors the citation click behavior across all content kinds (note,
  * annotation, text, EPUB, PDF) and reference types (external, external file).
@@ -152,6 +187,7 @@ export async function activateCitation(activation: CitationActivation): Promise<
     const {
         metadata,
         intent = 'passage',
+        readerTarget: requestedReaderTarget,
         isExternal,
         isExternalFile,
         externalFileKey,
@@ -231,6 +267,8 @@ export async function activateCitation(activation: CitationActivation): Promise<
         return;
     }
 
+    const readerTarget = resolveReaderTarget(requestedReaderTarget);
+
     // A citation that names no kind reads as a PDF. When it points at an
     // attachment, the attachment says what it is: a table's evidence stores no
     // kind, and an EPUB or snapshot passage must open in its own reader.
@@ -241,10 +279,10 @@ export async function activateCitation(activation: CitationActivation): Promise<
     // Handle note links using Zotero.Notes.open()
     if (item.isNote()) {
         logger(`Citation activation: Note Link (${item.id})`);
-        if (typeof Zotero.Notes?.open === 'function') {
-            await openNote(item.id);
+        if (readerTarget === 'window') {
+            await openNoteWindow(item.id);
         } else {
-            await getContextWindow()?.ZoteroPane.openNoteWindow(item.id);
+            await openNote(item.id);
         }
         return;
     }
@@ -258,12 +296,7 @@ export async function activateCitation(activation: CitationActivation): Promise<
             return;
         }
         try {
-            let reader = await getCurrentReaderAndWaitForView(undefined, true);
-            if (!reader || reader.itemID !== parentAttachment.id) {
-                reader = await openReader(parentAttachment.id);
-                await new Promise((resolve) => setTimeout(resolve, 300));
-                reader = await getCurrentReaderAndWaitForView(undefined, true);
-            }
+            const reader = await openCitationReader(parentAttachment.id, undefined, readerTarget);
             if (reader) {
                 setTimeout(() => {
                     reader.navigate({ annotationID: item.key });
@@ -326,6 +359,7 @@ export async function activateCitation(activation: CitationActivation): Promise<
             previewText,
             useTemporaryAnnotations: useTemporaryCitationAnnotations,
             ownerDocument,
+            readerTarget,
         });
         logger(`Citation activation: EPUB navigation outcome: ${outcome}`);
         if (outcome === 'failed') {
@@ -357,6 +391,7 @@ export async function activateCitation(activation: CitationActivation): Promise<
             previewText,
             useTemporaryAnnotations: useTemporaryCitationAnnotations,
             ownerDocument,
+            readerTarget,
         });
         logger(`Citation activation: snapshot navigation outcome: ${outcome}`);
         if (outcome === 'failed') {
@@ -373,7 +408,7 @@ export async function activateCitation(activation: CitationActivation): Promise<
         }
         if (item.isAttachment()) {
             try {
-                await openReader(item.id);
+                await openReader(item.id, undefined, readerTargetOptions(readerTarget));
             } catch (error) {
                 logger(`Citation activation: Failed to open non-PDF attachment: ${error}`);
                 await selectItemById(item.id);
@@ -430,29 +465,9 @@ export async function activateCitation(activation: CitationActivation): Promise<
     }
 
     try {
-        let reader = await getCurrentReaderAndWaitForView(undefined, true);
-        logger(`Citation activation: Current Reader (${reader?.itemID})`);
-
-        // Check if we need to open or switch to the correct PDF
-        if (!reader || reader.itemID !== pdfItem.id) {
-            logger(`Citation activation: Opening PDF in reader or switching to the correct PDF`);
-
-            // Determine the page to open
-            let pageIndex = 1;
-            if (boundingBoxData.length > 0) {
-                pageIndex = boundingBoxData[0].page;
-            } else if (pages.length > 0) {
-                pageIndex = pages[0];
-            }
-
-            // Open the PDF at page
-            logger(`Citation activation: Opening item ${pdfItem.id} at page ${pageIndex}`);
-            reader = await openReader(pdfItem.id, { pageIndex: pageIndex - 1 });
-
-            // Wait for reader to initialize (should already be done by getCurrentReaderAndWaitForView)
-            await new Promise(resolve => setTimeout(resolve, 300));
-            reader = await getCurrentReaderAndWaitForView(undefined, true);
-        }
+        // Open the PDF at the first cited page
+        const page = boundingBoxData[0]?.page ?? pages[0] ?? 1;
+        const reader = await openCitationReader(pdfItem.id, { pageIndex: page - 1 }, readerTarget);
 
         // Handle the three scenarios
         if (boundingBoxData.length > 0) {
@@ -469,7 +484,7 @@ export async function activateCitation(activation: CitationActivation): Promise<
                     highlightLocations,
                     previewText,
                     BEAVER_CITATION_ANNOTATION_AUTHOR,
-                    { authorName: BEAVER_CITATION_ANNOTATION_AUTHOR },
+                    { authorName: BEAVER_CITATION_ANNOTATION_AUTHOR, reader },
                 );
                 if (reader) {
                     presentTemporaryAnnotations(reader, annotationReferences, {

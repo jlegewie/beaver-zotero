@@ -12,6 +12,7 @@ import type { Cell, TableSpec } from '@beaver/agent-core/layouts/table';
 import type { TableFillCells } from '@beaver/agent-core/protocol/tableFillProtocol';
 import { ResearchTable } from '@beaver/agent-ui/layouts/research/ResearchTable';
 import { setHost } from '@beaver/agent-ui/host';
+import { CitationReaderTargetContext } from '@beaver/agent-ui/chat/Citation';
 import { hoverPeek } from '../../helpers/hoverPeek';
 
 const h = React.createElement;
@@ -79,19 +80,16 @@ let root: ReturnType<typeof createRoot> | null = null;
 let container: HTMLDivElement | null = null;
 const activateCitation = vi.fn();
 
-function mount(props: Partial<React.ComponentProps<typeof ResearchTable>> = {}) {
+function mount(props: Partial<React.ComponentProps<typeof ResearchTable>> = {}, readerTarget?: 'tab' | 'window') {
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
-    act(() =>
-        root?.render(
-            h(ResearchTable, {
-                table: table(),
-                documents: new Map([[pdf, { name: 'Baird_2011.pdf', kind: 'pdf' }]]),
-                ...props,
-            }),
-        ),
-    );
+    const grid = h(ResearchTable, {
+        table: table(),
+        documents: new Map([[pdf, { name: 'Baird_2011.pdf', kind: 'pdf' }]]),
+        ...props,
+    });
+    act(() => root?.render(readerTarget ? h(CitationReaderTargetContext.Provider, { value: readerTarget }, grid) : grid));
     return container;
 }
 
@@ -305,8 +303,15 @@ describe('the grid', () => {
         expect(activation.effectiveItemKey).toBe('PDFKEY01');
         expect(activation.metadata.content_kind).toBe('pdf');
         expect(activation.metadata.locations[0]).toMatchObject({ page_idx: 13, boxes: passage.boxes });
+        expect(activation.readerTarget).toBeUndefined();
         // The tag opens the passage; it does not open the inspector.
         expect(inspector()).toBeNull();
+    });
+
+    it('opens the passage where the surface around the table asks', () => {
+        mount({}, 'window');
+        click(cell('r1', 'effect').querySelector('.rt-tag-page')!);
+        expect(activateCitation.mock.calls[0][0].readerTarget).toBe('window');
     });
 });
 
