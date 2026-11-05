@@ -130,7 +130,7 @@ describe('the fill progress panel', () => {
             }),
         );
         render('thread-1');
-        expect(container.textContent).toContain("Filled 44 rows · 2 couldn't be read · 8.8 credits");
+        expect(container.textContent).toContain("Filled 44 rows · 2 couldn't be read");
         expect(button('Stop fill')).toBeUndefined();
         expect(button('Open table')).toBeTruthy();
         await act(async () => button('Dismiss')!.click());

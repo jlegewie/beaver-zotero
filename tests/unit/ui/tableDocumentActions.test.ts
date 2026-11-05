@@ -185,9 +185,9 @@ it("reports committed content with incomplete bookkeeping as saved", async () =>
     revert.mockResolvedValueOnce({ ok: true, saved: false, version: 3 });
     await click("restore-version");
     expect(root.textContent).toContain(
-        "content is saved, but bookkeeping is incomplete",
+        "saved, but its version history could not be updated",
     );
-    expect(root.textContent).toContain("do not repeat the revert");
+    expect(root.textContent).toContain("do not revert again");
 });
 it("reports unavailable store/history instead of exposing an editor", async () => {
     history.mockRejectedValueOnce(new Error("History is unavailable"));
@@ -230,11 +230,11 @@ it("addresses exclusion errors to the user during version restore", async () => 
 it("keeps local repair failures visible and retries without a content mutation", async () => {
     read.mockResolvedValueOnce({ spec, version: 1, recovered: [{ kind: 'bookkeeping_pending' }] });
     await click('repair');
-    expect(root.textContent).toContain('local bookkeeping still needs repair');
+    expect(root.textContent).toContain('version history still could not be updated');
     expect(revert).not.toHaveBeenCalled();
     read.mockResolvedValueOnce({ spec, version: 1, recovered: [] });
     await click('repair');
-    expect(root.textContent).toContain('bookkeeping is up to date');
+    expect(root.textContent).toContain('needs no repair');
     expect(revert).not.toHaveBeenCalled();
 });
 
@@ -249,7 +249,7 @@ it("does not promise a repair where Beaver may not modify the table", async () =
     (Zotero as any).Beaver.searchableLibraryIds = [];
     read.mockResolvedValueOnce({ spec, version: 1, recovered: [{ kind: 'bookkeeping_pending' }] });
     await click('repair');
-    expect(root.textContent).toContain('does not modify tables');
+    expect(root.textContent).toContain('does not change tables');
 });
 it("renders only the version history, loaded at once, for the table tab", async () => {
     const doc = root.ownerDocument;

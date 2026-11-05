@@ -6085,33 +6085,12 @@
     min-width: 0;
 }
 
-[id^="beaver-pane-"] .rt-toast + * {
-    margin-top: 0.4rem;
-}
-
 [id^="beaver-pane-"] .rt-toast-text {
     flex: 1 1 auto;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-}
-
-[id^="beaver-pane-"] .rt-toast-action {
-    height: 1.6rem;
-    padding: 0 0.6rem;
-    border: 1px solid var(--color-border50);
-    border-radius: 6px;
-    background: var(--material-background);
-    color: var(--fill-primary);
-    font: inherit;
-    font-weight: 600;
-    cursor: pointer;
-}
-
-[id^="beaver-pane-"] .rt-toast-action:disabled {
-    opacity: 0.5;
-    cursor: default;
 }
 
 /* External records (PubMed, ClinicalTrials.gov): tags, facts, search header, details. */

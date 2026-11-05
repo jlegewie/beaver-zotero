@@ -10,13 +10,14 @@ import {
     type TableRef,
 } from '../../../src/services/artifacts/tableItemIdentity';
 import { isTableChatEnabled } from '../../../src/services/tableCapability';
-import { TableFillBanner, TableFillButton, useTableFillJob, type TableFillButtonHandle } from './TableFillControl';
+import { TableFillButton, useFillResultBanner, useTableFillJob, type TableFillButtonHandle } from './TableFillControl';
 import type { TableFillScope } from '@beaver/agent-core/protocol/tableFillProtocol';
 import type { ResearchTableFill } from '@beaver/agent-ui/layouts';
 import { TABLE_UPDATED_EVENT, type TableUpdatedDetail } from '../../../src/services/artifacts/tableStore';
 import type { TableFocusTarget, TableTabMountOptions, TableTabRenderReport } from '../../../src/ui/tableTabTypes';
 import { getWindowRuntime } from '../../runtime/windowRuntime';
 import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
+import { useDocumentVisible } from '../../hooks/useDocumentVisible';
 import { selectItemById } from '../../utils/selectItem';
 import { describeItems } from './card/liveSources';
 import { libraryRefForLibraryID } from '../../../src/utils/libraryIdentity';
@@ -36,6 +37,8 @@ export interface TableTabWarningSource {
     onReload(listener: () => void): () => void;
     /** Called when the tab is asked to bring a row or cell into view. */
     onFocus(listener: (target: TableFocusTarget) => void): () => void;
+    /** Called when the window's selected tab changes. */
+    onSelectionChange(listener: () => void): () => void;
 }
 
 type Loaded = { spec: TableSpec; version: number };
@@ -154,6 +157,22 @@ function useImprovableRows(spec: TableSpec | null): ReadonlySet<string> {
         };
     }, [key, rowsKey, attachmentsChanged]);
     return improvable;
+}
+
+/**
+ * The one message under the toolbar, the newest: a fill's result replaces an
+ * edit's message, and an edit's message covers the result until dismissed.
+ */
+export function useTableMessage(
+    toast: React.ReactElement | null,
+    clearToast: () => void,
+    fillBanner: React.ReactElement | null,
+    fillJobId: string | null,
+): React.ReactElement | null {
+    React.useEffect(() => {
+        if (fillJobId) clearToast();
+    }, [fillJobId, clearToast]);
+    return toast ?? fillBanner;
 }
 
 function sameTable(a: Loaded, b: Loaded): boolean {
@@ -305,6 +324,12 @@ export default function TableTabView({
     const fillButton = React.useRef<TableFillButtonHandle>(null);
     const requestFill = React.useCallback((scope: TableFillScope) => fillButton.current?.openPlan(scope), []);
     const fillRunning = !!fillJob && fillJob.state !== 'done';
+    // On screen: the selected tab of a window that is not hidden. Unknown
+    // (null) when the tab's owner cannot say which tab is selected.
+    const tabSelected = React.useSyncExternalStore(warnings.onSelectionChange, () => options.isSelected?.() ?? null);
+    const documentVisible = useDocumentVisible(surfaceWindow.document);
+    const tabVisible = tabSelected === null ? null : tabSelected && documentVisible;
+    const fillResult = useFillResultBanner(fillJob, tabVisible);
     // A fill commits one version; an edit between its commits would split it,
     // so the table is not editable while one runs.
     const tableDisabledReason = editDisabledReason ?? (fillRunning ? FILL_RUNNING_REASON : undefined);
@@ -327,27 +352,23 @@ export default function TableTabView({
         surfaceWindow,
         portalContainer: hostRef.current,
         newBySource: newPapers.bySource,
+        onEdit: fillResult.onActivity,
     });
-    // The finished job whose banner the user dismissed, and whether the table
-    // shows only the rows it could not read.
-    const [dismissedJob, setDismissedJob] = React.useState<string | null>(null);
-    const [showFailed, setShowFailed] = React.useState(false);
-    const finishedJob = fillJob?.state === 'done' && fillJob.job_id !== dismissedJob ? fillJob : null;
-    const failedRows = React.useMemo(
-        () => (showFailed && finishedJob?.result ? new Set(finishedJob.result.failed_row_ids) : null),
-        [showFailed, finishedJob],
+    const { showAllRows } = fillResult;
+    const tableMessage = useTableMessage(
+        edits.toast,
+        edits.clearToast,
+        fillEnabled ? fillResult.banner : null,
+        fillResult.jobId,
     );
-    React.useEffect(() => {
-        if (!finishedJob) setShowFailed(false);
-    }, [finishedJob]);
     React.useEffect(
         () =>
             warnings.onFocus((target) => {
                 // A row outside "failed rows only" could not be shown.
-                setShowFailed(false);
+                showAllRows();
                 setFocus({ ...target, token: ++focusRequests.current });
             }),
-        [warnings],
+        [warnings, showAllRows],
     );
 
     React.useEffect(() => {
@@ -385,18 +406,6 @@ export default function TableTabView({
 
     const notices = [warning, state.error, actionError, edits.error, dropNotice].filter(Boolean);
     const itemID = Zotero.Items.getIDFromLibraryAndKey(tableRef.libraryID, tableRef.key);
-    const fillBanner =
-        fillEnabled && finishedJob ? (
-            <TableFillBanner
-                job={finishedJob}
-                showingFailed={showFailed}
-                onShowFailed={setShowFailed}
-                onDismiss={() => {
-                    setDismissedJob(finishedJob.job_id);
-                    Zotero.Beaver.tableFills?.dismiss(finishedJob.job_id);
-                }}
-            />
-        ) : null;
 
     return (
         <div
@@ -439,15 +448,9 @@ export default function TableTabView({
                               )
                             : undefined
                     }
-                    banner={
-                        fillBanner || edits.toast ? (
-                            <>
-                                {edits.toast}
-                                {fillBanner}
-                            </>
-                        ) : undefined
-                    }
-                    onlyRows={failedRows}
+                    banner={tableMessage ?? undefined}
+                    onActivity={fillResult.onActivity}
+                    onlyRows={fillResult.failedRows}
                     focus={focus}
                     onCopy={(text) => Zotero.Utilities.Internal.copyTextToClipboard(text)}
                     onExport={() => {

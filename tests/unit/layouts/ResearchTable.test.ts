@@ -621,3 +621,79 @@ describe('editing cells and filling from rows and columns', () => {
         expect(container!.querySelector('.selected-ids')?.textContent).toBe('r2');
     });
 });
+
+describe('the notice and the banner', () => {
+    const banner = () => container!.querySelector<HTMLElement>('.bt-banner');
+    const main = () => container!.querySelector<HTMLElement>('.rt-body > .rt-main');
+
+    it('sit in the grid column, above the grid, with the side panel closed', () => {
+        mount({ notice: 'Snapshot behind', banner: h('span', null, 'Filled 3 rows · 0.6 credits') });
+        const column = main()!;
+        expect(Array.from(column.children).map((el) => el.className)).toEqual(['bt-notice', 'bt-banner', 'bt-scroll rt-scroll']);
+        expect(container!.querySelector('.rt-surface > .bt-banner, .rt-surface > .bt-notice')).toBeNull();
+        expect(container!.querySelector('.rt-body')!.children).toHaveLength(1);
+    });
+
+    it('stay in the grid column beside an open cell inspector or version history', () => {
+        mount({
+            banner: h('span', null, 'Filled 3 rows · 0.6 credits'),
+            renderVersionHistory: () => h('p', null, 'versions'),
+        });
+        click(cell('r1', 'effect'));
+        const body = container!.querySelector('.rt-body')!;
+        expect(Array.from(body.children).map((el) => el.tagName.toLowerCase() + '.' + el.classList[0])).toEqual(['div.rt-main', 'aside.rt-inspector']);
+        expect(banner()!.parentElement).toBe(main());
+
+        const more = container!.querySelector<HTMLButtonElement>('button[aria-label="More actions"]')!;
+        click(more);
+        click(Array.from(document.querySelectorAll<HTMLElement>('*')).find((el) => el.textContent === 'Version history' && el.children.length === 0)!);
+        expect(body.querySelector(':scope > aside.rt-history')).not.toBeNull();
+        expect(banner()!.parentElement).toBe(main());
+    });
+});
+
+describe('activity', () => {
+    it("reports selecting a cell and changing the search, but not the table's first render", () => {
+        const onActivity = vi.fn();
+        mount({ onActivity });
+        expect(onActivity).not.toHaveBeenCalled();
+        click(cell('r1', 'effect'));
+        expect(onActivity).toHaveBeenCalledTimes(1);
+        const search = container!.querySelector<HTMLInputElement>('input[aria-label="Search rows"]')!;
+        act(() => {
+            Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, 'Baird');
+            search.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+        expect(onActivity).toHaveBeenCalledTimes(2);
+    });
+
+    it('reports a sort from the column menu', () => {
+        const onActivity = vi.fn();
+        mount({ onActivity });
+        click(container!.querySelector('button[aria-label="Column menu: Design"]')!);
+        click(Array.from(document.querySelectorAll<HTMLElement>('*')).find((el) => el.textContent === 'Sort A → Z' && el.children.length === 0)!);
+        expect(onActivity).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not report a cell opened from outside', () => {
+        const onActivity = vi.fn();
+        mount({ onActivity, focus: { rowId: 'r2', columnId: 'design', token: 1 } });
+        expect(inspector()).not.toBeNull();
+        expect(onActivity).not.toHaveBeenCalled();
+    });
+
+    it('does not report the search a focus request clears to show its row', () => {
+        const onActivity = vi.fn();
+        mount({ onActivity });
+        const search = container!.querySelector<HTMLInputElement>('input[aria-label="Search rows"]')!;
+        act(() => {
+            Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, 'no row matches this');
+            search.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+        expect(onActivity).toHaveBeenCalledTimes(1);
+        act(() => root?.render(h(ResearchTable, { table: table(), onActivity, focus: { rowId: 'r2', columnId: 'design', token: 1 } })));
+        expect(inspector()!.getAttribute('data-row-id')).toBe('r2');
+        expect(search.value).toBe('');
+        expect(onActivity).toHaveBeenCalledTimes(1);
+    });
+});
