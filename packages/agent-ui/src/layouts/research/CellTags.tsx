@@ -14,7 +14,7 @@ import {
     Icon,
     RepeatIcon,
 } from "../../icons";
-import { useHoverAnchor } from "../../primitives/HoverLayer";
+import { selectionWithin, useHoverAnchor } from "../../primitives/HoverLayer";
 import {
     cellTags,
     documentKindLabel,
@@ -337,15 +337,28 @@ function CitedPassage({
 }): React.ReactElement {
     const { vm, activate } = useCitationActivation(citation);
     const label = evidenceTagLabel(evidence, index, count, { kind, pageLabel: vm.pageLabels[0] });
+    // Not a <button>, whose text cannot be selected: a click opens the
+    // passage unless it ended selecting the quote.
     return (
-        <button
-            type="button"
+        <div
+            role="button"
+            tabIndex={0}
             className="rt-passage rt-passage-button"
             data-evidence-index={index}
             title={`Open in ${documentKindLabel(kind)}`}
-            onClick={(event) => activate(event)}
+            onClick={(event) => {
+                if (selectionWithin(event.currentTarget)) return;
+                activate(event);
+            }}
+            onKeyDown={(event) => {
+                if (event.target !== event.currentTarget) return;
+                if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    activate({ ownerDocument: event.currentTarget.ownerDocument });
+                }
+            }}
         >
             {body(label)}
-        </button>
+        </div>
     );
 }

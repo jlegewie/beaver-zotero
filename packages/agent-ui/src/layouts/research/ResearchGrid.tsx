@@ -11,10 +11,10 @@ import {
     type TableSort,
     type TableSpec,
 } from "@beaver/agent-core/layouts/table";
-import { ArrowDownIcon, ArrowUpLineIcon, CancelIcon, EditIcon, Icon, PlusSignIcon, RepeatIcon, TickIcon } from "../../icons";
+import { ArrowDownIcon, ArrowUpLineIcon, CancelIcon, CopyIcon, EditIcon, Icon, PlusSignIcon, RepeatIcon, TickIcon } from "../../icons";
 import type { MenuItem } from "../../primitives/ContextMenu";
 import MenuButton from "../../primitives/MenuButton";
-import { useHoverAnchor, useHoverLayer } from "../../primitives/HoverLayer";
+import { selectionWithin, useHoverAnchor, useHoverLayer } from "../../primitives/HoverLayer";
 import type { TextRenderer } from "../tableView";
 import type { TableState } from "../useTableState";
 import { useRowWindow } from "../useRowWindow";
@@ -67,6 +67,8 @@ export interface ResearchGridProps {
     onEditCell?(address: CellAddress): void;
     /** Why cells cannot be edited (a read-only library); the Edit shows it. */
     cellEditDisabledReason?: string;
+    /** Copies a cell's answer: the Copy in its expansion. Absent, no Copy. */
+    onCopyCell?(text: string): void;
     /** The open cell editor, floated over its cell and the rows below. */
     cellEditor?: { address: CellAddress; content: React.ReactNode; list: boolean } | null;
     /** A running fill's cells, by row ({@link rowFills}). */
@@ -135,6 +137,7 @@ export function ResearchGrid({
     filteredEmptyText,
     onEditCell,
     cellEditDisabledReason,
+    onCopyCell,
     cellEditor,
     fills,
     addedRows,
@@ -261,6 +264,7 @@ export function ResearchGrid({
                             addColumn={addColumn}
                             onEditCell={onEditCell}
                             editDisabledReason={cellEditDisabledReason}
+                            onCopyCell={onCopyCell}
                             fill={fills?.get(row.id)}
                             isAdded={!!addedRows?.has(row.id)}
                         />
@@ -521,6 +525,7 @@ interface ResearchRowProps {
     addColumn: boolean;
     onEditCell?(address: CellAddress): void;
     editDisabledReason?: string;
+    onCopyCell?(text: string): void;
     fill?: RowFill;
 }
 
@@ -543,6 +548,7 @@ const ResearchRow = React.memo(function ResearchRow({
     addColumn,
     onEditCell,
     editDisabledReason,
+    onCopyCell,
     fill,
 }: ResearchRowProps): React.ReactElement {
     const lookOf = useRowFillLooks(fill, row);
@@ -593,6 +599,7 @@ const ResearchRow = React.memo(function ResearchRow({
                     onSelect={onSelectCell}
                     onEdit={onEditCell}
                     editDisabledReason={editDisabledReason}
+                    onCopy={onCopyCell}
                     fill={cellFill(fill, column.id)}
                     look={lookOf(column.id)}
                 />
@@ -654,7 +661,7 @@ function PaperGridCell({
                 .join(" ")}
             data-column-id={paperColumnId}
             tabIndex={select ? 0 : undefined}
-            onClick={select}
+            onClick={select ? (event) => onCellClick(event, select) : undefined}
             onKeyDown={select ? (event) => onCellKey(event, select) : undefined}
             {...anchor}
         >
@@ -684,6 +691,12 @@ function useCellPeek(
     return { onMouseEnter, onMouseLeave, onMouseDown };
 }
 
+/** A click on the cell selects it, unless it ended a drag that selected its text. */
+function onCellClick(event: React.MouseEvent<HTMLElement>, select: () => void): void {
+    if (selectionWithin(event.currentTarget)) return;
+    select();
+}
+
 /** Enter or Space on the cell itself (not a control in it) selects it. */
 function onCellKey(event: React.KeyboardEvent<HTMLElement>, select: () => void): void {
     if (event.target !== event.currentTarget) return;
@@ -695,9 +708,9 @@ function onCellKey(event: React.KeyboardEvent<HTMLElement>, select: () => void):
 
 /**
  * A cell's expansion: its whole content, and its actions in a footer. A click
- * on the content selects the cell, as a click on the cell does; the
- * expansion closes first, since the inspector narrows the grid and the peek
- * would float over where the cell was.
+ * on the content selects the cell, as a click on the cell does (not one that
+ * ends selecting its text); the expansion closes first, since the inspector
+ * narrows the grid and the peek would float over where the cell was.
  */
 function CellPeek({
     onSelect,
@@ -720,7 +733,8 @@ function CellPeek({
             tabIndex={onSelect ? -1 : undefined}
             onClick={
                 onSelect
-                    ? () => {
+                    ? (event) => {
+                          if (selectionWithin(event.currentTarget)) return;
                           hide();
                           onSelect();
                       }
@@ -834,6 +848,7 @@ function QuestionCell({
     onSelect,
     onEdit,
     editDisabledReason,
+    onCopy,
     fill,
     look,
 }: {
@@ -845,6 +860,7 @@ function QuestionCell({
     onSelect(address: CellAddress): void;
     onEdit?(address: CellAddress): void;
     editDisabledReason?: string;
+    onCopy?(text: string): void;
     /** What the running fill does with the cell, as the job last said. */
     fill?: CellFill;
     /** How the grid shows it ({@link useRowFillLooks}). */
@@ -858,40 +874,46 @@ function QuestionCell({
     const select = () => onSelect({ rowId: row.id, columnId: column.id });
     // A narrow Category or Yes / no column gets a wider expansion.
     const peekWidth = column.type === "select" || column.type === "boolean" ? SHORT_PEEK_PX : undefined;
-    const anchor = useCellPeek((hide) => (
-        <CellPeek
-            onSelect={select}
-            hide={hide}
-            align={columnAlign(column)}
-            footer={
-                onEdit ? (
-                    <div className="rt-peek-footer">
-                        <button
-                            type="button"
-                            className="rt-peek-action"
-                            aria-label={`Edit ${column.header}`}
-                            title={editDisabledReason ?? "Edit answer"}
-                            disabled={!!editDisabledReason}
-                            onClick={(event) => {
-                                event.stopPropagation();
-                                hide();
-                                onEdit({ rowId: row.id, columnId: column.id });
-                            }}
-                        >
-                            <Icon icon={EditIcon} size={12} />
-                            Edit
-                        </button>
-                    </div>
-                ) : null
-            }
-        >
-            {/* The expansion draws when the table does, so it follows the job, not the look. */}
-            {fill ? <FillNote fill={fill} replacing={!pending} /> : null}
-            {fill && pending ? null : (
-                <CellBody row={row} cell={cell} column={column} renderText={renderText} documents={documents} full />
-            )}
-        </CellPeek>
-    ), peekWidth);
+    const anchor = useCellPeek((hide) => {
+        const copyText = onCopy ? answerText(cell) : "";
+        return (
+            <CellPeek
+                onSelect={select}
+                hide={hide}
+                align={columnAlign(column)}
+                footer={
+                    onEdit || copyText ? (
+                        <div className="rt-peek-footer">
+                            {copyText ? <CopyAction text={copyText} onCopy={onCopy!} /> : null}
+                            {onEdit ? (
+                                <button
+                                    type="button"
+                                    className="rt-peek-action"
+                                    aria-label={`Edit ${column.header}`}
+                                    title={editDisabledReason ?? "Edit answer"}
+                                    disabled={!!editDisabledReason}
+                                    onClick={(event) => {
+                                        event.stopPropagation();
+                                        hide();
+                                        onEdit({ rowId: row.id, columnId: column.id });
+                                    }}
+                                >
+                                    <Icon icon={EditIcon} size={12} />
+                                    Edit
+                                </button>
+                            ) : null}
+                        </div>
+                    ) : null
+                }
+            >
+                {/* The expansion draws when the table does, so it follows the job, not the look. */}
+                {fill ? <FillNote fill={fill} replacing={!pending} /> : null}
+                {fill && pending ? null : (
+                    <CellBody row={row} cell={cell} column={column} renderText={renderText} documents={documents} full />
+                )}
+            </CellPeek>
+        );
+    }, peekWidth);
     return (
         <td
             id={cellIdFor(row.id, column.id)}
@@ -910,7 +932,7 @@ function QuestionCell({
             aria-busy={look === "queued" || look === "active" ? true : undefined}
             tabIndex={0}
             aria-label={`${column.header}: open details`}
-            onClick={select}
+            onClick={(event) => onCellClick(event, select)}
             onKeyDown={(event) => onCellKey(event, select)}
             {...anchor}
         >
@@ -922,6 +944,44 @@ function QuestionCell({
                 )}
             </div>
         </td>
+    );
+}
+
+/**
+ * A cell's answer as plain text, to copy: Yes / No as the grid shows it, text
+ * without its citation tags. Empty when the cell holds no answer.
+ */
+function answerText(cell: Cell | undefined): string {
+    if (cell?.outcome !== "answered" || !cell.value) return "";
+    if (cell.value.kind === "boolean") return cell.value.value ? "Yes" : "No";
+    return cellValueText(cell.value).trim();
+}
+
+/** How long the Copy shows that it copied. */
+const COPIED_MS = 1400;
+
+/** The Copy in a cell's expansion: an icon, a tick for a moment once it copied. */
+function CopyAction({ text, onCopy }: { text: string; onCopy(text: string): void }): React.ReactElement {
+    const [copied, setCopied] = useState(false);
+    const timer = useRef<ReturnType<typeof setTimeout>>();
+    useEffect(() => () => clearTimeout(timer.current), []);
+    return (
+        <button
+            type="button"
+            className="rt-peek-action rt-peek-copy"
+            aria-label={copied ? "Copied" : "Copy answer"}
+            title={copied ? "Copied" : "Copy answer"}
+            onClick={(event) => {
+                // The expansion stays open; its click would open the cell.
+                event.stopPropagation();
+                onCopy(text);
+                setCopied(true);
+                clearTimeout(timer.current);
+                timer.current = setTimeout(() => setCopied(false), COPIED_MS);
+            }}
+        >
+            <Icon icon={copied ? TickIcon : CopyIcon} size={12} />
+        </button>
     );
 }
 
