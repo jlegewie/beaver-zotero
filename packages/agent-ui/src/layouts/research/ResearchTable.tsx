@@ -32,8 +32,8 @@ import { buildFilterMenu, buildSortMenu, FilterChips } from "../tableMenus";
 import { renderPlainText, type TableDensity, type TextRenderer } from "../tableView";
 import { useTableState } from "../useTableState";
 import { CellEditor, editsAsList, type CellEditInput } from "./CellEditor";
-import { CellInspector, type InspectorView } from "./CellInspector";
-import { researchColumns, type TableDocuments } from "./cellModel";
+import { CellInspector, type CellActionControls } from "./CellInspector";
+import { isNewRow, researchColumns, type TableDocuments } from "./cellModel";
 import { paperOpenAction, rowItemReference } from "./PaperCell";
 import { ResearchGrid, type CellAddress } from "./ResearchGrid";
 import { AnchoredPopover, InlineText } from "./TableEditing";
@@ -83,7 +83,7 @@ export interface ResearchTableEditing {
 
 /**
  * Editing cells (section 5's user cells): the editor on a cell, the
- * inspector's Edit, Clear and Reset to Beaver's answer, and Choose document.
+ * inspector's Edit and Reset to Beaver's answer, and Choose document.
  * With `disabledReason` (a read-only library) the controls show disabled.
  */
 export interface ResearchCellEditing {
@@ -164,9 +164,8 @@ export interface ResearchTableProps {
     className?: string;
 }
 
-type Panel =
-    | { kind: "cell"; address: CellAddress; view: InspectorView }
-    | { kind: "history" };
+/** The side panel: a selected cell (a question, or the Paper cell) or the version history. */
+type Panel = { kind: "cell"; address: CellAddress } | { kind: "history" };
 
 const DENSITY_OPTIONS: Array<{ density: TableDensity; label: string; lines: number[] }> = [
     { density: "compact", label: "Compact rows", lines: [5, 9.5, 14, 18.5] },
@@ -237,14 +236,16 @@ export function ResearchTable({
     }, [shownKey, state]);
 
     // The inspector follows its cell: closed when the row or column is gone.
+    // The Paper cell opens the row's paper view.
     const selected = panel?.kind === "cell" ? panel.address : null;
     const selectedRow = selected ? table.rows.find((row) => row.id === selected.rowId) : undefined;
     const selectedColumn = selected
         ? columns.questions.find((column) => column.id === selected.columnId)
         : undefined;
+    const selectedPaper = !!selected && !!columns.paper && selected.columnId === columns.paper.id;
     useEffect(() => {
-        if (panel?.kind === "cell" && (!selectedRow || !selectedColumn)) setPanel(null);
-    }, [panel, selectedRow, selectedColumn]);
+        if (panel?.kind === "cell" && (!selectedRow || (!selectedColumn && !selectedPaper))) setPanel(null);
+    }, [panel, selectedRow, selectedColumn, selectedPaper]);
     // The rail and Paper column are pinned only while the grid leaves at least
     // as much room beside them for answers; a narrow grid (a small window, the
     // inspector open) scrolls them away like any other column.
@@ -276,7 +277,7 @@ export function ResearchTable({
         );
         cell?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
         const paper = pinned ? cell?.parentElement?.querySelector<HTMLElement>(".rt-td-paper") : null;
-        if (!cell || !paper) return;
+        if (!cell || !paper || paper === cell) return;
         const covered = paper.getBoundingClientRect().right - cell.getBoundingClientRect().left;
         if (covered > 0) scroller.scrollLeft -= covered;
     }, [selected?.rowId, selected?.columnId]);
@@ -322,11 +323,7 @@ export function ResearchTable({
     }, [fill != null, table]);
 
     const onSelectCell = useCallback((address: CellAddress) => {
-        setPanel((current) => ({
-            kind: "cell",
-            address,
-            view: current?.kind === "cell" ? current.view : "cell",
-        }));
+        setPanel({ kind: "cell", address });
         activityRef.current?.();
     }, []);
 
@@ -418,12 +415,13 @@ export function ResearchTable({
     );
     const hiddenQuestions = columns.questions.filter((column) => state.hiddenColumns.has(column.id));
 
-    // Previous and next row in the view's order, keeping the column.
+    // Previous and next row in the view's order, keeping the column (or the
+    // paper view).
     const rowIndex = selected ? state.rows.findIndex((row) => row.id === selected.rowId) : -1;
     const stepRow = (delta: number) => {
         const next = state.rows[rowIndex + delta];
         if (!next || panel?.kind !== "cell") return;
-        setPanel({ ...panel, address: { rowId: next.id, columnId: panel.address.columnId } });
+        setPanel({ kind: "cell", address: { rowId: next.id, columnId: panel.address.columnId } });
         scrollRowIntoView(scrollRef.current, next.id, rowIndex + delta);
     };
 
@@ -452,54 +450,45 @@ export function ResearchTable({
         }
         lastFocus.current = focus.token;
         // A row cited alone closes a cell inspector, which would show another cell.
-        if (columnId) setPanel({ kind: "cell", address: { rowId: row.id, columnId }, view: "cell" });
+        if (columnId) setPanel({ kind: "cell", address: { rowId: row.id, columnId } });
         else setPanel((current) => (current?.kind === "cell" ? null : current));
         scrollRowIntoView(scrollRef.current, row.id, viewIndex >= 0 ? viewIndex : undefined);
     }, [focus, table, state, columns.questions]);
 
-    // The inspector's controls for the cell: Edit, and on the user's own
-    // answer Clear and Reset to Beaver's answer; Change beside the document.
+    // The inspector's controls for the cell: the Edit pencil beside the
+    // answer, and on the user's own answer Reset to Beaver's answer under it;
+    // Change beside the document.
     const cellActions = cellEditing
-        ? (row: Row, column: Column): React.ReactNode => {
+        ? (row: Row, column: Column): CellActionControls => {
               const disabled = !!cellEditing.disabledReason;
               const title = cellEditing.disabledReason;
               const cell = row.cells[column.id];
               const mine = cell?.provenance === "user";
-              return (
-                  <>
+              return {
+                  edit: (
                       <button
                           type="button"
-                          className="rt-inspector-action"
+                          className="rt-icon-button rt-inspector-edit"
+                          aria-label="Edit answer"
                           disabled={disabled}
-                          title={title}
+                          title={title ?? "Edit answer"}
                           onClick={() => openEditor({ rowId: row.id, columnId: column.id })}
                       >
-                          Edit
+                          <Icon icon={EditIcon} size={13} />
                       </button>
-                      {mine && cell.outcome !== "cleared" ? (
-                          <button
-                              type="button"
-                              className="rt-inspector-action"
-                              disabled={disabled}
-                              title={title}
-                              onClick={() => void cellEditing.onEdit(row, column, { op: "clear" })}
-                          >
-                              Clear
-                          </button>
-                      ) : null}
-                      {mine ? (
-                          <button
-                              type="button"
-                              className="rt-inspector-action"
-                              disabled={disabled}
-                              title={title ?? (cell.replaced ? undefined : "Beaver fills this cell again on the next Fill.")}
-                              onClick={() => cellEditing.onRestore(row, column)}
-                          >
-                              {cell.replaced ? "Reset to Beaver’s answer" : "Reset"}
-                          </button>
-                      ) : null}
-                  </>
-              );
+                  ),
+                  more: mine ? (
+                      <button
+                          type="button"
+                          className="rt-inspector-link"
+                          disabled={disabled}
+                          title={title ?? (cell.replaced ? undefined : "Beaver fills this cell again on the next Fill.")}
+                          onClick={() => cellEditing.onRestore(row, column)}
+                      >
+                          {cell.replaced ? "Reset to Beaver’s answer" : "Reset"}
+                      </button>
+                  ) : undefined,
+              };
           }
         : undefined;
     const documentAction = cellEditing?.onChooseDocument
@@ -805,17 +794,14 @@ export function ResearchTable({
                             />
                         </div>
                     </div>
-                    {panel?.kind === "cell" && selectedRow && selectedColumn ? (
+                    {panel?.kind === "cell" && selectedRow && (selectedColumn || selectedPaper) ? (
                         <CellInspector
                             row={selectedRow}
                             paperColumnId={columns.paper?.id}
                             column={selectedColumn}
                             questions={columns.questions}
-                            view={panel.view}
-                            onView={(view) => setPanel({ ...panel, view })}
-                            onColumn={(columnId) =>
-                                setPanel({ kind: "cell", address: { rowId: selectedRow.id, columnId }, view: "cell" })
-                            }
+                            isNew={isNewRow(table, selectedRow)}
+                            onColumn={(columnId) => setPanel({ kind: "cell", address: { rowId: selectedRow.id, columnId } })}
                             onPrevious={rowIndex > 0 ? () => stepRow(-1) : undefined}
                             onNext={rowIndex >= 0 && rowIndex < state.rows.length - 1 ? () => stepRow(1) : undefined}
                             onClose={() => setPanel(null)}

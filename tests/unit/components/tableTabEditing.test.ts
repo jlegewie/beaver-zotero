@@ -216,7 +216,7 @@ describe('ordinary edits', () => {
         await act(async () => field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
         expect(onEdit).toHaveBeenCalledTimes(1);
         await click($('tr[data-row-id="r2"] td[data-column-id="effect"]'));
-        await click(Array.from(container!.querySelectorAll('.rt-inspector-action')).find((b) => b.textContent === 'Reset'));
+        await click(Array.from(container!.querySelectorAll('.rt-inspector-link')).find((b) => b.textContent === 'Reset'));
         expect(commands.editCells).toHaveBeenCalled();
         expect(onEdit).toHaveBeenCalledTimes(2);
     });
@@ -455,7 +455,7 @@ describe('cell edits', () => {
         commands.editCells.mockResolvedValue({ ok: false, code: 'unknown_row', message: 'This row is no longer in the table.' });
         mount();
         await click(cellAt('r2', 'effect'));
-        await click(Array.from(container!.querySelectorAll('.rt-inspector-action')).find((b) => b.textContent === 'Reset'));
+        await click(Array.from(container!.querySelectorAll('.rt-inspector-link')).find((b) => b.textContent === 'Reset'));
         expect(commands.editCells).toHaveBeenCalledWith(ref, [{ op: 'restore', row: 'r2', column: 'effect' }], expect.objectContaining({ session: expect.any(String) }));
         expect(container!.textContent).toContain('This row is no longer in the table.');
     });

@@ -1,32 +1,43 @@
-import React from "react";
+import React, { useLayoutEffect, useRef, useState } from "react";
 import type { Column, Row } from "@beaver/agent-core/layouts/table";
 import { rowReference } from "@beaver/agent-core/layouts/tableCitations";
-import { ArrowDownIcon, ArrowUpIcon, CancelIcon, EditIcon, FileIcon, Icon } from "../../icons";
+import { ArrowDownIcon, ArrowRightIcon, ArrowUpIcon, CancelIcon, EditIcon, FileIcon, Icon } from "../../icons";
 import type { TextRenderer } from "../tableView";
-import { EvidencePassage } from "./CellTags";
+import { EvidencePassage, StatusTag } from "./CellTags";
 import {
     inspectorContent,
     rowDocumentLine,
     tagDefinition,
     type InspectorAnswer,
+    type InspectorContent,
     type TableDocuments,
 } from "./cellModel";
 import { CellBody, CellValue } from "./ResearchGrid";
-import { paperText } from "./PaperCell";
+import { PaperActions, paperText } from "./PaperCell";
 
-/** Which view of the row the inspector shows. */
-export type InspectorView = "cell" | "paper";
+/**
+ * The cell's edit controls: `edit` sits beside the answer (the pencil), and
+ * `more` under it (Reset to Beaver's answer on the user's answer).
+ */
+export interface CellActionControls {
+    edit?: React.ReactNode;
+    more?: React.ReactNode;
+}
 
 export interface CellInspectorProps {
     row: Row;
     /** The anchor column, which names a row without a reference. */
     paperColumnId?: string;
-    column: Column;
-    /** The question columns, for the whole-paper view. */
+    /** The selected question column; absent when the Paper cell is selected. */
+    column?: Column;
+    /** The question columns, for the paper view. */
     questions: Column[];
-    view: InspectorView;
-    onView(view: InspectorView): void;
-    /** Opens another column of the same row (from the whole-paper view). */
+    /** A row added since the last fill, noted in the paper view. */
+    isNew?: boolean;
+    /**
+     * Opens another cell of the same row: a question from the paper view, or
+     * the Paper cell (`paperColumnId`) from the cell view's subtitle.
+     */
     onColumn(columnId: string): void;
     /** Previous and next row in the view's order; absent at either end. */
     onPrevious?: () => void;
@@ -34,29 +45,25 @@ export interface CellInspectorProps {
     onClose(): void;
     renderText: TextRenderer;
     documents?: TableDocuments;
-    /**
-     * Controls under the cell's answer (Edit; on the user's answer also Clear
-     * and Reset to Beaver's answer) and beside the document line (Change).
-     * Absent in a read-only view.
-     */
-    cellActions?: (row: Row, column: Column) => React.ReactNode;
+    /** The cell's edit controls. Absent in a read-only view. */
+    cellActions?: (row: Row, column: Column) => CellActionControls;
+    /** Beside the document line (Change). */
     documentAction?: (row: Row) => React.ReactNode;
 }
 
 /**
- * "Cell details": the panel beside the grid for the cell the user clicked.
- * It names the paper, the column and its question, then what the cell holds:
- * Beaver's answer with its reasoning and evidence, or the user's answer with
- * Beaver's earlier one from `replaced`; and last, the document the row is
- * read from. The whole-paper view lists every question of the row.
+ * "Cell details": the panel beside the grid for the selected cell. A question
+ * cell shows the cell view: the question, then what the cell holds (Beaver's
+ * answer with its explanation and evidence, or the user's answer with
+ * Beaver's earlier one from `replaced`). The Paper cell shows the paper view:
+ * the row's actions and every question of the row.
  */
 export function CellInspector({
     row,
     paperColumnId,
     column,
     questions,
-    view,
-    onView,
+    isNew = false,
     onColumn,
     onPrevious,
     onNext,
@@ -69,16 +76,101 @@ export function CellInspector({
     const reference = rowReference(row);
     const paper = paperText(row, paperColumnId);
     const year = paper.year;
-    const heading = [reference?.display_name ?? paper.title, year && !reference?.display_name?.includes(year) ? year : undefined]
-        .filter(Boolean)
-        .join(" · ");
+    const documentLine = (
+        <div className="rt-inspector-document">
+            <Icon icon={FileIcon} size={13} />
+            <span className="rt-inspector-document-name">{rowDocumentLine(row, documents)}</span>
+            {documentAction?.(row)}
+        </div>
+    );
+
+    let title: React.ReactNode;
+    let subtitle: React.ReactNode = null;
+    let body: React.ReactNode;
+    if (column) {
+        const heading = [
+            reference?.display_name ?? paper.title,
+            year && !reference?.display_name?.includes(year) ? year : undefined,
+        ]
+            .filter(Boolean)
+            .join(" · ");
+        title = column.header;
+        subtitle = paperColumnId ? (
+            <button
+                type="button"
+                className="rt-inspector-subtitle rt-inspector-paper-link"
+                title={paper.title}
+                onClick={() => onColumn(paperColumnId)}
+            >
+                <span className="rt-inspector-subtitle-text">{heading}</span>
+                <Icon icon={ArrowRightIcon} size={11} className="rt-inspector-chevron" />
+            </button>
+        ) : (
+            <span className="rt-inspector-subtitle" title={paper.title}>
+                <span className="rt-inspector-subtitle-text">{heading}</span>
+            </span>
+        );
+        // The document line goes under the first Evidence heading; without
+        // one it closes the panel.
+        const content = inspectorContent(row, column);
+        const evidenceAnswer =
+            content.kind === "model" ? content.answer : content.kind === "user" ? content.replaced : undefined;
+        const documentInEvidence = !!evidenceAnswer && hasEvidenceSection(evidenceAnswer);
+        body = (
+            <>
+                {column.description ? <p className="rt-inspector-text rt-inspector-question">{column.description}</p> : null}
+                <CellDetails
+                    row={row}
+                    column={column}
+                    content={content}
+                    renderText={renderText}
+                    documents={documents}
+                    actions={content.kind === "system" ? undefined : cellActions?.(row, column)}
+                    documentLine={documentInEvidence ? documentLine : undefined}
+                />
+                {row.failure ? (
+                    <div className="rt-inspector-failure" role="note">
+                        {row.failure.message}
+                    </div>
+                ) : null}
+                {documentInEvidence ? null : documentLine}
+            </>
+        );
+    } else {
+        title = paper.title;
+        const byline = [reference?.subtitle, year].filter(Boolean).join(" · ");
+        subtitle = byline ? (
+            <span className="rt-inspector-subtitle">
+                <span className="rt-inspector-subtitle-text">{byline}</span>
+            </span>
+        ) : null;
+        body = (
+            <PaperDetails
+                row={row}
+                questions={questions}
+                isNew={isNew}
+                renderText={renderText}
+                documents={documents}
+                onColumn={onColumn}
+                documentLine={documentLine}
+            />
+        );
+    }
+
     return (
-        <aside className="rt-inspector" aria-label="Cell details" data-row-id={row.id} data-column-id={column.id}>
+        <aside
+            className="rt-inspector"
+            aria-label="Cell details"
+            data-view={column ? "cell" : "paper"}
+            data-row-id={row.id}
+            data-column-id={column?.id ?? paperColumnId}
+        >
             <div className="rt-inspector-head">
-                <div className="rt-inspector-nav">
-                    <span className="rt-inspector-paper" title={paper.title}>
-                        {heading}
-                    </span>
+                <div className="rt-inspector-nav rt-inspector-nav-titled">
+                    <div className="rt-inspector-titles">
+                        <div className="rt-inspector-title">{title}</div>
+                        {subtitle}
+                    </div>
                     <button
                         type="button"
                         className="rt-icon-button"
@@ -101,96 +193,55 @@ export function CellInspector({
                         <Icon icon={CancelIcon} size={14} />
                     </button>
                 </div>
-                <div className="rt-segmented" role="tablist">
-                    <button
-                        type="button"
-                        role="tab"
-                        aria-selected={view === "cell"}
-                        className={view === "cell" ? "rt-active" : ""}
-                        onClick={() => onView("cell")}
-                    >
-                        {column.header}
-                    </button>
-                    <button
-                        type="button"
-                        role="tab"
-                        aria-selected={view === "paper"}
-                        className={view === "paper" ? "rt-active" : ""}
-                        onClick={() => onView("paper")}
-                    >
-                        Whole paper
-                    </button>
-                </div>
-                {view === "cell" && column.description ? (
-                    <p className="rt-inspector-question">{column.description}</p>
-                ) : null}
             </div>
-            <div className="rt-inspector-body">
-                {view === "cell" ? (
-                    <CellDetails
-                        row={row}
-                        column={column}
-                        renderText={renderText}
-                        documents={documents}
-                        cellActions={cellActions}
-                    />
-                ) : (
-                    <WholePaper
-                        row={row}
-                        questions={questions}
-                        renderText={renderText}
-                        documents={documents}
-                        onColumn={onColumn}
-                    />
-                )}
-                {row.failure ? (
-                    <div className="rt-inspector-failure" role="note">
-                        {row.failure.message}
-                    </div>
-                ) : null}
-                <div className="rt-inspector-document">
-                    <Icon icon={FileIcon} size={13} />
-                    <span className="rt-inspector-document-name">{rowDocumentLine(row, documents)}</span>
-                    {documentAction?.(row)}
-                </div>
-            </div>
+            <div className="rt-inspector-body">{body}</div>
         </aside>
     );
+}
+
+/** An answer from the documents that cites no passage: its Evidence section notes it. */
+function citesNoPassage(answer: InspectorAnswer): boolean {
+    return answer.outcome === "answered" && answer.evidence.length === 0 && (answer.cell.documents?.length ?? 0) > 0;
+}
+
+function hasEvidenceSection(answer: InspectorAnswer): boolean {
+    return answer.evidence.length > 0 || citesNoPassage(answer);
 }
 
 function CellDetails({
     row,
     column,
+    content,
     renderText,
     documents,
-    cellActions,
+    actions,
+    documentLine,
 }: {
     row: Row;
     column: Column;
+    content: InspectorContent;
     renderText: TextRenderer;
     documents?: TableDocuments;
-    cellActions?: (row: Row, column: Column) => React.ReactNode;
+    actions?: CellActionControls;
+    documentLine?: React.ReactNode;
 }): React.ReactElement {
-    const content = inspectorContent(row, column, documents);
-    const actions = content.kind === "system" ? null : cellActions?.(row, column);
-    const actionRow = actions ? <div className="rt-inspector-actions">{actions}</div> : null;
     switch (content.kind) {
         case "pending":
-            return (
-                <section className="rt-inspector-section">
-                    <p className="rt-inspector-empty">
-                        {row.failure
-                            ? "Not answered: the last fill could not read this paper."
-                            : "Not filled yet. The next Fill answers it."}
-                    </p>
-                    {actionRow}
-                </section>
-            );
         case "failed":
             return (
                 <section className="rt-inspector-section">
-                    <p className="rt-failed">{content.message}</p>
-                    {actionRow}
+                    <div className="rt-inspector-answer-row">
+                        {content.kind === "failed" ? (
+                            <p className="rt-failed">{content.message}</p>
+                        ) : (
+                            <p className="rt-inspector-empty">
+                                {row.failure
+                                    ? "Not answered: the last fill could not read this paper."
+                                    : "Not filled yet. The next Fill answers it."}
+                            </p>
+                        )}
+                        {actions?.edit}
+                    </div>
                 </section>
             );
         case "system":
@@ -208,33 +259,37 @@ function CellDetails({
                     renderText={renderText}
                     documents={documents}
                     primary
-                    actions={actionRow}
+                    edit={actions?.edit}
+                    documentLine={documentLine}
                 />
             );
-        case "user": {
+        case "user":
             return (
                 <>
-                    <section className="rt-inspector-section">
-                        <div className="rt-section-label">
+                    <section className="rt-inspector-section rt-inspector-answer-section">
+                        <div className="rt-inspector-heading">
                             <Icon icon={EditIcon} size={12} />
                             <span>Your answer</span>
                         </div>
-                        <div className="rt-inspector-answer">
-                            {content.outcome === "answered" ? (
-                                <CellValue cell={content.cell} column={column} renderText={renderText} />
-                            ) : (
-                                <span className="rt-muted">
-                                    {content.outcome === "not_reported" ? "Not reported" : "Cleared"}
-                                </span>
-                            )}
+                        <div className="rt-inspector-answer-row">
+                            <div className="rt-inspector-answer">
+                                {content.outcome === "answered" ? (
+                                    <CellValue cell={content.cell} column={column} renderText={renderText} />
+                                ) : (
+                                    <span className="rt-muted">
+                                        {content.outcome === "not_reported" ? "Not reported" : "Cleared"}
+                                    </span>
+                                )}
+                            </div>
+                            {actions?.edit}
                         </div>
-                        {content.note ? <p className="rt-inspector-note">{content.note}</p> : null}
+                        {content.note ? <p className="rt-inspector-text">{content.note}</p> : null}
                         {content.stale ? (
                             <p className="rt-inspector-stale">
                                 {tagDefinition({ kind: "stale", reason: "question" }, content.cell)}
                             </p>
                         ) : null}
-                        {actionRow}
+                        {actions?.more ? <div className="rt-inspector-links">{actions.more}</div> : null}
                     </section>
                     {content.replaced ? (
                         <AnswerSection
@@ -243,18 +298,18 @@ function CellDetails({
                             answer={content.replaced}
                             renderText={renderText}
                             documents={documents}
+                            documentLine={documentLine}
                         />
                     ) : null}
                 </>
             );
-        }
     }
 }
 
 /**
- * Beaver's answer: where it was read from, the answer, its reasoning and each
- * passage with its tag. The user's cell shows Beaver's earlier answer in the
- * same form, set apart as a card.
+ * Beaver's answer: the answer with where it was read from, its explanation,
+ * and each passage with its tag under the row's document. On the user's cell
+ * it is Beaver's earlier answer, headed "Beaver's answer" and drawn quieter.
  */
 function AnswerSection({
     row,
@@ -263,7 +318,8 @@ function AnswerSection({
     renderText,
     documents,
     primary = false,
-    actions,
+    edit,
+    documentLine,
 }: {
     row: Row;
     column: Column;
@@ -271,102 +327,182 @@ function AnswerSection({
     renderText: TextRenderer;
     documents?: TableDocuments;
     primary?: boolean;
-    /** Controls under the answer (Edit). */
-    actions?: React.ReactNode;
+    /** The Edit control beside the answer. */
+    edit?: React.ReactNode;
+    /** The row's document line, under the Evidence heading. */
+    documentLine?: React.ReactNode;
 }): React.ReactElement {
-    const heading = answer.outcome === "not_reported" ? "Closest passages" : "Evidence";
+    const count = answer.evidence.length;
     return (
-        <section className={`rt-inspector-section${primary ? "" : " rt-inspector-card"}`}>
-            <div className="rt-section-label">
-                <span className="rt-section-title">Beaver answered</span>
-                <span className="rt-section-source">{answer.sourceLine}</span>
-            </div>
-            <div className="rt-inspector-answer">
-                {answer.outcome === "answered" ? (
-                    <CellValue cell={answer.cell} column={column} renderText={renderText} />
-                ) : (
-                    <span className="rt-muted">Not reported</span>
-                )}
-            </div>
-            {answer.stale ? (
-                <p className="rt-inspector-stale">
-                    {primary
-                        ? tagDefinition({ kind: "stale", reason: answer.stale }, answer.cell)
-                        : // Kept under the user's answer, it is never refilled.
-                          answer.stale === "question"
-                          ? "The question changed after this answer was written."
-                          : "The paper's document changed after this answer was written."}
-                </p>
+        <>
+            <section className="rt-inspector-section rt-inspector-answer-section">
+                {primary ? null : <div className="rt-inspector-heading">Beaver’s answer</div>}
+                <div className="rt-inspector-answer-row">
+                    <div className="rt-inspector-answer">
+                        {answer.outcome === "answered" ? (
+                            <CellValue cell={answer.cell} column={column} renderText={renderText} />
+                        ) : (
+                            <span className="rt-muted">Not reported</span>
+                        )}
+                    </div>
+                    {edit}
+                </div>
+                {answer.fromAbstract ? (
+                    <span className="rt-tags rt-tags-wrap">
+                        <StatusTag tag={{ kind: "abstract" }} cell={answer.cell} />
+                    </span>
+                ) : null}
+                {answer.stale ? (
+                    <p className="rt-inspector-stale">
+                        {primary
+                            ? tagDefinition({ kind: "stale", reason: answer.stale }, answer.cell)
+                            : // Kept under the user's answer, it is never refilled.
+                              answer.stale === "question"
+                              ? "The question changed after this answer was written."
+                              : "The paper's document changed after this answer was written."}
+                    </p>
+                ) : null}
+            </section>
+            {answer.reasoning ? (
+                <section className="rt-inspector-section">
+                    <div className="rt-inspector-heading">Explanation</div>
+                    <Explanation key={answer.reasoning}>{renderText(answer.reasoning)}</Explanation>
+                </section>
             ) : null}
-            {actions}
-            {answer.reasoning ? <div className="rt-inspector-reasoning">{renderText(answer.reasoning)}</div> : null}
-            {answer.evidence.length ? (
-                <div className="rt-passages">
-                    <div className="rt-passages-label">{heading}</div>
+            {hasEvidenceSection(answer) ? (
+                <section className="rt-inspector-section rt-passages">
+                    <div className="rt-inspector-heading">
+                        <span>{answer.outcome === "not_reported" ? "Closest passages" : "Evidence"}</span>
+                        {count ? <span className="rt-inspector-count">{count}</span> : null}
+                    </div>
+                    {documentLine}
+                    {count ? null : (
+                        <p className="rt-inspector-stale">{tagDefinition({ kind: "no_passage" }, answer.cell)}</p>
+                    )}
                     {answer.evidence.map((entry, index) => (
                         <EvidencePassage
                             key={index}
                             row={row}
                             evidence={entry}
                             index={index}
-                            count={answer.evidence.length}
+                            count={count}
                             documents={documents}
                         />
                     ))}
-                </div>
-            ) : answer.outcome === "answered" && (answer.cell.documents?.length ?? 0) > 0 ? (
-                <p className="rt-inspector-stale">
-                    {tagDefinition({ kind: "no_passage" }, answer.cell)}
-                </p>
+                </section>
             ) : null}
-        </section>
+        </>
     );
 }
 
-/** Every question of the row, each opening its own cell. */
-function WholePaper({
+/**
+ * The explanation, clamped to three lines with a More / Less toggle when the
+ * clamp cuts it. Keyed by its text, so other text starts clamped again.
+ */
+function Explanation({ children }: { children: React.ReactNode }): React.ReactElement {
+    const ref = useRef<HTMLDivElement>(null);
+    const [expanded, setExpanded] = useState(false);
+    const [cut, setCut] = useState(false);
+    useLayoutEffect(() => {
+        const el = ref.current;
+        if (!el || expanded) return;
+        const measure = () => setCut(el.scrollHeight > el.clientHeight + 1);
+        measure();
+        const Observer = el.ownerDocument.defaultView?.ResizeObserver;
+        if (!Observer) return;
+        const observer = new Observer(measure);
+        observer.observe(el);
+        return () => observer.disconnect();
+    }, [expanded]);
+    return (
+        <>
+            <div ref={ref} className={`rt-inspector-text rt-inspector-reasoning${expanded ? "" : " rt-clamp"}`}>
+                {children}
+            </div>
+            {cut || expanded ? (
+                <button
+                    type="button"
+                    className="rt-inspector-link rt-inspector-more"
+                    aria-expanded={expanded}
+                    onClick={() => setExpanded((open) => !open)}
+                >
+                    {expanded ? "Less" : "More"}
+                </button>
+            ) : null}
+        </>
+    );
+}
+
+/**
+ * The paper view: the row's Show in library and Open, its failure or New
+ * paper note, every question of the row (each opening its cell), and the
+ * document the row is read from.
+ */
+function PaperDetails({
     row,
     questions,
+    isNew,
     renderText,
     documents,
     onColumn,
+    documentLine,
 }: {
     row: Row;
     questions: Column[];
+    isNew: boolean;
     renderText: TextRenderer;
     documents?: TableDocuments;
     onColumn(columnId: string): void;
+    documentLine: React.ReactNode;
 }): React.ReactElement {
     return (
-        <div className="rt-whole-paper">
-            {questions.map((column) => (
-                <div
-                    key={column.id}
-                    className="rt-whole-paper-entry"
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => onColumn(column.id)}
-                    onKeyDown={(event) => {
-                        if (event.target !== event.currentTarget) return;
-                        if (event.key === "Enter" || event.key === " ") {
-                            event.preventDefault();
-                            onColumn(column.id);
-                        }
-                    }}
-                >
-                    <div className="rt-whole-paper-header">{column.header}</div>
-                    <div className="rt-whole-paper-value">
-                        <CellBody
-                            row={row}
-                            cell={row.cells[column.id]}
-                            column={column}
-                            renderText={renderText}
-                            documents={documents}
-                            full
-                        />
-                    </div>
+        <>
+            <PaperActions
+                row={row}
+                documents={documents}
+                className="rt-inspector-row-actions"
+                buttonClassName="rt-inspector-action"
+            />
+            {row.failure ? (
+                <div className="rt-inspector-failure" role="note">
+                    {row.failure.message}
                 </div>
-            ))}
-        </div>
+            ) : isNew ? (
+                <p className="rt-inspector-note">New paper: added since the last fill.</p>
+            ) : null}
+            <div className="rt-paper-questions">
+                {questions.map((column) => {
+                    const cell = row.cells[column.id];
+                    // The block is one button: its ::after covers the block,
+                    // and the page chips (buttons themselves) sit above it.
+                    return (
+                        <div key={column.id} className="rt-paper-question" data-column-id={column.id}>
+                            <button type="button" className="rt-paper-question-open" onClick={() => onColumn(column.id)}>
+                                <span className="rt-inspector-heading">{column.header}</span>
+                                <Icon icon={ArrowRightIcon} size={12} className="rt-inspector-chevron" />
+                            </button>
+                            <div className="rt-paper-question-value">
+                                {cell ? (
+                                    <CellBody
+                                        row={row}
+                                        cell={cell}
+                                        column={column}
+                                        renderText={renderText}
+                                        documents={documents}
+                                    />
+                                ) : (
+                                    // A row whose fill failed is not waiting on
+                                    // the next Fill; its failure says why.
+                                    <span className="rt-muted">
+                                        {row.failure ? "Not answered" : "Not filled yet. The next Fill answers it."}
+                                    </span>
+                                )}
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
+            {documentLine}
+        </>
     );
 }

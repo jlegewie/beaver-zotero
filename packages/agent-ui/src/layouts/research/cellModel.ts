@@ -76,7 +76,7 @@ export function documentKindLabel(kind: string | undefined): string {
 // ---------------------------------------------------------------------------
 
 /**
- * What a cell reads as: `pending` (unattempted, shown as "—"), an answer,
+ * What a cell reads as: `pending` (unattempted, left blank), an answer,
  * "Not reported", a cell the user cleared, or a failed answer.
  */
 export type CellState =
@@ -293,8 +293,8 @@ export function isNewRow(spec: TableSpec, row: Row): boolean {
 export interface InspectorAnswer {
     outcome: "answered" | "not_reported";
     cell: AnsweredCell | NotReportedCell | ReplacedCell;
-    /** "from the PDF", "from title and abstract", … */
-    sourceLine: string;
+    /** Read from the title and abstract alone: no document. */
+    fromAbstract: boolean;
     reasoning?: string;
     evidence: Evidence[];
     /** Set when the answer is out of date, and why. */
@@ -328,28 +328,19 @@ export type InspectorContent =
 function answerOf(
     row: Pick<Row, "documents">,
     cell: AnsweredCell | NotReportedCell | ReplacedCell,
-    documents: TableDocuments | undefined,
 ): InspectorAnswer {
-    const read = cell.documents ?? [];
-    const sourceLine = read.length
-        ? `from ${documentNoun(documents?.get(read[0])?.kind)}`
-        : "from title and abstract";
     const stale = staleReason(row, cell as Cell);
     return {
         outcome: cell.outcome,
         cell,
-        sourceLine,
+        fromAbstract: (cell.documents?.length ?? 0) === 0,
         ...(cell.reasoning ? { reasoning: cell.reasoning } : {}),
         evidence: cell.evidence ?? [],
         ...(stale ? { stale } : {}),
     };
 }
 
-export function inspectorContent(
-    row: Row,
-    column: Column,
-    documents?: TableDocuments,
-): InspectorContent {
+export function inspectorContent(row: Row, column: Column): InspectorContent {
     const cell = row.cells[column.id];
     if (!cell) return { kind: "pending" };
     if (cell.outcome === "failed") return { kind: "failed", message: cell.error };
@@ -370,10 +361,10 @@ export function inspectorContent(
             cell,
             ...(cell.outcome !== "cleared" && cell.reasoning ? { note: cell.reasoning } : {}),
             stale: !!cell.stale,
-            ...(replaced ? { replaced: answerOf(row, replaced, documents) } : {}),
+            ...(replaced ? { replaced: answerOf(row, replaced) } : {}),
         };
     }
-    return { kind: "model", answer: answerOf(row, cell, documents) };
+    return { kind: "model", answer: answerOf(row, cell) };
 }
 
 /**

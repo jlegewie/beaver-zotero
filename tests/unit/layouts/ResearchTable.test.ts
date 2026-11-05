@@ -127,7 +127,7 @@ describe('the grid', () => {
         expect(cell('r2', 'effect').querySelector('.rt-tag-edited')).not.toBeNull();
         expect(cell('r2', 'effect').querySelector('.rt-tag-page')).toBeNull();
         expect(cell('r2', 'design').textContent).toContain('Not reported');
-        expect(cell('r3', 'effect').textContent).toBe('—');
+        expect(cell('r3', 'effect').textContent).toBe('');
         const paper = container!.querySelector('tr[data-row-id="r3"] .rt-paper')!;
         expect(paper.textContent).toContain('New paper');
         expect(paper.textContent).toContain('Smith, Jones · QJE');
@@ -263,31 +263,107 @@ describe('the cell inspector', () => {
         }
     });
 
-    it("shows a model answer with its source, reasoning and passages, and the row's document", () => {
+    const headings = () => Array.from(inspector()!.querySelectorAll('.rt-inspector-body .rt-inspector-heading')).map((el) => el.textContent);
+
+    it("heads a question cell with its column and paper, then the question, the answer, its explanation and its evidence", () => {
         mount();
         click(cell('r1', 'effect'));
         const panel = inspector()!;
-        expect(panel.textContent).toContain('Baird 2011');
-        expect(panel.querySelector('.rt-inspector-question')?.textContent).toBe('The headline effect?');
-        expect(panel.querySelector('.rt-section-source')?.textContent).toBe('from the PDF');
-        expect(panel.textContent).toContain('Conditional transfers raised enrollment.');
-        expect(panel.textContent).toContain('Table 2 reports it.');
-        expect(panel.querySelectorAll('.rt-passage')).toHaveLength(1);
-        expect(panel.querySelector('.rt-inspector-document')?.textContent).toBe('Read from Baird_2011.pdf');
+        expect(panel.querySelector('.rt-inspector-title')?.textContent).toBe('Headline effect');
+        const paper = panel.querySelector<HTMLButtonElement>('button.rt-inspector-paper-link')!;
+        expect(paper.textContent).toBe('Baird 2011');
+        expect(paper.title).toBe('Baird 2011 title');
+        expect(panel.querySelector('.rt-inspector-head')?.textContent).not.toContain('The headline effect?');
+        expect(panel.querySelector('.rt-inspector-body > .rt-inspector-question')?.textContent).toBe('The headline effect?');
+        expect(panel.querySelector('.rt-inspector-answer')?.textContent).toBe('Conditional transfers raised enrollment.');
+        // An answer read from the document has no source line: Evidence counts its passages.
+        expect(panel.querySelector('.rt-inspector-answer-section .rt-tag')).toBeNull();
+        expect(headings()).toEqual(['Explanation', 'Evidence1']);
+        expect(panel.querySelector('.rt-inspector-reasoning')?.textContent).toBe('Table 2 reports it.');
+        expect(panel.textContent).not.toContain('Beaver answered');
+        expect(panel.querySelector('[role="tab"]')).toBeNull();
+        // The document line sits under the Evidence heading, above the passages.
+        const evidence = panel.querySelector('.rt-passages')!;
+        expect(Array.from(evidence.children).map((el) => el.className)).toEqual([
+            'rt-inspector-heading',
+            'rt-inspector-document',
+            expect.stringContaining('rt-passage'),
+        ]);
+        expect(evidence.querySelector('.rt-inspector-document')?.textContent).toBe('Read from Baird_2011.pdf');
+        expect(panel.querySelectorAll('.rt-inspector-document')).toHaveLength(1);
         expect(panel.textContent).not.toContain('Your answer');
     });
 
-    it("shows the user's answer and note, then Beaver's earlier answer and its evidence", () => {
+    it('heads Closest passages on a blank, and keeps the document line at the bottom without evidence', () => {
+        mount();
+        click(cell('r2', 'design'));
+        expect(inspector()!.querySelector('.rt-inspector-answer')?.textContent).toBe('Not reported');
+        expect(inspector()!.querySelector('.rt-passages')).toBeNull();
+        expect(inspector()!.querySelector('.rt-inspector-body')!.lastElementChild!.className).toBe('rt-inspector-document');
+        const spec = table();
+        spec.rows[1].cells.design = { outcome: 'not_reported', provenance: 'model', documents: [pdf], evidence: [passage, passage] } as Cell;
+        act(() => root?.render(h(ResearchTable, { table: spec })));
+        expect(headings()).toEqual(['Closest passages2']);
+    });
+
+    it('clamps a long explanation to three lines with More and Less', () => {
+        const height = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollHeight');
+        // A clamped explanation is taller than its box.
+        Object.defineProperty(Element.prototype, 'scrollHeight', {
+            configurable: true,
+            get(this: Element) {
+                return this.classList.contains('rt-inspector-reasoning') && this.classList.contains('rt-clamp') ? 120 : 0;
+            },
+        });
+        try {
+            mount();
+            click(cell('r1', 'effect'));
+            const reasoning = () => inspector()!.querySelector('.rt-inspector-reasoning')!;
+            const toggle = () => inspector()!.querySelector<HTMLButtonElement>('.rt-inspector-more');
+            expect(reasoning().classList.contains('rt-clamp')).toBe(true);
+            expect(toggle()?.textContent).toBe('More');
+            click(toggle()!);
+            expect(reasoning().classList.contains('rt-clamp')).toBe(false);
+            expect(toggle()?.textContent).toBe('Less');
+            expect(toggle()?.getAttribute('aria-expanded')).toBe('true');
+            click(toggle()!);
+            expect(reasoning().classList.contains('rt-clamp')).toBe(true);
+            expect(toggle()?.textContent).toBe('More');
+        } finally {
+            if (height) Object.defineProperty(Element.prototype, 'scrollHeight', height);
+            else delete (Element.prototype as { scrollHeight?: number }).scrollHeight;
+        }
+    });
+
+    it('tags an answer read from title and abstract alone', () => {
+        const spec = table();
+        spec.rows[0].cells.effect = model('From the abstract.', { documents: [], evidence: [] });
+        mount({ table: spec });
+        click(cell('r1', 'effect'));
+        expect(inspector()!.querySelector('.rt-inspector-answer-section .rt-tag-abstract')?.textContent).toBe('Abstract');
+        expect(inspector()!.querySelector('.rt-passages')).toBeNull();
+    });
+
+    it('offers no More when the explanation fits', () => {
+        mount();
+        click(cell('r1', 'effect'));
+        expect(inspector()!.querySelector('.rt-inspector-more')).toBeNull();
+    });
+
+    it("shows the user's answer and note, then Beaver's earlier answer as a section with its evidence", () => {
         mount();
         click(cell('r2', 'effect'));
         const panel = inspector()!;
-        expect(panel.textContent).toContain('Your answer');
-        expect(panel.textContent).toContain('Gains in consumption.');
-        expect(panel.textContent).toContain('Schooling was not an outcome.');
-        const earlier = panel.querySelector('.rt-inspector-card')!;
-        expect(earlier.textContent).toContain('Beaver answered');
-        expect(earlier.textContent).toContain('Transfers raised consumption.');
-        click(earlier.querySelector('.rt-passage')!);
+        expect(headings()).toEqual(['Your answer', 'Beaver’s answer', 'Explanation', 'Evidence1']);
+        const [mine, earlier] = Array.from(panel.querySelectorAll('.rt-inspector-answer-section'));
+        expect(mine.querySelector('.rt-inspector-answer')?.textContent).toBe('Gains in consumption.');
+        // The heading says who answered; the note follows as plain text.
+        expect(mine.querySelector('.rt-inspector-text')?.textContent).toBe('Schooling was not an outcome.');
+        expect(panel.textContent).not.toContain('Edited by you');
+        expect(earlier.querySelector('.rt-inspector-answer')?.textContent).toBe('Transfers raised consumption.');
+        expect(panel.querySelector('.rt-inspector-card')).toBeNull();
+        expect(panel.textContent).not.toContain('Beaver answered');
+        click(panel.querySelector('.rt-passage')!);
         expect(activateCitation).toHaveBeenCalledTimes(1);
     });
 
@@ -302,12 +378,119 @@ describe('the cell inspector', () => {
         expect(inspector()!.getAttribute('data-column-id')).toBe('effect');
     });
 
-    it('lists every question of the row in the whole-paper view', () => {
+});
+
+describe('the paper view', () => {
+    const paperCell = (rowId: string) => container!.querySelector<HTMLElement>(`tr[data-row-id="${rowId}"] td.rt-td-paper`)!;
+    const blocks = () => Array.from(inspector()!.querySelectorAll<HTMLButtonElement>('button.rt-paper-question-open'));
+
+    it('opens when the Paper cell is selected, with every question of the row', () => {
+        const onActivity = vi.fn();
+        mount({ onActivity });
+        click(paperCell('r1'));
+        const panel = inspector()!;
+        expect(panel.getAttribute('data-view')).toBe('paper');
+        expect(panel.getAttribute('data-row-id')).toBe('r1');
+        expect(paperCell('r1').classList.contains('rt-cell-selected')).toBe(true);
+        expect(onActivity).toHaveBeenCalled();
+        expect(panel.querySelector('.rt-inspector-title')?.textContent).toBe('Baird 2011 title');
+        expect(panel.querySelector('.rt-inspector-subtitle')?.textContent).toBe('Smith, Jones · 2011');
+        expect(blocks().map((b) => b.textContent)).toEqual(['Headline effect', 'Design', 'Amount']);
+        const values = Array.from(panel.querySelectorAll('.rt-paper-question-value'));
+        expect(values[0].querySelector('.rt-clamp')?.textContent).toBe('Conditional transfers raised enrollment.');
+        expect(values[0].querySelector('.rt-tag-page')?.textContent).toBe('p. 14');
+        expect(values[2].textContent).toBe('Not filled yet. The next Fill answers it.');
+        expect(panel.querySelector('.rt-inspector-body')!.lastElementChild!.className).toBe('rt-inspector-document');
+    });
+
+    it("offers the row's Show in library and Open, and notes a new paper", () => {
+        const revealInLibrary = vi.fn();
+        const openSource = vi.fn();
+        setHost({ navigation: { activateCitation, revealInLibrary, openSource } as never });
         mount();
-        click(cell('r1', 'effect'));
-        click(Array.from(inspector()!.querySelectorAll('[role="tab"]')).find((tab) => tab.textContent === 'Whole paper')!);
-        const entries = inspector()!.querySelectorAll('.rt-whole-paper-entry');
-        expect(Array.from(entries).map((e) => e.querySelector('.rt-whole-paper-header')?.textContent)).toEqual(['Headline effect', 'Design', 'Amount']);
+        click(paperCell('r1'));
+        const actions = () => Array.from(inspector()!.querySelectorAll<HTMLButtonElement>('.rt-inspector-row-actions button'));
+        expect(actions().map((b) => b.textContent)).toEqual(['Show in library', 'Open PDF']);
+        click(actions()[0]);
+        expect(revealInLibrary).toHaveBeenCalledWith(expect.objectContaining({ zotero_key: 'AAAA1111' }));
+        click(actions()[1]);
+        expect(openSource).toHaveBeenCalledTimes(1);
+        expect(inspector()!.textContent).not.toContain('New paper');
+        click(paperCell('r3'));
+        expect(inspector()!.querySelector('.rt-inspector-note')?.textContent).toBe('New paper: added since the last fill.');
+    });
+
+    it("opens a question's cell from its block", () => {
+        mount();
+        click(paperCell('r1'));
+        click(blocks().find((b) => b.textContent === 'Design')!);
+        expect(inspector()!.getAttribute('data-view')).toBe('cell');
+        expect(inspector()!.getAttribute('data-column-id')).toBe('design');
+        expect(cell('r1', 'design').classList.contains('rt-cell-selected')).toBe(true);
+    });
+
+    it("opens from the cell view's paper subtitle", () => {
+        mount();
+        click(cell('r2', 'effect'));
+        click(inspector()!.querySelector('button.rt-inspector-paper-link')!);
+        expect(inspector()!.getAttribute('data-view')).toBe('paper');
+        expect(inspector()!.getAttribute('data-row-id')).toBe('r2');
+        expect(paperCell('r2').classList.contains('rt-cell-selected')).toBe(true);
+    });
+
+    it('steps from paper to paper with the row buttons', () => {
+        mount();
+        click(paperCell('r2'));
+        click(inspector()!.querySelector('button[aria-label="Next row"]')!);
+        expect(inspector()!.getAttribute('data-view')).toBe('paper');
+        expect(inspector()!.getAttribute('data-row-id')).toBe('r3');
+        click(inspector()!.querySelector('button[aria-label="Previous row"]')!);
+        click(inspector()!.querySelector('button[aria-label="Previous row"]')!);
+        expect(inspector()!.getAttribute('data-row-id')).toBe('r1');
+        expect(inspector()!.querySelector('.rt-inspector-title')?.textContent).toBe('Baird 2011 title');
+    });
+
+    it('selects the Paper cell from the keyboard', () => {
+        mount();
+        const body = paperCell('r2').querySelector('.rt-paper-body')!;
+        act(() => {
+            body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+        });
+        expect(inspector()!.getAttribute('data-view')).toBe('paper');
+        expect(inspector()!.getAttribute('data-row-id')).toBe('r2');
+    });
+
+    it("leaves the cell unselected when its row menu is used", () => {
+        mount({ fill: { onFillRows: vi.fn(), onFillColumn: vi.fn() } });
+        click(container!.querySelector('tr[data-row-id="r1"] button[aria-label="Row actions"]')!);
+        const refill = Array.from(document.querySelectorAll<HTMLElement>('*')).find(
+            (el) => el.textContent === 'Refill row' && el.children.length === 0,
+        );
+        click(refill!);
+        expect(inspector()).toBeNull();
+        expect(paperCell('r1').classList.contains('rt-cell-selected')).toBe(false);
+    });
+
+    it("says a failed row's unfilled questions were not answered, not that the next Fill answers them", () => {
+        const spec = table();
+        spec.rows[2].failure = { code: 'no_source', message: 'This item has no document or abstract.' };
+        mount({ table: spec });
+        click(paperCell('r3'));
+        expect(inspector()!.querySelector('.rt-inspector-failure')?.textContent).toBe('This item has no document or abstract.');
+        const values = Array.from(inspector()!.querySelectorAll('.rt-paper-question-value')).map((v) => v.textContent);
+        expect(values).toEqual(['Not answered', 'Not answered', 'Not answered']);
+    });
+
+    it('is not selectable in a table without a paper column', () => {
+        // Every table with columns has an anchor: only a table without columns lacks one.
+        const spec = table();
+        spec.columns = [];
+        delete spec.anchor_column_id;
+        mount({ table: spec });
+        const paper = paperCell('r1');
+        expect(paper.classList.contains('rt-td-selectable')).toBe(false);
+        click(paper);
+        expect(inspector()).toBeNull();
     });
 
     it('opens on a cell asked for from outside', () => {
@@ -534,22 +717,26 @@ describe('editing cells and filling from rows and columns', () => {
         expect(editor()).toBeNull();
     });
 
-    it("offers Edit on Beaver's answer, and Edit, Clear and Reset to Beaver's answer on the user's", async () => {
+    const pencil = () => inspector()!.querySelector<HTMLButtonElement>('button[aria-label="Edit answer"]');
+    const links = () => Array.from(inspector()!.querySelectorAll<HTMLButtonElement>('.rt-inspector-links button'));
+
+    it("offers the Edit pencil beside Beaver's answer, and Reset to Beaver's answer under the user's", async () => {
         const cellEditing = editing();
         mount({ cellEditing });
         click(cell('r1', 'effect'));
-        expect(Array.from(inspector()!.querySelectorAll('.rt-inspector-action')).map((b) => b.textContent)).toEqual(['Edit', 'Change']);
+        expect(pencil()!.closest('.rt-inspector-answer-row')).not.toBeNull();
+        expect(links()).toEqual([]);
+        expect(Array.from(inspector()!.querySelectorAll('.rt-inspector-action')).map((b) => b.textContent)).toEqual(['Change']);
         click(cell('r2', 'effect'));
-        const actions = () => Array.from(inspector()!.querySelectorAll<HTMLButtonElement>('.rt-inspector-action'));
-        expect(actions().map((b) => b.textContent)).toEqual(['Edit', 'Clear', 'Reset to Beaver’s answer', 'Change']);
-        click(actions().find((b) => b.textContent === 'Reset to Beaver’s answer')!);
+        // The pencil sits on the user's answer, not on Beaver's earlier one.
+        expect(inspector()!.querySelectorAll('button[aria-label="Edit answer"]')).toHaveLength(1);
+        expect(pencil()!.closest('.rt-inspector-answer-section')!.textContent).toContain('Your answer');
+        expect(links().map((b) => b.textContent)).toEqual(['Reset to Beaver’s answer']);
+        click(links().find((b) => b.textContent === 'Reset to Beaver’s answer')!);
         expect(cellEditing.onRestore).toHaveBeenCalledWith(expect.objectContaining({ id: 'r2' }), expect.objectContaining({ id: 'effect' }));
-        click(actions().find((b) => b.textContent === 'Clear')!);
-        await flush();
-        expect(cellEditing.onEdit).toHaveBeenCalledWith(expect.objectContaining({ id: 'r2' }), expect.anything(), { op: 'clear' });
-        click(actions().find((b) => b.textContent === 'Change')!);
+        click(Array.from(inspector()!.querySelectorAll<HTMLButtonElement>('.rt-inspector-action')).find((b) => b.textContent === 'Change')!);
         expect(cellEditing.onChooseDocument).toHaveBeenCalledWith(expect.objectContaining({ id: 'r2' }));
-        click(actions().find((b) => b.textContent === 'Edit')!);
+        click(pencil()!);
         expect(editor()!.querySelector('textarea')!.value).toBe('Gains in consumption.');
         expect(editor()!.querySelector<HTMLInputElement>('input[placeholder="Why you changed it (optional)"]')!.value).toBe('Schooling was not an outcome.');
     });
@@ -574,18 +761,20 @@ describe('editing cells and filling from rows and columns', () => {
         });
         click(menuItem('Hide column')!);
         expect(container!.querySelector('th[data-column-id="amount"]')).toBeNull();
-        click(Array.from(inspector()!.querySelectorAll('.rt-inspector-action')).find((b) => b.textContent === 'Edit')!);
+        click(pencil()!);
         expect(container!.querySelector('th[data-column-id="amount"]')).not.toBeNull();
         expect(editor()).not.toBeNull();
     });
 
     it('shows the cell controls disabled with the reason in a read-only library', () => {
         mount({ cellEditing: { ...editing(), disabledReason: 'This library is read-only.' } });
-        const pencil = cell('r1', 'effect').querySelector<HTMLButtonElement>('button[aria-label="Edit Headline effect"]')!;
-        expect(pencil.disabled).toBe(true);
-        expect(pencil.title).toBe('This library is read-only.');
+        const cellPencil = cell('r1', 'effect').querySelector<HTMLButtonElement>('button[aria-label="Edit Headline effect"]')!;
+        expect(cellPencil.disabled).toBe(true);
+        expect(cellPencil.title).toBe('This library is read-only.');
         click(cell('r2', 'effect'));
-        expect(Array.from(inspector()!.querySelectorAll<HTMLButtonElement>('.rt-inspector-action')).every((b) => b.disabled)).toBe(true);
+        const controls = [pencil()!, ...links(), ...Array.from(inspector()!.querySelectorAll<HTMLButtonElement>('.rt-inspector-action'))];
+        expect(controls).toHaveLength(3);
+        expect(controls.every((b) => b.disabled)).toBe(true);
     });
 
     it('offers Refill row and Choose document… in the row menu', () => {

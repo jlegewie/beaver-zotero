@@ -46,7 +46,7 @@ const TOO_COMPLEX = "The PDF is too complex to read.";
  */
 export const ROW_FAILURE_MESSAGES: Readonly<Record<string, string>> = {
     deadline: "Ran out of time before this was answered.",
-    [NO_SOURCE]: "There is no document or abstract to read.",
+    [NO_SOURCE]: "There is no document or abstract.",
     no_answer: "No answer could be produced.",
     no_text: NO_READABLE_TEXT,
     [READ_FAILED]: DOCUMENT_UNREADABLE,

@@ -331,7 +331,7 @@ export function buildExtractionDemo(items: DemoItem[]): TableSpec {
         // A row with neither a document nor an abstract cannot be filled: the
         // failure goes on the row and its question cells stay unattempted.
         if (!item.attachmentKey && !item.abstract) {
-            row.failure = { code: 'no_source', message: 'This item has no document or abstract to read.' };
+            row.failure = { code: 'no_source', message: 'This item has no document or abstract.' };
             return row;
         }
         const documents = row.documents;
