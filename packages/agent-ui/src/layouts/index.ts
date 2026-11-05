@@ -28,7 +28,7 @@ export type {
 export { CellInspector } from "./research/CellInspector";
 export { CellEditor, editsAsList } from "./research/CellEditor";
 export type { CellEditInput } from "./research/CellEditor";
-export type { CellInspectorProps, InspectorView } from "./research/CellInspector";
+export type { CellActionControls, CellInspectorProps } from "./research/CellInspector";
 export {
     cellState,
     cellTags,

@@ -146,14 +146,14 @@ describe('inspector content', () => {
     const documents = new Map([[doc, { name: 'Smith_2020.pdf', kind: 'pdf' }]]);
 
     it('says an unattempted cell is not filled yet', () => {
-        expect(inspectorContent(row(), column, documents)).toEqual({ kind: 'pending' });
+        expect(inspectorContent(row(), column)).toEqual({ kind: 'pending' });
     });
 
     it('lays out a model answer: source, reasoning, evidence', () => {
-        const content = inspectorContent(row({ a: modelAnswer({ reasoning: 'Because.' }) }), column, documents);
+        const content = inspectorContent(row({ a: modelAnswer({ reasoning: 'Because.' }) }), column);
         expect(content.kind).toBe('model');
         if (content.kind !== 'model') return;
-        expect(content.answer.sourceLine).toBe('from the PDF');
+        expect(content.answer.fromAbstract).toBe(false);
         expect(content.answer.reasoning).toBe('Because.');
         expect(content.answer.evidence).toHaveLength(2);
         expect(content.answer.stale).toBeUndefined();
@@ -164,7 +164,7 @@ describe('inspector content', () => {
             row({ a: { outcome: 'answered', provenance: 'model', value: { kind: 'text', text: 'x' } } as Cell }, { documents: undefined }),
             column,
         );
-        expect(content.kind === 'model' && content.answer.sourceLine).toBe('from title and abstract');
+        expect(content.kind === 'model' && content.answer.fromAbstract).toBe(true);
     });
 
     it("shows the user's answer with Beaver's earlier answer from replaced", () => {
@@ -172,14 +172,13 @@ describe('inspector content', () => {
         const content = inspectorContent(
             row({ a: { outcome: 'answered', provenance: 'user', value: { kind: 'text', text: 'Mine' }, reasoning: 'Table 3', stale: true, replaced } as Cell }),
             column,
-            documents,
         );
         expect(content.kind).toBe('user');
         if (content.kind !== 'user') return;
         expect(content.outcome).toBe('answered');
         expect(content.note).toBe('Table 3');
         expect(content.stale).toBe(true);
-        expect(content.replaced?.sourceLine).toBe('from the PDF');
+        expect(content.replaced?.fromAbstract).toBe(false);
         expect(content.replaced?.evidence).toHaveLength(2);
         expect(content.replaced?.stale).toBe('question');
     });
@@ -188,7 +187,6 @@ describe('inspector content', () => {
         const content = inspectorContent(
             row({ a: { outcome: 'answered', provenance: 'user', value: { kind: 'text', text: 'Mine' }, stale: true, replaced: modelAnswer() as never } as Cell }),
             column,
-            documents,
         );
         expect(content.kind === 'user' && content.replaced?.stale).toBe('question');
     });
@@ -197,7 +195,7 @@ describe('inspector content', () => {
         const notReported = inspectorContent(row({ a: { outcome: 'not_reported', provenance: 'user', reasoning: 'n/a' } as Cell }), column);
         expect(notReported).toMatchObject({ kind: 'user', outcome: 'not_reported', note: 'n/a', stale: false });
         expect(notReported.kind === 'user' && notReported.replaced).toBeUndefined();
-        const cleared = inspectorContent(row({ a: { outcome: 'cleared', provenance: 'user', replaced: modelAnswer() as never } as Cell }), column, documents);
+        const cleared = inspectorContent(row({ a: { outcome: 'cleared', provenance: 'user', replaced: modelAnswer() as never } as Cell }), column);
         expect(cleared).toMatchObject({ kind: 'user', outcome: 'cleared' });
         expect(cleared.kind === 'user' && cleared.replaced?.outcome).toBe('answered');
     });

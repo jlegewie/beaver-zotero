@@ -80,7 +80,8 @@ function PaperIcon({ row, className }: { row: Row; className?: string }): React.
  * The Paper cell: title over authors · venue, a "New paper" tag on a row added
  * since the last fill, and the row's failure when its fill could not read it.
  * Hovering shows the paper card; the row's actions sit on its top-right
- * corner on hover.
+ * corner on hover. With `onSelect`, Enter or Space on it selects the cell
+ * (the grid's cell takes the click); the row's actions never do.
  */
 export function PaperCell({
     table,
@@ -90,6 +91,7 @@ export function PaperCell({
     documents,
     menuItems,
     onMenuToggle,
+    onSelect,
 }: {
     /** The table, for the row actions it declares (import). */
     table?: TableSpec;
@@ -101,6 +103,8 @@ export function PaperCell({
     menuItems: MenuItem[];
     /** Told when the row's menu opens and closes. */
     onMenuToggle?: (open: boolean) => void;
+    /** Selects the Paper cell (the paper view), from the keyboard. */
+    onSelect?: () => void;
 }): React.ReactElement {
     const { title, meta } = paperText(row, anchorColumnId);
     const hover = useHoverAnchor({
@@ -119,6 +123,17 @@ export function PaperCell({
                 // Keyboard focus shows the card; its actions are also in the row menu.
                 tabIndex={0}
                 {...hover}
+                onKeyDown={
+                    onSelect
+                        ? (event) => {
+                              if (event.target !== event.currentTarget) return;
+                              if (event.key === "Enter" || event.key === " ") {
+                                  event.preventDefault();
+                                  onSelect();
+                              }
+                          }
+                        : undefined
+                }
             >
                 <span className="rt-paper-title">{title}</span>
                 {meta ? <span className="rt-paper-meta">{meta}</span> : null}
@@ -136,20 +151,26 @@ export function PaperCell({
                     </span>
                 ) : null}
             </div>
-            {table ? <RowImportAction table={table} row={row} /> : null}
-            {menuItems.length ? (
-                <MenuButton
-                    menuItems={menuItems}
-                    variant="ghost-secondary"
-                    icon={MoreHorizontalIcon}
-                    className="rt-row-menu"
-                    ariaLabel="Row actions"
-                    toggleCallback={onMenuToggle}
-                />
-            ) : null}
+            {/* The row's actions and their menu: a click on them is theirs,
+                not the cell's. */}
+            <span className="rt-paper-actions" onClick={stopPropagation}>
+                {table ? <RowImportAction table={table} row={row} /> : null}
+                {menuItems.length ? (
+                    <MenuButton
+                        menuItems={menuItems}
+                        variant="ghost-secondary"
+                        icon={MoreHorizontalIcon}
+                        className="rt-row-menu"
+                        ariaLabel="Row actions"
+                        toggleCallback={onMenuToggle}
+                    />
+                ) : null}
+            </span>
         </div>
     );
 }
+
+const stopPropagation = (event: React.SyntheticEvent) => event.stopPropagation();
 
 /**
  * The paper's hover card: the chat's item chip card for the work, the row's
@@ -169,11 +190,8 @@ export function PaperCard({
 }): React.ReactElement {
     const { title, meta, year } = paperText(row, anchorColumnId);
     const reference = rowReference(row);
-    const navigation = getHost().navigation;
-    const item = rowItemReference(row);
     const documentId = row.documents?.[0];
     const info = documentId ? documents?.get(documentId) : undefined;
-    const open = paperOpenAction(row, documents);
     const subtitle = [reference?.subtitle, year, reference?.venue].filter(Boolean).join(" · ");
     return (
         <div className="rt-card rt-paper-card">
@@ -207,23 +225,41 @@ export function PaperCard({
             ) : isNew ? (
                 <div className="rt-paper-card-note rt-paper-card-new">New paper: added since the last fill.</div>
             ) : null}
-            {navigation && (item || open) ? (
-                <div className="rt-card-actions">
-                    {item ? (
-                        <button
-                            type="button"
-                            className="rt-card-button"
-                            onClick={() => navigation.revealInLibrary(item)}
-                        >
-                            Show in library
-                        </button>
-                    ) : null}
-                    {open ? (
-                        <button type="button" className="rt-card-button" onClick={open.run}>
-                            {open.label}
-                        </button>
-                    ) : null}
-                </div>
+            <PaperActions row={row} documents={documents} className="rt-card-actions" buttonClassName="rt-card-button" />
+        </div>
+    );
+}
+
+/**
+ * The row's Show in library and Open, each when the host can do it; nothing
+ * when neither is available. Shared by the paper card and the paper view.
+ */
+export function PaperActions({
+    row,
+    documents,
+    className,
+    buttonClassName,
+}: {
+    row: Row;
+    documents?: TableDocuments;
+    className: string;
+    buttonClassName: string;
+}): React.ReactElement | null {
+    const navigation = getHost().navigation;
+    const item = navigation ? rowItemReference(row) : undefined;
+    const open = paperOpenAction(row, documents);
+    if (!navigation || (!item && !open)) return null;
+    return (
+        <div className={className}>
+            {item ? (
+                <button type="button" className={buttonClassName} onClick={() => navigation.revealInLibrary(item)}>
+                    Show in library
+                </button>
+            ) : null}
+            {open ? (
+                <button type="button" className={buttonClassName} onClick={open.run}>
+                    {open.label}
+                </button>
             ) : null}
         </div>
     );

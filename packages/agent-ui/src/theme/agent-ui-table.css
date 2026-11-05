@@ -711,9 +711,15 @@
     border-right-color: var(--rt-border);
 }
 .beaver-root .rt-scroll[data-pinned] .rt-row-selected > .rt-td-rail,
-.beaver-root .rt-scroll[data-pinned] .rt-row-selected > .rt-td-paper {
+.beaver-root .rt-scroll[data-pinned] .rt-row-selected > .rt-td-paper,
+.beaver-root .rt-scroll[data-pinned] .rt-td-paper.rt-cell-selected {
     background:
         linear-gradient(var(--rt-selected), var(--rt-selected)),
+        var(--material-background);
+}
+.beaver-root .rt-scroll[data-pinned] .rt-td-selectable:not(.rt-cell-selected):hover {
+    background:
+        linear-gradient(var(--rt-hover), var(--rt-hover)),
         var(--material-background);
 }
 
@@ -801,11 +807,13 @@
     opacity: 1;
 }
 
-.beaver-root .rt-cell {
+.beaver-root .rt-cell,
+.beaver-root .rt-td-selectable {
     cursor: pointer;
 }
 
-.beaver-root .rt-cell:hover {
+.beaver-root .rt-cell:hover,
+.beaver-root .rt-td-selectable:hover {
     background: var(--rt-hover);
 }
 
@@ -852,10 +860,6 @@
 
 .beaver-root .rt-stale-text {
     color: var(--fill-secondary);
-}
-
-.beaver-root .rt-pending {
-    color: var(--fill-tertiary);
 }
 
 .beaver-root .rt-muted {
@@ -1141,9 +1145,6 @@
 
 .beaver-root .rt-inspector-head {
     flex: 0 0 auto;
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
     padding: 1.1rem 1.2rem 0.9rem;
     border-bottom: 1px solid var(--fill-quinary);
 }
@@ -1152,6 +1153,77 @@
     display: flex;
     align-items: center;
     gap: 0.45rem;
+}
+
+/* The cell's column (or the paper's title) over the paper (or its byline);
+ * the row buttons keep to the first line. */
+.beaver-root .rt-inspector-nav-titled {
+    align-items: flex-start;
+}
+
+.beaver-root .rt-inspector-titles {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.15rem;
+    padding-top: 0.15rem;
+}
+
+.beaver-root .rt-inspector-title {
+    max-width: 100%;
+    font-size: 1.08rem;
+    font-weight: 600;
+    line-height: 1.45rem;
+    color: var(--fill-primary);
+    overflow-wrap: anywhere;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.beaver-root .rt-inspector-subtitle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+    max-width: 100%;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    font-size: 0.92rem;
+    line-height: 1.3rem;
+    color: var(--fill-secondary);
+    text-align: start;
+}
+
+.beaver-root .rt-inspector-subtitle-text {
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.beaver-root .rt-inspector-paper-link {
+    cursor: pointer;
+}
+
+.beaver-root .rt-inspector-paper-link:hover {
+    color: var(--fill-primary);
+}
+
+.beaver-root .rt-inspector-paper-link:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: 1px;
+    border-radius: 0.25rem;
+}
+
+.beaver-root .rt-inspector-chevron {
+    flex: 0 0 auto;
+    color: var(--fill-tertiary);
 }
 
 .beaver-root .rt-inspector-paper {
@@ -1193,41 +1265,16 @@
     cursor: default;
 }
 
-.beaver-root .rt-segmented {
-    display: flex;
-    padding: 2px;
-    border-radius: 0.55rem;
-    background: var(--fill-quinary);
-}
-
-.beaver-root .rt-segmented button {
-    flex: 1 1 0;
-    min-width: 0;
-    height: 1.85rem;
-    border: 0;
-    border-radius: 0.4rem;
-    background: transparent;
-    font: inherit;
-    font-size: 0.92rem;
-    color: var(--fill-secondary);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    cursor: pointer;
-}
-
-.beaver-root .rt-segmented button.rt-active {
-    background: var(--material-background);
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
-    font-weight: 600;
-    color: var(--fill-primary);
-}
-
-.beaver-root .rt-inspector-question {
+/* The panel's type: the title at 14px; content (the question, answers,
+ * explanations, notes the user wrote, passages) at 13px; labels (headings,
+ * the subtitle, the document line, links, status notes) at 12px. Answers and
+ * headings are primary; supporting text is secondary. */
+.beaver-root .rt-inspector-text {
     margin: 0;
-    font-size: 0.92rem;
-    line-height: 1.3rem;
+    font-size: 1rem;
+    line-height: 1.46rem;
     color: var(--fill-secondary);
+    overflow-wrap: anywhere;
 }
 
 .beaver-root .rt-inspector-body {
@@ -1236,70 +1283,108 @@
     overflow: auto;
     display: flex;
     flex-direction: column;
-    gap: 1.2rem;
+    gap: 1.3rem;
     padding: 1.1rem 1.2rem;
 }
 
 .beaver-root .rt-inspector-section {
     display: flex;
     flex-direction: column;
+    align-items: stretch;
     gap: 0.6rem;
 }
 
-.beaver-root .rt-inspector-card {
-    padding: 0.9rem;
-    border: 1px solid var(--fill-quinary);
-    border-radius: 0.75rem;
-    background:
-        linear-gradient(var(--fill-senary), var(--fill-senary)),
-        var(--material-background);
+/* The answer: set off from the question (or Your answer) by a rule. */
+.beaver-root .rt-inspector-answer-section {
+    gap: 0.4rem;
+    padding-top: 1.3rem;
+    border-top: 1px solid var(--fill-quinary);
 }
 
-.beaver-root .rt-section-label {
+/* Explanation, Evidence, Your answer, Beaver's answer and the paper view's
+ * questions: one heading style. */
+.beaver-root .rt-inspector-heading {
     display: flex;
     align-items: center;
-    gap: 0.45rem;
-    font-size: 0.85rem;
+    gap: 0.4rem;
+    min-width: 0;
+    font-size: 0.92rem;
     font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
+    line-height: 1.3rem;
+    color: var(--fill-primary);
+}
+
+.beaver-root .rt-inspector-count {
+    font-weight: normal;
     color: var(--fill-secondary);
 }
 
-.beaver-root .rt-section-title {
-    flex: 1 1 auto;
+.beaver-root .rt-inspector-answer-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.45rem;
 }
 
-.beaver-root .rt-section-source {
-    font-size: 0.92rem;
-    font-weight: normal;
-    letter-spacing: normal;
-    text-transform: none;
+.beaver-root .rt-inspector-answer-row > :first-child {
+    flex: 1 1 auto;
+    min-width: 0;
 }
 
 .beaver-root .rt-inspector-answer {
-    font-size: 1.08rem;
-    line-height: 1.6rem;
+    font-size: 1rem;
+    line-height: 1.46rem;
+    color: var(--fill-primary);
     overflow-wrap: anywhere;
 }
 
-.beaver-root .rt-inspector-card .rt-inspector-answer {
-    font-size: 1rem;
-    line-height: 1.46rem;
-    color: var(--fill-secondary);
+.beaver-root .rt-inspector-edit {
+    width: 1.7rem;
+    height: 1.7rem;
 }
 
 .beaver-root .rt-inspector-answer p,
-.beaver-root .rt-inspector-reasoning p {
+.beaver-root .rt-inspector-text p {
     margin: 0;
 }
 
-.beaver-root .rt-inspector-reasoning,
 .beaver-root .rt-inspector-note {
     margin: 0;
     font-size: 0.92rem;
-    line-height: 1.35rem;
+    line-height: 1.3rem;
     color: var(--fill-secondary);
+}
+
+/* The explanation is clamped (`rt-clamp`) to three lines until More. */
+.beaver-root .rt-inspector-reasoning {
+    --rt-lines: 3;
+}
+
+/* Reset to Beaver's answer, and an explanation's More / Less. */
+.beaver-root .rt-inspector-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.9rem;
+}
+
+.beaver-root .rt-inspector-link {
+    align-self: flex-start;
+    padding: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    font-size: 0.92rem;
+    line-height: 1.3rem;
+    color: var(--accent-blue);
+    cursor: pointer;
+}
+
+.beaver-root .rt-inspector-link:hover:not(:disabled) {
+    text-decoration: underline;
+}
+
+.beaver-root .rt-inspector-link:disabled {
+    opacity: 0.5;
+    cursor: default;
 }
 
 .beaver-root .rt-inspector-stale {
@@ -1313,12 +1398,6 @@
     color: var(--fill-secondary);
 }
 
-.beaver-root .rt-inspector-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.45rem;
-}
-
 .beaver-root .rt-inspector-failure {
     padding: 0.6rem 0.75rem;
     border-radius: 0.5rem;
@@ -1328,14 +1407,11 @@
 }
 
 .beaver-root .rt-passages {
-    display: flex;
-    flex-direction: column;
     gap: 0.45rem;
 }
 
-.beaver-root .rt-passages-label {
-    font-size: 0.85rem;
-    color: var(--fill-secondary);
+.beaver-root .rt-passages > .rt-inspector-heading {
+    margin-bottom: 0.15rem;
 }
 
 .beaver-root .rt-passage {
@@ -1366,8 +1442,8 @@
 }
 
 .beaver-root .rt-passage-text {
-    font-size: 0.92rem;
-    line-height: 1.3rem;
+    font-size: 1rem;
+    line-height: 1.46rem;
     overflow-wrap: anywhere;
 }
 
@@ -1387,38 +1463,95 @@
     text-overflow: ellipsis;
 }
 
-.beaver-root .rt-whole-paper {
+/* The paper view --------------------------------------------------------- */
+
+.beaver-root .rt-inspector-row-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+}
+
+.beaver-root .rt-paper-questions {
     display: flex;
     flex-direction: column;
     gap: 0.3rem;
+    margin-inline: -0.6rem;
 }
 
-.beaver-root .rt-whole-paper-entry {
+/* A question block is one button: its ::after covers the block, and the
+ * page chips (buttons of their own) are raised above it. */
+.beaver-root .rt-paper-question {
+    position: relative;
     display: flex;
     flex-direction: column;
-    align-items: flex-start;
     gap: 0.3rem;
     padding: 0.6rem;
     border-radius: 0.55rem;
-    cursor: pointer;
 }
 
-.beaver-root .rt-whole-paper-entry:hover {
+.beaver-root .rt-paper-question:hover {
     background: var(--rt-hover);
 }
 
-.beaver-root .rt-whole-paper-header {
-    font-size: 0.85rem;
-    font-weight: 600;
-    color: var(--fill-secondary);
+.beaver-root .rt-paper-question-open {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    width: 100%;
+    padding: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    text-align: start;
+    cursor: pointer;
 }
 
-.beaver-root .rt-whole-paper-value {
+.beaver-root .rt-paper-question-open::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+}
+
+.beaver-root .rt-paper-question-open:focus-visible {
+    outline: none;
+}
+
+.beaver-root .rt-paper-question-open:focus-visible::after {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: -2px;
+}
+
+.beaver-root .rt-paper-question-open .rt-inspector-heading {
+    flex: 1 1 auto;
+}
+
+.beaver-root .rt-paper-question-open .rt-inspector-chevron {
+    opacity: 0;
+}
+
+.beaver-root .rt-paper-question:hover .rt-inspector-chevron,
+.beaver-root .rt-paper-question-open:focus-visible .rt-inspector-chevron {
+    opacity: 1;
+}
+
+.beaver-root .rt-paper-question-value {
+    --rt-lines: 3;
     display: flex;
     flex-direction: column;
     align-items: flex-start;
     gap: 0.3rem;
     width: 100%;
+    min-width: 0;
+}
+
+.beaver-root .rt-paper-question-value .rt-tags {
+    white-space: normal;
+}
+
+.beaver-root .rt-paper-question-value .rt-tag {
+    position: relative;
+    z-index: 1;
 }
 
 .beaver-root .rt-history .rt-dom-view select {

@@ -84,7 +84,8 @@ const FLEX_MIN = "18rem";
  * The research table's grid: a selection rail, the paper, the year and one
  * column per question, rows of one height set by the density.
  *
- * Every question cell is a button onto the inspector. Its text is clamped to
+ * Every question cell, and the Paper cell when the table has a paper column,
+ * is a button onto the inspector. Its text is clamped to
  * the row height; when the clamp cuts it, hovering floats the whole cell over
  * the rows below (the peek) and nothing in the grid moves.
  */
@@ -464,6 +465,9 @@ const ResearchRow = React.memo(function ResearchRow({
     // A pinned Paper cell stacks on its own, so the one whose menu is open
     // goes over the next rows' pinned cells.
     const [menuOpen, setMenuOpen] = useState(false);
+    // The Paper cell opens the row's paper view; without a paper column it
+    // is not selectable.
+    const selectPaper = paperColumnId ? () => onSelectCell({ rowId: row.id, columnId: paperColumnId }) : undefined;
     return (
         <tr
             className={["rt-row", isSelected ? "rt-row-selected" : "", row.failure ? "rt-row-failed" : ""]
@@ -480,7 +484,19 @@ const ResearchRow = React.memo(function ResearchRow({
                     />
                 </span>
             </td>
-            <td className={`rt-td rt-td-paper${menuOpen ? " rt-td-menu-open" : ""}`}>
+            <td
+                className={[
+                    "rt-td",
+                    "rt-td-paper",
+                    selectPaper ? "rt-td-selectable" : "",
+                    selectPaper && selectedColumn === paperColumnId ? "rt-cell-selected" : "",
+                    menuOpen ? "rt-td-menu-open" : "",
+                ]
+                    .filter(Boolean)
+                    .join(" ")}
+                data-column-id={paperColumnId}
+                onClick={selectPaper}
+            >
                 <PaperCell
                     table={table}
                     row={row}
@@ -489,6 +505,7 @@ const ResearchRow = React.memo(function ResearchRow({
                     documents={documents}
                     menuItems={menuItems(row)}
                     onMenuToggle={setMenuOpen}
+                    onSelect={selectPaper}
                 />
             </td>
             {showYear ? (
@@ -548,9 +565,8 @@ export function CellValue({
 }
 
 /**
- * The cell's body: the answer (or "Not reported", the pending "—", a cleared
- * or failed cell) followed by its tags. `full` drops the clamp, for the peek
- * and the inspector's whole-paper list.
+ * The cell's body: the answer (or "Not reported", a cleared or failed cell;
+ * nothing for an unattempted one) followed by its tags. `full` drops the clamp, for the peek.
  */
 export function CellBody({
     row,
@@ -572,7 +588,8 @@ export function CellBody({
     let text: React.ReactNode;
     switch (state) {
         case "pending":
-            text = <span className="rt-pending">—</span>;
+            // Unattempted: the cell is left blank.
+            text = null;
             break;
         case "not_reported":
             text = <span className="rt-muted">Not reported</span>;

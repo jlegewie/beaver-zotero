@@ -211,7 +211,7 @@
             "row": "r2",
             "failure": {
                 "code": "no_source",
-                "message": "There is no document or abstract to read."
+                "message": "There is no document or abstract."
             }
         },
         {
@@ -349,7 +349,7 @@
                 },
                 "failure": {
                     "code": "no_source",
-                    "message": "There is no document or abstract to read."
+                    "message": "There is no document or abstract."
                 },
                 "cells": {
                     "_reference": {

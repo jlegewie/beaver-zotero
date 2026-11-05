@@ -1028,7 +1028,7 @@ describe("how answers read", () => {
             rows: [
                 row("empty", {}, {
                     documents: undefined,
-                    failure: { code: "no_source", message: "This item has no document or abstract to read." },
+                    failure: { code: "no_source", message: "This item has no document or abstract." },
                 }),
                 row("locked", {}, { failure: { code: "encrypted", message: "The PDF is password-protected." } }),
                 row("fine", { note: filler({ kind: "text", text: "Read" }) }),
@@ -1038,7 +1038,7 @@ describe("how answers read", () => {
         expect(html).toMatch(/<details class="bt-r[^"]* bt-r-err" id="locked"/);
         expect(html).not.toMatch(/<details class="[^"]*bt-r-err[^"]*" id="fine"/);
         expect(detailHtml(html, "empty")).toContain(
-            '<p class="bt-d-err"><strong>Nothing to read.</strong> This item has no document or abstract to read.</p>',
+            '<p class="bt-d-err"><strong>Nothing to read.</strong> This item has no document or abstract.</p>',
         );
         expect(detailHtml(html, "locked")).toContain(
             '<p class="bt-d-err"><strong>Could not be read.</strong> The PDF is password-protected.</p>',
