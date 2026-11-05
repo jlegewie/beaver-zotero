@@ -299,11 +299,11 @@
     top: calc(100% + 0.4rem);
     right: 0;
     z-index: 30;
-    width: 22rem;
+    width: 20rem;
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
-    padding: 0.8rem 0.9rem;
+    gap: 0.6rem;
+    padding: 0.85rem 0.9rem 0.75rem;
     border: 1px solid var(--color-border50);
     border-radius: 0.6rem;
     background: var(--material-background);
@@ -312,13 +312,52 @@
     color: var(--fill-primary);
 }
 
+/* The plan's heading: what it fills on the left, what it costs on the right. */
+.beaver-root .bt-fill-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
 .beaver-root .bt-fill-title {
+    font-size: 1rem;
     font-weight: 600;
 }
 
-.beaver-root .bt-fill-lines {
+.beaver-root .bt-fill-cost {
+    flex: 0 0 auto;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    cursor: help;
+}
+
+.beaver-root .bt-fill-details {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+}
+
+/* What the plan fills: a muted label column, the columns it names beside it. */
+.beaver-root .bt-fill-changes {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    column-gap: 0.75rem;
+    row-gap: 0.3rem;
     margin: 0;
-    padding-left: 1.1rem;
+}
+
+.beaver-root .bt-fill-changes dt {
+    color: var(--fill-secondary);
+}
+
+.beaver-root .bt-fill-changes dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.beaver-root .bt-fill-change-text {
     color: var(--fill-secondary);
 }
 
@@ -327,8 +366,13 @@
     color: var(--fill-secondary);
 }
 
+/* The balance falls short of the fill: the only time it is shown. */
 .beaver-root .bt-fill-reach {
+    padding: 0.4rem 0.55rem;
+    border-radius: 0.4rem;
+    background: var(--tag-orange-quinary, var(--fill-quinary));
     color: var(--tag-orange-primary, var(--fill-primary));
+    font-size: 0.86rem;
 }
 
 .beaver-root .bt-fill-status {
