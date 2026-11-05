@@ -244,10 +244,10 @@ export function buildTable(
             code: "too_large",
             message:
                 cut !== -1
-                    ? `sources[${cut}]: the source holds ${resolved[cut].total} papers and a table holds at most ${rowCap}. Narrow it or remove it.`
-                    : `the sources hold ${facts.rows} papers and a table holds at most ${rowCap}. Narrow a source or remove one.`,
+                    ? `sources[${cut}]: the source holds ${resolved[cut].total} items and a table holds at most ${rowCap}. Narrow it or remove it.`
+                    : `the sources hold ${facts.rows} items and a table holds at most ${rowCap}. Narrow a source or remove one.`,
         };
-    if (!facts.rows) return { ok: false, code: "no_rows", message: "The approved sources yield no papers." };
+    if (!facts.rows) return { ok: false, code: "no_rows", message: "The approved sources yield no items." };
     const base: TableSpec = {
         id: input.id,
         spec_version: TABLE_SPEC_VERSION,
@@ -496,7 +496,7 @@ export function applyEdit(
             return {
                 ok: false,
                 code: "too_large",
-                message: `add_sources[${index}]: the source holds ${source.total} papers and a table holds at most ${rowCap}. Narrow it.`,
+                message: `add_sources[${index}]: the source holds ${source.total} items and a table holds at most ${rowCap}. Narrow it.`,
             };
         let entry: SourceEntry;
         if (draft.type === "items") {
@@ -587,7 +587,7 @@ export function applyEdit(
             return {
                 ok: false,
                 code: "too_large",
-                message: `${where}: the source holds ${source.total} papers and a table holds at most ${rowCap}. Narrow it.`,
+                message: `${where}: the source holds ${source.total} items and a table holds at most ${rowCap}. Narrow it.`,
             };
         const removed = removedKeys();
         const fresh = source.papers.filter((paper) => !paper.row.ref || !removed.has(paperKey(paper.row.ref)));

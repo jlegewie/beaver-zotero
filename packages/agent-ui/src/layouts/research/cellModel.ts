@@ -107,12 +107,12 @@ export type CellTag =
 
 /**
  * The tags a cell shows, in reading order: Out of date, Edited, the page
- * tags, Abstract, No passage.
+ * tags, Abstract only, No passage.
  *
  * - A model cell shows a page tag per evidence entry. An answer read from a
  *   document with no evidence shows No passage; a blank (Not reported) shows
  *   its closest passages and never No passage.
- * - A model answer or blank read from title and abstract shows Abstract.
+ * - A model answer or blank read from title and abstract shows Abstract only.
  * - A user cell shows Edited and never page tags: its evidence is Beaver's
  *   earlier answer, shown in the inspector.
  * - Out of date follows `staleReason`: a model cell when its question or its
@@ -158,7 +158,7 @@ export function tagDefinition(
             if (cell?.provenance === "user")
                 return "The question changed after your edit.";
             return tag.reason === "document"
-                ? "The paper's document changed after this answer was written. The next Fill updates it."
+                ? "The item's document changed after this answer was written. The next Fill updates it."
                 : "The question changed after this answer was written. The next Fill updates it.";
     }
 }
@@ -294,9 +294,9 @@ export function staleBadgeText(
 ): string {
     const what =
         reason === "document"
-            ? "the paper's document"
+            ? "the item's document"
             : reason === "mixed"
-              ? "the question or the paper's document"
+              ? "the question or the item's document"
               : "the question";
     return cells === 1
         ? `1 answer is out of date: ${what} changed after it was written. Fill to update it.`

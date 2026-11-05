@@ -1014,7 +1014,7 @@ describe("how answers read", () => {
             ],
         });
         expect(cellHtml(html, "question", "note")).toContain('<span class="bt-stale" title="The question changed">Stale</span>');
-        const documentChanged = `<span class="bt-stale" title="The paper${escapeHtml("'")}s document changed">Stale</span>`;
+        const documentChanged = `<span class="bt-stale" title="The item${escapeHtml("'")}s document changed">Stale</span>`;
         expect(cellHtml(html, "moved", "note")).toContain(documentChanged);
         expect(cellHtml(html, "gained", "note")).toContain(documentChanged);
         expect(cellHtml(html, "gained", "note")).toContain("From title and abstract");
@@ -1046,7 +1046,7 @@ describe("how answers read", () => {
         // Its unattempted cells stay empty.
         expect(cellHtml(html, "locked", "note")).toContain('<span class="bt-empty"></span>');
         const footer = /<footer class="bt-foot">([^<]*)<\/footer>/.exec(html)![1];
-        expect(footer).toBe("3 rows · 2 papers could not be read");
+        expect(footer).toBe("3 rows · 2 items could not be read");
     });
 });
 

@@ -94,6 +94,7 @@ const commands = {
 };
 const confirm = vi.fn(() => true);
 const onEdit = vi.fn();
+const onRowsAdded = vi.fn();
 
 function Harness({ table, readOnly, fillRunning }: { table: TableSpec; readOnly?: boolean; fillRunning?: boolean }) {
     const edits = useTableEditing({
@@ -106,6 +107,7 @@ function Harness({ table, readOnly, fillRunning }: { table: TableSpec; readOnly?
         portalContainer: null,
         newBySource: new Map([['s2', 3]]),
         onEdit,
+        onRowsAdded,
     });
     return h(
         'div',
@@ -171,6 +173,7 @@ beforeEach(() => {
     confirm.mockReset();
     confirm.mockReturnValue(true);
     onEdit.mockReset();
+    onRowsAdded.mockReset();
     (globalThis as any).Zotero = {
         __beaverTables: { local: { commands: () => commands } },
         Libraries: { get: () => ({ name: 'My Library' }) },
@@ -210,8 +213,35 @@ describe('ordinary edits', () => {
         expect(target.isAttached({ isRegularItem: () => true, libraryID: 1, key: 'AAAA1111' })).toBe(true);
         await act(async () => target.addItem({ isRegularItem: () => true, libraryID: 1, key: 'CCCC3333', deleted: false }));
         expect(commands.edit).toHaveBeenCalledWith(ref, { add_sources: [{ type: 'items', ids: ['u-CCCC3333'] }] }, expect.objectContaining({ seal: false }));
-        expect($('.rt-toast')?.textContent).toContain('Added 1 paper');
+        expect($('.rt-toast')?.textContent).toContain('Added 1 item');
         expect($('.rt-toast-action')).toBeNull();
+    });
+
+    it('hands the rows an addition put in the table to be shown, and nothing for an edit that adds none', async () => {
+        const grown = spec();
+        grown.rows = [...grown.rows, { id: 'r3', ref: { kind: 'item', library_ref: 'u', zotero_key: 'CCCC3333' }, cells: {} } as TableSpec['rows'][number]];
+        commands.edit.mockResolvedValue({
+            ...committed([{ op: 'add_source', source: 's1', type: 'items', rows_added: 1, rows_restored: 0, duplicates: 0, rejected: [] }]),
+            spec: grown,
+        });
+        mount();
+        const target = mocks.targets.at(-1);
+        await act(async () => target.addItem({ isRegularItem: () => true, libraryID: 1, key: 'CCCC3333', deleted: false }));
+        expect(onRowsAdded).toHaveBeenCalledWith(['r3']);
+
+        // Already in the table: the edit commits nothing new.
+        onRowsAdded.mockReset();
+        commands.edit.mockResolvedValue({ ...committed([]), committed: false });
+        await act(async () => target.addItem({ isRegularItem: () => true, libraryID: 1, key: 'DDDD4444', deleted: false }));
+        expect(onRowsAdded).not.toHaveBeenCalled();
+
+        // A rename adds no rows.
+        commands.edit.mockResolvedValue(committed([{ op: 'title', title: 'New' }]));
+        await click($('button[aria-label="Rename table"]'));
+        const field = $<HTMLInputElement>('input[aria-label="Rename table"]')!;
+        type(field, 'New');
+        await act(async () => field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+        expect(onRowsAdded).not.toHaveBeenCalled();
     });
 
     it('reports each edit it writes, structural or a cell, as the user acting', async () => {
@@ -387,8 +417,8 @@ describe('the sources popover', () => {
         mount();
         await click($('.rt-sources-button'));
         const trials = $('[data-source-id="s2"]')!;
-        expect(trials.textContent).toContain('Collection · My Library · 1 paper');
-        expect(trials.textContent).toContain('3 new papers');
+        expect(trials.textContent).toContain('Collection · My Library · 1 item');
+        expect(trials.textContent).toContain('3 new items');
         await click(trials.querySelector('.rt-source-add'));
         expect(commands.edit).toHaveBeenLastCalledWith(ref, { refresh_sources: ['s2'] }, expect.objectContaining({ seal: false }));
 

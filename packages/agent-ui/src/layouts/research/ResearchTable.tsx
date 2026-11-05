@@ -76,7 +76,7 @@ export interface ResearchTableEditing {
     renderSources?(close: () => void): React.ReactNode;
     /** The new-papers notice's Add. */
     onAddNewPapers?(): void;
-    /** Controls after the notice (+ Papers). */
+    /** Controls after the notice (+ Items). */
     toolbarActions?: React.ReactNode;
 }
 
@@ -114,6 +114,15 @@ export interface ResearchTableFill {
 export interface ResearchTableFocus {
     rowId: string;
     columnId?: string;
+    token: number | string;
+}
+
+/**
+ * Rows the user just added, to bring into view once the table has them.
+ * `token` changes with each request.
+ */
+export interface ResearchTableReveal {
+    rowIds: readonly string[];
     token: number | string;
 }
 
@@ -158,12 +167,22 @@ export interface ResearchTableProps {
     filling?: readonly TableFillCells[];
     /** Brings a row (and a cell, in the inspector) into view. */
     focus?: ResearchTableFocus | null;
+    /**
+     * Rows the user just added: scrolled to and briefly highlighted. Rows the
+     * search or a filter hides are offered behind a Show button instead.
+     */
+    reveal?: ResearchTableReveal | null;
     /** The structural edit controls; absent, the table is display only. */
     editing?: ResearchTableEditing;
     /** Window the rows, for a long table. */
     virtualize?: boolean;
     className?: string;
 }
+
+const NO_ROWS: ReadonlySet<string> = new Set();
+
+/** How long rows the user just added stay highlighted. */
+const ADDED_HIGHLIGHT_MS = 2000;
 
 /** The side panel: a selected cell (a question, or the Paper cell) or the version history. */
 type Panel = { kind: "cell"; address: CellAddress } | { kind: "history" };
@@ -202,6 +221,7 @@ export function ResearchTable({
     fill,
     filling,
     focus,
+    reveal,
     editing,
     virtualize,
     className,
@@ -215,6 +235,9 @@ export function ResearchTable({
     const scrollRef = useRef<HTMLDivElement>(null);
     const activityRef = useRef(onActivity);
     activityRef.current = onActivity;
+    // Rows just added: those highlighted now, and those the view hides.
+    const [addedRows, setAddedRows] = useState<ReadonlySet<string>>(NO_ROWS);
+    const [hiddenAdded, setHiddenAdded] = useState<ReadonlySet<string>>(NO_ROWS);
 
     // A change of sort, filters or search is the user's: the first render
     // only sets them up, and a focus request's reveal forgets the last view.
@@ -223,7 +246,10 @@ export function ResearchTable({
         const next = [state.sort, state.filters, state.quickFilter];
         const previous = viewKey.current;
         viewKey.current = next;
-        if (previous && next.some((value, index) => value !== previous[index])) activityRef.current?.();
+        if (previous && next.some((value, index) => value !== previous[index])) {
+            activityRef.current?.();
+            setHiddenAdded(NO_ROWS);
+        }
     }, [state.sort, state.filters, state.quickFilter]);
 
     // The paper and the year are system columns, which the shared view state
@@ -452,6 +478,40 @@ export function ResearchTable({
         scrollRowIntoView(scrollRef.current, row.id, viewIndex >= 0 ? viewIndex : undefined);
     }, [focus, table, state, columns.questions]);
 
+    // Rows the user just added: once the table has them, scroll to the first
+    // in the view's order and highlight those shown. Rows the search or a
+    // filter hides wait behind Show rather than undoing the user's view.
+    const showRows = (ids: ReadonlySet<string>) => {
+        const shown = state.rows.filter((row) => ids.has(row.id));
+        const shownIds = new Set(shown.map((row) => row.id));
+        if (shown.length) {
+            setAddedRows(shownIds);
+            scrollRowIntoView(scrollRef.current, shown[0].id, state.rows.indexOf(shown[0]), "center");
+        }
+        setHiddenAdded(new Set(table.rows.filter((row) => ids.has(row.id) && !shownIds.has(row.id)).map((row) => row.id)));
+    };
+    const lastReveal = useRef<ResearchTableReveal["token"] | null>(null);
+    useLayoutEffect(() => {
+        if (!reveal || reveal.token === lastReveal.current) return;
+        const ids = new Set(reveal.rowIds);
+        // The edit's result can arrive before the re-read that has its rows.
+        if (!table.rows.some((row) => ids.has(row.id))) return;
+        lastReveal.current = reveal.token;
+        showRows(ids);
+    }, [reveal, table, state.rows]);
+    // Show: clears the search and filters, then reveals the rows in that view.
+    const [showingAdded, setShowingAdded] = useState(false);
+    useLayoutEffect(() => {
+        if (!showingAdded) return;
+        setShowingAdded(false);
+        showRows(hiddenAdded);
+    }, [showingAdded]);
+    useEffect(() => {
+        if (!addedRows.size) return;
+        const timer = setTimeout(() => setAddedRows(NO_ROWS), ADDED_HIGHLIGHT_MS);
+        return () => clearTimeout(timer);
+    }, [addedRows]);
+
     // The inspector's controls for the cell: the Edit pencil beside the
     // answer, and on the user's own answer Reset to Beaver's answer under it;
     // Change beside the document.
@@ -527,8 +587,8 @@ export function ResearchTable({
 
     const selectedIds = state.rows.filter((row) => state.selectedRows.has(row.id)).map((row) => row.id);
     const sourceCount = table.sources?.length ?? 0;
-    const papers = table.rows.length;
-    const sourcesLabel = `${sourceCount ? `${sourceCount} ${sourceCount === 1 ? "source" : "sources"} · ` : ""}${papers} ${papers === 1 ? "paper" : "papers"}`;
+    const items = table.rows.length;
+    const sourcesLabel = `${sourceCount ? `${sourceCount} ${sourceCount === 1 ? "source" : "sources"} · ` : ""}${items} ${items === 1 ? "item" : "items"}`;
     const filterItems = buildFilterMenu(table, state);
     const sortItems = buildSortMenu(table, state);
     const sortColumn = state.sort ? table.columns.find((column) => column.id === state.sort!.column_id) : undefined;
@@ -677,6 +737,21 @@ export function ResearchTable({
                                 : `${hiddenQuestions.length} hidden columns · Show`}
                         </button>
                     ) : null}
+                    {hiddenAdded.size > 0 ? (
+                        <button
+                            type="button"
+                            className="rt-hidden-columns rt-hidden-added"
+                            title="The search or filters hide them"
+                            onClick={() => {
+                                state.clearFilters();
+                                setShowingAdded(true);
+                            }}
+                        >
+                            {hiddenAdded.size === 1
+                                ? "1 added item hidden · Show"
+                                : `${hiddenAdded.size} added items hidden · Show`}
+                        </button>
+                    ) : null}
                     <span className="rt-spacer" />
                     <label className="rt-search">
                         <Icon icon={SearchIcon} size={14} />
@@ -786,8 +861,9 @@ export function ResearchTable({
                                         : null
                                 }
                                 fills={fills}
+                                addedRows={addedRows}
                                 virtualize={virtualize}
-                                emptyText="No papers yet"
+                                emptyText="No items yet"
                                 filteredEmptyText="No rows match the search or filters"
                             />
                         </div>
@@ -839,7 +915,7 @@ export function ResearchTable({
 function sourceNames(table: TableSpec): string | undefined {
     const names = (table.sources ?? []).map((source) =>
         source.type === "items"
-            ? `Added papers · ${source.ids?.length ?? 0}`
+            ? `Added items · ${source.ids?.length ?? 0}`
             : (source.scope?.name ?? source.scope?.tag ?? source.type),
     );
     return names.length ? names.join("\n") : undefined;
@@ -850,18 +926,23 @@ function sourceNames(table: TableSpec): string | undefined {
  * row in the DOM yet: the scroll first goes to its estimated position, and a
  * frame later to the row itself.
  */
-function scrollRowIntoView(scroller: HTMLElement | null, rowId: string, index?: number): void {
+function scrollRowIntoView(
+    scroller: HTMLElement | null,
+    rowId: string,
+    index?: number,
+    block: ScrollLogicalPosition = "nearest",
+): void {
     if (!scroller) return;
     const find = () =>
         scroller.querySelector<HTMLElement>(`tr[data-row-id="${rowId.replace(/["\\]/g, "\\$&")}"]`);
     const row = find();
     if (row) {
-        row.scrollIntoView?.({ block: "nearest" });
+        row.scrollIntoView?.({ block });
         return;
     }
     if (index != null) {
         const sample = scroller.querySelector<HTMLElement>("tr.rt-row");
         scroller.scrollTop = index * (sample?.offsetHeight ?? 80);
     }
-    scroller.ownerDocument.defaultView?.requestAnimationFrame(() => find()?.scrollIntoView?.({ block: "nearest" }));
+    scroller.ownerDocument.defaultView?.requestAnimationFrame(() => find()?.scrollIntoView?.({ block }));
 }

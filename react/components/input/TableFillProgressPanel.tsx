@@ -102,7 +102,7 @@ const TableFillProgressPanel: React.FC = () => {
                     aria-valuemin={0}
                     aria-valuemax={total}
                     aria-valuenow={done}
-                    aria-valuetext={`${done} of ${total} papers filled`}
+                    aria-valuetext={`${done} of ${total} items filled`}
                 >
                     {done === 0 && !stopping ? (
                         <div className="batch-progress-indeterminate" />

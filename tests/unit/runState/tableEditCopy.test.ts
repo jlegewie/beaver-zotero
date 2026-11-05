@@ -15,12 +15,12 @@ describe("the change list of an edit", () => {
         const sources = (contract as any[]).find((c) => c.name === "apply-edit-sources").response.changes;
         expect(tableChangeLines(sources)).toEqual([
             { tone: "remove", text: "Removed collection “Cash transfers” · 2 rows" },
-            { tone: "add", text: "Added 2 papers · 1 restored" },
-            { tone: "add", text: "Added tag “cash” · 0 new papers · 2 already in the table" },
+            { tone: "add", text: "Added 2 items · 1 restored" },
+            { tone: "add", text: "Added tag “cash” · 0 new items · 2 already in the table" },
         ]);
         const refresh = (contract as any[]).find((c) => c.name === "apply-edit-refresh").response.changes;
         expect(tableChangeLines(refresh)).toEqual([
-            { tone: "add", text: "Refreshed collection “Cash transfers” · 1 new paper · 1 removed paper left out · 1 no longer in it, kept" },
+            { tone: "add", text: "Refreshed collection “Cash transfers” · 1 new item · 1 removed item left out · 1 no longer in it, kept" },
         ]);
     });
     it("names the user's answers a removed option cleared", () => {

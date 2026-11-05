@@ -123,10 +123,10 @@ describe('TableFillButton', () => {
         await act(async () => buttonNamed('Fill 2 rows')!.click());
         expect(fills.plan).toHaveBeenCalledWith(ref, { kind: 'pending' });
         const popover = container.querySelector('[role="dialog"]')!;
-        expect(popover.textContent).toContain('Fill 2 papers · 0.4 credits');
-        expect(popover.textContent).toContain('Reads 2 papers: 2 from the PDF');
-        expect(popover.textContent).toContain('Filling costs 0.2 credits per paper');
-        expect(popover.textContent).toContain('Your 0.2 credits cover about 1 of 2 papers');
+        expect(popover.textContent).toContain('Fill 2 items · 0.4 credits');
+        expect(popover.textContent).toContain('Reads 2 items: 2 from the PDF');
+        expect(popover.textContent).toContain('Filling costs 0.2 credits per item');
+        expect(popover.textContent).toContain('Your 0.2 credits cover about 1 of 2 items');
         await act(async () => buttonNamed('Fill 2')!.click());
         expect(fills.start).toHaveBeenCalledWith('plan-1');
         expect(container.querySelector('[role="dialog"]')).toBeNull();
@@ -145,7 +145,7 @@ describe('TableFillButton', () => {
         act(() => buttonNamed('Stop · 12/46')!.click());
         expect(fills.stop).toHaveBeenCalledWith('job-1');
         render(React.createElement(TableFillButton, { tableRef: ref, table: spec([row('a')]), job: { ...running, state: 'stopping' }, improvableRows: new Set<string>() }));
-        const stopping = buttonNamed('Stopping… finishing 3 papers')!;
+        const stopping = buttonNamed('Stopping… finishing 3 items')!;
         expect(stopping.disabled).toBe(true);
     });
 

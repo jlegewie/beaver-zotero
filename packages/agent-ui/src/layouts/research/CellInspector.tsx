@@ -253,7 +253,7 @@ function CellDetails({
                         ) : (
                             <p className="rt-inspector-empty">
                                 {row.failure
-                                    ? "Not answered: the last fill could not read this paper."
+                                    ? "Not answered: the last fill could not read this item."
                                     : "Not filled yet. The next Fill answers it."}
                             </p>
                         )}
@@ -376,7 +376,7 @@ function AnswerSection({
                             : // Kept under the user's answer, it is never refilled.
                               answer.stale === "question"
                               ? "The question changed after this answer was written."
-                              : "The paper's document changed after this answer was written."}
+                              : "The item's document changed after this answer was written."}
                     </p>
                 ) : null}
             </section>
@@ -491,7 +491,7 @@ function PaperDetails({
                     {row.failure.message}
                 </div>
             ) : isNew ? (
-                <p className="rt-inspector-note">New paper: added since the last fill.</p>
+                <p className="rt-inspector-note">New item: added since the last fill.</p>
             ) : null}
             <div className="rt-paper-questions">
                 {questions.map((column) => {

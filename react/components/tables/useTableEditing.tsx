@@ -59,7 +59,7 @@ function newSessionId(): string {
 /**
  * The table tab's structural edits: the controls `ResearchTable` offers
  * (title and description, the column menu and editor, (+), the sources
- * popover, + Papers, the new-papers notice's Add, Remove from table) and
+ * popover, + Items, the new-papers notice's Add, Remove from table) and
  * what they write.
  *
  * Every edit is data handed to the plugin realm (`commands.edit`), which
@@ -79,6 +79,7 @@ export function useTableEditing({
     portalContainer,
     newBySource,
     onEdit,
+    onRowsAdded,
 }: {
     tableRef: TableRef;
     spec: TableSpec;
@@ -91,6 +92,8 @@ export function useTableEditing({
     newBySource: ReadonlyMap<string, number>;
     /** The user is writing an edit (structural or a cell). */
     onEdit?: () => void;
+    /** Rows an addition of the user's put in the table, in the table's order. */
+    onRowsAdded?: (rowIds: string[]) => void;
 }) {
     const session = useRef(newSessionId()).current;
     const [toast, setToast] = useState<TableEditToast | null>(null);
@@ -103,6 +106,8 @@ export function useTableEditing({
     specRef.current = spec;
     const onEditRef = useRef(onEdit);
     onEditRef.current = onEdit;
+    const onRowsAddedRef = useRef(onRowsAdded);
+    onRowsAddedRef.current = onRowsAdded;
 
     const commands = useCallback(() => {
         const api = getTablesApi();
@@ -127,11 +132,16 @@ export function useTableEditing({
 
     /**
      * Writes one edit. A destructive edit that committed shows the Undo toast;
-     * an addition shows what it added. Returns the refusal's message, if any.
+     * an addition shows what it added and, with `reveal`, hands its new rows
+     * to `onRowsAdded`. Returns the refusal's message, if any.
      */
     const run = useCallback(
-        async (operations: TableUserEdit, options: { destructive?: boolean; change?: string; report?: boolean } = {}) => {
+        async (
+            operations: TableUserEdit,
+            options: { destructive?: boolean; change?: string; report?: boolean; reveal?: boolean } = {},
+        ) => {
             onEditRef.current?.();
+            const before = options.reveal ? new Set(specRef.current.rows.map((row) => row.id)) : null;
             const local = commands();
             if (!local) {
                 const message = 'Editing is unavailable right now. Reload Beaver and try again.';
@@ -158,6 +168,10 @@ export function useTableEditing({
             if (result.committed && options.destructive)
                 setToast({ text: editToastText(result.changes), undo: { version: result.version, sha256: result.sha256 } });
             else if (options.report && result.changes.length) setToast({ text: editToastText(result.changes) });
+            if (before && result.committed) {
+                const added = result.spec.rows.filter((row) => !before.has(row.id)).map((row) => row.id);
+                if (added.length) onRowsAddedRef.current?.(added);
+            }
             return null;
         },
         [commands, tableRef, session],
@@ -355,7 +369,7 @@ export function useTableEditing({
                 setToast({ text: 'Already in the table.' });
                 return;
             }
-            void run({ add_sources: drafts }, { report: true, change: 'Added papers' });
+            void run({ add_sources: drafts }, { report: true, reveal: true, change: 'Added items' });
         },
         [newScopes, run],
     );
@@ -363,14 +377,14 @@ export function useTableEditing({
     const restore = useCallback(
         (paper: RemovedPaper) => {
             const id = removedPaperId(paper);
-            if (id) void run({ add_sources: [{ type: 'items', ids: [id] }] }, { report: true, change: 'Restored a paper' });
+            if (id) void run({ add_sources: [{ type: 'items', ids: [id] }] }, { report: true, reveal: true, change: 'Restored an item' });
         },
         [run],
     );
 
     const refresh = useCallback(
         (sourceIds: string[]) => {
-            if (sourceIds.length) void run({ refresh_sources: sourceIds }, { report: true, change: 'Added new papers' });
+            if (sourceIds.length) void run({ refresh_sources: sourceIds }, { report: true, reveal: true, change: 'Added new items' });
         },
         [run],
     );
@@ -403,14 +417,14 @@ export function useTableEditing({
                 spec={spec}
                 newBySource={newBySource}
                 disabledReason={disabledReason}
-                addMenu={addMenu('Add papers or a collection', 'rt-sources-add-menu')}
+                addMenu={addMenu('Add items or a collection', 'rt-sources-add-menu')}
                 onRefresh={(entry) => refresh([entry.id])}
                 onRemove={removeSource}
                 onRestore={restore}
             />
         ),
         onAddNewPapers: () => refresh([...newBySource.keys()]),
-        toolbarActions: addMenu('Papers', 'rt-add-papers'),
+        toolbarActions: addMenu('Items', 'rt-add-papers'),
     };
 
     const selectionActions = (rowIds: string[]) => (

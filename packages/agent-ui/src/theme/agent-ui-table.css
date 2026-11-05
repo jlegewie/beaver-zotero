@@ -681,6 +681,30 @@
     background: var(--rt-selected);
 }
 
+/* Rows the user just added: a tint that fades. An inset shadow rather than a
+ * background, so the pinned columns keep their opaque background over what
+ * scrolls beneath them. */
+.beaver-root .rt-row-added > .rt-td {
+    animation: rt-row-added 2s ease-out forwards;
+}
+
+@keyframes rt-row-added {
+    0%,
+    35% {
+        box-shadow: inset 0 0 0 100vmax color-mix(in srgb, var(--accent-blue) 12%, transparent);
+    }
+    100% {
+        box-shadow: inset 0 0 0 100vmax transparent;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .beaver-root .rt-row-added > .rt-td {
+        animation: none;
+        box-shadow: inset 0 0 0 100vmax color-mix(in srgb, var(--accent-blue) 12%, transparent);
+    }
+}
+
 /* The checkbox rail and the Paper column stay put while a wide table scrolls
  * sideways, so every answer keeps its paper in view — while the grid is wide
  * enough (`data-pinned`, set by ResearchTable). Pinned cells are opaque (the
@@ -869,6 +893,31 @@
     -webkit-line-clamp: var(--rt-lines);
     -webkit-box-orient: vertical;
     overflow: hidden;
+}
+
+/* A Category answer wraps rather than clipping a long category: two lines at
+ * most in the grid (one in compact rows, which have no room for more), whole
+ * in the expansion and the inspector. One line keeps the pill's height. */
+.beaver-root .rt-choice {
+    box-sizing: border-box;
+    height: auto;
+    min-height: 1.5rem;
+    padding-block: 0.15rem;
+    line-height: 1.2rem;
+    border-radius: 0.75rem;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-overflow: clip;
+}
+
+.beaver-root .rt-cell-body > .rt-choice {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+}
+
+.beaver-root .rt-grid[data-density="compact"] .rt-cell-body > .rt-choice {
+    -webkit-line-clamp: 1;
 }
 
 .beaver-root .rt-stale-text {
@@ -1191,7 +1240,9 @@
         0 0 0 1px var(--beaver-border-strong, var(--color-border50)),
         0 0.75rem 2rem rgba(20, 24, 40, 0.16);
     max-height: 60vh;
-    overflow: auto;
+    /* It grows down, never sideways: what is wider than the cell wraps. */
+    overflow-x: hidden;
+    overflow-y: auto;
 }
 
 .beaver-root .rt-peek {
@@ -1213,6 +1264,8 @@
     flex-direction: column;
     align-items: flex-start;
     gap: 0.6rem;
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 
 /* The expansion's actions, on the right. */
