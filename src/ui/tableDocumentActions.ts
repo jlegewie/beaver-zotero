@@ -1,5 +1,6 @@
 /** Local snapshot actions. Store callbacks cross the bundle seam; dialogs use this document. */
-import { toCsv } from "@beaver/agent-core/layouts/table";
+import { sortRows, type TableSort } from "@beaver/agent-core/layouts/table";
+import { toCsv } from "@beaver/agent-core/layouts/tableExport";
 import { getTablesApi, type TableLocalCommands } from "../services/artifacts/tablesApi";
 import {
     TABLE_REPAIR_SKIPPED,
@@ -19,33 +20,49 @@ export function tableActionErrorMessage(error: unknown, ref: TableRef): string {
     return String(failure?.message ?? failure?.error ?? error);
 }
 
+export type TableExportFormat = "xlsx" | "csv";
+
+const EXPORT_FORMATS: Record<TableExportFormat, { extension: string; filter: string }> = {
+    xlsx: { extension: "xlsx", filter: "Excel Workbook" },
+    csv: { extension: "csv", filter: "CSV" },
+};
+
 /**
- * Asks where to save and writes the table as CSV, with its evidence and reasoning
- * columns. Reads the table again after the picker closes, so a write that lands
- * while it is open is exported rather than the version the user first saw.
+ * Asks where to save and writes the table as an Excel workbook or a CSV
+ * file, its rows in the given sort order (the table's own order without one).
+ * Reads the table again after the picker closes, so a write that lands while
+ * it is open is exported rather than the version the user first saw.
  * Resolves the file's name, or null when the user cancelled.
  */
-export async function exportTableCsv(
+export async function exportTable(
     win: Window,
     ref: TableRef,
     commands: () => TableLocalCommands,
+    format: TableExportFormat,
+    sort?: TableSort,
 ): Promise<string | null> {
+    const { extension, filter } = EXPORT_FORMATS[format];
+    const exporter = Zotero.Beaver?.exporter;
+    if (format === "xlsx" && !exporter) throw new Error("Excel export is unavailable right now.");
     const current = await commands().read(ref);
     const { FilePicker } = ChromeUtils.importESModule(
         "chrome://zotero/content/modules/filePicker.mjs",
     );
     const picker = new FilePicker();
     picker.init(win, "Export table", picker.modeSave);
-    picker.defaultString = `${(current.spec.title || "Table").replace(/[\\/:*?"<>|]/g, "_")}.csv`;
-    picker.appendFilter("CSV", "*.csv");
+    picker.defaultString = `${(current.spec.title || "Table").replace(/[\\/:*?"<>|]/g, "_")}.${extension}`;
+    picker.defaultExtension = extension;
+    picker.appendFilter(filter, `*.${extension}`);
     if ((await picker.show()) === picker.returnCancel) return null;
-    const latest = await commands().read(ref);
-    await IOUtils.writeUTF8(picker.file, toCsv(latest.spec));
+    const latest = (await commands().read(ref)).spec;
+    const rows = sort ? sortRows(latest, sort) : latest.rows;
+    if (format === "xlsx") await exporter!.writeTableWorkbook(picker.file, latest, rows);
+    else await IOUtils.writeUTF8(picker.file, toCsv(latest, rows));
     return PathUtils.filename(picker.file);
 }
 
 /**
- * The table's local actions: Export CSV, Version history (the retained
+ * The table's local actions: Export to Excel, Export CSV, Version history (the retained
  * versions, and reverting to one), and Check / repair. `historyOnly` renders the
  * version history alone and loads it at once, for the table tab's Version
  * history panel.
@@ -105,11 +122,13 @@ export function renderTableDocumentActions(
         controls.push(button);
         return button;
     };
-    const exportButton = action("export-csv", "Export CSV", async () => {
-        if (!win) throw new Error("The originating window is closed.");
-        if (!(await exportTableCsv(win, ref, commands))) return;
-        status.textContent = "CSV exported with evidence and reasoning columns.";
-    });
+    const exportAction = (format: TableExportFormat, text: string) =>
+        action(`export-${format}`, text, async () => {
+            if (!win) throw new Error("The originating window is closed.");
+            const file = await exportTable(win, ref, commands, format);
+            if (file) status.textContent = `Exported ${file}.`;
+        });
+    const exportButtons = [exportAction("xlsx", "Export to Excel"), exportAction("csv", "Export CSV")];
     const versions = doc.createElement("select");
     versions.setAttribute("aria-label", "Retained version");
     versions.hidden = true;
@@ -176,6 +195,6 @@ export function renderTableDocumentActions(
         void run(loadHistory);
         return root;
     }
-    root.append(exportButton, history, versions, restore, repair, status);
+    root.append(...exportButtons, history, versions, restore, repair, status);
     return root;
 }

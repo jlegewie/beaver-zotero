@@ -156,6 +156,25 @@ describe('the grid', () => {
         expect(first).toContain('Baird 2011');
     });
 
+    it('offers Excel and CSV exports, each in the view sort order', () => {
+        const onExport = vi.fn();
+        mount({ onExport });
+        const menuItem = (label: string) =>
+            Array.from(document.querySelectorAll<HTMLElement>('*')).find((el) => el.textContent === label && el.children.length === 0)!;
+        const pick = (label: string) => {
+            click(container!.querySelector<HTMLButtonElement>('button[aria-label="More actions"]')!);
+            click(menuItem(label));
+        };
+        pick('Export to Excel');
+        click(container!.querySelector('button[aria-label="Column menu: Design"]')!);
+        click(menuItem('Sort A → Z'));
+        pick('Export CSV');
+        expect(onExport.mock.calls).toEqual([
+            ['xlsx', undefined],
+            ['csv', { column_id: 'design', direction: 'asc' }],
+        ]);
+    });
+
     it("expands the Paper cell to the paper's full details, with its actions in the footer", () => {
         const revealInLibrary = vi.fn();
         setHost({ navigation: { activateCitation, revealInLibrary, openSource: vi.fn() } as never });
@@ -1480,5 +1499,169 @@ describe('a running fill', () => {
         rerender({ filling: [running[1]] });
         expect(cell('r1', 'effect').hasAttribute('data-fill')).toBe(false);
         expect(cell('r3', 'effect').dataset.fill).toBe('active');
+    });
+});
+
+describe('selecting and copying text', () => {
+    /** Selects the text of `el`, as a drag over it would. */
+    const selectText = (el: Element) => {
+        const selection = window.getSelection()!;
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        selection.removeAllRanges();
+        selection.addRange(range);
+    };
+    const copyButton = () => peek()!.querySelector<HTMLButtonElement>('button[aria-label="Copy answer"]');
+    const pressCopy = () =>
+        act(() => {
+            document.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', metaKey: true, bubbles: true }));
+        });
+
+    afterEach(() => window.getSelection()?.removeAllRanges());
+
+    it("copies a cell's answer from the icon before Edit, keeping the expansion open", () => {
+        const onCopy = vi.fn();
+        mount({ onCopy, cellEditing: { onEdit: vi.fn() } as never });
+        expand(cell('r1', 'effect'));
+        const buttons = peekButtons();
+        expect(buttons.map((b) => b.getAttribute('aria-label'))).toEqual(['Copy answer', 'Edit Headline effect']);
+        // Icon only.
+        expect(buttons[0].textContent).toBe('');
+        click(buttons[0]);
+        expect(onCopy).toHaveBeenCalledWith('Conditional transfers raised enrollment.');
+        expect(peek()).not.toBeNull();
+        expect(inspector()).toBeNull();
+        expect(peekButtons()[0].getAttribute('aria-label')).toBe('Copied');
+    });
+
+    it('copies a Category answer as its label, and offers no Copy without an answer', () => {
+        const onCopy = vi.fn();
+        mount({ onCopy });
+        expand(cell('r1', 'design'));
+        click(copyButton()!);
+        expect(onCopy).toHaveBeenCalledWith('RCT');
+        act(() => {
+            peek()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        });
+        // Not reported: nothing to copy, and with no Edit, no footer.
+        expect(expand(cell('r2', 'design'))!.querySelector('.rt-peek-footer')).toBeNull();
+    });
+
+    it('does not open the cell when a click ends selecting text in it or its expansion', () => {
+        mount();
+        const expansion = expand(cell('r1', 'effect'))!;
+        selectText(expansion.querySelector('.rt-text')!);
+        click(expansion.querySelector('.rt-peek')!);
+        expect(peek()).not.toBeNull();
+        expect(inspector()).toBeNull();
+        selectText(cell('r1', 'effect').querySelector('.rt-text')!);
+        click(cell('r1', 'effect'));
+        expect(inspector()).toBeNull();
+        // A plain click still opens it.
+        window.getSelection()!.removeAllRanges();
+        click(cell('r1', 'effect'));
+        expect(inspector()).not.toBeNull();
+    });
+
+    it('keeps an expansion open while it holds a selection, and closes it once the selection goes', () => {
+        mount();
+        const expansion = expand(cell('r1', 'effect'))!;
+        selectText(expansion.querySelector('.rt-text')!);
+        vi.useFakeTimers();
+        try {
+            act(() => {
+                expansion.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body }));
+            });
+            act(() => {
+                vi.advanceTimersByTime(1000);
+            });
+            expect(peek()).not.toBeNull();
+            act(() => {
+                window.getSelection()!.removeAllRanges();
+                document.dispatchEvent(new Event('selectionchange'));
+            });
+            expect(peek()).toBeNull();
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('keeps an expansion holding a selection when the pointer crosses another cell', () => {
+        mount();
+        const expansion = expand(cell('r1', 'effect'))!;
+        selectText(expansion.querySelector('.rt-text')!);
+        expect(expand(cell('r1', 'amount'))).toBe(expansion);
+        expect(expansion.textContent).toContain('Conditional transfers raised enrollment.');
+    });
+
+    it('opens no expansion or tip while text is selected, which opening it would collapse', () => {
+        mount();
+        // Grid text selected: hovering another cell opens no expansion.
+        selectText(cell('r1', 'effect').querySelector('.rt-text')!);
+        expect(expand(cell('r1', 'amount'))).toBeNull();
+        window.getSelection()!.removeAllRanges();
+        // Expansion text selected: hovering its page tag opens no card.
+        const expansion = expand(cell('r1', 'effect'))!;
+        selectText(expansion.querySelector('.rt-text')!);
+        hoverPeek(expansion.querySelector('.rt-tag-page')!, container!);
+        expect(document.querySelector('.bt-hover-card')).toBeNull();
+        expect(peek()).toBe(expansion);
+    });
+
+    it('selects a passage without opening it, and opens it with a plain click or Enter', () => {
+        mount();
+        click(cell('r1', 'effect'));
+        const passageEl = inspector()!.querySelector<HTMLElement>('.rt-passage[role="button"]')!;
+        selectText(passageEl.querySelector('.rt-passage-text')!);
+        click(passageEl);
+        expect(activateCitation).not.toHaveBeenCalled();
+        window.getSelection()!.removeAllRanges();
+        click(passageEl);
+        expect(activateCitation).toHaveBeenCalledTimes(1);
+        act(() => {
+            passageEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        });
+        expect(activateCitation).toHaveBeenCalledTimes(2);
+    });
+
+    it("selects a paper-view answer without opening its cell", () => {
+        mount();
+        click(paperCell('r1'));
+        const block = inspector()!.querySelector<HTMLElement>('.rt-paper-question[data-column-id="effect"]')!;
+        selectText(block.querySelector('.rt-paper-question-value')!);
+        click(block.querySelector('.rt-paper-question-value')!);
+        expect(inspector()!.getAttribute('data-view')).toBe('paper');
+        window.getSelection()!.removeAllRanges();
+        click(block.querySelector('.rt-paper-question-value')!);
+        expect(inspector()!.getAttribute('data-column-id')).toBe('effect');
+    });
+
+    it('copies the selected text with Cmd+C and from the context menu, within the table only', () => {
+        const onCopy = vi.fn();
+        mount({ onCopy });
+        // The expansion, drawn beside the surface.
+        selectText(expand(cell('r1', 'design'))!.querySelector('.rt-peek-body .bt-pill')!);
+        pressCopy();
+        expect(onCopy).toHaveBeenLastCalledWith('RCT');
+        onCopy.mockClear();
+        window.getSelection()!.removeAllRanges();
+        click(cell('r1', 'effect'));
+        selectText(inspector()!.querySelector('.rt-inspector-reasoning')!);
+        pressCopy();
+        expect(onCopy).toHaveBeenLastCalledWith('Table 2 reports it.');
+        act(() => {
+            inspector()!
+                .querySelector('.rt-inspector-reasoning')!
+                .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 5, clientY: 5 }));
+        });
+        click(menuEntry('Copy')!);
+        expect(onCopy).toHaveBeenCalledTimes(2);
+        const outside = document.createElement('p');
+        outside.textContent = 'Elsewhere';
+        document.body.appendChild(outside);
+        selectText(outside);
+        pressCopy();
+        expect(onCopy).toHaveBeenCalledTimes(2);
+        outside.remove();
     });
 });

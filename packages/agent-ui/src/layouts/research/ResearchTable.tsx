@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { isColumnSortable, toPlainText, type Column, type Row, type TableSpec } from "@beaver/agent-core/layouts/table";
+import { isColumnSortable, toPlainText, type Column, type Row, type TableSort, type TableSpec } from "@beaver/agent-core/layouts/table";
 import { cellsToFill } from "@beaver/agent-core/layouts/tableFill";
 import type { TableFillCells } from "@beaver/agent-core/protocol/tableFillProtocol";
 import {
@@ -28,8 +28,8 @@ import {
     ViewIcon,
 } from "../../icons";
 import MenuButton from "../../primitives/MenuButton";
-import type { MenuItem } from "../../primitives/ContextMenu";
-import { HoverLayerProvider } from "../../primitives/HoverLayer";
+import ContextMenu, { type MenuItem, type MenuPosition } from "../../primitives/ContextMenu";
+import { HoverLayerProvider, selectionWithin } from "../../primitives/HoverLayer";
 import { FindQueryProvider } from "../../chat/findContext";
 import { buildFilterMenu, buildSortMenu, FilterChips } from "../tableMenus";
 import { renderPlainText, type TableDensity, type TextRenderer } from "../tableView";
@@ -153,7 +153,11 @@ export interface ResearchTableProps {
     onlyRows?: ReadonlySet<string> | null;
     /** More actions: each is offered when its callback is present. */
     onCopy?: (text: string) => void;
-    onExport?: () => void;
+    /**
+     * Export the table as an Excel workbook or a CSV file: every row, in the
+     * view's sort order when one is set.
+     */
+    onExport?: (format: "xlsx" | "csv", sort: TableSort | undefined) => void;
     onShowInLibrary?: () => void;
     /** The version history view; offered under More actions when given. */
     renderVersionHistory?: () => React.ReactNode;
@@ -254,6 +258,9 @@ export function ResearchTable({
     const [editingCell, setEditingCell] = useState<CellAddress | null>(null);
     const editDisabled = editing?.disabledReason;
     const scrollRef = useRef<HTMLDivElement>(null);
+    // Holds the surface and its hover layers, which the provider draws beside it.
+    const copyScopeRef = useRef<HTMLDivElement>(null);
+    const selectionCopy = useSelectionCopy(copyScopeRef, onCopy);
     const activityRef = useRef(onActivity);
     activityRef.current = onActivity;
     // Rows just added: those highlighted now, and those the view hides.
@@ -613,7 +620,11 @@ export function ResearchTable({
                 onCopy(toPlainText(table, state.rows, visible));
             },
         });
-    if (onExport) moreItems.push({ label: "Export CSV", icon: DownloadIcon, onClick: onExport });
+    if (onExport)
+        moreItems.push(
+            { label: "Export to Excel", icon: DownloadIcon, onClick: () => onExport("xlsx", state.sort) },
+            { label: "Export CSV", icon: DownloadIcon, onClick: () => onExport("csv", state.sort) },
+        );
     if (onShowInLibrary) moreItems.push({ label: "Show in library", icon: LibraryIcon, onClick: onShowInLibrary });
     if (renderVersionHistory)
         moreItems.push({ label: "Version history", icon: ClockIcon, onClick: () => setPanel({ kind: "history" }) });
@@ -627,325 +638,390 @@ export function ResearchTable({
     const sortColumn = state.sort ? menuTable.columns.find((column) => column.id === state.sort!.column_id) : undefined;
 
     const surface = (
-        <HoverLayerProvider>
-            <section className={`bt-surface rt-surface${className ? ` ${className}` : ""}`}>
-                <header className="rt-header">
-                    <span className="rt-header-icon" aria-hidden="true">
-                        <Icon icon={TableIcon} size={18} />
-                    </span>
-                    <div className="rt-identity">
-                        {editing?.onTitle ? (
-                            <InlineText
-                                as="h1"
-                                className="rt-title"
-                                value={table.title || ""}
-                                placeholder="Table"
-                                label="Rename table"
-                                disabledReason={editDisabled}
-                                onSave={editing.onTitle}
-                            />
-                        ) : (
-                            <h1 className="rt-title">{table.title || "Table"}</h1>
-                        )}
-                        {editing?.onDescription ? (
-                            <InlineText
-                                className="rt-description"
-                                value={table.description ?? ""}
-                                placeholder="Add a description"
-                                label="Edit description"
-                                multiline
-                                disabledReason={editDisabled}
-                                onSave={editing.onDescription}
-                            />
-                        ) : table.description ? (
-                            <p className="rt-description">{table.description}</p>
-                        ) : null}
-                    </div>
-                    <div className="rt-header-actions">
-                        {moreItems.length ? (
-                            <MenuButton
-                                menuItems={moreItems}
-                                variant="surface"
-                                icon={MoreHorizontalIcon}
-                                className="rt-more"
-                                ariaLabel="More actions"
-                            />
-                        ) : null}
-                        {typeof headerEnd === "function" ? headerEnd(selectedIds) : headerEnd}
-                    </div>
-                </header>
-
-                <div className="rt-toolbar">
-                    {selectedIds.length > 0 ? (
-                        <div className="rt-selectionbar">
-                            <span className="rt-selection-count" role="status">
-                                {selectedIds.length} selected
-                            </span>
-                            {fill ? (
-                                <button
-                                    type="button"
-                                    className="rt-selection-action rt-selection-fill"
-                                    disabled={!!fill.disabledReason}
-                                    title={fill.disabledReason}
-                                    onClick={() => fill.onFillRows(selectedIds)}
-                                >
-                                    {selectedIds.length === 1 ? "Fill 1 row" : `Fill ${selectedIds.length} rows`}
-                                </button>
-                            ) : null}
-                            {selectionActions?.(
-                                selectedIds,
-                                state.rows.filter((row) => state.selectedRows.has(row.id)),
-                            )}
-                            <button
-                                type="button"
-                                className="rt-icon-button"
-                                aria-label="Clear selection"
-                                onClick={state.clearSelection}
-                            >
-                                <Icon icon={CancelIcon} size={12} />
-                            </button>
-                        </div>
-                    ) : (
-                        <div className="rt-toolbar-left">
-                            {editing?.renderSources ? (
-                                <AnchoredPopover
-                                    open={sourcesOpen}
-                                    label="Sources"
-                                    className="rt-sources-popover"
-                                    onClose={() => setSourcesOpen(false)}
-                                    anchor={
-                                        <button
-                                            type="button"
-                                            className="rt-sources-chip rt-sources-button"
-                                            aria-haspopup="dialog"
-                                            aria-expanded={sourcesOpen}
-                                            onClick={() => setSourcesOpen((open) => !open)}
-                                        >
-                                            <Icon icon={LayersIcon} size={14} />
-                                            {sourcesLabel}
-                                            <Icon icon={ChevronIcon} size={11} className="rt-chip-chevron" />
-                                        </button>
-                                    }
-                                >
-                                    {editing.renderSources(() => setSourcesOpen(false))}
-                                </AnchoredPopover>
+        <div ref={copyScopeRef} className="rt-copy-scope" onContextMenu={selectionCopy.onContextMenu}>
+            <HoverLayerProvider>
+                <section className={`bt-surface rt-surface${className ? ` ${className}` : ""}`}>
+                    <header className="rt-header">
+                        <span className="rt-header-icon" aria-hidden="true">
+                            <Icon icon={TableIcon} size={18} />
+                        </span>
+                        <div className="rt-identity">
+                            {editing?.onTitle ? (
+                                <InlineText
+                                    as="h1"
+                                    className="rt-title"
+                                    value={table.title || ""}
+                                    placeholder="Table"
+                                    label="Rename table"
+                                    disabledReason={editDisabled}
+                                    onSave={editing.onTitle}
+                                />
                             ) : (
-                                <span className="rt-sources-chip" title={sourceNames(table)}>
-                                    <Icon icon={LayersIcon} size={14} />
-                                    {sourcesLabel}
-                                </span>
+                                <h1 className="rt-title">{table.title || "Table"}</h1>
                             )}
-                            {newPapers && newPapers.count > 0 ? (
-                                <span className="rt-new-papers" role="status">
-                                    <span className="rt-dot" aria-hidden="true" />
-                                    {newPapers.sources === 1 && newPapers.sourceName
-                                        ? `${newPapers.count} new in “${newPapers.sourceName}”`
-                                        : `${newPapers.count} new in ${newPapers.sources} sources`}
-                                    {editing?.onAddNewPapers ? (
-                                        <button
-                                            type="button"
-                                            className="rt-new-papers-add"
-                                            disabled={!!editDisabled}
-                                            title={editDisabled ?? "Add them to the table"}
-                                            onClick={editing.onAddNewPapers}
-                                        >
-                                            Add
-                                        </button>
-                                    ) : null}
-                                </span>
+                            {editing?.onDescription ? (
+                                <InlineText
+                                    className="rt-description"
+                                    value={table.description ?? ""}
+                                    placeholder="Add a description"
+                                    label="Edit description"
+                                    multiline
+                                    disabledReason={editDisabled}
+                                    onSave={editing.onDescription}
+                                />
+                            ) : table.description ? (
+                                <p className="rt-description">{table.description}</p>
                             ) : null}
-                            {editing?.toolbarActions}
                         </div>
-                    )}
-                    <FilterChips table={menuTable} state={state} />
-                    {hiddenQuestions.length > 0 ? (
-                        <button
-                            type="button"
-                            className="rt-hidden-columns"
-                            title={hiddenQuestions.map((column) => column.header).join("\n")}
-                            onClick={() => hiddenQuestions.forEach((column) => state.toggleColumn(column.id))}
-                        >
-                            {hiddenQuestions.length === 1
-                                ? "1 hidden column · Show"
-                                : `${hiddenQuestions.length} hidden columns · Show`}
-                        </button>
-                    ) : null}
-                    {hiddenAdded.size > 0 ? (
-                        <button
-                            type="button"
-                            className="rt-hidden-columns rt-hidden-added"
-                            title="The search or filters hide them"
-                            onClick={() => {
-                                state.clearFilters();
-                                setShowingAdded(true);
-                            }}
-                        >
-                            {hiddenAdded.size === 1
-                                ? "1 added item hidden · Show"
-                                : `${hiddenAdded.size} added items hidden · Show`}
-                        </button>
-                    ) : null}
-                    <span className="rt-spacer" />
-                    <label className="rt-search">
-                        <Icon icon={SearchIcon} size={14} />
-                        <input
-                            type="text"
-                            placeholder="Search rows"
-                            aria-label="Search rows"
-                            value={state.quickFilter}
-                            onChange={(event) => state.setQuickFilter(event.target.value)}
-                        />
-                    </label>
-                    {filterItems.length ? (
-                        <MenuButton
-                            menuItems={filterItems}
-                            variant={state.filters.length ? "surface" : "ghost-secondary"}
-                            icon={FilterIcon}
-                            buttonLabel="Filter"
-                            className="rt-toolbar-button"
-                            ariaLabel="Filter rows"
-                            maxHeight="24rem"
-                            width="16rem"
-                        />
-                    ) : null}
-                    {sortItems.length ? (
-                        <MenuButton
-                            menuItems={sortItems}
-                            variant={sortColumn ? "surface" : "ghost-secondary"}
-                            icon={ChevronIcon}
-                            buttonLabel={
-                                sortColumn
-                                    ? `Sort: ${sortColumn.header} ${state.sort!.direction === "asc" ? "↑" : "↓"}`
-                                    : "Sort"
-                            }
-                            className="rt-toolbar-button"
-                            ariaLabel="Sort rows"
-                            maxHeight="24rem"
-                            width="16rem"
-                        />
-                    ) : null}
-                    <div className="rt-density" role="group" aria-label="Row height">
-                        {DENSITY_OPTIONS.map((option) => (
-                            <button
-                                key={option.density}
-                                type="button"
-                                aria-label={option.label}
-                                title={option.label}
-                                aria-pressed={state.density === option.density}
-                                className={state.density === option.density ? "rt-active" : ""}
-                                onClick={() => state.setDensity(option.density)}
-                            >
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
-                                    <path d={option.lines.map((y) => `M4 ${y}h16`).join("")} />
-                                </svg>
-                            </button>
-                        ))}
-                    </div>
-                </div>
+                        <div className="rt-header-actions">
+                            {moreItems.length ? (
+                                <MenuButton
+                                    menuItems={moreItems}
+                                    variant="surface"
+                                    icon={MoreHorizontalIcon}
+                                    className="rt-more"
+                                    ariaLabel="More actions"
+                                />
+                            ) : null}
+                            {typeof headerEnd === "function" ? headerEnd(selectedIds) : headerEnd}
+                        </div>
+                    </header>
 
-                <div className="rt-body">
-                    {/* The grid's column: the notice and the banner span the
-                        grid only, so the side panel starts under the toolbar. */}
-                    <div className="rt-main">
-                        {notice ? (
-                            <div className="bt-notice" role="status">
-                                {notice}
-                            </div>
-                        ) : null}
-                        {banner ? (
-                            <div className="bt-banner" role="status">
-                                {banner}
-                            </div>
-                        ) : null}
-                        <div ref={scrollRef} className="bt-scroll rt-scroll" data-pinned={pinned || undefined}>
-                            <ResearchGrid
-                                table={table}
-                                state={state}
-                                columns={columns}
-                                renderText={renderText}
-                                documents={documents}
-                                selected={selected}
-                                onSelectCell={onSelectCell}
-                                rowMenuItems={rowMenu}
-                                columnMenuItems={columnMenu}
-                                onAddColumn={editing?.onAddColumn}
-                                editDisabledReason={editDisabled}
-                                onEditCell={cellEditing ? openEditor : undefined}
-                                cellEditDisabledReason={cellEditing?.disabledReason}
-                                cellEditor={
-                                    editingCell && editingRow && editingColumn && cellEditing
-                                        ? {
-                                              address: editingCell,
-                                              list: editsAsList(editingColumn),
-                                              content: (
-                                                  <CellEditor
-                                                      key={`${editingCell.rowId}/${editingCell.columnId}`}
-                                                      column={editingColumn}
-                                                      cell={editingRow.cells[editingColumn.id]}
-                                                      onCancel={() => setEditingCell(null)}
-                                                      onSave={async (input) => {
-                                                          const refused = await cellEditing.onEdit(editingRow, editingColumn, input);
-                                                          if (!refused) setEditingCell(null);
-                                                          return refused;
-                                                      }}
-                                                  />
-                                              ),
-                                          }
-                                        : null
-                                }
-                                fills={fills}
-                                addedRows={addedRows}
-                                virtualize={virtualize}
-                                emptyText="No items yet"
-                                filteredEmptyText="No rows match the search or filters"
-                            />
-                        </div>
-                    </div>
-                    {panel?.kind === "cell" && selectedRow && (selectedColumn || selectedPaper) ? (
-                        <CellInspector
-                            row={selectedRow}
-                            paperColumnId={columns.paper?.id}
-                            column={selectedColumn}
-                            fill={selectedColumn ? cellFill(fills.get(selectedRow.id), selectedColumn.id) : undefined}
-                            questions={columns.questions}
-                            table={table}
-                            rowMenuItems={rowMenu(selectedRow)}
-                            isNew={isNewRow(table, selectedRow)}
-                            onColumn={(columnId) => setPanel({ kind: "cell", address: { rowId: selectedRow.id, columnId } })}
-                            onPrevious={rowIndex > 0 ? () => stepRow(-1) : undefined}
-                            onNext={rowIndex >= 0 && rowIndex < state.rows.length - 1 ? () => stepRow(1) : undefined}
-                            onClose={() => setPanel(null)}
-                            renderText={renderText}
-                            documents={documents}
-                            cellActions={cellActions}
-                            documentAction={documentAction}
-                        />
-                    ) : panel?.kind === "history" && renderVersionHistory ? (
-                        <aside className="rt-inspector rt-history" aria-label="Version history">
-                            <div className="rt-inspector-head">
-                                <div className="rt-inspector-nav">
-                                    <span className="rt-inspector-paper rt-panel-title">Version history</span>
+                    <div className="rt-toolbar">
+                        {selectedIds.length > 0 ? (
+                            <div className="rt-selectionbar">
+                                <span className="rt-selection-count" role="status">
+                                    {selectedIds.length} selected
+                                </span>
+                                {fill ? (
                                     <button
                                         type="button"
-                                        className="rt-icon-button"
-                                        aria-label="Close version history"
-                                        onClick={() => setPanel(null)}
+                                        className="rt-selection-action rt-selection-fill"
+                                        disabled={!!fill.disabledReason}
+                                        title={fill.disabledReason}
+                                        onClick={() => fill.onFillRows(selectedIds)}
                                     >
-                                        <Icon icon={CancelIcon} size={14} />
+                                        {selectedIds.length === 1 ? "Fill 1 row" : `Fill ${selectedIds.length} rows`}
                                     </button>
-                                </div>
+                                ) : null}
+                                {selectionActions?.(
+                                    selectedIds,
+                                    state.rows.filter((row) => state.selectedRows.has(row.id)),
+                                )}
+                                <button
+                                    type="button"
+                                    className="rt-icon-button"
+                                    aria-label="Clear selection"
+                                    onClick={state.clearSelection}
+                                >
+                                    <Icon icon={CancelIcon} size={12} />
+                                </button>
                             </div>
-                            <div className="rt-inspector-body">{renderVersionHistory()}</div>
-                        </aside>
-                    ) : null}
-                </div>
-            </section>
-        </HoverLayerProvider>
+                        ) : (
+                            <div className="rt-toolbar-left">
+                                {editing?.renderSources ? (
+                                    <AnchoredPopover
+                                        open={sourcesOpen}
+                                        label="Sources"
+                                        className="rt-sources-popover"
+                                        onClose={() => setSourcesOpen(false)}
+                                        anchor={
+                                            <button
+                                                type="button"
+                                                className="rt-sources-chip rt-sources-button"
+                                                aria-haspopup="dialog"
+                                                aria-expanded={sourcesOpen}
+                                                onClick={() => setSourcesOpen((open) => !open)}
+                                            >
+                                                <Icon icon={LayersIcon} size={14} />
+                                                {sourcesLabel}
+                                                <Icon icon={ChevronIcon} size={11} className="rt-chip-chevron" />
+                                            </button>
+                                        }
+                                    >
+                                        {editing.renderSources(() => setSourcesOpen(false))}
+                                    </AnchoredPopover>
+                                ) : (
+                                    <span className="rt-sources-chip" title={sourceNames(table)}>
+                                        <Icon icon={LayersIcon} size={14} />
+                                        {sourcesLabel}
+                                    </span>
+                                )}
+                                {newPapers && newPapers.count > 0 ? (
+                                    <span className="rt-new-papers" role="status">
+                                        <span className="rt-dot" aria-hidden="true" />
+                                        {newPapers.sources === 1 && newPapers.sourceName
+                                            ? `${newPapers.count} new in “${newPapers.sourceName}”`
+                                            : `${newPapers.count} new in ${newPapers.sources} sources`}
+                                        {editing?.onAddNewPapers ? (
+                                            <button
+                                                type="button"
+                                                className="rt-new-papers-add"
+                                                disabled={!!editDisabled}
+                                                title={editDisabled ?? "Add them to the table"}
+                                                onClick={editing.onAddNewPapers}
+                                            >
+                                                Add
+                                            </button>
+                                        ) : null}
+                                    </span>
+                                ) : null}
+                                {editing?.toolbarActions}
+                            </div>
+                        )}
+                        <FilterChips table={menuTable} state={state} />
+                        {hiddenQuestions.length > 0 ? (
+                            <button
+                                type="button"
+                                className="rt-hidden-columns"
+                                title={hiddenQuestions.map((column) => column.header).join("\n")}
+                                onClick={() => hiddenQuestions.forEach((column) => state.toggleColumn(column.id))}
+                            >
+                                {hiddenQuestions.length === 1
+                                    ? "1 hidden column · Show"
+                                    : `${hiddenQuestions.length} hidden columns · Show`}
+                            </button>
+                        ) : null}
+                        {hiddenAdded.size > 0 ? (
+                            <button
+                                type="button"
+                                className="rt-hidden-columns rt-hidden-added"
+                                title="The search or filters hide them"
+                                onClick={() => {
+                                    state.clearFilters();
+                                    setShowingAdded(true);
+                                }}
+                            >
+                                {hiddenAdded.size === 1
+                                    ? "1 added item hidden · Show"
+                                    : `${hiddenAdded.size} added items hidden · Show`}
+                            </button>
+                        ) : null}
+                        <span className="rt-spacer" />
+                        <label className="rt-search">
+                            <Icon icon={SearchIcon} size={14} />
+                            <input
+                                type="text"
+                                placeholder="Search rows"
+                                aria-label="Search rows"
+                                value={state.quickFilter}
+                                onChange={(event) => state.setQuickFilter(event.target.value)}
+                            />
+                        </label>
+                        {filterItems.length ? (
+                            <MenuButton
+                                menuItems={filterItems}
+                                variant={state.filters.length ? "surface" : "ghost-secondary"}
+                                icon={FilterIcon}
+                                buttonLabel="Filter"
+                                className="rt-toolbar-button"
+                                ariaLabel="Filter rows"
+                                maxHeight="24rem"
+                                width="16rem"
+                            />
+                        ) : null}
+                        {sortItems.length ? (
+                            <MenuButton
+                                menuItems={sortItems}
+                                variant={sortColumn ? "surface" : "ghost-secondary"}
+                                icon={ChevronIcon}
+                                buttonLabel={
+                                    sortColumn
+                                        ? `Sort: ${sortColumn.header} ${state.sort!.direction === "asc" ? "↑" : "↓"}`
+                                        : "Sort"
+                                }
+                                className="rt-toolbar-button"
+                                ariaLabel="Sort rows"
+                                maxHeight="24rem"
+                                width="16rem"
+                            />
+                        ) : null}
+                        <div className="rt-density" role="group" aria-label="Row height">
+                            {DENSITY_OPTIONS.map((option) => (
+                                <button
+                                    key={option.density}
+                                    type="button"
+                                    aria-label={option.label}
+                                    title={option.label}
+                                    aria-pressed={state.density === option.density}
+                                    className={state.density === option.density ? "rt-active" : ""}
+                                    onClick={() => state.setDensity(option.density)}
+                                >
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+                                        <path d={option.lines.map((y) => `M4 ${y}h16`).join("")} />
+                                    </svg>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="rt-body">
+                        {/* The grid's column: the notice and the banner span the
+                            grid only, so the side panel starts under the toolbar. */}
+                        <div className="rt-main">
+                            {notice ? (
+                                <div className="bt-notice" role="status">
+                                    {notice}
+                                </div>
+                            ) : null}
+                            {banner ? (
+                                <div className="bt-banner" role="status">
+                                    {banner}
+                                </div>
+                            ) : null}
+                            <div ref={scrollRef} className="bt-scroll rt-scroll" data-pinned={pinned || undefined}>
+                                <ResearchGrid
+                                    table={table}
+                                    state={state}
+                                    columns={columns}
+                                    renderText={renderText}
+                                    documents={documents}
+                                    selected={selected}
+                                    onSelectCell={onSelectCell}
+                                    rowMenuItems={rowMenu}
+                                    columnMenuItems={columnMenu}
+                                    onAddColumn={editing?.onAddColumn}
+                                    editDisabledReason={editDisabled}
+                                    onEditCell={cellEditing ? openEditor : undefined}
+                                    cellEditDisabledReason={cellEditing?.disabledReason}
+                                    onCopyCell={onCopy}
+                                    cellEditor={
+                                        editingCell && editingRow && editingColumn && cellEditing
+                                            ? {
+                                                  address: editingCell,
+                                                  list: editsAsList(editingColumn),
+                                                  content: (
+                                                      <CellEditor
+                                                          key={`${editingCell.rowId}/${editingCell.columnId}`}
+                                                          column={editingColumn}
+                                                          cell={editingRow.cells[editingColumn.id]}
+                                                          onCancel={() => setEditingCell(null)}
+                                                          onSave={async (input) => {
+                                                              const refused = await cellEditing.onEdit(editingRow, editingColumn, input);
+                                                              if (!refused) setEditingCell(null);
+                                                              return refused;
+                                                          }}
+                                                      />
+                                                  ),
+                                              }
+                                            : null
+                                    }
+                                    fills={fills}
+                                    addedRows={addedRows}
+                                    virtualize={virtualize}
+                                    emptyText="No items yet"
+                                    filteredEmptyText="No rows match the search or filters"
+                                />
+                            </div>
+                        </div>
+                        {panel?.kind === "cell" && selectedRow && (selectedColumn || selectedPaper) ? (
+                            <CellInspector
+                                row={selectedRow}
+                                paperColumnId={columns.paper?.id}
+                                column={selectedColumn}
+                                fill={selectedColumn ? cellFill(fills.get(selectedRow.id), selectedColumn.id) : undefined}
+                                questions={columns.questions}
+                                table={table}
+                                rowMenuItems={rowMenu(selectedRow)}
+                                isNew={isNewRow(table, selectedRow)}
+                                onColumn={(columnId) => setPanel({ kind: "cell", address: { rowId: selectedRow.id, columnId } })}
+                                onPrevious={rowIndex > 0 ? () => stepRow(-1) : undefined}
+                                onNext={rowIndex >= 0 && rowIndex < state.rows.length - 1 ? () => stepRow(1) : undefined}
+                                onClose={() => setPanel(null)}
+                                renderText={renderText}
+                                documents={documents}
+                                cellActions={cellActions}
+                                documentAction={documentAction}
+                            />
+                        ) : panel?.kind === "history" && renderVersionHistory ? (
+                            <aside className="rt-inspector rt-history" aria-label="Version history">
+                                <div className="rt-inspector-head">
+                                    <div className="rt-inspector-nav">
+                                        <span className="rt-inspector-paper rt-panel-title">Version history</span>
+                                        <button
+                                            type="button"
+                                            className="rt-icon-button"
+                                            aria-label="Close version history"
+                                            onClick={() => setPanel(null)}
+                                        >
+                                            <Icon icon={CancelIcon} size={14} />
+                                        </button>
+                                    </div>
+                                </div>
+                                <div className="rt-inspector-body">{renderVersionHistory()}</div>
+                            </aside>
+                        ) : null}
+                    </div>
+                </section>
+            </HoverLayerProvider>
+            {selectionCopy.menu}
+        </div>
     );
 
     // The search's terms are marked wherever the grid, its expansions and the
     // inspector show a value, as find in chat marks its hits.
     return <FindQueryProvider query={state.searchTerms}>{surface}</FindQueryProvider>;
+}
+
+/** Whether a key event's target edits text (an input, a textarea, an editable element). */
+function isEditableTarget(target: EventTarget | null): boolean {
+    const el = target as HTMLElement | null;
+    if (!el || el.nodeType !== 1) return false;
+    return el.isContentEditable || el.tagName === "INPUT" || el.tagName === "TEXTAREA";
+}
+
+/** The text selected within `scope`, or "" when nothing is. */
+function selectedTextWithin(scope: HTMLElement | null): string {
+    return selectionWithin(scope) ? (scope!.ownerDocument.defaultView?.getSelection()?.toString() ?? "") : "";
+}
+
+/**
+ * Copies the text selected in the table (its cells, their expansions and the
+ * inspector) through the host: Cmd / Ctrl+C, or Copy in the menu a right-click
+ * on a selection opens. A chrome document does not copy a page selection on
+ * its own. Without `onCopy` the surface leaves copying to its document.
+ */
+function useSelectionCopy(
+    scopeRef: React.RefObject<HTMLElement>,
+    onCopy: ((text: string) => void) | undefined,
+): { onContextMenu?: (event: React.MouseEvent) => void; menu: React.ReactNode } {
+    const [menu, setMenu] = useState<{ position: MenuPosition; text: string } | null>(null);
+    const copyRef = useRef(onCopy);
+    copyRef.current = onCopy;
+    const copies = !!onCopy;
+    useEffect(() => {
+        const scope = scopeRef.current;
+        if (!copies || !scope) return;
+        const doc = scope.ownerDocument;
+        const onKey = (event: KeyboardEvent) => {
+            if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return;
+            if (event.key.toLowerCase() !== "c" || event.isComposing || isEditableTarget(event.target)) return;
+            const text = selectedTextWithin(scope);
+            if (text.trim()) copyRef.current?.(text);
+        };
+        doc.addEventListener("keydown", onKey);
+        return () => doc.removeEventListener("keydown", onKey);
+    }, [scopeRef, copies]);
+    if (!onCopy) return { menu: null };
+    return {
+        onContextMenu: (event) => {
+            if (isEditableTarget(event.target)) return;
+            const text = selectedTextWithin(scopeRef.current);
+            if (!text.trim()) return;
+            event.preventDefault();
+            setMenu({ position: { x: event.clientX, y: event.clientY }, text });
+        },
+        menu: menu ? (
+            <ContextMenu
+                menuItems={[{ label: "Copy", icon: CopyIcon, onClick: () => onCopy(menu.text) }]}
+                isOpen
+                onClose={() => setMenu(null)}
+                position={menu.position}
+                useFixedPosition
+                className="rt-copy-menu"
+            />
+        ) : null,
+    };
 }
 
 /** The sources' names, for the chip's tooltip. */

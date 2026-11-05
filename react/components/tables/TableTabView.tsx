@@ -22,7 +22,7 @@ import { useDocumentVisible } from '../../hooks/useDocumentVisible';
 import { selectItemById } from '../../utils/selectItem';
 import { describeItems } from './card/liveSources';
 import { libraryRefForLibraryID } from '../../../src/utils/libraryIdentity';
-import { exportTableCsv, renderTableDocumentActions, tableActionErrorMessage } from '../../../src/ui/tableDocumentActions';
+import { exportTable, renderTableDocumentActions, tableActionErrorMessage } from '../../../src/ui/tableDocumentActions';
 import { getTablesApi } from '../../../src/services/artifacts/tablesApi';
 import { useNewPapers, useTableDocuments } from './tableTabData';
 import { FILL_RUNNING_REASON, useTableEditing } from './useTableEditing';
@@ -477,7 +477,7 @@ export default function TableTabView({
                     focus={focus}
                     reveal={reveal}
                     onCopy={(text) => Zotero.Utilities.Internal.copyTextToClipboard(text)}
-                    onExport={() => {
+                    onExport={(format, sort) => {
                         const win = surfaceWindow;
                         const api = getTablesApi();
                         if (!win || !api) {
@@ -485,7 +485,7 @@ export default function TableTabView({
                             return;
                         }
                         setActionError(null);
-                        exportTableCsv(win, tableRef, () => api.local.commands(win)).catch((error) =>
+                        exportTable(win, tableRef, () => api.local.commands(win), format, sort).catch((error) =>
                             setActionError(tableActionErrorMessage(error, tableRef)),
                         );
                     }}

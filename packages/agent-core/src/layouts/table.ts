@@ -648,6 +648,28 @@ export function anchorColumn(spec: TableSpec): Column | undefined {
     return spec.columns.find((c) => c.type === "reference") ?? spec.columns[0];
 }
 
+/** The columns the research table draws, in order. */
+export interface ResearchColumns {
+    /** The paper: the anchor (reference) column. */
+    paper: Column | undefined;
+    /** The year system column, when the table has one. */
+    year: Column | undefined;
+    /** The question columns: everything else that is not a system column. */
+    questions: Column[];
+}
+
+/** The paper column, the year and the question columns, as the research table and its exports group them. */
+export function researchColumns(spec: TableSpec): ResearchColumns {
+    const paper =
+        spec.columns.find((column) => column.id === REFERENCE_COLUMN_ID) ??
+        anchorColumn(spec);
+    const year = spec.columns.find((column) => column.id === YEAR_COLUMN_ID);
+    const questions = spec.columns.filter(
+        (column) => column !== paper && column !== year && !column.system,
+    );
+    return { paper, year, questions };
+}
+
 export function isColumnFilterable(column: Column): boolean {
     return column.filterable ?? true;
 }
@@ -816,7 +838,7 @@ export function isUncitedAnswer(cell: Cell | undefined): boolean {
 }
 
 /**
- * Plain-text form of a value, for CSV export and text filters. Citation tags
+ * Plain-text form of a value, for exports and text filters. Citation tags
  * are stripped: they are markup, so leaving them in would put `<citation …/>`
  * into a spreadsheet cell and let a search for "cit" match every sourced value.
  */
@@ -1646,78 +1668,13 @@ export function validateTableSpec(spec: TableSpec): TableSpecIssue[] {
 // Export
 // ---------------------------------------------------------------------------
 
-function csvEscape(field: string): string {
-    if (/^[\s]*[=+@-]/.test(field)) field = "'" + field;
-    return /[",\r\n]/.test(field) ? `"${field.replace(/"/g, '""')}"` : field;
-}
-
-/** One evidence entry as a line: `document locator: quote`, with its table context. */
-function evidenceLine(evidence: Evidence): string {
-    const where = [evidence.document, evidence.locator]
-        .filter(Boolean)
-        .join(" ");
-    const context = evidence.context ? ` [${evidence.context}]` : "";
-    return `${where}: ${evidence.quote}${context}`;
-}
-
-/**
- * RFC 4180 CSV of the table: one header row of column headers, then one row per
- * table row in the given order.
- * Companion fields carry each cell's evidence, its reasoning and its state; a
- * companion column empty in every row is omitted. Formula-like values are
- * escaped. The filler's stored confidence is not exported.
- */
-export function toCsv(spec: TableSpec, rows: Row[] = spec.rows): string {
-    const fields = rows.map((row) =>
-        spec.columns.map((c) => {
-            const cell = row.cells[c.id];
-            const value = cell?.value;
-            return [
-                cell?.outcome === "not_reported"
-                    ? "Not reported"
-                    : cellValueText(value),
-                (cell?.evidence ?? []).map(evidenceLine).join("\n"),
-                cell?.reasoning ?? "",
-                [
-                    cell && cell.outcome !== "answered" ? cell.outcome : "",
-                    cell?.error ?? "",
-                    isStale(row, cell) ? "stale" : "",
-                    isTitleAbstractOnly(cell) ? "title and abstract" : "",
-                    cell?.provenance ?? "",
-                ]
-                    .filter(Boolean)
-                    .join("; "),
-            ];
-        }),
-    );
-    // A companion column that is empty in every row is left out: it would only
-    // widen the sheet. The value column is always written.
-    const suffixes = ["", " — evidence", " — reasoning", " — state"];
-    const kept = spec.columns.map((_, ci) =>
-        suffixes.map(
-            (_, fi) => fi === 0 || fields.some((row) => row[ci][fi] !== ""),
-        ),
-    );
-    const pick = (values: string[][]) =>
-        values.flatMap((group, ci) => group.filter((_, fi) => kept[ci][fi]));
-    const header = pick(
-        spec.columns.map((c) =>
-            suffixes.map((suffix) => c.header + suffix),
-        ),
-    )
-        .map(csvEscape)
-        .join(",");
-    const lines = fields.map((row) => pick(row).map(csvEscape).join(","));
-    return [header, ...lines].join("\r\n");
-}
-
 /**
  * The table as plain text for the clipboard: tab-separated, one header line of
  * column headers, then one line per row in the given order. It carries what a
- * reader sees in the grid — the value, or "Not reported" — and none of the
- * evidence or state companions {@link toCsv} adds. Tabs and line breaks inside
- * a value become spaces, so every row stays one line and pastes into a
- * spreadsheet or a document table cell for cell.
+ * reader sees in the grid — the value, or "Not reported" — and none of its
+ * evidence or reasoning. Tabs and line breaks inside a value become spaces,
+ * so every row stays one line and pastes into a spreadsheet or a document
+ * table cell for cell.
  */
 export function toPlainText(
     spec: TableSpec,

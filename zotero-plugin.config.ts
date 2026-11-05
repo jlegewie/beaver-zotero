@@ -87,14 +87,18 @@ export default defineConfig({
       },
       {
         // Export runtime: the parser and writers of @beaver/agent-export with
-        // remark, KaTeX and docx. Loaded on first export into its own script
-        // scope (src/services/export/exportRuntime.ts), so the main bundle does
-        // not carry it. `neutral` keeps esbuild off the packages' `browser`
-        // builds, which assume a DOM the plugin realm does not have.
+        // remark, KaTeX, docx and JSZip. Loaded on first export into its own
+        // script scope (src/services/export/exportRuntime.ts), so the main
+        // bundle does not carry it. `neutral` keeps esbuild off the packages'
+        // `browser` builds, which assume a DOM the plugin realm does not have.
         entryPoints: ["packages/agent-export/src/runtime.ts"],
         define: {
           "process.env.NODE_ENV": JSON.stringify(mode),
         },
+        // JSZip's Node stream support. It requires the module inside a
+        // try/catch and only uses it when that succeeds, so left unresolved
+        // the require fails and JSZip writes without Node streams.
+        external: ["readable-stream"],
         bundle: true,
         format: "iife",
         globalName: "BeaverExportRuntime",
