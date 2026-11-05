@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { toPlainText, type Column, type Row, type TableSpec } from "@beaver/agent-core/layouts/table";
 import { cellsToFill } from "@beaver/agent-core/layouts/tableFill";
+import type { TableFillCells } from "@beaver/agent-core/protocol/tableFillProtocol";
 import {
     ArrowUpIcon,
     CancelIcon,
@@ -33,7 +34,7 @@ import { renderPlainText, type TableDensity, type TextRenderer } from "../tableV
 import { useTableState } from "../useTableState";
 import { CellEditor, editsAsList, type CellEditInput } from "./CellEditor";
 import { CellInspector, type CellActionControls } from "./CellInspector";
-import { isNewRow, researchColumns, type TableDocuments } from "./cellModel";
+import { cellFill, isNewRow, researchColumns, rowFills, type TableDocuments } from "./cellModel";
 import { ResearchGrid, type CellAddress } from "./ResearchGrid";
 import { AnchoredPopover, InlineText } from "./TableEditing";
 
@@ -153,6 +154,8 @@ export interface ResearchTableProps {
     cellEditing?: ResearchCellEditing;
     /** Fill entry points in the row and column menus and the selection bar. */
     fill?: ResearchTableFill;
+    /** The cells a running fill will still write; they show as filling until their answers land. */
+    filling?: readonly TableFillCells[];
     /** Brings a row (and a cell, in the inspector) into view. */
     focus?: ResearchTableFocus | null;
     /** The structural edit controls; absent, the table is display only. */
@@ -197,6 +200,7 @@ export function ResearchTable({
     rowMenuItems,
     cellEditing,
     fill,
+    filling,
     focus,
     editing,
     virtualize,
@@ -319,6 +323,8 @@ export function ResearchTable({
         for (const [, column] of cellsToFill(table)) counts.set(column, (counts.get(column) ?? 0) + 1);
         return counts;
     }, [fill != null, table]);
+
+    const fills = useMemo(() => rowFills(filling), [filling]);
 
     const onSelectCell = useCallback((address: CellAddress) => {
         setPanel({ kind: "cell", address });
@@ -779,6 +785,7 @@ export function ResearchTable({
                                           }
                                         : null
                                 }
+                                fills={fills}
                                 virtualize={virtualize}
                                 emptyText="No papers yet"
                                 filteredEmptyText="No rows match the search or filters"
@@ -790,6 +797,7 @@ export function ResearchTable({
                             row={selectedRow}
                             paperColumnId={columns.paper?.id}
                             column={selectedColumn}
+                            fill={selectedColumn ? cellFill(fills.get(selectedRow.id), selectedColumn.id) : undefined}
                             questions={columns.questions}
                             table={table}
                             rowMenuItems={rowMenu(selectedRow)}

@@ -210,6 +210,19 @@ export interface TableFillResult {
 
 export type TableFillJobState = "running" | "stopping" | "done";
 
+/**
+ * Cells a running job will still write, grouped by the question columns its
+ * rows fill (one group when every row fills the same columns). A row leaves
+ * once its answers are saved, its failure is, or the job drops it.
+ */
+export interface TableFillCells {
+    columns: string[];
+    /** Rows not started yet. */
+    queued: string[];
+    /** Rows being read or answered now, or answered and waiting to be saved. */
+    active: string[];
+}
+
 /** A job's progress, published on every change. */
 export interface TableFillJobSnapshot {
     job_id: string;
@@ -232,6 +245,8 @@ export interface TableFillJobSnapshot {
     started_at: number;
     /** Rough seconds until the last row finishes; null until a row has. */
     seconds_left: number | null;
+    /** The cells still to write; absent once the job ends. */
+    cells?: TableFillCells[];
     /** Set once the job ends. */
     result?: TableFillResult;
 }

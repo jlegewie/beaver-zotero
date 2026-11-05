@@ -10,10 +10,11 @@ import {
     rowDocumentLine,
     tagDefinition,
     type InspectorAnswer,
+    type CellFill,
     type InspectorContent,
     type TableDocuments,
 } from "./cellModel";
-import { CellBody, CellValue } from "./ResearchGrid";
+import { CellBody, CellValue, FillNote } from "./ResearchGrid";
 import { PaperActions, paperText } from "./PaperCell";
 
 /**
@@ -31,6 +32,8 @@ export interface CellInspectorProps {
     paperColumnId?: string;
     /** The selected question column; absent when the Paper cell is selected. */
     column?: Column;
+    /** What a running fill is doing with the selected cell. */
+    fill?: CellFill;
     /** The question columns, for the paper view. */
     questions: Column[];
     /** The table, for the row actions it declares (import) in the paper view. */
@@ -67,6 +70,7 @@ export function CellInspector({
     row,
     paperColumnId,
     column,
+    fill,
     questions,
     table,
     rowMenuItems,
@@ -126,15 +130,19 @@ export function CellInspector({
         body = (
             <>
                 {column.description ? <p className="rt-inspector-text rt-inspector-question">{column.description}</p> : null}
-                <CellDetails
-                    row={row}
-                    column={column}
-                    content={content}
-                    renderText={renderText}
-                    documents={documents}
-                    actions={content.kind === "system" ? undefined : cellActions?.(row, column)}
-                    documentLine={documentInEvidence ? documentLine : undefined}
-                />
+                {fill ? <FillNote fill={fill} replacing={content.kind !== "pending"} /> : null}
+                {/* The fill's note says an unfilled cell's answer is coming. */}
+                {fill && content.kind === "pending" ? null : (
+                    <CellDetails
+                        row={row}
+                        column={column}
+                        content={content}
+                        renderText={renderText}
+                        documents={documents}
+                        actions={content.kind === "system" ? undefined : cellActions?.(row, column)}
+                        documentLine={documentInEvidence ? documentLine : undefined}
+                    />
+                )}
                 {row.failure ? (
                     <div className="rt-inspector-failure" role="note">
                         {row.failure.message}

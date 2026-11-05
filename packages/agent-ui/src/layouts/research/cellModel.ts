@@ -23,6 +23,7 @@ import {
     type TableSpec,
 } from "@beaver/agent-core/layouts/table";
 import { cellsToFill } from "@beaver/agent-core/layouts/tableFill";
+import type { TableFillCells } from "@beaver/agent-core/protocol/tableFillProtocol";
 
 // ---------------------------------------------------------------------------
 // Documents
@@ -205,6 +206,34 @@ export function researchColumns(spec: TableSpec): ResearchColumns {
         (column) => column !== paper && column !== year && !column.system,
     );
     return { paper, year, questions };
+}
+
+// ---------------------------------------------------------------------------
+// A running fill
+// ---------------------------------------------------------------------------
+
+/** A running fill's work in one row: the columns it writes, and whether it is answering them now. */
+export interface RowFill {
+    columns: readonly string[];
+    active: boolean;
+}
+
+/** How a running fill touches a cell: waiting its turn, or being answered now. */
+export type CellFill = "queued" | "active";
+
+/** A running fill's cells by row, from the job's groups. */
+export function rowFills(groups: readonly TableFillCells[] | undefined): ReadonlyMap<string, RowFill> {
+    const fills = new Map<string, RowFill>();
+    for (const { columns, queued, active } of groups ?? []) {
+        for (const row of queued) fills.set(row, { columns, active: false });
+        for (const row of active) fills.set(row, { columns, active: true });
+    }
+    return fills;
+}
+
+export function cellFill(fill: RowFill | undefined, columnId: string): CellFill | undefined {
+    if (!fill?.columns.includes(columnId)) return undefined;
+    return fill.active ? "active" : "queued";
 }
 
 /** A column's pending-work badges. */

@@ -442,6 +442,7 @@ export default function TableTabView({
                     editing={edits.editing}
                     cellEditing={edits.cellEditing}
                     fill={fill}
+                    filling={fillJob?.cells}
                     selectionActions={edits.selectionActions}
                     rowMenuItems={edits.rowMenuItems}
                     notice={notices.length ? notices.join(' ') : undefined}

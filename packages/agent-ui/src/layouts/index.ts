@@ -30,6 +30,7 @@ export { CellEditor, editsAsList } from "./research/CellEditor";
 export type { CellEditInput } from "./research/CellEditor";
 export type { CellActionControls, CellInspectorProps } from "./research/CellInspector";
 export {
+    cellFill,
     cellState,
     cellTags,
     columnBadges,
@@ -40,16 +41,19 @@ export {
     newBadgeText,
     researchColumns,
     rowDocumentLine,
+    rowFills,
     staleBadgeText,
     tagDefinition,
 } from "./research/cellModel";
 export type {
+    CellFill,
     CellState,
     CellTag,
     ColumnBadges,
     InspectorAnswer,
     InspectorContent,
     ResearchColumns,
+    RowFill,
     TableDocumentInfo,
     TableDocuments,
 } from "./research/cellModel";
