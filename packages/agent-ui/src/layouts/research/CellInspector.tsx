@@ -1,7 +1,8 @@
 import React, { useLayoutEffect, useRef, useState } from "react";
-import type { Column, Row } from "@beaver/agent-core/layouts/table";
+import type { Column, Row, TableSpec } from "@beaver/agent-core/layouts/table";
 import { rowReference } from "@beaver/agent-core/layouts/tableCitations";
 import { ArrowDownIcon, ArrowRightIcon, ArrowUpIcon, CancelIcon, EditIcon, FileIcon, Icon } from "../../icons";
+import type { MenuItem } from "../../primitives/ContextMenu";
 import type { TextRenderer } from "../tableView";
 import { EvidencePassage, StatusTag } from "./CellTags";
 import {
@@ -32,6 +33,10 @@ export interface CellInspectorProps {
     column?: Column;
     /** The question columns, for the paper view. */
     questions: Column[];
+    /** The table, for the row actions it declares (import) in the paper view. */
+    table?: TableSpec;
+    /** The row's menu, beside its actions in the paper view. */
+    rowMenuItems?: MenuItem[];
     /** A row added since the last fill, noted in the paper view. */
     isNew?: boolean;
     /**
@@ -56,13 +61,15 @@ export interface CellInspectorProps {
  * cell shows the cell view: the question, then what the cell holds (Beaver's
  * answer with its explanation and evidence, or the user's answer with
  * Beaver's earlier one from `replaced`). The Paper cell shows the paper view:
- * the row's actions and every question of the row.
+ * the row's actions (with its menu) and every question of the row.
  */
 export function CellInspector({
     row,
     paperColumnId,
     column,
     questions,
+    table,
+    rowMenuItems,
     isNew = false,
     onColumn,
     onPrevious,
@@ -146,7 +153,9 @@ export function CellInspector({
         ) : null;
         body = (
             <PaperDetails
+                table={table}
                 row={row}
+                menuItems={rowMenuItems}
                 questions={questions}
                 isNew={isNew}
                 renderText={renderText}
@@ -434,12 +443,14 @@ function Explanation({ children }: { children: React.ReactNode }): React.ReactEl
 }
 
 /**
- * The paper view: the row's Show in library and Open, its failure or New
+ * The paper view: the row's actions and menu, its failure or New
  * paper note, every question of the row (each opening its cell), and the
  * document the row is read from.
  */
 function PaperDetails({
+    table,
     row,
+    menuItems,
     questions,
     isNew,
     renderText,
@@ -447,7 +458,9 @@ function PaperDetails({
     onColumn,
     documentLine,
 }: {
+    table?: TableSpec;
     row: Row;
+    menuItems?: MenuItem[];
     questions: Column[];
     isNew: boolean;
     renderText: TextRenderer;
@@ -458,8 +471,10 @@ function PaperDetails({
     return (
         <>
             <PaperActions
+                table={table}
                 row={row}
                 documents={documents}
+                menuItems={menuItems}
                 className="rt-inspector-row-actions"
                 buttonClassName="rt-inspector-action"
             />

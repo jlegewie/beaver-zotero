@@ -34,10 +34,8 @@ import { useTableState } from "../useTableState";
 import { CellEditor, editsAsList, type CellEditInput } from "./CellEditor";
 import { CellInspector, type CellActionControls } from "./CellInspector";
 import { isNewRow, researchColumns, type TableDocuments } from "./cellModel";
-import { paperOpenAction, rowItemReference } from "./PaperCell";
 import { ResearchGrid, type CellAddress } from "./ResearchGrid";
 import { AnchoredPopover, InlineText } from "./TableEditing";
-import { getHost } from "../../host";
 
 /** "3 new in 'Cash transfers'": a source whose items the table lacks. */
 export interface NewPapersNotice {
@@ -327,7 +325,6 @@ export function ResearchTable({
         activityRef.current?.();
     }, []);
 
-    const navigation = getHost().navigation;
     const rowMenu = useCallback(
         (row: Row): MenuItem[] => {
             const items: MenuItem[] = [];
@@ -338,12 +335,6 @@ export function ResearchTable({
                     disabled: !!fill.disabledReason,
                     onClick: () => fill.onFillRows([row.id]),
                 });
-            const ref = rowItemReference(row);
-            if (ref && navigation)
-                items.push({ label: "Show in library", icon: LibraryIcon, onClick: () => navigation.revealInLibrary(ref) });
-            // The card's Open, reachable by keyboard.
-            const open = paperOpenAction(row, documents);
-            if (open) items.push({ label: open.label, icon: FileIcon, onClick: open.run });
             if (cellEditing?.onChooseDocument && row.ref?.kind === "item")
                 items.push({
                     label: "Choose document…",
@@ -353,7 +344,7 @@ export function ResearchTable({
                 });
             return [...items, ...(rowMenuItems?.(row) ?? [])];
         },
-        [navigation, rowMenuItems, documents, fill, cellEditing],
+        [rowMenuItems, fill, cellEditing],
     );
 
     // A question column's menu: its edits (when the host makes them), then
@@ -800,6 +791,8 @@ export function ResearchTable({
                             paperColumnId={columns.paper?.id}
                             column={selectedColumn}
                             questions={columns.questions}
+                            table={table}
+                            rowMenuItems={rowMenu(selectedRow)}
                             isNew={isNewRow(table, selectedRow)}
                             onColumn={(columnId) => setPanel({ kind: "cell", address: { rowId: selectedRow.id, columnId } })}
                             onPrevious={rowIndex > 0 ? () => stepRow(-1) : undefined}

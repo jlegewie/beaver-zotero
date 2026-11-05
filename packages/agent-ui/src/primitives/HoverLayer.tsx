@@ -215,7 +215,7 @@ function PlacedLayer({
     onLeave(): void;
 }): React.ReactElement {
     const ref = useRef<HTMLDivElement | null>(null);
-    const [position, setPosition] = useState<{ left: number; top: number; width?: number } | null>(null);
+    const [position, setPosition] = useState<{ left: number; top: number; width?: number; minHeight?: number } | null>(null);
 
     useLayoutEffect(() => {
         const el = ref.current;
@@ -225,7 +225,11 @@ function PlacedLayer({
         const rect = anchor.getBoundingClientRect();
         const peekWidth = Math.max(rect.width, layer.width ?? 0);
         // The peek's height depends on its width: measure it at that width.
-        if (layer.variant === 'peek') el.style.width = `${peekWidth}px`;
+        // It covers at least its anchor, so a short cell's peek hides the cell.
+        if (layer.variant === 'peek') {
+            el.style.width = `${peekWidth}px`;
+            el.style.minHeight = `${rect.height}px`;
+        }
         const box = el.getBoundingClientRect();
         const viewW = view.innerWidth;
         const viewH = view.innerHeight;
@@ -235,7 +239,7 @@ function PlacedLayer({
             // below; lifted only as far as the window's bottom edge requires.
             const top = Math.max(EDGE_PX, Math.min(rect.top, viewH - box.height - EDGE_PX));
             const left = Math.max(EDGE_PX, Math.min(rect.left, viewW - width - EDGE_PX));
-            setPosition({ left, top, width });
+            setPosition({ left, top, width, minHeight: rect.height });
             return;
         }
         // Below the anchor, else above it; a card that fits neither is held
@@ -264,6 +268,7 @@ function PlacedLayer({
                 left: position?.left ?? 0,
                 top: position?.top ?? 0,
                 width: layer.variant === 'peek' ? position?.width : layer.width,
+                minHeight: position?.minHeight,
                 visibility: position ? 'visible' : 'hidden',
             }}
             onMouseEnter={onEnter}
@@ -288,7 +293,6 @@ export function useHoverAnchor({
     width,
     delayMs,
     disabled = false,
-    shouldOpen,
 }: {
     slot: HoverSlot;
     variant: HoverVariant;
@@ -296,8 +300,6 @@ export function useHoverAnchor({
     width?: number;
     delayMs?: number;
     disabled?: boolean;
-    /** Checked when the pointer arrives; false keeps the layer closed (an untruncated cell). */
-    shouldOpen?: (anchor: HTMLElement) => boolean;
 }): {
     onMouseEnter(event: React.MouseEvent<HTMLElement>): void;
     onMouseLeave(): void;
@@ -312,7 +314,6 @@ export function useHoverAnchor({
     renderRef.current = render;
     const open = (anchor: HTMLElement) => {
         if (!api || disabled) return;
-        if (shouldOpen && !shouldOpen(anchor)) return;
         api.hoverIn(slot, { anchor, variant, width, id: idRef.current, render: () => renderRef.current() }, delayMs);
     };
     return {

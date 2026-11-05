@@ -696,11 +696,6 @@
 .beaver-root .rt-scroll[data-pinned] .rt-th-paper {
     z-index: 3;
 }
-/* A row's menu opens inside its pinned Paper cell: that cell goes over the
- * next rows' pinned cells (but stays under the sticky headers). */
-.beaver-root .rt-scroll[data-pinned] .rt-td-menu-open {
-    z-index: 2;
-}
 .beaver-root .rt-scroll[data-pinned] .rt-td-rail,
 .beaver-root .rt-scroll[data-pinned] .rt-th-rail {
     left: 0;
@@ -795,21 +790,32 @@
     display: none;
 }
 
-.beaver-root .rt-row-menu {
-    position: absolute;
-    top: -0.15rem;
-    right: -0.3rem;
-    opacity: 0;
+/* The Paper cell's expansion: the whole title and byline, and the failure. */
+.beaver-root .rt-paper-full .rt-paper-title {
+    display: block;
+    overflow: visible;
+    overflow-wrap: anywhere;
 }
-.beaver-root .rt-row:hover .rt-row-menu,
-.beaver-root .rt-row-menu:focus-visible,
-.beaver-root .rt-row-menu[aria-expanded="true"] {
-    opacity: 1;
+
+.beaver-root .rt-paper-full .rt-paper-meta {
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+.beaver-root .rt-paper-failure {
+    font-size: 0.92rem;
+    line-height: 1.3rem;
+    color: var(--tag-red-primary);
 }
 
 .beaver-root .rt-cell,
 .beaver-root .rt-td-selectable {
     cursor: pointer;
+}
+
+.beaver-root .rt-td-selectable:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: -2px;
 }
 
 .beaver-root .rt-cell:hover,
@@ -984,6 +990,10 @@
 }
 
 .beaver-root .bt-hover-peek {
+    /* At least its cell's height (set inline): the content fills it, the
+     * footer at the bottom. */
+    display: flex;
+    flex-direction: column;
     background: var(--material-background);
     border-radius: 0.6rem;
     box-shadow:
@@ -994,11 +1004,17 @@
 }
 
 .beaver-root .rt-peek {
+    flex: 1 0 auto;
     display: flex;
     flex-direction: column;
     gap: 0.6rem;
     padding: 0.75rem 0.9rem;
     cursor: pointer;
+}
+
+/* A Paper cell's expansion in a table without a paper column selects nothing. */
+.beaver-root .rt-peek:not([role="button"]) {
+    cursor: default;
 }
 
 .beaver-root .rt-peek-body {
@@ -1008,11 +1024,17 @@
     gap: 0.6rem;
 }
 
+/* The expansion's actions, on the right. */
 .beaver-root .rt-peek-footer {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.4rem;
+    margin-top: auto;
     padding-top: 0.6rem;
     border-top: 1px solid var(--fill-quinary);
     font-size: 0.85rem;
-    color: var(--fill-secondary);
 }
 
 .beaver-root .rt-card {
@@ -1066,68 +1088,6 @@
 
 .beaver-root .rt-link-button:hover {
     text-decoration: underline;
-}
-
-.beaver-root .rt-paper-card-document {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-    padding: 0.75rem 0.9rem;
-    border-top: 1px solid var(--fill-quinary);
-    color: var(--fill-secondary);
-}
-
-.beaver-root .rt-paper-card-document-text {
-    flex: 1 1 auto;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-}
-
-.beaver-root .rt-paper-card-file {
-    font-size: 0.92rem;
-    color: var(--fill-primary);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.beaver-root .rt-paper-card-note {
-    font-size: 0.85rem;
-    color: var(--fill-secondary);
-}
-
-.beaver-root .rt-paper-card-new {
-    padding: 0 0.9rem 0.75rem;
-}
-
-.beaver-root .rt-paper-card-failure {
-    padding: 0 0.9rem 0.75rem;
-    font-size: 0.92rem;
-    color: var(--tag-red-primary);
-}
-
-.beaver-root .rt-card-actions {
-    display: flex;
-    gap: 0.3rem;
-    padding: 0.6rem;
-    border-top: 1px solid var(--fill-quinary);
-}
-
-.beaver-root .rt-card-button {
-    height: 2rem;
-    padding: 0 0.75rem;
-    border: 0;
-    border-radius: 0.45rem;
-    background: var(--fill-quinary);
-    font: inherit;
-    font-size: 0.92rem;
-    color: var(--fill-primary);
-    cursor: pointer;
-}
-
-.beaver-root .rt-card-button:hover {
-    background: var(--fill-quarternary);
 }
 
 /* The cell inspector --------------------------------------------------------- */
@@ -1747,41 +1707,11 @@
 
 /* Editing cells -------------------------------------------------------------- */
 
-/* The pencil on a question cell, shown while the cell is hovered or focused. */
-.beaver-root .rt-cell-edit {
-    position: absolute;
-    top: 0.35rem;
-    right: 0.35rem;
-    width: 1.55rem;
-    height: 1.55rem;
-    background: var(--material-background);
-    box-shadow: 0 0 0 1px var(--fill-quinary);
-    opacity: 0;
-}
-
-.beaver-root .rt-cell:hover .rt-cell-edit,
-.beaver-root .rt-cell:focus-within .rt-cell-edit {
-    opacity: 1;
-}
-
-.beaver-root .rt-cell-edit:hover:not(:disabled) {
-    background: var(--material-background);
-    color: var(--fill-primary);
-}
-
-.beaver-root .rt-peek-footer {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-}
-
-.beaver-root .rt-peek-footer > span {
-    flex: 1 1 auto;
-}
-
-.beaver-root .rt-peek-edit {
+/* A button in a cell's expansion: Edit, the row's actions and its menu. */
+.beaver-root .rt-peek-action {
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     gap: 0.3rem;
     height: 1.6rem;
     padding: 0 0.55rem;
@@ -1793,8 +1723,24 @@
     cursor: pointer;
 }
 
-.beaver-root .rt-peek-edit:hover {
+.beaver-root .rt-peek-action:hover:not(:disabled) {
     background: var(--fill-quinary);
+}
+
+.beaver-root .rt-peek-action:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+/* The row's menu button: a square of the others' height. */
+.beaver-root .rt-peek-action.rt-row-menu {
+    width: 1.6rem;
+    padding: 0;
+}
+
+.beaver-root .rt-inspector-action.rt-row-menu {
+    width: 1.85rem;
+    padding: 0;
 }
 
 /* The editor floats over the grid at its cell, above the sticky header. */
@@ -1931,6 +1877,10 @@
 
 /* The inspector's Edit, Clear, Reset to Beaver's answer and Change. */
 .beaver-root .rt-inspector-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
     height: 1.85rem;
     padding: 0 0.7rem;
     border: 1px solid var(--color-border50);
