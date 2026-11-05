@@ -85,6 +85,13 @@ export function HoverLayerProvider({ children }: { children: React.ReactNode }):
     const openTimers = useRef<Partial<Record<HoverSlot, ReturnType<typeof setTimeout>>>>({});
     const closeTimers = useRef<Partial<Record<HoverSlot, ReturnType<typeof setTimeout>>>>({});
     const peekRef = useRef<HTMLDivElement | null>(null);
+    const cardRef = useRef<HTMLDivElement | null>(null);
+    /** The slot a mouse button was pressed in (a drag selecting its text). */
+    const pressed = useRef<HoverSlot | null>(null);
+    /** The slots the pointer is over. */
+    const over = useRef<Partial<Record<HoverSlot, boolean>>>({});
+    /** Slots kept open after the pointer left, for the text selected in them. */
+    const held = useRef(new Set<HoverSlot>());
     /** Ends the wheel gesture being passed to the content beneath, if any. */
     const wheelPass = useRef<(() => void) | null>(null);
 
@@ -99,6 +106,9 @@ export function HoverLayerProvider({ children }: { children: React.ReactNode }):
         for (const s of slots) {
             clear(openTimers, s);
             clear(closeTimers, s);
+            held.current.delete(s);
+            over.current[s] = false;
+            if (pressed.current === s) pressed.current = null;
         }
         setLayers((current) => {
             if (slots.every((s) => !current[s])) return current;
@@ -112,17 +122,33 @@ export function HoverLayerProvider({ children }: { children: React.ReactNode }):
 
     const cancelClose = useCallback((slot: HoverSlot) => clear(closeTimers, slot), []);
 
+    const layerElement = useCallback(
+        (slot: HoverSlot) => (slot === 'peek' ? peekRef.current : cardRef.current),
+        [],
+    );
+
+    // A layer whose text is being selected stays while the button is down,
+    // and afterwards while the selection lasts, so it can be copied.
     const hoverOut = useCallback(
         (slot: HoverSlot) => {
             clear(openTimers, slot);
             clear(closeTimers, slot);
-            closeTimers.current[slot] = setTimeout(() => hide(slot), CLOSE_DELAY_MS);
+            if (pressed.current === slot) return;
+            closeTimers.current[slot] = setTimeout(() => {
+                delete closeTimers.current[slot];
+                if (selectionWithin(layerElement(slot))) held.current.add(slot);
+                else hide(slot);
+            }, CLOSE_DELAY_MS);
         },
-        [hide],
+        [hide, layerElement],
     );
 
     const hoverIn = useCallback(
         (slot: HoverSlot, layer: OpenLayer, delayMs = OPEN_DELAY_MS) => {
+            // While text is selected, no layer opens or replaces another: in a
+            // chrome document the insertion would collapse the selection. An
+            // open layer holding it keeps its close timer, which holds it.
+            if (layersRef.current[slot]?.id !== layer.id && hasSelection(layer.anchor)) return;
             clear(closeTimers, slot);
             clear(openTimers, slot);
             if (layersRef.current[slot]?.id === layer.id) return;
@@ -133,13 +159,15 @@ export function HoverLayerProvider({ children }: { children: React.ReactNode }):
             // With a layer already open in the slot, the next one follows at
             // once; not while the wheel scrolls beneath, which has just closed it.
             const delay = layersRef.current[slot] && !wheelPass.current ? 0 : delayMs;
-            const open = () =>
+            const open = () => {
+                if (hasSelection(layer.anchor)) return;
                 setLayers((current) => {
                     const next = { ...current, [slot]: layer };
                     // A peek covers the cards of what it covers.
                     if (slot === 'peek' && next.card && layer.anchor.contains(next.card.anchor)) delete next.card;
                     return next;
                 });
+            };
             if (delay <= 0) open();
             else openTimers.current[slot] = setTimeout(open, delay);
         },
@@ -188,13 +216,31 @@ export function HoverLayerProvider({ children }: { children: React.ReactNode }):
         const onKey = (event: KeyboardEvent) => {
             if (event.key === 'Escape' && !event.isComposing) hide();
         };
+        // The end of a drag that left its layer closes it, as leaving would
+        // have, unless it selected text there.
+        const onMouseUp = () => {
+            const slot = pressed.current;
+            pressed.current = null;
+            if (slot && !over.current[slot]) hoverOut(slot);
+        };
+        // A held layer closes once its selection is gone.
+        const onSelectionChange = () => {
+            for (const slot of [...held.current]) {
+                if (over.current[slot] || pressed.current === slot || selectionWithin(layerElement(slot))) continue;
+                hide(slot);
+            }
+        };
         doc.addEventListener('scroll', onScroll, true);
         doc.addEventListener('keydown', onKey, true);
+        doc.addEventListener('mouseup', onMouseUp, true);
+        doc.addEventListener('selectionchange', onSelectionChange);
         return () => {
             doc.removeEventListener('scroll', onScroll, true);
             doc.removeEventListener('keydown', onKey, true);
+            doc.removeEventListener('mouseup', onMouseUp, true);
+            doc.removeEventListener('selectionchange', onSelectionChange);
         };
-    }, [anyOpen, doc, hide]);
+    }, [anyOpen, doc, hide, hoverOut, layerElement]);
 
     const api = useMemo<HoverLayerApi>(() => ({ hoverIn, hoverOut, hide, isOpen }), [hoverIn, hoverOut, hide, isOpen]);
 
@@ -206,8 +252,22 @@ export function HoverLayerProvider({ children }: { children: React.ReactNode }):
                     key={`peek:${layers.peek.id}`}
                     layer={layers.peek}
                     elementRef={peekRef}
-                    onEnter={() => cancelClose('peek')}
-                    onLeave={() => hoverOut('peek')}
+                    onEnter={() => {
+                        over.current.peek = true;
+                        cancelClose('peek');
+                    }}
+                    // A card opened from the peek stands clear of it, so the
+                    // pointer crosses the peek to reach it: keep it meanwhile.
+                    // Leaving the peek closes both, unless it enters the card.
+                    onOver={() => {
+                        const card = layersRef.current.card;
+                        if (card && peekRef.current?.contains(card.anchor)) cancelClose('card');
+                    }}
+                    onLeave={() => {
+                        over.current.peek = false;
+                        hoverOut('peek');
+                    }}
+                    onPress={() => (pressed.current = 'peek')}
                     onWheel={onLayerWheel}
                 />
             ) : null}
@@ -215,15 +275,20 @@ export function HoverLayerProvider({ children }: { children: React.ReactNode }):
                 <PlacedLayer
                     key={`card:${layers.card.id}`}
                     layer={layers.card}
+                    elementRef={cardRef}
+                    clearOf={peekRef}
                     onEnter={() => {
+                        over.current.card = true;
                         cancelClose('card');
                         // The pointer left the peek for a card opened from it.
                         if (peekRef.current?.contains(layers.card!.anchor)) cancelClose('peek');
                     }}
                     onLeave={() => {
+                        over.current.card = false;
                         hoverOut('card');
                         if (peekRef.current?.contains(layers.card!.anchor)) hoverOut('peek');
                     }}
+                    onPress={() => (pressed.current = 'card')}
                     onWheel={onLayerWheel}
                 />
             ) : null}
@@ -235,18 +300,28 @@ export function HoverLayerProvider({ children }: { children: React.ReactNode }):
 function PlacedLayer({
     layer,
     elementRef,
+    clearOf,
     onEnter,
+    onOver,
     onLeave,
+    onPress,
     onWheel,
 }: {
     layer: OpenLayer;
     elementRef?: React.MutableRefObject<HTMLDivElement | null>;
+    /** A layer a card opened from inside must not cover (the peek it came from). */
+    clearOf?: React.MutableRefObject<HTMLDivElement | null>;
     onEnter(): void;
+    /** The pointer moved onto an element inside the layer. */
+    onOver?(): void;
     onLeave(): void;
+    onPress(): void;
     onWheel(event: React.WheelEvent<HTMLElement>, anchor: HTMLElement): void;
 }): React.ReactElement {
     const ref = useRef<HTMLDivElement | null>(null);
-    const [position, setPosition] = useState<{ left: number; top: number; width?: number; minHeight?: number } | null>(null);
+    const [position, setPosition] = useState<
+        { left: number; top?: number; bottom?: number; width?: number; minHeight?: number; maxHeight?: number } | null
+    >(null);
 
     useLayoutEffect(() => {
         const el = ref.current;
@@ -273,17 +348,13 @@ function PlacedLayer({
             setPosition({ left, top, width, minHeight: rect.height });
             return;
         }
-        // Below the anchor, else above it; a card that fits neither is held
-        // inside the window and scrolls within its bounded height.
-        const below = rect.bottom + 4;
-        const above = rect.top - box.height - 4;
-        const top = below + box.height <= viewH - EDGE_PX
-            ? below
-            : above >= EDGE_PX
-              ? above
-              : Math.max(EDGE_PX, viewH - box.height - EDGE_PX);
-        const left = Math.max(EDGE_PX, Math.min(rect.left, viewW - box.width - EDGE_PX));
-        setPosition({ left, top });
+        // A card from a tag inside the peek keeps clear of the whole peek: the
+        // tags follow the cell's text, and a card above the tag would hide it.
+        const host = clearOf?.current;
+        const clear = host && host !== el && host.contains(anchor) ? host.getBoundingClientRect() : undefined;
+        const placement = placeCard(rect, box, { width: viewW, height: viewH }, clear);
+        // A tip is one short paragraph and does not scroll: only a card is bounded.
+        setPosition(layer.variant === 'card' ? placement : { ...placement, maxHeight: undefined });
     }, [layer]);
 
     return (
@@ -297,18 +368,86 @@ function PlacedLayer({
             style={{
                 position: 'fixed',
                 left: position?.left ?? 0,
-                top: position?.top ?? 0,
+                top: position ? (position.top ?? 'auto') : 0,
+                bottom: position?.bottom,
                 width: layer.variant === 'peek' ? position?.width : layer.width,
                 minHeight: position?.minHeight,
+                maxHeight: position?.maxHeight,
                 visibility: position ? 'visible' : 'hidden',
             }}
             onMouseEnter={onEnter}
+            onMouseOver={onOver}
             onMouseLeave={onLeave}
+            onMouseDown={(event) => {
+                if (event.button === 0) onPress();
+            }}
             onWheel={(event) => onWheel(event, layer.anchor)}
         >
             {layer.render()}
         </div>
     );
+}
+
+/** Where a card or tip goes: `top` or `bottom` (the edge it grows from), in window coordinates. */
+export interface CardPlacement {
+    left: number;
+    top?: number;
+    bottom?: number;
+    /** The room on the chosen side; a taller card scrolls within it. */
+    maxHeight: number;
+}
+
+/** Gap between an anchor and its card. */
+const CARD_GAP_PX = 4;
+/** The least room above or below worth a card that scrolls; less, and it goes beside the anchor. */
+const MIN_CARD_PX = 160;
+
+/**
+ * Places a card of `size` next to `anchor` without ever covering the anchor,
+ * or `clear` when given (the peek the anchor sits in): below them, else above
+ * them, else on the roomier of the two sides with its height bounded to that
+ * room. Only when neither side has room for a usable card does it go beside
+ * them. The card stays left-aligned with the anchor. A card above is held by
+ * its bottom edge, so content that grows after placement (an expanded
+ * passage) grows away from the anchor rather than over it.
+ */
+export function placeCard(
+    anchor: { top: number; bottom: number; left: number; right: number },
+    size: { width: number; height: number },
+    view: { width: number; height: number },
+    clear?: { top: number; bottom: number; left: number; right: number },
+): CardPlacement {
+    const keep = clear
+        ? {
+              top: Math.min(anchor.top, clear.top),
+              bottom: Math.max(anchor.bottom, clear.bottom),
+              left: Math.min(anchor.left, clear.left),
+              right: Math.max(anchor.right, clear.right),
+          }
+        : anchor;
+    const clampLeft = (left: number) => Math.max(EDGE_PX, Math.min(left, view.width - size.width - EDGE_PX));
+    const below: CardPlacement = {
+        left: clampLeft(anchor.left),
+        top: keep.bottom + CARD_GAP_PX,
+        maxHeight: Math.max(0, view.height - EDGE_PX - keep.bottom - CARD_GAP_PX),
+    };
+    const above: CardPlacement = {
+        left: clampLeft(anchor.left),
+        bottom: view.height - keep.top + CARD_GAP_PX,
+        maxHeight: Math.max(0, keep.top - CARD_GAP_PX - EDGE_PX),
+    };
+    if (size.height <= below.maxHeight) return below;
+    if (size.height <= above.maxHeight) return above;
+    const roomier = above.maxHeight > below.maxHeight ? above : below;
+    if (roomier.maxHeight >= MIN_CARD_PX) return roomier;
+    // Too little room above and below: beside, level with the anchor's top.
+    const right = keep.right + CARD_GAP_PX;
+    const left = keep.left - CARD_GAP_PX - size.width;
+    const fitsRight = right + size.width <= view.width - EDGE_PX;
+    if (!fitsRight && left < EDGE_PX) return roomier;
+    const fullHeight = Math.max(0, view.height - 2 * EDGE_PX);
+    const top = Math.max(EDGE_PX, Math.min(anchor.top, view.height - EDGE_PX - Math.min(size.height, fullHeight)));
+    return { left: fitsRight ? right : left, top, maxHeight: Math.max(0, view.height - EDGE_PX - top) };
 }
 
 /**
@@ -396,6 +535,22 @@ function canScroll(el: HTMLElement, deltaX: number, deltaY: number): boolean {
         if (deltaX < 0 ? el.scrollLeft > 0 : el.scrollLeft + el.clientWidth < el.scrollWidth - 1) return true;
     }
     return false;
+}
+
+/**
+ * Whether text is selected within `el`: a drag that selects text there ends
+ * in a click, which should not act as one.
+ */
+export function selectionWithin(el: Element | null | undefined): boolean {
+    const selection = el?.ownerDocument.defaultView?.getSelection();
+    if (!el || !selection || selection.isCollapsed || !selection.rangeCount) return false;
+    return (!!selection.anchorNode && el.contains(selection.anchorNode)) || (!!selection.focusNode && el.contains(selection.focusNode));
+}
+
+/** Whether text is selected anywhere in `node`'s document. */
+function hasSelection(node: Node): boolean {
+    const selection = node.ownerDocument?.defaultView?.getSelection();
+    return !!selection && !selection.isCollapsed;
 }
 
 let anchorSequence = 0;

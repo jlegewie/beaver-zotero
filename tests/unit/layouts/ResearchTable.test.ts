@@ -334,6 +334,100 @@ describe('the grid', () => {
     });
 });
 
+describe("a page tag's passage card", () => {
+    // jsdom has no layout: a clamped passage reports its clamped height as
+    // clientHeight and the whole passage as scrollHeight, as Gecko does.
+    const fullHeight = { value: 0 };
+    let restore: (() => void) | null = null;
+    beforeEach(() => {
+        const proto = HTMLElement.prototype;
+        const client = Object.getOwnPropertyDescriptor(proto, 'clientHeight');
+        const scroll = Object.getOwnPropertyDescriptor(proto, 'scrollHeight');
+        Object.defineProperty(proto, 'clientHeight', {
+            configurable: true,
+            get(this: HTMLElement) {
+                if (!this.classList.contains('rt-quote')) return 0;
+                return this.classList.contains('rt-quote-clamped') ? Math.min(fullHeight.value, 133) : fullHeight.value;
+            },
+        });
+        Object.defineProperty(proto, 'scrollHeight', {
+            configurable: true,
+            get(this: HTMLElement) {
+                return this.classList.contains('rt-quote') ? fullHeight.value : 0;
+            },
+        });
+        restore = () => {
+            if (client) Object.defineProperty(proto, 'clientHeight', client);
+            else delete (proto as { clientHeight?: number }).clientHeight;
+            if (scroll) Object.defineProperty(proto, 'scrollHeight', scroll);
+            else delete (proto as { scrollHeight?: number }).scrollHeight;
+        };
+    });
+    afterEach(() => {
+        restore?.();
+        restore = null;
+    });
+
+    /** Opens the card of the effect cell's page tag, from the cell's expansion. */
+    function openCard(quote: string): HTMLElement {
+        const spec = table();
+        spec.rows[0].cells.effect = model('Conditional transfers raised enrollment.', { evidence: [{ ...passage, quote }] });
+        mount({ table: spec });
+        const tag = expand(cell('r1', 'effect'))!.querySelector('.rt-tag-page')!;
+        hoverPeek(tag, container!);
+        return container!.querySelector<HTMLElement>('.bt-hover-card')!;
+    }
+
+    it('cuts a long passage to its first lines, and Show more reveals the rest', () => {
+        fullHeight.value = 456;
+        const card = openCard('A long passage. '.repeat(60));
+        const quote = card.querySelector('.rt-quote')!;
+        expect(quote.classList.contains('rt-quote-clamped')).toBe(true);
+        const toggle = card.querySelector<HTMLButtonElement>('.rt-quote-toggle')!;
+        expect(toggle.textContent).toBe('Show more');
+        expect(toggle.getAttribute('aria-expanded')).toBe('false');
+        click(toggle);
+        expect(quote.classList.contains('rt-quote-clamped')).toBe(false);
+        expect(toggle.textContent).toBe('Show less');
+        click(toggle);
+        expect(quote.classList.contains('rt-quote-clamped')).toBe(true);
+        // The card stays open with the link to the passage.
+        expect(container!.querySelector('.bt-hover-card .rt-link-button')?.textContent).toBe('Open in PDF');
+    });
+
+    it("stays open while the pointer crosses the cell's expansion on its way to the card", () => {
+        fullHeight.value = 40;
+        openCard('Enrollment rose by 3.4 points.');
+        const expansion = peek()!;
+        const tag = expansion.querySelector<HTMLElement>('.rt-tag-page')!;
+        const text = expansion.querySelector<HTMLElement>('.rt-peek-body')!;
+        const move = (from: Element, to: Element) => {
+            from.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: to }));
+            to.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: from }));
+        };
+        vi.useFakeTimers();
+        try {
+            act(() => move(tag, text));
+            act(() => vi.advanceTimersByTime(1000));
+            expect(container!.querySelector('.bt-hover-card')).not.toBeNull();
+            // Leaving the expansion for anywhere but the card closes both.
+            act(() => move(text, document.body));
+            act(() => vi.advanceTimersByTime(1000));
+            expect(container!.querySelector('.bt-hover-card')).toBeNull();
+            expect(peek()).toBeNull();
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('shows a short passage whole, without a toggle', () => {
+        fullHeight.value = 40;
+        const card = openCard('Enrollment rose by 3.4 points.');
+        expect(card.querySelector('.rt-quote')?.textContent).toBe('“Enrollment rose by 3.4 points.”');
+        expect(card.querySelector('.rt-quote-toggle')).toBeNull();
+    });
+});
+
 describe('pinned columns', () => {
     it('pins the rail and Paper column only while the grid has as much room again beside them', () => {
         let width = 1000;
@@ -1097,6 +1191,85 @@ describe('rows the user just added', () => {
     });
 });
 
+describe('sorting', () => {
+    const rowOrder = () =>
+        Array.from(container!.querySelectorAll<HTMLElement>('tbody tr[data-row-id]')).map((row) => row.dataset.rowId);
+    const header = (columnId: string) => container!.querySelector<HTMLElement>(`th[data-column-id="${columnId}"]`)!;
+    const sortedHeaders = () =>
+        Array.from(container!.querySelectorAll<HTMLElement>('th[aria-sort]')).map((th) => [th.dataset.columnId, th.getAttribute('aria-sort')]);
+    const withYears = () => {
+        const spec = table();
+        spec.rows[2].cells._year = { outcome: 'answered', provenance: 'system', value: { kind: 'date', value: '2015' } } as Cell;
+        return spec;
+    };
+
+    it('sorts by the item from its header menu, A → Z and Z → A', () => {
+        mount();
+        click(container!.querySelector('button[aria-label="Column menu: Item"]')!);
+        click(menuEntry('Sort A → Z')!);
+        expect(rowOrder()).toEqual(['r1', 'r3', 'r2']);
+        click(container!.querySelector('button[aria-label="Column menu: Item"]')!);
+        click(menuEntry('Sort Z → A')!);
+        expect(rowOrder()).toEqual(['r2', 'r3', 'r1']);
+    });
+
+    it('sorts by the year from its header menu, newest first, with rows without a year last', () => {
+        mount({ table: withYears() });
+        click(container!.querySelector('button[aria-label="Column menu: Year"]')!);
+        click(menuEntry('Sort newest first')!);
+        expect(rowOrder()).toEqual(['r3', 'r1', 'r2']);
+        click(container!.querySelector('button[aria-label="Column menu: Year"]')!);
+        click(menuEntry('Sort oldest first')!);
+        expect(rowOrder()).toEqual(['r1', 'r3', 'r2']);
+    });
+
+    it('marks the sorted column only, with its direction', () => {
+        mount();
+        expect(sortedHeaders()).toEqual([]);
+        expect(container!.querySelector('.rt-th-sort')).toBeNull();
+        click(container!.querySelector('button[aria-label="Column menu: Design"]')!);
+        click(menuEntry('Sort Z → A')!);
+        expect(sortedHeaders()).toEqual([['design', 'descending']]);
+        expect(header('design').querySelector('.rt-th-sort')?.getAttribute('title')).toBe('Sorted Z → A');
+        click(container!.querySelector('button[aria-label="Column menu: Year"]')!);
+        click(menuEntry('Sort oldest first')!);
+        expect(sortedHeaders()).toEqual([['_year', 'ascending']]);
+        expect(header('_year').querySelector('.rt-th-sort')?.getAttribute('title')).toBe('Sorted oldest first');
+    });
+
+    it("clears the sort from the sorted column's menu", () => {
+        mount();
+        click(container!.querySelector('button[aria-label="Column menu: Item"]')!);
+        expect(menuEntry('Clear sort')).toBeUndefined();
+        click(menuEntry('Sort Z → A')!);
+        click(container!.querySelector('button[aria-label="Column menu: Item"]')!);
+        click(menuEntry('Clear sort')!);
+        expect(rowOrder()).toEqual(['r1', 'r2', 'r3']);
+        expect(sortedHeaders()).toEqual([]);
+    });
+
+    it('names the paper column Item in the toolbar Sort menu and its label', () => {
+        mount();
+        click(container!.querySelector('button[aria-label="Sort rows"]')!);
+        const entries = Array.from(document.querySelectorAll<HTMLElement>('.bt-menu-check span:last-child')).map((el) => el.textContent);
+        expect(entries.slice(0, 2)).toEqual(['Item', 'Year']);
+        click(menuEntry('Item')!);
+        expect(container!.querySelector('button[aria-label="Sort rows"]')!.textContent).toBe('Sort: Item ↑');
+    });
+
+    it('keeps offering the item and the year for a different table in the same view', () => {
+        mount();
+        const other = table();
+        other.id = 'other';
+        other.key = 'OTHERKEY';
+        act(() => root?.render(h(ResearchTable, { table: other })));
+        expect(container!.querySelector('button[aria-label="Column menu: Year"]')).not.toBeNull();
+        click(container!.querySelector('button[aria-label="Sort rows"]')!);
+        const entries = Array.from(document.querySelectorAll<HTMLElement>('.bt-menu-check span:last-child')).map((el) => el.textContent);
+        expect(entries.slice(0, 2)).toEqual(['Item', 'Year']);
+    });
+});
+
 describe('activity', () => {
     it("reports selecting a cell and changing the search, but not the table's first render", () => {
         const onActivity = vi.fn();
@@ -1233,5 +1406,169 @@ describe('a running fill', () => {
         rerender({ filling: [running[1]] });
         expect(cell('r1', 'effect').hasAttribute('data-fill')).toBe(false);
         expect(cell('r3', 'effect').dataset.fill).toBe('active');
+    });
+});
+
+describe('selecting and copying text', () => {
+    /** Selects the text of `el`, as a drag over it would. */
+    const selectText = (el: Element) => {
+        const selection = window.getSelection()!;
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        selection.removeAllRanges();
+        selection.addRange(range);
+    };
+    const copyButton = () => peek()!.querySelector<HTMLButtonElement>('button[aria-label="Copy answer"]');
+    const pressCopy = () =>
+        act(() => {
+            document.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', metaKey: true, bubbles: true }));
+        });
+
+    afterEach(() => window.getSelection()?.removeAllRanges());
+
+    it("copies a cell's answer from the icon before Edit, keeping the expansion open", () => {
+        const onCopy = vi.fn();
+        mount({ onCopy, cellEditing: { onEdit: vi.fn() } as never });
+        expand(cell('r1', 'effect'));
+        const buttons = peekButtons();
+        expect(buttons.map((b) => b.getAttribute('aria-label'))).toEqual(['Copy answer', 'Edit Headline effect']);
+        // Icon only.
+        expect(buttons[0].textContent).toBe('');
+        click(buttons[0]);
+        expect(onCopy).toHaveBeenCalledWith('Conditional transfers raised enrollment.');
+        expect(peek()).not.toBeNull();
+        expect(inspector()).toBeNull();
+        expect(peekButtons()[0].getAttribute('aria-label')).toBe('Copied');
+    });
+
+    it('copies a Category answer as its label, and offers no Copy without an answer', () => {
+        const onCopy = vi.fn();
+        mount({ onCopy });
+        expand(cell('r1', 'design'));
+        click(copyButton()!);
+        expect(onCopy).toHaveBeenCalledWith('RCT');
+        act(() => {
+            peek()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        });
+        // Not reported: nothing to copy, and with no Edit, no footer.
+        expect(expand(cell('r2', 'design'))!.querySelector('.rt-peek-footer')).toBeNull();
+    });
+
+    it('does not open the cell when a click ends selecting text in it or its expansion', () => {
+        mount();
+        const expansion = expand(cell('r1', 'effect'))!;
+        selectText(expansion.querySelector('.rt-text')!);
+        click(expansion.querySelector('.rt-peek')!);
+        expect(peek()).not.toBeNull();
+        expect(inspector()).toBeNull();
+        selectText(cell('r1', 'effect').querySelector('.rt-text')!);
+        click(cell('r1', 'effect'));
+        expect(inspector()).toBeNull();
+        // A plain click still opens it.
+        window.getSelection()!.removeAllRanges();
+        click(cell('r1', 'effect'));
+        expect(inspector()).not.toBeNull();
+    });
+
+    it('keeps an expansion open while it holds a selection, and closes it once the selection goes', () => {
+        mount();
+        const expansion = expand(cell('r1', 'effect'))!;
+        selectText(expansion.querySelector('.rt-text')!);
+        vi.useFakeTimers();
+        try {
+            act(() => {
+                expansion.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body }));
+            });
+            act(() => {
+                vi.advanceTimersByTime(1000);
+            });
+            expect(peek()).not.toBeNull();
+            act(() => {
+                window.getSelection()!.removeAllRanges();
+                document.dispatchEvent(new Event('selectionchange'));
+            });
+            expect(peek()).toBeNull();
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('keeps an expansion holding a selection when the pointer crosses another cell', () => {
+        mount();
+        const expansion = expand(cell('r1', 'effect'))!;
+        selectText(expansion.querySelector('.rt-text')!);
+        expect(expand(cell('r1', 'amount'))).toBe(expansion);
+        expect(expansion.textContent).toContain('Conditional transfers raised enrollment.');
+    });
+
+    it('opens no expansion or tip while text is selected, which opening it would collapse', () => {
+        mount();
+        // Grid text selected: hovering another cell opens no expansion.
+        selectText(cell('r1', 'effect').querySelector('.rt-text')!);
+        expect(expand(cell('r1', 'amount'))).toBeNull();
+        window.getSelection()!.removeAllRanges();
+        // Expansion text selected: hovering its page tag opens no card.
+        const expansion = expand(cell('r1', 'effect'))!;
+        selectText(expansion.querySelector('.rt-text')!);
+        hoverPeek(expansion.querySelector('.rt-tag-page')!, container!);
+        expect(document.querySelector('.bt-hover-card')).toBeNull();
+        expect(peek()).toBe(expansion);
+    });
+
+    it('selects a passage without opening it, and opens it with a plain click or Enter', () => {
+        mount();
+        click(cell('r1', 'effect'));
+        const passageEl = inspector()!.querySelector<HTMLElement>('.rt-passage[role="button"]')!;
+        selectText(passageEl.querySelector('.rt-passage-text')!);
+        click(passageEl);
+        expect(activateCitation).not.toHaveBeenCalled();
+        window.getSelection()!.removeAllRanges();
+        click(passageEl);
+        expect(activateCitation).toHaveBeenCalledTimes(1);
+        act(() => {
+            passageEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        });
+        expect(activateCitation).toHaveBeenCalledTimes(2);
+    });
+
+    it("selects a paper-view answer without opening its cell", () => {
+        mount();
+        click(paperCell('r1'));
+        const block = inspector()!.querySelector<HTMLElement>('.rt-paper-question[data-column-id="effect"]')!;
+        selectText(block.querySelector('.rt-paper-question-value')!);
+        click(block.querySelector('.rt-paper-question-value')!);
+        expect(inspector()!.getAttribute('data-view')).toBe('paper');
+        window.getSelection()!.removeAllRanges();
+        click(block.querySelector('.rt-paper-question-value')!);
+        expect(inspector()!.getAttribute('data-column-id')).toBe('effect');
+    });
+
+    it('copies the selected text with Cmd+C and from the context menu, within the table only', () => {
+        const onCopy = vi.fn();
+        mount({ onCopy });
+        // The expansion, drawn beside the surface.
+        selectText(expand(cell('r1', 'design'))!.querySelector('.rt-peek-body .bt-pill')!);
+        pressCopy();
+        expect(onCopy).toHaveBeenLastCalledWith('RCT');
+        onCopy.mockClear();
+        window.getSelection()!.removeAllRanges();
+        click(cell('r1', 'effect'));
+        selectText(inspector()!.querySelector('.rt-inspector-reasoning')!);
+        pressCopy();
+        expect(onCopy).toHaveBeenLastCalledWith('Table 2 reports it.');
+        act(() => {
+            inspector()!
+                .querySelector('.rt-inspector-reasoning')!
+                .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 5, clientY: 5 }));
+        });
+        click(menuEntry('Copy')!);
+        expect(onCopy).toHaveBeenCalledTimes(2);
+        const outside = document.createElement('p');
+        outside.textContent = 'Elsewhere';
+        document.body.appendChild(outside);
+        selectText(outside);
+        pressCopy();
+        expect(onCopy).toHaveBeenCalledTimes(2);
+        outside.remove();
     });
 });

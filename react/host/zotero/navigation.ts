@@ -1,6 +1,6 @@
 import { resolveCollection } from '../../../src/services/collections/collectionIdentity';
 import { tryGetWindowRuntime } from '../../runtime/windowRuntime';
-import { openStoredTable, undoStoredTableEdit } from './tables';
+import { openStoredTableForUser, undoStoredTableEdit } from './tables';
 import type { NavigationHost, AttachmentMatchNavigation } from '@beaver/agent-ui/host/types';
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import type { ViewAttachment } from '@beaver/agent-core/types/attachments/apiTypes';
@@ -60,7 +60,7 @@ function findCollectionByKey(key: string, libraryID: number | null): Zotero.Coll
  * The richer `activateCitation` flow lives in `./citationActivation`.
  */
 export const zoteroNavigation: NavigationHost = {
-    openTable: openStoredTable,
+    openTable: openStoredTableForUser,
     undoTableEdit: undoStoredTableEdit,
     itemMenuItems,
     revealInLibrary(ref: ZoteroItemReference): void {

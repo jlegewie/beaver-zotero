@@ -9,7 +9,8 @@ import {
     fillButtonRows,
     formatCredits,
     pendingLines,
-    planCostLine,
+    planSourcesLine,
+    planTitle,
     planRowLine,
     pricingSentence,
     progressLine,
@@ -111,7 +112,12 @@ describe("table fill copy", () => {
     });
 
     it("describes a plan: what it fills, what it reads, what it costs and how far the balance reaches", () => {
-        expect(planCostLine(plan({ credits: 9.2 }))).toBe("Fill 46 items · 9.2 credits");
+        expect(planTitle(plan())).toBe("Fill 46 items");
+        expect(planSourcesLine(plan())).toBe("43 from PDF · 3 from title and abstract");
+        expect(planSourcesLine(plan({ document_kinds: { pdf: 40, epub: 3 }, no_input: 1, unavailable: 1 }))).toBe(
+            "43 from full text · 3 from title and abstract · 2 can't be read",
+        );
+        expect(planSourcesLine(plan({ documents: 0, title_abstract: 0 }))).toBeNull();
         expect(planRowLine(plan())).toBe("Reads 46 items: 43 from the PDF, 3 from title and abstract");
         expect(planRowLine(plan({ document_kinds: { pdf: 40, epub: 3 }, no_input: 1, unavailable: 1, rows: 48 }))).toBe(
             "Reads 46 items: 43 from their documents, 3 from title and abstract. 2 items can't be read and are skipped",
@@ -129,13 +135,26 @@ describe("table fill copy", () => {
                     }),
                 }),
             ),
-        ).toEqual(["3 new items", "Not yet answered: Sample", "Changed column: Method"]);
+        ).toEqual([
+            { label: "New items", value: "3" },
+            { label: "New column", value: "Sample" },
+            { label: "Changed", value: "Method" },
+        ]);
+        // A table never filled: every row is new, and the heading already says so.
+        expect(pendingLines(plan({ pending: pending({ rows: 13, new_rows: 13 }) }))).toEqual([]);
+        // A column that already has answers names its empty cells instead.
+        expect(
+            pendingLines(
+                plan({ pending: pending({ rows: 2, columns: [{ id: "n", header: "Sample", reason: "new", cells: 2 }] }) }),
+                new Set(["n"]),
+            ),
+        ).toEqual([{ label: "Empty cells", value: "Sample" }]);
         // Unreadable rows are skipped, not filled.
-        expect(planCostLine(plan({ rows: 4, documents: 2, title_abstract: 1, unavailable: 1, credits: 0.45 }))).toBe("Fill 3 items · 0.45 credits");
-        expect(pendingLines(plan({ scope: { kind: "retry_failed" }, rows: 2 }))).toEqual(["Retry 2 items that failed last time"]);
+        expect(planTitle(plan({ rows: 4, documents: 2, title_abstract: 1, unavailable: 1 }))).toBe("Fill 3 items");
+        expect(pendingLines(plan({ scope: { kind: "retry_failed" }, rows: 2 }))).toEqual([{ value: "Retry 2 items that failed last time" }]);
         expect(balanceLine(plan({ credits: 9.2, balance: 6, documents: 46, title_abstract: 0 }))).toBe("Your 6 credits cover about 30 of 46 items");
         expect(balanceLine(plan())).toBeNull();
-        expect(planCostLine(plan({ rows: 5, documents: 5, title_abstract: 0, credits: 1 }))).toBe("Fill 5 items · 1 credit");
+        expect(planTitle(plan({ rows: 5, documents: 5, title_abstract: 0 }))).toBe("Fill 5 items");
         expect(balanceLine(plan({ credits: 9.2, balance: 1, documents: 46, title_abstract: 0 }))).toBe("Your 1 credit covers about 5 of 46 items");
         expect(balanceLine(plan({ balance: null }))).toBeNull();
     });

@@ -8,12 +8,13 @@ import {
     type Cell,
     type Column,
     type Row,
+    type TableSort,
     type TableSpec,
 } from "@beaver/agent-core/layouts/table";
-import { ArrowDownIcon, CancelIcon, EditIcon, Icon, PlusSignIcon, RepeatIcon, TickIcon } from "../../icons";
+import { ArrowDownIcon, ArrowUpLineIcon, CancelIcon, CopyIcon, EditIcon, Icon, PlusSignIcon, RepeatIcon, TickIcon } from "../../icons";
 import type { MenuItem } from "../../primitives/ContextMenu";
 import MenuButton from "../../primitives/MenuButton";
-import { useHoverAnchor, useHoverLayer } from "../../primitives/HoverLayer";
+import { selectionWithin, useHoverAnchor, useHoverLayer } from "../../primitives/HoverLayer";
 import type { TextRenderer } from "../tableView";
 import type { TableState } from "../useTableState";
 import { useRowWindow } from "../useRowWindow";
@@ -24,6 +25,8 @@ import {
     columnBadges,
     isNewRow,
     newBadgeText,
+    PAPER_HEADER,
+    sortOrderLabel,
     staleBadgeText,
     type CellFill,
     type ResearchColumns,
@@ -47,7 +50,7 @@ export interface ResearchGridProps {
     selected: CellAddress | null;
     onSelectCell(address: CellAddress): void;
     rowMenuItems(row: Row): MenuItem[];
-    /** A question column's menu (on hover over its header). */
+    /** A column's menu (on hover over its header); an empty one shows no button. */
     columnMenuItems?(column: Column): MenuItem[];
     /** The (+) after the last column; absent, no add column. */
     onAddColumn?(): void;
@@ -64,6 +67,8 @@ export interface ResearchGridProps {
     onEditCell?(address: CellAddress): void;
     /** Why cells cannot be edited (a read-only library); the Edit shows it. */
     cellEditDisabledReason?: string;
+    /** Copies a cell's answer: the Copy in its expansion. Absent, no Copy. */
+    onCopyCell?(text: string): void;
     /** The open cell editor, floated over its cell and the rows below. */
     cellEditor?: { address: CellAddress; content: React.ReactNode; list: boolean } | null;
     /** A running fill's cells, by row ({@link rowFills}). */
@@ -132,6 +137,7 @@ export function ResearchGrid({
     filteredEmptyText,
     onEditCell,
     cellEditDisabledReason,
+    onCopyCell,
     cellEditor,
     fills,
     addedRows,
@@ -159,7 +165,7 @@ export function ResearchGrid({
     });
     const windowRows = virtualize ? state.rows.slice(rowWindow.start, rowWindow.end) : state.rows;
     const addColumn = !!onAddColumn;
-    const minWidth = `calc(2.75rem + 20rem + ${columns.year ? "4.5rem + " : ""}${addColumn ? `${ADD_WIDTH} + ` : ""}${questions
+    const minWidth = `calc(2.75rem + 20rem + ${columns.year ? `${YEAR_WIDTH} + ` : ""}${addColumn ? `${ADD_WIDTH} + ` : ""}${questions
         .map((column) => questionWidth(column) ?? FLEX_MIN)
         .join(" + ") || "0px"})`;
     const columnCount = 2 + (columns.year ? 1 : 0) + questions.length + (addColumn ? 1 : 0);
@@ -171,7 +177,7 @@ export function ResearchGrid({
                 <colgroup>
                     <col style={{ width: "2.75rem" }} />
                     <col style={{ width: "20rem" }} />
-                    {columns.year ? <col style={{ width: "4.5rem" }} /> : null}
+                    {columns.year ? <col style={{ width: YEAR_WIDTH }} /> : null}
                     {questions.map((column) => (
                         <col key={column.id} style={{ width: questionWidth(column) }} />
                     ))}
@@ -188,18 +194,34 @@ export function ResearchGrid({
                                 />
                             ) : null}
                         </th>
-                        <th className="rt-th rt-th-paper" scope="col">
-                            <span className="rt-th-label">Item</span>
-                        </th>
-                        {columns.year ? (
-                            <th className="rt-th rt-th-year" scope="col">
-                                <span className="rt-th-label">{columns.year.header}</span>
+                        {columns.paper ? (
+                            <ColumnHeader
+                                column={columns.paper}
+                                kind="paper"
+                                sort={state.sort}
+                                menuItems={columnMenuItems}
+                            />
+                        ) : (
+                            <th className="rt-th rt-th-paper" scope="col">
+                                <div className="rt-th-top">
+                                    <span className="rt-th-label">{PAPER_HEADER}</span>
+                                </div>
                             </th>
+                        )}
+                        {columns.year ? (
+                            <ColumnHeader
+                                column={columns.year}
+                                kind="year"
+                                sort={state.sort}
+                                menuItems={columnMenuItems}
+                            />
                         ) : null}
                         {questions.map((column) => (
-                            <QuestionHeader
+                            <ColumnHeader
                                 key={column.id}
                                 column={column}
+                                kind="question"
+                                sort={state.sort}
                                 badges={badges.get(column.id)!}
                                 menuItems={columnMenuItems}
                             />
@@ -242,6 +264,7 @@ export function ResearchGrid({
                             addColumn={addColumn}
                             onEditCell={onEditCell}
                             editDisabledReason={cellEditDisabledReason}
+                            onCopyCell={onCopyCell}
                             fill={fills?.get(row.id)}
                             isAdded={!!addedRows?.has(row.id)}
                         />
@@ -313,6 +336,8 @@ function CellEditorLayer({
 }
 
 const ADD_WIDTH = "3.25rem";
+/** Room for "Year", its sort mark and the column menu's button. */
+const YEAR_WIDTH = "5.5rem";
 
 function Spacer({ height }: { height: number }): React.ReactElement {
     return (
@@ -376,43 +401,53 @@ function SelectBox({
 }
 
 /**
- * A question column's header: its name and badges over its question, and the
- * column menu's button on hover.
+ * A column's header: its name, the sort mark when the view is sorted by it,
+ * and the column menu's button on hover. A question's header adds its badges
+ * and, under the name, its question.
  */
-function QuestionHeader({
+function ColumnHeader({
     column,
+    kind,
+    sort,
     badges,
     menuItems,
 }: {
     column: Column;
-    badges: ReturnType<typeof columnBadges>;
+    kind: "paper" | "year" | "question";
+    sort: TableSort | undefined;
+    badges?: ReturnType<typeof columnBadges>;
     menuItems?(column: Column): MenuItem[];
 }): React.ReactElement {
     // The menu renders inside this sticky cell, which stacks on its own: while
     // it is open the cell is raised over its neighbours, or the next header
     // would paint over the menu and take its clicks.
     const [menuOpen, setMenuOpen] = React.useState(false);
+    const label = kind === "paper" ? PAPER_HEADER : column.header;
+    const items = menuItems?.(column) ?? [];
+    const direction = sort?.column_id === column.id ? sort.direction : undefined;
     return (
         <th
-            className={`rt-th rt-th-question${menuOpen ? " rt-th-menu-open" : ""}`}
+            className={`rt-th rt-th-${kind}${items.length ? " rt-th-has-menu" : ""}${menuOpen ? " rt-th-menu-open" : ""}`}
             scope="col"
             data-column-id={column.id}
+            aria-sort={direction === "asc" ? "ascending" : direction === "desc" ? "descending" : undefined}
         >
-            {menuItems ? (
+            {items.length ? (
                 <span className="rt-column-menu">
                     <MenuButton
-                        menuItems={menuItems(column)}
+                        menuItems={items}
                         variant="ghost-secondary"
                         icon={ArrowDownIcon}
-                        ariaLabel={`Column menu: ${column.header}`}
+                        ariaLabel={`Column menu: ${label}`}
                         width="13rem"
                         toggleCallback={setMenuOpen}
                     />
                 </span>
             ) : null}
             <div className="rt-th-top">
-                <span className="rt-th-label">{column.header}</span>
-                {badges.staleCells > 0 ? (
+                <span className="rt-th-label">{label}</span>
+                {direction ? <SortMark direction={direction} year={kind === "year"} /> : null}
+                {badges && badges.staleCells > 0 ? (
                     <Badge
                         className="rt-badge rt-badge-stale"
                         text={staleBadgeText(badges.staleCells, badges.staleReason)}
@@ -421,18 +456,36 @@ function QuestionHeader({
                         {badges.staleCells}
                     </Badge>
                 ) : null}
-                {badges.newCells > 0 ? (
+                {badges && badges.newCells > 0 ? (
                     <Badge className="rt-badge rt-badge-new" text={newBadgeText(badges.newCells)}>
                         New
                     </Badge>
                 ) : null}
             </div>
-            {column.description ? (
+            {kind === "question" && column.description ? (
                 <div className="rt-th-question-text" title={column.description}>
                     {column.description}
                 </div>
             ) : null}
         </th>
+    );
+}
+
+/**
+ * The quiet arrow after a header's name while the view is sorted by that
+ * column: up for A → Z (oldest first), down for Z → A. A full arrow rather
+ * than a chevron, which is the column menu's button.
+ */
+function SortMark({ direction, year }: { direction: TableSort["direction"]; year: boolean }): React.ReactElement {
+    return (
+        <span className="rt-th-sort" title={`Sorted ${sortOrderLabel(direction, year)}`}>
+            <Icon
+                icon={ArrowUpLineIcon}
+                size={11}
+                aria-hidden="true"
+                style={direction === "desc" ? { transform: "rotate(180deg)" } : undefined}
+            />
+        </span>
     );
 }
 
@@ -472,6 +525,7 @@ interface ResearchRowProps {
     addColumn: boolean;
     onEditCell?(address: CellAddress): void;
     editDisabledReason?: string;
+    onCopyCell?(text: string): void;
     fill?: RowFill;
 }
 
@@ -494,6 +548,7 @@ const ResearchRow = React.memo(function ResearchRow({
     addColumn,
     onEditCell,
     editDisabledReason,
+    onCopyCell,
     fill,
 }: ResearchRowProps): React.ReactElement {
     const lookOf = useRowFillLooks(fill, row);
@@ -544,6 +599,7 @@ const ResearchRow = React.memo(function ResearchRow({
                     onSelect={onSelectCell}
                     onEdit={onEditCell}
                     editDisabledReason={editDisabledReason}
+                    onCopy={onCopyCell}
                     fill={cellFill(fill, column.id)}
                     look={lookOf(column.id)}
                 />
@@ -605,7 +661,7 @@ function PaperGridCell({
                 .join(" ")}
             data-column-id={paperColumnId}
             tabIndex={select ? 0 : undefined}
-            onClick={select}
+            onClick={select ? (event) => onCellClick(event, select) : undefined}
             onKeyDown={select ? (event) => onCellKey(event, select) : undefined}
             {...anchor}
         >
@@ -635,6 +691,12 @@ function useCellPeek(
     return { onMouseEnter, onMouseLeave, onMouseDown };
 }
 
+/** A click on the cell selects it, unless it ended a drag that selected its text. */
+function onCellClick(event: React.MouseEvent<HTMLElement>, select: () => void): void {
+    if (selectionWithin(event.currentTarget)) return;
+    select();
+}
+
 /** Enter or Space on the cell itself (not a control in it) selects it. */
 function onCellKey(event: React.KeyboardEvent<HTMLElement>, select: () => void): void {
     if (event.target !== event.currentTarget) return;
@@ -646,9 +708,9 @@ function onCellKey(event: React.KeyboardEvent<HTMLElement>, select: () => void):
 
 /**
  * A cell's expansion: its whole content, and its actions in a footer. A click
- * on the content selects the cell, as a click on the cell does; the
- * expansion closes first, since the inspector narrows the grid and the peek
- * would float over where the cell was.
+ * on the content selects the cell, as a click on the cell does (not one that
+ * ends selecting its text); the expansion closes first, since the inspector
+ * narrows the grid and the peek would float over where the cell was.
  */
 function CellPeek({
     onSelect,
@@ -671,7 +733,8 @@ function CellPeek({
             tabIndex={onSelect ? -1 : undefined}
             onClick={
                 onSelect
-                    ? () => {
+                    ? (event) => {
+                          if (selectionWithin(event.currentTarget)) return;
                           hide();
                           onSelect();
                       }
@@ -785,6 +848,7 @@ function QuestionCell({
     onSelect,
     onEdit,
     editDisabledReason,
+    onCopy,
     fill,
     look,
 }: {
@@ -796,6 +860,7 @@ function QuestionCell({
     onSelect(address: CellAddress): void;
     onEdit?(address: CellAddress): void;
     editDisabledReason?: string;
+    onCopy?(text: string): void;
     /** What the running fill does with the cell, as the job last said. */
     fill?: CellFill;
     /** How the grid shows it ({@link useRowFillLooks}). */
@@ -809,40 +874,46 @@ function QuestionCell({
     const select = () => onSelect({ rowId: row.id, columnId: column.id });
     // A narrow Category or Yes / no column gets a wider expansion.
     const peekWidth = column.type === "select" || column.type === "boolean" ? SHORT_PEEK_PX : undefined;
-    const anchor = useCellPeek((hide) => (
-        <CellPeek
-            onSelect={select}
-            hide={hide}
-            align={columnAlign(column)}
-            footer={
-                onEdit ? (
-                    <div className="rt-peek-footer">
-                        <button
-                            type="button"
-                            className="rt-peek-action"
-                            aria-label={`Edit ${column.header}`}
-                            title={editDisabledReason ?? "Edit answer"}
-                            disabled={!!editDisabledReason}
-                            onClick={(event) => {
-                                event.stopPropagation();
-                                hide();
-                                onEdit({ rowId: row.id, columnId: column.id });
-                            }}
-                        >
-                            <Icon icon={EditIcon} size={12} />
-                            Edit
-                        </button>
-                    </div>
-                ) : null
-            }
-        >
-            {/* The expansion draws when the table does, so it follows the job, not the look. */}
-            {fill ? <FillNote fill={fill} replacing={!pending} /> : null}
-            {fill && pending ? null : (
-                <CellBody row={row} cell={cell} column={column} renderText={renderText} documents={documents} full />
-            )}
-        </CellPeek>
-    ), peekWidth);
+    const anchor = useCellPeek((hide) => {
+        const copyText = onCopy ? answerText(cell) : "";
+        return (
+            <CellPeek
+                onSelect={select}
+                hide={hide}
+                align={columnAlign(column)}
+                footer={
+                    onEdit || copyText ? (
+                        <div className="rt-peek-footer">
+                            {copyText ? <CopyAction text={copyText} onCopy={onCopy!} /> : null}
+                            {onEdit ? (
+                                <button
+                                    type="button"
+                                    className="rt-peek-action"
+                                    aria-label={`Edit ${column.header}`}
+                                    title={editDisabledReason ?? "Edit answer"}
+                                    disabled={!!editDisabledReason}
+                                    onClick={(event) => {
+                                        event.stopPropagation();
+                                        hide();
+                                        onEdit({ rowId: row.id, columnId: column.id });
+                                    }}
+                                >
+                                    <Icon icon={EditIcon} size={12} />
+                                    Edit
+                                </button>
+                            ) : null}
+                        </div>
+                    ) : null
+                }
+            >
+                {/* The expansion draws when the table does, so it follows the job, not the look. */}
+                {fill ? <FillNote fill={fill} replacing={!pending} /> : null}
+                {fill && pending ? null : (
+                    <CellBody row={row} cell={cell} column={column} renderText={renderText} documents={documents} full />
+                )}
+            </CellPeek>
+        );
+    }, peekWidth);
     return (
         <td
             id={cellIdFor(row.id, column.id)}
@@ -861,7 +932,7 @@ function QuestionCell({
             aria-busy={look === "queued" || look === "active" ? true : undefined}
             tabIndex={0}
             aria-label={`${column.header}: open details`}
-            onClick={select}
+            onClick={(event) => onCellClick(event, select)}
             onKeyDown={(event) => onCellKey(event, select)}
             {...anchor}
         >
@@ -873,6 +944,44 @@ function QuestionCell({
                 )}
             </div>
         </td>
+    );
+}
+
+/**
+ * A cell's answer as plain text, to copy: Yes / No as the grid shows it, text
+ * without its citation tags. Empty when the cell holds no answer.
+ */
+function answerText(cell: Cell | undefined): string {
+    if (cell?.outcome !== "answered" || !cell.value) return "";
+    if (cell.value.kind === "boolean") return cell.value.value ? "Yes" : "No";
+    return cellValueText(cell.value).trim();
+}
+
+/** How long the Copy shows that it copied. */
+const COPIED_MS = 1400;
+
+/** The Copy in a cell's expansion: an icon, a tick for a moment once it copied. */
+function CopyAction({ text, onCopy }: { text: string; onCopy(text: string): void }): React.ReactElement {
+    const [copied, setCopied] = useState(false);
+    const timer = useRef<ReturnType<typeof setTimeout>>();
+    useEffect(() => () => clearTimeout(timer.current), []);
+    return (
+        <button
+            type="button"
+            className="rt-peek-action rt-peek-copy"
+            aria-label={copied ? "Copied" : "Copy answer"}
+            title={copied ? "Copied" : "Copy answer"}
+            onClick={(event) => {
+                // The expansion stays open; its click would open the cell.
+                event.stopPropagation();
+                onCopy(text);
+                setCopied(true);
+                clearTimeout(timer.current);
+                timer.current = setTimeout(() => setCopied(false), COPIED_MS);
+            }}
+        >
+            <Icon icon={copied ? TickIcon : CopyIcon} size={12} />
+        </button>
     );
 }
 

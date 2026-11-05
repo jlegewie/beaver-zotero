@@ -4,6 +4,7 @@ import { rowReference } from "@beaver/agent-core/layouts/tableCitations";
 import { ArrowDownIcon, ArrowRightIcon, ArrowUpIcon, CancelIcon, EditIcon, FileIcon, Icon } from "../../icons";
 import type { MenuItem } from "../../primitives/ContextMenu";
 import type { TextRenderer } from "../tableView";
+import { selectionWithin } from "../../primitives/HoverLayer";
 import { EvidencePassage, StatusTag } from "./CellTags";
 import {
     inspectorContent,
@@ -496,10 +497,21 @@ function PaperDetails({
             <div className="rt-paper-questions">
                 {questions.map((column) => {
                     const cell = row.cells[column.id];
-                    // The block is one button: its ::after covers the block,
-                    // and the page chips (buttons themselves) sit above it.
+                    // A click anywhere on the block opens the cell, as its
+                    // heading does; not one on a page chip, nor one that ends
+                    // selecting the answer.
                     return (
-                        <div key={column.id} className="rt-paper-question" data-column-id={column.id}>
+                        <div
+                            key={column.id}
+                            className="rt-paper-question"
+                            data-column-id={column.id}
+                            onClick={(event) => {
+                                const target = event.target as Element;
+                                if (target.closest?.('button, a, [role="button"]')) return;
+                                if (selectionWithin(event.currentTarget)) return;
+                                onColumn(column.id);
+                            }}
+                        >
                             <button type="button" className="rt-paper-question-open" onClick={() => onColumn(column.id)}>
                                 <span className="rt-inspector-heading">{column.header}</span>
                                 <Icon icon={ArrowRightIcon} size={12} className="rt-inspector-chevron" />

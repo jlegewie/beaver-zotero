@@ -58,7 +58,7 @@ export const TableArtifactRow: React.FC<TableArtifactRowProps> = ({ row }) => {
         }
         const outcome = await open(record.reference.key, surfaceWindow, { onDownload: () => setOpenMessage('Downloading table…') })
             .catch(() => ({ error: 'Table provider unavailable.' }));
-        setOpenMessage('error' in outcome ? outcome.error : (outcome.warning ?? ''));
+        setOpenMessage('error' in outcome ? '' : (outcome.warning ?? ''));
     }, [record.reference.key, surfaceWindow]);
 
     const headerIcon = isHovered ? (isExpanded ? ArrowDownIcon : ArrowRightIcon) : TableIcon;

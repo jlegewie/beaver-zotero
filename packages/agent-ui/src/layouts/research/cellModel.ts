@@ -186,6 +186,15 @@ export function evidenceTagLabel(
 // Columns and rows
 // ---------------------------------------------------------------------------
 
+/** The paper column's header, whatever the spec calls it. */
+export const PAPER_HEADER = "Item";
+
+/** A sort order in words: "A → Z", or "oldest first" for the year. */
+export function sortOrderLabel(direction: "asc" | "desc", year: boolean): string {
+    if (year) return direction === "asc" ? "oldest first" : "newest first";
+    return direction === "asc" ? "A → Z" : "Z → A";
+}
+
 // ---------------------------------------------------------------------------
 // A running fill
 // ---------------------------------------------------------------------------
