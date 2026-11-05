@@ -8,9 +8,10 @@ import {
     type Cell,
     type Column,
     type Row,
+    type TableSort,
     type TableSpec,
 } from "@beaver/agent-core/layouts/table";
-import { ArrowDownIcon, CancelIcon, EditIcon, Icon, PlusSignIcon, RepeatIcon, TickIcon } from "../../icons";
+import { ArrowDownIcon, ArrowUpLineIcon, CancelIcon, EditIcon, Icon, PlusSignIcon, RepeatIcon, TickIcon } from "../../icons";
 import type { MenuItem } from "../../primitives/ContextMenu";
 import MenuButton from "../../primitives/MenuButton";
 import { useHoverAnchor, useHoverLayer } from "../../primitives/HoverLayer";
@@ -24,6 +25,8 @@ import {
     columnBadges,
     isNewRow,
     newBadgeText,
+    PAPER_HEADER,
+    sortOrderLabel,
     staleBadgeText,
     type CellFill,
     type ResearchColumns,
@@ -47,7 +50,7 @@ export interface ResearchGridProps {
     selected: CellAddress | null;
     onSelectCell(address: CellAddress): void;
     rowMenuItems(row: Row): MenuItem[];
-    /** A question column's menu (on hover over its header). */
+    /** A column's menu (on hover over its header); an empty one shows no button. */
     columnMenuItems?(column: Column): MenuItem[];
     /** The (+) after the last column; absent, no add column. */
     onAddColumn?(): void;
@@ -159,7 +162,7 @@ export function ResearchGrid({
     });
     const windowRows = virtualize ? state.rows.slice(rowWindow.start, rowWindow.end) : state.rows;
     const addColumn = !!onAddColumn;
-    const minWidth = `calc(2.75rem + 20rem + ${columns.year ? "4.5rem + " : ""}${addColumn ? `${ADD_WIDTH} + ` : ""}${questions
+    const minWidth = `calc(2.75rem + 20rem + ${columns.year ? `${YEAR_WIDTH} + ` : ""}${addColumn ? `${ADD_WIDTH} + ` : ""}${questions
         .map((column) => questionWidth(column) ?? FLEX_MIN)
         .join(" + ") || "0px"})`;
     const columnCount = 2 + (columns.year ? 1 : 0) + questions.length + (addColumn ? 1 : 0);
@@ -171,7 +174,7 @@ export function ResearchGrid({
                 <colgroup>
                     <col style={{ width: "2.75rem" }} />
                     <col style={{ width: "20rem" }} />
-                    {columns.year ? <col style={{ width: "4.5rem" }} /> : null}
+                    {columns.year ? <col style={{ width: YEAR_WIDTH }} /> : null}
                     {questions.map((column) => (
                         <col key={column.id} style={{ width: questionWidth(column) }} />
                     ))}
@@ -188,18 +191,34 @@ export function ResearchGrid({
                                 />
                             ) : null}
                         </th>
-                        <th className="rt-th rt-th-paper" scope="col">
-                            <span className="rt-th-label">Item</span>
-                        </th>
-                        {columns.year ? (
-                            <th className="rt-th rt-th-year" scope="col">
-                                <span className="rt-th-label">{columns.year.header}</span>
+                        {columns.paper ? (
+                            <ColumnHeader
+                                column={columns.paper}
+                                kind="paper"
+                                sort={state.sort}
+                                menuItems={columnMenuItems}
+                            />
+                        ) : (
+                            <th className="rt-th rt-th-paper" scope="col">
+                                <div className="rt-th-top">
+                                    <span className="rt-th-label">{PAPER_HEADER}</span>
+                                </div>
                             </th>
+                        )}
+                        {columns.year ? (
+                            <ColumnHeader
+                                column={columns.year}
+                                kind="year"
+                                sort={state.sort}
+                                menuItems={columnMenuItems}
+                            />
                         ) : null}
                         {questions.map((column) => (
-                            <QuestionHeader
+                            <ColumnHeader
                                 key={column.id}
                                 column={column}
+                                kind="question"
+                                sort={state.sort}
                                 badges={badges.get(column.id)!}
                                 menuItems={columnMenuItems}
                             />
@@ -313,6 +332,8 @@ function CellEditorLayer({
 }
 
 const ADD_WIDTH = "3.25rem";
+/** Room for "Year", its sort mark and the column menu's button. */
+const YEAR_WIDTH = "5.5rem";
 
 function Spacer({ height }: { height: number }): React.ReactElement {
     return (
@@ -376,43 +397,53 @@ function SelectBox({
 }
 
 /**
- * A question column's header: its name and badges over its question, and the
- * column menu's button on hover.
+ * A column's header: its name, the sort mark when the view is sorted by it,
+ * and the column menu's button on hover. A question's header adds its badges
+ * and, under the name, its question.
  */
-function QuestionHeader({
+function ColumnHeader({
     column,
+    kind,
+    sort,
     badges,
     menuItems,
 }: {
     column: Column;
-    badges: ReturnType<typeof columnBadges>;
+    kind: "paper" | "year" | "question";
+    sort: TableSort | undefined;
+    badges?: ReturnType<typeof columnBadges>;
     menuItems?(column: Column): MenuItem[];
 }): React.ReactElement {
     // The menu renders inside this sticky cell, which stacks on its own: while
     // it is open the cell is raised over its neighbours, or the next header
     // would paint over the menu and take its clicks.
     const [menuOpen, setMenuOpen] = React.useState(false);
+    const label = kind === "paper" ? PAPER_HEADER : column.header;
+    const items = menuItems?.(column) ?? [];
+    const direction = sort?.column_id === column.id ? sort.direction : undefined;
     return (
         <th
-            className={`rt-th rt-th-question${menuOpen ? " rt-th-menu-open" : ""}`}
+            className={`rt-th rt-th-${kind}${items.length ? " rt-th-has-menu" : ""}${menuOpen ? " rt-th-menu-open" : ""}`}
             scope="col"
             data-column-id={column.id}
+            aria-sort={direction === "asc" ? "ascending" : direction === "desc" ? "descending" : undefined}
         >
-            {menuItems ? (
+            {items.length ? (
                 <span className="rt-column-menu">
                     <MenuButton
-                        menuItems={menuItems(column)}
+                        menuItems={items}
                         variant="ghost-secondary"
                         icon={ArrowDownIcon}
-                        ariaLabel={`Column menu: ${column.header}`}
+                        ariaLabel={`Column menu: ${label}`}
                         width="13rem"
                         toggleCallback={setMenuOpen}
                     />
                 </span>
             ) : null}
             <div className="rt-th-top">
-                <span className="rt-th-label">{column.header}</span>
-                {badges.staleCells > 0 ? (
+                <span className="rt-th-label">{label}</span>
+                {direction ? <SortMark direction={direction} year={kind === "year"} /> : null}
+                {badges && badges.staleCells > 0 ? (
                     <Badge
                         className="rt-badge rt-badge-stale"
                         text={staleBadgeText(badges.staleCells, badges.staleReason)}
@@ -421,18 +452,36 @@ function QuestionHeader({
                         {badges.staleCells}
                     </Badge>
                 ) : null}
-                {badges.newCells > 0 ? (
+                {badges && badges.newCells > 0 ? (
                     <Badge className="rt-badge rt-badge-new" text={newBadgeText(badges.newCells)}>
                         New
                     </Badge>
                 ) : null}
             </div>
-            {column.description ? (
+            {kind === "question" && column.description ? (
                 <div className="rt-th-question-text" title={column.description}>
                     {column.description}
                 </div>
             ) : null}
         </th>
+    );
+}
+
+/**
+ * The quiet arrow after a header's name while the view is sorted by that
+ * column: up for A → Z (oldest first), down for Z → A. A full arrow rather
+ * than a chevron, which is the column menu's button.
+ */
+function SortMark({ direction, year }: { direction: TableSort["direction"]; year: boolean }): React.ReactElement {
+    return (
+        <span className="rt-th-sort" title={`Sorted ${sortOrderLabel(direction, year)}`}>
+            <Icon
+                icon={ArrowUpLineIcon}
+                size={11}
+                aria-hidden="true"
+                style={direction === "desc" ? { transform: "rotate(180deg)" } : undefined}
+            />
+        </span>
     );
 }
 

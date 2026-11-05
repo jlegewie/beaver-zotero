@@ -78,6 +78,11 @@ export interface UseTableStateOptions {
      * pointing at a set of rows ("Show" the rows a fill could not read).
      */
     onlyRows?: ReadonlySet<string> | null;
+    /**
+     * Columns the surface always draws, so they are never hidden by default —
+     * system columns included — and the sort and filter menus offer them.
+     */
+    alwaysShown?: readonly string[];
 }
 
 /** The table a hidden-column set was seeded for. */
@@ -145,14 +150,16 @@ export function useTableState(
         // same render id is not mistaken for it.
         setHiddenFor(identity);
     }
+    const alwaysShown = options.alwaysShown;
     const hiddenColumns = useMemo<ReadonlySet<string>>(() => {
         const hidden = new Set(defaultHiddenColumnIds(spec));
         for (const [id, isHidden] of columnOverrides) {
             if (isHidden) hidden.add(id);
             else hidden.delete(id);
         }
+        for (const id of alwaysShown ?? []) hidden.delete(id);
         return hidden;
-    }, [spec, columnOverrides]);
+    }, [spec, columnOverrides, alwaysShown]);
 
     const clearFilter = useCallback((columnId: string) => {
         setFilters((current) =>

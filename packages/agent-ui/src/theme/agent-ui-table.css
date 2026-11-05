@@ -615,6 +615,14 @@
     white-space: nowrap;
 }
 
+/* The column the view is sorted by: a quiet arrow after its name. */
+.beaver-root .rt-th-sort {
+    flex: 0 0 auto;
+    display: inline-flex;
+    margin-left: -0.15rem;
+    color: var(--fill-secondary);
+}
+
 .beaver-root .rt-th-question-text {
     margin-top: 0.15rem;
     font-size: 0.92rem;
@@ -1914,8 +1922,18 @@
 }
 
 /* The column menu's button floats at the header's top right on hover. */
-.beaver-root .rt-th-question {
+.beaver-root .rt-th-has-menu {
     padding-right: 2.2rem;
+}
+
+/* The year column is too narrow to keep that room free: its button covers
+ * the end of the header instead, on the header's own background. */
+.beaver-root .rt-th-year.rt-th-has-menu {
+    padding-right: 0.6rem;
+}
+
+.beaver-root .rt-th-year .rt-column-menu {
+    background: inherit;
 }
 
 .beaver-root .rt-column-menu {
@@ -1925,7 +1943,7 @@
     opacity: 0;
 }
 
-.beaver-root .rt-th-question:hover .rt-column-menu,
+.beaver-root .rt-th:hover .rt-column-menu,
 .beaver-root .rt-column-menu:focus-within,
 .beaver-root .rt-th-menu-open .rt-column-menu {
     opacity: 1;
