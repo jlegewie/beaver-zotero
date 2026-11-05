@@ -9,7 +9,7 @@ import { getRecentAsync, loadFullItemData } from '../../../../src/utils/zoteroUt
 import { searchableLibraryIdsAtom } from '../../../atoms/profile';
 import { isLibraryTabAtom, selectedZoteroTabIdAtom, ThreadItemFilter } from '../../../atoms/ui';
 import { selectedZoteroItemsAtom } from '../../../atoms/zoteroContext';
-import { scoreSearchResult, searchTitleCreatorYear } from '../../../utils/search';
+import { searchSourceItems } from '../../../utils/search';
 import { getCurrentContextItemForFilter } from '../../../utils/zoteroTabContext';
 import { getActiveZoteroLibraryId } from '../../../utils/zoteroTargetContext';
 import { ChipButton } from '../../agentRuns/requestChips/ChipButton';
@@ -162,42 +162,16 @@ const ThreadFilterMenu: React.FC<ThreadFilterMenuProps> = ({ activeFilter, onSel
         const searchId = Date.now().toString();
         currentSearchRef.current = searchId;
 
-        // An empty searchable-library list means every library is excluded.
-        // An empty `libraryIds` array passed to `searchTitleCreatorYear`
-        // adds no library restriction and would search every library
-        // instead, so this returns no results without calling the search.
-        if (searchableLibraryIds.length === 0) {
-            setSearchResults([]);
-            return;
-        }
-
         try {
-            let normalizedQuery = query.replace(/ (?:&|and) /g, ' ');
-            normalizedQuery = normalizedQuery.replace(/,/, ' ');
-            normalizedQuery = normalizedQuery.replace(/&/, ' ');
-            normalizedQuery = normalizedQuery.replace(/ ?(\d{1,4})$/, ' $1');
-            normalizedQuery = normalizedQuery.trim();
-
-            const resultsItems = await searchTitleCreatorYear(normalizedQuery, searchableLibraryIds);
-            await loadFullItemData(resultsItems);
-
-            if (searchId !== currentSearchRef.current) return;
-
             // The filter search intentionally targets regular items only —
             // attachments and notes remain reachable as filter targets
             // through the current-context row and recent items above.
-            const regularItems = resultsItems.filter((item) => item.isRegularItem());
-
-            const scoredResults = regularItems
-                .map((item) => ({ item, score: scoreSearchResult(item, normalizedQuery) }))
-                .filter((result) => result.score > 0)
-                .sort((a, b) => b.score - a.score)
-                .slice(0, limit)
-                .map((result) => result.item);
-
-            if (searchId !== currentSearchRef.current) return;
-
-            setSearchResults(scoredResults);
+            const isCurrent = () => searchId === currentSearchRef.current;
+            const result = await searchSourceItems(query, searchableLibraryIds, limit, {
+                include: (item) => item.isRegularItem(),
+                isCurrent,
+            });
+            if (result && isCurrent()) setSearchResults(result.items);
         } catch (error) {
             logger(`ThreadFilterMenu.handleSearch: ${error}`, 1);
         }

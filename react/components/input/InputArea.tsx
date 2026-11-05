@@ -2,9 +2,8 @@ import { threadReadOnlyAtom } from '../../runtime/threadProjection';
 import { RECONNECT_HELD_CAPTION, RECONNECT_UNAVAILABLE_TOOLTIP } from '@beaver/agent-core/transport/connectionFailure';
 import { useRunReconnectShown } from '../../hooks/useVisibleReconnect';
 import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
-import { useComposerVoice } from "../../hooks/useComposerVoice";
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { MicIcon, StopIcon, GlobalSearchIcon, ArrowUpLineIcon } from '../icons/icons';
+import { StopIcon, GlobalSearchIcon, ArrowUpLineIcon } from '../icons/icons';
 import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai';
 import { newThreadAtom, currentThreadIdAtom } from '../../atoms/threads';
 import { currentMessageContentAtom, currentMessagePillsAtom, pendingPillInsertsAtom, composerResetTokenAtom, pendingAttachmentTokensAtom, clearComposerAtom } from '../../atoms/messageComposition';
@@ -110,7 +109,6 @@ const InputArea: React.FC<InputAreaProps> = ({
 
     // Imperative handle exposed by the Lexical editor (focus / clear).
     const editorHandleRef = useRef<LexicalEditorInputHandle | null>(null);
-    const voice = useComposerVoice(inputRef, editorHandleRef);
     const pendingSelectionRestoreRef = useRef<{ offset: number; skipFocus: boolean } | null>(null);
     const focusEditor = useCallback(() => {
         editorHandleRef.current?.focus();
@@ -501,7 +499,6 @@ const InputArea: React.FC<InputAreaProps> = ({
     };
 
     const sendMessage = (composedMessage: string) => {
-        if (!voice.canSend()) return;
         // Text typed with an input method reaches `messageContent` one
         // composition at a time, and the last one lands shortly after the user
         // commits it. Publish anything still withheld so a send that follows
@@ -577,7 +574,6 @@ const InputArea: React.FC<InputAreaProps> = ({
 
     // Handle the editor's submit signal (Enter without Shift).
     const handleEditorSubmit = useCallback(() => {
-        if (!voice.canSend()) return;
         if (isPending) {
             logger('handleEditorSubmit: Blocked - request already in progress');
             return;
@@ -592,7 +588,7 @@ const InputArea: React.FC<InputAreaProps> = ({
         if (isAddSourcesMenuOpen) return;
         if (isAttachingFiles) return;
         sendMessage(messageContent);
-    }, [isPending, isAwaitingApproval, isSlashMenuOpen, isAddSourcesMenuOpen, isAttachingFiles, messageContent, voice.busy]);
+    }, [isPending, isAwaitingApproval, isSlashMenuOpen, isAddSourcesMenuOpen, isAttachingFiles, messageContent]);
 
     const handleDismissHighTokenWarning = (e: React.MouseEvent) => {
         e.preventDefault();
@@ -799,25 +795,18 @@ const InputArea: React.FC<InputAreaProps> = ({
                             onCommit={commitAddSourcesMenu}
                             onResetQuery={resetAddSourcesQuery}
                             menuPortalContainer={menuPortalContainer}
-                            disabled={isAwaitingApproval || voice.busy}
+                            disabled={isAwaitingApproval}
                             verticalPosition={verticalPosition}
                         />
                     )}
-                    {!hideModelSelector && !voice.listening && (
+                    {!hideModelSelector && (
                         <ModelSelectionButton inputRef={inputRef} focusInput={focusEditor} disabled={isAwaitingApproval} />
                     )}
-                    {voice.listening ? (
-                        <div className="composer-voice-meter" role="img" aria-label={voice.clipping ? 'Microphone clipping' : voice.lowSignal ? 'Microphone signal is low' : 'Microphone level'}>
-                            <div className="composer-voice-bars">
-                                {voice.levels.map((level, index) => <span key={index} style={{ height: `${Math.max(2, Math.min(24, level * 90))}px` }} />)}
-                            </div>
-                            <span className="composer-voice-time">{Math.floor(voice.seconds / 60)}:{String(voice.seconds % 60).padStart(2, '0')}</span>
-                        </div>
-                    ) : <div className="flex-1" />}
+                    <div className="flex-1" />
                     <span id={webSearchDescriptionId} className="sr-only">
                         {webSearchDescription}
                     </span>
-                    {!showVerdictButtons && !voice.listening && (
+                    {!showVerdictButtons && (
                     <Tooltip
                         key={String(isWebSearchAllowed)}
                         content={webSearchTooltipContent}
@@ -856,16 +845,6 @@ const InputArea: React.FC<InputAreaProps> = ({
                     </Tooltip>
                     )}
 
-                    {process.env.NODE_ENV === 'development' && voice.enabled && <IconButton
-                        icon={voice.listening ? StopIcon : MicIcon}
-                        className="composer-icons"
-                        loading={voice.processing}
-                        ariaLabel={voice.listening ? 'Stop dictation and transcribe' : voice.processing ? 'Preparing or transcribing dictation' : 'Dictate message'}
-                        ariaPressed={voice.listening}
-                        title="Dictation uses Beaver credits. Audio and selected source terms are sent to Beaver for transcription and correction. Escape cancels."
-                        disabled={voice.processing || (voice.busy && !voice.listening) || (!voice.listening && (!voice.canStart || isAwaitingApproval || isPending))}
-                        onClick={() => { void voice.toggle(); }}
-                    />}
                     {/* Send, and the two things that take its place: Stop while
                         a run is live, and the pair of verdict buttons once
                         there are instructions for a pending approval. */}
@@ -915,7 +894,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                             className="composer-send"
                             ariaLabel="Send message"
                             onClick={handleSubmit}
-                            disabled={threadReadOnly || voice.busy || messageContent.length === 0 || !selectedModel || isSlashMenuOpen || isAttachingFiles}
+                            disabled={threadReadOnly || messageContent.length === 0 || !selectedModel || isSlashMenuOpen || isAttachingFiles}
                         />
                     )}
                 </div>

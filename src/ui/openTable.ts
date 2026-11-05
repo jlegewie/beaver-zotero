@@ -75,12 +75,14 @@ export interface OpenTableOptions {
 /** How long to wait for a main window's Beaver renderer to come up. */
 const TAB_HOST_TIMEOUT_MS = 15000;
 
+// Every open checks and repairs the table again, so closing and reopening
+// the tab is the retry.
 const BOOKKEEPING_PENDING =
-    'Content is committed, but local bookkeeping needs repair. Use Check / repair table to retry.';
+    'Your table is saved, but Beaver could not update its version history. Close and reopen the table to try again.';
 const BOOKKEEPING_UNCHECKED =
-    'Local bookkeeping could not be checked. Use Check / repair table to retry.';
+    'Beaver could not finish checking this table while opening it. Close and reopen the table to try again.';
 const SNAPSHOT_BEHIND =
-    'The saved snapshot of this table could not be updated, so Zotero without Beaver shows an earlier version. Use Check / repair table to retry.';
+    'The copy of this table that Zotero shows without Beaver could not be updated, so it shows an earlier version. Close and reopen the table to try again.';
 
 /**
  * The main window that hosts the tab: the origin's own (see rule 3), once its

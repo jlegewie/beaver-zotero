@@ -43,6 +43,8 @@ export interface TableTabMountOptions {
     /** The spec's title changed; the tab and the window title follow it. */
     onTitle(title: string): void;
     onRendered?(report: TableTabRenderReport): void;
+    /** Whether the tab is the selected one in its window. */
+    isSelected?(): boolean;
 }
 
 /** What the renderer hands back for one mounted tab. */
@@ -55,6 +57,8 @@ export interface TableTabHandle {
     focus(target: TableFocusTarget): void;
     /** Shows a fill's failed rows. */
     request(request: TableTabRequest): void;
+    /** The window's selected tab changed: the tab may have been shown or hidden. */
+    selectionChanged(): void;
 }
 
 export type RenderTableTab = (

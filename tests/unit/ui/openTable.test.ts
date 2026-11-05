@@ -160,7 +160,7 @@ describe('openTable', () => {
     it('surfaces unfinished bookkeeping without hiding the table', async () => {
         run.mockResolvedValue({ recovered: [{ kind: 'bookkeeping_pending' }] });
         const outcome = await openTable(REF, { window: main });
-        expect(outcome).toMatchObject({ ok: true, warning: expect.stringContaining('Check / repair table') });
+        expect(outcome).toMatchObject({ ok: true, warning: expect.stringContaining('could not update its version history') });
         expect(openTableTab).toHaveBeenCalledOnce();
     });
 
@@ -171,14 +171,14 @@ describe('openTable', () => {
         arrange();
         tableRepairAllowed.mockReturnValue(false);
         const outcome = await openTable(REF, { window: main });
-        expect(outcome).toMatchObject({ ok: true, warning: expect.stringContaining('does not modify tables') });
+        expect(outcome).toMatchObject({ ok: true, warning: expect.stringContaining('does not change tables') });
         expect(tableRepairAllowed).toHaveBeenCalledWith(REF.libraryID);
     });
 
     it('still opens a table whose library refuses the repair', async () => {
         run.mockRejectedValue(new Error('Library excluded'));
         const outcome = await openTable(REF, { window: main });
-        expect(outcome).toMatchObject({ ok: true, warning: expect.stringContaining('could not be checked') });
+        expect(outcome).toMatchObject({ ok: true, warning: expect.stringContaining('could not finish checking this table') });
         expect(openTableTab).toHaveBeenCalledOnce();
     });
 

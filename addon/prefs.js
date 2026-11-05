@@ -8,12 +8,6 @@ pref("installedVersion", "");
 pref("showHighTokenUsageWarningMessage", true);
 pref("authMethod", "otp");
 
-// Microphone helper explanation
-pref("voice.helperExplained", false);
-pref("voice.nativeEnabled", false);
-pref("voice.enabled", false);
-pref("voice.language", "en");
-
 // App settings
 pref("keyboardShortcut", "j");
 pref("statefulChat", true);

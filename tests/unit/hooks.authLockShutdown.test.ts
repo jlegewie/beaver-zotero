@@ -102,12 +102,6 @@ vi.mock('../../react/constants/versionUpdateMessages', () => ({
     getAllVersionUpdateMessageVersions: vi.fn(() => []),
 }));
 
-vi.mock('../../src/services/voice/voiceService', () => ({
-    createVoiceService: vi.fn(() => { throw new Error('Timer module unavailable'); }),
-}));
-vi.mock('../../src/services/voice/developmentHarness', () => ({
-    DevelopmentVoiceHarness: vi.fn(function () { throw new Error('Timer module unavailable'); }),
-}));
 vi.mock('../../src/services/documentCache', () => ({
     DocumentCache: class {
         init = vi.fn().mockResolvedValue(undefined);
@@ -301,28 +295,7 @@ describe('hooks auth lock shutdown cleanup', () => {
         vi.useRealTimers();
     });
 
-    it('cancels the originating voice session when a main window unloads', async () => {
-        const hooks = await loadHooks();
-        const win = makeWindow();
-        const voice = { windowUnloaded: vi.fn(), dispose: vi.fn() };
-        (globalThis as any).addon.voice = voice;
-        vi.mocked(Zotero.getMainWindows).mockReturnValue([win, makeWindow()]);
-        await hooks.onMainWindowUnload(win);
-        expect(voice.windowUnloaded).toHaveBeenCalledWith(win);
-        expect(voice.dispose).not.toHaveBeenCalled();
-    });
-
-    it('disposes and removes the plugin voice service on shutdown', async () => {
-        const hooks = await loadHooks();
-        const voice = { dispose: vi.fn() };
-        (globalThis as any).addon.voice = voice;
-        await hooks.onShutdown();
-        expect(voice.dispose).toHaveBeenCalledOnce();
-        expect((globalThis as any).addon.voice).toBeUndefined();
-    });
-
-    it.each(['production', 'development'])('continues essential startup when optional voice initialization fails in %s', async env => {
-        (globalThis as any).__env__ = env;
+    it('completes essential startup', async () => {
         (globalThis as any).Services.startup.shuttingDown = false;
         const testConnection = vi.fn().mockResolvedValue(undefined);
         (Zotero as any).DBConnection = vi.fn(function () { return { test: testConnection }; });
@@ -334,14 +307,11 @@ describe('hooks auth lock shutdown cleanup', () => {
         expect((globalThis as any).addon.db.closeDatabase).not.toHaveBeenCalled();
         expect(mockRegisterShortcuts).toHaveBeenCalledOnce();
         expect(Zotero.PreferencePanes.register).toHaveBeenCalledOnce();
-        expect((globalThis as any).addon.voice).toBeUndefined();
-        expect((globalThis as any).addon.voiceHarness).toBeUndefined();
         const prefs = await import('../../src/utils/prefs');
         expect(prefs.clearPref).toHaveBeenCalledWith('backgroundProcessingContinuous');
     });
 
     it('holds the quit until running table fills have flushed, and disposes the account after', async () => {
-        (globalThis as any).__env__ = 'production';
         (globalThis as any).Services.startup.shuttingDown = false;
         (Zotero as any).DBConnection = vi.fn(function () { return { test: vi.fn().mockResolvedValue(undefined) }; });
         (Zotero as any).PreferencePanes = { register: vi.fn().mockResolvedValue(undefined) };
@@ -375,26 +345,14 @@ describe('hooks auth lock shutdown cleanup', () => {
         }
     });
 
-    it('continues window cleanup after voice unload throws', async () => {
-        const hooks = await loadHooks(); const win = makeWindow();
-        (globalThis as any).addon.voice = { windowUnloaded: vi.fn(() => { throw new Error('voice failure'); }) };
-        vi.mocked(Zotero.getMainWindows).mockReturnValue([win, makeWindow()]);
-        await hooks.onMainWindowUnload(win);
-        expect(mockRemoveChatPanel).toHaveBeenCalledWith(win);
-    });
-
-    it('closes the database and other services after voice disposal throws', async () => {
+    it('closes the database and stops background services on shutdown', async () => {
         const hooks = await loadHooks();
         const stop = vi.fn().mockResolvedValue(undefined), closeDatabase = vi.fn().mockResolvedValue(undefined);
-        (globalThis as any).addon.voice = { dispose: vi.fn(() => { throw new Error('voice failure'); }) };
-        (globalThis as any).addon.voiceHarness = {};
         (globalThis as any).addon.db = { closeDatabase };
         (globalThis as any).addon.backgroundExtractor = { stop };
         await hooks.onShutdown();
         expect(stop).toHaveBeenCalledOnce(); expect(closeDatabase).toHaveBeenCalledOnce();
         expect((globalThis as any).addon.runtime.getSnapshot()).toEqual([]);
-        expect((globalThis as any).addon.voice).toBeUndefined();
-        expect((globalThis as any).addon.voiceHarness).toBeUndefined();
     });
 
     it('disposes instance auth during full shutdown unload', async () => {

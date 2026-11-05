@@ -212,6 +212,7 @@ export function openTableTab(
                 owned.renders.push(report);
                 if (owned.renders.length > MAX_RENDER_REPORTS) owned.renders.shift();
             },
+            isSelected: () => tabsOf(owned.win)?.selectedID === owned.tabID,
         });
     } catch (error) {
         // A tab with nothing in it is worse than none.
@@ -378,6 +379,14 @@ export function initTableTabs(open: TableTabOpener): void {
                     return;
                 }
                 if (event === 'select') {
+                    // Any tab's selection can show or hide a table tab.
+                    for (const entry of entries.values()) {
+                        try {
+                            entry.handle?.selectionChanged();
+                        } catch (error) {
+                            logger(`tableTab: could not report the selection: ${String(error)}`, 2);
+                        }
+                    }
                     const id = String(ids[0]);
                     if (extraData?.[id]?.type !== TABLE_TAB_TYPE) return;
                     // With the chat open, the sidebar shows it in the context

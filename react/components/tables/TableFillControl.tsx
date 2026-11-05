@@ -17,6 +17,7 @@ import {
     planCostLine,
     planRowLine,
     pricingSentence,
+    resultNeedsAttention,
     resultText,
     runningLabel,
     timeLeftText,
@@ -380,7 +381,7 @@ export interface TableFillBannerProps {
     onDismiss(): void;
 }
 
-/** The result of the last fill, under the toolbar, until dismissed. */
+/** The result of the last fill, over the grid, until dismissed. */
 export function TableFillBanner({ job, showingFailed, onShowFailed, onDismiss }: TableFillBannerProps): React.ReactElement {
     const failed = job.result?.failed_row_ids.length ?? 0;
     return (
@@ -396,4 +397,111 @@ export function TableFillBanner({ job, showingFailed, onShowFailed, onDismiss }:
             </button>
         </span>
     );
+}
+
+/** How long a clean result stays while its tab is visible. */
+export const CLEAN_RESULT_VISIBLE_MS = 10_000;
+
+/**
+ * The last fill's result banner and its "failed rows only" filter.
+ *
+ * A clean result (rows filled, credits charged, nothing else to say) clears
+ * itself at the user's next action in the table (`onActivity`), or after
+ * {@link CLEAN_RESULT_VISIBLE_MS} of the tab being visible; with `visible`
+ * null (unknown) only the next action clears it. A result that needs
+ * attention stays until dismissed or replaced by the next fill. Either way
+ * the dismissal lets the plugin forget the job.
+ *
+ * The filter names its job: the chat can ask for a fill's failed rows
+ * (`showFailedRows`) after that fill's banner is gone or replaced, and then
+ * a strip of its own offers to show every row again. A new fill clears it.
+ */
+export function useFillResultBanner(
+    job: TableFillJobSnapshot | null,
+    visible: boolean | null,
+): {
+    banner: React.ReactElement | null;
+    /** The finished job the banner shows; null when there is none. */
+    jobId: string | null;
+    /** The rows to show while "failed rows only" is on; null otherwise. */
+    failedRows: ReadonlySet<string> | null;
+    /** Show every row again. */
+    showAllRows(): void;
+    /** Show only the rows a fill could not read, asked for from outside the tab. */
+    showFailedRows(jobId: string, rowIds: readonly string[]): void;
+    /** The user acted on the table. */
+    onActivity(): void;
+} {
+    const [dismissedJob, setDismissedJob] = React.useState<string | null>(null);
+    const [failedFilter, setFailedFilter] = React.useState<{ jobId: string; rows: ReadonlySet<string> } | null>(null);
+    const finishedJob = job?.state === 'done' && job.job_id !== dismissedJob ? job : null;
+    const showFailed = !!failedFilter && failedFilter.jobId === finishedJob?.job_id;
+    const failedRows = failedFilter?.rows ?? null;
+    const setShowFailed = React.useCallback(
+        (show: boolean) =>
+            setFailedFilter(
+                show && finishedJob?.result
+                    ? { jobId: finishedJob.job_id, rows: new Set(finishedJob.result.failed_row_ids) }
+                    : null,
+            ),
+        [finishedJob],
+    );
+    // A new fill works on every row again.
+    const running = !!job && job.state !== 'done';
+    React.useEffect(() => {
+        if (running) setFailedFilter(null);
+    }, [running]);
+
+    const dismiss = React.useCallback((jobId: string) => {
+        setDismissedJob(jobId);
+        setFailedFilter((filter) => (filter?.jobId === jobId ? null : filter));
+        Zotero.Beaver.tableFills?.dismiss(jobId);
+    }, []);
+    const cleanJob = finishedJob && !resultNeedsAttention(finishedJob) ? finishedJob.job_id : null;
+    const onActivity = React.useCallback(() => {
+        if (cleanJob) dismiss(cleanJob);
+    }, [cleanJob, dismiss]);
+    // Counts only while the tab is visible: a fill that ends in the
+    // background still shows its result when the user comes back.
+    React.useEffect(() => {
+        if (!cleanJob || visible !== true) return;
+        const timer = setTimeout(() => dismiss(cleanJob), CLEAN_RESULT_VISIBLE_MS);
+        return () => clearTimeout(timer);
+    }, [cleanJob, visible, dismiss]);
+
+    const showAllRows = React.useCallback(() => setFailedFilter(null), []);
+    const showFailedRows = React.useCallback((jobId: string, rowIds: readonly string[]) => {
+        if (rowIds.length) setFailedFilter({ jobId, rows: new Set(rowIds) });
+    }, []);
+    const jobBanner = finishedJob ? (
+        <TableFillBanner
+            job={finishedJob}
+            showingFailed={showFailed}
+            onShowFailed={setShowFailed}
+            onDismiss={() => dismiss(finishedJob.job_id)}
+        />
+    ) : null;
+    // Failed rows of a fill whose banner is not the one shown: their own
+    // strip, so the filter can be undone.
+    const filterStrip =
+        failedFilter && !showFailed ? (
+            <span className="bt-fill-banner">
+                <span className="bt-fill-banner-text">
+                    {failedFilter.rows.size === 1
+                        ? "Showing the row that couldn't be read"
+                        : `Showing the ${failedFilter.rows.size.toLocaleString('en-US')} rows that couldn't be read`}
+                </span>
+                <button type="button" className="bt-fill-banner-link" onClick={showAllRows}>
+                    Show all
+                </button>
+            </span>
+        ) : null;
+    const banner =
+        jobBanner && filterStrip ? (
+            <>
+                {filterStrip}
+                {jobBanner}
+            </>
+        ) : (jobBanner ?? filterStrip);
+    return { banner, jobId: finishedJob?.job_id ?? null, failedRows, showAllRows, showFailedRows, onActivity };
 }
