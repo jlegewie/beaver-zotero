@@ -14,7 +14,7 @@ import { TableFillButton, useFillResultBanner, useTableFillJob, type TableFillBu
 import type { TableFillScope } from '@beaver/agent-core/protocol/tableFillProtocol';
 import type { ResearchTableFill } from '@beaver/agent-ui/layouts';
 import { TABLE_UPDATED_EVENT, type TableUpdatedDetail } from '../../../src/services/artifacts/tableStore';
-import type { TableFocusTarget, TableTabMountOptions, TableTabRenderReport } from '../../../src/ui/tableTabTypes';
+import type { TableFocusTarget, TableTabMountOptions, TableTabRenderReport, TableTabRequest } from '../../../src/ui/tableTabTypes';
 import { getWindowRuntime } from '../../runtime/windowRuntime';
 import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
 import { useDocumentVisible } from '../../hooks/useDocumentVisible';
@@ -37,6 +37,8 @@ export interface TableTabWarningSource {
     onReload(listener: () => void): () => void;
     /** Called when the tab is asked to bring a row or cell into view. */
     onFocus(listener: (target: TableFocusTarget) => void): () => void;
+    /** Called when the tab is asked to show a fill's failed rows. */
+    onRequest(listener: (request: TableTabRequest) => void): () => void;
     /** Called when the window's selected tab changes. */
     onSelectionChange(listener: () => void): () => void;
 }
@@ -354,13 +356,23 @@ export default function TableTabView({
         newBySource: newPapers.bySource,
         onEdit: fillResult.onActivity,
     });
-    const { showAllRows } = fillResult;
+    const { showAllRows, showFailedRows } = fillResult;
     const tableMessage = useTableMessage(
         edits.toast,
         edits.clearToast,
         fillEnabled ? fillResult.banner : null,
         fillResult.jobId,
     );
+    // A fill's failed rows asked for from the chat, shown once the table is
+    // on screen.
+    const [request, setRequest] = React.useState<TableTabRequest | null>(() => options.request ?? null);
+    React.useEffect(() => warnings.onRequest(setRequest), [warnings]);
+    const tableShown = state.kind === 'table';
+    React.useEffect(() => {
+        if (!request || !tableShown) return;
+        setRequest(null);
+        showFailedRows(request.job_id, request.row_ids);
+    }, [request, tableShown, showFailedRows]);
     React.useEffect(
         () =>
             warnings.onFocus((target) => {

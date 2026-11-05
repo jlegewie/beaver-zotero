@@ -75,8 +75,11 @@ const done = (over: Partial<TableFillResult> = {}, jobId = 'job-1'): TableFillJo
     result: result(over),
 });
 
+let latest: ReturnType<typeof useFillResultBanner> | null = null;
+
 function Harness({ job, visible }: { job: TableFillJobSnapshot | null; visible: boolean | null }) {
     const fill = useFillResultBanner(job, visible);
+    latest = fill;
     return h(ResearchTable, {
         table,
         banner: fill.banner ?? undefined,
@@ -195,6 +198,34 @@ describe('a result that needs attention', () => {
         click(container!.querySelector('.bt-banner [aria-label="Dismiss"]'));
         expect(banner()).toBeNull();
         expect(dismiss).toHaveBeenCalledWith('job-1');
+    });
+});
+
+describe('failed rows asked for from the chat', () => {
+    it('shows them with a strip of their own once the banner is dismissed', () => {
+        render(done({ failed_row_ids: ['r2'] }));
+        click(container!.querySelector('.bt-banner [aria-label="Dismiss"]'));
+        act(() => latest!.showFailedRows('job-1', ['r2']));
+        expect(container!.querySelector('tr[data-row-id="r1"]')).toBeNull();
+        expect(banner()?.textContent).toContain("Showing the row that couldn't be read");
+        click(button('Show all'));
+        expect(container!.querySelector('tr[data-row-id="r1"]')).not.toBeNull();
+        expect(banner()).toBeNull();
+    });
+
+    it("uses the banner's own toggle when the banner is that fill's", () => {
+        render(done({ failed_row_ids: ['r2'] }));
+        act(() => latest!.showFailedRows('job-1', ['r2']));
+        expect(container!.querySelector('tr[data-row-id="r1"]')).toBeNull();
+        expect(banner()?.textContent).not.toContain('Showing the');
+        expect(button('Show all')).not.toBeNull();
+    });
+
+    it("keeps the strip beside a newer fill's banner", () => {
+        render(done({ failed_row_ids: ['r2'] }, 'job-2'));
+        act(() => latest!.showFailedRows('job-1', ['r2']));
+        expect(banner()?.textContent).toContain("Showing the row that couldn't be read");
+        expect(banner()?.textContent).toContain("1 couldn't be read");
     });
 });
 

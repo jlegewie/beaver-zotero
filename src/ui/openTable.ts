@@ -44,7 +44,7 @@ import {
 } from '../services/artifacts/tableItemIdentity';
 import { contextMainWindow, resolveNavigationWindow, WindowUnavailableError } from '../runtime/navigation';
 import { canHostTableTab, openTableTab, setTableTabWarning } from './tableTab';
-import type { TableFocusTarget } from './tableTabTypes';
+import type { TableFocusTarget, TableTabRequest } from './tableTabTypes';
 
 export type OpenTableOutcome =
     /**
@@ -68,6 +68,8 @@ export interface OpenTableOptions {
     onDownload?: () => void;
     /** A row (and a cell, with a column) to bring into view: a citation's target. */
     focus?: TableFocusTarget;
+    /** A fill's failed rows for the tab to show. */
+    request?: TableTabRequest;
 }
 
 /** How long to wait for a main window's Beaver renderer to come up. */
@@ -195,6 +197,7 @@ export async function openTable(ref: TableRef, options: OpenTableOptions = {}): 
             background: options.background,
             index: options.index,
             ...(found ? { focus: target } : {}),
+            ...(options.request ? { request: options.request } : {}),
         });
         const warning = await repairOnOpen(item, ref);
         setTableTabWarning(tabID, warning ?? null);

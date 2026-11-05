@@ -98,7 +98,7 @@ export class FakeTabs {
 export function fakeWindow() {
     const doc = document.implementation.createHTMLDocument('main');
     const listeners: Record<string, Array<() => void>> = {};
-    const handle = { setWarning: vi.fn(), reload: vi.fn(), focus: vi.fn(), selectionChanged: vi.fn() };
+    const handle = { setWarning: vi.fn(), reload: vi.fn(), focus: vi.fn(), selectionChanged: vi.fn(), request: vi.fn() };
     const win: any = {
         closed: false,
         document: doc,

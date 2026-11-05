@@ -411,6 +411,10 @@ export const CLEAN_RESULT_VISIBLE_MS = 10_000;
  * null (unknown) only the next action clears it. A result that needs
  * attention stays until dismissed or replaced by the next fill. Either way
  * the dismissal lets the plugin forget the job.
+ *
+ * The filter names its job: the chat can ask for a fill's failed rows
+ * (`showFailedRows`) after that fill's banner is gone or replaced, and then
+ * a strip of its own offers to show every row again. A new fill clears it.
  */
 export function useFillResultBanner(
     job: TableFillJobSnapshot | null,
@@ -423,22 +427,34 @@ export function useFillResultBanner(
     failedRows: ReadonlySet<string> | null;
     /** Show every row again. */
     showAllRows(): void;
+    /** Show only the rows a fill could not read, asked for from outside the tab. */
+    showFailedRows(jobId: string, rowIds: readonly string[]): void;
     /** The user acted on the table. */
     onActivity(): void;
 } {
     const [dismissedJob, setDismissedJob] = React.useState<string | null>(null);
-    const [showFailed, setShowFailed] = React.useState(false);
+    const [failedFilter, setFailedFilter] = React.useState<{ jobId: string; rows: ReadonlySet<string> } | null>(null);
     const finishedJob = job?.state === 'done' && job.job_id !== dismissedJob ? job : null;
-    const failedRows = React.useMemo(
-        () => (showFailed && finishedJob?.result ? new Set(finishedJob.result.failed_row_ids) : null),
-        [showFailed, finishedJob],
+    const showFailed = !!failedFilter && failedFilter.jobId === finishedJob?.job_id;
+    const failedRows = failedFilter?.rows ?? null;
+    const setShowFailed = React.useCallback(
+        (show: boolean) =>
+            setFailedFilter(
+                show && finishedJob?.result
+                    ? { jobId: finishedJob.job_id, rows: new Set(finishedJob.result.failed_row_ids) }
+                    : null,
+            ),
+        [finishedJob],
     );
+    // A new fill works on every row again.
+    const running = !!job && job.state !== 'done';
     React.useEffect(() => {
-        if (!finishedJob) setShowFailed(false);
-    }, [finishedJob]);
+        if (running) setFailedFilter(null);
+    }, [running]);
 
     const dismiss = React.useCallback((jobId: string) => {
         setDismissedJob(jobId);
+        setFailedFilter((filter) => (filter?.jobId === jobId ? null : filter));
         Zotero.Beaver.tableFills?.dismiss(jobId);
     }, []);
     const cleanJob = finishedJob && !resultNeedsAttention(finishedJob) ? finishedJob.job_id : null;
@@ -453,8 +469,11 @@ export function useFillResultBanner(
         return () => clearTimeout(timer);
     }, [cleanJob, visible, dismiss]);
 
-    const showAllRows = React.useCallback(() => setShowFailed(false), []);
-    const banner = finishedJob ? (
+    const showAllRows = React.useCallback(() => setFailedFilter(null), []);
+    const showFailedRows = React.useCallback((jobId: string, rowIds: readonly string[]) => {
+        if (rowIds.length) setFailedFilter({ jobId, rows: new Set(rowIds) });
+    }, []);
+    const jobBanner = finishedJob ? (
         <TableFillBanner
             job={finishedJob}
             showingFailed={showFailed}
@@ -462,5 +481,27 @@ export function useFillResultBanner(
             onDismiss={() => dismiss(finishedJob.job_id)}
         />
     ) : null;
-    return { banner, jobId: finishedJob?.job_id ?? null, failedRows, showAllRows, onActivity };
+    // Failed rows of a fill whose banner is not the one shown: their own
+    // strip, so the filter can be undone.
+    const filterStrip =
+        failedFilter && !showFailed ? (
+            <span className="bt-fill-banner">
+                <span className="bt-fill-banner-text">
+                    {failedFilter.rows.size === 1
+                        ? "Showing the row that couldn't be read"
+                        : `Showing the ${failedFilter.rows.size.toLocaleString('en-US')} rows that couldn't be read`}
+                </span>
+                <button type="button" className="bt-fill-banner-link" onClick={showAllRows}>
+                    Show all
+                </button>
+            </span>
+        ) : null;
+    const banner =
+        jobBanner && filterStrip ? (
+            <>
+                {filterStrip}
+                {jobBanner}
+            </>
+        ) : (jobBanner ?? filterStrip);
+    return { banner, jobId: finishedJob?.job_id ?? null, failedRows, showAllRows, showFailedRows, onActivity };
 }

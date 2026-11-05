@@ -7,6 +7,7 @@
  */
 
 import type { TableSpec } from '@beaver/agent-core/layouts/table';
+import type { TableFillViewRequest } from '@beaver/agent-core/protocol/tableFillProtocol';
 import type { TableRef } from '../services/artifacts/tableItemIdentity';
 
 /** A row (and a cell, with a column) to bring into view: a citation's target. */
@@ -14,6 +15,9 @@ export interface TableFocusTarget {
     rowId: string;
     columnId?: string;
 }
+
+/** A fill's failed rows for the tab to show. */
+export type TableTabRequest = TableFillViewRequest;
 
 /** What one committed load of the table cost, for diagnostics. */
 export interface TableTabRenderReport {
@@ -34,6 +38,8 @@ export interface TableTabMountOptions {
     initial?: { spec: TableSpec; version: number };
     /** A row or cell to bring into view once the table is on screen. */
     focus?: TableFocusTarget;
+    /** A fill's failed rows, shown once the table is on screen. */
+    request?: TableTabRequest;
     /** The spec's title changed; the tab and the window title follow it. */
     onTitle(title: string): void;
     onRendered?(report: TableTabRenderReport): void;
@@ -49,6 +55,8 @@ export interface TableTabHandle {
     reload(): void;
     /** Brings a row or cell into view, clearing filters that hide it. */
     focus(target: TableFocusTarget): void;
+    /** Shows a fill's failed rows. */
+    request(request: TableTabRequest): void;
     /** The window's selected tab changed: the tab may have been shown or hidden. */
     selectionChanged(): void;
 }

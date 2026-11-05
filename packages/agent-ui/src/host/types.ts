@@ -11,6 +11,7 @@ import type { MenuItem } from '../primitives/ContextMenu';
 import type { AddSourcesMenuHandle, AddSourcesQuerySource } from '../composer/useAddSourcesMenu';
 import type { AgentActionType } from '@beaver/agent-core/protocol/agentProtocol';
 import type { BatchOutcomeTarget } from '@beaver/agent-core/run-state/batchProgress';
+import type { TableFillViewRequest } from '@beaver/agent-core/protocol/tableFillProtocol';
 
 /**
  * What a citation click should act on.
@@ -108,12 +109,17 @@ export interface NavigationHost {
      * looking at rather than in whichever window is newest. `onDownload`
      * fires when the table's files must be downloaded before it can open.
      * `focus` brings a row (and a cell, with a column) into view; the result's
-     * `focus` is `missing` when the table no longer has it.
+     * `focus` is `missing` when the table no longer has it. `request` asks the
+     * table's view to show a fill's failed rows.
      */
     openTable?(
         key: string,
         origin?: Window | null,
-        options?: { onDownload?: () => void; focus?: { rowId: string; columnId?: string } },
+        options?: {
+            onDownload?: () => void;
+            focus?: { rowId: string; columnId?: string };
+            request?: TableFillViewRequest;
+        },
     ): Promise<{ ok: true; warning?: string; focus?: 'found' | 'missing' } | { error: string }>;
     /**
      * Takes back one model edit of a stored table (the `edit_table` tool
