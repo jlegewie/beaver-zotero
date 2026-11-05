@@ -914,6 +914,170 @@
     text-align: center;
 }
 
+/* A running fill --------------------------------------------------------------
+ * A cell the fill will write says so until its answer is saved. Waiting its
+ * turn (`queued`) it is still: placeholder lines in an empty cell, the current
+ * answer faded. Being answered (`active`) it shimmers: the lines, or a light
+ * sweep over the faded answer, which stays until the new one replaces it. A
+ * fill answers a row's cells together, so they sweep in step. An answer that
+ * arrives (`landed`) fades in over a brief tint. */
+
+.beaver-root .rt-cell {
+    --rt-fill-tint: color-mix(in srgb, var(--accent-blue) 24%, transparent);
+}
+
+.beaver-root .rt-fill-lines {
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+    width: 100%;
+    padding-top: 0.35rem;
+}
+
+.beaver-root .rt-fill-line {
+    display: block;
+    height: 0.5rem;
+    border-radius: 999px;
+    background-color: var(--fill-quinary);
+}
+
+.beaver-root .rt-fill-line:nth-child(1) {
+    width: 92%;
+}
+
+.beaver-root .rt-fill-line:nth-child(2) {
+    width: 76%;
+}
+
+.beaver-root .rt-fill-line:nth-child(3) {
+    width: 54%;
+}
+
+.beaver-root .rt-fill-lines-short .rt-fill-line {
+    width: min(4.5rem, 100%);
+}
+
+/* One line where the row shows one. */
+.beaver-root .rt-grid[data-density="compact"] .rt-fill-line:nth-child(n + 2) {
+    display: none;
+}
+
+.beaver-root .rt-cell[data-fill="active"] .rt-fill-line {
+    background-image: linear-gradient(90deg, transparent 0%, var(--rt-fill-tint) 50%, transparent 100%);
+    background-size: 50% 100%;
+    background-repeat: no-repeat;
+    animation: rt-fill-sweep 1.8s ease-in-out infinite;
+}
+
+.beaver-root .rt-cell[data-fill="active"] .rt-fill-line:nth-child(2) {
+    animation-delay: 0.12s;
+}
+
+.beaver-root .rt-cell[data-fill="active"] .rt-fill-line:nth-child(3) {
+    animation-delay: 0.24s;
+}
+
+.beaver-root .rt-cell[data-fill] .rt-cell-body > :not(.rt-fill-lines) {
+    transition: opacity 0.3s ease;
+}
+
+.beaver-root .rt-cell[data-fill="queued"] .rt-cell-body > :not(.rt-fill-lines) {
+    opacity: 0.6;
+}
+
+.beaver-root .rt-cell[data-fill="active"] .rt-cell-body > :not(.rt-fill-lines) {
+    opacity: 0.4;
+}
+
+/* The sweep over an answer being replaced. */
+.beaver-root .rt-cell[data-fill="active"]:not([data-cell-state="pending"])::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background-image: linear-gradient(
+        100deg,
+        transparent 0%,
+        color-mix(in srgb, var(--accent-blue) 13%, transparent) 50%,
+        transparent 100%
+    );
+    background-size: 45% 100%;
+    background-repeat: no-repeat;
+    animation: rt-fill-sweep 2.2s ease-in-out infinite;
+}
+
+.beaver-root .rt-cell[data-fill="landed"] {
+    animation: rt-fill-landed 1.4s ease-out;
+}
+
+.beaver-root .rt-cell[data-fill="landed"] .rt-cell-body {
+    animation: rt-fill-in 0.45s ease-out;
+}
+
+/* What the fill is doing with the cell, in its expansion and the inspector. */
+.beaver-root .rt-fill-note {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    margin: 0;
+    color: var(--fill-secondary);
+}
+
+.beaver-root .rt-fill-note::before {
+    content: "";
+    flex: none;
+    width: 0.45rem;
+    height: 0.45rem;
+    margin-top: 0.4em;
+    border-radius: 50%;
+    background: var(--fill-tertiary);
+}
+
+.beaver-root .rt-fill-note[data-fill="active"]::before {
+    background: var(--accent-blue);
+    animation: rt-fill-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes rt-fill-sweep {
+    0% { background-position: -100% 0; }
+    100% { background-position: 200% 0; }
+}
+
+@keyframes rt-fill-landed {
+    0% { background-color: color-mix(in srgb, var(--accent-blue) 14%, transparent); }
+    100% { background-color: transparent; }
+}
+
+@keyframes rt-fill-in {
+    0% { opacity: 0; }
+    100% { opacity: 1; }
+}
+
+@keyframes rt-fill-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .beaver-root .rt-cell[data-fill="active"] .rt-fill-line {
+        animation: none;
+        background-image: none;
+        background-color: var(--rt-fill-tint);
+    }
+
+    .beaver-root .rt-cell[data-fill="active"]:not([data-cell-state="pending"])::after {
+        animation: none;
+        background-image: none;
+        background-color: color-mix(in srgb, var(--accent-blue) 6%, transparent);
+    }
+
+    .beaver-root .rt-cell[data-fill="landed"],
+    .beaver-root .rt-cell[data-fill="landed"] .rt-cell-body,
+    .beaver-root .rt-fill-note[data-fill="active"]::before {
+        animation: none;
+    }
+}
+
 /* Tags ---------------------------------------------------------------------- */
 
 .beaver-root .rt-tags {

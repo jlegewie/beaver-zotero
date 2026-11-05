@@ -1,4 +1,4 @@
-import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
     cellIdFor,
     cellValueText,
@@ -19,12 +19,15 @@ import type { TableState } from "../useTableState";
 import { useRowWindow } from "../useRowWindow";
 import { CellTags } from "./CellTags";
 import {
+    cellFill,
     cellState,
     columnBadges,
     isNewRow,
     newBadgeText,
     staleBadgeText,
+    type CellFill,
     type ResearchColumns,
+    type RowFill,
     type TableDocuments,
 } from "./cellModel";
 import { PaperActions, PaperCell } from "./PaperCell";
@@ -63,6 +66,8 @@ export interface ResearchGridProps {
     cellEditDisabledReason?: string;
     /** The open cell editor, floated over its cell and the rows below. */
     cellEditor?: { address: CellAddress; content: React.ReactNode; list: boolean } | null;
+    /** A running fill's cells, by row ({@link rowFills}). */
+    fills?: ReadonlyMap<string, RowFill>;
 }
 
 /** A question column's width: prose shares what is left; short types are fixed. */
@@ -108,6 +113,7 @@ export function ResearchGrid({
     onEditCell,
     cellEditDisabledReason,
     cellEditor,
+    fills,
 }: ResearchGridProps): React.ReactElement {
     const rootRef = useRef<HTMLDivElement>(null);
     const bodyRef = useRef<HTMLTableSectionElement>(null);
@@ -215,6 +221,7 @@ export function ResearchGrid({
                             addColumn={addColumn}
                             onEditCell={onEditCell}
                             editDisabledReason={cellEditDisabledReason}
+                            fill={fills?.get(row.id)}
                         />
                     ))}
                     {rowWindow.padBottom > 0 ? <Spacer height={rowWindow.padBottom} /> : null}
@@ -442,6 +449,7 @@ interface ResearchRowProps {
     addColumn: boolean;
     onEditCell?(address: CellAddress): void;
     editDisabledReason?: string;
+    fill?: RowFill;
 }
 
 const ResearchRow = React.memo(function ResearchRow({
@@ -462,7 +470,9 @@ const ResearchRow = React.memo(function ResearchRow({
     addColumn,
     onEditCell,
     editDisabledReason,
+    fill,
 }: ResearchRowProps): React.ReactElement {
+    const lookOf = useRowFillLooks(fill, row);
     return (
         <tr
             className={["rt-row", isSelected ? "rt-row-selected" : "", row.failure ? "rt-row-failed" : ""]
@@ -505,6 +515,8 @@ const ResearchRow = React.memo(function ResearchRow({
                     onSelect={onSelectCell}
                     onEdit={onEditCell}
                     editDisabledReason={editDisabledReason}
+                    fill={cellFill(fill, column.id)}
+                    look={lookOf(column.id)}
                 />
             ))}
             {addColumn ? <td className="rt-td rt-td-add" aria-hidden="true" /> : null}
@@ -741,6 +753,8 @@ function QuestionCell({
     onSelect,
     onEdit,
     editDisabledReason,
+    fill,
+    look,
 }: {
     row: Row;
     column: Column;
@@ -750,8 +764,16 @@ function QuestionCell({
     onSelect(address: CellAddress): void;
     onEdit?(address: CellAddress): void;
     editDisabledReason?: string;
+    /** What the running fill does with the cell, as the job last said. */
+    fill?: CellFill;
+    /** How the grid shows it ({@link useRowFillLooks}). */
+    look?: FillLook;
 }): React.ReactElement {
     const cell = row.cells[column.id];
+    const pending = cellState(cell) === "pending";
+    // An empty cell waiting for its answer shows placeholder lines; one with
+    // an answer keeps it, dimmed, until the new one is saved.
+    const placeholder = (look === "queued" || look === "active") && pending;
     const select = () => onSelect({ rowId: row.id, columnId: column.id });
     const anchor = useCellPeek((hide) => (
         <CellPeek
@@ -780,7 +802,11 @@ function QuestionCell({
                 ) : null
             }
         >
-            <CellBody row={row} cell={cell} column={column} renderText={renderText} documents={documents} full />
+            {/* The expansion draws when the table does, so it follows the job, not the look. */}
+            {fill ? <FillNote fill={fill} replacing={!pending} /> : null}
+            {fill && pending ? null : (
+                <CellBody row={row} cell={cell} column={column} renderText={renderText} documents={documents} full />
+            )}
         </CellPeek>
     ));
     return (
@@ -797,6 +823,8 @@ function QuestionCell({
                 .join(" ")}
             data-column-id={column.id}
             data-cell-state={cellState(cell)}
+            data-fill={look}
+            aria-busy={look === "queued" || look === "active" ? true : undefined}
             tabIndex={0}
             aria-label={`${column.header}: open details`}
             onClick={select}
@@ -804,8 +832,157 @@ function QuestionCell({
             {...anchor}
         >
             <div className="rt-cell-body">
-                <CellBody row={row} cell={cell} column={column} renderText={renderText} documents={documents} />
+                {placeholder ? (
+                    <FillLines short={column.type === "select" || column.type === "boolean"} />
+                ) : (
+                    <CellBody row={row} cell={cell} column={column} renderText={renderText} documents={documents} />
+                )}
             </div>
         </td>
+    );
+}
+
+/** How a cell shows a running fill: `landed` briefly marks an answer that just arrived. */
+type FillLook = CellFill | "landed";
+
+/** How long an answer that just arrived stays marked. */
+const LANDED_MS = 1400;
+/**
+ * How long a row the fill let go keeps filling while it waits for the table
+ * that holds its answers. The job's news and the table's reload race; the
+ * reload almost always follows within moments.
+ */
+const SETTLE_MS = 3000;
+
+interface RowFillTrack {
+    /** What each cell the fill reached held then. */
+    before: Map<string, Cell | undefined>;
+    /** The row's failure then. */
+    failure: string;
+    /** The columns the fill last listed. */
+    columns: readonly string[];
+    active: boolean;
+    /** Let go after starting; waiting for its answers. */
+    settling: boolean;
+    /** Its answers arrived while the fill still lists it. */
+    done: boolean;
+}
+
+function sameCell(a: Cell | undefined, b: Cell | undefined): boolean {
+    return a === b || JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+}
+
+const failureKey = (row: Row) => JSON.stringify(row.failure ?? null);
+const NO_COLUMNS: ReadonlySet<string> = new Set();
+
+/**
+ * How a row's cells show a running fill, by column. A fill writes a row's
+ * answers (or its failure) in one commit, so the row lands as a whole: once
+ * any cell the fill reached, or the row's failure, changes, the cells whose
+ * content changed are marked `landed` for a moment and the rest stop filling,
+ * whichever of the job's news and the table's reload comes first. A row the
+ * job lets go after starting it keeps filling until that change arrives, or
+ * for {@link SETTLE_MS}; one dropped from the queue (Stop) ends at once.
+ */
+function useRowFillLooks(fill: RowFill | undefined, row: Row): (columnId: string) => FillLook | undefined {
+    const [landed, setLanded] = useState<ReadonlySet<string> | null>(null);
+    const [settling, setSettling] = useState<RowFill | null>(null);
+    const track = useRef<RowFillTrack | null>(null);
+    const listed = useRef(fill);
+    listed.current = fill;
+    const timer = useRef<ReturnType<typeof setTimeout>>();
+    useEffect(() => () => clearTimeout(timer.current), []);
+    useLayoutEffect(() => {
+        const later = (ms: number, then: () => void) => {
+            clearTimeout(timer.current);
+            timer.current = setTimeout(then, ms);
+        };
+        let current = track.current;
+        if (!current) {
+            if (!fill) return;
+            // A new fill: an earlier one's landed mark gives way.
+            clearTimeout(timer.current);
+            setLanded(null);
+            current = track.current = {
+                before: new Map(),
+                failure: failureKey(row),
+                columns: fill.columns,
+                active: false,
+                settling: false,
+                done: false,
+            };
+        }
+        if (current.done) {
+            if (fill) return;
+            track.current = null;
+            setLanded((now) => (now === NO_COLUMNS ? null : now));
+            return;
+        }
+        if (fill) for (const id of fill.columns) if (!current.before.has(id)) current.before.set(id, row.cells[id]);
+        const changed = [...current.before].filter(([id, cell]) => !sameCell(row.cells[id], cell)).map(([id]) => id);
+        if (changed.length || failureKey(row) !== current.failure) {
+            // The row's answers were saved.
+            current.done = true;
+            if (!fill) track.current = null;
+            setSettling(null);
+            setLanded(new Set(changed));
+            // Kept empty while the job still lists the row, so it does not fill again.
+            later(LANDED_MS, () => setLanded(listed.current ? NO_COLUMNS : null));
+            return;
+        }
+        if (fill) {
+            current.columns = fill.columns;
+            current.active ||= fill.active;
+            if (current.settling) {
+                current.settling = false;
+                clearTimeout(timer.current);
+                setSettling(null);
+            }
+            return;
+        }
+        if (!current.active) {
+            track.current = null;
+            return;
+        }
+        if (current.settling) return;
+        // Kept, so the change above is still seen when the table arrives.
+        current.settling = true;
+        const settled = current;
+        setSettling({ columns: current.columns, active: true });
+        later(SETTLE_MS, () => {
+            if (track.current !== settled) return;
+            track.current = null;
+            setSettling(null);
+        });
+    }, [fill, row]);
+    return (columnId) =>
+        landed ? (landed.has(columnId) ? "landed" : undefined) : cellFill(fill ?? settling ?? undefined, columnId);
+}
+
+/** Placeholder lines where an answer is coming: still while queued, shimmering while answered. */
+function FillLines({ short }: { short: boolean }): React.ReactElement {
+    return (
+        <span className={`rt-fill-lines${short ? " rt-fill-lines-short" : ""}`} aria-hidden="true">
+            {Array.from({ length: short ? 1 : 3 }, (_, index) => (
+                <span key={index} className="rt-fill-line" />
+            ))}
+        </span>
+    );
+}
+
+/** What a running fill is doing with a cell, said in its expansion and the inspector. */
+export function FillNote({ fill, replacing }: { fill: CellFill; replacing: boolean }): React.ReactElement {
+    const text =
+        fill === "active"
+            ? replacing
+                ? "Beaver is answering this again. This answer stays until the new one is saved."
+                : "Beaver is answering this now."
+            : replacing
+              ? "Beaver answers this again later in this fill."
+              : "Beaver answers this later in this fill.";
+    return (
+        <p className="rt-fill-note" data-fill={fill}>
+            {text}
+        </p>
     );
 }

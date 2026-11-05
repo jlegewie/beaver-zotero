@@ -9,6 +9,7 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Cell, TableSpec } from '@beaver/agent-core/layouts/table';
+import type { TableFillCells } from '@beaver/agent-core/protocol/tableFillProtocol';
 import { ResearchTable } from '@beaver/agent-ui/layouts/research/ResearchTable';
 import { setHost } from '@beaver/agent-ui/host';
 import { hoverPeek } from '../../helpers/hoverPeek';
@@ -964,5 +965,98 @@ describe('activity', () => {
         expect(inspector()!.getAttribute('data-row-id')).toBe('r2');
         expect(search.value).toBe('');
         expect(onActivity).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe('a running fill', () => {
+    const rerender = (props: Partial<React.ComponentProps<typeof ResearchTable>>) =>
+        act(() => root?.render(h(ResearchTable, { table: table(), ...props })));
+    /** r1 waits its turn on Headline effect; r3 is being answered on Headline effect and Amount. */
+    const running: TableFillCells[] = [
+        { columns: ['effect'], queued: ['r1'], active: [] },
+        { columns: ['effect', 'amount'], queued: [], active: ['r3'] },
+    ];
+    const answered = (): TableSpec => {
+        const spec = table();
+        spec.rows[2].cells.effect = model('Enrollment rose.');
+        return spec;
+    };
+
+    it('marks only the cells it will write: still while queued, shimmering while answered', () => {
+        mount({ filling: running });
+        expect(cell('r1', 'effect').dataset.fill).toBe('queued');
+        expect(cell('r3', 'effect').dataset.fill).toBe('active');
+        expect(cell('r3', 'amount').dataset.fill).toBe('active');
+        expect(cell('r3', 'amount').getAttribute('aria-busy')).toBe('true');
+        for (const [row, column] of [['r1', 'design'], ['r1', 'amount'], ['r2', 'effect'], ['r3', 'design']]) {
+            expect(cell(row, column).hasAttribute('data-fill')).toBe(false);
+        }
+        // An empty cell gets placeholder lines; an answered one keeps its answer.
+        expect(cell('r3', 'effect').querySelectorAll('.rt-fill-line')).toHaveLength(3);
+        expect(cell('r1', 'effect').querySelector('.rt-fill-lines')).toBeNull();
+        expect(cell('r1', 'effect').textContent).toContain('Conditional transfers raised enrollment.');
+    });
+
+    it('says what the fill is doing in the expansion and the inspector', () => {
+        mount({ filling: running });
+        expect(expand(cell('r3', 'effect'))!.querySelector('.rt-peek-body')?.textContent).toBe('Beaver is answering this now.');
+        expect(expand(cell('r1', 'effect'))!.querySelector('.rt-peek-body')?.textContent).toContain(
+            'Beaver answers this again later in this fill.Conditional transfers raised enrollment.',
+        );
+        click(cell('r3', 'effect'));
+        expect(inspector()!.textContent).toContain('Beaver is answering this now.');
+        expect(inspector()!.textContent).not.toContain('Not filled yet');
+    });
+
+    it('lands the whole row when its answers arrive before the news of the fill', () => {
+        vi.useFakeTimers();
+        try {
+            mount({ filling: running });
+            rerender({ table: answered(), filling: running });
+            expect(cell('r3', 'effect').dataset.fill).toBe('landed');
+            expect(cell('r3', 'effect').textContent).toContain('Enrollment rose.');
+            // Saved in the same commit with nothing new in it: done too.
+            expect(cell('r3', 'amount').hasAttribute('data-fill')).toBe(false);
+            act(() => vi.advanceTimersByTime(1500));
+            // The job still lists the row for a moment: it does not fill again.
+            expect(cell('r3', 'effect').hasAttribute('data-fill')).toBe(false);
+            expect(cell('r3', 'amount').hasAttribute('data-fill')).toBe(false);
+            rerender({ table: answered(), filling: [running[0]] });
+            expect(cell('r3', 'amount').hasAttribute('data-fill')).toBe(false);
+            expect(cell('r1', 'effect').dataset.fill).toBe('queued');
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("keeps an open expansion's note in step with the job", () => {
+        mount({ filling: running });
+        const open = expand(cell('r1', 'effect'))!;
+        expect(open.querySelector('.rt-fill-note')?.textContent).toBe('Beaver answers this again later in this fill.');
+        rerender({ filling: [{ columns: ['effect'], queued: [], active: ['r1'] }, running[1]] });
+        expect(peek()!.querySelector('.rt-fill-note')?.textContent).toBe(
+            'Beaver is answering this again. This answer stays until the new one is saved.',
+        );
+        rerender({ filling: [running[1]] });
+        expect(peek()!.querySelector('.rt-fill-note')).toBeNull();
+    });
+
+    it('keeps a let-go cell filling until the table holding its answer arrives', () => {
+        const before = table();
+        mount({ table: before, filling: running });
+        // The news first: the same table is on screen, so the answer is still coming.
+        rerender({ table: before, filling: [] });
+        expect(cell('r3', 'effect').dataset.fill).toBe('active');
+        rerender({ table: answered(), filling: [] });
+        expect(cell('r3', 'effect').dataset.fill).toBe('landed');
+        // A cell the reload left unchanged (a failure, the same answer) stops filling.
+        expect(cell('r3', 'amount').hasAttribute('data-fill')).toBe(false);
+    });
+
+    it('lets a queued cell go at once when the fill stops', () => {
+        mount({ filling: running });
+        rerender({ filling: [running[1]] });
+        expect(cell('r1', 'effect').hasAttribute('data-fill')).toBe(false);
+        expect(cell('r3', 'effect').dataset.fill).toBe('active');
     });
 });

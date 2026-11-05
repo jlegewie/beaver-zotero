@@ -756,6 +756,77 @@ describe("stopping", () => {
     });
 });
 
+describe("the cells a job is filling", () => {
+    const last = (snapshots: TableFillJobSnapshot[]) => snapshots[snapshots.length - 1];
+    const userCell: Cell = { outcome: "answered", provenance: "user", value: { kind: "text", text: "Mine" } };
+
+    it("lists rows queued, then active until their answers are saved, grouped by the columns they fill", async () => {
+        const rows = [
+            itemRow("a", { documents: ["u-PDFa"] }),
+            itemRow("b", { documents: ["u-PDFb"], cells: { design: userCell } }),
+            itemRow("c", { documents: ["u-PDFc"] }),
+        ];
+        const { state, fills } = harness(rows);
+        const gates: Deferred<void>[] = [];
+        state.respond = async (request) => {
+            const gate = deferred<void>();
+            gates.push(gate);
+            await gate.promise;
+            return answer(request);
+        };
+        const { job } = await planAndStart(fills);
+        await until(() => state.requests.length === 1, "the first row in flight");
+        expect(last(state.snapshots).cells).toEqual([
+            { columns: ["method", "design"], queued: ["c"], active: ["a"] },
+            { columns: ["method"], queued: ["b"], active: [] },
+        ]);
+        // Answered, but not saved yet: still active.
+        gates[0].resolve();
+        await until(() => state.requests.length === 2, "the second row in flight");
+        expect(last(state.snapshots).cells).toEqual([
+            { columns: ["method", "design"], queued: ["c"], active: ["a"] },
+            { columns: ["method"], queued: [], active: ["b"] },
+        ]);
+        gates[1].resolve();
+        await until(() => gates.length === 3, "the last row in flight");
+        gates[2].resolve();
+        const done = await fills.wait(job.job_id);
+        // The last commit lets every row go before the job reads as done.
+        const settled = state.snapshots.filter((snapshot) => snapshot.state === "running").pop();
+        expect(settled?.cells).toEqual([]);
+        expect(done?.cells).toBeUndefined();
+    });
+
+    it("drops the queued rows on Stop and keeps a row in flight until it is written", async () => {
+        const rows = Array.from({ length: 4 }, (_, i) => itemRow(`r${i}`, { documents: [`u-PDFr${i}`] }));
+        const { state, fills } = harness(rows);
+        const gate = deferred<void>();
+        state.respond = async (request) => {
+            await gate.promise;
+            return answer(request);
+        };
+        const { job } = await planAndStart(fills);
+        await until(() => state.requests.length === 1, "a row in flight");
+        fills.stop(job.job_id);
+        expect(last(state.snapshots).cells).toEqual([{ columns: ["method", "design"], queued: [], active: ["r0"] }]);
+        gate.resolve();
+        await fills.wait(job.job_id);
+        expect(state.table.rows[0].cells.method).toBeDefined();
+    });
+
+    it("lets a row go when it is not sent after all", async () => {
+        const { state, fills } = harness([itemRow("a", { documents: ["u-PDFa"] })]);
+        state.documents["u-PDFa"] = { ok: false, code: "file_missing" };
+        let seen = false;
+        const { job } = await planAndStart(fills);
+        await fills.wait(job.job_id);
+        for (const snapshot of state.snapshots) if (snapshot.cells?.some((group) => group.active.includes("a"))) seen = true;
+        expect(seen).toBe(true);
+        const running = state.snapshots.filter((snapshot) => snapshot.state === "running").pop();
+        expect(running?.cells).toEqual([]);
+    });
+});
+
 describe("failed requests", () => {
     it("retries a network error and a 429 with the same key and the same body", async () => {
         const { state, fills } = harness([itemRow("a", { documents: ["u-PDFa"] })]);

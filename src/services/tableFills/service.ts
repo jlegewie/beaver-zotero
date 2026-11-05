@@ -37,6 +37,7 @@ import {
 } from '@beaver/agent-core/layouts/tableFill';
 import {
     TABLE_FILL_CHANGED_EVENT,
+    type TableFillCells,
     type TableFillColumn,
     type TableFillJobSnapshot,
     type TableFillNotStartedReason,
@@ -254,6 +255,11 @@ class FillJob {
      */
     private abandoned = false;
     private pendingCommit: PendingRow[] = [];
+    /**
+     * Rows started and not settled, with the columns they fill. `saving`: its
+     * writes wait for a commit, and the row stays until that commit settles.
+     */
+    private working = new Map<string, { columns: string[]; saving: boolean }>();
     private commitTimer?: ReturnType<typeof setTimeout>;
     private commitChain: Promise<void> = Promise.resolve();
     /** A commit landed, so the snapshot is behind until the job renders it. */
@@ -331,8 +337,22 @@ class FillJob {
             balance: this.balanceAtStart == null ? null : round(Math.max(0, this.balanceAtStart - this.charged)),
             started_at: this.startedAt,
             seconds_left: secondsLeft,
-            ...(this.state === 'done' ? { result: this.result } : {}),
+            ...(this.state === 'done' ? { result: this.result } : { cells: this.cells() }),
         };
+    }
+
+    /** The cells still to write, grouped by the columns each row fills. */
+    private cells(): TableFillCells[] {
+        const groups = new Map<string, TableFillCells>();
+        const add = (row: string, columns: string[], list: 'queued' | 'active') => {
+            const key = columns.join('\u0000');
+            let group = groups.get(key);
+            if (!group) groups.set(key, (group = { columns, queued: [], active: [] }));
+            group[list].push(row);
+        };
+        for (const [row, { columns }] of this.working) add(row, columns, 'active');
+        for (const row of this.queue) add(row.row, row.columns, 'queued');
+        return [...groups.values()];
     }
 
     private publish(): void {
@@ -453,6 +473,7 @@ class FillJob {
             const row = this.queue.shift();
             if (!row) return;
             this.inFlight += 1;
+            this.working.set(row.row, { columns: row.columns, saving: false });
             this.publish();
             try {
                 await this.processRow(row);
@@ -471,6 +492,7 @@ class FillJob {
                 }
             } finally {
                 this.inFlight -= 1;
+                if (!this.working.get(row.row)?.saving) this.working.delete(row.row);
                 this.publish();
             }
         }
@@ -488,6 +510,7 @@ class FillJob {
             this.addNotStarted('changed', 1);
             return;
         }
+        this.working.set(row.row, { columns: row.columns, saving: false });
         let document: SerializedFillDocument | undefined;
         if (read && row.document) {
             if (!read.ok) {
@@ -706,6 +729,8 @@ class FillJob {
 
     private enqueueCommit(row: string, mutations: TableMutation[], cells: PendingRow['cells'] = []): void {
         if (this.abandoned) return;
+        const working = this.working.get(row);
+        if (working) working.saving = true;
         this.pendingCommit.push({ row, mutations, cells });
         if (this.pendingCommit.length >= this.settings.commitRows) {
             void this.flush();
@@ -729,25 +754,35 @@ class FillJob {
         this.pendingCommit = [];
         if (batch.length) {
             this.commitChain = this.commitChain.then(async () => {
-                const landed = await this.commitNow(batch.flatMap((entry) => entry.mutations), 0);
-                if (Array.isArray(landed)) {
-                    this.countWritten(batch, landed);
-                    return;
-                }
-                if (landed === 'failed' || batch.length === 1) {
-                    this.result.not_written += batch.length;
-                    return;
-                }
-                // The table refused the batch as a whole (an answer it cannot
-                // hold): commit row by row, so one row does not cost the others.
-                for (const entry of batch) {
-                    const one = await this.commitNow(entry.mutations, 0);
-                    if (Array.isArray(one)) this.countWritten([entry], one);
-                    else this.result.not_written += 1;
+                try {
+                    await this.commitBatch(batch);
+                } finally {
+                    // Its rows are settled, written or not: their cells stop filling.
+                    for (const entry of batch) this.working.delete(entry.row);
+                    this.publish();
                 }
             });
         }
         return this.commitChain;
+    }
+
+    private async commitBatch(batch: PendingRow[]): Promise<void> {
+        const landed = await this.commitNow(batch.flatMap((entry) => entry.mutations), 0);
+        if (Array.isArray(landed)) {
+            this.countWritten(batch, landed);
+            return;
+        }
+        if (landed === 'failed' || batch.length === 1) {
+            this.result.not_written += batch.length;
+            return;
+        }
+        // The table refused the batch as a whole (an answer it cannot
+        // hold): commit row by row, so one row does not cost the others.
+        for (const entry of batch) {
+            const one = await this.commitNow(entry.mutations, 0);
+            if (Array.isArray(one)) this.countWritten([entry], one);
+            else this.result.not_written += 1;
+        }
     }
 
     /**
