@@ -39,7 +39,7 @@ export function removedPaperId(paper: RemovedPaper): string | null {
  * the table's items entry, a picked collection or tag becomes a source. A
  * paper already in the table shows checked; it is removed from the row's
  * menu, not here. Excluded libraries are not offered. Each instance owns its
- * menu state, so the toolbar's + Papers and the sources popover's "Add papers
+ * menu state, so the toolbar's + Items and the sources popover's "Add items
  * or a collection" open independently.
  */
 export function TableAddSources({
@@ -150,7 +150,7 @@ export function TableAddSources({
 
 /** A source entry's name: the scope's, or "Added papers" for the papers picked by hand. */
 export function sourceEntryName(entry: SourceEntry): string {
-    if (entry.type === 'items') return 'Added papers';
+    if (entry.type === 'items') return 'Added items';
     const scope = entry.scope;
     if (!scope) return 'Source';
     if (scope.kind === 'tag') return scope.tag ?? 'Tag';
@@ -161,7 +161,7 @@ const KIND_NAMES: Record<string, string> = { collection: 'Collection', tag: 'Tag
 
 /** "Collection · My Library · 38 papers"; "Picked by hand · 8 papers". */
 function sourceEntryLine(entry: SourceEntry, rows: number): string {
-    const papers = `${rows.toLocaleString('en-US')} ${rows === 1 ? 'paper' : 'papers'}`;
+    const papers = `${rows.toLocaleString('en-US')} ${rows === 1 ? 'item' : 'items'}`;
     if (entry.type === 'items' || !entry.scope) return `Picked by hand · ${papers}`;
     const libraryID = resolveLibraryRef({ library_ref: entry.scope.library_ref });
     const library = libraryID ? (Zotero.Libraries.get(libraryID) as Zotero.Library | false) : false;
@@ -258,13 +258,13 @@ export function TableSourcesPopover({
                                 <div className="rt-source-new">
                                     <span className="rt-source-new-count">
                                         <span className="rt-dot" aria-hidden="true" />
-                                        {fresh === 1 ? '1 new paper' : `${fresh.toLocaleString('en-US')} new papers`}
+                                        {fresh === 1 ? '1 new item' : `${fresh.toLocaleString('en-US')} new items`}
                                     </span>
                                     <button
                                         type="button"
                                         className="rt-source-add"
                                         disabled={disabled}
-                                        title={disabledReason ?? `Add the new papers in ${name}`}
+                                        title={disabledReason ?? `Add the new items in ${name}`}
                                         onClick={() => onRefresh(entry)}
                                     >
                                         Add
@@ -287,12 +287,12 @@ export function TableSourcesPopover({
             })}
             {removed.length > 0 ? (
                 <>
-                    <div className="rt-sources-heading rt-sources-removed-heading">Removed papers · {removed.length}</div>
-                    <p className="rt-sources-note">Removed papers stay out when a source refreshes.</p>
+                    <div className="rt-sources-heading rt-sources-removed-heading">Removed items · {removed.length}</div>
+                    <p className="rt-sources-note">Removed items stay out when a source refreshes.</p>
                     <div className="rt-removed-list">
                         {removed.map((paper, index) => {
                             const id = removedPaperId(paper);
-                            const title = (id && titles.get(id)) || (paper.ref.kind === 'item' ? 'Paper' : 'Work');
+                            const title = (id && titles.get(id)) || (paper.ref.kind === 'item' ? 'Item' : 'Work');
                             return (
                                 <div key={`${id ?? index}`} className="rt-removed">
                                     <span className="rt-removed-title" title={title}>
@@ -321,7 +321,7 @@ export function TableSourcesPopover({
     );
 }
 
-/** The (+) trigger's content for the "+ Papers" control. */
+/** The (+) trigger's content for the "+ Items" control. */
 export const addPapersContent = (label: string) => (
     <>
         <Icon icon={PlusSignIcon} size={13} />

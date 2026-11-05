@@ -33,9 +33,9 @@ export function pricingSentence(
     prices: TableFillPricing,
     titleAbstractRows = 0,
 ): string {
-    const sentence = `Filling costs ${creditsText(prices.document)} per paper, charged as each paper is filled. Papers that can't be read are free.`;
+    const sentence = `Filling costs ${creditsText(prices.document)} per item, charged as each item is filled. Items that can't be read are free.`;
     if (titleAbstractRows > 0 && prices.title_abstract !== prices.document)
-        return `${sentence} A paper answered from its title and abstract costs ${formatCredits(prices.title_abstract)}.`;
+        return `${sentence} An item answered from its title and abstract costs ${formatCredits(prices.title_abstract)}.`;
     return sentence;
 }
 
@@ -65,13 +65,13 @@ export function pendingLines(
     plan: Pick<TableFillPlanSummary, "pending" | "scope" | "rows">,
 ): string[] {
     if (plan.scope.kind === "retry_failed")
-        return [`Retry ${count(plan.rows, "paper")} that failed last time`];
+        return [`Retry ${count(plan.rows, "item")} that failed last time`];
     if (plan.scope.kind === "cells") return [];
     if (plan.scope.limit)
         return [`A trial: the first ${count(plan.rows, "row")} with work to do`];
     const pending = plan.pending;
     const lines: string[] = [];
-    if (pending.new_rows > 0) lines.push(`${count(pending.new_rows, "new paper")}`);
+    if (pending.new_rows > 0) lines.push(`${count(pending.new_rows, "new item")}`);
     // Unanswered cells in rows that are not new: a column added since, or
     // cells an earlier fill did not reach.
     const unanswered = pending.columns.filter((c) => c.reason === "new");
@@ -85,7 +85,7 @@ export function pendingLines(
             `${changed.length === 1 ? "Changed column" : "Changed columns"}: ${changed.map((c) => c.header).join(", ")}`,
         );
     if (pending.retry_rows > 0)
-        lines.push(`${count(pending.retry_rows, "paper")} to retry`);
+        lines.push(`${count(pending.retry_rows, "item")} to retry`);
     return lines;
 }
 
@@ -122,10 +122,10 @@ export function planRowLine(
         parts.push(
             `${plan.title_abstract.toLocaleString("en-US")} from title and abstract`,
         );
-    let line = `Reads ${count(read, "paper")}${parts.length ? `: ${parts.join(", ")}` : ""}`;
+    let line = `Reads ${count(read, "item")}${parts.length ? `: ${parts.join(", ")}` : ""}`;
     const unreadable = plan.no_input + plan.unavailable;
     if (unreadable)
-        line += `. ${count(unreadable, "paper")} can't be read and ${unreadable === 1 ? "is" : "are"} skipped`;
+        line += `. ${count(unreadable, "item")} can't be read and ${unreadable === 1 ? "is" : "are"} skipped`;
     return line;
 }
 
@@ -140,7 +140,7 @@ export function fillActionLabel(
 export function planCostLine(
     plan: Pick<TableFillPlanSummary, "rows" | "credits" | "documents" | "title_abstract">,
 ): string {
-    return `Fill ${count(papersRead(plan), "paper")} · ${creditsText(plan.credits)}`;
+    return `Fill ${count(papersRead(plan), "item")} · ${creditsText(plan.credits)}`;
 }
 
 /**
@@ -167,7 +167,7 @@ export function balanceLine(
     const perPaper = paying > 0 ? plan.credits / paying : plan.prices.document;
     const covered = perPaper > 0 ? Math.floor(plan.balance / perPaper + 1e-9) : paying;
     const balance = creditsText(plan.balance);
-    return `Your ${balance} ${balance.endsWith("credit") ? "covers" : "cover"} about ${Math.min(covered, paying)} of ${paying} papers`;
+    return `Your ${balance} ${balance.endsWith("credit") ? "covers" : "cover"} about ${Math.min(covered, paying)} of ${paying} items`;
 }
 
 /** "About 3 minutes left". */
@@ -194,11 +194,11 @@ export function progressLine(job: TableFillJobSnapshot): { status: string; faile
         return {
             status:
                 job.in_flight > 0
-                    ? `Stopping: finishing ${count(job.in_flight, "paper")} already underway`
+                    ? `Stopping: finishing ${count(job.in_flight, "item")} already underway`
                     : "Stopping",
             failed,
         };
-    const papers = count(job.rows_total, "paper");
+    const papers = count(job.rows_total, "item");
     if (job.rows_done === 0) return { status: `Starting to read ${papers}`, failed };
     let status = `Reading ${job.rows_done.toLocaleString("en-US")} of ${papers}`;
     const seconds = job.seconds_left;
@@ -229,7 +229,7 @@ export function failedRowsLink(failed: number): string {
 export function runningLabel(job: TableFillJobSnapshot): string {
     if (job.state === "stopping")
         return job.in_flight > 0
-            ? `Stopping… finishing ${count(job.in_flight, "paper")}`
+            ? `Stopping… finishing ${count(job.in_flight, "item")}`
             : "Stopping…";
     return `Stop · ${job.rows_done}/${job.rows_total}`;
 }
@@ -250,7 +250,7 @@ function stoppedText(job: TableFillJobSnapshot, result: TableFillResult): string
 }
 
 function afterText(job: TableFillJobSnapshot): string {
-    return `after ${job.rows_done} of ${count(job.rows_total, "paper")}`;
+    return `after ${job.rows_done} of ${count(job.rows_total, "item")}`;
 }
 
 /** A stop that neither the user nor the balance caused, as a sentence. */
@@ -290,7 +290,7 @@ export function resultSummary(job: TableFillJobSnapshot): string {
             : result.stopped_by === "stopped"
               ? `Stopped ${after}`
               : (stopSentence(result, after) ?? `Filled ${count(result.rows_answered, "row")}`);
-    return result.not_written ? `${line} · ${count(result.not_written, "paper")} not saved` : line;
+    return result.not_written ? `${line} · ${count(result.not_written, "item")} not saved` : line;
 }
 
 /** Answers the table declined to write, left for the next fill. */
@@ -323,13 +323,13 @@ export function resultText(job: TableFillJobSnapshot): string {
     // A stop counts the papers it worked on, saved or not: name the unsaved ones.
     if (stopped)
         return result.not_written
-            ? `${stopped}; ${count(result.not_written, "paper")} could not be saved`
+            ? `${stopped}; ${count(result.not_written, "item")} could not be saved`
             : stopped;
     const failed = result.failed_row_ids.length;
     const parts = [`Filled ${count(result.rows_answered, "row")}`];
     if (failed) parts.push(`${failed.toLocaleString("en-US")} couldn't be read`);
     if (result.not_written)
-        parts.push(`${count(result.not_written, "paper")} could not be saved`);
+        parts.push(`${count(result.not_written, "item")} could not be saved`);
     const skipped = skippedAnswers(result);
     if (skipped) parts.push(`${count(skipped, "answer")} left for the next fill`);
     return parts.join(" · ");

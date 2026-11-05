@@ -80,7 +80,7 @@ export const ROW_FAILURE_MESSAGES: Readonly<Record<string, string>> = {
     library_excluded: "The item is in a library Beaver cannot access.",
     library_unavailable:
         "The item's library is not available on this computer.",
-    request_refused: "Beaver could not send this paper to be answered.",
+    request_refused: "Beaver could not send this item to be answered.",
     multiple_documents: "This row names several documents; a fill reads one.",
 };
 

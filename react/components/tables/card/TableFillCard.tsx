@@ -230,7 +230,7 @@ export const TableFillCard: React.FC<TableFillCardProps> = ({ request, onSubmit,
                 <div className="flex-1" />
                 <Button
                     variant="solid"
-                    ariaLabel={`${runLabel} papers`}
+                    ariaLabel={`${runLabel} items`}
                     onClick={() => decide(true)}
                     disabled={locked}
                     title={disabled ? heldCaption : undefined}

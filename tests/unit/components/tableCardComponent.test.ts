@@ -1031,9 +1031,9 @@ describe('TableCard', () => {
             expect(button('Create only')).toBeUndefined();
             expect(container.querySelector('.table-card-run-option')?.textContent).toBe('Fill the table now');
             expect(runOption()!.checked).toBe(true);
-            expect(receipt()).toBe('1 paper · 0.2 credits');
+            expect(receipt()).toBe('1 item · 0.2 credits');
             // The standing rate moved behind the info button.
-            expect(container.textContent).not.toContain('Charged per paper');
+            expect(container.textContent).not.toContain('Charged per item');
             await click('Create table');
             expect(sent[0]).toMatchObject({ approved: true, choice: 'create_and_run', cost: { credits: 0.2 } });
             expect(sent[0]).not.toHaveProperty('estimate_id');
@@ -1066,14 +1066,14 @@ describe('TableCard', () => {
         it('shows how the papers are read and the rate behind the info button', async () => {
             render({ ...costedFixture('create-items'), cost: { rows: 12, documents: 10, title_abstract: 2, no_input: 0, credits: 2.1 } });
             await click('Next');
-            expect(receipt()).toBe('12 papers · 2.1 credits');
+            expect(receipt()).toBe('12 items · 2.1 credits');
             const info = container.querySelector('button[aria-label="How this is priced"]') as HTMLButtonElement;
             expect(info.getAttribute('aria-expanded')).toBe('false');
             await clickElement(info);
             const popover = container.querySelector('[role="dialog"][aria-label="How this is priced"]');
             const rows = [...popover!.querySelectorAll('.table-card-pricing-rows > span')].map((cell) => cell.textContent);
-            expect(rows).toEqual(['Full text', '10 papers', '0.2 each', 'Abstract only', '2 papers', '0.05 each']);
-            expect(popover?.textContent).toContain('Charged per paper as it is filled.');
+            expect(rows).toEqual(['Full text', '10 items', '0.2 each', 'Abstract only', '2 items', '0.05 each']);
+            expect(popover?.textContent).toContain('Charged per item as it is filled.');
             expect(info.getAttribute('aria-expanded')).toBe('true');
             // Escape closes it and gives focus back to the button.
             await press(document.activeElement ?? document.body, 'Escape');
@@ -1101,11 +1101,11 @@ describe('TableCard', () => {
             render(costedFixture('create-items'));
             await click('Next');
             // The fixture's one unreadable paper.
-            expect(bands()).toEqual(['1 paper has no full text or abstract and is skipped.']);
+            expect(bands()).toEqual(['1 item has no full text or abstract and is skipped.']);
             act(() => root?.unmount());
             render({ ...costedFixture('create-items'), cost: { rows: 12, documents: 10, title_abstract: 2, no_input: 0, credits: 2.1 } });
             await click('Next');
-            expect(bands()).toEqual(['2 papers have no full text and are read from their abstracts.']);
+            expect(bands()).toEqual(['2 items have no full text and are read from their abstracts.']);
             act(() => root?.unmount());
             render({ ...costedFixture('create-items'), cost: { rows: 12, documents: 12, title_abstract: 0, no_input: 0, credits: 2.4 } });
             await click('Next');
@@ -1116,7 +1116,7 @@ describe('TableCard', () => {
             render({ ...costedFixture('create-items'), cost: { rows: 46, documents: 46, title_abstract: 0, no_input: 0, credits: 9.2 } });
             await click('Next');
             const warning = container.querySelector('.table-card-footer-band[role="alert"]');
-            expect(warning?.textContent).toContain('Your 6 credits cover about 30 of 46 papers.');
+            expect(warning?.textContent).toContain('Your 6 credits cover about 30 of 46 items.');
             await click('Add credits');
             expect(mocks.openPreferencesWindow).toHaveBeenCalledWith('billing');
             // Creating without the fill costs nothing, so the warning goes.
@@ -1208,7 +1208,7 @@ describe('TableCard', () => {
             });
             await click('Next');
             expect(button('Create table')!.disabled).toBe(false);
-            expect(receipt()).toBe('Up to 42 papers · 7.65 credits');
+            expect(receipt()).toBe('Up to 42 items · 7.65 credits');
             // An estimate makes no claim about which papers lack full text.
             expect(bands()).toEqual([]);
             await clickElement(container.querySelector('button[aria-label="How this is priced"]'));
@@ -1245,7 +1245,7 @@ describe('TableCard', () => {
             // The decision stays in view, quiet; Back and Create table make way for Stop.
             expect(container.querySelector('.table-card-decision-held')).not.toBeNull();
             expect(runOption()!.disabled).toBe(true);
-            expect(receipt()).toBe('1 paper · 0.2 credits');
+            expect(receipt()).toBe('1 item · 0.2 credits');
             expect(controls()).toEqual(['Cancel', 'Stop']);
             expect(button('Cancel')!.disabled).toBe(true);
             await click('Stop');
@@ -1277,7 +1277,7 @@ describe('TableCard', () => {
             expect(container.textContent).toContain('Sample size');
             expect(container.textContent).toContain('Design');
             const cost = container.querySelector('.table-card-cost')?.textContent ?? '';
-            expect(cost).toContain('Reads 32 papers: 30 from their documents, 2 from title and abstract');
+            expect(cost).toContain('Reads 32 items: 30 from their documents, 2 from title and abstract');
             expect(cost).toContain('6.1 credits');
             // The balance (6) does not cover the plan.
             expect(cost).toContain('Your 6 credits cover about');

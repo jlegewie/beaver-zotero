@@ -133,7 +133,7 @@ describe('columns and rows', () => {
         expect(columnBadges(spec, spec.columns[4]).newCells).toBe(4);
         expect(newBadgeText(46)).toBe('New column: 46 cells to fill');
         expect(staleBadgeText(2, 'question')).toBe('2 answers are out of date: the question changed after they were written. Fill to update them.');
-        expect(staleBadgeText(1, 'document')).toMatch(/^1 answer is out of date: the paper's document changed after it was written/);
+        expect(staleBadgeText(1, 'document')).toMatch(/^1 answer is out of date: the item's document changed after it was written/);
     });
 
     it('calls a row new when no question cell is written and its fill did not fail', () => {

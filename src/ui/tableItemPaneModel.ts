@@ -363,7 +363,7 @@ export function buildTableSectionFields(
     if (titleAbstractOnly) flags.push(`${titleAbstractOnly} from title and abstract`);
     if (stale) flags.push(`${stale} stale`);
     if (failedRows)
-        flags.push(`${plural(failedRows, 'paper', 'papers')} could not be read`);
+        flags.push(`${plural(failedRows, 'item', 'items')} could not be read`);
 
     const annotationWarning = annotationsBeforeLastWrite > 0;
 

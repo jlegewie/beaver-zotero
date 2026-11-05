@@ -123,7 +123,7 @@ describe('the grid', () => {
     it('shows the identity, the sources chip and the column badges', () => {
         mount();
         expect(container!.querySelector('.rt-title')?.textContent).toBe('Cash transfers');
-        expect(container!.querySelector('.rt-sources-chip')?.textContent).toBe('1 source · 3 papers');
+        expect(container!.querySelector('.rt-sources-chip')?.textContent).toBe('1 source · 3 items');
         const amount = container!.querySelector('th[data-column-id="amount"]')!;
         expect(amount.querySelector('.rt-badge-new')?.textContent).toBe('New');
         expect(amount.querySelector('.rt-th-question-text')?.textContent).toBe('Transfer size?');
@@ -138,7 +138,7 @@ describe('the grid', () => {
         expect(cell('r2', 'design').textContent).toContain('Not reported');
         expect(cell('r3', 'effect').textContent).toBe('');
         const paper = container!.querySelector('tr[data-row-id="r3"] .rt-paper')!;
-        expect(paper.textContent).toContain('New paper');
+        expect(paper.textContent).toContain('New item');
         // Authors, then the venue in italics on its own line; the year is its own column.
         expect(Array.from(paper.querySelectorAll('.rt-paper-meta')).map((line) => line.textContent)).toEqual(['Smith, Jones', 'QJE']);
         expect(paper.querySelector('.rt-paper-venue em')?.textContent).toBe('QJE');
@@ -472,7 +472,7 @@ describe('the cell inspector', () => {
         spec.rows[0].cells.effect = model('From the abstract.', { documents: [], evidence: [] });
         mount({ table: spec });
         click(cell('r1', 'effect'));
-        expect(inspector()!.querySelector('.rt-inspector-answer-section .rt-tag-abstract')?.textContent).toBe('Abstract');
+        expect(inspector()!.querySelector('.rt-inspector-answer-section .rt-tag-abstract')?.textContent).toBe('Abstract only');
         expect(inspector()!.querySelector('.rt-passages')).toBeNull();
     });
 
@@ -546,9 +546,9 @@ describe('the paper view', () => {
         expect(revealInLibrary).toHaveBeenCalledWith(expect.objectContaining({ zotero_key: 'AAAA1111' }));
         click(actions()[1]);
         expect(openSource).toHaveBeenCalledTimes(1);
-        expect(inspector()!.textContent).not.toContain('New paper');
+        expect(inspector()!.textContent).not.toContain('New item');
         click(paperCell('r3'));
-        expect(inspector()!.querySelector('.rt-inspector-note')?.textContent).toBe('New paper: added since the last fill.');
+        expect(inspector()!.querySelector('.rt-inspector-note')?.textContent).toBe('New item: added since the last fill.');
     });
 
     it("opens a question's cell from its block", () => {
@@ -966,6 +966,110 @@ describe('the notice and the banner', () => {
         click(Array.from(document.querySelectorAll<HTMLElement>('*')).find((el) => el.textContent === 'Version history' && el.children.length === 0)!);
         expect(body.querySelector(':scope > aside.rt-history')).not.toBeNull();
         expect(banner()!.parentElement).toBe(main());
+    });
+});
+
+describe('Category columns', () => {
+    const withOptions = (labels: string[]) => {
+        const spec = table();
+        spec.columns = spec.columns.map((column) =>
+            column.id === 'design' ? { ...column, options: labels.map((label) => ({ label, color: 'green' as const })) } : column,
+        );
+        return spec;
+    };
+    /** The design column's width: after the rail, the paper, the year and Headline effect. */
+    const designWidth = () => container!.querySelectorAll<HTMLElement>('colgroup col')[4].style.width;
+
+    it('sizes the column to its longest category, within bounds', () => {
+        mount();
+        expect(designWidth()).toBe('9rem');
+        act(() => root?.render(h(ResearchTable, { table: withOptions(['RCT', 'Observational regression']) })));
+        expect(designWidth()).toBe('14.4rem');
+        act(() => root?.render(h(ResearchTable, { table: withOptions(['RCT', 'Decomposition/counterfactual analysis of outcomes']) })));
+        expect(designWidth()).toBe('16rem');
+    });
+
+    it('draws the answer as a pill that wraps rather than clipping', () => {
+        mount();
+        expect(cell('r1', 'design').querySelector('.bt-pill')?.classList.contains('rt-choice')).toBe(true);
+    });
+
+    it("opens a Category cell's expansion wider than its narrow column, and a text cell's at the cell's width", () => {
+        mount();
+        expect(expand(cell('r1', 'design'))!.style.width).toBe('224px');
+        act(() => root?.render(h(ResearchTable, { table: table() })));
+        expect(expand(cell('r1', 'effect'))!.style.width).not.toBe('224px');
+    });
+});
+
+describe('rows the user just added', () => {
+    const scrolled = vi.fn();
+    beforeEach(() => {
+        scrolled.mockReset();
+        HTMLElement.prototype.scrollIntoView = function (this: HTMLElement, options?: ScrollIntoViewOptions) {
+            scrolled(this.getAttribute('data-row-id'), options);
+        } as never;
+    });
+    afterEach(() => {
+        delete (HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+        vi.useRealTimers();
+    });
+    const added = () => Array.from(container!.querySelectorAll('tr.rt-row-added')).map((row) => row.getAttribute('data-row-id'));
+    const showAdded = () => container!.querySelector<HTMLButtonElement>('.rt-hidden-added');
+    const render = (props: Partial<React.ComponentProps<typeof ResearchTable>>, spec = table()) =>
+        act(() => root?.render(h(ResearchTable, { table: spec, ...props })));
+    const search = (text: string) => {
+        const input = container!.querySelector<HTMLInputElement>('input[aria-label="Search rows"]')!;
+        act(() => {
+            Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, text);
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+        return input;
+    };
+
+    it("highlights them for a moment and scrolls to the first in the view's order", () => {
+        vi.useFakeTimers();
+        mount({ reveal: { rowIds: ['r3', 'r2'], token: 1 } });
+        expect(added()).toEqual(['r2', 'r3']);
+        expect(scrolled).toHaveBeenCalledWith('r2', { block: 'center' });
+        act(() => vi.advanceTimersByTime(2000));
+        expect(added()).toEqual([]);
+    });
+
+    it('waits for the table that has them', () => {
+        mount();
+        const grown = table();
+        grown.rows = [...grown.rows, { id: 'r4', ref: { kind: 'item', library_ref: 'u', zotero_key: 'DDDD4444', library_id: 1 }, cells: {} }];
+        render({ reveal: { rowIds: ['r4'], token: 1 } });
+        expect(added()).toEqual([]);
+        render({ reveal: { rowIds: ['r4'], token: 1 } }, grown);
+        expect(added()).toEqual(['r4']);
+        expect(scrolled).toHaveBeenCalledWith('r4', { block: 'center' });
+    });
+
+    it('offers rows the search hides behind Show, keeping the search until the user asks', () => {
+        mount();
+        const input = search('Baird');
+        render({ reveal: { rowIds: ['r3'], token: 1 } });
+        expect(added()).toEqual([]);
+        expect(scrolled).not.toHaveBeenCalled();
+        expect(showAdded()?.textContent).toBe('1 added item hidden · Show');
+        expect(input.value).toBe('Baird');
+
+        click(showAdded()!);
+        expect(input.value).toBe('');
+        expect(added()).toEqual(['r3']);
+        expect(scrolled).toHaveBeenCalledWith('r3', { block: 'center' });
+        expect(showAdded()).toBeNull();
+    });
+
+    it('forgets the hidden rows once the user changes the search', () => {
+        mount();
+        search('Baird');
+        render({ reveal: { rowIds: ['r2', 'r3'], token: 1 } });
+        expect(showAdded()?.textContent).toBe('2 added items hidden · Show');
+        search('Bai');
+        expect(showAdded()).toBeNull();
     });
 });
 

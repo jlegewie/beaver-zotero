@@ -203,7 +203,7 @@ describe('buildTableSectionFields — trust counts', () => {
         expect(fields.stale).toBe(1);
         expect(fields.failedRows).toBe(2);
         expect(fields.flagsLine).toBe(
-            '4 from title and abstract · 1 stale · 2 papers could not be read'
+            '4 from title and abstract · 1 stale · 2 items could not be read'
         );
     });
 
@@ -211,7 +211,7 @@ describe('buildTableSectionFields — trust counts', () => {
         const fields = buildTableSectionFields(
             input({ summary: summary({ failed_rows: 1, columns_detail: { a: column({ answered: 1 }) } }) })
         );
-        expect(fields.flagsLine).toBe('1 paper could not be read');
+        expect(fields.flagsLine).toBe('1 item could not be read');
     });
 
     it('leaves the flags line empty when nothing is flagged', () => {

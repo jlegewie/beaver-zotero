@@ -173,7 +173,7 @@ function TextEditor({
                 <Button
                     variant="ghost-secondary"
                     disabled={saving}
-                    title="The paper does not say"
+                    title="The item does not say"
                     onClick={() => void save({ op: "not_reported", note: noteText })}
                 >
                     Not reported

@@ -144,5 +144,5 @@ export function fillStatusLine(state: 'waiting' | 'background' | 'started', rows
     if (state === 'background') return 'Filling in the background';
     // A fill this renderer no longer follows (Zotero restarted since): what is known is that it started.
     if (state === 'started') return 'Started filling in the background';
-    return rows && rows > 0 ? `Filling ${rows.toLocaleString('en-US')} ${rows === 1 ? 'paper' : 'papers'}…` : 'Filling…';
+    return rows && rows > 0 ? `Filling ${rows.toLocaleString('en-US')} ${rows === 1 ? 'item' : 'items'}…` : 'Filling…';
 }

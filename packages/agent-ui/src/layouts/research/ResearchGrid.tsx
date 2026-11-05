@@ -68,6 +68,8 @@ export interface ResearchGridProps {
     cellEditor?: { address: CellAddress; content: React.ReactNode; list: boolean } | null;
     /** A running fill's cells, by row ({@link rowFills}). */
     fills?: ReadonlyMap<string, RowFill>;
+    /** Rows the user just added, highlighted briefly. */
+    addedRows?: ReadonlySet<string>;
 }
 
 /** A question column's width: prose shares what is left; short types are fixed. */
@@ -75,13 +77,31 @@ function questionWidth(column: Column): string | undefined {
     if (typeof column.width === "number") return `${column.width}px`;
     switch (column.type) {
         case "select":
-            return "11.5rem";
+            return selectWidth(column);
         case "boolean":
             return "8.5rem";
         default:
             return undefined;
     }
 }
+
+/**
+ * A Category column wide enough for its longest category on one line, within
+ * bounds; a longer one wraps in its pill. Estimated from the labels' length:
+ * about 0.46rem a character at the pill's size, plus the pill's and the
+ * cell's padding.
+ */
+function selectWidth(column: Column): string {
+    const longest = Math.max(0, ...(column.options ?? []).map((option) => option.label.length));
+    const rem = Math.min(SELECT_MAX_REM, Math.max(SELECT_MIN_REM, longest * 0.46 + 3.4));
+    return `${Math.round(rem * 10) / 10}rem`;
+}
+
+const SELECT_MIN_REM = 9;
+const SELECT_MAX_REM = 16;
+
+/** The narrowest expansion of a Category or Yes / no cell, whose column is narrow. */
+const SHORT_PEEK_PX = 224;
 
 const FLEX_MIN = "18rem";
 
@@ -114,6 +134,7 @@ export function ResearchGrid({
     cellEditDisabledReason,
     cellEditor,
     fills,
+    addedRows,
 }: ResearchGridProps): React.ReactElement {
     const rootRef = useRef<HTMLDivElement>(null);
     const bodyRef = useRef<HTMLTableSectionElement>(null);
@@ -168,7 +189,7 @@ export function ResearchGrid({
                             ) : null}
                         </th>
                         <th className="rt-th rt-th-paper" scope="col">
-                            <span className="rt-th-label">Paper</span>
+                            <span className="rt-th-label">Item</span>
                         </th>
                         {columns.year ? (
                             <th className="rt-th rt-th-year" scope="col">
@@ -222,6 +243,7 @@ export function ResearchGrid({
                             onEditCell={onEditCell}
                             editDisabledReason={cellEditDisabledReason}
                             fill={fills?.get(row.id)}
+                            isAdded={!!addedRows?.has(row.id)}
                         />
                     ))}
                     {rowWindow.padBottom > 0 ? <Spacer height={rowWindow.padBottom} /> : null}
@@ -441,6 +463,7 @@ interface ResearchRowProps {
     renderText: TextRenderer;
     documents?: TableDocuments;
     isNew: boolean;
+    isAdded: boolean;
     isSelected: boolean;
     selectedColumn?: string;
     onToggleSelect(rowId: string): void;
@@ -462,6 +485,7 @@ const ResearchRow = React.memo(function ResearchRow({
     renderText,
     documents,
     isNew,
+    isAdded,
     isSelected,
     selectedColumn,
     onToggleSelect,
@@ -475,7 +499,12 @@ const ResearchRow = React.memo(function ResearchRow({
     const lookOf = useRowFillLooks(fill, row);
     return (
         <tr
-            className={["rt-row", isSelected ? "rt-row-selected" : "", row.failure ? "rt-row-failed" : ""]
+            className={[
+                "rt-row",
+                isSelected ? "rt-row-selected" : "",
+                row.failure ? "rt-row-failed" : "",
+                isAdded ? "rt-row-added" : "",
+            ]
                 .filter(Boolean)
                 .join(" ")}
             data-row-id={row.id}
@@ -587,10 +616,12 @@ function PaperGridCell({
 
 /**
  * A grid cell's expansion, opened by hovering the cell: what `render` draws,
- * given `hide` to close it. Returns the handlers to spread on the cell.
+ * given `hide` to close it, at least `minWidth` px wide. Returns the handlers
+ * to spread on the cell.
  */
 function useCellPeek(
     render: (hide: () => void) => React.ReactNode,
+    minWidth?: number,
 ): Pick<ReturnType<typeof useHoverAnchor>, "onMouseEnter" | "onMouseLeave" | "onMouseDown"> {
     const layers = useHoverLayer();
     const hide = () => layers?.hide();
@@ -598,6 +629,7 @@ function useCellPeek(
         slot: "peek",
         variant: "peek",
         delayMs: 450,
+        width: minWidth,
         render: () => render(hide),
     });
     return { onMouseEnter, onMouseLeave, onMouseDown };
@@ -669,7 +701,7 @@ export function CellValue({
             const option = selectOption(column, value.label);
             return (
                 <span
-                    className={`bt-pill bt-pill-${option?.color ?? "gray"}`}
+                    className={`bt-pill bt-pill-${option?.color ?? "gray"} rt-choice`}
                     title={option?.description || undefined}
                 >
                     {value.label}
@@ -775,6 +807,8 @@ function QuestionCell({
     // an answer keeps it, dimmed, until the new one is saved.
     const placeholder = (look === "queued" || look === "active") && pending;
     const select = () => onSelect({ rowId: row.id, columnId: column.id });
+    // A narrow Category or Yes / no column gets a wider expansion.
+    const peekWidth = column.type === "select" || column.type === "boolean" ? SHORT_PEEK_PX : undefined;
     const anchor = useCellPeek((hide) => (
         <CellPeek
             onSelect={select}
@@ -808,7 +842,7 @@ function QuestionCell({
                 <CellBody row={row} cell={cell} column={column} renderText={renderText} documents={documents} full />
             )}
         </CellPeek>
-    ));
+    ), peekWidth);
     return (
         <td
             id={cellIdFor(row.id, column.id)}

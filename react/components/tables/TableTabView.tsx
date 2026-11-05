@@ -1,6 +1,6 @@
 import React from 'react';
 import { isTitleAbstractOnly, type TableSpec } from '@beaver/agent-core/layouts/table';
-import { ResearchTable, type ResearchTableFocus } from '@beaver/agent-ui/layouts';
+import { ResearchTable, type ResearchTableFocus, type ResearchTableReveal } from '@beaver/agent-ui/layouts';
 import MarkdownRenderer from '../messages/MarkdownRenderer';
 import {
     isTableItemError,
@@ -260,6 +260,8 @@ export default function TableTabView({
     const [focus, setFocus] = React.useState<ResearchTableFocus | null>(() =>
         options.focus ? { ...options.focus, token: ++focusRequests.current } : null,
     );
+    // Rows the user just added, brought into view.
+    const [reveal, setReveal] = React.useState<ResearchTableReveal | null>(null);
 
     React.useEffect(() => {
         let live = true;
@@ -355,6 +357,11 @@ export default function TableTabView({
         portalContainer: hostRef.current,
         newBySource: newPapers.bySource,
         onEdit: fillResult.onActivity,
+        onRowsAdded: (rowIds) => {
+            // Rows outside "failed rows only" could not be shown.
+            fillResult.showAllRows();
+            setReveal({ rowIds, token: ++focusRequests.current });
+        },
     });
     const { showAllRows, showFailedRows } = fillResult;
     const tableMessage = useTableMessage(
@@ -465,6 +472,7 @@ export default function TableTabView({
                     onActivity={fillResult.onActivity}
                     onlyRows={fillResult.failedRows}
                     focus={focus}
+                    reveal={reveal}
                     onCopy={(text) => Zotero.Utilities.Internal.copyTextToClipboard(text)}
                     onExport={() => {
                         const win = surfaceWindow;

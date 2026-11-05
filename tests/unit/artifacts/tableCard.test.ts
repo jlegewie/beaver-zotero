@@ -148,10 +148,10 @@ describe("stage lines", () => {
         ).toEqual(["4 answers from title and abstract only"]);
         expect(
             formatTableStages({ ...record, change: "Filled table", stages: { ...stages, answered: 9, remaining_rows: 3, failed_rows: 2, failed: 1 } }),
-        ).toEqual(["3 rows still to fill", "2 papers could not be read", "1 cell failed"]);
+        ).toEqual(["3 rows still to fill", "2 items could not be read", "1 cell failed"]);
         expect(
             formatTableStages({ ...record, change: "Filled table", stages: { ...stages, answered: 9, remaining_rows: 0, failed_rows: 1 } }),
-        ).toEqual(["1 paper could not be read"]);
+        ).toEqual(["1 item could not be read"]);
         expect(formatTableStages(record)).toEqual([]);
     });
 });

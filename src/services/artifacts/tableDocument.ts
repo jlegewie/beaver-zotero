@@ -192,7 +192,7 @@ function safeHref(uri: string | null | undefined): string | null {
 /** Why a cell is stale, as its marker's tooltip says it (the React grid says the same). */
 const STALE_REASON_TEXT: Record<'question' | 'document', string> = {
     question: 'The question changed',
-    document: "The paper's document changed",
+    document: "The item's document changed",
 };
 
 /**
@@ -613,7 +613,7 @@ export function renderTableHtml(spec: TableSpec, options: TableHtmlOptions = {})
         footerParts.push(`${coverage.titleAbstractOnly} from title and abstract`);
     if (coverage.errorRows > 0)
         footerParts.push(
-            `${coverage.errorRows} ${coverage.errorRows === 1 ? 'paper' : 'papers'} could not be read`
+            `${coverage.errorRows} ${coverage.errorRows === 1 ? 'item' : 'items'} could not be read`
         );
 
     const head = [

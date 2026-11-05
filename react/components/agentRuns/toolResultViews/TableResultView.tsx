@@ -143,7 +143,7 @@ export function formatTableStages(record: TableRecord): string[] {
     if (stages.answered > 0 && stages.remaining_rows > 0)
         lines.push(`${plural(stages.remaining_rows, "row")} still to fill`);
     const failedRows = stages.failed_rows ?? 0;
-    if (failedRows > 0) lines.push(`${plural(failedRows, "paper")} could not be read`);
+    if (failedRows > 0) lines.push(`${plural(failedRows, "item")} could not be read`);
     if (stages.title_abstract_only > 0)
         lines.push(`${plural(stages.title_abstract_only, "answer")} from title and abstract only`);
     if (stages.failed > 0) lines.push(`${plural(stages.failed, "cell")} failed`);

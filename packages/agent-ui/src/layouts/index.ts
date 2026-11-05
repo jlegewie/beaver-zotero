@@ -23,6 +23,7 @@ export type {
     ResearchTableEditing,
     ResearchTableFill,
     ResearchTableFocus,
+    ResearchTableReveal,
     ResearchTableProps,
 } from "./research/ResearchTable";
 export { CellInspector } from "./research/CellInspector";
