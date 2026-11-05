@@ -170,7 +170,9 @@ if (!parsed.options.lib || nonEsLibs.length > 0) {
 // pins it) calls to change a stored table, and nothing inside the package
 // applies a mutation. `layouts/tableCitations.ts` is a root too: clients build
 // the citations a table's evidence renders as, and nothing inside the package
-// renders one. `layouts/tableFill.ts` (selection and pending work) and
+// renders one. `layouts/tableExport.ts` is a root on the same rule: a client
+// writes a table to a file with it, and nothing inside the package does.
+// `layouts/tableFill.ts` (selection and pending work) and
 // `protocol/tableFillProtocol.ts` (the fill endpoint and the plugin's fill job)
 // are roots for the same reason: a client plans and shows fills with them, and
 // nothing inside the package runs one.
@@ -224,6 +226,7 @@ const entryPaths = [
   "src/layouts/tableEdit.ts",
   "src/protocol/tableFillProtocol.ts",
   "src/layouts/tableCitations.ts",
+  "src/layouts/tableExport.ts",
   "src/identity/itemLinks.ts",
   "src/extract/pageLabels/printedPageLabels.ts",
 ].map((p) => path.join(pkgDir, p));

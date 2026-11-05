@@ -8,9 +8,6 @@
  */
 
 import {
-    REFERENCE_COLUMN_ID,
-    YEAR_COLUMN_ID,
-    anchorColumn,
     isFillableColumn,
     staleReason,
     type AnsweredCell,
@@ -24,6 +21,8 @@ import {
 } from "@beaver/agent-core/layouts/table";
 import { cellsToFill } from "@beaver/agent-core/layouts/tableFill";
 import type { TableFillCells } from "@beaver/agent-core/protocol/tableFillProtocol";
+
+export { researchColumns, type ResearchColumns } from "@beaver/agent-core/layouts/table";
 
 // ---------------------------------------------------------------------------
 // Documents
@@ -194,27 +193,6 @@ export const PAPER_HEADER = "Item";
 export function sortOrderLabel(direction: "asc" | "desc", year: boolean): string {
     if (year) return direction === "asc" ? "oldest first" : "newest first";
     return direction === "asc" ? "A → Z" : "Z → A";
-}
-
-/** The columns the research table draws, in order. */
-export interface ResearchColumns {
-    /** The paper: the anchor (reference) column. */
-    paper: Column | undefined;
-    /** The year system column, when the table has one. */
-    year: Column | undefined;
-    /** The question columns: everything else that is not a system column. */
-    questions: Column[];
-}
-
-export function researchColumns(spec: TableSpec): ResearchColumns {
-    const paper =
-        spec.columns.find((column) => column.id === REFERENCE_COLUMN_ID) ??
-        anchorColumn(spec);
-    const year = spec.columns.find((column) => column.id === YEAR_COLUMN_ID);
-    const questions = spec.columns.filter(
-        (column) => column !== paper && column !== year && !column.system,
-    );
-    return { paper, year, questions };
 }
 
 // ---------------------------------------------------------------------------

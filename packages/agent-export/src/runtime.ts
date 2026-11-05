@@ -1,7 +1,7 @@
 /**
  * Entry point of the export runtime: the parts of the pipeline that carry
  * sizeable dependencies (remark, KaTeX, the docx writer) and the writers
- * (Word, HTML for PDF, Markdown, LaTeX). A host may load this lazily,
+ * (Word, HTML for PDF, Markdown, LaTeX, Excel). A host may load this lazily,
  * separately from its main bundle.
  */
 
@@ -19,3 +19,5 @@ export { writeMarkdown } from './markdown/writeMarkdown';
 export type { WriteMarkdownInput, WriteMarkdownResult } from './markdown/writeMarkdown';
 export { writeLatex } from './latex/writeLatex';
 export type { WriteLatexInput, WriteLatexResult } from './latex/writeLatex';
+export { writeXlsx } from './xlsx/writeXlsx';
+export type { WriteXlsxInput, WriteXlsxResult } from './xlsx/writeXlsx';

@@ -33,7 +33,6 @@ import {
     stripCitationTags,
     summarizeCoverage,
     TABLE_SPEC_VERSION,
-    toCsv,
     toPlainText,
     validateTableSpec,
     type Cell,
@@ -817,110 +816,6 @@ describe("plain text", () => {
             ]).map((r) => r.id),
         ).toEqual(["a"]);
     });
-
-    it("exports a CSV cell without the tags", () => {
-        expect(toCsv(citedSpec)).toBe(
-            'Methods,Methods — state\r\n"Survey of 1,200 adults in 2019.",system',
-        );
-    });
-});
-
-describe("toCsv", () => {
-    it("writes headers, value text, empty cells and escapes fields", () => {
-        const csv = toCsv(
-            spec,
-            sortRows(spec, { column_id: "cites", direction: "desc" }),
-        );
-        expect(csv.split("\r\n")).toEqual([
-            "Reference,Reference — state,Year,Year — state,Citations,Citations — state,Type,Type — state,Open access,Open access — state,Methods,Methods — state",
-            'Smith 2020 — Alpha,system,2020,system,120,system,Article,system,true,system,"Survey, n = 1,200",system',
-            "Jones 2018,system,2018-05,system,7,system,Book,system,false,system,,",
-            "adams 2022,system,2022-01-15,system,,,Article,system,,,Interviews,system",
-        ]);
-    });
-
-    it("writes evidence, reasoning and state beside the value, never confidence, escaping formula-like text", () => {
-        const table: TableSpec = {
-            id: "outcomes",
-            columns: [{ id: "a", header: "=Header", type: "text" }],
-            rows: [
-                { id: "unattempted", cells: {} },
-                {
-                    id: "finding",
-                    cells: {
-                        a: {
-                            outcome: "not_reported",
-                            provenance: "model",
-                            reasoning: "=Nothing on sample size",
-                        },
-                    },
-                },
-                {
-                    id: "answer",
-                    documents: ["u-DOC1"],
-                    cells: {
-                        a: {
-                            outcome: "answered",
-                            provenance: "model",
-                            value: { kind: "text", text: "120 adults" },
-                            documents: ["u-DOC1"],
-                            confidence: "low",
-                            stale: true,
-                            evidence: [
-                                {
-                                    document: "u-DOC1",
-                                    locator: "s1",
-                                    page: 3,
-                                    quote: 'The study enrolled "120" participants.',
-                                    context: "Table 1. Sample",
-                                },
-                                { document: "u-DOC1", locator: "s9", quote: "120 adults" },
-                            ],
-                        },
-                    },
-                },
-                {
-                    id: "silent",
-                    documents: ["u-DOC1"],
-                    cells: {
-                        a: {
-                            outcome: "answered",
-                            provenance: "model",
-                            value: { kind: "text", text: "Not discussed" },
-                            documents: ["u-DOC1"],
-                            confidence: "high",
-                        },
-                    },
-                },
-                {
-                    id: "failed",
-                    cells: {
-                        a: {
-                            outcome: "failed",
-                            provenance: "model",
-                            error_code: "no_locator",
-                            error: "no passage",
-                        },
-                    },
-                },
-            ],
-        };
-        const lines = toCsv(table).split("\r\n");
-        expect(lines[0]).toBe(
-            "'=Header,'=Header — evidence,'=Header — reasoning,'=Header — state",
-        );
-        expect(lines[1]).toBe(",,,");
-        expect(lines[2]).toBe(
-            "Not reported,,'=Nothing on sample size,not_reported; title and abstract; model",
-        );
-        expect(lines[3]).toBe(
-            '120 adults,"u-DOC1 s1: The study enrolled ""120"" participants. [Table 1. Sample]\nu-DOC1 s9: 120 adults",,stale; model',
-        );
-        expect(lines[4]).toBe("Not discussed,,,model");
-        expect(lines[5]).toBe(",,,failed; no passage; model");
-        expect(toCsv(table)).not.toMatch(/confidence|\blow\b|\bhigh\b/);
-    });
-
 });
 
 describe("anchor column", () => {

@@ -73,6 +73,7 @@ it("renders document actions before lazy item data can establish table identity"
         "open",
         "library",
         "restore-shadow",
+        "export-xlsx",
         "export-csv",
         "history",
         "restore-version",
