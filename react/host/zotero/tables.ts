@@ -1,4 +1,5 @@
 import type { TableDisplay } from "@beaver/agent-ui/host/types";
+import type { TableFillViewRequest } from "@beaver/agent-core/protocol/tableFillProtocol";
 import {
     parseItemReference,
     resolveLibraryRef,
@@ -17,12 +18,17 @@ function resolveTableRef(key: string) {
  * Opens a stored table in the Beaver tab of `origin`'s main window. With
  * `background`, the tab opens behind the selected one, so the chat stays in view.
  * `onDownload` fires when the table's files must be downloaded first. `focus`
- * brings a row or cell into view.
+ * brings a row or cell into view; `request` asks the tab to show a fill's failed rows.
  */
 export async function openStoredTable(
     key: string,
     origin?: Window | null,
-    options: { background?: boolean; onDownload?: () => void; focus?: { rowId: string; columnId?: string } } = {},
+    options: {
+        background?: boolean;
+        onDownload?: () => void;
+        focus?: { rowId: string; columnId?: string };
+        request?: TableFillViewRequest;
+    } = {},
 ) {
     const api = getTablesApi();
     const ref = resolveTableRef(key);
@@ -33,6 +39,7 @@ export async function openStoredTable(
         ...(options.background ? { background: true } : {}),
         ...(options.onDownload ? { onDownload: options.onDownload } : {}),
         ...(options.focus ? { focus: options.focus } : {}),
+        ...(options.request ? { request: options.request } : {}),
     });
 }
 

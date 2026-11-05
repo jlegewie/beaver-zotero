@@ -1287,6 +1287,121 @@
     border-bottom: 1px solid var(--fill-quinary);
 }
 
+/* A chat fill's progress. The surface is `.batch-progress-bar`'s; this lays
+   out its two lines: glyph, title and actions on the first, what is happening
+   on the second, indented under the title. The rule along the top edge draws
+   rows filled and rows that could not be read. */
+[id^="beaver-pane-"] .table-fill-progress {
+    position: relative;
+}
+
+[id^="beaver-pane-"] .table-fill-progress-rule {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    display: flex;
+    overflow: hidden;
+    pointer-events: none;
+    background-color: var(--fill-quarternary);
+}
+
+[id^="beaver-pane-"] .table-fill-progress-filled {
+    background-color: var(--accent-blue);
+    transition: width 0.3s ease;
+}
+
+[id^="beaver-pane-"] .table-fill-progress-failed {
+    background-color: var(--tag-orange);
+    transition: width 0.3s ease;
+}
+
+/* Stopping: the rule stays, faded, while the papers underway finish. */
+[id^="beaver-pane-"] .table-fill-progress-rule-stopping .table-fill-progress-filled,
+[id^="beaver-pane-"] .table-fill-progress-rule-stopping .table-fill-progress-failed {
+    opacity: 0.4;
+}
+
+[id^="beaver-pane-"] .table-fill-progress-body {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: 0.5rem;
+    row-gap: 0.1rem;
+    align-items: center;
+    padding: 0.55rem 0.75rem 0.6rem;
+}
+
+[id^="beaver-pane-"] .table-fill-progress-glyph {
+    width: 14px;
+    height: 14px;
+}
+
+[id^="beaver-pane-"] .table-fill-progress-head {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    min-width: 0;
+}
+
+[id^="beaver-pane-"] .table-fill-progress-title {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-weight: 600;
+    color: var(--fill-primary);
+}
+
+[id^="beaver-pane-"] .table-fill-progress-status {
+    grid-column: 2;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    column-gap: 0.5rem;
+    min-width: 0;
+    color: var(--fill-secondary);
+}
+
+[id^="beaver-pane-"] .table-fill-progress-text {
+    min-width: 0;
+}
+
+[id^="beaver-pane-"] .table-fill-progress-warning {
+    color: var(--tag-orange-primary);
+}
+
+/* "· 2 couldn't be read" wraps as one phrase. */
+[id^="beaver-pane-"] .table-fill-progress-text .table-fill-progress-warning {
+    white-space: nowrap;
+}
+
+/* A follow-up on line two: a link, not a button. */
+[id^="beaver-pane-"] .table-fill-progress-link {
+    font: inherit;
+    font-weight: 600;
+    color: var(--accent-blue);
+    background: none;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+}
+
+[id^="beaver-pane-"] .table-fill-progress-link:hover {
+    text-decoration: underline;
+}
+
+[id^="beaver-pane-"] .table-fill-progress-link:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: 1px;
+    border-radius: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    [id^="beaver-pane-"] .table-fill-progress-filled,
+    [id^="beaver-pane-"] .table-fill-progress-failed {
+        transition: none;
+    }
+}
+
 /* Disclosure hover, shared by the batch progress bar and the run receipt. The
    bar's own surface and its bleed into the composer's top edge live in
    agent-ui-components.css, with the composer whose padding they cancel; the

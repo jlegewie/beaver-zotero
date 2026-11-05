@@ -14,7 +14,7 @@ import { TableFillBanner, TableFillButton, useTableFillJob, type TableFillButton
 import type { TableFillScope } from '@beaver/agent-core/protocol/tableFillProtocol';
 import type { ResearchTableFill } from '@beaver/agent-ui/layouts';
 import { TABLE_UPDATED_EVENT, type TableUpdatedDetail } from '../../../src/services/artifacts/tableStore';
-import type { TableFocusTarget, TableTabMountOptions, TableTabRenderReport } from '../../../src/ui/tableTabTypes';
+import type { TableFocusTarget, TableTabMountOptions, TableTabRenderReport, TableTabRequest } from '../../../src/ui/tableTabTypes';
 import { getWindowRuntime } from '../../runtime/windowRuntime';
 import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
 import { selectItemById } from '../../utils/selectItem';
@@ -36,6 +36,8 @@ export interface TableTabWarningSource {
     onReload(listener: () => void): () => void;
     /** Called when the tab is asked to bring a row or cell into view. */
     onFocus(listener: (target: TableFocusTarget) => void): () => void;
+    /** Called when the tab is asked to show a fill's failed rows. */
+    onRequest(listener: (request: TableTabRequest) => void): () => void;
 }
 
 type Loaded = { spec: TableSpec; version: number };
@@ -328,23 +330,42 @@ export default function TableTabView({
         portalContainer: hostRef.current,
         newBySource: newPapers.bySource,
     });
-    // The finished job whose banner the user dismissed, and whether the table
-    // shows only the rows it could not read.
+    // The finished job whose banner the user dismissed, and the rows a fill
+    // could not read when the table shows only those. The filter names its
+    // job: the chat can ask for a job's rows after the banner is gone.
     const [dismissedJob, setDismissedJob] = React.useState<string | null>(null);
-    const [showFailed, setShowFailed] = React.useState(false);
+    const [failedFilter, setFailedFilter] = React.useState<{ jobId: string; rows: ReadonlySet<string> } | null>(null);
     const finishedJob = fillJob?.state === 'done' && fillJob.job_id !== dismissedJob ? fillJob : null;
-    const failedRows = React.useMemo(
-        () => (showFailed && finishedJob?.result ? new Set(finishedJob.result.failed_row_ids) : null),
-        [showFailed, finishedJob],
+    const showFailed = !!failedFilter && failedFilter.jobId === finishedJob?.job_id;
+    const failedRows = failedFilter?.rows ?? null;
+    const setShowFailed = React.useCallback(
+        (show: boolean) =>
+            setFailedFilter(
+                show && finishedJob?.result
+                    ? { jobId: finishedJob.job_id, rows: new Set(finishedJob.result.failed_row_ids) }
+                    : null,
+            ),
+        [finishedJob],
     );
+    // A new fill works on every row again.
     React.useEffect(() => {
-        if (!finishedJob) setShowFailed(false);
-    }, [finishedJob]);
+        if (fillRunning) setFailedFilter(null);
+    }, [fillRunning]);
+    // A fill's failed rows asked for from the chat, shown once the table is
+    // on screen.
+    const [request, setRequest] = React.useState<TableTabRequest | null>(() => options.request ?? null);
+    React.useEffect(() => warnings.onRequest(setRequest), [warnings]);
+    const tableShown = state.kind === 'table';
+    React.useEffect(() => {
+        if (!request || !tableShown) return;
+        setRequest(null);
+        if (request.row_ids.length) setFailedFilter({ jobId: request.job_id, rows: new Set(request.row_ids) });
+    }, [request, tableShown]);
     React.useEffect(
         () =>
             warnings.onFocus((target) => {
                 // A row outside "failed rows only" could not be shown.
-                setShowFailed(false);
+                setFailedFilter(null);
                 setFocus({ ...target, token: ++focusRequests.current });
             }),
         [warnings],
@@ -385,7 +406,7 @@ export default function TableTabView({
 
     const notices = [warning, state.error, actionError, edits.error, dropNotice].filter(Boolean);
     const itemID = Zotero.Items.getIDFromLibraryAndKey(tableRef.libraryID, tableRef.key);
-    const fillBanner =
+    const jobBanner =
         fillEnabled && finishedJob ? (
             <TableFillBanner
                 job={finishedJob}
@@ -393,9 +414,32 @@ export default function TableTabView({
                 onShowFailed={setShowFailed}
                 onDismiss={() => {
                     setDismissedJob(finishedJob.job_id);
+                    if (showFailed) setFailedFilter(null);
                     Zotero.Beaver.tableFills?.dismiss(finishedJob.job_id);
                 }}
             />
+        ) : null;
+    // Failed rows of a job whose banner is not the one shown (asked for from
+    // the chat): their own strip, so the filter can be undone.
+    const filterStrip =
+        failedFilter && !showFailed ? (
+            <span className="bt-fill-banner">
+                <span className="bt-fill-banner-text">
+                    {failedFilter.rows.size === 1
+                        ? "Showing the row that couldn't be read"
+                        : `Showing the ${failedFilter.rows.size.toLocaleString('en-US')} rows that couldn't be read`}
+                </span>
+                <button type="button" className="bt-fill-banner-link" onClick={() => setFailedFilter(null)}>
+                    Show all
+                </button>
+            </span>
+        ) : null;
+    const fillBanner =
+        jobBanner || filterStrip ? (
+            <>
+                {filterStrip}
+                {jobBanner}
+            </>
         ) : null;
 
     return (

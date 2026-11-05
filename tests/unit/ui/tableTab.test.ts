@@ -142,6 +142,18 @@ describe('opening', () => {
         expect(win.BeaverReact.renderTableTab).toHaveBeenCalledTimes(1);
     });
 
+    it("hands a fill's failed rows to a new tab and to the one already open", () => {
+        const win = windows[0];
+        const request = { kind: 'show_failed' as const, job_id: 'job-1', row_ids: ['r1'] };
+        openTableTab(win, tableItem(), REF, { request });
+        expect(win.BeaverReact.renderTableTab.mock.calls[0][2].request).toEqual(request);
+
+        const again = { kind: 'show_failed' as const, job_id: 'job-2', row_ids: ['r2'] };
+        openTableTab(win, tableItem(), REF, { request: again });
+        expect(win.handle.request).toHaveBeenCalledWith(again);
+        expect(win.BeaverReact.renderTableTab).toHaveBeenCalledTimes(1);
+    });
+
     it('opens behind the selected tab when asked', () => {
         const win = windows[0];
         openTableTab(win, tableItem(), REF, { background: true });

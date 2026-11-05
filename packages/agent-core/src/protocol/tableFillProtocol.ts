@@ -109,6 +109,13 @@ export type TableFillScope =
     | { kind: "retry_failed" }
     | { kind: "cells"; rows?: string[]; columns?: string[] };
 
+/**
+ * What a table's view is asked to do once it shows the table, from a fill's
+ * result elsewhere: show only the rows a finished fill could not read.
+ * `row_ids` are the job's failed rows, from its result.
+ */
+export type TableFillViewRequest = { kind: "show_failed"; job_id: string; row_ids: string[] };
+
 /** What a plan costs and what it reads, as the Fill popover shows it. */
 export interface TableFillPlanSummary {
     plan_id: string;

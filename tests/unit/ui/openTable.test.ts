@@ -124,6 +124,12 @@ describe('openTable', () => {
         await expect(openTable(REF, { window: main, focus: { rowId: 'r1' } })).resolves.toMatchObject({ focus: 'found' });
     });
 
+    it("passes a fill's failed rows to the tab", async () => {
+        const request = { kind: 'show_failed' as const, job_id: 'job-1', row_ids: ['r1'] };
+        await expect(openTable(REF, { window: main, request })).resolves.toMatchObject({ ok: true });
+        expect(openTableTab).toHaveBeenLastCalledWith(main, ITEM, REF, expect.objectContaining({ request }));
+    });
+
     it('opens the table without a focus when the cited row or column is gone', async () => {
         const spec = { ...SPEC, columns: [{ id: 'design', header: 'Design', type: 'select' }], rows: [{ id: 'r1', cells: {} }] };
         readTableItemSpec.mockResolvedValue({ ok: true, spec, file: { spec } });
