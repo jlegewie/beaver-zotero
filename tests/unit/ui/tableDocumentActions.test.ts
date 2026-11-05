@@ -122,24 +122,20 @@ it("exports a fresh persisted spec after the originating window picker returns",
     expect(commands).toHaveBeenCalledWith(origin);
     expect(init).toHaveBeenCalledWith(origin, "Export table", 1);
     expect(read).toHaveBeenCalledTimes(2);
+    // Values only: no evidence, reasoning, confidence or state companions.
     expect(IOUtils.writeUTF8).toHaveBeenCalledWith(
         "/tmp/comparison.csv",
-        expect.stringContaining("Fresh answer"),
+        "Answer\r\nFresh answer",
     );
-    expect(IOUtils.writeUTF8).toHaveBeenCalledWith(
-        "/tmp/comparison.csv",
-        expect.stringContaining("Answer — evidence"),
-    );
-    expect(IOUtils.writeUTF8).toHaveBeenCalledWith(
-        "/tmp/comparison.csv",
-        expect.stringContaining('"u-ATTACH01 s3: Evidence, with ""quotes"""'),
-    );
-    // The filler's stored confidence is never exported.
-    expect(IOUtils.writeUTF8).not.toHaveBeenCalledWith(
-        "/tmp/comparison.csv",
-        expect.stringContaining("Answer — confidence"),
-    );
-    expect(root.textContent).toContain("evidence and reasoning columns");
+    expect(root.textContent).toContain("Exported comparison.csv.");
+});
+it("exports an Excel workbook through the plugin-realm exporter", async () => {
+    const writeTableWorkbook = vi.fn().mockResolvedValue(undefined);
+    (Zotero as any).Beaver = { ...(Zotero as any).Beaver, exporter: { writeTableWorkbook } };
+    await click("export-xlsx");
+    expect(writeTableWorkbook).toHaveBeenCalledWith("/tmp/comparison.csv", spec, spec.rows);
+    expect(IOUtils.writeUTF8).not.toHaveBeenCalled();
+    expect(root.textContent).toContain("Exported comparison.csv.");
 });
 it("treats cancellation as no action", async () => {
     show.mockResolvedValue(2);

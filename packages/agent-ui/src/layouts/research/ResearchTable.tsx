@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { toPlainText, type Column, type Row, type TableSpec } from "@beaver/agent-core/layouts/table";
+import { toPlainText, type Column, type Row, type TableSort, type TableSpec } from "@beaver/agent-core/layouts/table";
 import { cellsToFill } from "@beaver/agent-core/layouts/tableFill";
 import type { TableFillCells } from "@beaver/agent-core/protocol/tableFillProtocol";
 import {
@@ -151,7 +151,11 @@ export interface ResearchTableProps {
     onlyRows?: ReadonlySet<string> | null;
     /** More actions: each is offered when its callback is present. */
     onCopy?: (text: string) => void;
-    onExport?: () => void;
+    /**
+     * Export the table as an Excel workbook or a CSV file: every row, in the
+     * view's sort order when one is set.
+     */
+    onExport?: (format: "xlsx" | "csv", sort: TableSort | undefined) => void;
     onShowInLibrary?: () => void;
     /** The version history view; offered under More actions when given. */
     renderVersionHistory?: () => React.ReactNode;
@@ -580,7 +584,11 @@ export function ResearchTable({
                 onCopy(toPlainText(table, state.rows, visible));
             },
         });
-    if (onExport) moreItems.push({ label: "Export CSV", icon: DownloadIcon, onClick: onExport });
+    if (onExport)
+        moreItems.push(
+            { label: "Export to Excel", icon: DownloadIcon, onClick: () => onExport("xlsx", state.sort) },
+            { label: "Export CSV", icon: DownloadIcon, onClick: () => onExport("csv", state.sort) },
+        );
     if (onShowInLibrary) moreItems.push({ label: "Show in library", icon: LibraryIcon, onClick: onShowInLibrary });
     if (renderVersionHistory)
         moreItems.push({ label: "Version history", icon: ClockIcon, onClick: () => setPanel({ kind: "history" }) });

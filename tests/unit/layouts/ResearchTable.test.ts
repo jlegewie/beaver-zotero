@@ -156,6 +156,25 @@ describe('the grid', () => {
         expect(first).toContain('Baird 2011');
     });
 
+    it('offers Excel and CSV exports, each in the view sort order', () => {
+        const onExport = vi.fn();
+        mount({ onExport });
+        const menuItem = (label: string) =>
+            Array.from(document.querySelectorAll<HTMLElement>('*')).find((el) => el.textContent === label && el.children.length === 0)!;
+        const pick = (label: string) => {
+            click(container!.querySelector<HTMLButtonElement>('button[aria-label="More actions"]')!);
+            click(menuItem(label));
+        };
+        pick('Export to Excel');
+        click(container!.querySelector('button[aria-label="Column menu: Design"]')!);
+        click(menuItem('Sort A → Z'));
+        pick('Export CSV');
+        expect(onExport.mock.calls).toEqual([
+            ['xlsx', undefined],
+            ['csv', { column_id: 'design', direction: 'asc' }],
+        ]);
+    });
+
     it("expands the Paper cell to the paper's full details, with its actions in the footer", () => {
         const revealInLibrary = vi.fn();
         setHost({ navigation: { activateCitation, revealInLibrary, openSource: vi.fn() } as never });
