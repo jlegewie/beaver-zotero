@@ -210,7 +210,7 @@ describe('the grid', () => {
         expect(expansion.querySelector('.rt-bool-yes')?.textContent).toBe('Yes');
     });
 
-    it('scrolls the grid, not nothing, when the wheel turns over an open expansion', () => {
+    it('scrolls the grid with the whole wheel gesture that begins over an open expansion', () => {
         mount();
         const scroller = container!.querySelector<HTMLElement>('.rt-scroll')!;
         // jsdom loads no stylesheet: the grid's own overflow, inline.
@@ -219,11 +219,58 @@ describe('the grid', () => {
         Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 500 });
         const scrollBy = vi.fn();
         scroller.scrollBy = scrollBy as never;
+        const wheel = (el: Element, init: WheelEventInit = {}) => {
+            const event = new WheelEvent('wheel', { deltaY: 120, bubbles: true, cancelable: true, screenX: 50, screenY: 50, ...init });
+            act(() => {
+                el.dispatchEvent(event);
+            });
+            return event;
+        };
+        const expansion = expand(cell('r1', 'effect'))!;
+        vi.useFakeTimers();
+        try {
+            // The first event scrolls the grid beneath and closes the expansion.
+            wheel(expansion.querySelector('.rt-peek-body')!);
+            expect(scrollBy).toHaveBeenLastCalledWith({ left: 0, top: 120 });
+            expect(peek()).toBeNull();
+            // The browser keeps the rest of the gesture on the closed expansion,
+            // which scrolls nothing: the grid scrolls with it here, and only here.
+            const next = wheel(cell('r2', 'effect'), { deltaY: 3, deltaMode: 1 });
+            expect(scrollBy).toHaveBeenCalledTimes(2);
+            expect(scrollBy).toHaveBeenLastCalledWith({ left: 0, top: 48 });
+            expect(next.defaultPrevented).toBe(true);
+            // Once the wheel has rested, the browser scrolls the grid itself.
+            act(() => {
+                vi.advanceTimersByTime(1600);
+            });
+            expect(wheel(cell('r2', 'effect')).defaultPrevented).toBe(false);
+            expect(scrollBy).toHaveBeenCalledTimes(2);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('ends the wheel gesture passed to the grid once the pointer moves', () => {
+        mount();
+        const scroller = container!.querySelector<HTMLElement>('.rt-scroll')!;
+        scroller.style.overflowY = 'auto';
+        Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 2000 });
+        Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 500 });
+        const scrollBy = vi.fn();
+        scroller.scrollBy = scrollBy as never;
         const expansion = expand(cell('r1', 'effect'))!;
         act(() => {
-            expansion.querySelector('.rt-peek-body')!.dispatchEvent(new WheelEvent('wheel', { deltaY: 120, bubbles: true }));
+            expansion.dispatchEvent(new WheelEvent('wheel', { deltaY: 120, bubbles: true, screenX: 50, screenY: 50 }));
         });
-        expect(scrollBy).toHaveBeenCalledWith({ left: 0, top: 120 });
+        act(() => {
+            document.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, screenX: 90, screenY: 50 }));
+        });
+        const later = new WheelEvent('wheel', { deltaY: 120, bubbles: true, cancelable: true, screenX: 90, screenY: 50 });
+        act(() => {
+            cell('r2', 'effect').dispatchEvent(later);
+        });
+        expect(later.defaultPrevented).toBe(false);
+        expect(scrollBy).toHaveBeenCalledTimes(1);
     });
 
     it("says an unfilled cell's expansion is not filled yet", () => {

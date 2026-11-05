@@ -65,6 +65,14 @@ export function useHoverLayer(): HoverLayerApi | null {
 const OPEN_DELAY_MS = 320;
 const CLOSE_DELAY_MS = 140;
 const EDGE_PX = 8;
+/**
+ * How long after its last event a wheel gesture that began over a layer goes
+ * on scrolling the content beneath: Gecko's wheel transaction timeout
+ * (`mousewheel.transaction.timeout`).
+ */
+const WHEEL_GESTURE_MS = 1500;
+/** Pointer travel that ends such a gesture, as it ends Gecko's transaction. */
+const WHEEL_MOVE_PX = 4;
 
 /**
  * Provides the hover layers to everything inside it and draws them. Put it
@@ -77,6 +85,8 @@ export function HoverLayerProvider({ children }: { children: React.ReactNode }):
     const openTimers = useRef<Partial<Record<HoverSlot, ReturnType<typeof setTimeout>>>>({});
     const closeTimers = useRef<Partial<Record<HoverSlot, ReturnType<typeof setTimeout>>>>({});
     const peekRef = useRef<HTMLDivElement | null>(null);
+    /** Ends the wheel gesture being passed to the content beneath, if any. */
+    const wheelPass = useRef<(() => void) | null>(null);
 
     const clear = (timers: typeof openTimers, slot: HoverSlot) => {
         const timer = timers.current[slot];
@@ -120,8 +130,9 @@ export function HoverLayerProvider({ children }: { children: React.ReactNode }):
             // peek opens the card instead.
             const peek = layersRef.current.peek;
             if (slot === 'card' && peek && peek.anchor !== layer.anchor && peek.anchor.contains(layer.anchor)) return;
-            // With a layer already open in the slot, the next one follows at once.
-            const delay = layersRef.current[slot] ? 0 : delayMs;
+            // With a layer already open in the slot, the next one follows at
+            // once; not while the wheel scrolls beneath, which has just closed it.
+            const delay = layersRef.current[slot] && !wheelPass.current ? 0 : delayMs;
             const open = () =>
                 setLayers((current) => {
                     const next = { ...current, [slot]: layer };
@@ -137,12 +148,28 @@ export function HoverLayerProvider({ children }: { children: React.ReactNode }):
 
     const isOpen = useCallback((slot: HoverSlot, id: string) => layersRef.current[slot]?.id === id, []);
 
+    // A wheel over a layer scrolls what it covers and closes it; the rest of
+    // the gesture follows (see `passWheelGesture`).
+    const onLayerWheel = useCallback(
+        (event: React.WheelEvent<HTMLElement>, anchor: HTMLElement) => {
+            if (wheelPass.current) return;
+            const scroller = scrollBeneath(event, anchor);
+            if (!scroller) return;
+            wheelPass.current = passWheelGesture(scroller, event, () => {
+                wheelPass.current = null;
+            });
+            hide();
+        },
+        [hide],
+    );
+
     useEffect(
         () => () => {
             for (const slot of ['peek', 'card'] as HoverSlot[]) {
                 clear(openTimers, slot);
                 clear(closeTimers, slot);
             }
+            wheelPass.current?.();
         },
         [],
     );
@@ -181,6 +208,7 @@ export function HoverLayerProvider({ children }: { children: React.ReactNode }):
                     elementRef={peekRef}
                     onEnter={() => cancelClose('peek')}
                     onLeave={() => hoverOut('peek')}
+                    onWheel={onLayerWheel}
                 />
             ) : null}
             {layers.card ? (
@@ -196,6 +224,7 @@ export function HoverLayerProvider({ children }: { children: React.ReactNode }):
                         hoverOut('card');
                         if (peekRef.current?.contains(layers.card!.anchor)) hoverOut('peek');
                     }}
+                    onWheel={onLayerWheel}
                 />
             ) : null}
         </HoverLayerContext.Provider>
@@ -208,11 +237,13 @@ function PlacedLayer({
     elementRef,
     onEnter,
     onLeave,
+    onWheel,
 }: {
     layer: OpenLayer;
     elementRef?: React.MutableRefObject<HTMLDivElement | null>;
     onEnter(): void;
     onLeave(): void;
+    onWheel(event: React.WheelEvent<HTMLElement>, anchor: HTMLElement): void;
 }): React.ReactElement {
     const ref = useRef<HTMLDivElement | null>(null);
     const [position, setPosition] = useState<{ left: number; top: number; width?: number; minHeight?: number } | null>(null);
@@ -273,7 +304,7 @@ function PlacedLayer({
             }}
             onMouseEnter={onEnter}
             onMouseLeave={onLeave}
-            onWheel={(event) => scrollBeneath(event, layer.anchor)}
+            onWheel={(event) => onWheel(event, layer.anchor)}
         >
             {layer.render()}
         </div>
@@ -283,22 +314,72 @@ function PlacedLayer({
 /**
  * A layer floats over the content it belongs to, so a wheel over it would
  * scroll nothing: unless the layer itself scrolls that way, the wheel scrolls
- * the anchor's scroll container instead (and that scroll closes the layer).
+ * the anchor's scroll container instead. Returns the container it scrolled.
  */
-function scrollBeneath(event: React.WheelEvent<HTMLElement>, anchor: HTMLElement): void {
+function scrollBeneath(event: React.WheelEvent<HTMLElement>, anchor: HTMLElement): HTMLElement | null {
     const { deltaX, deltaY } = event;
     for (let el = event.target as HTMLElement | null; el && el !== event.currentTarget.parentElement; el = el.parentElement) {
-        if (canScroll(el, deltaX, deltaY)) return;
+        if (canScroll(el, deltaX, deltaY)) return null;
     }
     let scroller = anchor.parentElement;
     while (scroller && !canScroll(scroller, deltaX, deltaY)) scroller = scroller.parentElement;
-    if (!scroller) return;
+    if (scroller) scrollByWheel(scroller, event);
+    return scroller;
+}
+
+/**
+ * Scrolls `scroller` with the rest of a wheel gesture whose first event
+ * reached it through a layer, until the wheel rests or the pointer moves.
+ * Gecko keeps a gesture on the target its first event hit: the layer, which
+ * scrolls nothing, and still does once the layer has closed. Each later event
+ * over the scroller (or a layer) scrolls it here instead, cancelled so the
+ * browser cannot scroll it a second time. Returns a function that ends it.
+ */
+function passWheelGesture(scroller: HTMLElement, first: React.WheelEvent<HTMLElement>, onEnd: () => void): () => void {
+    const doc = scroller.ownerDocument;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let ended = false;
+    const moved = (event: MouseEvent) =>
+        Math.abs(event.screenX - first.screenX) > WHEEL_MOVE_PX || Math.abs(event.screenY - first.screenY) > WHEEL_MOVE_PX;
+    const onWheel = (event: WheelEvent) => {
+        const target = event.target as Element | null;
+        if (moved(event) || !target || !(scroller.contains(target) || target.closest?.('.bt-hover-layer'))) {
+            end();
+            return;
+        }
+        event.preventDefault();
+        scrollByWheel(scroller, event);
+        rest();
+    };
+    const onMove = (event: MouseEvent) => {
+        if (moved(event)) end();
+    };
+    const rest = () => {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(end, WHEEL_GESTURE_MS);
+    };
+    function end() {
+        if (ended) return;
+        ended = true;
+        if (timer) clearTimeout(timer);
+        doc.removeEventListener('wheel', onWheel, true);
+        doc.removeEventListener('mousemove', onMove, true);
+        onEnd();
+    }
+    doc.addEventListener('wheel', onWheel, { capture: true, passive: false });
+    doc.addEventListener('mousemove', onMove, true);
+    rest();
+    return end;
+}
+
+/** Scrolls `scroller` by a wheel event's deltas. */
+function scrollByWheel(scroller: HTMLElement, event: { deltaX: number; deltaY: number; deltaMode: number }): void {
     // Lines (a mouse wheel in some setups) and pages are not pixels.
     const page = event.deltaMode === 2;
     const line = event.deltaMode === 1 ? 16 : 1;
     scroller.scrollBy({
-        left: deltaX * (page ? scroller.clientWidth : line),
-        top: deltaY * (page ? scroller.clientHeight : line),
+        left: event.deltaX * (page ? scroller.clientWidth : line),
+        top: event.deltaY * (page ? scroller.clientHeight : line),
     });
 }
 
