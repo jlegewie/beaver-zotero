@@ -214,6 +214,28 @@ function stoppedText(job: TableFillJobSnapshot, result: TableFillResult): string
     return null;
 }
 
+/** Answers the table declined to write, left for the next fill. */
+function skippedAnswers(result: TableFillResult): number {
+    return Object.values(result.skipped_cells).reduce((a, b) => a + b, 0);
+}
+
+/**
+ * Whether a finished fill's result asks something of the user: it stopped
+ * early, rows could not be read or saved, or answers were left for the next
+ * fill. False only for a clean result, which {@link resultText} reduces to
+ * rows filled and credits.
+ */
+export function resultNeedsAttention(job: TableFillJobSnapshot): boolean {
+    const result = job.result;
+    if (!result) return true;
+    return (
+        stoppedText(job, result) !== null ||
+        result.failed_row_ids.length > 0 ||
+        result.not_written > 0 ||
+        skippedAnswers(result) > 0
+    );
+}
+
 /** The result line of a finished fill. */
 export function resultText(job: TableFillJobSnapshot): string {
     const result = job.result;
@@ -230,7 +252,7 @@ export function resultText(job: TableFillJobSnapshot): string {
     if (failed) parts.push(`${failed.toLocaleString("en-US")} couldn't be read`);
     if (result.not_written)
         parts.push(`${count(result.not_written, "paper")} could not be saved`);
-    const skipped = Object.values(result.skipped_cells).reduce((a, b) => a + b, 0);
+    const skipped = skippedAnswers(result);
     if (skipped) parts.push(`${count(skipped, "answer")} left for the next fill`);
     parts.push(credits);
     return parts.join(" · ");

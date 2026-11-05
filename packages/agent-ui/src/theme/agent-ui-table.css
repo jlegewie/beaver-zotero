@@ -212,7 +212,7 @@
  * Fill — the tab's Fill button, its plan popover and the result banner
  * ========================================================================== */
 
-/* News about the table, under the toolbar: the last fill's result. */
+/* News about the table, over the grid: the last fill's result. */
 .beaver-root .bt-banner {
     flex: 0 0 auto;
     padding: 0.45rem 1.25rem;
@@ -527,6 +527,16 @@
     flex: 1 1 auto;
     min-height: 0;
     display: flex;
+}
+
+/* The grid's column: the notice and the fill banner over the grid, so the
+ * side panel beside it starts right under the toolbar. */
+.beaver-root .rt-main {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
 }
 
 .beaver-root .rt-scroll {

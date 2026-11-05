@@ -77,6 +77,7 @@ export function useTableEditing({
     surfaceWindow,
     portalContainer,
     newBySource,
+    onEdit,
 }: {
     tableRef: TableRef;
     spec: TableSpec;
@@ -87,6 +88,8 @@ export function useTableEditing({
     surfaceWindow: Window | null;
     portalContainer: HTMLElement | null;
     newBySource: ReadonlyMap<string, number>;
+    /** The user is writing an edit (structural or a cell). */
+    onEdit?: () => void;
 }) {
     const session = useRef(newSessionId()).current;
     const [toast, setToast] = useState<TableEditToast | null>(null);
@@ -97,6 +100,8 @@ export function useTableEditing({
     const [choosing, setChoosing] = useState(false);
     const specRef = useRef(spec);
     specRef.current = spec;
+    const onEditRef = useRef(onEdit);
+    onEditRef.current = onEdit;
 
     const commands = useCallback(() => {
         const api = getTablesApi();
@@ -125,6 +130,7 @@ export function useTableEditing({
      */
     const run = useCallback(
         async (operations: TableUserEdit, options: { destructive?: boolean; change?: string; report?: boolean } = {}) => {
+            onEditRef.current?.();
             const local = commands();
             if (!local) {
                 const message = 'Editing is unavailable right now. Reload Beaver and try again.';
@@ -183,6 +189,7 @@ export function useTableEditing({
      */
     const editCells = useCallback(
         async (edits: TableCellEdit[], change: string): Promise<string | null> => {
+            onEditRef.current?.();
             const local = commands();
             let message: string | null = null;
             if (!local) message = 'Editing is unavailable right now. Reload Beaver and try again.';

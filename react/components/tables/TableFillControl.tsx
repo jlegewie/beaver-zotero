@@ -17,6 +17,7 @@ import {
     planCostLine,
     planRowLine,
     pricingSentence,
+    resultNeedsAttention,
     resultText,
     runningLabel,
     timeLeftText,
@@ -380,7 +381,7 @@ export interface TableFillBannerProps {
     onDismiss(): void;
 }
 
-/** The result of the last fill, under the toolbar, until dismissed. */
+/** The result of the last fill, over the grid, until dismissed. */
 export function TableFillBanner({ job, showingFailed, onShowFailed, onDismiss }: TableFillBannerProps): React.ReactElement {
     const failed = job.result?.failed_row_ids.length ?? 0;
     return (
@@ -396,4 +397,68 @@ export function TableFillBanner({ job, showingFailed, onShowFailed, onDismiss }:
             </button>
         </span>
     );
+}
+
+/** How long a clean result stays while its tab is visible. */
+export const CLEAN_RESULT_VISIBLE_MS = 10_000;
+
+/**
+ * The last fill's result banner and its "failed rows only" filter.
+ *
+ * A clean result (rows filled, credits charged, nothing else to say) clears
+ * itself at the user's next action in the table (`onActivity`), or after
+ * {@link CLEAN_RESULT_VISIBLE_MS} of the tab being visible; with `visible`
+ * null (unknown) only the next action clears it. A result that needs
+ * attention stays until dismissed or replaced by the next fill. Either way
+ * the dismissal lets the plugin forget the job.
+ */
+export function useFillResultBanner(
+    job: TableFillJobSnapshot | null,
+    visible: boolean | null,
+): {
+    banner: React.ReactElement | null;
+    /** The rows to show while "failed rows only" is on; null otherwise. */
+    failedRows: ReadonlySet<string> | null;
+    /** Show every row again. */
+    showAllRows(): void;
+    /** The user acted on the table. */
+    onActivity(): void;
+} {
+    const [dismissedJob, setDismissedJob] = React.useState<string | null>(null);
+    const [showFailed, setShowFailed] = React.useState(false);
+    const finishedJob = job?.state === 'done' && job.job_id !== dismissedJob ? job : null;
+    const failedRows = React.useMemo(
+        () => (showFailed && finishedJob?.result ? new Set(finishedJob.result.failed_row_ids) : null),
+        [showFailed, finishedJob],
+    );
+    React.useEffect(() => {
+        if (!finishedJob) setShowFailed(false);
+    }, [finishedJob]);
+
+    const dismiss = React.useCallback((jobId: string) => {
+        setDismissedJob(jobId);
+        Zotero.Beaver.tableFills?.dismiss(jobId);
+    }, []);
+    const cleanJob = finishedJob && !resultNeedsAttention(finishedJob) ? finishedJob.job_id : null;
+    const onActivity = React.useCallback(() => {
+        if (cleanJob) dismiss(cleanJob);
+    }, [cleanJob, dismiss]);
+    // Counts only while the tab is visible: a fill that ends in the
+    // background still shows its result when the user comes back.
+    React.useEffect(() => {
+        if (!cleanJob || visible !== true) return;
+        const timer = setTimeout(() => dismiss(cleanJob), CLEAN_RESULT_VISIBLE_MS);
+        return () => clearTimeout(timer);
+    }, [cleanJob, visible, dismiss]);
+
+    const showAllRows = React.useCallback(() => setShowFailed(false), []);
+    const banner = finishedJob ? (
+        <TableFillBanner
+            job={finishedJob}
+            showingFailed={showFailed}
+            onShowFailed={setShowFailed}
+            onDismiss={() => dismiss(finishedJob.job_id)}
+        />
+    ) : null;
+    return { banner, failedRows, showAllRows, onActivity };
 }

@@ -132,8 +132,13 @@ export interface ResearchTableProps {
     headerEnd?: React.ReactNode | ((selectedRowIds: string[]) => React.ReactNode);
     /** A warning about the whole table, kept above the grid. */
     notice?: React.ReactNode;
-    /** News under the toolbar (a fill's result). */
+    /** News above the grid, beside the side panel (a fill's result). */
     banner?: React.ReactNode;
+    /**
+     * The user acted on the table: selected a cell, opened the cell editor,
+     * or changed the sort, filters or search.
+     */
+    onActivity?: () => void;
     /** Show only these rows (a fill's failed rows). */
     onlyRows?: ReadonlySet<string> | null;
     /** More actions: each is offered when its callback is present. */
@@ -185,6 +190,7 @@ export function ResearchTable({
     headerEnd,
     notice,
     banner,
+    onActivity,
     onlyRows,
     onCopy,
     onExport,
@@ -206,6 +212,18 @@ export function ResearchTable({
     const [editingCell, setEditingCell] = useState<CellAddress | null>(null);
     const editDisabled = editing?.disabledReason;
     const scrollRef = useRef<HTMLDivElement>(null);
+    const activityRef = useRef(onActivity);
+    activityRef.current = onActivity;
+
+    // A change of sort, filters or search is the user's: the first render
+    // only sets them up, and a focus request's reveal forgets the last view.
+    const viewKey = useRef<unknown[] | null>(null);
+    useEffect(() => {
+        const next = [state.sort, state.filters, state.quickFilter];
+        const previous = viewKey.current;
+        viewKey.current = next;
+        if (previous && next.some((value, index) => value !== previous[index])) activityRef.current?.();
+    }, [state.sort, state.filters, state.quickFilter]);
 
     // The paper and the year are system columns, which the shared view state
     // hides by default; this table always shows them, so the sort and filter
@@ -276,6 +294,7 @@ export function ResearchTable({
             if (state.hiddenColumns.has(address.columnId)) state.toggleColumn(address.columnId);
             if (!state.rows.some((row) => row.id === address.rowId)) state.clearFilters();
             setEditingCell(address);
+            activityRef.current?.();
         },
         [state],
     );
@@ -302,15 +321,14 @@ export function ResearchTable({
         return counts;
     }, [fill != null, table]);
 
-    const onSelectCell = useCallback(
-        (address: CellAddress) =>
-            setPanel((current) => ({
-                kind: "cell",
-                address,
-                view: current?.kind === "cell" ? current.view : "cell",
-            })),
-        [],
-    );
+    const onSelectCell = useCallback((address: CellAddress) => {
+        setPanel((current) => ({
+            kind: "cell",
+            address,
+            view: current?.kind === "cell" ? current.view : "cell",
+        }));
+        activityRef.current?.();
+    }, []);
 
     const navigation = getHost().navigation;
     const rowMenu = useCallback(
@@ -425,7 +443,10 @@ export function ResearchTable({
         const hidden = columnId !== undefined && state.hiddenColumns.has(columnId);
         if ((viewIndex < 0 || hidden) && revealedFor.current !== focus.token) {
             revealedFor.current = focus.token;
-            if (viewIndex < 0) state.clearFilters();
+            if (viewIndex < 0) {
+                viewKey.current = null;
+                state.clearFilters();
+            }
             if (hidden) state.toggleColumn(columnId);
             return;
         }
@@ -728,58 +749,61 @@ export function ResearchTable({
                     </div>
                 </div>
 
-                {notice ? (
-                    <div className="bt-notice" role="status">
-                        {notice}
-                    </div>
-                ) : null}
-                {banner ? (
-                    <div className="bt-banner" role="status">
-                        {banner}
-                    </div>
-                ) : null}
-
                 <div className="rt-body">
-                    <div ref={scrollRef} className="bt-scroll rt-scroll" data-pinned={pinned || undefined}>
-                        <ResearchGrid
-                            table={table}
-                            state={state}
-                            columns={columns}
-                            renderText={renderText}
-                            documents={documents}
-                            selected={selected}
-                            onSelectCell={onSelectCell}
-                            rowMenuItems={rowMenu}
-                            columnMenuItems={columnMenu}
-                            onAddColumn={editing?.onAddColumn}
-                            editDisabledReason={editDisabled}
-                            onEditCell={cellEditing ? openEditor : undefined}
-                            cellEditDisabledReason={cellEditing?.disabledReason}
-                            cellEditor={
-                                editingCell && editingRow && editingColumn && cellEditing
-                                    ? {
-                                          address: editingCell,
-                                          list: editsAsList(editingColumn),
-                                          content: (
-                                              <CellEditor
-                                                  key={`${editingCell.rowId}/${editingCell.columnId}`}
-                                                  column={editingColumn}
-                                                  cell={editingRow.cells[editingColumn.id]}
-                                                  onCancel={() => setEditingCell(null)}
-                                                  onSave={async (input) => {
-                                                      const refused = await cellEditing.onEdit(editingRow, editingColumn, input);
-                                                      if (!refused) setEditingCell(null);
-                                                      return refused;
-                                                  }}
-                                              />
-                                          ),
-                                      }
-                                    : null
-                            }
-                            virtualize={virtualize}
-                            emptyText="No papers yet"
-                            filteredEmptyText="No rows match the search or filters"
-                        />
+                    {/* The grid's column: the notice and the banner span the
+                        grid only, so the side panel starts under the toolbar. */}
+                    <div className="rt-main">
+                        {notice ? (
+                            <div className="bt-notice" role="status">
+                                {notice}
+                            </div>
+                        ) : null}
+                        {banner ? (
+                            <div className="bt-banner" role="status">
+                                {banner}
+                            </div>
+                        ) : null}
+                        <div ref={scrollRef} className="bt-scroll rt-scroll" data-pinned={pinned || undefined}>
+                            <ResearchGrid
+                                table={table}
+                                state={state}
+                                columns={columns}
+                                renderText={renderText}
+                                documents={documents}
+                                selected={selected}
+                                onSelectCell={onSelectCell}
+                                rowMenuItems={rowMenu}
+                                columnMenuItems={columnMenu}
+                                onAddColumn={editing?.onAddColumn}
+                                editDisabledReason={editDisabled}
+                                onEditCell={cellEditing ? openEditor : undefined}
+                                cellEditDisabledReason={cellEditing?.disabledReason}
+                                cellEditor={
+                                    editingCell && editingRow && editingColumn && cellEditing
+                                        ? {
+                                              address: editingCell,
+                                              list: editsAsList(editingColumn),
+                                              content: (
+                                                  <CellEditor
+                                                      key={`${editingCell.rowId}/${editingCell.columnId}`}
+                                                      column={editingColumn}
+                                                      cell={editingRow.cells[editingColumn.id]}
+                                                      onCancel={() => setEditingCell(null)}
+                                                      onSave={async (input) => {
+                                                          const refused = await cellEditing.onEdit(editingRow, editingColumn, input);
+                                                          if (!refused) setEditingCell(null);
+                                                          return refused;
+                                                      }}
+                                                  />
+                                              ),
+                                          }
+                                        : null
+                                }
+                                virtualize={virtualize}
+                                emptyText="No papers yet"
+                                filteredEmptyText="No rows match the search or filters"
+                            />
+                        </div>
                     </div>
                     {panel?.kind === "cell" && selectedRow && selectedColumn ? (
                         <CellInspector

@@ -11,6 +11,7 @@ import {
     planCostLine,
     planRowLine,
     pricingSentence,
+    resultNeedsAttention,
     resultText,
     runningLabel,
     timeLeftText,
@@ -178,5 +179,44 @@ describe("table fill copy", () => {
         expect(resultText(job({ state: "done", rows_done: 30, result: result({ stopped_by: "stopped", credits_charged: 6, not_written: 2 }) }))).toBe(
             "Stopped after 30 of 46 papers · 6 credits; 2 papers could not be saved",
         );
+    });
+});
+
+describe("resultNeedsAttention", () => {
+    const clean = result({ row_failures: {}, failed_row_ids: [] });
+    const done = (over: Partial<TableFillResult> = {}) => job({ state: "done", result: { ...clean, ...over } });
+
+    it("is false for a clean result, which reads as rows filled and credits", () => {
+        expect(resultNeedsAttention(done())).toBe(false);
+        expect(resultText(done())).toBe("Filled 44 rows · 8.8 credits");
+    });
+
+    it("is true without a result", () => {
+        expect(resultNeedsAttention(job({ state: "done" }))).toBe(true);
+    });
+
+    it("is true for a fill that stopped, by the user or for any other reason", () => {
+        expect(resultNeedsAttention(done({ stopped_by: "stopped" }))).toBe(true);
+        expect(resultNeedsAttention(done({ stopped_by: "insufficient_credits" }))).toBe(true);
+        expect(resultNeedsAttention(done({ stopped_by: "unavailable" }))).toBe(true);
+    });
+
+    it("is false for a stop reason the result line does not name", () => {
+        // `changed` is not a stop the result line reports, so the line reads clean.
+        expect(resultText(done({ stopped_by: "changed" }))).toBe("Filled 44 rows · 8.8 credits");
+        expect(resultNeedsAttention(done({ stopped_by: "changed" }))).toBe(false);
+    });
+
+    it("is true when rows could not be read", () => {
+        expect(resultNeedsAttention(done({ failed_row_ids: ["a"] }))).toBe(true);
+    });
+
+    it("is true when papers could not be saved", () => {
+        expect(resultNeedsAttention(done({ not_written: 1 }))).toBe(true);
+    });
+
+    it("is true when answers were left for the next fill, and false for an empty count", () => {
+        expect(resultNeedsAttention(done({ skipped_cells: { column_changed: 2 } }))).toBe(true);
+        expect(resultNeedsAttention(done({ skipped_cells: { column_changed: 0 } }))).toBe(false);
     });
 });

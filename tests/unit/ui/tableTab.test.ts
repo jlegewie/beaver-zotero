@@ -421,6 +421,21 @@ describe('the context pane', () => {
         expect(win.handle.reload).toHaveBeenCalledOnce();
     });
 
+    it("tells its tab whenever any tab is selected, and whether it is the selected one", async () => {
+        const win = windows[0];
+        const { tabID } = openTableTab(win, tableItem(), REF);
+        const { isSelected } = win.BeaverReact.renderTableTab.mock.calls[0][2];
+        win.Zotero_Tabs.select(tabID);
+        expect(isSelected()).toBe(true);
+        win.handle.selectionChanged.mockClear();
+
+        win.Zotero_Tabs.select('zotero-pane');
+        await notifier.notify('select', 'tab', ['zotero-pane'], { 'zotero-pane': { type: 'library' } });
+
+        expect(win.handle.selectionChanged).toHaveBeenCalledOnce();
+        expect(isSelected()).toBe(false);
+    });
+
     it('closes the tab when its table is trashed or deleted, and only that tab', async () => {
         const win = windows[0];
         const { tabID } = openTableTab(win, tableItem(), REF);

@@ -301,6 +301,7 @@ export function renderTableTab(
     const listeners = new Set<() => void>();
     const reloadListeners = new Set<() => void>();
     const focusListeners = new Set<(target: TableFocusTarget) => void>();
+    const selectionListeners = new Set<() => void>();
     const warnings = {
         get: () => warning,
         subscribe(listener: () => void) {
@@ -315,6 +316,10 @@ export function renderTableTab(
             focusListeners.add(listener);
             return () => { focusListeners.delete(listener); };
         },
+        onSelectionChange(listener: () => void) {
+            selectionListeners.add(listener);
+            return () => { selectionListeners.delete(listener); };
+        },
     };
     mountSurface(domElement, <TableTabView tableRef={tableRef} options={options} warnings={warnings} />);
     return {
@@ -328,6 +333,9 @@ export function renderTableTab(
         },
         focus(target) {
             for (const listener of focusListeners) listener(target);
+        },
+        selectionChanged() {
+            for (const listener of selectionListeners) listener();
         },
     };
 }

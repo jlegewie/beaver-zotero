@@ -92,6 +92,7 @@ const commands = {
     undo: vi.fn(),
 };
 const confirm = vi.fn(() => true);
+const onEdit = vi.fn();
 
 function Harness({ table, readOnly, fillRunning }: { table: TableSpec; readOnly?: boolean; fillRunning?: boolean }) {
     const edits = useTableEditing({
@@ -103,6 +104,7 @@ function Harness({ table, readOnly, fillRunning }: { table: TableSpec; readOnly?
         surfaceWindow: window,
         portalContainer: null,
         newBySource: new Map([['s2', 3]]),
+        onEdit,
     });
     return h(
         'div',
@@ -159,6 +161,7 @@ beforeEach(() => {
     commands.undo.mockReset();
     confirm.mockReset();
     confirm.mockReturnValue(true);
+    onEdit.mockReset();
     (globalThis as any).Zotero = {
         __beaverTables: { local: { commands: () => commands } },
         Libraries: { get: () => ({ name: 'My Library' }) },
@@ -200,6 +203,22 @@ describe('ordinary edits', () => {
         expect(commands.edit).toHaveBeenCalledWith(ref, { add_sources: [{ type: 'items', ids: ['u-CCCC3333'] }] }, expect.objectContaining({ seal: false }));
         expect($('.rt-toast')?.textContent).toContain('Added 1 paper');
         expect($('.rt-toast-action')).toBeNull();
+    });
+
+    it('reports each edit it writes, structural or a cell, as the user acting', async () => {
+        commands.edit.mockResolvedValue({ ...committed([{ op: 'title', title: 'New' }]) });
+        commands.editCells.mockResolvedValue({ ...committed([]), version: 6 });
+        mount();
+        await click($('button[aria-label="Rename table"]'));
+        expect(onEdit).not.toHaveBeenCalled();
+        const field = $<HTMLInputElement>('input[aria-label="Rename table"]')!;
+        type(field, 'New');
+        await act(async () => field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+        expect(onEdit).toHaveBeenCalledTimes(1);
+        await click($('tr[data-row-id="r2"] td[data-column-id="effect"]'));
+        await click(Array.from(container!.querySelectorAll('.rt-inspector-action')).find((b) => b.textContent === 'Reset'));
+        expect(commands.editCells).toHaveBeenCalled();
+        expect(onEdit).toHaveBeenCalledTimes(2);
     });
 
     it('does not add a collection the table already has', async () => {
