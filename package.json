@@ -21,7 +21,7 @@
     "homepage": "https://www.beaverapp.ai",
     "license": "AGPL-3.0-or-later",
     "scripts": {
-        "start": "npm run copy:agent-ui-css && concurrently \"zotero-plugin serve\" \"npm run watch-react\"",
+        "start": "npm run copy:agent-ui-css && concurrently \"zotero-plugin serve\" \"npm run watch-react\" \"npm run watch:agent-ui-css\"",
         "build": "npm run copy:agent-ui-css && NODE_ENV=production npm run build-react:prod && NODE_ENV=production zotero-plugin build && tsc --noEmit && npm run typecheck:core && npm run typecheck:ui && npm run typecheck:export && npm run check:bundle",
         "build:dev": "npm run copy:agent-ui-css && NODE_ENV=development npm run build-react:dev && NODE_ENV=development zotero-plugin build --dev && npm run pack:xpi && tsc --noEmit && npm run typecheck:core && npm run typecheck:ui && npm run typecheck:export && npm run check:bundle",
         "build:staging": "npm run copy:agent-ui-css && BUILD_ENV=staging npm run build-react:staging && BUILD_ENV=staging zotero-plugin build && tsc --noEmit && npm run typecheck:core && npm run typecheck:ui && npm run typecheck:export && npm run check:bundle",
@@ -43,6 +43,7 @@
         "watch-react": "webpack --config webpack.config.js --mode=development --watch",
         "pack:xpi": "node scripts/pack-xpi.mjs",
         "copy:agent-ui-css": "node scripts/copy-agent-ui-css.mjs",
+        "watch:agent-ui-css": "node scripts/copy-agent-ui-css.mjs --watch",
         "beaver-extract": "tsx src/beaver-extract/cli/main.ts",
         "typecheck:cli": "tsc -p tsconfig.cli.json --noEmit",
         "typecheck:core": "tsc -p packages/agent-core --noEmit && node packages/agent-core/verify-program.mjs",
