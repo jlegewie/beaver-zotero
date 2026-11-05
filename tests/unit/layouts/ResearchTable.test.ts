@@ -1172,6 +1172,99 @@ describe('rows the user just added', () => {
     });
 });
 
+describe('search', () => {
+    const shownRows = () =>
+        Array.from(container!.querySelectorAll<HTMLElement>('tbody tr[data-row-id]')).map((row) => row.dataset.rowId);
+    const hits = (el: Element = container!) => Array.from(el.querySelectorAll('mark.beaver-find-hit')).map((mark) => mark.textContent);
+    const search = (text: string) => {
+        const input = container!.querySelector<HTMLInputElement>('input[aria-label="Search rows"]')!;
+        act(() => {
+            Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, text);
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+    };
+    const withExtras = () => {
+        const spec = table();
+        spec.columns.push(
+            { id: '_identifier', header: 'DOI', type: 'text', system: true },
+            { id: 'girls', header: 'Girls only', type: 'boolean' },
+        );
+        spec.rows[0].cells._identifier = { outcome: 'answered', provenance: 'system', value: { kind: 'text', text: '10.1093/qje/qjr032' } } as Cell;
+        spec.rows[0].cells.girls = { outcome: 'answered', provenance: 'model', value: { kind: 'boolean', value: true } } as Cell;
+        spec.rows[1].cells.girls = { outcome: 'answered', provenance: 'model', value: { kind: 'boolean', value: false } } as Cell;
+        return spec;
+    };
+
+    it('shows the rows that hold every word, in any of their columns', () => {
+        mount();
+        search('baird ENROLLMENT');
+        expect(shownRows()).toEqual(['r1']);
+        search('baird consumption');
+        expect(shownRows()).toEqual([]);
+        search('smith');
+        expect(shownRows()).toEqual(['r1', 'r2', 'r3']);
+    });
+
+    it('reads a quoted phrase as one term', () => {
+        mount();
+        search('"raised enrollment"');
+        expect(shownRows()).toEqual(['r1']);
+        search('"enrollment raised"');
+        expect(shownRows()).toEqual([]);
+    });
+
+    it('matches a Yes / No answer as the grid shows it', () => {
+        mount({ table: withExtras() });
+        search('yes');
+        expect(shownRows()).toEqual(['r1']);
+        expect(hits(cell('r1', 'girls'))).toEqual(['Yes']);
+        search('true');
+        expect(shownRows()).toEqual([]);
+    });
+
+    it('does not match columns the grid does not show', () => {
+        mount({ table: withExtras() });
+        search('qjr032');
+        expect(shownRows()).toEqual([]);
+    });
+
+    it('marks the words wherever the grid shows them', () => {
+        mount();
+        search('baird 2011 rct enrollment qje');
+        expect(shownRows()).toEqual(['r1']);
+        expect(hits(paperCell('r1'))).toEqual(['Baird', '2011', 'QJE']);
+        expect(hits(container!.querySelector('tr[data-row-id="r1"] td.rt-td-year')!)).toEqual(['2011']);
+        expect(hits(cell('r1', 'design'))).toEqual(['RCT']);
+        expect(hits(cell('r1', 'effect'))).toEqual(['enrollment']);
+    });
+
+    it('marks the words in a cell\'s expansion and the inspector', () => {
+        mount();
+        search('enrollment');
+        expect(hits(expand(cell('r1', 'effect'))!)).toEqual(['enrollment']);
+        click(cell('r1', 'effect'));
+        expect(hits(inspector()!)).toContain('enrollment');
+    });
+
+    it("marks the words in a paper's title and byline in the paper view", () => {
+        mount();
+        search('baird smith');
+        click(paperCell('r1'));
+        expect(hits(inspector()!.querySelector('.rt-inspector-head')!)).toEqual(['Baird', 'Smith']);
+    });
+
+    it('marks nothing for a one-letter word, and nothing once the search is cleared', () => {
+        mount();
+        search('t');
+        expect(shownRows()).toEqual(['r1', 'r2', 'r3']);
+        expect(hits()).toEqual([]);
+        search('baird');
+        expect(hits()).toEqual(['Baird']);
+        search('');
+        expect(hits()).toEqual([]);
+    });
+});
+
 describe('sorting', () => {
     const rowOrder = () =>
         Array.from(container!.querySelectorAll<HTMLElement>('tbody tr[data-row-id]')).map((row) => row.dataset.rowId);

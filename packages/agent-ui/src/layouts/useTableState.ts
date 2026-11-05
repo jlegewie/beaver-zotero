@@ -5,6 +5,7 @@ import {
     filterRows,
     isColumnFilterable,
     sortRows,
+    type CellValue,
     type Filter,
     type Row,
     type TableSort,
@@ -28,9 +29,15 @@ export interface TableState {
     density: TableDensity;
     setDensity(density: TableDensity): void;
 
-    /** Substring match across every filterable column (OR), case-insensitive. */
+    /** The search box's text, as typed. */
     quickFilter: string;
     setQuickFilter(text: string): void;
+    /**
+     * The search's terms ({@link searchTerms}): a row is shown when each
+     * appears, case-insensitively, in one of its visible, filterable columns.
+     * Stable while the query's terms are unchanged.
+     */
+    searchTerms: readonly string[];
     /** Per-column filters (AND). Setting a filter replaces the column's previous one. */
     filters: Filter[];
     clearFilter(columnId: string): void;
@@ -110,14 +117,37 @@ function toggleInSet(set: ReadonlySet<string>, id: string): Set<string> {
     return next;
 }
 
-function matchesQuickFilter(spec: TableSpec, row: Row, query: string): boolean {
-    const needle = query.toLocaleLowerCase();
-    return spec.columns.some((column) => {
-        if (!isColumnFilterable(column)) return false;
-        return cellValueText(row.cells[column.id]?.value)
-            .toLocaleLowerCase()
-            .includes(needle);
-    });
+/**
+ * A search query's terms: its words, and each double-quoted phrase as one term,
+ * as Zotero's quick search reads a query. Lower-cased, without duplicates.
+ */
+export function searchTerms(query: string): string[] {
+    const terms = new Set<string>();
+    for (const [, phrase, word] of query.matchAll(/"([^"]*)"?|(\S+)/g)) {
+        const term = (phrase ?? word).trim().toLowerCase();
+        if (term) terms.add(term);
+    }
+    return [...terms];
+}
+
+/**
+ * A value as the table shows it, which is what the search matches: Yes / No
+ * for a boolean, and a paper's title, authors and venue.
+ */
+function searchText(value: CellValue | undefined): string {
+    if (value?.kind === "boolean") return value.value ? "Yes" : "No";
+    if (value?.kind === "reference")
+        return [value.title ?? value.display_name, value.subtitle, value.venue].filter(Boolean).join("\n");
+    return cellValueText(value);
+}
+
+/** The row's searched columns as one lower-cased string, one line per column. */
+function rowSearchText(row: Row, columns: readonly string[]): string {
+    // One line per column, so a quoted phrase cannot span two cells.
+    return columns
+        .map((id) => searchText(row.cells[id]?.value))
+        .join("\n")
+        .toLowerCase();
 }
 
 export function useTableState(
@@ -223,18 +253,43 @@ export function useTableState(
         [],
     );
 
+    // Kept while the terms are the same (a trailing space, a changed case),
+    // so the rows and every highlighting cell stay as they are. A term never
+    // holds a newline: the search box is one line.
+    const termsKey = searchTerms(quickFilter).join("\n");
+    const terms = useMemo<readonly string[]>(() => (termsKey ? termsKey.split("\n") : []), [termsKey]);
+
+    // The search reads only what the viewer can see: a match in a hidden
+    // column would show a row with nothing in it highlighted.
+    const searchedColumns = useMemo(
+        () =>
+            spec.columns
+                .filter((column) => isColumnFilterable(column) && !hiddenColumns.has(column.id))
+                .map((column) => column.id),
+        [spec, hiddenColumns],
+    );
+    // Each row's text, built once per table and column set while searching,
+    // so a keystroke only runs the substring checks.
+    const searching = terms.length > 0;
+    const rowTexts = useMemo(
+        () => (searching ? new Map(spec.rows.map((row) => [row.id, rowSearchText(row, searchedColumns)])) : null),
+        [spec, searchedColumns, searching],
+    );
+
     const onlyRows = options.onlyRows ?? null;
     const rows = useMemo(() => {
         const narrowed = onlyRows
             ? { ...spec, rows: spec.rows.filter((row) => onlyRows.has(row.id)) }
             : spec;
         const filtered = filterRows(narrowed, filters);
-        const quick = quickFilter.trim();
-        const searched = quick
-            ? filtered.filter((row) => matchesQuickFilter(spec, row, quick))
+        const searched = rowTexts
+            ? filtered.filter((row) => {
+                  const text = rowTexts.get(row.id) ?? "";
+                  return terms.every((term) => text.includes(term));
+              })
             : filtered;
         return sortRows({ ...spec, rows: searched }, sort);
-    }, [spec, filters, quickFilter, sort, onlyRows]);
+    }, [spec, filters, terms, rowTexts, sort, onlyRows]);
 
     const toggleRowSelection = useCallback(
         (rowId: string) => setSelectedRows((s) => toggleInSet(s, rowId)),
@@ -267,13 +322,14 @@ export function useTableState(
         setDensity,
         quickFilter,
         setQuickFilter,
+        searchTerms: terms,
         filters,
         clearFilter,
         clearFilters,
         toggleSelectFilter,
         toggleBooleanFilter,
         toggleEmptyFilter,
-        hasFilters: filters.length > 0 || quickFilter.trim().length > 0,
+        hasFilters: filters.length > 0 || terms.length > 0,
         rows,
         hiddenColumns,
         toggleColumn,

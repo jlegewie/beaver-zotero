@@ -9,6 +9,7 @@ import { documentReference } from "@beaver/agent-core/layouts/rowActions";
 import { rowReference } from "@beaver/agent-core/layouts/tableCitations";
 import { itemTypeToIconName } from "@beaver/agent-core/types/citations";
 import type { ZoteroItemReference } from "@beaver/agent-core/types/zotero";
+import { FindHighlight } from "../../chat/highlightText";
 import { getHost } from "../../host";
 import { FileIcon, Icon, LibraryIcon, MoreHorizontalIcon } from "../../icons";
 import MenuButton from "../../primitives/MenuButton";
@@ -104,13 +105,23 @@ export function PaperCell({
                 <PaperIcon row={row} />
             </span>
             <div className="rt-paper-body">
-                <span className="rt-paper-title">{title}</span>
-                {authors ? <span className="rt-paper-meta">{authors}</span> : null}
+                <span className="rt-paper-title">
+                    <FindHighlight text={title} />
+                </span>
+                {authors ? (
+                    <span className="rt-paper-meta">
+                        <FindHighlight text={authors} />
+                    </span>
+                ) : null}
                 {venue || shownYear ? (
                     <span className="rt-paper-meta rt-paper-venue">
-                        {venue ? <em>{venue}</em> : null}
+                        {venue ? (
+                            <em>
+                                <FindHighlight text={venue} />
+                            </em>
+                        ) : null}
                         {venue && shownYear ? " · " : null}
-                        {shownYear}
+                        {shownYear ? <FindHighlight text={shownYear} /> : null}
                     </span>
                 ) : null}
                 {row.failure ? (

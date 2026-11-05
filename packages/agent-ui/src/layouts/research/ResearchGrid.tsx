@@ -11,6 +11,7 @@ import {
     type TableSort,
     type TableSpec,
 } from "@beaver/agent-core/layouts/table";
+import { FindHighlight } from "../../chat/highlightText";
 import { ArrowDownIcon, ArrowUpLineIcon, CancelIcon, EditIcon, Icon, PlusSignIcon, RepeatIcon, TickIcon } from "../../icons";
 import type { MenuItem } from "../../primitives/ContextMenu";
 import MenuButton from "../../primitives/MenuButton";
@@ -579,7 +580,7 @@ const ResearchRow = React.memo(function ResearchRow({
             />
             {showYear ? (
                 <td className="rt-td rt-td-year">
-                    {cellValueText(yearColumnId ? row.cells[yearColumnId]?.value : undefined)}
+                    <FindHighlight text={cellValueText(yearColumnId ? row.cells[yearColumnId]?.value : undefined)} />
                 </td>
             ) : null}
             {questions.map((column) => (
@@ -753,7 +754,7 @@ export function CellValue({
                     className={`bt-pill bt-pill-${option?.color ?? "gray"} rt-choice`}
                     title={option?.description || undefined}
                 >
-                    {value.label}
+                    <FindHighlight text={value.label} />
                 </span>
             );
         }
@@ -761,13 +762,13 @@ export function CellValue({
             return (
                 <span className={`rt-bool rt-bool-${value.value ? "yes" : "no"}`}>
                     <Icon icon={value.value ? TickIcon : CancelIcon} size={9} />
-                    {value.value ? "Yes" : "No"}
+                    <FindHighlight text={value.value ? "Yes" : "No"} />
                 </span>
             );
         case "text":
             return <>{renderText(value.text)}</>;
         default:
-            return <>{cellValueText(value)}</>;
+            return <FindHighlight text={cellValueText(value)} />;
     }
 }
 

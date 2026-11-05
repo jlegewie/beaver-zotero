@@ -1,8 +1,9 @@
 import React from 'react';
-import { FIND_HIT_ATTR, FIND_HIT_CLASS, findMatchRanges } from './findContext';
+import { FIND_HIT_ATTR, FIND_HIT_CLASS, findMatchRanges, useFindQuery, type FindQuery } from './findContext';
 
 /**
- * Wrap every occurrence of `query` in `text` in a find-hit `<mark>`.
+ * Wrap every occurrence of `query` (or of each of its terms) in `text` in a
+ * find-hit `<mark>`.
  *
  * For renderers that display a plain string (message text, chip labels, table
  * cells). Markdown goes through `rehypeFindHighlight` instead, which does the
@@ -17,7 +18,7 @@ import { FIND_HIT_ATTR, FIND_HIT_CLASS, findMatchRanges } from './findContext';
  */
 export function highlightText(
     text: string,
-    query: string,
+    query: FindQuery,
     keyPrefix: string = 'find'
 ): React.ReactNode {
     const ranges = findMatchRanges(text, query);
@@ -43,4 +44,9 @@ export function highlightText(
     }
     if (cursor < text.length) nodes.push(text.slice(cursor));
     return nodes;
+}
+
+/** `text` with the hits of the find query provided above it marked. */
+export function FindHighlight({ text }: { text: string }): React.ReactElement {
+    return <>{highlightText(text, useFindQuery())}</>;
 }

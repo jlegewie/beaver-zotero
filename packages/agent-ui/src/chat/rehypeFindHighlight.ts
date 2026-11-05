@@ -1,4 +1,4 @@
-import { FIND_HIT_ATTR, FIND_HIT_CLASS, findMatchRanges } from './findContext';
+import { FIND_HIT_ATTR, FIND_HIT_CLASS, findMatchRanges, type FindQuery } from './findContext';
 
 /**
  * The hast shapes this transformer touches. `@types/hast` is deliberately not
@@ -26,10 +26,10 @@ const SKIPPED_CLASS_PARTS = ['katex', 'math'];
  * sanitize schema does not have to allow, and it can only recognize KaTeX
  * output once KaTeX has produced it.
  *
- * @param query The active find query. Empty means no-op.
+ * @param query The active find query or its terms. Empty means no-op.
  */
-export function rehypeFindHighlight(query: string): (tree: HastNode) => void {
-    if (!query) return () => {};
+export function rehypeFindHighlight(query: FindQuery): (tree: HastNode) => void {
+    if (query.length === 0) return () => {};
     return (tree: HastNode) => {
         highlightChildren(tree, query);
     };
@@ -59,7 +59,7 @@ function classNames(node: HastNode): string[] {
 }
 
 /** Recursively split the text nodes below `parent` on find matches. */
-function highlightChildren(parent: HastNode, query: string): void {
+function highlightChildren(parent: HastNode, query: FindQuery): void {
     const children = parent.children;
     if (!children || children.length === 0) return;
 
@@ -88,7 +88,7 @@ function highlightChildren(parent: HastNode, query: string): void {
  * Split one text value into text nodes and `<mark>` elements, or return `null`
  * when it holds no match and the original node can be kept as is.
  */
-function splitTextNode(value: string, query: string): HastNode[] | null {
+function splitTextNode(value: string, query: FindQuery): HastNode[] | null {
     const ranges = findMatchRanges(value, query);
     if (ranges.length === 0) return null;
 
