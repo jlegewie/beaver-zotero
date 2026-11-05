@@ -38,7 +38,7 @@ export function TableChip({ title, tableKey, remove }: { title: string; tableKey
                 const open = getHost().navigation?.openTable;
                 if (!open) { setError('Table provider unavailable.'); return; }
                 void open(tableKey, surfaceWindow, { onDownload: () => setError('Downloading table…') })
-                    .then(result => setError('error' in result ? result.error : result.warning ?? ''))
+                    .then(result => setError('error' in result ? '' : result.warning ?? ''))
                     .catch(() => setError('Table provider unavailable.'));
             }}
         />

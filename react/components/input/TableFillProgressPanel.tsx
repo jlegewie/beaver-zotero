@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { currentThreadIdAtom } from '@beaver/agent-core/run-state/atoms';
 import { chatFillsAtom, dismissChatFillAtom, panelFill } from '@beaver/agent-core/run-state/tableChatFills';
@@ -41,7 +41,6 @@ const TableFillProgressPanel: React.FC = () => {
     const fills = useAtomValue(chatFillsAtom);
     const threadId = useAtomValue(currentThreadIdAtom);
     const dismiss = useSetAtom(dismissChatFillAtom);
-    const [openMessage, setOpenMessage] = useState('');
     const fill = panelFill(fills, threadId);
     const snapshot = fill?.snapshot ?? null;
     const libraryRef = snapshot ? libraryRefForLibraryID(snapshot.table.libraryID) : null;
@@ -52,11 +51,8 @@ const TableFillProgressPanel: React.FC = () => {
             if (!tableKey) return;
             const origin = (event.currentTarget as Element).ownerDocument?.defaultView ?? null;
             const open = getHost().navigation?.openTable;
-            if (!open) return;
-            const outcome = await open(tableKey, origin, request ? { request } : undefined).catch(() => ({
-                error: 'Table provider unavailable.',
-            }));
-            setOpenMessage('error' in outcome ? outcome.error : '');
+            // The host reports a table that cannot be opened.
+            await open?.(tableKey, origin, request ? { request } : undefined).catch(() => undefined);
         },
         [tableKey],
     );
@@ -150,7 +146,6 @@ const TableFillProgressPanel: React.FC = () => {
                 </div>
                 <div className="table-fill-progress-status text-sm">
                     <span className="table-fill-progress-text">
-                        {openMessage ? `${openMessage} · ` : ''}
                         {line.status}
                         {line.failed ? <span className="table-fill-progress-warning"> · {line.failed}</span> : null}
                     </span>

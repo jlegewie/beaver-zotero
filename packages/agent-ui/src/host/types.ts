@@ -119,7 +119,8 @@ export interface NavigationHost {
      * fires when the table's files must be downloaded before it can open.
      * `focus` brings a row (and a cell, with a column) into view; the result's
      * `focus` is `missing` when the table no longer has it. `request` asks the
-     * table's view to show a fill's failed rows.
+     * table's view to show a fill's failed rows. The host tells the user when
+     * the table cannot be opened, so the `error` is not for display.
      */
     openTable?(
         key: string,
