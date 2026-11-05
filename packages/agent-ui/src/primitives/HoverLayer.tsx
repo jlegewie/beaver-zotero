@@ -273,10 +273,48 @@ function PlacedLayer({
             }}
             onMouseEnter={onEnter}
             onMouseLeave={onLeave}
+            onWheel={(event) => scrollBeneath(event, layer.anchor)}
         >
             {layer.render()}
         </div>
     );
+}
+
+/**
+ * A layer floats over the content it belongs to, so a wheel over it would
+ * scroll nothing: unless the layer itself scrolls that way, the wheel scrolls
+ * the anchor's scroll container instead (and that scroll closes the layer).
+ */
+function scrollBeneath(event: React.WheelEvent<HTMLElement>, anchor: HTMLElement): void {
+    const { deltaX, deltaY } = event;
+    for (let el = event.target as HTMLElement | null; el && el !== event.currentTarget.parentElement; el = el.parentElement) {
+        if (canScroll(el, deltaX, deltaY)) return;
+    }
+    let scroller = anchor.parentElement;
+    while (scroller && !canScroll(scroller, deltaX, deltaY)) scroller = scroller.parentElement;
+    if (!scroller) return;
+    // Lines (a mouse wheel in some setups) and pages are not pixels.
+    const page = event.deltaMode === 2;
+    const line = event.deltaMode === 1 ? 16 : 1;
+    scroller.scrollBy({
+        left: deltaX * (page ? scroller.clientWidth : line),
+        top: deltaY * (page ? scroller.clientHeight : line),
+    });
+}
+
+/** Whether `el` scrolls and has room left to scroll by the wheel's deltas. */
+function canScroll(el: HTMLElement, deltaX: number, deltaY: number): boolean {
+    const view = el.ownerDocument.defaultView;
+    const style = view?.getComputedStyle(el);
+    if (!style) return false;
+    const scrolls = (overflow: string) => overflow === 'auto' || overflow === 'scroll';
+    if (deltaY && scrolls(style.overflowY)) {
+        if (deltaY < 0 ? el.scrollTop > 0 : el.scrollTop + el.clientHeight < el.scrollHeight - 1) return true;
+    }
+    if (deltaX && scrolls(style.overflowX)) {
+        if (deltaX < 0 ? el.scrollLeft > 0 : el.scrollLeft + el.clientWidth < el.scrollWidth - 1) return true;
+    }
+    return false;
 }
 
 let anchorSequence = 0;

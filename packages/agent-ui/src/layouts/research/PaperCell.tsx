@@ -28,18 +28,19 @@ export function rowItemReference(row: Row): ZoteroItemReference | undefined {
     };
 }
 
-/** The paper's title, and its authors and venue as one line. */
+/** The paper's title, authors, venue and year. */
 export function paperText(
     row: Row,
     /** The anchor column, whose value names a row that has no reference. */
     anchorColumnId?: string,
-): { title: string; meta: string; year?: string } {
+): { title: string; authors?: string; venue?: string; year?: string } {
     const reference = rowReference(row);
     const year = cellValueText(row.cells[YEAR_COLUMN_ID]?.value) || undefined;
     const anchorText = !reference && anchorColumnId ? cellValueText(row.cells[anchorColumnId]?.value) : "";
     return {
         title: reference?.title ?? reference?.display_name ?? (anchorText || "Untitled"),
-        meta: [reference?.subtitle, reference?.venue].filter(Boolean).join(" · "),
+        ...(reference?.subtitle ? { authors: reference.subtitle } : {}),
+        ...(reference?.venue ? { venue: reference.venue } : {}),
         ...(year ? { year } : {}),
     };
 }
@@ -75,11 +76,13 @@ function PaperIcon({ row, className }: { row: Row; className?: string }): React.
 }
 
 /**
- * The Paper cell's content: title over authors · venue, a "New paper" tag on
- * a row added since the last fill, and the row's failure when its fill could
- * not read it. `full` is the cell's expansion (the peek): the whole title,
- * authors, year and venue, and the failure's message. The grid's cell owns
- * the click, the keyboard and the expansion.
+ * The Paper cell's content: the title, the authors, the venue in italics on
+ * its own line (when the row height leaves room), a "New paper" tag on a row
+ * added since the last fill, and the row's failure when its fill could not
+ * read it. `full` is the cell's expansion (the peek): nothing clamped, the
+ * year after the venue (the Year column scrolls away when the table does),
+ * and the failure's message. The grid's cell owns the click, the keyboard and
+ * the expansion.
  */
 export function PaperCell({
     row,
@@ -92,17 +95,24 @@ export function PaperCell({
     isNew: boolean;
     full?: boolean;
 }): React.ReactElement {
-    const { title, meta, year } = paperText(row, anchorColumnId);
-    const reference = rowReference(row);
-    const fullMeta = [reference?.subtitle, year, reference?.venue].filter(Boolean).join(" · ") || meta;
+    const { title, authors, venue, year } = paperText(row, anchorColumnId);
+    const flagged = !!row.failure || isNew;
+    const shownYear = full ? year : undefined;
     return (
-        <div className={`rt-paper${full ? " rt-paper-full" : ""}`}>
+        <div className={["rt-paper", full ? "rt-paper-full" : "", flagged ? "rt-paper-flagged" : ""].filter(Boolean).join(" ")}>
             <span className="rt-paper-icon" aria-hidden="true">
                 <PaperIcon row={row} />
             </span>
             <div className="rt-paper-body">
                 <span className="rt-paper-title">{title}</span>
-                {(full ? fullMeta : meta) ? <span className="rt-paper-meta">{full ? fullMeta : meta}</span> : null}
+                {authors ? <span className="rt-paper-meta">{authors}</span> : null}
+                {venue || shownYear ? (
+                    <span className="rt-paper-meta rt-paper-venue">
+                        {venue ? <em>{venue}</em> : null}
+                        {venue && shownYear ? " · " : null}
+                        {shownYear}
+                    </span>
+                ) : null}
                 {row.failure ? (
                     <span className="rt-row-flags">
                         <span className="rt-tag rt-tag-failed" title={full ? undefined : row.failure.message}>
@@ -158,7 +168,7 @@ export function PaperActions({
     };
     return (
         <div className={className} onClick={stopPropagation}>
-            {importControl}
+            {importControl != null ? <span className="rt-row-import">{importControl}</span> : null}
             {item && navigation ? (
                 <button
                     type="button"

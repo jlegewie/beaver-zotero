@@ -138,7 +138,9 @@ describe('the grid', () => {
         expect(cell('r3', 'effect').textContent).toBe('');
         const paper = container!.querySelector('tr[data-row-id="r3"] .rt-paper')!;
         expect(paper.textContent).toContain('New paper');
-        expect(paper.textContent).toContain('Smith, Jones · QJE');
+        // Authors, then the venue in italics on its own line; the year is its own column.
+        expect(Array.from(paper.querySelectorAll('.rt-paper-meta')).map((line) => line.textContent)).toEqual(['Smith, Jones', 'QJE']);
+        expect(paper.querySelector('.rt-paper-venue em')?.textContent).toBe('QJE');
     });
 
     it('copies the view as text with the paper and the year', () => {
@@ -164,7 +166,11 @@ describe('the grid', () => {
         expect(paperCell('r1').getAttribute('tabindex')).toBe('0');
         const expansion = expand(paperCell('r1'))!;
         expect(expansion.querySelector('.rt-paper-full .rt-paper-title')?.textContent).toBe('Baird 2011 title');
-        expect(expansion.querySelector('.rt-paper-full .rt-paper-meta')?.textContent).toBe('Smith, Jones · 2011 · QJE');
+        // The expansion adds the year after the venue: the Year column scrolls away with the table.
+        expect(Array.from(expansion.querySelectorAll('.rt-paper-full .rt-paper-meta')).map((line) => line.textContent)).toEqual([
+            'Smith, Jones',
+            'QJE · 2011',
+        ]);
         // The item, not the attachment the row is read from.
         expect(expansion.textContent).not.toContain('Baird_2011.pdf');
         expect(peekButtons().map((b) => b.textContent)).toEqual(['Show in library', 'Open PDF']);
@@ -178,6 +184,8 @@ describe('the grid', () => {
         mount();
         const expansion = expand(cell('r1', 'design'))!;
         expect(expansion.querySelector('.bt-pill')?.textContent).toBe('RCT');
+        // Drawn with the column's alignment, as the cell draws it.
+        expect(expansion.querySelector('.rt-peek-body')!.classList.contains('bt-align-start')).toBe(true);
         expect(expansion.textContent).not.toContain('Click for evidence');
         // A read-only view has no actions: no footer.
         expect(expansion.querySelector('.rt-peek-footer')).toBeNull();
@@ -185,6 +193,36 @@ describe('the grid', () => {
         click(expansion.querySelector('.rt-peek')!);
         expect(peek()).toBeNull();
         expect(inspector()!.getAttribute('data-column-id')).toBe('design');
+    });
+
+    it('draws Yes / No as a marked pill, centred, in the cell and its expansion alike', () => {
+        const spec = table();
+        spec.columns.push({ id: 'rct', header: 'Randomized', type: 'boolean', description: 'Randomized?' });
+        spec.rows[0].cells.rct = { outcome: 'answered', provenance: 'model', value: { kind: 'boolean', value: true }, documents: [pdf] } as Cell;
+        spec.rows[1].cells.rct = { outcome: 'answered', provenance: 'model', value: { kind: 'boolean', value: false }, documents: [pdf] } as Cell;
+        mount({ table: spec });
+        expect(cell('r1', 'rct').querySelector('.rt-bool-yes svg')).not.toBeNull();
+        expect(cell('r1', 'rct').querySelector('.rt-bool-yes')?.textContent).toBe('Yes');
+        expect(cell('r2', 'rct').querySelector('.rt-bool-no')?.textContent).toBe('No');
+        const expansion = expand(cell('r1', 'rct'))!;
+        expect(expansion.querySelector('.rt-peek-body')!.classList.contains('bt-align-center')).toBe(true);
+        expect(expansion.querySelector('.rt-bool-yes')?.textContent).toBe('Yes');
+    });
+
+    it('scrolls the grid, not nothing, when the wheel turns over an open expansion', () => {
+        mount();
+        const scroller = container!.querySelector<HTMLElement>('.rt-scroll')!;
+        // jsdom loads no stylesheet: the grid's own overflow, inline.
+        scroller.style.overflowY = 'auto';
+        Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 2000 });
+        Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 500 });
+        const scrollBy = vi.fn();
+        scroller.scrollBy = scrollBy as never;
+        const expansion = expand(cell('r1', 'effect'))!;
+        act(() => {
+            expansion.querySelector('.rt-peek-body')!.dispatchEvent(new WheelEvent('wheel', { deltaY: 120, bubbles: true }));
+        });
+        expect(scrollBy).toHaveBeenCalledWith({ left: 0, top: 120 });
     });
 
     it("says an unfilled cell's expansion is not filled yet", () => {

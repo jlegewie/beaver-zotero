@@ -10,7 +10,7 @@ import {
     type Row,
     type TableSpec,
 } from "@beaver/agent-core/layouts/table";
-import { ArrowDownIcon, EditIcon, Icon, PlusSignIcon, RepeatIcon, TickIcon } from "../../icons";
+import { ArrowDownIcon, CancelIcon, EditIcon, Icon, PlusSignIcon, RepeatIcon, TickIcon } from "../../icons";
 import type { MenuItem } from "../../primitives/ContextMenu";
 import MenuButton from "../../primitives/MenuButton";
 import { useHoverAnchor, useHoverLayer } from "../../primitives/HoverLayer";
@@ -609,11 +609,14 @@ function onCellKey(event: React.KeyboardEvent<HTMLElement>, select: () => void):
 function CellPeek({
     onSelect,
     hide,
+    align = "start",
     footer,
     children,
 }: {
     onSelect?: () => void;
     hide(): void;
+    /** The column's alignment, as the cell draws its value. */
+    align?: ReturnType<typeof columnAlign>;
     footer?: React.ReactNode;
     children: React.ReactNode;
 }): React.ReactElement {
@@ -631,7 +634,7 @@ function CellPeek({
                     : undefined
             }
         >
-            <div className="rt-peek-body">{children}</div>
+            <div className={`rt-peek-body bt-align-${align}`}>{children}</div>
             {footer}
         </div>
     );
@@ -662,7 +665,12 @@ export function CellValue({
             );
         }
         case "boolean":
-            return <span className="rt-bool">{value.value ? "Yes" : "No"}</span>;
+            return (
+                <span className={`rt-bool rt-bool-${value.value ? "yes" : "no"}`}>
+                    <Icon icon={value.value ? TickIcon : CancelIcon} size={9} />
+                    {value.value ? "Yes" : "No"}
+                </span>
+            );
         case "text":
             return <>{renderText(value.text)}</>;
         default:
@@ -749,6 +757,7 @@ function QuestionCell({
         <CellPeek
             onSelect={select}
             hide={hide}
+            align={columnAlign(column)}
             footer={
                 onEdit ? (
                     <div className="rt-peek-footer">
