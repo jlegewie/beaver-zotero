@@ -24,7 +24,7 @@ Notes:
   typechecks `tests/`**. A broken test contract passes typecheck; run the suites. A
   `vi.mock()` path that no longer resolves is a silent no-op, not an error.
 - Every `build*` script starts with `copy:agent-ui-css` and ends with both package gates.
-  `npm start` runs the copy step too, once, before the watcher.
+  `npm start` runs the copy step before the watchers, then keeps it watching.
 - **Never create commits** unless explicitly asked.
 
 ### Build vs. watch — do not mix them
@@ -51,10 +51,14 @@ Consequences:
 - **Don't edit source while a live/integration run is extracting.**
 - Hot reload only refreshes the bundles and UI, not global state that survives a window
   reload (DB, Supabase, services). Startup-only wiring needs a full plugin reload.
-- **`@beaver/agent-ui`'s stylesheets are not watched.** `copy:agent-ui-css` runs once per
-  `npm start`. Saving one *does* trigger a scaffold rebuild + reload, but that copies the
-  stale generated file, so it looks like the edit did nothing. Re-run
-  `npm run copy:agent-ui-css` after editing a shared sheet.
+- **`@beaver/agent-ui`'s stylesheets ship as generated copies.** `npm start` runs
+  `watch:agent-ui-css`, which re-copies a sheet into `addon/content/styles/` whenever its
+  source changes (an edit, a merge, a checkout), so every rebuild ships the current
+  rules. A watcher started before this script existed never re-copies: restart it, or
+  run `npm run copy:agent-ui-css`. Even with a current copy, a hot reload often keeps
+  applying the previous version of a global sheet (Gecko caches it), so new markup can
+  render against old rules. Reload once more or restart Zotero before treating a layout
+  bug as real.
 
 ## Source layout: four roots, two bundles
 
