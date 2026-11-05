@@ -9,15 +9,13 @@ import { documentReference } from "@beaver/agent-core/layouts/rowActions";
 import { rowReference } from "@beaver/agent-core/layouts/tableCitations";
 import { itemTypeToIconName } from "@beaver/agent-core/types/citations";
 import type { ZoteroItemReference } from "@beaver/agent-core/types/zotero";
-import { ChipPopupCard } from "../../chat/ChipPopup";
 import { getHost } from "../../host";
-import { FileIcon, Icon, MoreHorizontalIcon } from "../../icons";
+import { FileIcon, Icon, LibraryIcon, MoreHorizontalIcon } from "../../icons";
 import MenuButton from "../../primitives/MenuButton";
 import type { MenuItem } from "../../primitives/ContextMenu";
-import { useHoverAnchor } from "../../primitives/HoverLayer";
 import { rowActionHandler } from "../rowActionHandlers";
-import { RowImportAction } from "../rowActions";
-import { documentKindLabel, documentNoun, type TableDocuments } from "./cellModel";
+import { rowImportControl } from "../rowActions";
+import { documentKindLabel, type TableDocuments } from "./cellModel";
 
 /** The row's own item, as the host's navigation names it. */
 export function rowItemReference(row: Row): ZoteroItemReference | undefined {
@@ -30,18 +28,19 @@ export function rowItemReference(row: Row): ZoteroItemReference | undefined {
     };
 }
 
-/** The paper's title, and its authors and venue as one line. */
+/** The paper's title, authors, venue and year. */
 export function paperText(
     row: Row,
     /** The anchor column, whose value names a row that has no reference. */
     anchorColumnId?: string,
-): { title: string; meta: string; year?: string } {
+): { title: string; authors?: string; venue?: string; year?: string } {
     const reference = rowReference(row);
     const year = cellValueText(row.cells[YEAR_COLUMN_ID]?.value) || undefined;
     const anchorText = !reference && anchorColumnId ? cellValueText(row.cells[anchorColumnId]?.value) : "";
     return {
         title: reference?.title ?? reference?.display_name ?? (anchorText || "Untitled"),
-        meta: [reference?.subtitle, reference?.venue].filter(Boolean).join(" · "),
+        ...(reference?.subtitle ? { authors: reference.subtitle } : {}),
+        ...(reference?.venue ? { venue: reference.venue } : {}),
         ...(year ? { year } : {}),
     };
 }
@@ -77,69 +76,46 @@ function PaperIcon({ row, className }: { row: Row; className?: string }): React.
 }
 
 /**
- * The Paper cell: title over authors · venue, a "New paper" tag on a row added
- * since the last fill, and the row's failure when its fill could not read it.
- * Hovering shows the paper card; the row's actions sit on its top-right
- * corner on hover. With `onSelect`, Enter or Space on it selects the cell
- * (the grid's cell takes the click); the row's actions never do.
+ * The Paper cell's content: the title, the authors, the venue in italics on
+ * its own line (when the row height leaves room), a "New paper" tag on a row
+ * added since the last fill, and the row's failure when its fill could not
+ * read it. `full` is the cell's expansion (the peek): nothing clamped, the
+ * year after the venue (the Year column scrolls away when the table does),
+ * and the failure's message. The grid's cell owns the click, the keyboard and
+ * the expansion.
  */
 export function PaperCell({
-    table,
     row,
     anchorColumnId,
     isNew,
-    documents,
-    menuItems,
-    onMenuToggle,
-    onSelect,
+    full = false,
 }: {
-    /** The table, for the row actions it declares (import). */
-    table?: TableSpec;
     row: Row;
     anchorColumnId?: string;
     isNew: boolean;
-    documents?: TableDocuments;
-    /** The row's actions; the menu is omitted when there are none. */
-    menuItems: MenuItem[];
-    /** Told when the row's menu opens and closes. */
-    onMenuToggle?: (open: boolean) => void;
-    /** Selects the Paper cell (the paper view), from the keyboard. */
-    onSelect?: () => void;
+    full?: boolean;
 }): React.ReactElement {
-    const { title, meta } = paperText(row, anchorColumnId);
-    const hover = useHoverAnchor({
-        slot: "card",
-        variant: "card",
-        width: 312,
-        render: () => <PaperCard row={row} anchorColumnId={anchorColumnId} documents={documents} isNew={isNew} />,
-    });
+    const { title, authors, venue, year } = paperText(row, anchorColumnId);
+    const flagged = !!row.failure || isNew;
+    const shownYear = full ? year : undefined;
     return (
-        <div className="rt-paper">
+        <div className={["rt-paper", full ? "rt-paper-full" : "", flagged ? "rt-paper-flagged" : ""].filter(Boolean).join(" ")}>
             <span className="rt-paper-icon" aria-hidden="true">
                 <PaperIcon row={row} />
             </span>
-            <div
-                className="rt-paper-body"
-                // Keyboard focus shows the card; its actions are also in the row menu.
-                tabIndex={0}
-                {...hover}
-                onKeyDown={
-                    onSelect
-                        ? (event) => {
-                              if (event.target !== event.currentTarget) return;
-                              if (event.key === "Enter" || event.key === " ") {
-                                  event.preventDefault();
-                                  onSelect();
-                              }
-                          }
-                        : undefined
-                }
-            >
+            <div className="rt-paper-body">
                 <span className="rt-paper-title">{title}</span>
-                {meta ? <span className="rt-paper-meta">{meta}</span> : null}
+                {authors ? <span className="rt-paper-meta">{authors}</span> : null}
+                {venue || shownYear ? (
+                    <span className="rt-paper-meta rt-paper-venue">
+                        {venue ? <em>{venue}</em> : null}
+                        {venue && shownYear ? " · " : null}
+                        {shownYear}
+                    </span>
+                ) : null}
                 {row.failure ? (
                     <span className="rt-row-flags">
-                        <span className="rt-tag rt-tag-failed" title={row.failure.message}>
+                        <span className="rt-tag rt-tag-failed" title={full ? undefined : row.failure.message}>
                             {row.failure.code === "no_source" ? "Nothing to read" : "Couldn't be read"}
                         </span>
                     </span>
@@ -150,117 +126,90 @@ export function PaperCell({
                         </span>
                     </span>
                 ) : null}
+                {full && row.failure ? <span className="rt-paper-failure">{row.failure.message}</span> : null}
             </div>
-            {/* The row's actions and their menu: a click on them is theirs,
-                not the cell's. */}
-            <span className="rt-paper-actions" onClick={stopPropagation}>
-                {table ? <RowImportAction table={table} row={row} /> : null}
-                {menuItems.length ? (
-                    <MenuButton
-                        menuItems={menuItems}
-                        variant="ghost-secondary"
-                        icon={MoreHorizontalIcon}
-                        className="rt-row-menu"
-                        ariaLabel="Row actions"
-                        toggleCallback={onMenuToggle}
-                    />
-                ) : null}
-            </span>
-        </div>
-    );
-}
-
-const stopPropagation = (event: React.SyntheticEvent) => event.stopPropagation();
-
-/**
- * The paper's hover card: the chat's item chip card for the work, the row's
- * document, and Show in library and Open.
- */
-export function PaperCard({
-    row,
-    anchorColumnId,
-    documents,
-    isNew = false,
-}: {
-    row: Row;
-    anchorColumnId?: string;
-    documents?: TableDocuments;
-    /** A row added since the last fill. */
-    isNew?: boolean;
-}): React.ReactElement {
-    const { title, meta, year } = paperText(row, anchorColumnId);
-    const reference = rowReference(row);
-    const documentId = row.documents?.[0];
-    const info = documentId ? documents?.get(documentId) : undefined;
-    const subtitle = [reference?.subtitle, year, reference?.venue].filter(Boolean).join(" · ");
-    return (
-        <div className="rt-card rt-paper-card">
-            <ChipPopupCard
-                icon={<PaperIcon row={row} />}
-                title={title}
-                subtitle={subtitle || meta ? { text: subtitle || meta } : null}
-            />
-            <div className="rt-paper-card-document">
-                <Icon icon={FileIcon} size={14} />
-                <div className="rt-paper-card-document-text">
-                    {documentId ? (
-                        <>
-                            <span className="rt-paper-card-file">{info?.name ?? "Document"}</span>
-                            <span className="rt-paper-card-note">
-                                Answers in this row are read from {documentNoun(info?.kind).replace(/^the /, "this ")}
-                            </span>
-                        </>
-                    ) : (
-                        <>
-                            <span className="rt-paper-card-file">No document</span>
-                            <span className="rt-paper-card-note">
-                                Answers in this row come from the title and abstract
-                            </span>
-                        </>
-                    )}
-                </div>
-            </div>
-            {row.failure ? (
-                <div className="rt-paper-card-failure">{row.failure.message}</div>
-            ) : isNew ? (
-                <div className="rt-paper-card-note rt-paper-card-new">New paper: added since the last fill.</div>
-            ) : null}
-            <PaperActions row={row} documents={documents} className="rt-card-actions" buttonClassName="rt-card-button" />
         </div>
     );
 }
 
 /**
- * The row's Show in library and Open, each when the host can do it; nothing
- * when neither is available. Shared by the paper card and the paper view.
+ * The row's actions as buttons: the table's import (an external work), Show
+ * in library and Open, each when the host can do it, then the row's menu.
+ * Nothing when there are none. Shared by the Paper cell's expansion and the
+ * paper view. `onAction` runs before each (the expansion closes itself).
  */
 export function PaperActions({
+    table,
     row,
     documents,
+    menuItems = [],
+    onAction,
     className,
     buttonClassName,
 }: {
+    /** The table, for the row actions it declares (import). */
+    table?: TableSpec;
     row: Row;
     documents?: TableDocuments;
+    /** The row's further actions, behind a menu button. */
+    menuItems?: MenuItem[];
+    onAction?: () => void;
     className: string;
     buttonClassName: string;
 }): React.ReactElement | null {
     const navigation = getHost().navigation;
     const item = navigation ? rowItemReference(row) : undefined;
     const open = paperOpenAction(row, documents);
-    if (!navigation || (!item && !open)) return null;
+    const importControl = table ? rowImportControl(table, row) : null;
+    if (importControl == null && !item && !open && !menuItems.length) return null;
+    const run = (action: () => void) => () => {
+        onAction?.();
+        action();
+    };
     return (
-        <div className={className}>
-            {item ? (
-                <button type="button" className={buttonClassName} onClick={() => navigation.revealInLibrary(item)}>
+        <div className={className} onClick={stopPropagation}>
+            {importControl != null ? <span className="rt-row-import">{importControl}</span> : null}
+            {item && navigation ? (
+                <button
+                    type="button"
+                    className={buttonClassName}
+                    onClick={run(() => navigation.revealInLibrary(item))}
+                >
+                    <Icon icon={LibraryIcon} size={12} />
                     Show in library
                 </button>
             ) : null}
             {open ? (
-                <button type="button" className={buttonClassName} onClick={open.run}>
+                <button type="button" className={buttonClassName} onClick={run(open.run)}>
+                    <Icon icon={FileIcon} size={12} />
                     {open.label}
                 </button>
+            ) : null}
+            {menuItems.length ? (
+                <MenuButton
+                    menuItems={onAction ? menuItems.map((entry) => withBefore(entry, onAction)) : menuItems}
+                    // No button variant: the class styles it like its neighbours.
+                    variant="rt"
+                    icon={MoreHorizontalIcon}
+                    className={`${buttonClassName} rt-row-menu`}
+                    ariaLabel="Row actions"
+                />
             ) : null}
         </div>
     );
 }
+
+/** A menu entry that runs `before` first; a submenu's parent only opens it, so its entries do. */
+function withBefore(entry: MenuItem, before: () => void): MenuItem {
+    if (entry.isDivider) return entry;
+    if (entry.submenu) return { ...entry, submenu: entry.submenu.map((sub) => withBefore(sub, before)) };
+    return {
+        ...entry,
+        onClick: () => {
+            before();
+            entry.onClick();
+        },
+    };
+}
+
+const stopPropagation = (event: React.SyntheticEvent) => event.stopPropagation();

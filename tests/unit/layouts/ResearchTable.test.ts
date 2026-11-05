@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Cell, TableSpec } from '@beaver/agent-core/layouts/table';
 import { ResearchTable } from '@beaver/agent-ui/layouts/research/ResearchTable';
 import { setHost } from '@beaver/agent-ui/host';
+import { hoverPeek } from '../../helpers/hoverPeek';
 
 const h = React.createElement;
 
@@ -97,6 +98,13 @@ const cell = (rowId: string, columnId: string) =>
     container!.querySelector<HTMLElement>(`tr[data-row-id="${rowId}"] td[data-column-id="${columnId}"]`)!;
 const click = (el: Element) => act(() => (el as HTMLElement).click());
 const inspector = () => container!.querySelector<HTMLElement>('aside[aria-label="Cell details"]');
+const paperCell = (rowId: string) => container!.querySelector<HTMLElement>(`tr[data-row-id="${rowId}"] td.rt-td-paper`)!;
+const peek = () => container!.querySelector<HTMLElement>('.bt-hover-peek');
+/** Hovers a cell until its expansion opens, and returns the expansion. */
+const expand = (el: Element) => hoverPeek(el, container!);
+const peekButtons = () => Array.from(peek()!.querySelectorAll<HTMLButtonElement>('.rt-peek-footer button'));
+const menuEntry = (label: string) =>
+    Array.from(document.querySelectorAll<HTMLElement>('*')).find((el) => el.textContent === label && el.children.length === 0);
 
 beforeEach(() => {
     activateCitation.mockReset();
@@ -130,7 +138,9 @@ describe('the grid', () => {
         expect(cell('r3', 'effect').textContent).toBe('');
         const paper = container!.querySelector('tr[data-row-id="r3"] .rt-paper')!;
         expect(paper.textContent).toContain('New paper');
-        expect(paper.textContent).toContain('Smith, Jones · QJE');
+        // Authors, then the venue in italics on its own line; the year is its own column.
+        expect(Array.from(paper.querySelectorAll('.rt-paper-meta')).map((line) => line.textContent)).toEqual(['Smith, Jones', 'QJE']);
+        expect(paper.querySelector('.rt-paper-venue em')?.textContent).toBe('QJE');
     });
 
     it('copies the view as text with the paper and the year', () => {
@@ -147,16 +157,78 @@ describe('the grid', () => {
         expect(first).toContain('Baird 2011');
     });
 
-    it("offers the paper's Open in the row menu, reachable by keyboard", () => {
+    it("expands the Paper cell to the paper's full details, with its actions in the footer", () => {
+        const revealInLibrary = vi.fn();
+        setHost({ navigation: { activateCitation, revealInLibrary, openSource: vi.fn() } as never });
         mount();
-        const menu = container!.querySelector<HTMLButtonElement>('tr[data-row-id="r1"] button[aria-label="Row actions"]')!;
-        click(menu);
-        const labels = Array.from(document.querySelectorAll<HTMLElement>('*'))
-            .filter((el) => el.children.length === 0)
-            .map((el) => el.textContent);
-        expect(labels).toContain('Show in library');
-        expect(labels).toContain('Open PDF');
-        expect(container!.querySelector('tr[data-row-id="r1"] .rt-paper-body')!.getAttribute('tabindex')).toBe('0');
+        // The cell holds no controls of its own; it is focusable for the keyboard.
+        expect(paperCell('r1').querySelector('button')).toBeNull();
+        expect(paperCell('r1').getAttribute('tabindex')).toBe('0');
+        const expansion = expand(paperCell('r1'))!;
+        expect(expansion.querySelector('.rt-paper-full .rt-paper-title')?.textContent).toBe('Baird 2011 title');
+        // The expansion adds the year after the venue: the Year column scrolls away with the table.
+        expect(Array.from(expansion.querySelectorAll('.rt-paper-full .rt-paper-meta')).map((line) => line.textContent)).toEqual([
+            'Smith, Jones',
+            'QJE · 2011',
+        ]);
+        // The item, not the attachment the row is read from.
+        expect(expansion.textContent).not.toContain('Baird_2011.pdf');
+        expect(peekButtons().map((b) => b.textContent)).toEqual(['Show in library', 'Open PDF']);
+        click(peekButtons()[0]);
+        expect(revealInLibrary).toHaveBeenCalledWith(expect.objectContaining({ zotero_key: 'AAAA1111' }));
+        expect(peek()).toBeNull();
+        expect(inspector()).toBeNull();
+    });
+
+    it('expands every question cell, even one whose text fits, with no evidence hint', () => {
+        mount();
+        const expansion = expand(cell('r1', 'design'))!;
+        expect(expansion.querySelector('.bt-pill')?.textContent).toBe('RCT');
+        // Drawn with the column's alignment, as the cell draws it.
+        expect(expansion.querySelector('.rt-peek-body')!.classList.contains('bt-align-start')).toBe(true);
+        expect(expansion.textContent).not.toContain('Click for evidence');
+        // A read-only view has no actions: no footer.
+        expect(expansion.querySelector('.rt-peek-footer')).toBeNull();
+        // A click on the expansion opens the cell, as a click on the cell does.
+        click(expansion.querySelector('.rt-peek')!);
+        expect(peek()).toBeNull();
+        expect(inspector()!.getAttribute('data-column-id')).toBe('design');
+    });
+
+    it('draws Yes / No as a marked pill, centred, in the cell and its expansion alike', () => {
+        const spec = table();
+        spec.columns.push({ id: 'rct', header: 'Randomized', type: 'boolean', description: 'Randomized?' });
+        spec.rows[0].cells.rct = { outcome: 'answered', provenance: 'model', value: { kind: 'boolean', value: true }, documents: [pdf] } as Cell;
+        spec.rows[1].cells.rct = { outcome: 'answered', provenance: 'model', value: { kind: 'boolean', value: false }, documents: [pdf] } as Cell;
+        mount({ table: spec });
+        expect(cell('r1', 'rct').querySelector('.rt-bool-yes svg')).not.toBeNull();
+        expect(cell('r1', 'rct').querySelector('.rt-bool-yes')?.textContent).toBe('Yes');
+        expect(cell('r2', 'rct').querySelector('.rt-bool-no')?.textContent).toBe('No');
+        const expansion = expand(cell('r1', 'rct'))!;
+        expect(expansion.querySelector('.rt-peek-body')!.classList.contains('bt-align-center')).toBe(true);
+        expect(expansion.querySelector('.rt-bool-yes')?.textContent).toBe('Yes');
+    });
+
+    it('scrolls the grid, not nothing, when the wheel turns over an open expansion', () => {
+        mount();
+        const scroller = container!.querySelector<HTMLElement>('.rt-scroll')!;
+        // jsdom loads no stylesheet: the grid's own overflow, inline.
+        scroller.style.overflowY = 'auto';
+        Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 2000 });
+        Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 500 });
+        const scrollBy = vi.fn();
+        scroller.scrollBy = scrollBy as never;
+        const expansion = expand(cell('r1', 'effect'))!;
+        act(() => {
+            expansion.querySelector('.rt-peek-body')!.dispatchEvent(new WheelEvent('wheel', { deltaY: 120, bubbles: true }));
+        });
+        expect(scrollBy).toHaveBeenCalledWith({ left: 0, top: 120 });
+    });
+
+    it("says an unfilled cell's expansion is not filled yet", () => {
+        mount();
+        expect(cell('r3', 'effect').textContent).toBe('');
+        expect(expand(cell('r3', 'effect'))!.querySelector('.rt-peek-body')?.textContent).toBe('Not filled yet');
     });
 
     it("keeps the host's Add control on an external work the table lets the user import", () => {
@@ -170,8 +242,10 @@ describe('the grid', () => {
             cells: { _reference: { outcome: 'answered', provenance: 'system', value: { kind: 'reference', display_name: 'Outside 2020' } } as Cell },
         });
         mount({ table: spec });
-        expect(container!.querySelector('tr[data-row-id="ext"] .import-control')).not.toBeNull();
-        expect(container!.querySelector('tr[data-row-id="r1"] .import-control')).toBeNull();
+        // In the Paper cell's expansion, not on the cell.
+        expect(container!.querySelector('tr[data-row-id="ext"] .import-control')).toBeNull();
+        expect(expand(paperCell('ext'))!.querySelector('.rt-peek-footer .import-control')).not.toBeNull();
+        expect(expand(paperCell('r1'))!.querySelector('.import-control')).toBeNull();
     });
 
     it('opens the passage through the citation activation when a page tag is clicked', () => {
@@ -232,18 +306,28 @@ describe('pinned columns', () => {
 });
 
 describe('row menus', () => {
-    it("raises the row's Paper cell while its menu is open", () => {
-        mount({ fill: { onFillRows: vi.fn(), onFillColumn: vi.fn() } });
-        const paper = () => container!.querySelector('tr[data-row-id="r1"] .rt-td-paper')!;
-        expect(paper().classList.contains('rt-td-menu-open')).toBe(false);
-        click(container!.querySelector('tr[data-row-id="r1"] button[aria-label="Row actions"]')!);
-        expect(paper().classList.contains('rt-td-menu-open')).toBe(true);
-        // Choosing an entry closes the menu.
-        const refill = Array.from(document.querySelectorAll<HTMLElement>('*')).find(
-            (el) => el.textContent === 'Refill row' && el.children.length === 0,
-        );
-        click(refill!);
-        expect(paper().classList.contains('rt-td-menu-open')).toBe(false);
+    it("puts the row's menu last in the Paper cell's expansion, which closes when an entry is chosen", () => {
+        const fill = { onFillRows: vi.fn(), onFillColumn: vi.fn() };
+        mount({ fill });
+        expand(paperCell('r1'));
+        const buttons = peekButtons();
+        expect(buttons[buttons.length - 1].getAttribute('aria-label')).toBe('Row actions');
+        click(buttons[buttons.length - 1]);
+        // Show in library and Open are buttons, not menu entries.
+        expect(menuEntry('Show in library')?.closest('[role="menuitem"]')).toBeFalsy();
+        click(menuEntry('Refill row')!);
+        expect(fill.onFillRows).toHaveBeenCalledWith(['r1']);
+        expect(peek()).toBeNull();
+        expect(inspector()).toBeNull();
+    });
+
+    it("offers the row's menu in the paper view, reachable by keyboard", () => {
+        const fill = { onFillRows: vi.fn(), onFillColumn: vi.fn() };
+        mount({ fill });
+        click(paperCell('r2'));
+        click(inspector()!.querySelector('.rt-inspector-row-actions button[aria-label="Row actions"]')!);
+        click(menuEntry('Refill row')!);
+        expect(fill.onFillRows).toHaveBeenCalledWith(['r2']);
     });
 });
 
@@ -381,7 +465,6 @@ describe('the cell inspector', () => {
 });
 
 describe('the paper view', () => {
-    const paperCell = (rowId: string) => container!.querySelector<HTMLElement>(`tr[data-row-id="${rowId}"] td.rt-td-paper`)!;
     const blocks = () => Array.from(inspector()!.querySelectorAll<HTMLButtonElement>('button.rt-paper-question-open'));
 
     it('opens when the Paper cell is selected, with every question of the row', () => {
@@ -452,9 +535,8 @@ describe('the paper view', () => {
 
     it('selects the Paper cell from the keyboard', () => {
         mount();
-        const body = paperCell('r2').querySelector('.rt-paper-body')!;
         act(() => {
-            body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+            paperCell('r2').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
         });
         expect(inspector()!.getAttribute('data-view')).toBe('paper');
         expect(inspector()!.getAttribute('data-row-id')).toBe('r2');
@@ -462,11 +544,9 @@ describe('the paper view', () => {
 
     it("leaves the cell unselected when its row menu is used", () => {
         mount({ fill: { onFillRows: vi.fn(), onFillColumn: vi.fn() } });
-        click(container!.querySelector('tr[data-row-id="r1"] button[aria-label="Row actions"]')!);
-        const refill = Array.from(document.querySelectorAll<HTMLElement>('*')).find(
-            (el) => el.textContent === 'Refill row' && el.children.length === 0,
-        );
-        click(refill!);
+        expand(paperCell('r1'));
+        click(peek()!.querySelector('button[aria-label="Row actions"]')!);
+        click(menuEntry('Refill row')!);
         expect(inspector()).toBeNull();
         expect(paperCell('r1').classList.contains('rt-cell-selected')).toBe(false);
     });
@@ -670,10 +750,10 @@ describe('editing cells and filling from rows and columns', () => {
         return { onEdit, onRestore: vi.fn(), onChooseDocument: vi.fn() };
     }
 
-    it("edits a text cell in place from the cell's pencil: the answer, a note, and Save", async () => {
+    it("edits a text cell in place from the Edit in its expansion: the answer, a note, and Save", async () => {
         const cellEditing = editing();
         mount({ cellEditing });
-        click(cell('r1', 'effect').querySelector('button[aria-label="Edit Headline effect"]')!);
+        click(expand(cell('r1', 'effect'))!.querySelector('button[aria-label="Edit Headline effect"]')!);
         expect(inspector()).toBeNull();
         const [answer] = editor()!.querySelectorAll<HTMLTextAreaElement>('textarea');
         expect(answer.value).toBe('Conditional transfers raised enrollment.');
@@ -693,7 +773,7 @@ describe('editing cells and filling from rows and columns', () => {
     it('keeps the editor open with the refusal, and Escape (not while composing) cancels', async () => {
         const cellEditing = editing(vi.fn(async () => 'This row is no longer in the table.'));
         mount({ cellEditing });
-        click(cell('r1', 'effect').querySelector('button[aria-label="Edit Headline effect"]')!);
+        click(expand(cell('r1', 'effect'))!.querySelector('button[aria-label="Edit Headline effect"]')!);
         click(Array.from(editor()!.querySelectorAll('button')).find((b) => b.textContent === 'Save')!);
         await flush();
         expect(editor()!.querySelector('[role="alert"]')?.textContent).toBe('This row is no longer in the table.');
@@ -707,7 +787,7 @@ describe('editing cells and filling from rows and columns', () => {
     it('opens a Choice cell on its options, Not reported and Clear cell, each saving at once', async () => {
         const cellEditing = editing();
         mount({ cellEditing });
-        click(cell('r1', 'design').querySelector('button[aria-label="Edit Design"]')!);
+        click(expand(cell('r1', 'design'))!.querySelector('button[aria-label="Edit Design"]')!);
         const options = Array.from(editor()!.querySelectorAll('[role="option"]')).map((o) => o.textContent);
         expect(options).toEqual(['RCT', 'Not reported', 'Clear cell']);
         expect(editor()!.querySelector('[role="option"][aria-selected="true"]')?.textContent).toBe('RCT');
@@ -744,7 +824,7 @@ describe('editing cells and filling from rows and columns', () => {
     it("makes Beaver's own choice the user's when it is picked, so fills keep it", async () => {
         const cellEditing = editing();
         mount({ cellEditing });
-        click(cell('r1', 'design').querySelector('button[aria-label="Edit Design"]')!);
+        click(expand(cell('r1', 'design'))!.querySelector('button[aria-label="Edit Design"]')!);
         click(Array.from(editor()!.querySelectorAll('[role="option"]')).find((o) => o.textContent === 'RCT')!);
         await flush();
         expect(cellEditing.onEdit).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ id: 'design' }), {
@@ -768,9 +848,9 @@ describe('editing cells and filling from rows and columns', () => {
 
     it('shows the cell controls disabled with the reason in a read-only library', () => {
         mount({ cellEditing: { ...editing(), disabledReason: 'This library is read-only.' } });
-        const cellPencil = cell('r1', 'effect').querySelector<HTMLButtonElement>('button[aria-label="Edit Headline effect"]')!;
-        expect(cellPencil.disabled).toBe(true);
-        expect(cellPencil.title).toBe('This library is read-only.');
+        const cellEdit = expand(cell('r1', 'effect'))!.querySelector<HTMLButtonElement>('button[aria-label="Edit Headline effect"]')!;
+        expect(cellEdit.disabled).toBe(true);
+        expect(cellEdit.title).toBe('This library is read-only.');
         click(cell('r2', 'effect'));
         const controls = [pencil()!, ...links(), ...Array.from(inspector()!.querySelectorAll<HTMLButtonElement>('.rt-inspector-action'))];
         expect(controls).toHaveLength(3);
@@ -781,10 +861,10 @@ describe('editing cells and filling from rows and columns', () => {
         const fill = { onFillRows: vi.fn(), onFillColumn: vi.fn() };
         const cellEditing = editing();
         mount({ fill, cellEditing });
-        click(container!.querySelector('tr[data-row-id="r1"] button[aria-label="Row actions"]')!);
+        click(expand(paperCell('r1'))!.querySelector('button[aria-label="Row actions"]')!);
         click(menuItem('Refill row')!);
         expect(fill.onFillRows).toHaveBeenCalledWith(['r1']);
-        click(container!.querySelector('tr[data-row-id="r1"] button[aria-label="Row actions"]')!);
+        click(expand(paperCell('r1'))!.querySelector('button[aria-label="Row actions"]')!);
         click(menuItem('Choose document…')!);
         expect(cellEditing.onChooseDocument).toHaveBeenCalledWith(expect.objectContaining({ id: 'r1' }));
     });

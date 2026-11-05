@@ -10,7 +10,7 @@ import {
     type Row,
     type TableSpec,
 } from "@beaver/agent-core/layouts/table";
-import { ArrowDownIcon, EditIcon, Icon, PlusSignIcon, RepeatIcon, TickIcon } from "../../icons";
+import { ArrowDownIcon, CancelIcon, EditIcon, Icon, PlusSignIcon, RepeatIcon, TickIcon } from "../../icons";
 import type { MenuItem } from "../../primitives/ContextMenu";
 import MenuButton from "../../primitives/MenuButton";
 import { useHoverAnchor, useHoverLayer } from "../../primitives/HoverLayer";
@@ -27,7 +27,7 @@ import {
     type ResearchColumns,
     type TableDocuments,
 } from "./cellModel";
-import { PaperCell } from "./PaperCell";
+import { PaperActions, PaperCell } from "./PaperCell";
 
 /** The cell the inspector is open on. */
 export interface CellAddress {
@@ -55,11 +55,11 @@ export interface ResearchGridProps {
     emptyText: string;
     filteredEmptyText: string;
     /**
-     * Opens the cell editor: the pencil on a cell and the peek's Edit.
-     * Absent, cells are not editable here.
+     * Opens the cell editor: the Edit in a cell's expansion. Absent, cells
+     * are not editable here.
      */
     onEditCell?(address: CellAddress): void;
-    /** Why cells cannot be edited (a read-only library); the pencil shows it. */
+    /** Why cells cannot be edited (a read-only library); the Edit shows it. */
     cellEditDisabledReason?: string;
     /** The open cell editor, floated over its cell and the rows below. */
     cellEditor?: { address: CellAddress; content: React.ReactNode; list: boolean } | null;
@@ -85,9 +85,10 @@ const FLEX_MIN = "18rem";
  * column per question, rows of one height set by the density.
  *
  * Every question cell, and the Paper cell when the table has a paper column,
- * is a button onto the inspector. Its text is clamped to
- * the row height; when the clamp cuts it, hovering floats the whole cell over
- * the rows below (the peek) and nothing in the grid moves.
+ * is a button onto the inspector. Its text is clamped to the row height.
+ * Hovering any of them floats the whole cell over the rows below (the peek,
+ * its expansion), with the cell's actions in its footer; nothing in the grid
+ * moves.
  */
 export function ResearchGrid({
     table,
@@ -462,12 +463,6 @@ const ResearchRow = React.memo(function ResearchRow({
     onEditCell,
     editDisabledReason,
 }: ResearchRowProps): React.ReactElement {
-    // A pinned Paper cell stacks on its own, so the one whose menu is open
-    // goes over the next rows' pinned cells.
-    const [menuOpen, setMenuOpen] = useState(false);
-    // The Paper cell opens the row's paper view; without a paper column it
-    // is not selectable.
-    const selectPaper = paperColumnId ? () => onSelectCell({ rowId: row.id, columnId: paperColumnId }) : undefined;
     return (
         <tr
             className={["rt-row", isSelected ? "rt-row-selected" : "", row.failure ? "rt-row-failed" : ""]
@@ -484,30 +479,16 @@ const ResearchRow = React.memo(function ResearchRow({
                     />
                 </span>
             </td>
-            <td
-                className={[
-                    "rt-td",
-                    "rt-td-paper",
-                    selectPaper ? "rt-td-selectable" : "",
-                    selectPaper && selectedColumn === paperColumnId ? "rt-cell-selected" : "",
-                    menuOpen ? "rt-td-menu-open" : "",
-                ]
-                    .filter(Boolean)
-                    .join(" ")}
-                data-column-id={paperColumnId}
-                onClick={selectPaper}
-            >
-                <PaperCell
-                    table={table}
-                    row={row}
-                    anchorColumnId={paperColumnId}
-                    isNew={isNew}
-                    documents={documents}
-                    menuItems={menuItems(row)}
-                    onMenuToggle={setMenuOpen}
-                    onSelect={selectPaper}
-                />
-            </td>
+            <PaperGridCell
+                table={table}
+                row={row}
+                paperColumnId={paperColumnId}
+                isNew={isNew}
+                documents={documents}
+                selected={!!paperColumnId && selectedColumn === paperColumnId}
+                onSelect={onSelectCell}
+                menuItems={menuItems}
+            />
             {showYear ? (
                 <td className="rt-td rt-td-year">
                     {cellValueText(yearColumnId ? row.cells[yearColumnId]?.value : undefined)}
@@ -530,6 +511,134 @@ const ResearchRow = React.memo(function ResearchRow({
         </tr>
     );
 });
+
+/**
+ * The Paper cell. With a paper column it opens the row's paper view (click,
+ * Enter or Space); without one it is not selectable. Hovering shows its
+ * expansion: the full title, authors, year and venue, with the row's actions
+ * in the footer.
+ */
+function PaperGridCell({
+    table,
+    row,
+    paperColumnId,
+    isNew,
+    documents,
+    selected,
+    onSelect,
+    menuItems,
+}: {
+    table: TableSpec;
+    row: Row;
+    paperColumnId?: string;
+    isNew: boolean;
+    documents?: TableDocuments;
+    selected: boolean;
+    onSelect(address: CellAddress): void;
+    menuItems(row: Row): MenuItem[];
+}): React.ReactElement {
+    const select = paperColumnId ? () => onSelect({ rowId: row.id, columnId: paperColumnId }) : undefined;
+    const anchor = useCellPeek((hide) => (
+        <CellPeek
+            onSelect={select}
+            hide={hide}
+            footer={
+                <PaperActions
+                    table={table}
+                    row={row}
+                    documents={documents}
+                    menuItems={menuItems(row)}
+                    onAction={hide}
+                    className="rt-peek-footer"
+                    buttonClassName="rt-peek-action"
+                />
+            }
+        >
+            <PaperCell row={row} anchorColumnId={paperColumnId} isNew={isNew} full />
+        </CellPeek>
+    ));
+    return (
+        <td
+            className={["rt-td", "rt-td-paper", select ? "rt-td-selectable" : "", selected ? "rt-cell-selected" : ""]
+                .filter(Boolean)
+                .join(" ")}
+            data-column-id={paperColumnId}
+            tabIndex={select ? 0 : undefined}
+            onClick={select}
+            onKeyDown={select ? (event) => onCellKey(event, select) : undefined}
+            {...anchor}
+        >
+            <PaperCell row={row} anchorColumnId={paperColumnId} isNew={isNew} />
+        </td>
+    );
+}
+
+/**
+ * A grid cell's expansion, opened by hovering the cell: what `render` draws,
+ * given `hide` to close it. Returns the handlers to spread on the cell.
+ */
+function useCellPeek(
+    render: (hide: () => void) => React.ReactNode,
+): Pick<ReturnType<typeof useHoverAnchor>, "onMouseEnter" | "onMouseLeave" | "onMouseDown"> {
+    const layers = useHoverLayer();
+    const hide = () => layers?.hide();
+    const { onMouseEnter, onMouseLeave, onMouseDown } = useHoverAnchor({
+        slot: "peek",
+        variant: "peek",
+        delayMs: 450,
+        render: () => render(hide),
+    });
+    return { onMouseEnter, onMouseLeave, onMouseDown };
+}
+
+/** Enter or Space on the cell itself (not a control in it) selects it. */
+function onCellKey(event: React.KeyboardEvent<HTMLElement>, select: () => void): void {
+    if (event.target !== event.currentTarget) return;
+    if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        select();
+    }
+}
+
+/**
+ * A cell's expansion: its whole content, and its actions in a footer. A click
+ * on the content selects the cell, as a click on the cell does; the
+ * expansion closes first, since the inspector narrows the grid and the peek
+ * would float over where the cell was.
+ */
+function CellPeek({
+    onSelect,
+    hide,
+    align = "start",
+    footer,
+    children,
+}: {
+    onSelect?: () => void;
+    hide(): void;
+    /** The column's alignment, as the cell draws its value. */
+    align?: ReturnType<typeof columnAlign>;
+    footer?: React.ReactNode;
+    children: React.ReactNode;
+}): React.ReactElement {
+    return (
+        <div
+            className="rt-peek"
+            role={onSelect ? "button" : undefined}
+            tabIndex={onSelect ? -1 : undefined}
+            onClick={
+                onSelect
+                    ? () => {
+                          hide();
+                          onSelect();
+                      }
+                    : undefined
+            }
+        >
+            <div className={`rt-peek-body bt-align-${align}`}>{children}</div>
+            {footer}
+        </div>
+    );
+}
 
 /** A cell's value as the grid draws it: prose, a Choice pill, Yes / No or a date. */
 export function CellValue({
@@ -556,7 +665,12 @@ export function CellValue({
             );
         }
         case "boolean":
-            return <span className="rt-bool">{value.value ? "Yes" : "No"}</span>;
+            return (
+                <span className={`rt-bool rt-bool-${value.value ? "yes" : "no"}`}>
+                    <Icon icon={value.value ? TickIcon : CancelIcon} size={9} />
+                    {value.value ? "Yes" : "No"}
+                </span>
+            );
         case "text":
             return <>{renderText(value.text)}</>;
         default:
@@ -588,8 +702,8 @@ export function CellBody({
     let text: React.ReactNode;
     switch (state) {
         case "pending":
-            // Unattempted: the cell is left blank.
-            text = null;
+            // Unattempted: the cell is left blank; its expansion says so.
+            text = full ? <span className="rt-muted">{row.failure ? "Not answered" : "Not filled yet"}</span> : null;
             break;
         case "not_reported":
             text = <span className="rt-muted">Not reported</span>;
@@ -618,16 +732,6 @@ export function CellBody({
     );
 }
 
-/** Whether the clamp cut the cell's text or its tags. */
-function isTruncated(anchor: HTMLElement): boolean {
-    const text = anchor.querySelector<HTMLElement>(".rt-clamp");
-    const tags = anchor.querySelector<HTMLElement>(".rt-tags");
-    return (
-        (!!text && text.scrollHeight > text.clientHeight + 1) ||
-        (!!tags && tags.scrollWidth > tags.clientWidth + 1)
-    );
-}
-
 function QuestionCell({
     row,
     column,
@@ -649,48 +753,36 @@ function QuestionCell({
 }): React.ReactElement {
     const cell = row.cells[column.id];
     const select = () => onSelect({ rowId: row.id, columnId: column.id });
-    const edit = onEdit && !editDisabledReason ? () => onEdit({ rowId: row.id, columnId: column.id }) : undefined;
-    const layers = useHoverLayer();
-    const peek = useHoverAnchor({
-        slot: "peek",
-        variant: "peek",
-        delayMs: 450,
-        shouldOpen: isTruncated,
-        render: () => (
-            <div
-                className="rt-peek"
-                role="button"
-                tabIndex={-1}
-                onClick={() => {
-                    // The inspector narrows the grid: the peek would float over
-                    // where the cell was.
-                    layers?.hide();
-                    select();
-                }}
-            >
-                <div className="rt-peek-body">
-                    <CellBody row={row} cell={cell} column={column} renderText={renderText} documents={documents} full />
-                </div>
-                <div className="rt-peek-footer">
-                    <span>Click for evidence</span>
-                    {edit ? (
+    const anchor = useCellPeek((hide) => (
+        <CellPeek
+            onSelect={select}
+            hide={hide}
+            align={columnAlign(column)}
+            footer={
+                onEdit ? (
+                    <div className="rt-peek-footer">
                         <button
                             type="button"
-                            className="rt-peek-edit"
+                            className="rt-peek-action"
+                            aria-label={`Edit ${column.header}`}
+                            title={editDisabledReason ?? "Edit answer"}
+                            disabled={!!editDisabledReason}
                             onClick={(event) => {
                                 event.stopPropagation();
-                                layers?.hide();
-                                edit();
+                                hide();
+                                onEdit({ rowId: row.id, columnId: column.id });
                             }}
                         >
-                            <Icon icon={EditIcon} size={11} />
+                            <Icon icon={EditIcon} size={12} />
                             Edit
                         </button>
-                    ) : null}
-                </div>
-            </div>
-        ),
-    });
+                    </div>
+                ) : null
+            }
+        >
+            <CellBody row={row} cell={cell} column={column} renderText={renderText} documents={documents} full />
+        </CellPeek>
+    ));
     return (
         <td
             id={cellIdFor(row.id, column.id)}
@@ -708,35 +800,12 @@ function QuestionCell({
             tabIndex={0}
             aria-label={`${column.header}: open details`}
             onClick={select}
-            onKeyDown={(event) => {
-                if (event.target !== event.currentTarget) return;
-                if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    select();
-                }
-            }}
-            onMouseEnter={peek.onMouseEnter}
-            onMouseLeave={peek.onMouseLeave}
-            onMouseDown={peek.onMouseDown}
+            onKeyDown={(event) => onCellKey(event, select)}
+            {...anchor}
         >
             <div className="rt-cell-body">
                 <CellBody row={row} cell={cell} column={column} renderText={renderText} documents={documents} />
             </div>
-            {onEdit ? (
-                <button
-                    type="button"
-                    className="rt-icon-button rt-cell-edit"
-                    aria-label={`Edit ${column.header}`}
-                    title={editDisabledReason ?? "Edit answer"}
-                    disabled={!!editDisabledReason}
-                    onClick={(event) => {
-                        event.stopPropagation();
-                        edit?.();
-                    }}
-                >
-                    <Icon icon={EditIcon} size={12} />
-                </button>
-            ) : null}
         </td>
     );
 }

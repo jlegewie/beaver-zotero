@@ -42,6 +42,7 @@ vi.mock('../../../src/ui/tableDocumentActions', () => ({
 }));
 
 import { setHost } from '@beaver/agent-ui/host';
+import { hoverPeek } from '../../helpers/hoverPeek';
 import { ResearchTable } from '@beaver/agent-ui/layouts/research/ResearchTable';
 import { FILL_RUNNING_REASON, useTableEditing } from '../../../react/components/tables/useTableEditing';
 
@@ -145,6 +146,14 @@ const click = async (el: Element | null | undefined) => {
 };
 const menuItem = (label: string) =>
     Array.from(document.querySelectorAll<HTMLElement>('*')).find((el) => el.textContent === label && el.children.length === 0);
+/** Hovers a cell until its expansion opens, and returns the expansion. */
+function expand(el: Element | null): HTMLElement | null {
+    if (!el) throw new Error('nothing to hover');
+    return hoverPeek(el, container!);
+}
+/** The row's menu button, in its Paper cell's expansion. */
+const rowActions = (rowId: string) =>
+    expand($(`tr[data-row-id="${rowId}"] td.rt-td-paper`))?.querySelector('button[aria-label="Row actions"]');
 const openColumnMenu = (header: string) => click($(`button[aria-label="Column menu: ${header}"]`));
 const type = (input: HTMLInputElement | HTMLTextAreaElement, value: string) =>
     act(() => {
@@ -251,7 +260,7 @@ describe('destructive edits and Undo', () => {
         commands.edit.mockResolvedValue(committed([{ op: 'remove_rows', rows: 1 }]));
         commands.undo.mockResolvedValue({ ok: false, code: 'changed', message: 'The table has changed since; use version history.' });
         mount();
-        await click($('tr[data-row-id="r1"] button[aria-label="Row actions"]'));
+        await click(rowActions('r1'));
         await click(menuItem('Remove from table'));
         expect(commands.edit).toHaveBeenCalledWith(ref, { remove_rows: ['r1'] }, expect.objectContaining({ seal: true }));
         await click($('.rt-toast-action'));
@@ -261,7 +270,7 @@ describe('destructive edits and Undo', () => {
     it('waits for a running fill before Undo', async () => {
         commands.edit.mockResolvedValue(committed([{ op: 'remove_rows', rows: 1 }]));
         mount();
-        await click($('tr[data-row-id="r1"] button[aria-label="Row actions"]'));
+        await click(rowActions('r1'));
         await click(menuItem('Remove from table'));
         // A fill started after the edit.
         rerender({ fillRunning: true });
@@ -278,7 +287,7 @@ describe('destructive edits and Undo', () => {
         await click(menuItem('Edit column…'));
         expect($('textarea[aria-label="Column question"]')).toBeNull();
         await click(menuItem('Remove column'));
-        await click($('tr[data-row-id="r1"] button[aria-label="Row actions"]'));
+        await click(rowActions('r1'));
         await click(menuItem('Remove from table'));
         expect(commands.edit).not.toHaveBeenCalled();
     });
@@ -439,7 +448,7 @@ describe('cell edits', () => {
     it("writes the user's answer in the tab session, with no toast", async () => {
         commands.editCells.mockResolvedValue(written);
         mount();
-        await click(cellAt('r1', 'effect')!.querySelector('button[aria-label="Edit Effect"]'));
+        await click(expand(cellAt('r1', 'effect'))!.querySelector('button[aria-label="Edit Effect"]'));
         type($<HTMLTextAreaElement>('.rt-cell-editor textarea')!, 'Enrollment rose 3.4 points.');
         await click(Array.from(container!.querySelectorAll('.rt-cell-editor button')).find((b) => b.textContent === 'Save'));
         expect(commands.editCells).toHaveBeenCalledWith(
@@ -480,7 +489,7 @@ describe('cell edits', () => {
         const table = spec();
         table.rows[0].documents = ['u-PDF00001'];
         mount({ table });
-        await click(container!.querySelector('tr[data-row-id="r1"] button[aria-label="Row actions"]'));
+        await click(rowActions('r1'));
         await click(menuItem('Choose document…'));
         await act(async () => {});
         const dialog = $('.rt-document-chooser')!;

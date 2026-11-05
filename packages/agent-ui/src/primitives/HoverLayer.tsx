@@ -215,7 +215,7 @@ function PlacedLayer({
     onLeave(): void;
 }): React.ReactElement {
     const ref = useRef<HTMLDivElement | null>(null);
-    const [position, setPosition] = useState<{ left: number; top: number; width?: number } | null>(null);
+    const [position, setPosition] = useState<{ left: number; top: number; width?: number; minHeight?: number } | null>(null);
 
     useLayoutEffect(() => {
         const el = ref.current;
@@ -225,7 +225,11 @@ function PlacedLayer({
         const rect = anchor.getBoundingClientRect();
         const peekWidth = Math.max(rect.width, layer.width ?? 0);
         // The peek's height depends on its width: measure it at that width.
-        if (layer.variant === 'peek') el.style.width = `${peekWidth}px`;
+        // It covers at least its anchor, so a short cell's peek hides the cell.
+        if (layer.variant === 'peek') {
+            el.style.width = `${peekWidth}px`;
+            el.style.minHeight = `${rect.height}px`;
+        }
         const box = el.getBoundingClientRect();
         const viewW = view.innerWidth;
         const viewH = view.innerHeight;
@@ -235,7 +239,7 @@ function PlacedLayer({
             // below; lifted only as far as the window's bottom edge requires.
             const top = Math.max(EDGE_PX, Math.min(rect.top, viewH - box.height - EDGE_PX));
             const left = Math.max(EDGE_PX, Math.min(rect.left, viewW - width - EDGE_PX));
-            setPosition({ left, top, width });
+            setPosition({ left, top, width, minHeight: rect.height });
             return;
         }
         // Below the anchor, else above it; a card that fits neither is held
@@ -264,14 +268,53 @@ function PlacedLayer({
                 left: position?.left ?? 0,
                 top: position?.top ?? 0,
                 width: layer.variant === 'peek' ? position?.width : layer.width,
+                minHeight: position?.minHeight,
                 visibility: position ? 'visible' : 'hidden',
             }}
             onMouseEnter={onEnter}
             onMouseLeave={onLeave}
+            onWheel={(event) => scrollBeneath(event, layer.anchor)}
         >
             {layer.render()}
         </div>
     );
+}
+
+/**
+ * A layer floats over the content it belongs to, so a wheel over it would
+ * scroll nothing: unless the layer itself scrolls that way, the wheel scrolls
+ * the anchor's scroll container instead (and that scroll closes the layer).
+ */
+function scrollBeneath(event: React.WheelEvent<HTMLElement>, anchor: HTMLElement): void {
+    const { deltaX, deltaY } = event;
+    for (let el = event.target as HTMLElement | null; el && el !== event.currentTarget.parentElement; el = el.parentElement) {
+        if (canScroll(el, deltaX, deltaY)) return;
+    }
+    let scroller = anchor.parentElement;
+    while (scroller && !canScroll(scroller, deltaX, deltaY)) scroller = scroller.parentElement;
+    if (!scroller) return;
+    // Lines (a mouse wheel in some setups) and pages are not pixels.
+    const page = event.deltaMode === 2;
+    const line = event.deltaMode === 1 ? 16 : 1;
+    scroller.scrollBy({
+        left: deltaX * (page ? scroller.clientWidth : line),
+        top: deltaY * (page ? scroller.clientHeight : line),
+    });
+}
+
+/** Whether `el` scrolls and has room left to scroll by the wheel's deltas. */
+function canScroll(el: HTMLElement, deltaX: number, deltaY: number): boolean {
+    const view = el.ownerDocument.defaultView;
+    const style = view?.getComputedStyle(el);
+    if (!style) return false;
+    const scrolls = (overflow: string) => overflow === 'auto' || overflow === 'scroll';
+    if (deltaY && scrolls(style.overflowY)) {
+        if (deltaY < 0 ? el.scrollTop > 0 : el.scrollTop + el.clientHeight < el.scrollHeight - 1) return true;
+    }
+    if (deltaX && scrolls(style.overflowX)) {
+        if (deltaX < 0 ? el.scrollLeft > 0 : el.scrollLeft + el.clientWidth < el.scrollWidth - 1) return true;
+    }
+    return false;
 }
 
 let anchorSequence = 0;
@@ -288,7 +331,6 @@ export function useHoverAnchor({
     width,
     delayMs,
     disabled = false,
-    shouldOpen,
 }: {
     slot: HoverSlot;
     variant: HoverVariant;
@@ -296,8 +338,6 @@ export function useHoverAnchor({
     width?: number;
     delayMs?: number;
     disabled?: boolean;
-    /** Checked when the pointer arrives; false keeps the layer closed (an untruncated cell). */
-    shouldOpen?: (anchor: HTMLElement) => boolean;
 }): {
     onMouseEnter(event: React.MouseEvent<HTMLElement>): void;
     onMouseLeave(): void;
@@ -312,7 +352,6 @@ export function useHoverAnchor({
     renderRef.current = render;
     const open = (anchor: HTMLElement) => {
         if (!api || disabled) return;
-        if (shouldOpen && !shouldOpen(anchor)) return;
         api.hoverIn(slot, { anchor, variant, width, id: idRef.current, render: () => renderRef.current() }, delayMs);
     };
     return {

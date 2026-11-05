@@ -383,6 +383,9 @@ export function addBeaverTab<Ref>(win: Window, options: AddBeaverTabOptions<Ref>
     pane.id = `beaver-pane-${options.kind}-${id}`;
     pane.className = `beaver-root beaver-tab beaver-${options.kind}-tab`;
     pane.setAttribute('style', 'display: flex; flex: 1; height: 100%; width: 100%; min-width: 0; min-height: 0; overflow: hidden;');
+    // Zotero's context pane sits beside the tab and covers anything past its
+    // edge: menus opened in the tab stay inside it.
+    pane.setAttribute('data-menu-bounds', '');
     container.appendChild(pane);
 
     const entry: BeaverTabEntry = {
