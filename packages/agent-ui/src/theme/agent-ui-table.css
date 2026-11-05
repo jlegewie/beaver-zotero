@@ -358,6 +358,16 @@
  * answer clamps to the lines that height holds.
  * ========================================================================== */
 
+/* Holds the surface and the hover layers drawn beside it, for copying. */
+.beaver-root .rt-copy-scope {
+    display: contents;
+}
+
+/* The Copy menu for a selection opens over the hover layers (a peek's text). */
+.beaver-root .rt-copy-scope > .rt-copy-menu {
+    z-index: 100001;
+}
+
 .beaver-root .rt-surface {
     --rt-line: 1.46rem;
     --rt-border: var(--color-border50);
@@ -1483,6 +1493,26 @@
     overflow-wrap: anywhere;
 }
 
+/* Selecting text ------------------------------------------------------------
+ * A chrome document selects nothing by default: the cells, their expansions
+ * and the inspector opt in, so their text can be selected and copied. Their
+ * controls and tags stay out of a selection. */
+
+.beaver-root .rt-td,
+.beaver-root .rt-peek-body,
+.beaver-root .rt-inspector-title,
+.beaver-root .rt-inspector-body {
+    user-select: text;
+}
+
+.beaver-root .rt-td button,
+.beaver-root .rt-peek-body button,
+.beaver-root .rt-inspector-body button,
+.beaver-root .rt-peek-footer,
+.beaver-root .rt-tag {
+    user-select: none;
+}
+
 .beaver-root .rt-inspector-body {
     flex: 1 1 auto;
     min-height: 0;
@@ -1684,8 +1714,9 @@
     margin-inline: -0.6rem;
 }
 
-/* A question block is one button: its ::after covers the block, and the
- * page chips (buttons of their own) are raised above it. */
+/* A question block opens its cell on a click anywhere (CellInspector). Its
+ * heading's ::after only draws the focus ring over the whole block: it takes
+ * no clicks, so the answer under it can be selected. */
 .beaver-root .rt-paper-question {
     position: relative;
     display: flex;
@@ -1693,6 +1724,7 @@
     gap: 0.3rem;
     padding: 0.6rem;
     border-radius: 0.55rem;
+    cursor: pointer;
 }
 
 .beaver-root .rt-paper-question:hover {
@@ -1717,6 +1749,7 @@
     position: absolute;
     inset: 0;
     border-radius: inherit;
+    pointer-events: none;
 }
 
 .beaver-root .rt-paper-question-open:focus-visible {
