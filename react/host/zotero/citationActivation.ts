@@ -31,9 +31,9 @@ import { navigateToEpubCitation } from '../../utils/epubVisualizer/epubCitationN
 import { navigateToSnapshotCitation } from '../../utils/snapshotVisualizer/snapshotCitationNavigation';
 import { resolvePageLabelFromLabels } from '@beaver/agent-ui/utils/pageLabels';
 import { getPageLabelsForItem } from './itemData';
-import { launchExternalFile, notifyReferenceUnavailable, notifyTableOpenFailed } from './sourceActions';
+import { launchExternalFile, notifyReferenceUnavailable } from './sourceActions';
+import { openTableForUser } from './tables';
 import { getResolvedRef, parseTableLocator } from '@beaver/agent-core/citations/citationGrammar';
-import { getTablesApi } from '../../../src/services/artifacts/tablesApi';
 import { getPref } from '../../../src/utils/prefs';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { selectItemById } from '../../utils/selectItem';
@@ -124,23 +124,19 @@ async function epubLocationOfPart(
  */
 async function openCitedTable(citation: Citation, ownerDocument: Document): Promise<void> {
     const ref = getResolvedRef(citation);
-    const api = getTablesApi();
-    if (ref?.kind !== 'zotero' || !api) return;
+    if (ref?.kind !== 'zotero') return;
     const resolved = await resolveItemReference(ref);
     if (resolved.status !== 'found') {
-        notifyReferenceUnavailable('item', resolved.status === 'library_unavailable' ? 'library_unavailable' : 'missing');
+        notifyReferenceUnavailable('table', resolved.status === 'library_unavailable' ? 'library_unavailable' : 'missing');
         return;
     }
     const focus = parseTableLocator(ref.loc);
-    const outcome = await api.openTable(
+    const outcome = await openTableForUser(
         { libraryID: resolved.item.libraryID, key: resolved.item.key },
-        { window: ownerDocument.defaultView, ...(focus ? { focus } : {}) },
+        ownerDocument.defaultView,
+        focus ? { focus } : {},
     );
-    if ('error' in outcome) {
-        notifyTableOpenFailed(outcome.error);
-        return;
-    }
-    if (outcome.focus === 'missing') notifyReferenceUnavailable('table_cell');
+    if ('ok' in outcome && outcome.focus === 'missing') notifyReferenceUnavailable('table_cell');
 }
 
 /**

@@ -21,7 +21,7 @@ function notifyExternalFileUnavailable(): void {
  * object an in-prose link names) that was rendered from persisted run history
  * but does not exist on this computer.
  */
-export type UnavailableReferenceKind = 'item' | 'collection' | 'search' | 'view' | 'annotation' | 'action' | 'tag' | 'link' | 'table_cell';
+export type UnavailableReferenceKind = 'item' | 'collection' | 'search' | 'view' | 'annotation' | 'action' | 'tag' | 'link' | 'table' | 'table_cell';
 export type UnavailableReferenceCause = 'missing' | 'library_unavailable';
 
 const UNAVAILABLE_REFERENCE_COPY: Record<UnavailableReferenceKind, { title: string; text: string }> = {
@@ -52,6 +52,10 @@ const UNAVAILABLE_REFERENCE_COPY: Record<UnavailableReferenceKind, { title: stri
     tag: {
         title: 'Tag Not Available',
         text: 'This tag is no longer on any item in your Zotero libraries. It may have been renamed or removed.',
+    },
+    table: {
+        title: 'Table Not Available',
+        text: 'This table is no longer in your Zotero library. It may have been deleted.',
     },
     table_cell: {
         title: 'Cell Not Available',
@@ -85,6 +89,10 @@ const LIBRARY_UNAVAILABLE_COPY: Record<Exclude<UnavailableReferenceKind, 'action
     annotation: {
         title: 'Annotation Not Available',
         text: "This annotation is in a library that isn't available on this computer. It may be a group library you haven't joined on this device.",
+    },
+    table: {
+        title: 'Table Not Available',
+        text: "This table is in a library that isn't available on this computer. It may be a group library you haven't joined on this device.",
     },
     tag: {
         title: 'Tag Not Available',
@@ -123,7 +131,7 @@ export function notifyReferenceUnavailable(
     }
 }
 
-/** Say why a cited table could not be opened (no file, unreadable, no window). */
+/** Say why a table that exists could not be opened (no file, unreadable, no window). */
 export function notifyTableOpenFailed(message: string): void {
     try {
         store.set(addPopupMessageAtom, {

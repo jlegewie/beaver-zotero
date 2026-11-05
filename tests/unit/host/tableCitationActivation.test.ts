@@ -5,8 +5,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Citation } from '@beaver/agent-core/types/citations';
 
-const { resolveItemReference, notifyReferenceUnavailable, notifyTableOpenFailed, openTable, revealSource } = vi.hoisted(() => ({
+const { resolveItemReference, notifyReferenceUnavailable, notifyTableOpenFailed, openTable, revealSource, lookup } = vi.hoisted(() => ({
     revealSource: vi.fn(),
+    lookup: vi.fn(),
     resolveItemReference: vi.fn(),
     notifyReferenceUnavailable: vi.fn(),
     notifyTableOpenFailed: vi.fn(),
@@ -64,13 +65,15 @@ describe('activating a table citation', () => {
         vi.clearAllMocks();
         resolveItemReference.mockResolvedValue({ status: 'found', item: { libraryID: 1, key: 'TABLEKEY' } });
         openTable.mockResolvedValue({ ok: true, tabID: 't', reused: false, focus: 'found' });
+        lookup.mockResolvedValue({ deleted: false });
+        vi.stubGlobal('Zotero', { Items: { getByLibraryAndKeyAsync: lookup } });
     });
 
     it('opens the table at the cited cell, from the window that was clicked', async () => {
         await activate({ kind: 'cell', value: 'r0a1b2c3d4/design', raw: 'cell:r0a1b2c3d4/design' });
         expect(openTable).toHaveBeenCalledWith(
             { libraryID: 1, key: 'TABLEKEY' },
-            { window: win, focus: { rowId: 'r0a1b2c3d4', columnId: 'design' } },
+            { focus: { rowId: 'r0a1b2c3d4', columnId: 'design' }, window: win },
         );
         expect(notifyReferenceUnavailable).not.toHaveBeenCalled();
     });
@@ -85,7 +88,7 @@ describe('activating a table citation', () => {
 
     it('opens the table at a cited row', async () => {
         await activate({ kind: 'row', value: 'r0a1b2c3d4', raw: 'row:r0a1b2c3d4' });
-        expect(openTable).toHaveBeenCalledWith(expect.anything(), { window: win, focus: { rowId: 'r0a1b2c3d4' } });
+        expect(openTable).toHaveBeenCalledWith(expect.anything(), { focus: { rowId: 'r0a1b2c3d4' }, window: win });
     });
 
     it('says the cell is gone when the table no longer has its row or column', async () => {
@@ -97,7 +100,15 @@ describe('activating a table citation', () => {
     it('says the table is gone, as for any deleted item, and opens nothing', async () => {
         resolveItemReference.mockResolvedValue({ status: 'missing' });
         await activate({ kind: 'cell', value: 'r0a1b2c3d4/design', raw: 'cell:r0a1b2c3d4/design' });
-        expect(notifyReferenceUnavailable).toHaveBeenCalledWith('item', 'missing');
+        expect(notifyReferenceUnavailable).toHaveBeenCalledWith('table', 'missing');
+        expect(openTable).not.toHaveBeenCalled();
+    });
+
+    it('says a table in the trash is gone, and opens nothing', async () => {
+        lookup.mockResolvedValue({ deleted: true });
+        await activate({ kind: 'cell', value: 'r0a1b2c3d4/design', raw: 'cell:r0a1b2c3d4/design' });
+        expect(notifyReferenceUnavailable).toHaveBeenCalledWith('table');
+        expect(notifyTableOpenFailed).not.toHaveBeenCalled();
         expect(openTable).not.toHaveBeenCalled();
     });
 
