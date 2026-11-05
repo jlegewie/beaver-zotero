@@ -315,6 +315,100 @@ describe('the grid', () => {
     });
 });
 
+describe("a page tag's passage card", () => {
+    // jsdom has no layout: a clamped passage reports its clamped height as
+    // clientHeight and the whole passage as scrollHeight, as Gecko does.
+    const fullHeight = { value: 0 };
+    let restore: (() => void) | null = null;
+    beforeEach(() => {
+        const proto = HTMLElement.prototype;
+        const client = Object.getOwnPropertyDescriptor(proto, 'clientHeight');
+        const scroll = Object.getOwnPropertyDescriptor(proto, 'scrollHeight');
+        Object.defineProperty(proto, 'clientHeight', {
+            configurable: true,
+            get(this: HTMLElement) {
+                if (!this.classList.contains('rt-quote')) return 0;
+                return this.classList.contains('rt-quote-clamped') ? Math.min(fullHeight.value, 133) : fullHeight.value;
+            },
+        });
+        Object.defineProperty(proto, 'scrollHeight', {
+            configurable: true,
+            get(this: HTMLElement) {
+                return this.classList.contains('rt-quote') ? fullHeight.value : 0;
+            },
+        });
+        restore = () => {
+            if (client) Object.defineProperty(proto, 'clientHeight', client);
+            else delete (proto as { clientHeight?: number }).clientHeight;
+            if (scroll) Object.defineProperty(proto, 'scrollHeight', scroll);
+            else delete (proto as { scrollHeight?: number }).scrollHeight;
+        };
+    });
+    afterEach(() => {
+        restore?.();
+        restore = null;
+    });
+
+    /** Opens the card of the effect cell's page tag, from the cell's expansion. */
+    function openCard(quote: string): HTMLElement {
+        const spec = table();
+        spec.rows[0].cells.effect = model('Conditional transfers raised enrollment.', { evidence: [{ ...passage, quote }] });
+        mount({ table: spec });
+        const tag = expand(cell('r1', 'effect'))!.querySelector('.rt-tag-page')!;
+        hoverPeek(tag, container!);
+        return container!.querySelector<HTMLElement>('.bt-hover-card')!;
+    }
+
+    it('cuts a long passage to its first lines, and Show more reveals the rest', () => {
+        fullHeight.value = 456;
+        const card = openCard('A long passage. '.repeat(60));
+        const quote = card.querySelector('.rt-quote')!;
+        expect(quote.classList.contains('rt-quote-clamped')).toBe(true);
+        const toggle = card.querySelector<HTMLButtonElement>('.rt-quote-toggle')!;
+        expect(toggle.textContent).toBe('Show more');
+        expect(toggle.getAttribute('aria-expanded')).toBe('false');
+        click(toggle);
+        expect(quote.classList.contains('rt-quote-clamped')).toBe(false);
+        expect(toggle.textContent).toBe('Show less');
+        click(toggle);
+        expect(quote.classList.contains('rt-quote-clamped')).toBe(true);
+        // The card stays open with the link to the passage.
+        expect(container!.querySelector('.bt-hover-card .rt-link-button')?.textContent).toBe('Open in PDF');
+    });
+
+    it("stays open while the pointer crosses the cell's expansion on its way to the card", () => {
+        fullHeight.value = 40;
+        openCard('Enrollment rose by 3.4 points.');
+        const expansion = peek()!;
+        const tag = expansion.querySelector<HTMLElement>('.rt-tag-page')!;
+        const text = expansion.querySelector<HTMLElement>('.rt-peek-body')!;
+        const move = (from: Element, to: Element) => {
+            from.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: to }));
+            to.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: from }));
+        };
+        vi.useFakeTimers();
+        try {
+            act(() => move(tag, text));
+            act(() => vi.advanceTimersByTime(1000));
+            expect(container!.querySelector('.bt-hover-card')).not.toBeNull();
+            // Leaving the expansion for anywhere but the card closes both.
+            act(() => move(text, document.body));
+            act(() => vi.advanceTimersByTime(1000));
+            expect(container!.querySelector('.bt-hover-card')).toBeNull();
+            expect(peek()).toBeNull();
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('shows a short passage whole, without a toggle', () => {
+        fullHeight.value = 40;
+        const card = openCard('Enrollment rose by 3.4 points.');
+        expect(card.querySelector('.rt-quote')?.textContent).toBe('“Enrollment rose by 3.4 points.”');
+        expect(card.querySelector('.rt-quote-toggle')).toBeNull();
+    });
+});
+
 describe('pinned columns', () => {
     it('pins the rail and Paper column only while the grid has as much room again beside them', () => {
         let width = 1000;
