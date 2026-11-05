@@ -1078,6 +1078,85 @@ describe('rows the user just added', () => {
     });
 });
 
+describe('sorting', () => {
+    const rowOrder = () =>
+        Array.from(container!.querySelectorAll<HTMLElement>('tbody tr[data-row-id]')).map((row) => row.dataset.rowId);
+    const header = (columnId: string) => container!.querySelector<HTMLElement>(`th[data-column-id="${columnId}"]`)!;
+    const sortedHeaders = () =>
+        Array.from(container!.querySelectorAll<HTMLElement>('th[aria-sort]')).map((th) => [th.dataset.columnId, th.getAttribute('aria-sort')]);
+    const withYears = () => {
+        const spec = table();
+        spec.rows[2].cells._year = { outcome: 'answered', provenance: 'system', value: { kind: 'date', value: '2015' } } as Cell;
+        return spec;
+    };
+
+    it('sorts by the item from its header menu, A → Z and Z → A', () => {
+        mount();
+        click(container!.querySelector('button[aria-label="Column menu: Item"]')!);
+        click(menuEntry('Sort A → Z')!);
+        expect(rowOrder()).toEqual(['r1', 'r3', 'r2']);
+        click(container!.querySelector('button[aria-label="Column menu: Item"]')!);
+        click(menuEntry('Sort Z → A')!);
+        expect(rowOrder()).toEqual(['r2', 'r3', 'r1']);
+    });
+
+    it('sorts by the year from its header menu, newest first, with rows without a year last', () => {
+        mount({ table: withYears() });
+        click(container!.querySelector('button[aria-label="Column menu: Year"]')!);
+        click(menuEntry('Sort newest first')!);
+        expect(rowOrder()).toEqual(['r3', 'r1', 'r2']);
+        click(container!.querySelector('button[aria-label="Column menu: Year"]')!);
+        click(menuEntry('Sort oldest first')!);
+        expect(rowOrder()).toEqual(['r1', 'r3', 'r2']);
+    });
+
+    it('marks the sorted column only, with its direction', () => {
+        mount();
+        expect(sortedHeaders()).toEqual([]);
+        expect(container!.querySelector('.rt-th-sort')).toBeNull();
+        click(container!.querySelector('button[aria-label="Column menu: Design"]')!);
+        click(menuEntry('Sort Z → A')!);
+        expect(sortedHeaders()).toEqual([['design', 'descending']]);
+        expect(header('design').querySelector('.rt-th-sort')?.getAttribute('title')).toBe('Sorted Z → A');
+        click(container!.querySelector('button[aria-label="Column menu: Year"]')!);
+        click(menuEntry('Sort oldest first')!);
+        expect(sortedHeaders()).toEqual([['_year', 'ascending']]);
+        expect(header('_year').querySelector('.rt-th-sort')?.getAttribute('title')).toBe('Sorted oldest first');
+    });
+
+    it("clears the sort from the sorted column's menu", () => {
+        mount();
+        click(container!.querySelector('button[aria-label="Column menu: Item"]')!);
+        expect(menuEntry('Clear sort')).toBeUndefined();
+        click(menuEntry('Sort Z → A')!);
+        click(container!.querySelector('button[aria-label="Column menu: Item"]')!);
+        click(menuEntry('Clear sort')!);
+        expect(rowOrder()).toEqual(['r1', 'r2', 'r3']);
+        expect(sortedHeaders()).toEqual([]);
+    });
+
+    it('names the paper column Item in the toolbar Sort menu and its label', () => {
+        mount();
+        click(container!.querySelector('button[aria-label="Sort rows"]')!);
+        const entries = Array.from(document.querySelectorAll<HTMLElement>('.bt-menu-check span:last-child')).map((el) => el.textContent);
+        expect(entries.slice(0, 2)).toEqual(['Item', 'Year']);
+        click(menuEntry('Item')!);
+        expect(container!.querySelector('button[aria-label="Sort rows"]')!.textContent).toBe('Sort: Item ↑');
+    });
+
+    it('keeps offering the item and the year for a different table in the same view', () => {
+        mount();
+        const other = table();
+        other.id = 'other';
+        other.key = 'OTHERKEY';
+        act(() => root?.render(h(ResearchTable, { table: other })));
+        expect(container!.querySelector('button[aria-label="Column menu: Year"]')).not.toBeNull();
+        click(container!.querySelector('button[aria-label="Sort rows"]')!);
+        const entries = Array.from(document.querySelectorAll<HTMLElement>('.bt-menu-check span:last-child')).map((el) => el.textContent);
+        expect(entries.slice(0, 2)).toEqual(['Item', 'Year']);
+    });
+});
+
 describe('activity', () => {
     it("reports selecting a cell and changing the search, but not the table's first render", () => {
         const onActivity = vi.fn();
