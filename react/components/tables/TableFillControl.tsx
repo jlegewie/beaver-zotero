@@ -14,8 +14,8 @@ import {
     fillButtonRows,
     creditsText,
     pendingLines,
-    planCostLine,
-    planRowLine,
+    planSourcesLine,
+    planTitle,
     pricingSentence,
     resultNeedsAttention,
     resultText,
@@ -56,7 +56,14 @@ export function useTableFillJob(tableRef: TableRef): TableFillJobSnapshot | null
 
 type Popover =
     | { scope: TableFillScope; state: 'planning' }
-    | { scope: TableFillScope; state: 'ready' | 'starting'; plan: TableFillPlanSummary; error?: string }
+    | {
+          scope: TableFillScope;
+          state: 'ready' | 'starting';
+          plan: TableFillPlanSummary;
+          error?: string;
+          /** Starting the five-row trial rather than the plan shown. */
+          trial?: boolean;
+      }
     | { scope: TableFillScope; state: 'error'; message: string };
 
 export interface TableFillButtonProps {
@@ -90,9 +97,11 @@ const EMPTY_ROWS: string[] = [];
  * Idle, it counts the table's new and stale work ("Fill 46 rows"), or reads
  * "Fill", muted, when everything is up to date; rows that only need a retry
  * are offered in its menu but do not light it. A click plans the fill in the
- * plugin and shows the plan in a popover: what will be filled, the row line,
- * the exact cost, the pricing sentence and how far the balance reaches. "Fill
- * N" starts exactly that plan. While a job runs it is the Stop button.
+ * plugin and shows the plan in a popover: how many items, the exact cost (the
+ * price per item on hover), what changed, where the answers come from, and a
+ * warning only when the balance falls short. "Fill N" starts exactly that
+ * plan; "Try 5 first" plans and starts the five-row trial in one step. While
+ * a job runs it is the Stop button.
  */
 export const TableFillButton = React.forwardRef<TableFillButtonHandle, TableFillButtonProps>(function TableFillButton(
     { tableRef, table, job, improvableRows, disabledReason, selectedRowIds = EMPTY_ROWS },
@@ -109,6 +118,11 @@ export const TableFillButton = React.forwardRef<TableFillButtonHandle, TableFill
         return [...improvableRows].filter((row) => selected.has(row)).length;
     }, [table, improvableRows]);
     const rows = fillButtonRows(pending, improvableRows.size, alsoPending);
+    // Columns with any answer, so the plan can tell a new column from empty cells.
+    const answeredColumns = React.useMemo(
+        () => new Set(table.columns.filter((c) => table.rows.some((r) => r.cells[c.id] !== undefined)).map((c) => c.id)),
+        [table],
+    );
     const running = job != null && job.state !== 'done';
 
     const close = React.useCallback(() => {
@@ -179,24 +193,41 @@ export const TableFillButton = React.forwardRef<TableFillButtonHandle, TableFill
         [running, disabledReason, openPlan],
     );
 
-    const start = React.useCallback(async () => {
-        if (popover?.state !== 'ready') return;
-        const fills = Zotero.Beaver.tableFills;
-        if (!fills) return;
-        const mine = ++request.current;
-        setPopover({ ...popover, state: 'starting', error: undefined });
-        const started = await fills.start(popover.plan.plan_id).catch((error: unknown) => ({
-            ok: false as const,
-            code: 'table_unavailable' as const,
-            message: String((error as Error)?.message ?? error),
-        }));
-        if (mine !== request.current) return;
-        if (started.ok) {
-            setPopover(null);
-            return;
-        }
-        setPopover({ ...popover, state: 'ready', error: started.message });
-    }, [popover]);
+    /**
+     * Starts the plan shown, or (`trial`) plans and starts its first five
+     * rows: the user has already seen the whole fill's cost, which bounds
+     * the trial's, so the trial needs no second confirmation. A refusal
+     * leaves the shown plan in place with the reason.
+     */
+    const start = React.useCallback(
+        async (trial: boolean) => {
+            if (popover?.state !== 'ready') return;
+            const fills = Zotero.Beaver.tableFills;
+            if (!fills) return;
+            const shown = popover;
+            const mine = ++request.current;
+            setPopover({ ...shown, state: 'starting', trial, error: undefined });
+            const fail = (message: string) => {
+                if (mine === request.current) setPopover({ ...shown, state: 'ready', error: message });
+            };
+            try {
+                let planId = shown.plan.plan_id;
+                if (trial) {
+                    const planned = await fills.plan(tableRef, { kind: 'pending', limit: TRIAL_ROWS });
+                    if (mine !== request.current) return;
+                    if (!planned.ok) return fail(planned.message);
+                    planId = planned.plan.plan_id;
+                }
+                const started = await fills.start(planId);
+                if (mine !== request.current) return;
+                if (started.ok) setPopover(null);
+                else fail(started.message);
+            } catch (error) {
+                fail(String((error as Error)?.message ?? error));
+            }
+        },
+        [popover, tableRef.libraryID, tableRef.key],
+    );
 
     if (running) {
         const stopping = job.state === 'stopping';
@@ -243,13 +274,6 @@ export const TableFillButton = React.forwardRef<TableFillButtonHandle, TableFill
             onClick: () => void openPlan({ kind: 'retry_failed' }),
             disabled: retryRows === 0,
         },
-        { label: '', isDivider: true, onClick: () => {} },
-        {
-            label: 'Fill this column and Refill row live in the column and row menus.',
-            disabled: true,
-            onClick: () => {},
-            customContent: <span className="bt-fill-menu-note">Fill this column and Refill row live in the column and row menus.</span>,
-        },
     ];
 
     return (
@@ -278,8 +302,9 @@ export const TableFillButton = React.forwardRef<TableFillButtonHandle, TableFill
             {popover ? (
                 <FillPopover
                     popover={popover}
-                    onStart={() => void start()}
-                    onTrial={() => void openPlan({ kind: 'pending', limit: TRIAL_ROWS })}
+                    answeredColumns={answeredColumns}
+                    onStart={() => void start(false)}
+                    onTrial={() => void start(true)}
                     onCancel={close}
                 />
             ) : null}
@@ -289,11 +314,13 @@ export const TableFillButton = React.forwardRef<TableFillButtonHandle, TableFill
 
 function FillPopover({
     popover,
+    answeredColumns,
     onStart,
     onTrial,
     onCancel,
 }: {
     popover: Popover;
+    answeredColumns: ReadonlySet<string>;
     onStart: () => void;
     onTrial: () => void;
     onCancel: () => void;
@@ -314,25 +341,41 @@ function FillPopover({
         body = <div className="bt-fill-status">Everything is up to date.</div>;
     } else {
         const plan = popover.plan;
-        const lines = pendingLines(plan);
+        const lines = pendingLines(plan, answeredColumns);
+        const labeled = lines.filter((line) => line.label);
+        const sentences = lines.filter((line) => !line.label);
+        const sources = planSourcesLine(plan);
         const reach = balanceLine(plan);
+        const starting = popover.state === 'starting';
         body = (
             <>
-                <div className="bt-fill-title">{planCostLine(plan)}</div>
-                {lines.length ? (
-                    <ul className="bt-fill-lines">
-                        {lines.map((line) => (
-                            <li key={line}>{line}</li>
+                <div className="bt-fill-head">
+                    <span className="bt-fill-title">{planTitle(plan)}</span>
+                    <span className="bt-fill-cost" title={pricingSentence(plan.prices, plan.title_abstract)}>
+                        {creditsText(plan.credits)}
+                    </span>
+                </div>
+                {lines.length || sources ? (
+                    <div className="bt-fill-details">
+                        {sentences.map((line) => (
+                            <div key={line.value} className="bt-fill-change-text">
+                                {line.value}
+                            </div>
                         ))}
-                    </ul>
+                        {labeled.length ? (
+                            <dl className="bt-fill-changes">
+                                {labeled.map((line) => (
+                                    <React.Fragment key={line.label}>
+                                        <dt>{line.label}</dt>
+                                        <dd>{line.value}</dd>
+                                    </React.Fragment>
+                                ))}
+                            </dl>
+                        ) : null}
+                        {sources ? <div className="bt-fill-note">{sources}</div> : null}
+                    </div>
                 ) : null}
-                <div className="bt-fill-line">{planRowLine(plan)}.</div>
-                <div className="bt-fill-note">{pricingSentence(plan.prices, plan.title_abstract)}</div>
-                {reach ? (
-                    <div className="bt-fill-line bt-fill-reach">{reach}.</div>
-                ) : plan.balance != null ? (
-                    <div className="bt-fill-note">Balance: {creditsText(plan.balance)}</div>
-                ) : null}
+                {reach ? <div className="bt-fill-reach">{reach}.</div> : null}
                 {popover.error ? (
                     <div className="bt-fill-error" role="alert">
                         {popover.error}
@@ -343,17 +386,18 @@ function FillPopover({
         // A whole pending fill can be tried on its first rows first.
         if (popover.scope.kind === 'pending' && !popover.scope.limit && plan.rows > TRIAL_ROWS)
             trial = (
-                <Button variant="ghost-secondary" onClick={onTrial} disabled={popover.state === 'starting'}>
-                    Try on 5 rows first
+                <Button
+                    variant="ghost-secondary"
+                    onClick={onTrial}
+                    disabled={starting}
+                    loading={starting && popover.trial}
+                    title={`Fill the first ${TRIAL_ROWS} rows now to check the answers`}
+                >
+                    Try {TRIAL_ROWS} first
                 </Button>
             );
         action = (
-            <Button
-                variant="solid"
-                onClick={onStart}
-                disabled={popover.state === 'starting'}
-                loading={popover.state === 'starting'}
-            >
+            <Button variant="solid" onClick={onStart} disabled={starting} loading={starting && !popover.trial}>
                 {fillActionLabel(plan)}
             </Button>
         );
