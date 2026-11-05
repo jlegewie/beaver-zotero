@@ -266,7 +266,7 @@ describe("fill stage card", () => {
         expect(html).toContain("9 rows still to fill");
     });
 
-    it("lists failures, skipped cells, title-and-abstract answers and credits, and nothing for a call that ran no fill", async () => {
+    it("lists failures, skipped cells, and title-and-abstract answers, and nothing for a call that ran no fill", async () => {
         const { formatFillLines } = await import("../../../react/components/agentRuns/toolResultViews/TableResultView");
         const fill = {
             ...outcomes.fill_record.fill,
@@ -290,7 +290,6 @@ describe("fill stage card", () => {
             "4 answers from title and abstract only",
             "1 cell skipped: edited by you",
             "2 cells skipped: row removed during the fill",
-            "Table fill · 6.5 credits",
         ]);
         expect(formatFillLines({ ...outcomes.fill_record, run: "none" })).toEqual([]);
         expect(formatFillLines(record)).toEqual([]);

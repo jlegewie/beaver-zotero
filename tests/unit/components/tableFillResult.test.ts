@@ -14,10 +14,12 @@ import type { TableFillJobSnapshot, TableFillResult } from '@beaver/agent-core/p
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
 vi.mock('../../../react/runtime/windowRuntime', () => ({ getWindowRuntime: () => ({}) }));
+vi.mock('../../../react/components/tables/card/liveSources', () => ({ describeItems: vi.fn() }));
 
 import { setHost } from '@beaver/agent-ui/host';
 import { ResearchTable } from '@beaver/agent-ui/layouts/research/ResearchTable';
 import { CLEAN_RESULT_VISIBLE_MS, useFillResultBanner } from '../../../react/components/tables/TableFillControl';
+import { useTableMessage } from '../../../react/components/tables/TableTabView';
 
 const h = React.createElement;
 
@@ -120,7 +122,7 @@ afterEach(() => {
 describe('a clean result', () => {
     it('clears at the next cell selection, letting the plugin forget the job', () => {
         render(done());
-        expect(banner()?.textContent).toContain('Filled 2 rows · 0.4 credits');
+        expect(banner()?.textContent).toContain('Filled 2 rows');
         click(cell('r1'));
         expect(banner()).toBeNull();
         expect(dismiss).toHaveBeenCalledWith('job-1');
@@ -193,5 +195,42 @@ describe('a result that needs attention', () => {
         click(container!.querySelector('.bt-banner [aria-label="Dismiss"]'));
         expect(banner()).toBeNull();
         expect(dismiss).toHaveBeenCalledWith('job-1');
+    });
+});
+
+describe('one message at a time', () => {
+    let setToast: (text: string | null) => void = () => {};
+    function MessageHarness({ job }: { job: TableFillJobSnapshot | null }) {
+        const fill = useFillResultBanner(job, null);
+        const [toast, set] = React.useState<string | null>(null);
+        setToast = set;
+        const clearToast = React.useCallback(() => set(null), []);
+        const message = useTableMessage(toast ? h('span', { className: 'toast' }, toast) : null, clearToast, fill.banner, fill.jobId);
+        return h('div', { className: 'bt-banner' }, message);
+    }
+    const show = (job: TableFillJobSnapshot | null) => {
+        if (!root) {
+            container = document.createElement('div');
+            document.body.appendChild(container);
+            root = createRoot(container);
+        }
+        act(() => root!.render(h(MessageHarness, { job })));
+    };
+
+    it("covers a fill's result with an edit's message until it is dismissed", () => {
+        const attention = done({ failed_row_ids: ['r2'] });
+        show(attention);
+        act(() => setToast('Added 1 paper'));
+        expect(banner()?.textContent).toBe('Added 1 paper');
+        act(() => setToast(null));
+        expect(banner()?.textContent).toContain("1 couldn't be read");
+    });
+
+    it("replaces an edit's message with a new fill's result", () => {
+        show(null);
+        act(() => setToast('Added 1 paper'));
+        show(done({}, 'job-2'));
+        expect(banner()?.textContent).toContain('Filled 2 rows');
+        expect(banner()?.textContent).not.toContain('Added 1 paper');
     });
 });

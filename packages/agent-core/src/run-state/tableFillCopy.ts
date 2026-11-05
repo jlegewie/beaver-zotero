@@ -189,11 +189,10 @@ export function runningLabel(job: TableFillJobSnapshot): string {
 
 /** Why a fill stopped before running out of rows; null when it did not. */
 function stoppedText(job: TableFillJobSnapshot, result: TableFillResult): string | null {
-    const credits = creditsText(result.credits_charged);
     const after = `after ${job.rows_done} of ${count(job.rows_total, "paper")}`;
     switch (result.stopped_by) {
         case "insufficient_credits":
-            return `Out of credits ${after} · ${credits}`;
+            return `Out of credits ${after}`;
         case "price_changed":
             return "Prices changed; fill again to see the new cost";
         case "account_changed":
@@ -209,7 +208,7 @@ function stoppedText(job: TableFillJobSnapshot, result: TableFillResult): string
         case "table_unavailable":
             return `The fill stopped ${after} because the table is no longer available`;
         case "stopped":
-            return `Stopped ${after} · ${credits}`;
+            return `Stopped ${after}`;
     }
     return null;
 }
@@ -223,7 +222,7 @@ function skippedAnswers(result: TableFillResult): number {
  * Whether a finished fill's result asks something of the user: it stopped
  * early, rows could not be read or saved, or answers were left for the next
  * fill. False only for a clean result, which {@link resultText} reduces to
- * rows filled and credits.
+ * the rows filled.
  */
 export function resultNeedsAttention(job: TableFillJobSnapshot): boolean {
     const result = job.result;
@@ -246,7 +245,6 @@ export function resultText(job: TableFillJobSnapshot): string {
         return result.not_written
             ? `${stopped}; ${count(result.not_written, "paper")} could not be saved`
             : stopped;
-    const credits = creditsText(result.credits_charged);
     const failed = result.failed_row_ids.length;
     const parts = [`Filled ${count(result.rows_answered, "row")}`];
     if (failed) parts.push(`${failed.toLocaleString("en-US")} couldn't be read`);
@@ -254,6 +252,5 @@ export function resultText(job: TableFillJobSnapshot): string {
         parts.push(`${count(result.not_written, "paper")} could not be saved`);
     const skipped = skippedAnswers(result);
     if (skipped) parts.push(`${count(skipped, "answer")} left for the next fill`);
-    parts.push(credits);
     return parts.join(" · ");
 }

@@ -417,6 +417,8 @@ export function useFillResultBanner(
     visible: boolean | null,
 ): {
     banner: React.ReactElement | null;
+    /** The finished job the banner shows; null when there is none. */
+    jobId: string | null;
     /** The rows to show while "failed rows only" is on; null otherwise. */
     failedRows: ReadonlySet<string> | null;
     /** Show every row again. */
@@ -460,5 +462,5 @@ export function useFillResultBanner(
             onDismiss={() => dismiss(finishedJob.job_id)}
         />
     ) : null;
-    return { banner, failedRows, showAllRows, onActivity };
+    return { banner, jobId: finishedJob?.job_id ?? null, failedRows, showAllRows, onActivity };
 }

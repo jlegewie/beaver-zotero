@@ -6,6 +6,7 @@ import type { TableCardLibraryScope } from '@beaver/agent-core/protocol/tableCar
 import type { CellEditInput, ResearchCellEditing, ResearchColumnType, ResearchTableEditing } from '@beaver/agent-ui/layouts';
 import type { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
 import { getHost } from '@beaver/agent-ui/host';
+import { CancelIcon, Icon } from '@beaver/agent-ui/icons';
 import { DeleteIcon } from '../icons/icons';
 import { getTablesApi } from '../../../src/services/artifacts/tablesApi';
 import type { TableRef } from '../../../src/services/artifacts/tableItemIdentity';
@@ -428,13 +429,16 @@ export function useTableEditing({
         { label: 'Remove from table', icon: DeleteIcon, disabled, onClick: () => removeRows([row.id]) },
     ];
 
+    const clearToast = useCallback(() => setToast(null), []);
+    // Drawn with the fill result's controls: the two share the bar under the
+    // toolbar, which keeps one height whichever it shows.
     const toastView = toast ? (
         <div className="rt-toast" role="status">
             <span className="rt-toast-text">{toast.error ? `${toast.text} · ${toast.error}` : toast.text}</span>
             {toast.undo ? (
                 <button
                     type="button"
-                    className="rt-toast-action"
+                    className="bt-fill-banner-link rt-toast-action"
                     disabled={fillRunning}
                     title={fillRunning ? 'Undo is available when the fill ends.' : undefined}
                     onClick={() => void undo()}
@@ -442,8 +446,8 @@ export function useTableEditing({
                     Undo
                 </button>
             ) : null}
-            <button type="button" className="rt-icon-button rt-toast-close" aria-label="Dismiss" onClick={() => setToast(null)}>
-                ×
+            <button type="button" className="bt-fill-banner-close rt-toast-close" aria-label="Dismiss" onClick={clearToast}>
+                <Icon icon={CancelIcon} size={10} />
             </button>
         </div>
     ) : null;
@@ -479,5 +483,5 @@ export function useTableEditing({
         [addSources],
     );
 
-    return { editing, cellEditing, selectionActions, rowMenuItems, toast: toastView, overlay, error, onDrop };
+    return { editing, cellEditing, selectionActions, rowMenuItems, toast: toastView, clearToast, overlay, error, onDrop };
 }

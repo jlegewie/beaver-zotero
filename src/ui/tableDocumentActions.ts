@@ -153,7 +153,7 @@ export function renderTableDocumentActions(
             status.textContent = `Reverted to version ${version}, saved as version ${result.version}. ${
                 result.saved
                     ? "Close and reopen any open snapshot to see the current table."
-                    : "The content is saved, but bookkeeping is incomplete. Reopen the table to repair it; do not repeat the revert."
+                    : "The table is saved, but its version history could not be updated. Reopen the table to repair it; do not revert again."
             }`;
         },
         true,
@@ -166,9 +166,9 @@ export function renderTableDocumentActions(
     const repair = action("repair", "Check / repair table", async () => {
         const current = await commands().read(ref);
         status.textContent = !current.recovered?.some((entry) => entry.kind === 'bookkeeping_pending')
-            ? "Table bookkeeping is up to date."
+            ? "The table needs no repair."
             : tableRepairAllowed(ref.libraryID)
-              ? "Content is committed, but local bookkeeping still needs repair. Try again after resolving storage or sync errors."
+              ? "The table is saved, but its version history still could not be updated. Try again after resolving storage or sync errors."
               : TABLE_REPAIR_SKIPPED;
     });
     if (options.historyOnly) {

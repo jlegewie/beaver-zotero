@@ -159,6 +159,22 @@ function useImprovableRows(spec: TableSpec | null): ReadonlySet<string> {
     return improvable;
 }
 
+/**
+ * The one message under the toolbar, the newest: a fill's result replaces an
+ * edit's message, and an edit's message covers the result until dismissed.
+ */
+export function useTableMessage(
+    toast: React.ReactElement | null,
+    clearToast: () => void,
+    fillBanner: React.ReactElement | null,
+    fillJobId: string | null,
+): React.ReactElement | null {
+    React.useEffect(() => {
+        if (fillJobId) clearToast();
+    }, [fillJobId, clearToast]);
+    return toast ?? fillBanner;
+}
+
 function sameTable(a: Loaded, b: Loaded): boolean {
     return a.version === b.version && JSON.stringify(a.spec) === JSON.stringify(b.spec);
 }
@@ -339,6 +355,12 @@ export default function TableTabView({
         onEdit: fillResult.onActivity,
     });
     const { showAllRows } = fillResult;
+    const tableMessage = useTableMessage(
+        edits.toast,
+        edits.clearToast,
+        fillEnabled ? fillResult.banner : null,
+        fillResult.jobId,
+    );
     React.useEffect(
         () =>
             warnings.onFocus((target) => {
@@ -384,7 +406,6 @@ export default function TableTabView({
 
     const notices = [warning, state.error, actionError, edits.error, dropNotice].filter(Boolean);
     const itemID = Zotero.Items.getIDFromLibraryAndKey(tableRef.libraryID, tableRef.key);
-    const fillBanner = fillEnabled ? fillResult.banner : null;
 
     return (
         <div
@@ -427,14 +448,7 @@ export default function TableTabView({
                               )
                             : undefined
                     }
-                    banner={
-                        fillBanner || edits.toast ? (
-                            <>
-                                {edits.toast}
-                                {fillBanner}
-                            </>
-                        ) : undefined
-                    }
+                    banner={tableMessage ?? undefined}
                     onActivity={fillResult.onActivity}
                     onlyRows={fillResult.failedRows}
                     focus={focus}

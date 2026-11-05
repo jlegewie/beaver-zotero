@@ -182,15 +182,10 @@ const SKIP_REASONS: Record<string, string> = {
     documents_changed: "document changed during the fill",
 };
 
-function formatCredits(credits: number): string {
-    const rounded = Math.round(credits * 100) / 100;
-    return `${rounded} credit${rounded === 1 ? "" : "s"}`;
-}
-
 /**
  * What the fill this call started did: rows filled of those planned, rows
  * failed, rows not started and why, rows without a document or abstract,
- * answers from title and abstract, skipped cells, and the fill's credits. A
+ * answers from title and abstract, and skipped cells. A
  * fill still running when the call returned says so; its progress is in the
  * panel above the composer. Empty for a call that started no fill.
  */
@@ -217,7 +212,6 @@ export function formatFillLines(record: TableRecord): string[] {
     for (const [reason, cells] of Object.entries(fill.skipped ?? {})) {
         if (cells > 0) lines.push(`${plural(cells, "cell")} skipped: ${SKIP_REASONS[reason] ?? reason}`);
     }
-    if (fill.credits_charged > 0) lines.push(`Table fill · ${formatCredits(fill.credits_charged)}`);
     return lines;
 }
 

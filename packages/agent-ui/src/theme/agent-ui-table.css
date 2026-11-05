@@ -255,7 +255,12 @@
     color: var(--accent-blue);
 }
 
-.beaver-root .bt-fill-banner-link:hover,
+.beaver-root .bt-fill-banner-link:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.beaver-root .bt-fill-banner-link:hover:not(:disabled),
 .beaver-root .bt-fill-banner-close:hover {
     background: var(--fill-quinary);
 }

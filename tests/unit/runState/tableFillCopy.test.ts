@@ -145,21 +145,21 @@ describe("table fill copy", () => {
     });
 
     it("sums up a finished fill", () => {
-        expect(resultText(job({ state: "done", result: result() }))).toBe("Filled 44 rows · 2 couldn't be read · 8.8 credits");
+        expect(resultText(job({ state: "done", result: result() }))).toBe("Filled 44 rows · 2 couldn't be read");
         expect(resultText(job({ state: "done", rows_done: 30, result: result({ stopped_by: "insufficient_credits", credits_charged: 6 }) }))).toBe(
-            "Out of credits after 30 of 46 papers · 6 credits",
+            "Out of credits after 30 of 46 papers",
         );
         expect(resultText(job({ state: "done", rows_done: 30, result: result({ stopped_by: "stopped", credits_charged: 6 }) }))).toBe(
-            "Stopped after 30 of 46 papers · 6 credits",
+            "Stopped after 30 of 46 papers",
         );
         expect(resultText(job({ state: "done", result: result({ stopped_by: "price_changed" }) }))).toBe(
             "Prices changed; fill again to see the new cost",
         );
         expect(resultText(job({ state: "done", result: result({ failed_row_ids: [], skipped_cells: { column_changed: 2 } }) }))).toBe(
-            "Filled 44 rows · 2 answers left for the next fill · 8.8 credits",
+            "Filled 44 rows · 2 answers left for the next fill",
         );
         expect(resultText(job({ state: "done", result: result({ failed_row_ids: [], not_written: 1 }) }))).toBe(
-            "Filled 44 rows · 1 paper could not be saved · 8.8 credits",
+            "Filled 44 rows · 1 paper could not be saved",
         );
     });
 
@@ -177,7 +177,7 @@ describe("table fill copy", () => {
             "The fill stopped after 3 of 3 papers because the library became read-only; 1 paper could not be saved",
         );
         expect(resultText(job({ state: "done", rows_done: 30, result: result({ stopped_by: "stopped", credits_charged: 6, not_written: 2 }) }))).toBe(
-            "Stopped after 30 of 46 papers · 6 credits; 2 papers could not be saved",
+            "Stopped after 30 of 46 papers; 2 papers could not be saved",
         );
     });
 });
@@ -186,9 +186,9 @@ describe("resultNeedsAttention", () => {
     const clean = result({ row_failures: {}, failed_row_ids: [] });
     const done = (over: Partial<TableFillResult> = {}) => job({ state: "done", result: { ...clean, ...over } });
 
-    it("is false for a clean result, which reads as rows filled and credits", () => {
+    it("is false for a clean result, which reads as the rows filled", () => {
         expect(resultNeedsAttention(done())).toBe(false);
-        expect(resultText(done())).toBe("Filled 44 rows · 8.8 credits");
+        expect(resultText(done())).toBe("Filled 44 rows");
     });
 
     it("is true without a result", () => {
@@ -203,7 +203,7 @@ describe("resultNeedsAttention", () => {
 
     it("is false for a stop reason the result line does not name", () => {
         // `changed` is not a stop the result line reports, so the line reads clean.
-        expect(resultText(done({ stopped_by: "changed" }))).toBe("Filled 44 rows · 8.8 credits");
+        expect(resultText(done({ stopped_by: "changed" }))).toBe("Filled 44 rows");
         expect(resultNeedsAttention(done({ stopped_by: "changed" }))).toBe(false);
     });
 

@@ -131,7 +131,7 @@ export function tableRepairAllowed(libraryID: number): boolean {
 
 /** Why a table's bookkeeping stays unrepaired where {@link tableRepairAllowed} is false. */
 export const TABLE_REPAIR_SKIPPED =
-    'Local bookkeeping needs repair, but Beaver does not modify tables in a read-only library or one excluded from Beaver.';
+    'This table needs a repair, but Beaver does not change tables in a read-only library or one excluded from Beaver.';
 
 /** Where an unreadable table can be recovered: the item pane's recovery. */
 export const UNREADABLE_TABLE_RECOVERY =
