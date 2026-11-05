@@ -13,10 +13,6 @@ declare namespace _ZoteroTypes {
       "installedVersion": string;
       "showHighTokenUsageWarningMessage": boolean;
       "authMethod": string;
-      "voice.helperExplained": boolean;
-      "voice.nativeEnabled": boolean;
-      "voice.enabled": boolean;
-      "voice.language": string;
       "keyboardShortcut": string;
       "statefulChat": boolean;
       "addSelectedItemsOnOpen": boolean;

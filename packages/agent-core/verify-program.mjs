@@ -177,11 +177,7 @@ if (!parsed.options.lib || nonEsLibs.length > 0) {
 // `identity/itemLinks.ts` parses the Zotero object links the model writes in
 // chat markdown. Clients render and export them; nothing inside the package
 // follows a link, so it is a root too.
-// Voice is a standalone session API, independent of the agent-run protocol.
-// Its controller and injectable fakes are separate roots consumed by hosts/tests.
 const entryPaths = [
-  "src/voice/controller.ts",
-  "src/voice/fakes.ts",
   "src/globals.d.ts",
   "src/protocol/agentProtocol.ts",
   "src/protocol/wordProtocol.ts",

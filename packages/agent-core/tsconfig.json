@@ -36,9 +36,6 @@
   "files": [
     "src/protocol/artifactProtocol.ts",
     "./src/globals.d.ts",
-    "./src/voice/contracts.ts",
-    "./src/voice/controller.ts",
-    "./src/voice/fakes.ts",
     "./src/protocol/agentProtocol.ts",
     "./src/protocol/duplicates.ts",
     "./src/protocol/wordProtocol.ts",

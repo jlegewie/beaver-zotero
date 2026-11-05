@@ -322,27 +322,6 @@ export default tseslint.config(
             "no-restricted-globals": "off",
         },
     },
-    // Voice harness fragments are concatenated with a generated prefix and
-    // executed inside Zotero's chrome context over RDP (see
-    // native/voice/tests/zotero-dictation.py), so the VOICE_* consts and the
-    // chrome globals below are always defined by the time the file runs.
-    {
-        files: ["native/voice/tests/**/*.js"],
-        languageOptions: {
-            globals: {
-                Zotero: "readonly",
-                ChromeUtils: "readonly",
-                IOUtils: "readonly",
-                VOICE_TEST_WINDOW: "readonly",
-                VOICE_TEST_ROOT: "readonly",
-                VOICE_TEST_URL: "readonly",
-                VOICE_SCREENSHOT: "readonly",
-            },
-        },
-        rules: {
-            "no-restricted-globals": "off",
-        },
-    },
     // The MuPDF worker bundle is a separate execution context: no DOM, no
     // window, no Zotero. It must not import the BeaverExtract index barrel (re-exports
     // BeaverExtractor, MuPDFService, the logger — none of which are

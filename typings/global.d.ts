@@ -108,9 +108,6 @@ declare namespace Zotero {
         /** Table fill plans and jobs; plugin realm, reached from renderers through this slot. */
         const tableFills: import("../src/services/tableFills/service").InstanceTableFills | undefined;
         const runtime: import("../src/runtime/instance").BeaverInstance;
-        const voiceNative: import("../src/services/voice/nativeVoice").NativeVoice | undefined;
-        const voice: import("../src/services/voice/voiceService").VoiceService | undefined;
-        const voiceHarness: import("../src/services/voice/developmentHarness").DevelopmentVoiceHarness | undefined;
         const pluginVersion: string;
 
         const data: {
