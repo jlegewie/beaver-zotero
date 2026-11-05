@@ -122,7 +122,7 @@ export function PaperCell({
                 ) : isNew ? (
                     <span className="rt-row-flags">
                         <span className="rt-tag rt-tag-new" title="Added since the last fill">
-                            New paper
+                            New item
                         </span>
                     </span>
                 ) : null}

@@ -23,7 +23,7 @@ function quoted(text: string): string {
 }
 
 function sourceLabel(change: { type?: string; kind?: string | null; name?: string | null }): string {
-    if (!change.kind) return "selected papers";
+    if (!change.kind) return "selected items";
     const kind = change.kind.replace("_", " ");
     return change.name ? `${kind} ${quoted(change.name)}` : kind;
 }
@@ -72,8 +72,8 @@ export function tableChangeLines(changes: readonly TableChange[]): TableChangeLi
             case "add_source": {
                 const parts = [
                     change.type === "items"
-                        ? `Added ${plural(change.rows_added + change.rows_restored, "paper")}`
-                        : `Added ${sourceLabel(change)} · ${plural(change.rows_added, "new paper")}`,
+                        ? `Added ${plural(change.rows_added + change.rows_restored, "item")}`
+                        : `Added ${sourceLabel(change)} · ${plural(change.rows_added, "new item")}`,
                     change.rows_restored ? `${change.rows_restored} restored` : null,
                     change.duplicates ? `${change.duplicates} already in the table` : null,
                     change.rejected.length ? `${change.rejected.length} could not be added` : null,
@@ -89,8 +89,8 @@ export function tableChangeLines(changes: readonly TableChange[]): TableChangeLi
                 break;
             case "refresh_source": {
                 const parts = [
-                    `Refreshed ${sourceLabel(change)} · ${plural(change.rows_added, "new paper")}`,
-                    change.removed_skipped ? `${plural(change.removed_skipped, "removed paper")} left out` : null,
+                    `Refreshed ${sourceLabel(change)} · ${plural(change.rows_added, "new item")}`,
+                    change.removed_skipped ? `${plural(change.removed_skipped, "removed item")} left out` : null,
                     change.no_longer_found ? `${change.no_longer_found} no longer in it, kept` : null,
                 ].filter(Boolean);
                 lines.push({ tone: "add", text: parts.join(" · ") });

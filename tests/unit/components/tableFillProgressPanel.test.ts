@@ -123,7 +123,7 @@ describe('the fill progress panel', () => {
         store.set(recordChatFillAtom, snapshot({ rows_failed: 0, seconds_left: 45 }));
         const opened = opener();
         render('thread-1');
-        expect(lines()).toEqual(['TrialsStop', 'Reading 12 of 46 papers']);
+        expect(lines()).toEqual(['TrialsStop', 'Reading 12 of 46 items']);
         expect(container.textContent).not.toContain('Filling');
         expect(container.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow')).toBe('12');
         await act(async () => button('Stop fill')!.click());
@@ -135,7 +135,7 @@ describe('the fill progress panel', () => {
     it('names failures as they happen and draws them on the rule', () => {
         store.set(recordChatFillAtom, snapshot({ rows_done: 5, rows_total: 12, rows_failed: 1, seconds_left: 30 }));
         render('thread-1');
-        expect(lines()[1]).toBe('Reading 5 of 12 papers · 1 failed');
+        expect(lines()[1]).toBe('Reading 5 of 12 items · 1 failed');
         expect(container.querySelector('.table-fill-progress-status .table-fill-progress-warning')?.textContent).toBe(
             ' · 1 failed',
         );
@@ -146,14 +146,14 @@ describe('the fill progress panel', () => {
     it('sweeps the rule and claims no time before the first row finishes', () => {
         store.set(recordChatFillAtom, snapshot({ rows_done: 0, rows_failed: 0, seconds_left: null }));
         render('thread-1');
-        expect(lines()[1]).toBe('Starting to read 46 papers');
+        expect(lines()[1]).toBe('Starting to read 46 items');
         expect(container.querySelector('.batch-progress-indeterminate')).toBeTruthy();
     });
 
     it('shows the estimate only for a long fill', () => {
         store.set(recordChatFillAtom, snapshot({ rows_done: 8, rows_total: 40, rows_failed: 0, seconds_left: 240 }));
         render('thread-1');
-        expect(lines()[1]).toBe('Reading 8 of 40 papers · about 4 minutes left');
+        expect(lines()[1]).toBe('Reading 8 of 40 items · about 4 minutes left');
     });
 
     it('shows nothing in another thread', () => {
@@ -165,7 +165,7 @@ describe('the fill progress panel', () => {
     it('says it is finishing the papers in flight after a stop', () => {
         store.set(recordChatFillAtom, snapshot({ state: 'stopping', in_flight: 3, rows_failed: 0 }));
         render('thread-1');
-        expect(lines()[1]).toBe('Stopping: finishing 3 papers already underway');
+        expect(lines()[1]).toBe('Stopping: finishing 3 items already underway');
         expect(button('Stop fill')!.disabled).toBe(true);
         expect(container.querySelector('.table-fill-progress-rule-stopping')).toBeTruthy();
     });
@@ -216,7 +216,7 @@ describe('the fill progress panel', () => {
             }),
         );
         render('thread-1');
-        expect(lines()[1]).toBe('Out of credits after 7 of 12 papers' + 'Add credits');
+        expect(lines()[1]).toBe('Out of credits after 7 of 12 items' + 'Add credits');
         await act(async () => button('Add credits')!.click());
         expect(openPreferences).toHaveBeenCalledWith('billing');
     });
@@ -227,7 +227,7 @@ describe('the fill progress panel', () => {
             snapshot({ state: 'done', rows_done: 30, in_flight: 0, result: result({ stopped_by: 'stopped', credits_charged: 6 }) }),
         );
         render('thread-1');
-        expect(lines()[1]).toBe('Stopped after 30 of 46 papers');
+        expect(lines()[1]).toBe('Stopped after 30 of 46 items');
         expect(container.querySelector('.table-fill-progress-glyph.font-color-secondary')).toBeTruthy();
     });
 });

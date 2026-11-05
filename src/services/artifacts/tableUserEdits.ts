@@ -104,7 +104,7 @@ async function checkRowDocument(spec: TableSpec, edit: Extract<TableCellEdit, { 
     const parent = attachment && attachment.parentItemID ? ((await Zotero.Items.getAsync(attachment.parentItemID)) as Zotero.Item | false) : false;
     const sameItem = !!parent && parent.key === ref.zotero_key && resolveLibraryRef({ library_ref: ref.library_ref, library_id: ref.library_id }) === parent.libraryID;
     if (!attachment || attachment.deleted || !sameItem || !isRowDocumentKind(getReadableContentKind(attachment)))
-        throw new TableItemError('That document is not a readable attachment of this paper.', 'invalid_request');
+        throw new TableItemError('That document is not a readable attachment of this item.', 'invalid_request');
 }
 
 /**

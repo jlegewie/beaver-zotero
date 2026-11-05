@@ -803,7 +803,7 @@ class FillJob {
                 {
                     actor: 'agent',
                     collapse_key: this.id,
-                    change: `Filled ${Math.min(done, total)} of ${total} ${total === 1 ? 'paper' : 'papers'}`,
+                    change: `Filled ${Math.min(done, total)} of ${total} ${total === 1 ? 'item' : 'items'}`,
                     ...(this.origin.run ? { run_id: this.origin.run.run_id, thread_id: this.origin.run.thread_id } : {}),
                 },
                 this.assertMayCommit,

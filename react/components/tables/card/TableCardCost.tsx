@@ -179,7 +179,7 @@ export const TableCardReceipt: React.FC<TableCardReceiptProps> = ({ cost, upperB
                         ))}
                     </div>
                     <p className="table-card-pricing-note">
-                        {upperBound ? 'An estimate. Charged per paper as it is filled.' : 'Charged per paper as it is filled.'}
+                        {upperBound ? 'An estimate. Charged per item as it is filled.' : 'Charged per item as it is filled.'}
                     </p>
                 </div>
             )}

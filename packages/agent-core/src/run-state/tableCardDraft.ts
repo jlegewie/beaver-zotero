@@ -964,7 +964,7 @@ function costPapers(cost: TableCardCost): number {
 /** The receipt beside the run checkbox: "12 papers" and "2.1 credits", "Up to" while not exact. */
 export function costReceipt(cost: TableCardCost, upperBound = false): { papers: string; credits: string } {
     return {
-        papers: `${upperBound ? 'Up to ' : ''}${plural(costPapers(cost), 'paper')}`,
+        papers: `${upperBound ? 'Up to ' : ''}${plural(costPapers(cost), 'item')}`,
         credits: creditsText(cost.credits),
     };
 }
@@ -981,7 +981,7 @@ export function costNotice(cost: TableCardCost): string | null {
     const total = abstracts + skipped;
     if (!total) return null;
     const one = total === 1;
-    const head = `${plural(total, 'paper')} ${one ? 'has' : 'have'} no full text`;
+    const head = `${plural(total, 'item')} ${one ? 'has' : 'have'} no full text`;
     if (abstracts && skipped)
         return `${head}: ${format(abstracts)} ${abstracts === 1 ? 'is read from its abstract' : 'are read from their abstracts'}, ${format(skipped)} ${skipped === 1 ? 'is' : 'are'} skipped.`;
     if (abstracts) return `${head} and ${one ? 'is read from its abstract' : 'are read from their abstracts'}.`;
@@ -1003,10 +1003,10 @@ export interface CostBreakdownRow {
 export function costBreakdown(cost: TableCardCost, prices: TableFillPricing | null): CostBreakdownRow[] {
     const rows: CostBreakdownRow[] = [];
     const each = (price: number | undefined) => (price === undefined ? null : `${formatCredits(price)} each`);
-    if (cost.documents) rows.push({ label: 'Full text', papers: plural(cost.documents, 'paper'), rate: each(prices?.document) });
+    if (cost.documents) rows.push({ label: 'Full text', papers: plural(cost.documents, 'item'), rate: each(prices?.document) });
     if (cost.title_abstract)
-        rows.push({ label: 'Abstract only', papers: plural(cost.title_abstract, 'paper'), rate: each(prices?.title_abstract) });
-    if (cost.no_input) rows.push({ label: 'Skipped', papers: plural(cost.no_input, 'paper'), rate: 'free' });
+        rows.push({ label: 'Abstract only', papers: plural(cost.title_abstract, 'item'), rate: each(prices?.title_abstract) });
+    if (cost.no_input) rows.push({ label: 'Skipped', papers: plural(cost.no_input, 'item'), rate: 'free' });
     return rows;
 }
 
@@ -1030,5 +1030,5 @@ export function balanceNotice(cost: TableCardCost, balance: number | null, price
     const perPaper = paying > 0 ? cost.credits / paying : Infinity;
     if (balance + 1e-9 >= perPaper) return `${reach}.`;
     const text = creditsText(balance);
-    return `Your ${text} ${text.endsWith('credit') ? "isn't" : "aren't"} enough to fill ${paying === 1 ? 'this paper' : 'these papers'}.`;
+    return `Your ${text} ${text.endsWith('credit') ? "isn't" : "aren't"} enough to fill ${paying === 1 ? 'this item' : 'these items'}.`;
 }

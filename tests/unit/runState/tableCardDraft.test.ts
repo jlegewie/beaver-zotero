@@ -577,9 +577,9 @@ describe('table card draft', () => {
         it('writes the row line and the credits, with "up to" while the count is not exact', () => {
             const cost = { rows: 180, documents: 150, title_abstract: 18, no_input: 12, credits: 30.9 };
             expect(costLine(cost)).toBe(
-                "Reads 168 papers: 150 from their documents, 18 from title and abstract. 12 papers can't be read and are skipped",
+                "Reads 168 items: 150 from their documents, 18 from title and abstract. 12 items can't be read and are skipped",
             );
-            expect(costLine(cost, true)).toMatch(/^Reads up to 168 papers/);
+            expect(costLine(cost, true)).toMatch(/^Reads up to 168 items/);
             expect(costCredits(cost)).toBe('30.9 credits');
             expect(costCredits(cost, true)).toBe('Up to 30.9 credits');
             expect(costLine(null)).toBeNull();
@@ -633,48 +633,48 @@ describe('table card draft', () => {
 
         it('writes the receipt as papers read and credits, with "Up to" while not exact', () => {
             const cost = { rows: 180, documents: 150, title_abstract: 18, no_input: 12, credits: 30.9 };
-            expect(costReceipt(cost)).toEqual({ papers: '168 papers', credits: '30.9 credits' });
-            expect(costReceipt(cost, true)).toEqual({ papers: 'Up to 168 papers', credits: '30.9 credits' });
-            expect(costReceipt({ rows: 1, documents: 1, title_abstract: 0, no_input: 0, credits: 0.2 }).papers).toBe('1 paper');
+            expect(costReceipt(cost)).toEqual({ papers: '168 items', credits: '30.9 credits' });
+            expect(costReceipt(cost, true)).toEqual({ papers: 'Up to 168 items', credits: '30.9 credits' });
+            expect(costReceipt({ rows: 1, documents: 1, title_abstract: 0, no_input: 0, credits: 0.2 }).papers).toBe('1 item');
         });
 
         it('has a line of its own only for papers without full text', () => {
             expect(costNotice({ rows: 12, documents: 12, title_abstract: 0, no_input: 0, credits: 2.4 })).toBeNull();
             expect(costNotice({ rows: 12, documents: 10, title_abstract: 2, no_input: 0, credits: 2.1 })).toBe(
-                '2 papers have no full text and are read from their abstracts.',
+                '2 items have no full text and are read from their abstracts.',
             );
             expect(costNotice({ rows: 2, documents: 1, title_abstract: 0, no_input: 1, credits: 0.2 })).toBe(
-                '1 paper has no full text or abstract and is skipped.',
+                '1 item has no full text or abstract and is skipped.',
             );
             // Both kinds lack full text: one line says what happens to each.
             expect(costNotice({ rows: 3, documents: 1, title_abstract: 1, no_input: 1, credits: 0.25 })).toBe(
-                '2 papers have no full text: 1 is read from its abstract, 1 is skipped.',
+                '2 items have no full text: 1 is read from its abstract, 1 is skipped.',
             );
         });
 
         it('lists the papers by how they are read, each with its rate, for the pricing popover', () => {
             expect(costBreakdown({ rows: 3, documents: 1, title_abstract: 1, no_input: 1, credits: 0.25 }, PRICES)).toEqual([
-                { label: 'Full text', papers: '1 paper', rate: '0.2 each' },
-                { label: 'Abstract only', papers: '1 paper', rate: '0.05 each' },
-                { label: 'Skipped', papers: '1 paper', rate: 'free' },
+                { label: 'Full text', papers: '1 item', rate: '0.2 each' },
+                { label: 'Abstract only', papers: '1 item', rate: '0.05 each' },
+                { label: 'Skipped', papers: '1 item', rate: 'free' },
             ]);
             // Only the groups the table has; no rate until the prices are known.
             expect(costBreakdown({ rows: 5, documents: 5, title_abstract: 0, no_input: 0, credits: 1 }, null)).toEqual([
-                { label: 'Full text', papers: '5 papers', rate: null },
+                { label: 'Full text', papers: '5 items', rate: null },
             ]);
         });
 
         it('warns only when the balance does not reach the fill', () => {
             const cost = { rows: 12, documents: 12, title_abstract: 0, no_input: 0, credits: 2.4 };
-            expect(balanceNotice(cost, 1.4, PRICES)).toBe('Your 1.4 credits cover about 7 of 12 papers.');
+            expect(balanceNotice(cost, 1.4, PRICES)).toBe('Your 1.4 credits cover about 7 of 12 items.');
             expect(balanceNotice(cost, 5, PRICES)).toBeNull();
             // Where the estimate would be "about 0", the warning says the balance is not enough.
-            expect(balanceNotice(cost, 0.1, PRICES)).toBe("Your 0.1 credits aren't enough to fill these papers.");
+            expect(balanceNotice(cost, 0.1, PRICES)).toBe("Your 0.1 credits aren't enough to fill these items.");
             const mixed = { rows: 2, documents: 1, title_abstract: 1, no_input: 0, credits: 0.25 };
-            expect(balanceNotice(mixed, 0.1, PRICES)).toBe("Your 0.1 credits aren't enough to fill these papers.");
-            expect(balanceNotice(mixed, 0.15, PRICES)).toBe('Your 0.15 credits cover about 1 of 2 papers.');
+            expect(balanceNotice(mixed, 0.1, PRICES)).toBe("Your 0.1 credits aren't enough to fill these items.");
+            expect(balanceNotice(mixed, 0.15, PRICES)).toBe('Your 0.15 credits cover about 1 of 2 items.');
             expect(balanceNotice({ rows: 1, documents: 1, title_abstract: 0, no_input: 0, credits: 0.2 }, 0, PRICES)).toBe(
-                "Your 0 credits aren't enough to fill this paper.",
+                "Your 0 credits aren't enough to fill this item.",
             );
             expect(balanceNotice(cost, null, PRICES)).toBeNull();
         });
@@ -692,7 +692,7 @@ describe('table card draft', () => {
                 choice: reply!.choice,
             });
             expect(fillActionLabel(request)).toBe('Fill 32');
-            expect(costLine(request.cost)).toBe('Reads 32 papers: 30 from their documents, 2 from title and abstract');
+            expect(costLine(request.cost)).toBe('Reads 32 items: 30 from their documents, 2 from title and abstract');
             expect(costCredits(request.cost)).toBe('6.1 credits');
         });
 

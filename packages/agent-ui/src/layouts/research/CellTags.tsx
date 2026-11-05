@@ -26,7 +26,7 @@ import {
 
 /**
  * The inline tags after a cell's text: a page tag per cited passage and the
- * status tags (Abstract, Out of date, Edited, No passage), in the order
+ * status tags (Abstract only, Out of date, Edited, No passage), in the order
  * {@link cellTags} gives.
  */
 export function CellTags({
@@ -64,7 +64,7 @@ export function CellTags({
 }
 
 const STATUS_LABEL: Record<Exclude<CellTag, { kind: "page" }>["kind"], string> = {
-    abstract: "Abstract",
+    abstract: "Abstract only",
     stale: "Out of date",
     edited: "Edited",
     no_passage: "No passage",

@@ -95,7 +95,7 @@ export function TableDocumentChooser({
     }, [row.id]);
 
     const choice = choices?.find((entry) => entry.id === picked);
-    const title = rowReference(row)?.title ?? rowReference(row)?.display_name ?? 'This paper';
+    const title = rowReference(row)?.title ?? rowReference(row)?.display_name ?? 'This item';
 
     return (
         <div className="rt-dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onCancel()}>
@@ -121,9 +121,9 @@ export function TableDocumentChooser({
                             {lookupError}
                         </div>
                     ) : choices === null ? (
-                        <div className="rt-hint">Looking up the paper’s attachments…</div>
+                        <div className="rt-hint">Looking up the item’s attachments…</div>
                     ) : choices.length === 0 ? (
-                        <div className="rt-hint">This paper has no PDF, EPUB or snapshot attachment.</div>
+                        <div className="rt-hint">This item has no PDF, EPUB or snapshot attachment.</div>
                     ) : (
                         <div className="rt-document-choices" role="radiogroup" aria-label="Documents">
                             {choices.map((entry, index) => (

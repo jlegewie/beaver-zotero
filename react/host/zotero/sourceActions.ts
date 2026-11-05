@@ -55,7 +55,7 @@ const UNAVAILABLE_REFERENCE_COPY: Record<UnavailableReferenceKind, { title: stri
     },
     table_cell: {
         title: 'Cell Not Available',
-        text: 'This paper or question is no longer in the table. It may have been removed.',
+        text: 'This item or question is no longer in the table. It may have been removed.',
     },
     // The link was written by the model, so unlike the other kinds the target
     // may never have existed.

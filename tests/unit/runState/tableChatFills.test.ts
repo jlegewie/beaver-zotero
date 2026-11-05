@@ -87,8 +87,8 @@ describe('chat fills', () => {
     });
 
     it('words the tool call status line without live counts', () => {
-        expect(fillStatusLine('waiting', 46)).toBe('Filling 46 papers…');
-        expect(fillStatusLine('waiting', 1)).toBe('Filling 1 paper…');
+        expect(fillStatusLine('waiting', 46)).toBe('Filling 46 items…');
+        expect(fillStatusLine('waiting', 1)).toBe('Filling 1 item…');
         expect(fillStatusLine('background')).toBe('Filling in the background');
         expect(fillStatusLine('started')).toBe('Started filling in the background');
     });
