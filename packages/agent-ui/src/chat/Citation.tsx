@@ -15,7 +15,7 @@ import {
 import { pageLabelsByAttachmentIdAtom, externalFileLocalPathsAtom } from '@beaver/agent-core/citations/atoms';
 import { useCitationMarker } from './useCitationMarker';
 import { getHost } from '../host';
-import type { CitationExportRender } from '../host/types';
+import type { CitationExportRender, CitationReaderTarget } from '../host/types';
 import { useCitationViewModel, type CitationViewModel } from './useCitationViewModel';
 import { hasAlternateModifier, useAlternateActivation } from './useAlternateActivation';
 import { Icon, LibraryIcon, PdfIcon, FileIcon, GlobalSearchIcon, NoteIcon, HighlighterIcon, TextAlignLeftIcon, ExternalLinkIcon, TableIcon, ArrowUpRightIcon } from '../icons';
@@ -161,6 +161,13 @@ export function citationTargetFlags(vm: CitationViewModel): CitationTargetFlags 
 }
 
 /**
+ * Where citations rendered below open the cited document. A surface that lives
+ * in a tab provides `window`, so a click does not replace the surface itself;
+ * unset, the host decides.
+ */
+export const CitationReaderTargetContext = React.createContext<CitationReaderTarget | undefined>(undefined);
+
+/**
  * Hand a ready citation to the host's activation: the cited passage, or the
  * cited work when `alternate` asks for it and that changes anything.
  */
@@ -169,11 +176,13 @@ function activateCitationViewModel(
     flags: CitationTargetFlags,
     ownerDocument: Document,
     alternate: boolean,
+    readerTarget: CitationReaderTarget | undefined,
 ): void {
     if (!vm.metadata || vm.isStreaming || vm.isInvalid) return;
     void getHost().navigation?.activateCitation({
         metadata: vm.metadata,
         intent: flags.canRevealItem && alternate ? 'item' : 'passage',
+        ...(readerTarget ? { readerTarget } : {}),
         isExternal: vm.isExternal,
         isExternalFile: vm.isExternalFile,
         externalFileKey: vm.externalFileKey,
@@ -211,15 +220,16 @@ export function useCitationActivation(citation: CitationMetadata): CitationActiv
     const vm = useCitationViewModel(props);
     const flags = citationTargetFlags(vm);
     const ready = !!vm.metadata && !vm.isStreaming && !vm.isInvalid;
+    const readerTarget = React.useContext(CitationReaderTargetContext);
     const activate = (source: React.MouseEvent | { ownerDocument: Document }) => {
         if ('currentTarget' in source) {
             source.preventDefault();
             const target = source.currentTarget as Element;
             const doc = target.ownerDocument;
-            activateCitationViewModel(vm, flags, doc, hasAlternateModifier(source, doc.defaultView?.navigator));
+            activateCitationViewModel(vm, flags, doc, hasAlternateModifier(source, doc.defaultView?.navigator), readerTarget);
             return;
         }
-        activateCitationViewModel(vm, flags, source.ownerDocument, false);
+        activateCitationViewModel(vm, flags, source.ownerDocument, false, readerTarget);
     };
     return { vm, flags, ready, activate };
 }
@@ -233,6 +243,7 @@ const Citation: React.FC<CitationProps> = (props) => {
     // citation host. Zotero data access below is confined to the click/export
     // paths, which are inherently host-specific.
     const vm = useCitationViewModel(props as Record<string, unknown>);
+    const readerTarget = React.useContext(CitationReaderTargetContext);
     const {
         metadata: citationMetadata,
         isExternal,
@@ -418,6 +429,7 @@ const Citation: React.FC<CitationProps> = (props) => {
             flags,
             e.currentTarget.ownerDocument,
             hasAlternateModifier(e, e.currentTarget.ownerDocument.defaultView?.navigator),
+            readerTarget,
         );
     };
 

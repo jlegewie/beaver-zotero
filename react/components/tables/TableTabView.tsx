@@ -1,6 +1,7 @@
 import React from 'react';
 import { isTitleAbstractOnly, type TableSpec } from '@beaver/agent-core/layouts/table';
 import { ResearchTable, type ResearchTableFocus } from '@beaver/agent-ui/layouts';
+import { CitationReaderTargetContext } from '@beaver/agent-ui/chat/Citation';
 import MarkdownRenderer from '../messages/MarkdownRenderer';
 import {
     isTableItemError,
@@ -420,6 +421,8 @@ export default function TableTabView({
     const itemID = Zotero.Items.getIDFromLibraryAndKey(tableRef.libraryID, tableRef.key);
 
     return (
+        // A citation opened from the table must not replace the tab it is in.
+        <CitationReaderTargetContext.Provider value="window">
         <div
             ref={hostRef}
             className="display-flex flex-col h-full w-full min-w-0 min-h-0 relative"
@@ -490,6 +493,7 @@ export default function TableTabView({
             </TableCardDropZone>
             {edits.overlay}
         </div>
+        </CitationReaderTargetContext.Provider>
     );
 }
 
