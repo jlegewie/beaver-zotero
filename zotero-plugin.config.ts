@@ -3,7 +3,6 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { defineConfig } from "zotero-plugin-scaffold";
 import pkg from "./package.json";
-import { checkVoicePackage } from "./native/voice/macos/check-package.mjs";
 
 const { mode, definitions } = loadBuildEnvironment();
 
@@ -107,9 +106,6 @@ export default defineConfig({
       },
     ],
     hooks: {
-      "build:copyAssets": async (ctx) => {
-        checkVoicePackage(join(ctx.dist, "addon"), process.env.NODE_ENV === "development", process.env.VOICE_PACKAGE_REQUIRED === "1");
-      },
       "build:fluent": async (ctx) => {
         const enUsDir = join(ctx.dist, "addon/locale/en-US");
         if (!existsSync(enUsDir)) return;

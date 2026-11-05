@@ -285,8 +285,6 @@ function $selectDomComparableRange(start: number, end: number): void {
 export type LexicalEditorInputHandle = {
     focus: () => void;
     clear: () => void;
-    /** Append without rebuilding command nodes. Returns false while IME composition is active. */
-    appendText: (text: string) => boolean;
     setText: (text: string, caretOffset?: number) => void;
     /** Delete `length` characters of the editor content in place (no full
      *  rebuild), ending `keepAfter` characters before its end, and leave the
@@ -472,19 +470,6 @@ const EditorApi = forwardRef<LexicalEditorInputHandle, {
                         },
                         { defaultSelection: 'rootEnd' },
                     );
-                },
-                appendText: (text) => {
-                    if (editor.isComposing()) return false;
-                    pendingTextRef.current?.flush();
-                    selectionRepairGenerationRef.current++;
-                    pinnedEndCaretRef.current = false;
-                    blurSelectionRef.current = null;
-                    editor.update(() => {
-                        const root = $getRoot();
-                        const previous = root.getTextContent();
-                        root.selectEnd().insertText((previous && !/\s$/.test(previous) ? " " : "") + text);
-                    }, { discrete: true, tag: SKIP_SELECTION_FOCUS_TAG });
-                    return true;
                 },
                 clear: () => {
                     setPlainText('', 0);

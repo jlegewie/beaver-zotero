@@ -22,9 +22,6 @@ import { AIProvider } from "./services/OpenAIProvider";
 import { createSyncPauseService } from './services/syncPause';
 import { createZToolkit } from "./utils/ztoolkit";
 
-import type { DevelopmentVoiceHarness } from './services/voice/developmentHarness';
-import type { VoiceService } from './services/voice/voiceService';
-
 class Addon {
     public localEndpoints?: import("./services/instanceLocalEndpoints").InstanceLocalEndpoints;
     public threads = new ThreadRepository();
@@ -53,9 +50,6 @@ class Addon {
     public itemImport = new ItemImportService();
     public exporter = new InstanceExport();
     public runtime = new BeaverInstance();
-    public voiceNative?: import("./services/voice/nativeVoice").NativeVoice;
-    public voice?: VoiceService;
-    public voiceHarness?: DevelopmentVoiceHarness;
     public data: {
         alive: boolean;
         config: typeof config;

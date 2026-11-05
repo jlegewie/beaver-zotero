@@ -786,9 +786,3 @@
 .beaver-root .tooltip-fade-in-top {
     animation: tooltipFadeInTop 0.2s ease-in-out forwards;
 }
-
-.composer-voice-meter { display: flex; flex: 1; min-width: 0; align-items: center; gap: 6px; }
-.composer-voice-bars { display: flex; flex: 1; min-width: 0; height: 26px; overflow: hidden; justify-content: flex-end; align-items: center; gap: 2px; }
-.composer-voice-bars > span { flex: 0 0 2px; background: currentColor; border-radius: 1px; }
-.composer-voice-time { font-variant-numeric: tabular-nums; font-size: 11px; }
-.composer-voice-feedback { font-size: 11px; color: var(--font-color-secondary); padding: 0 8px; }

@@ -28,10 +28,6 @@ import { createInstanceAccount } from './services/instanceAccount';
 import { createInstanceTableFills } from './services/tableFills';
 import { InstancePreferences } from './services/instancePreferences';
 import { registerBeaverProtocolHandler, unregisterBeaverProtocolHandler } from "./services/protocolHandler";
-import { DevelopmentVoiceHarness } from "./services/voice/developmentHarness";
-import { NativeVoice } from "./services/voice/nativeVoice";
-import { productVoiceAdapters } from "./services/voice/productVoice";
-import { createVoiceService } from "./services/voice/voiceService";
 import {
     cleanupTableItemPane,
     initTableItemPane,
@@ -430,20 +426,6 @@ async function onStartup() {
         addon.citationService = citationService;
         ztoolkit.log("CitationService initialized successfully");
 
-        // Voice is optional: its initialization must not prevent the rest of Beaver loading.
-        try {
-            if (Zotero.isMac) addon.voiceNative = new NativeVoice();
-            if (__env__ === 'development') {
-                addon.voiceHarness = new DevelopmentVoiceHarness(undefined, addon.voiceNative, productVoiceAdapters(addon.voiceNative, () => addon.voice?.uploadContext));
-                addon.voice = addon.voiceHarness.service;
-            } else {
-                addon.voice = createVoiceService(productVoiceAdapters(addon.voiceNative, () => addon.voice?.uploadContext));
-            }
-        } catch {
-            disposeVoice();
-            ztoolkit.log('Voice initialization failed; continuing without voice');
-        }
-
         // -------- Register keyboard shortcuts --------
         BeaverUIFactory.registerShortcuts();
 
@@ -538,7 +520,6 @@ function onStandaloneWindowUnload(win: Window): void {
     if (!runtime || !addon.runtime.markClosing(win)) return;
     addon.mutations.cancelOwner(runtime.id);
     void addon.notePreviews.detachOwner(runtime.id).catch(Zotero.logError);
-    addon.voice?.windowUnloaded(win);
     closeAgentConnection(win, "Beaver window closed", {
         rememberInterruptedThread: true,
     });
@@ -623,11 +604,6 @@ async function onMainWindowUnload(win: Window): Promise<void> {
     ztoolkit.log("onMainWindowUnload: Starting cleanup");
 
     try {
-        try {
-            addon.voice?.windowUnloaded(win);
-        } catch {
-            ztoolkit.log('Voice window cleanup failed; continuing cleanup');
-        }
         // Close first: later steps can await, and the window may be gone when
         // this handler returns. Read quitting and the window count here — the
         // later scope check runs after those awaits.
@@ -962,14 +938,6 @@ function unregisterMainWindowFtl(win: Window): void {
     if (link) link.remove();
 }
 
-function disposeVoice(): void {
-    try { addon.voice?.dispose(); } catch { ztoolkit.log('Voice disposal failed'); }
-    try { addon.voiceNative?.dispose(); } catch { ztoolkit.log('Native voice disposal failed'); }
-    addon.voiceNative = undefined;
-    addon.voice = undefined;
-    addon.voiceHarness = undefined;
-}
-
 let appShutdownDisposal: Promise<void> | undefined;
 
 /** APP_SHUTDOWN runs too late to access windows, React, or reader UI. */
@@ -1035,7 +1003,6 @@ async function disposePlugin(): Promise<void> {
 
     try {
         BeaverUIFactory.closeBeaverWindow();
-        disposeVoice();
         const openWindows = Zotero.getMainWindows?.().filter(w => w && !w.closed) ?? [];
         for (const win of openWindows) addon.runtime.markClosing(win);
         for (const win of openWindows) {

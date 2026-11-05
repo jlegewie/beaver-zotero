@@ -259,7 +259,6 @@ export class InstanceAccount {
             (event, session) => {
                 if (event === "SIGNED_OUT") {
                     if (!this.pendingAuth) this.signedOut = true;
-                    Zotero.Beaver?.voice?.authChanged(null);
                     // `signedOut` is set by the sign-out command before it runs.
                     recordAuthDiagnostic(
                         "signed_out",
@@ -540,7 +539,6 @@ export class InstanceAccount {
         this.refreshAgain = false;
         this.attempts = 0;
         this.rejectionCheckAfter = 0;
-        Zotero.Beaver?.voice?.authChanged(null);
         this.publish();
     }
     private acceptSession(session: Session | null): void {

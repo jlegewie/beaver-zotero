@@ -96,7 +96,7 @@ webpack-side caller via a callback or wrapper.
 ## `packages/agent-core` — the client-agnostic core
 
 The wire protocol and its type closure (`protocol/`, `transport/`, `run-state/`, `types/`,
-`agents/`, `citations/`, `identity/`, `platform/`, `extract/`, `voice/`) live here and are imported as
+`agents/`, `citations/`, `identity/`, `platform/`, `extract/`) live here and are imported as
 `@beaver/agent-core/<subpath>` from `src/`, `react/`, and `tests/`.
 
 - **Import by package specifier, never by relative path**, and never re-add a copy of a
@@ -118,9 +118,6 @@ The wire protocol and its type closure (`protocol/`, `transport/`, `run-state/`,
 - MuPDF worker code (`src/beaver-extract/worker/**`) may import **only**
   `@beaver/agent-core/extract/*`, and may not otherwise leave `src/beaver-extract`
   (lint-enforced).
-
-Voice contracts, ownership rules, and the fake-session verification recipe are documented in
-[`docs/voice-protocol.md`](docs/voice-protocol.md).
 
 ## `packages/agent-ui` — the shared React layer
 
@@ -432,7 +429,7 @@ curl -sS -X POST http://127.0.0.1:<port>/beaver/test/<name> \
 
 Staging builds also enable in-memory Zotero debug capture at plugin startup, without
 changing the profile's logging preferences. Production builds do not enable these
-diagnostics. The fake voice-session endpoint remains development-only.
+diagnostics.
 
 The endpoints are registered by `addon.localEndpoints` and gated on authentication, so **they exist
 only once Beaver is logged in on that instance**, including with zero windows. UI commands

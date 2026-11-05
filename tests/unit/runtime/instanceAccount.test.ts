@@ -79,7 +79,6 @@ describe("instance account ownership", () => {
         mocks.profile.mockResolvedValue(profile());
         mocks.exclusion.mockResolvedValue({});
         const beaver = {
-            voice: { authChanged: vi.fn() },
             backgroundExtractor: { abortJobsWithoutAccess: vi.fn(), notify: vi.fn() },
             processingReconciler: { notify: vi.fn() },
         };
@@ -474,7 +473,7 @@ describe("instance account ownership", () => {
             });
         },
     );
-    it("revokes access and voice synchronously before sign-out waits for the SDK", async () => {
+    it("revokes access synchronously before sign-out waits for the SDK", async () => {
         await load();
         const pending = deferred<any>();
         sdk.auth.signOut.mockReturnValueOnce(pending.promise);
@@ -485,7 +484,6 @@ describe("instance account ownership", () => {
         const logout = account.auth.signOut();
         expect(Zotero.Beaver.searchableLibraryIds).toEqual([]);
         expect(Zotero.Beaver.hasOcrAccess).toBe(false);
-        expect(Zotero.Beaver.voice?.authChanged).toHaveBeenCalledWith(null);
         expect(account.getSnapshot().session).toBeNull();
         pending.resolve({ error: null });
         await logout;

@@ -1,6 +1,5 @@
 import { handleDuplicatesRequest } from '../duplicates/discovery';
 import { handleTestProtectedCacheHttpRequest } from './handlers/testProtectedCacheHandlers';
-import { handleTestVoiceHttpRequest } from './handlers/testVoiceHandlers';
 import { handleTestExportHttpRequest, handleTestExportNoteHttpRequest } from './handlers/testExportHandlers';
 import { handleTestNoteCreateHttpRequest, handleTestNoteDeleteHttpRequest, handleTestNoteReadHttpRequest } from './handlers/testNoteHandlers';
 import { handleTestTableFillHttpRequest, handleTestTablePendingHttpRequest } from './handlers/testTableFillHandlers';
@@ -869,10 +868,6 @@ export function registerEndpoints(): (() => void) | undefined {
 
     // Diagnostics and test commands are available in development and staging.
     if (process.env.NODE_ENV === 'development' || process.env.BUILD_ENV === 'staging') {
-        // Fake voice sessions require the development-only voice harness.
-        if (process.env.NODE_ENV === 'development') {
-            endpoints['/beaver/test/voice'] = createEndpoint(handleTestVoiceHttpRequest);
-        }
         endpoints['/beaver/test/ping'] =
             createEndpoint(handleTestPingHttpRequest);
 
