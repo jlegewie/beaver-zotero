@@ -60,32 +60,43 @@ export function fillButtonLabel(rows: number): string {
     return rows > 0 ? `Fill ${count(rows, "row")}` : "Fill";
 }
 
-/** What a plan fills, by kind: new papers, new columns, changed questions. */
+/** One line of what a plan fills: a short label and its value, or a sentence. */
+export interface PendingLine {
+    label?: string;
+    value: string;
+}
+
+/**
+ * What a plan fills, by kind: new items, new columns, empty cells, changed
+ * questions, retries. `answeredColumns` holds the columns with any answer in
+ * the table: a column with unanswered cells reads as new only when it has
+ * none, else its empty cells are named (cells an earlier fill did not reach).
+ * New items are named only beside other work: when they are all there is
+ * (a table never filled), the plan's heading already says it.
+ */
 export function pendingLines(
     plan: Pick<TableFillPlanSummary, "pending" | "scope" | "rows">,
-): string[] {
+    answeredColumns: ReadonlySet<string> = new Set(),
+): PendingLine[] {
     if (plan.scope.kind === "retry_failed")
-        return [`Retry ${count(plan.rows, "item")} that failed last time`];
+        return [{ value: `Retry ${count(plan.rows, "item")} that failed last time` }];
     if (plan.scope.kind === "cells") return [];
     if (plan.scope.limit)
-        return [`A trial: the first ${count(plan.rows, "row")} with work to do`];
+        return [{ value: `Trial run on the first ${count(plan.rows, "row")} with work to do` }];
     const pending = plan.pending;
-    const lines: string[] = [];
-    if (pending.new_rows > 0) lines.push(`${count(pending.new_rows, "new item")}`);
-    // Unanswered cells in rows that are not new: a column added since, or
-    // cells an earlier fill did not reach.
+    const lines: PendingLine[] = [];
+    const headers = (columns: { header: string }[]) => columns.map((c) => c.header).join(", ");
+    if (pending.new_rows > 0 && pending.new_rows < pending.rows)
+        lines.push({ label: "New items", value: pending.new_rows.toLocaleString("en-US") });
     const unanswered = pending.columns.filter((c) => c.reason === "new");
+    const added = unanswered.filter((c) => !answeredColumns.has(c.id));
+    const gaps = unanswered.filter((c) => answeredColumns.has(c.id));
     const changed = pending.columns.filter((c) => c.reason !== "new");
-    if (unanswered.length)
-        lines.push(
-            `Not yet answered: ${unanswered.map((c) => c.header).join(", ")}`,
-        );
-    if (changed.length)
-        lines.push(
-            `${changed.length === 1 ? "Changed column" : "Changed columns"}: ${changed.map((c) => c.header).join(", ")}`,
-        );
-    if (pending.retry_rows > 0)
-        lines.push(`${count(pending.retry_rows, "item")} to retry`);
+    if (added.length)
+        lines.push({ label: added.length === 1 ? "New column" : "New columns", value: headers(added) });
+    if (gaps.length) lines.push({ label: "Empty cells", value: headers(gaps) });
+    if (changed.length) lines.push({ label: "Changed", value: headers(changed) });
+    if (pending.retry_rows > 0) lines.push({ label: "Retry", value: count(pending.retry_rows, "item") });
     return lines;
 }
 
@@ -136,11 +147,42 @@ export function fillActionLabel(
     return `Fill ${papersRead(plan).toLocaleString("en-US")}`;
 }
 
-/** "Fill 46 papers · 9.2 credits". */
-export function planCostLine(
-    plan: Pick<TableFillPlanSummary, "rows" | "credits" | "documents" | "title_abstract">,
+/** A plan's heading: "Fill 46 items". */
+export function planTitle(
+    plan: Pick<TableFillPlanSummary, "rows" | "documents" | "title_abstract">,
 ): string {
-    return `Fill ${count(papersRead(plan), "item")} · ${creditsText(plan.credits)}`;
+    return `Fill ${count(papersRead(plan), "item")}`;
+}
+
+/**
+ * Where a plan's answers come from, in a few words: "43 from PDF · 3 from
+ * title and abstract · 2 can't be read". Null when nothing is read.
+ */
+export function planSourcesLine(
+    plan: Pick<
+        TableFillPlanSummary,
+        "documents" | "document_kinds" | "title_abstract" | "no_input" | "unavailable"
+    >,
+): string | null {
+    const parts: string[] = [];
+    if (plan.documents) {
+        const kinds = Object.entries(plan.document_kinds ?? {}).filter(([, n]) => n > 0);
+        const only = kinds.length === 1 ? kinds[0][0] : undefined;
+        const source =
+            only === "pdf"
+                ? "PDF"
+                : only === "epub"
+                  ? "EPUB"
+                  : only === "snapshot"
+                    ? "web snapshot"
+                    : "full text";
+        parts.push(`${plan.documents.toLocaleString("en-US")} from ${source}`);
+    }
+    if (plan.title_abstract)
+        parts.push(`${plan.title_abstract.toLocaleString("en-US")} from title and abstract`);
+    const unreadable = plan.no_input + plan.unavailable;
+    if (unreadable) parts.push(`${unreadable.toLocaleString("en-US")} can't be read`);
+    return parts.length ? parts.join(" · ") : null;
 }
 
 /**

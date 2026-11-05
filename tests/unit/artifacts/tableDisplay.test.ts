@@ -11,6 +11,12 @@ const deps = vi.hoisted(() => ({
     unregister: vi.fn(),
     addEvent: vi.fn(),
     removeEvent: vi.fn(),
+    notifyUnavailable: vi.fn(),
+    notifyFailed: vi.fn(),
+}));
+vi.mock("../../../react/host/zotero/sourceActions", () => ({
+    notifyReferenceUnavailable: deps.notifyUnavailable,
+    notifyTableOpenFailed: deps.notifyFailed,
 }));
 vi.mock("../../../src/utils/libraryIdentity", () => ({
     parseItemReference: (key: string) =>
@@ -40,6 +46,7 @@ vi.mock("../../../react/runtime/windowRuntime", () => ({
 }));
 import {
     openStoredTable,
+    openStoredTableForUser,
     resolveTableDisplay,
     subscribeTableChanges,
 } from "../../../react/host/zotero/tables";
@@ -127,6 +134,30 @@ describe("current table display and snapshot navigation", () => {
         expect(await openStoredTable("u-ABCDEFGH")).toEqual({
             error: "Missing file",
         });
+        // Opens nobody clicked do not interrupt the user.
+        expect(deps.notifyFailed).not.toHaveBeenCalled();
+    });
+    it("shows a not-available popup, and opens nothing, when the clicked table was deleted", async () => {
+        deps.lookup.mockResolvedValueOnce(false);
+        expect(await openStoredTableForUser("u-ABCDEFGH")).toHaveProperty("error");
+        expect(deps.notifyUnavailable).toHaveBeenCalledExactlyOnceWith("table");
+        deps.lookup.mockResolvedValueOnce({ deleted: true });
+        expect(await openStoredTableForUser("u-ABCDEFGH")).toHaveProperty("error");
+        expect(deps.notifyUnavailable).toHaveBeenCalledTimes(2);
+        expect(deps.open).not.toHaveBeenCalled();
+        expect(deps.notifyFailed).not.toHaveBeenCalled();
+    });
+    it("shows a popup with the reason when a clicked table that exists cannot be opened", async () => {
+        deps.open.mockResolvedValueOnce({ error: "Could not open table ABCDEFGH — it has no file on disk." });
+        await openStoredTableForUser("u-ABCDEFGH", null, { focus: { rowId: "row" } });
+        expect(deps.open).toHaveBeenCalledWith({ libraryID: 1, key: "ABCDEFGH" }, { focus: { rowId: "row" }, window: null });
+        expect(deps.notifyFailed).toHaveBeenCalledExactlyOnceWith("Could not open table ABCDEFGH — it has no file on disk.");
+        expect(deps.notifyUnavailable).not.toHaveBeenCalled();
+    });
+    it("says the library is unavailable when the clicked table's library is not on this device", async () => {
+        expect(await openStoredTableForUser("x-ABCDEFGH")).toHaveProperty("error");
+        expect(deps.notifyUnavailable).toHaveBeenCalledExactlyOnceWith("table", "library_unavailable");
+        expect(deps.open).not.toHaveBeenCalled();
     });
     it("refreshes on relevant item/table events and releases both listeners on unmount or unload", () => {
         const changed = vi.fn();

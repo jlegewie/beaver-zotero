@@ -118,18 +118,47 @@ describe('TableFillButton', () => {
         expect(buttonNamed('Fill 1 row')).toBeUndefined();
     });
 
-    it('shows the plan with its cost and balance, and starts exactly that plan', async () => {
+    it('shows the plan with its cost, warns of a short balance, and starts exactly that plan', async () => {
         render(React.createElement(TableFillButton, { tableRef: ref, table: spec([row('a'), row('b')]), job: null, improvableRows: new Set<string>() }));
         await act(async () => buttonNamed('Fill 2 rows')!.click());
         expect(fills.plan).toHaveBeenCalledWith(ref, { kind: 'pending' });
         const popover = container.querySelector('[role="dialog"]')!;
-        expect(popover.textContent).toContain('Fill 2 items · 0.4 credits');
-        expect(popover.textContent).toContain('Reads 2 items: 2 from the PDF');
-        expect(popover.textContent).toContain('Filling costs 0.2 credits per item');
+        expect(popover.querySelector('.bt-fill-title')?.textContent).toBe('Fill 2 items');
+        const cost = popover.querySelector('.bt-fill-cost')!;
+        expect(cost.textContent).toBe('0.4 credits');
+        expect(cost.getAttribute('title')).toContain('Filling costs 0.2 credits per item');
+        expect(popover.textContent).toContain('2 from PDF');
+        // Never filled: no change lines, the heading says what is filled.
+        expect(popover.querySelector('.bt-fill-changes')).toBeNull();
         expect(popover.textContent).toContain('Your 0.2 credits cover about 1 of 2 items');
         await act(async () => buttonNamed('Fill 2')!.click());
         expect(fills.start).toHaveBeenCalledWith('plan-1');
         expect(container.querySelector('[role="dialog"]')).toBeNull();
+    });
+
+    it('shows no balance when it covers the fill', async () => {
+        fills.plan.mockResolvedValueOnce({ ok: true, plan: { ...plan, balance: 640 } });
+        render(React.createElement(TableFillButton, { tableRef: ref, table: spec([row('a'), row('b')]), job: null, improvableRows: new Set<string>() }));
+        await act(async () => buttonNamed('Fill 2 rows')!.click());
+        const popover = container.querySelector('[role="dialog"]')!;
+        expect(popover.textContent).not.toContain('640');
+        expect(popover.querySelector('.bt-fill-reach')).toBeNull();
+    });
+
+    it('names a column without answers as new, and one with answers by its empty cells', async () => {
+        const columnPlan = { ...plan, pending: { ...plan.pending, new_rows: 0, columns: [{ id: 'method', header: 'Method', reason: 'new' as const, cells: 1 }] } };
+        fills.plan.mockResolvedValue({ ok: true, plan: columnPlan });
+        render(React.createElement(TableFillButton, { tableRef: ref, table: spec([row('a'), row('b')]), job: null, improvableRows: new Set<string>() }));
+        await act(async () => buttonNamed('Fill 2 rows')!.click());
+        const change = () => [...container.querySelectorAll('.bt-fill-changes dt, .bt-fill-changes dd')].map((e) => e.textContent);
+        expect(change()).toEqual(['New column', 'Method']);
+        act(() => buttonNamed('Cancel')!.click());
+        const partly = spec([row('a', { method: answered }, { documents: ['u-A'] }), row('b')]);
+        render(React.createElement(TableFillButton, { tableRef: ref, table: partly, job: null, improvableRows: new Set<string>() }));
+        await act(async () => buttonNamed('Fill 1 row')!.click());
+        expect(change()).toEqual(['Empty cells', 'Method']);
+        fills.plan.mockReset();
+        fills.plan.mockImplementation(async () => ({ ok: true, plan }));
     });
 
     it('keeps the popover open with the reason when the start is refused', async () => {
@@ -180,12 +209,28 @@ describe('the Fill menu and plans asked for elsewhere in the tab', () => {
         expect(fills.plan).toHaveBeenCalledWith(ref, { kind: 'cells', rows: ['b', 'c'] });
     });
 
-    it("offers the trial in a whole fill's plan", async () => {
-        fills.plan.mockResolvedValueOnce({ ok: true, plan: { ...plan, rows: 7, documents: 7 } });
+    it("starts the trial from a whole fill's plan without a second confirmation", async () => {
+        fills.plan
+            .mockResolvedValueOnce({ ok: true, plan: { ...plan, rows: 7, documents: 7 } })
+            .mockResolvedValueOnce({ ok: true, plan: { ...plan, plan_id: 'trial-1', scope: { kind: 'pending', limit: 5 }, rows: 5, documents: 5 } });
         render(React.createElement(TableFillButton, { tableRef: ref, table: spec(rows), job: null, improvableRows: new Set<string>() }));
         await act(async () => buttonNamed('Fill 7 rows')!.click());
-        await act(async () => buttonNamed('Try on 5 rows first')!.click());
+        await act(async () => buttonNamed('Try 5 first')!.click());
         expect(fills.plan).toHaveBeenLastCalledWith(ref, { kind: 'pending', limit: 5 });
+        expect(fills.start).toHaveBeenCalledWith('trial-1');
+        expect(container.querySelector('[role="dialog"]')).toBeNull();
+    });
+
+    it('keeps the whole plan with the reason when the trial cannot be planned', async () => {
+        fills.plan
+            .mockResolvedValueOnce({ ok: true, plan: { ...plan, rows: 7, documents: 7 } })
+            .mockResolvedValueOnce({ ok: false, message: 'The table changed.' } as any);
+        render(React.createElement(TableFillButton, { tableRef: ref, table: spec(rows), job: null, improvableRows: new Set<string>() }));
+        await act(async () => buttonNamed('Fill 7 rows')!.click());
+        await act(async () => buttonNamed('Try 5 first')!.click());
+        expect(fills.start).not.toHaveBeenCalled();
+        expect(container.querySelector('[role="alert"]')?.textContent).toBe('The table changed.');
+        expect(buttonNamed('Fill 7')).toBeDefined();
     });
 
     it('shows the plan a row or a column asks for, unless a fill is running', async () => {

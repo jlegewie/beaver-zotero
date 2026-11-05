@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { toPlainText, type Column, type Row, type TableSpec } from "@beaver/agent-core/layouts/table";
+import { isColumnSortable, toPlainText, type Column, type Row, type TableSpec } from "@beaver/agent-core/layouts/table";
 import { cellsToFill } from "@beaver/agent-core/layouts/tableFill";
 import type { TableFillCells } from "@beaver/agent-core/protocol/tableFillProtocol";
 import {
+    ArrowDownIcon,
     ArrowUpIcon,
     CancelIcon,
     CheckmarkCircleIcon,
@@ -34,7 +35,7 @@ import { renderPlainText, type TableDensity, type TextRenderer } from "../tableV
 import { useTableState } from "../useTableState";
 import { CellEditor, editsAsList, type CellEditInput } from "./CellEditor";
 import { CellInspector, type CellActionControls } from "./CellInspector";
-import { cellFill, isNewRow, researchColumns, rowFills, type TableDocuments } from "./cellModel";
+import { cellFill, isNewRow, PAPER_HEADER, researchColumns, rowFills, sortOrderLabel, type TableDocuments } from "./cellModel";
 import { ResearchGrid, type CellAddress } from "./ResearchGrid";
 import { AnchoredPopover, InlineText } from "./TableEditing";
 
@@ -226,8 +227,27 @@ export function ResearchTable({
     virtualize,
     className,
 }: ResearchTableProps): React.ReactElement {
-    const state = useTableState(table, { density: "cozy", onlyRows });
     const columns = useMemo(() => researchColumns(table), [table]);
+    // The paper and the year are system columns, which the shared view state
+    // hides by default; this table always draws them.
+    const alwaysShown = useMemo(
+        () => [columns.paper?.id, columns.year?.id].filter((id): id is string => !!id),
+        [columns],
+    );
+    const state = useTableState(table, { density: "cozy", onlyRows, alwaysShown });
+    // The toolbar's menus and chips name the paper column as its header does.
+    const menuTable = useMemo(
+        () =>
+            columns.paper
+                ? {
+                      ...table,
+                      columns: table.columns.map((column) =>
+                          column === columns.paper ? { ...column, header: PAPER_HEADER } : column,
+                      ),
+                  }
+                : table,
+        [table, columns.paper],
+    );
     const [panel, setPanel] = useState<Panel | null>(null);
     const [sourcesOpen, setSourcesOpen] = useState(false);
     const [editingCell, setEditingCell] = useState<CellAddress | null>(null);
@@ -254,17 +274,6 @@ export function ResearchTable({
             setHiddenAdded(NO_ROWS);
         }
     }, [state.sort, state.filters, state.quickFilter]);
-
-    // The paper and the year are system columns, which the shared view state
-    // hides by default; this table always shows them, so the sort and filter
-    // menus offer them too.
-    const shownKey = [columns.paper?.id, columns.year?.id].filter(Boolean).join(",");
-    const showedSystem = useRef<string | undefined>(undefined);
-    useEffect(() => {
-        if (!shownKey || showedSystem.current === shownKey) return;
-        showedSystem.current = shownKey;
-        for (const id of shownKey.split(",")) if (state.hiddenColumns.has(id)) state.toggleColumn(id);
-    }, [shownKey, state]);
 
     // The inspector follows its cell: closed when the row or column is gone.
     // The Paper cell opens the row's paper view.
@@ -382,10 +391,37 @@ export function ResearchTable({
         [rowMenuItems, fill, cellEditing],
     );
 
-    // A question column's menu: its edits (when the host makes them), then
-    // the view's own Sort and Hide.
+    // A column menu's sort entries: both directions, and Clear sort on the
+    // column the view is sorted by.
+    const sortEntries = useCallback(
+        (column: Column): MenuItem[] => {
+            if (!isColumnSortable(column)) return [];
+            const year = column === columns.year;
+            const items: MenuItem[] = [
+                {
+                    label: `Sort ${sortOrderLabel("asc", year)}`,
+                    icon: ArrowUpIcon,
+                    onClick: () => state.setSort({ column_id: column.id, direction: "asc" }),
+                },
+                {
+                    label: `Sort ${sortOrderLabel("desc", year)}`,
+                    icon: ArrowDownIcon,
+                    onClick: () => state.setSort({ column_id: column.id, direction: "desc" }),
+                },
+            ];
+            if (state.sort?.column_id === column.id)
+                items.push({ label: "Clear sort", icon: CancelIcon, onClick: () => state.setSort(undefined) });
+            return items;
+        },
+        [state, columns.year],
+    );
+
+    // A column's menu. The paper's and the year's offer only the sort; a
+    // question's has its edits (when the host makes them), then the view's
+    // own Sort and Hide.
     const columnMenu = useCallback(
         (column: Column): MenuItem[] => {
+            if (column === columns.paper || column === columns.year) return sortEntries(column);
             const items: MenuItem[] = [];
             const disabled = !!editing?.disabledReason;
             if (editing?.onEditColumn)
@@ -400,11 +436,7 @@ export function ResearchTable({
                 });
             }
             if (items.length) items.push({ label: "", isDivider: true, onClick: () => {} });
-            items.push({
-                label: "Sort A → Z",
-                icon: ArrowUpIcon,
-                onClick: () => state.setSort({ column_id: column.id, direction: "asc" }),
-            });
+            items.push(...sortEntries(column));
             items.push({ label: "Hide column", icon: ViewIcon, onClick: () => state.toggleColumn(column.id) });
             if (editing?.onChangeType) {
                 const current = COLUMN_TYPE_LABELS.find((entry) => entry.type === column.type);
@@ -437,7 +469,7 @@ export function ResearchTable({
             }
             return items;
         },
-        [editing, state, fill, fillable],
+        [editing, state, fill, fillable, columns, sortEntries],
     );
     const hiddenQuestions = columns.questions.filter((column) => state.hiddenColumns.has(column.id));
 
@@ -592,9 +624,9 @@ export function ResearchTable({
     const sourceCount = table.sources?.length ?? 0;
     const items = table.rows.length;
     const sourcesLabel = `${sourceCount ? `${sourceCount} ${sourceCount === 1 ? "source" : "sources"} · ` : ""}${items} ${items === 1 ? "item" : "items"}`;
-    const filterItems = buildFilterMenu(table, state);
-    const sortItems = buildSortMenu(table, state);
-    const sortColumn = state.sort ? table.columns.find((column) => column.id === state.sort!.column_id) : undefined;
+    const filterItems = buildFilterMenu(menuTable, state);
+    const sortItems = buildSortMenu(menuTable, state);
+    const sortColumn = state.sort ? menuTable.columns.find((column) => column.id === state.sort!.column_id) : undefined;
 
     return (
         <div ref={copyScopeRef} className="rt-copy-scope" onContextMenu={selectionCopy.onContextMenu}>
@@ -728,7 +760,7 @@ export function ResearchTable({
                                 {editing?.toolbarActions}
                             </div>
                         )}
-                        <FilterChips table={table} state={state} />
+                        <FilterChips table={menuTable} state={state} />
                         {hiddenQuestions.length > 0 ? (
                             <button
                                 type="button"
