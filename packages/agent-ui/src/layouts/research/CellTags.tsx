@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Cell, Evidence, Row } from "@beaver/agent-core/layouts/table";
 import {
     citationForEvidence,
@@ -212,7 +212,9 @@ function CitedEvidenceTag({
 
 /**
  * The page tag's hover card: where the passage is, the passage with its
- * table context, and a link that opens it.
+ * table context, and a link that opens it. A long passage is cut to a few
+ * lines so the card stays a glance beside its cell; Show more reveals the
+ * rest, and the card then scrolls within the room its placement allows.
  */
 function EvidenceCard({
     row,
@@ -231,6 +233,17 @@ function EvidenceCard({
     const where = label.startsWith("p. ")
         ? `Page ${label.slice(3)}`
         : label;
+    const quote = evidence.quote.replace(/\s+/g, " ").trim();
+    const quoteRef = useRef<HTMLParagraphElement | null>(null);
+    const [expanded, setExpanded] = useState(false);
+    const [clipped, setClipped] = useState(false);
+    // Whether the clamp cut the passage, measured before the card is placed.
+    // The toggle shares the link's row, so showing it does not change the
+    // card's height.
+    useLayoutEffect(() => {
+        const el = quoteRef.current;
+        if (el && !expanded) setClipped(el.scrollHeight > el.clientHeight + 1);
+    }, [quote, expanded]);
     return (
         <div className="rt-card rt-evidence-card">
             <div className="rt-card-meta">
@@ -240,15 +253,32 @@ function EvidenceCard({
             {evidence.context ? (
                 <div className="rt-evidence-context">{evidence.context}</div>
             ) : null}
-            <p className="rt-quote">“{evidence.quote.replace(/\s+/g, " ").trim()}”</p>
-            <button
-                type="button"
-                className="rt-link-button"
-                onClick={(event) => onOpen({ ownerDocument: event.currentTarget.ownerDocument })}
+            <p
+                ref={quoteRef}
+                className={`rt-quote${expanded ? "" : " rt-quote-clamped"}`}
             >
-                Open in {documentKindLabel(kind)}
-                <Icon icon={ArrowUpRightIcon} size={12} />
-            </button>
+                “{quote}”
+            </p>
+            <div className="rt-evidence-actions">
+                <button
+                    type="button"
+                    className="rt-link-button"
+                    onClick={(event) => onOpen({ ownerDocument: event.currentTarget.ownerDocument })}
+                >
+                    Open in {documentKindLabel(kind)}
+                    <Icon icon={ArrowUpRightIcon} size={12} />
+                </button>
+                {clipped || expanded ? (
+                    <button
+                        type="button"
+                        className="rt-quote-toggle"
+                        aria-expanded={expanded}
+                        onClick={() => setExpanded((value) => !value)}
+                    >
+                        {expanded ? "Show less" : "Show more"}
+                    </button>
+                ) : null}
+            </div>
         </div>
     );
 }
