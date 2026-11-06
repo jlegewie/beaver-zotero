@@ -29,6 +29,15 @@ import {
     resolveLibrariesFilter,
 } from './utils';
 
+type ItemLevelFilters = Pick<WSResolveSearchFiltersRequest, 'collections' | 'tags' | 'authors' | 'year'>;
+
+/** Whether filters narrow the search to items (collections, tags, authors or a year), not just libraries. */
+export function hasItemLevelFilters(filters: ItemLevelFilters): boolean {
+    const year = filters.year;
+    return !!(filters.collections?.length || filters.tags?.length || filters.authors?.length
+        || (year && ((year.min ?? 0) > 0 || (year.max ?? 0) > 0 || (year.exact ?? 0) > 0)));
+}
+
 /** Build the response envelope with timing metadata. */
 function buildResponse(
     request: WSResolveSearchFiltersRequest,
@@ -60,11 +69,6 @@ export async function handleResolveSearchFiltersRequest(
     const hasCollections = !!(request.collections?.length);
     const hasTags = !!(request.tags?.length);
     const hasAuthors = !!(request.authors?.length);
-    const hasYear = !!request.year && (
-        (request.year.min ?? 0) > 0 ||
-        (request.year.max ?? 0) > 0 ||
-        (request.year.exact ?? 0) > 0
-    );
 
     // Intersect the library filter with searchable libraries, through the same
     // resolution every other search op uses: portable refs ("u"/"g<groupID>")
@@ -109,7 +113,7 @@ export async function handleResolveSearchFiltersRequest(
     }
 
     // No item-level filters means there is no attachment set to resolve.
-    if (!hasCollections && !hasTags && !hasAuthors && !hasYear) {
+    if (!hasItemLevelFilters(request)) {
         logger('handleResolveSearchFiltersRequest: no item-level filters provided', 1);
         return buildResponse(request, [], undefined, startTime, 0);
     }
