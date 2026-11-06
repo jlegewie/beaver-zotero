@@ -838,7 +838,7 @@ describe('structural edit controls', () => {
         const pencil = container!.querySelector<HTMLButtonElement>('button[aria-label="Rename table"]')!;
         expect(pencil.disabled).toBe(true);
         expect(pencil.title).toBe('This library is read-only.');
-        expect(container!.querySelector<HTMLButtonElement>('button[aria-label="Add column"]')!.disabled).toBe(true);
+        expect(container!.querySelector<HTMLButtonElement>('th.rt-th-add button[aria-label="Add column"]')!.disabled).toBe(true);
     });
 
     it("offers the column menu's edits, then Sort and Hide, and adds a column from (+)", () => {
@@ -853,7 +853,7 @@ describe('structural edit controls', () => {
         click(container!.querySelector('button[aria-label="Column menu: Headline effect"]')!);
         click(menuItem('Remove column')!);
         expect(onRemoveColumn).toHaveBeenCalledWith(expect.objectContaining({ id: 'effect' }));
-        click(container!.querySelector('button[aria-label="Add column"]')!);
+        click(container!.querySelector('th.rt-th-add button[aria-label="Add column"]')!);
         expect(onAddColumn).toHaveBeenCalledTimes(1);
     });
 
@@ -886,6 +886,47 @@ describe('structural edit controls', () => {
         click(chip);
         click(container!.querySelector('.probe')!);
         expect(container!.querySelector('[aria-label="Sources"]')).toBeNull();
+    });
+
+    it('offers + Column in the toolbar, which adds a column like (+)', () => {
+        const onAddColumn = vi.fn();
+        mount({ editing: { onAddColumn, toolbarActions: h('button', { className: 'probe-items' }, 'Items') } });
+        const toolbar = container!.querySelector('.rt-toolbar-left')!;
+        const button = toolbar.querySelector<HTMLButtonElement>('button.rt-add-column-action')!;
+        expect(button.textContent).toBe('Column');
+        expect(button.getAttribute('aria-label')).toBe('Add column');
+        // After the host's own actions (+ Items).
+        expect(toolbar.querySelector('.probe-items')!.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        click(button);
+        expect(onAddColumn).toHaveBeenCalledTimes(1);
+    });
+
+    it('offers no + Column on a display-only table', () => {
+        mount();
+        expect(container!.querySelector('.rt-add-column-action')).toBeNull();
+    });
+
+    it('disables both Add column controls with the reason at the column limit', () => {
+        const full = table();
+        full.columns = [
+            ...full.columns,
+            ...Array.from({ length: 17 }, (_, i) => ({ id: `extra${i}`, header: `Extra ${i}`, type: 'text' }) as TableSpec['columns'][number]),
+        ];
+        mount({ table: full, editing: { onAddColumn: vi.fn() } });
+        const reason = 'A table holds at most 20 question columns. Remove a column to add another.';
+        const toolbarButton = container!.querySelector<HTMLButtonElement>('.rt-add-column-action')!;
+        expect(toolbarButton.disabled).toBe(true);
+        expect(toolbarButton.parentElement!.title).toBe(reason);
+        const plus = container!.querySelector<HTMLButtonElement>('th.rt-th-add button')!;
+        expect(plus.disabled).toBe(true);
+        expect(plus.closest('th')!.title).toBe(reason);
+    });
+
+    it('shows the read-only reason on + Column before the limit', () => {
+        mount({ editing: { disabledReason: 'This library is read-only.', onAddColumn: vi.fn() } });
+        const button = container!.querySelector<HTMLButtonElement>('.rt-add-column-action')!;
+        expect(button.disabled).toBe(true);
+        expect(button.parentElement!.title).toBe('This library is read-only.');
     });
 
     it("adds the new papers from the notice's Add", () => {
@@ -1188,6 +1229,94 @@ describe('rows the user just added', () => {
         expect(showAdded()?.textContent).toBe('2 added items hidden · Show');
         search('Bai');
         expect(showAdded()).toBeNull();
+    });
+});
+
+describe('columns the user just added', () => {
+    const scroller = () => container!.querySelector<HTMLElement>('.rt-scroll')!;
+    const render = (props: Partial<React.ComponentProps<typeof ResearchTable>>, spec = table()) =>
+        act(() => root?.render(h(ResearchTable, { table: spec, ...props })));
+    const grown = () => {
+        const spec = table();
+        spec.columns = [...spec.columns, { id: 'sample', header: 'Sample', type: 'text', description: 'How many?' }];
+        return spec;
+    };
+    const headers = () => Array.from(container!.querySelectorAll('th.rt-th-added')).map((th) => th.getAttribute('data-column-id'));
+    const cols = () => container!.querySelectorAll('col.rt-col-added').length;
+    const rect = (left: number, right: number) =>
+        ({ left, right, top: 0, bottom: 40, width: right - left, height: 40, x: left, y: 0, toJSON() {} }) as DOMRect;
+    const original = HTMLElement.prototype.getBoundingClientRect;
+    let scrollLeft = 0;
+    let sample = rect(900, 1200);
+    beforeEach(() => {
+        scrollLeft = 0;
+        sample = rect(900, 1200);
+        // The grid is 600 px wide (its box is 620 with the scrollbar) and the
+        // new column sits past its right edge.
+        HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+            if (this.classList.contains('rt-scroll')) return rect(0, 620);
+            if (this.getAttribute('data-column-id') === 'sample') return sample;
+            return rect(0, 0);
+        };
+    });
+    afterEach(() => {
+        HTMLElement.prototype.getBoundingClientRect = original;
+        vi.useRealTimers();
+    });
+    const mountScroller = () => {
+        mount();
+        Object.defineProperty(scroller(), 'clientWidth', { configurable: true, get: () => 600 });
+        Object.defineProperty(scroller(), 'scrollLeft', {
+            configurable: true,
+            get: () => scrollLeft,
+            set: (value: number) => {
+                scrollLeft = value;
+            },
+        });
+    };
+
+    it('waits for the table that has the column, then scrolls sideways to it and highlights it for a moment', () => {
+        vi.useFakeTimers();
+        mountScroller();
+        const scrollTop = scroller().scrollTop;
+        render({ reveal: { columnIds: ['sample'], token: 1 } });
+        expect(headers()).toEqual([]);
+        expect(scrollLeft).toBe(0);
+
+        render({ reveal: { columnIds: ['sample'], token: 1 } }, grown());
+        expect(headers()).toEqual(['sample']);
+        expect(cols()).toBe(1);
+        // Its right edge to the grid's, inside the scrollbar; rows stay where they were.
+        expect(scrollLeft).toBe(600);
+        expect(scroller().scrollTop).toBe(scrollTop);
+        act(() => vi.advanceTimersByTime(2000));
+        expect(headers()).toEqual([]);
+        expect(cols()).toBe(0);
+    });
+
+    it('shows the start of a column wider than the grid', () => {
+        sample = rect(700, 1500);
+        mountScroller();
+        render({ reveal: { columnIds: ['sample'], token: 1 } }, grown());
+        expect(scrollLeft).toBe(700);
+    });
+
+    it('leaves the scroll alone for a column already in view, and still highlights it', () => {
+        sample = rect(300, 500);
+        mountScroller();
+        render({ reveal: { columnIds: ['sample'], token: 1 } }, grown());
+        expect(scrollLeft).toBe(0);
+        expect(headers()).toEqual(['sample']);
+    });
+
+    it('reveals each request once', () => {
+        mountScroller();
+        render({ reveal: { columnIds: ['sample'], token: 1 } }, grown());
+        scrollLeft = 0;
+        render({ reveal: { columnIds: ['sample'], token: 1 } }, grown());
+        expect(scrollLeft).toBe(0);
+        render({ reveal: { columnIds: ['sample'], token: 2 } }, grown());
+        expect(scrollLeft).toBe(600);
     });
 });
 

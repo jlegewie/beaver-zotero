@@ -427,6 +427,21 @@ function modelColumnCount(spec: TableSpec): number {
 }
 
 /**
+ * Why the table has no room for another question column, or undefined when it
+ * has: the column limit, or the question-cell limit a column would cross.
+ * The Add column controls show it before the user writes a question that the
+ * write would refuse.
+ */
+export function addColumnBlockedReason(spec: TableSpec): string | undefined {
+    const columns = modelColumnCount(spec);
+    if (columns >= MAX_MODEL_COLUMNS)
+        return `A table holds at most ${MAX_MODEL_COLUMNS} question columns. Remove a column to add another.`;
+    if (spec.rows.length * (columns + 1) > MAX_QUESTION_CELLS)
+        return `Another column would give the table more than ${MAX_QUESTION_CELLS} question cells (rows × question columns). Remove rows or columns first.`;
+    return undefined;
+}
+
+/**
  * `spec` with `mutations` applied in order, or the first failure.
  *
  * Semantics worth knowing before writing a producer:

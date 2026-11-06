@@ -55,8 +55,8 @@ export interface ResearchGridProps {
     columnMenuItems?(column: Column): MenuItem[];
     /** The (+) after the last column; absent, no add column. */
     onAddColumn?(): void;
-    /** Why the (+) is disabled (a read-only library). */
-    editDisabledReason?: string;
+    /** Why the (+) is disabled (a read-only library, the table's limits). */
+    addColumnDisabledReason?: string;
     /** Window the rows, for a long table. */
     virtualize?: boolean;
     emptyText: string;
@@ -76,6 +76,8 @@ export interface ResearchGridProps {
     fills?: ReadonlyMap<string, RowFill>;
     /** Rows the user just added, highlighted briefly. */
     addedRows?: ReadonlySet<string>;
+    /** Columns the user just added, highlighted briefly. */
+    addedColumns?: ReadonlySet<string>;
 }
 
 /** A question column's width: prose shares what is left; short types are fixed. */
@@ -132,7 +134,7 @@ export function ResearchGrid({
     rowMenuItems,
     columnMenuItems,
     onAddColumn,
-    editDisabledReason,
+    addColumnDisabledReason,
     virtualize = false,
     emptyText,
     filteredEmptyText,
@@ -142,6 +144,7 @@ export function ResearchGrid({
     cellEditor,
     fills,
     addedRows,
+    addedColumns,
 }: ResearchGridProps): React.ReactElement {
     const rootRef = useRef<HTMLDivElement>(null);
     const bodyRef = useRef<HTMLTableSectionElement>(null);
@@ -180,7 +183,11 @@ export function ResearchGrid({
                     <col style={{ width: "20rem" }} />
                     {columns.year ? <col style={{ width: YEAR_WIDTH }} /> : null}
                     {questions.map((column) => (
-                        <col key={column.id} style={{ width: questionWidth(column) }} />
+                        <col
+                            key={column.id}
+                            className={addedColumns?.has(column.id) ? "rt-col-added" : undefined}
+                            style={{ width: questionWidth(column) }}
+                        />
                     ))}
                     {addColumn ? <col style={{ width: ADD_WIDTH }} /> : null}
                 </colgroup>
@@ -225,16 +232,18 @@ export function ResearchGrid({
                                 sort={state.sort}
                                 badges={badges.get(column.id)!}
                                 menuItems={columnMenuItems}
+                                isAdded={!!addedColumns?.has(column.id)}
                             />
                         ))}
                         {addColumn ? (
-                            <th className="rt-th rt-th-add" scope="col">
+                            // The reason sits on the cell too: a disabled button shows no tooltip of its own.
+                            <th className="rt-th rt-th-add" scope="col" title={addColumnDisabledReason}>
                                 <button
                                     type="button"
                                     className="rt-icon-button rt-add-column"
                                     aria-label="Add column"
-                                    title={editDisabledReason ?? "Add column"}
-                                    disabled={!!editDisabledReason}
+                                    title={addColumnDisabledReason ?? "Add column"}
+                                    disabled={!!addColumnDisabledReason}
                                     onClick={onAddColumn}
                                 >
                                     <Icon icon={PlusSignIcon} size={14} />
@@ -412,8 +421,11 @@ function ColumnHeader({
     sort,
     badges,
     menuItems,
+    isAdded = false,
 }: {
     column: Column;
+    /** Just added by the user: highlighted briefly. */
+    isAdded?: boolean;
     kind: "paper" | "year" | "question";
     sort: TableSort | undefined;
     badges?: ReturnType<typeof columnBadges>;
@@ -428,7 +440,7 @@ function ColumnHeader({
     const direction = sort?.column_id === column.id ? sort.direction : undefined;
     return (
         <th
-            className={`rt-th rt-th-${kind}${items.length ? " rt-th-has-menu" : ""}${menuOpen ? " rt-th-menu-open" : ""}`}
+            className={`rt-th rt-th-${kind}${items.length ? " rt-th-has-menu" : ""}${menuOpen ? " rt-th-menu-open" : ""}${isAdded ? " rt-th-added" : ""}`}
             scope="col"
             data-column-id={column.id}
             aria-sort={direction === "asc" ? "ascending" : direction === "desc" ? "descending" : undefined}

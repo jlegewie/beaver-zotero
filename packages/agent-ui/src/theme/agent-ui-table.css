@@ -794,6 +794,39 @@
     }
 }
 
+/* A column the user just added: its header (opaque, so tinted like an added
+ * row's cells) and, through its <col>, the cells under it, which are
+ * transparent. */
+.beaver-root .rt-th-added {
+    animation: rt-row-added 2s ease-out forwards;
+}
+
+.beaver-root .rt-col-added {
+    animation: rt-column-added 2s ease-out forwards;
+}
+
+@keyframes rt-column-added {
+    0%,
+    35% {
+        background-color: color-mix(in srgb, var(--accent-blue) 12%, transparent);
+    }
+    100% {
+        background-color: transparent;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .beaver-root .rt-th-added {
+        animation: none;
+        box-shadow: inset 0 0 0 100vmax color-mix(in srgb, var(--accent-blue) 12%, transparent);
+    }
+
+    .beaver-root .rt-col-added {
+        animation: none;
+        background-color: color-mix(in srgb, var(--accent-blue) 12%, transparent);
+    }
+}
+
 /* The checkbox rail and the Paper column stay put while a wide table scrolls
  * sideways, so every answer keeps its paper in view — while the grid is wide
  * enough (`data-pinned`, set by ResearchTable). Pinned cells are opaque (the

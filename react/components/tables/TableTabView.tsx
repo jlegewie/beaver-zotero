@@ -245,7 +245,7 @@ export default function TableTabView({
     const [focus, setFocus] = React.useState<ResearchTableFocus | null>(() =>
         options.focus ? { ...options.focus, token: ++focusRequests.current } : null,
     );
-    // Rows the user just added, brought into view.
+    // Rows or columns the user just added, brought into view.
     const [reveal, setReveal] = React.useState<ResearchTableReveal | null>(null);
 
     React.useEffect(() => {
@@ -347,6 +347,7 @@ export default function TableTabView({
             fillResult.showAllRows();
             setReveal({ rowIds, token: ++focusRequests.current });
         },
+        onColumnsAdded: (columnIds) => setReveal({ columnIds, token: ++focusRequests.current }),
     });
     const { showAllRows, showFailedRows } = fillResult;
     const tableMessage = useTableMessage(

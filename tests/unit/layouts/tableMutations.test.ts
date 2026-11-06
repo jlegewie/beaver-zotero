@@ -20,6 +20,7 @@ import type {
     TableSpec,
 } from "@beaver/agent-core/layouts/table";
 import {
+    addColumnBlockedReason,
     applyMutations,
     carryColumnRevisions,
     summarize,
@@ -556,6 +557,47 @@ describe("applyMutations", () => {
         // A table already over the cap (written under older limits) may still shrink.
         const over: TableSpec = { id: "t", columns: questions(20), rows: rows(300) };
         expect(applyMutations(over, [{ op: "remove_rows", rows: ["r0"] }]).ok).toBe(true);
+    });
+});
+
+describe("addColumnBlockedReason", () => {
+    const sized = (columns: number, rows: number): TableSpec => ({
+        id: "t",
+        columns: [
+            { id: "_reference", header: "Reference", type: "reference", system: true },
+            ...Array.from({ length: columns }, (_, i) => ({ id: `q${i}`, header: `Q${i}`, type: "text" }) as Column),
+        ],
+        rows: Array.from({ length: rows }, (_, i) => ({ id: `r${i}`, cells: {} })),
+    });
+
+    it("leaves room while another question column stays within both limits", () => {
+        expect(addColumnBlockedReason(sized(19, 250))).toBeUndefined();
+        expect(addColumnBlockedReason(sized(9, 500))).toBeUndefined();
+    });
+
+    it("names the column limit once the table has 20 question columns, not counting system columns", () => {
+        expect(addColumnBlockedReason(sized(20, 1))).toBe(
+            "A table holds at most 20 question columns. Remove a column to add another.",
+        );
+    });
+
+    it("names the question-cell limit another column would cross", () => {
+        expect(addColumnBlockedReason(sized(10, 500))).toContain("more than 5000 question cells");
+    });
+
+    it("agrees with the write: a column the check allows is not refused as too large", () => {
+        for (const spec of [sized(19, 250), sized(9, 500), sized(0, 0)]) {
+            const result = applyMutations(spec, [
+                { op: "add_columns", columns: [{ id: "new", header: "New", type: "text", description: "New?" }] },
+            ] as TableMutation[]);
+            expect(result.ok ? undefined : result.error.code).not.toBe("too_large");
+        }
+        for (const spec of [sized(20, 1), sized(10, 500)]) {
+            const result = applyMutations(spec, [
+                { op: "add_columns", columns: [{ id: "new", header: "New", type: "text", description: "New?" }] },
+            ] as TableMutation[]);
+            expect(result.ok ? undefined : result.error.code).toBe("too_large");
+        }
     });
 });
 
