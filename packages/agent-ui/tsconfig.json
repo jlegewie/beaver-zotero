@@ -275,6 +275,7 @@
     "./src/layouts/research/CellEditor.tsx",
     "./src/layouts/research/ResearchTable.tsx",
     "./src/layouts/research/TableEditing.tsx",
+    "./src/layouts/research/VersionHistory.tsx",
 
     "./src/host/index.ts",
     "./src/host/types.ts"

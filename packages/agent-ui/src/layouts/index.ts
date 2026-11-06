@@ -27,6 +27,8 @@ export type {
     ResearchTableProps,
 } from "./research/ResearchTable";
 export { CellInspector } from "./research/CellInspector";
+export { VersionHistory } from "./research/VersionHistory";
+export type { TableVersionListEntry, VersionHistoryProps } from "./research/VersionHistory";
 export { CellEditor, editsAsList } from "./research/CellEditor";
 export type { CellEditInput } from "./research/CellEditor";
 export type { CellActionControls, CellInspectorProps } from "./research/CellInspector";
