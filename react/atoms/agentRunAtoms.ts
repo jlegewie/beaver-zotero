@@ -189,7 +189,7 @@ import {
 import { isCreateCard, isFillCard } from '@beaver/agent-core/protocol/tableCardProtocol';
 import type { WSTableCardRequest, WSTableCardResponse, WSTableCardStale } from '@beaver/agent-core/protocol/tableCardProtocol';
 import { tableRecordFromMetadata } from '@beaver/agent-core/run-state/tableResults';
-import { openStoredTable } from '../host/zotero/tables';
+import { openCreatedTable } from '../host/zotero/tables';
 import { readCreditThreshold } from '../utils/creditThreshold';
 import { flushPendingPartEvents, queuePartEvent } from '../utils/streamingPartQueue';
 import { getAppliedPdfAnnotationCount } from '../agents/agentActionCounts';
@@ -1886,16 +1886,11 @@ export function createWSCallbacks(
             if (event.part.part_kind === "tool-return") {
                 await processToolReturnResults(event.part, set);
 
-                // A table the user just approved opens in its Beaver tab,
-                // behind the selected tab so the answer stays in view.
+                // Open the new table unless its fill already opened it.
                 if (event.part.tool_name === "create_table") {
                     const created = tableRecordFromMetadata(event.part.metadata);
                     if (created) {
-                        void openStoredTable(created.reference.key, getHostWindow(), { background: true })
-                            .then((outcome) => {
-                                if ("error" in outcome) logger(`WS onToolReturn: opening the new table failed: ${outcome.error}`, 1);
-                            })
-                            .catch((error) => logger(`WS onToolReturn: opening the new table failed: ${String(error)}`, 1));
+                        void openCreatedTable(created.reference.key, getHostWindow(), event.run_id, event.part.tool_call_id);
                     }
                 }
 
