@@ -1,5 +1,5 @@
 {
-    "name": "an options update may add a label",
+    "name": "an options update may add a label; the new label marks the column's answers out of date",
     "before": {
         "id": "t1",
         "spec_version": 2,
@@ -416,7 +416,8 @@
                                     ]
                                 ]
                             }
-                        ]
+                        ],
+                        "stale": true
                     }
                 },
                 "in_library": true,

@@ -142,6 +142,32 @@ describe('what an edit clears, and asking first', () => {
         expect(isDestructiveUpdate(design, update, result.changes[0])).toBe(false);
     });
 
+    it('reads a draft as a new question by the engine’s rule: definitions and new options, not renames or removals', () => {
+        // What the editor's "Existing answers" choice is preselected from.
+        const withReview: Column = { ...design, options: [...design.options!, { label: 'Review', color: 'red', description: 'Summarizes others' }] };
+        const table = { ...spec(), columns: [spec().columns[0], withReview] } as TableSpec;
+        const asks = (edit: (draft: ReturnType<typeof columnEditorDraft>) => void) => {
+            const draft = columnEditorDraft(withReview);
+            edit(draft);
+            const result = dryRun(table, { update_columns: [columnUpdate(withReview, draft)!] });
+            if (!result.ok) throw new Error(result.message);
+            const change = result.changes[0];
+            return change.op === 'update_column' && change.fields.includes('question');
+        };
+        expect(asks((draft) => (draft.column.options[0].label = 'Randomized trial'))).toBe(false);
+        expect(asks((draft) => draft.column.options.splice(2, 1))).toBe(false);
+        expect(asks((draft) => (draft.column.options[0].description = 'Assigned by lottery'))).toBe(true);
+        expect(asks((draft) => draft.column.options.push({ key: 'new', label: 'Survey', description: 'Asks people' }))).toBe(true);
+        expect(asks((draft) => draft.column.options.push({ key: 'new', label: 'Survey', description: '' }))).toBe(true);
+        // A rename and a removal together still ask nothing.
+        expect(
+            asks((draft) => {
+                draft.column.options[0].label = 'Randomized trial';
+                draft.column.options.splice(2, 1);
+            }),
+        ).toBe(false);
+    });
+
     it('treats removing an option no answer holds as destructive without asking', () => {
         const unused: Column = { ...design, options: [...design.options!, { label: 'Survey', color: 'red' }] };
         const update = { id: 'design', options: [{ label: 'RCT', description: 'Randomized' }, { label: 'Cohort' }] };

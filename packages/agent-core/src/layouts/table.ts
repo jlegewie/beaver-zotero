@@ -1234,6 +1234,8 @@ function compareCodePoints(a: string, b: string): number {
  * definition, the definitions as compact JSON pairs `[key, definition]` sorted
  * by {@link normalizeSelectLabel}. Recolouring, reordering or re-spelling an
  * option, or adding one without a definition, leaves the digest unchanged.
+ * Staleness is decided by `update_column`, not by the digest alone: an added
+ * option marks answers out of date even when the digest stays the same.
  *
  * A filler sends it with each answer and the engine skips the write when the
  * column's question changed since. The backend computes the same digest; the

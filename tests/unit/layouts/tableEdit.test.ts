@@ -121,6 +121,44 @@ describe("editing a table", () => {
         // The stored row kept its answer.
         expect(result.spec.rows[0].cells.n).toBeDefined();
     });
+    const collection = (key: string, papers: ResolvedSource["papers"]): ResolvedSource => ({
+        ...source("s9", papers),
+        entry: { id: "s9", type: "library", scope: { kind: "collection", library_ref: "u", key, name: "Labor" } },
+    });
+    it("keeps papers removed in the same call out of a collection it adds", () => {
+        const labor = collection("LABORCOL", [paper("BBBBBBBB"), paper("CCCCCCCC"), paper("DDDDDDDD")]);
+        const result = applyEdit(
+            base(),
+            { add_sources: [{ type: "library", scope: labor.entry.scope! }], remove_rows: ["r-BBBBBBBB", "r-CCCCCCCC"] },
+            { added: [labor], refreshed: new Map() },
+            NOW,
+        );
+        if (!result.ok) throw new Error(result.message);
+        expect(result.changes).toEqual([
+            { op: "remove_rows", rows: 2 },
+            { op: "add_source", source: "s3", type: "library", kind: "collection", name: "Labor", library_ref: "u", rows_added: 1, rows_restored: 0, removed_skipped: 2, duplicates: 0, rejected: [] },
+        ]);
+        expect(result.spec.rows.map((row) => row.id)).toEqual(["r-AAAAAAAA", "r-DDDDDDDD"]);
+        expect(result.spec.removed!.map((paper) => (paper.ref as any).zotero_key)).toEqual(["BBBBBBBB", "CCCCCCCC"]);
+        // Refreshing the collection later leaves them out too.
+        const refreshed = applyEdit(result.spec, { refresh_sources: ["s3"] }, { added: [], refreshed: new Map([["s3", labor]]) }, NOW);
+        expect(refreshed.ok && refreshed.changes[0]).toMatchObject({ op: "refresh_source", rows_added: 0, removed_skipped: 2 });
+    });
+    it("brings back a paper an items source names, even one the same call removes", () => {
+        const items = source("s1", [paper("BBBBBBBB")]);
+        const result = applyEdit(base(), { remove_rows: ["r-BBBBBBBB"], add_sources: [{ type: "items", ids: ["u-BBBBBBBB"] }] }, { added: [items], refreshed: new Map() }, NOW);
+        if (!result.ok) throw new Error(result.message);
+        expect(result.changes[1]).toEqual({ op: "add_source", source: "s1", type: "items", rows_added: 0, rows_restored: 1, duplicates: 0, rejected: [] });
+        expect(result.spec.removed).toBeUndefined();
+    });
+    it("restores a paper removed by an earlier call when a collection holding it is added", () => {
+        const removed = applyEdit(base(), { remove_rows: ["r-BBBBBBBB"] }, { added: [], refreshed: new Map() }, NOW);
+        if (!removed.ok) throw new Error(removed.message);
+        const labor = collection("LABORCOL", [paper("BBBBBBBB")]);
+        const result = applyEdit(removed.spec, { add_sources: [{ type: "library", scope: labor.entry.scope! }] }, { added: [labor], refreshed: new Map() }, NOW);
+        expect(result.ok && result.changes[0]).toMatchObject({ rows_added: 0, rows_restored: 1 });
+        expect(result.ok && result.changes[0]).not.toHaveProperty("removed_skipped");
+    });
     it("refresh skips removed papers, adds new ones and reports rows no longer found, keeping staleness", () => {
         let spec = base();
         const stale = applyEdit(spec, { update_columns: [{ id: "n", description: "How many people?" }] }, { added: [], refreshed: new Map() }, NOW);
@@ -250,9 +288,30 @@ describe("option edits in the change list", () => {
         const cleared = edit(withDesign(), [{ label: "rct", description: null }, { label: "Cohort" }, { label: "Other" }]);
         expect(cleared.ok && cleared.changes[0]).toMatchObject({ fields: ["question", "options"], stale: 3 });
     });
-    it("reads removing an option with a definition as a new question, as its staleness does", () => {
+    it("reads removing an option with a definition as an options change only, keeping the other answers fresh", () => {
         const result = edit(withDesign(), [{ label: "Cohort" }, { label: "Other" }]);
-        expect(result.ok && result.changes[0]).toMatchObject({ fields: ["question", "options"], cleared: 1, stale: 2 });
+        expect(result.ok && result.changes[0]).toMatchObject({ fields: ["options"], cleared: 1, stale: 0 });
+        expect(result.ok && result.spec.rows.some((row) => row.cells.design?.stale)).toBe(false);
+    });
+    it("reads renaming one defined option and dropping another as an options change only", () => {
+        const spec = withDesign();
+        const column = spec.columns.find((c) => c.id === "design")!;
+        column.options = [...column.options!, { label: "Review", color: "red", description: "Summarizes other studies" }];
+        // The definition is sent again unchanged, as the model sends the full list.
+        const result = edit(spec, [
+            { label: "Randomized trial", previous_label: "RCT", description: "Randomized" },
+            { label: "Cohort" },
+            { label: "Other" },
+        ]);
+        expect(result.ok && result.changes[0]).toMatchObject({ fields: ["options"], stale: 0, cleared: 0, relabelled: 1 });
+    });
+    it("still marks the answers out of date when a rename also rewords the definition", () => {
+        const result = edit(withDesign(), [{ label: "Randomized trial", previous_label: "RCT", description: "Assigned by lottery" }, { label: "Cohort" }, { label: "Other" }]);
+        expect(result.ok && result.changes[0]).toMatchObject({ fields: ["question", "options"], stale: 3, relabelled: 1 });
+    });
+    it("reads an added option without a definition as a new question too", () => {
+        const added = edit(withDesign(), [{ label: "RCT" }, { label: "Cohort" }, { label: "Other" }, { label: "Case study" }]);
+        expect(added.ok && added.changes[0]).toMatchObject({ fields: ["question", "options"], stale: 3 });
     });
     it("reads a new definition, on a kept or an added option, as a new question", () => {
         const defined = edit(withDesign(), [{ label: "RCT" }, { label: "Cohort", description: "Followed over time" }, { label: "Other" }]);
