@@ -1561,10 +1561,10 @@ describe('a running fill', () => {
         for (const [row, column] of [['r1', 'design'], ['r1', 'amount'], ['r2', 'effect'], ['r3', 'design']]) {
             expect(cell(row, column).hasAttribute('data-fill')).toBe(false);
         }
-        // An empty cell gets placeholder lines; an answered one keeps its answer.
+        // Empty or answered, every cell it will write shows placeholder lines.
         expect(cell('r3', 'effect').querySelectorAll('.rt-fill-line')).toHaveLength(3);
-        expect(cell('r1', 'effect').querySelector('.rt-fill-lines')).toBeNull();
-        expect(cell('r1', 'effect').textContent).toContain('Conditional transfers raised enrollment.');
+        expect(cell('r1', 'effect').querySelectorAll('.rt-fill-line')).toHaveLength(3);
+        expect(cell('r1', 'effect').textContent).not.toContain('Conditional transfers raised enrollment.');
     });
 
     it('says what the fill is doing in the expansion and the inspector', () => {

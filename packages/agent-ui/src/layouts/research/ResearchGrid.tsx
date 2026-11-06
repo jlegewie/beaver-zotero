@@ -881,9 +881,9 @@ function QuestionCell({
 }): React.ReactElement {
     const cell = row.cells[column.id];
     const pending = cellState(cell) === "pending";
-    // An empty cell waiting for its answer shows placeholder lines; one with
-    // an answer keeps it, dimmed, until the new one is saved.
-    const placeholder = (look === "queued" || look === "active") && pending;
+    // A cell waiting for its answer shows placeholder lines. An answer it
+    // already holds stays readable in the expansion until the new one is saved.
+    const placeholder = look === "queued" || look === "active";
     const select = () => onSelect({ rowId: row.id, columnId: column.id });
     // A narrow Category or Yes / no column gets a wider expansion.
     const peekWidth = column.type === "select" || column.type === "boolean" ? SHORT_PEEK_PX : undefined;
