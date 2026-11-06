@@ -20,6 +20,16 @@ export function tableActionErrorMessage(error: unknown, ref: TableRef): string {
     return String(failure?.message ?? failure?.error ?? error);
 }
 
+/**
+ * A revert that threw may or may not have landed, so the message says to
+ * check. A refusal (a fill is running) wrote nothing and needs no check.
+ */
+export function revertFailureMessage(error: unknown, ref: TableRef): string {
+    const refused = (error as { code?: string } | null)?.code === "fill_running";
+    const message = tableActionErrorMessage(error, ref);
+    return refused ? message : `${message} Revert was not confirmed. Check the current table before trying again.`;
+}
+
 export type TableExportFormat = "xlsx" | "csv";
 
 const EXPORT_FORMATS: Record<TableExportFormat, { extension: string; filter: string }> = {
@@ -62,16 +72,10 @@ export async function exportTable(
 }
 
 /**
- * The table's local actions: Export to Excel, Export CSV, Version history (the retained
- * versions, and reverting to one), and Check / repair. `historyOnly` renders the
- * version history alone and loads it at once, for the table tab's Version
- * history panel.
+ * The item pane's table actions: Export to Excel, Export CSV, Version history
+ * (the retained versions, and reverting to one), and Check / repair.
  */
-export function renderTableDocumentActions(
-    doc: Document,
-    ref: TableRef,
-    options: { historyOnly?: boolean } = {},
-): HTMLElement {
+export function renderTableDocumentActions(doc: Document, ref: TableRef): HTMLElement {
     const root = doc.createElement("div");
     const status = doc.createElement("div");
     status.setAttribute("role", "status");
@@ -95,9 +99,7 @@ export function renderTableDocumentActions(
         try {
             await operation();
         } catch (error) {
-            // A refusal (a fill is running) wrote nothing, so there is nothing to check.
-            const refused = (error as { code?: string } | null)?.code === "fill_running";
-            status.textContent = `${tableActionErrorMessage(error, ref)}${restoring && !refused ? " Revert was not confirmed. Check the current table before trying again." : ""}`;
+            status.textContent = restoring ? revertFailureMessage(error, ref) : tableActionErrorMessage(error, ref);
         } finally {
             busy = false;
             controls.forEach((control) => {
@@ -190,11 +192,6 @@ export function renderTableDocumentActions(
               ? "The table is saved, but its version history still could not be updated. Try again after resolving storage or sync errors."
               : TABLE_REPAIR_SKIPPED;
     });
-    if (options.historyOnly) {
-        root.append(versions, restore, status);
-        void run(loadHistory);
-        return root;
-    }
     root.append(...exportButtons, history, versions, restore, repair, status);
     return root;
 }

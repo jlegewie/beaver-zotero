@@ -22,7 +22,8 @@ import { useDocumentVisible } from '../../hooks/useDocumentVisible';
 import { selectItemById } from '../../utils/selectItem';
 import { describeItems } from './card/liveSources';
 import { libraryRefForLibraryID } from '../../../src/utils/libraryIdentity';
-import { exportTable, renderTableDocumentActions, tableActionErrorMessage } from '../../../src/ui/tableDocumentActions';
+import { exportTable, tableActionErrorMessage } from '../../../src/ui/tableDocumentActions';
+import { TableVersionHistory } from './TableVersionHistory';
 import { getTablesApi } from '../../../src/services/artifacts/tablesApi';
 import { useNewPapers, useTableDocuments } from './tableTabData';
 import { FILL_RUNNING_REASON, useTableEditing } from './useTableEditing';
@@ -198,23 +199,6 @@ const renderCellText = (text: string) => (
     // `markdown` is what the chat's citation styling is scoped to.
     <MarkdownRenderer content={text} className="markdown bt-md" />
 );
-
-/**
- * Mounts a DOM view built outside React (the item pane's version history)
- * into the tab. Built once per mount, in the tab's own document.
- */
-function DomView({ create }: { create: (doc: Document) => HTMLElement }): React.ReactElement {
-    const ref = React.useRef<HTMLDivElement>(null);
-    const createRef = React.useRef(create);
-    React.useEffect(() => {
-        const host = ref.current;
-        if (!host) return;
-        const view = createRef.current(host.ownerDocument);
-        host.replaceChildren(view);
-        return () => host.replaceChildren();
-    }, []);
-    return <div ref={ref} className="rt-dom-view" />;
-}
 
 /**
  * A stored table in the Beaver tab of a main window.
@@ -495,7 +479,13 @@ export default function TableTabView({
                             : undefined
                     }
                     renderVersionHistory={() => (
-                        <DomView create={(doc) => renderTableDocumentActions(doc, tableRef, { historyOnly: true })} />
+                        <TableVersionHistory
+                            tableRef={tableRef}
+                            currentVersion={state.table.version}
+                            reloadKey={state.table}
+                            readOnly={readOnly}
+                            restoreDisabledReason={fillRunning ? FILL_RUNNING_REASON : undefined}
+                        />
                     )}
                 />
             </TableCardDropZone>

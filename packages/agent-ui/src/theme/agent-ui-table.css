@@ -1903,19 +1903,185 @@
     z-index: 1;
 }
 
-.beaver-root .rt-history .rt-dom-view select {
-    width: 100%;
-    margin-bottom: 0.6rem;
+/* Version history: a timeline of saved versions, newest first, grouped by
+ * day. Each entry has a marker on a vertical rule; the current version's is
+ * filled. Restore shows on hover and keyboard focus. */
+.beaver-root .rt-history-content {
+    display: flex;
+    flex-direction: column;
+    gap: 1.1rem;
 }
 
-.beaver-root .rt-history .rt-dom-view button {
-    margin-right: 0.45rem;
-}
-
-.beaver-root .rt-history .rt-dom-view [role="status"] {
-    margin-top: 0.6rem;
+.beaver-root .rt-history-status {
+    margin: 0;
     font-size: 0.92rem;
+    line-height: 1.3rem;
     color: var(--fill-secondary);
+}
+
+.beaver-root .rt-history-loading {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    margin: 0;
+    color: var(--fill-secondary);
+}
+
+.beaver-root .rt-history-day {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+}
+
+.beaver-root .rt-history-day-heading {
+    margin: 0;
+    padding: 0 0.5rem;
+    color: var(--fill-secondary);
+}
+
+.beaver-root .rt-history-list {
+    display: flex;
+    flex-direction: column;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.beaver-root .rt-history-entry {
+    position: relative;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.7rem;
+    padding: 0.55rem 0.5rem;
+    border-radius: 0.5rem;
+}
+
+.beaver-root .rt-history-entry:hover {
+    background: var(--fill-quinary);
+}
+
+.beaver-root .rt-history-marker {
+    position: relative;
+    flex: 0 0 0.9rem;
+    align-self: stretch;
+}
+
+/* The rule runs through the entry's padding to meet its neighbours, and stops
+ * at the first and last marker of a day. */
+.beaver-root .rt-history-marker::before {
+    content: "";
+    position: absolute;
+    left: calc(50% - 0.5px);
+    top: -0.55rem;
+    bottom: -0.55rem;
+    width: 1px;
+    background: var(--fill-quarternary);
+}
+
+.beaver-root .rt-history-entry:first-child .rt-history-marker::before {
+    top: 0.73rem;
+}
+
+.beaver-root .rt-history-entry:last-child .rt-history-marker::before {
+    bottom: calc(100% - 0.73rem);
+}
+
+.beaver-root .rt-history-marker::after {
+    content: "";
+    position: absolute;
+    left: calc(50% - 0.32rem);
+    top: 0.41rem;
+    box-sizing: border-box;
+    width: 0.64rem;
+    height: 0.64rem;
+    border: 1.5px solid var(--fill-tertiary);
+    border-radius: 50%;
+    background: var(--material-background);
+}
+
+.beaver-root .rt-history-current .rt-history-marker::after {
+    border-color: var(--accent-blue);
+    background: var(--accent-blue);
+}
+
+.beaver-root .rt-history-text {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+}
+
+.beaver-root .rt-history-title {
+    display: flex;
+    align-items: baseline;
+    gap: 0.45rem;
+    min-width: 0;
+}
+
+.beaver-root .rt-history-change {
+    min-width: 0;
+    font-size: 1rem;
+    line-height: 1.46rem;
+    font-weight: 500;
+    color: var(--fill-primary);
+    overflow-wrap: anywhere;
+}
+
+.beaver-root .rt-history-badge {
+    flex: 0 0 auto;
+    padding: 0 0.4rem;
+    border-radius: 0.3rem;
+    background: var(--tag-blue-quarternary);
+    color: var(--tag-blue-primary);
+    font-size: 0.8rem;
+    font-weight: 600;
+    line-height: 1.25rem;
+}
+
+.beaver-root .rt-history-meta {
+    font-size: 0.92rem;
+    line-height: 1.3rem;
+    color: var(--fill-secondary);
+}
+
+.beaver-root .rt-history-version {
+    color: var(--fill-tertiary);
+}
+
+/* Restore sits over the entry's right edge, so while hidden it takes no
+ * width from the text. The wrapper shows and hides it. A disabled Restore
+ * stays opaque (so the text beneath never shows through) with muted text;
+ * the one being restored keeps full colour. */
+.beaver-root .rt-history-actions {
+    position: absolute;
+    top: 50%;
+    right: 0.5rem;
+    transform: translateY(-50%);
+    opacity: 0;
+}
+
+.beaver-root .rt-history-entry:hover .rt-history-actions,
+.beaver-root .rt-history-entry:focus-within .rt-history-actions,
+.beaver-root .rt-history-actions.rt-history-restoring {
+    opacity: 1;
+}
+
+.beaver-root .rt-history-restore {
+    height: 1.7rem;
+}
+
+.beaver-root .rt-history-actions .rt-history-restore:disabled {
+    opacity: 1;
+    color: var(--fill-tertiary);
+}
+
+.beaver-root .rt-history-restoring .rt-history-restore:disabled {
+    color: var(--fill-primary);
+}
+
+.beaver-root .rt-history-note {
+    padding: 0 0.5rem;
 }
 
 /* ==========================================================================
