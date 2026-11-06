@@ -4,7 +4,8 @@
  * belongs in `@beaver/agent-core/layouts/table` instead.
  */
 
-import type React from "react";
+import React from "react";
+import { FindHighlight } from "../chat/highlightText";
 
 /**
  * Row height, and with it how many lines every cell clamps to. The pixel
@@ -19,4 +20,5 @@ export type TableDensity = "compact" | "cozy" | "tall";
  */
 export type TextRenderer = (text: string) => React.ReactNode;
 
-export const renderPlainText: TextRenderer = (text) => text;
+/** The text as it is, with the table search's hits marked. */
+export const renderPlainText: TextRenderer = (text) => React.createElement(FindHighlight, { text });

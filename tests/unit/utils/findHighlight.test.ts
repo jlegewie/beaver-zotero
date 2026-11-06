@@ -14,7 +14,9 @@ import {
     FIND_HIT_CLASS,
     FIND_MIN_QUERY_LENGTH,
     FindQueryProvider,
+    findMatchRanges,
     useFindQuery,
+    type FindQuery,
 } from '@beaver/agent-ui/chat/findContext';
 import { highlightText } from '@beaver/agent-ui/chat/highlightText';
 import { rehypeFindHighlight } from '@beaver/agent-ui/chat/rehypeFindHighlight';
@@ -223,10 +225,11 @@ describe('rehypeFindHighlight', () => {
 
 /** Renders whatever `useFindQuery` reports, so the gate can be asserted on. */
 function Probe() {
-    return React.createElement('span', null, `[${useFindQuery()}]`);
+    const query = useFindQuery();
+    return React.createElement('span', null, `[${typeof query === 'string' ? query : query.join('|')}]`);
 }
 
-function readQuery(query?: string): string {
+function readQuery(query?: FindQuery): string {
     const probe = React.createElement(Probe);
     const tree =
         query === undefined
@@ -259,5 +262,29 @@ describe('useFindQuery', () => {
 
     it('keeps surrounding whitespace, which is part of what the user searched for', () => {
         expect(readQuery('of ')).toBe('of ');
+    });
+
+    it('reports only the terms long enough to highlight', () => {
+        expect(readQuery(['stem', 'a', 'women'])).toBe('stem|women');
+        expect(readQuery(['a', 'b'])).toBe('');
+    });
+});
+
+describe('findMatchRanges with several terms', () => {
+    it('finds every term on its own, left to right', () => {
+        expect(findMatchRanges('Women in STEM fields', ['stem', 'women'])).toEqual([
+            { start: 0, end: 5 },
+            { start: 9, end: 13 },
+        ]);
+    });
+
+    it('merges hits that overlap or touch into one range', () => {
+        expect(findMatchRanges('transfers', ['trans', 'sfer', 'fers'])).toEqual([{ start: 0, end: 9 }]);
+    });
+
+    it('marks every term of a highlighted string', () => {
+        expect(renderToStaticMarkup(React.createElement(React.Fragment, null, highlightText('STEM and women', ['women', 'stem'])))).toBe(
+            `${HIT_OPEN}STEM</mark> and ${HIT_OPEN}women</mark>`,
+        );
     });
 });

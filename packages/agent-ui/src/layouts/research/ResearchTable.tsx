@@ -30,6 +30,7 @@ import {
 import MenuButton from "../../primitives/MenuButton";
 import ContextMenu, { type MenuItem, type MenuPosition } from "../../primitives/ContextMenu";
 import { HoverLayerProvider, selectionWithin } from "../../primitives/HoverLayer";
+import { FindQueryProvider } from "../../chat/findContext";
 import { buildFilterMenu, buildSortMenu, FilterChips } from "../tableMenus";
 import { renderPlainText, type TableDensity, type TextRenderer } from "../tableView";
 import { useTableState } from "../useTableState";
@@ -270,14 +271,14 @@ export function ResearchTable({
     // only sets them up, and a focus request's reveal forgets the last view.
     const viewKey = useRef<unknown[] | null>(null);
     useEffect(() => {
-        const next = [state.sort, state.filters, state.quickFilter];
+        const next = [state.sort, state.filters, state.searchTerms];
         const previous = viewKey.current;
         viewKey.current = next;
         if (previous && next.some((value, index) => value !== previous[index])) {
             activityRef.current?.();
             setHiddenAdded(NO_ROWS);
         }
-    }, [state.sort, state.filters, state.quickFilter]);
+    }, [state.sort, state.filters, state.searchTerms]);
 
     // The inspector follows its cell: closed when the row or column is gone.
     // The Paper cell opens the row's paper view.
@@ -636,7 +637,7 @@ export function ResearchTable({
     const sortItems = buildSortMenu(menuTable, state);
     const sortColumn = state.sort ? menuTable.columns.find((column) => column.id === state.sort!.column_id) : undefined;
 
-    return (
+    const surface = (
         <div ref={copyScopeRef} className="rt-copy-scope" onContextMenu={selectionCopy.onContextMenu}>
             <HoverLayerProvider>
                 <section className={`bt-surface rt-surface${className ? ` ${className}` : ""}`}>
@@ -956,6 +957,10 @@ export function ResearchTable({
             {selectionCopy.menu}
         </div>
     );
+
+    // The search's terms are marked wherever the grid, its expansions and the
+    // inspector show a value, as find in chat marks its hits.
+    return <FindQueryProvider query={state.searchTerms}>{surface}</FindQueryProvider>;
 }
 
 /** Whether a key event's target edits text (an input, a textarea, an editable element). */

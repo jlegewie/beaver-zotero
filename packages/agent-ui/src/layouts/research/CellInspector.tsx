@@ -3,6 +3,7 @@ import type { Column, Row, TableSpec } from "@beaver/agent-core/layouts/table";
 import { rowReference } from "@beaver/agent-core/layouts/tableCitations";
 import { ArrowDownIcon, ArrowRightIcon, ArrowUpIcon, CancelIcon, EditIcon, FileIcon, Icon } from "../../icons";
 import type { MenuItem } from "../../primitives/ContextMenu";
+import { FindHighlight } from "../../chat/highlightText";
 import type { TextRenderer } from "../tableView";
 import { selectionWithin } from "../../primitives/HoverLayer";
 import { EvidencePassage, StatusTag } from "./CellTags";
@@ -153,11 +154,13 @@ export function CellInspector({
             </>
         );
     } else {
-        title = paper.title;
+        title = <FindHighlight text={paper.title} />;
         const byline = [reference?.subtitle, year].filter(Boolean).join(" · ");
         subtitle = byline ? (
             <span className="rt-inspector-subtitle">
-                <span className="rt-inspector-subtitle-text">{byline}</span>
+                <span className="rt-inspector-subtitle-text">
+                    <FindHighlight text={byline} />
+                </span>
             </span>
         ) : null;
         body = (
