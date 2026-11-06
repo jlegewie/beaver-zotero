@@ -475,12 +475,12 @@
 .beaver-root .rt-header-actions button.rt-more,
 .beaver-root .rt-header-actions button.bt-fill-main,
 .beaver-root .rt-header-actions button.bt-fill-more {
-    height: 2.2rem;
+    height: 2rem;
     font-size: 1rem;
 }
 
 .beaver-root .rt-header-actions button.rt-more {
-    width: 2.2rem;
+    width: 2rem;
     justify-content: center;
 }
 

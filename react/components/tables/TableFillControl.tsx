@@ -235,6 +235,7 @@ export const TableFillButton = React.forwardRef<TableFillButtonHandle, TableFill
             <div className="bt-fill" ref={wrapRef}>
                 <Button
                     variant="surface"
+                    className="bt-fill-main"
                     icon={stopping ? <Spinner size={12} /> : StopIcon}
                     disabled={stopping}
                     title={timeLeftText(job.seconds_left) ?? undefined}
