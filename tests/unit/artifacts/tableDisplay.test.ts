@@ -13,7 +13,11 @@ const deps = vi.hoisted(() => ({
     removeEvent: vi.fn(),
     notifyUnavailable: vi.fn(),
     notifyFailed: vi.fn(),
+    getPref: vi.fn(),
+    logger: vi.fn(),
 }));
+vi.mock("../../../src/utils/prefs", () => ({ getPref: deps.getPref }));
+vi.mock("@beaver/agent-core/platform/logger", () => ({ logger: deps.logger }));
 vi.mock("../../../react/host/zotero/sourceActions", () => ({
     notifyReferenceUnavailable: deps.notifyUnavailable,
     notifyTableOpenFailed: deps.notifyFailed,
@@ -45,6 +49,7 @@ vi.mock("../../../react/runtime/windowRuntime", () => ({
     }),
 }));
 import {
+    openCreatedTable,
     openStoredTable,
     openStoredTableForUser,
     resolveTableDisplay,
@@ -55,6 +60,7 @@ beforeEach(() => {
     vi.clearAllMocks();
     deps.api.mockReturnValue({ openTable: deps.open });
     deps.open.mockResolvedValue({ ok: true });
+    deps.getPref.mockReturnValue(true);
     deps.lookup.mockResolvedValue({
         deleted: false,
         getField: () => "Renamed in Zotero",
@@ -82,6 +88,64 @@ beforeEach(() => {
         Sync: { Storage: { Local: { getEnabledForLibrary: deps.fileSync } } },
     });
     deps.fileSync.mockReturnValue(false);
+});
+
+describe("opening a newly created table", () => {
+    let origin: Window;
+    beforeEach(() => {
+        origin = { closed: false } as Window;
+    });
+
+    it("selects the table in the originating window by default", async () => {
+        deps.getPref.mockReturnValue(undefined);
+        await openCreatedTable("u-ABCDEFGH", origin, "run-1", "create-1");
+        expect(deps.getPref).toHaveBeenCalledWith("tables.openAfterCreate");
+        expect(deps.open).toHaveBeenCalledExactlyOnceWith(
+            { libraryID: 1, key: "ABCDEFGH" },
+            { window: origin },
+        );
+    });
+
+    it("does not open the table when the preference is disabled", async () => {
+        deps.getPref.mockReturnValue(false);
+        await openCreatedTable("u-ABCDEFGH", origin, "run-1", "create-1");
+        expect(deps.open).not.toHaveBeenCalled();
+    });
+
+    it("does not refocus the table when the tool returns after its fill started", async () => {
+        await openCreatedTable("u-ABCDEFGH", origin, "run-1", "create-1");
+        await openCreatedTable("u-ABCDEFGH", origin, "run-1", "create-1");
+        expect(deps.open).toHaveBeenCalledTimes(1);
+    });
+
+    it("opens only once when the fill snapshot and tool return overlap", async () => {
+        let finish!: (value: { ok: true }) => void;
+        deps.open.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+        const pending = openCreatedTable("u-ABCDEFGH", origin, "run-1", "create-1");
+        await openCreatedTable("u-ABCDEFGH", origin, "run-1", "create-1");
+        expect(deps.open).toHaveBeenCalledTimes(1);
+        finish({ ok: true });
+        await pending;
+    });
+
+    it("opens subsequent creations and allows tool call ids to repeat in a new run", async () => {
+        await openCreatedTable("u-ABCDEFGH", origin, "run-1", "create-1");
+        await openCreatedTable("g6073928-ABCDEFGH", origin, "run-1", "create-2");
+        await openCreatedTable("u-ABCDEFGH", origin, "run-2", "create-1");
+        expect(deps.open).toHaveBeenCalledTimes(3);
+    });
+
+    it.each([
+        () => deps.open.mockResolvedValueOnce({ error: "Missing file" }),
+        () => deps.open.mockRejectedValueOnce(new Error("Provider unavailable")),
+    ])("allows the tool return to retry a failed open without interrupting chat", async (fail) => {
+        fail();
+        await openCreatedTable("u-ABCDEFGH", origin, "run-1", "create-1");
+        await openCreatedTable("u-ABCDEFGH", origin, "run-1", "create-1");
+        expect(deps.open).toHaveBeenCalledTimes(2);
+        expect(deps.logger).toHaveBeenCalledTimes(1);
+        expect(deps.notifyFailed).not.toHaveBeenCalled();
+    });
 });
 
 describe("current table display and snapshot navigation", () => {

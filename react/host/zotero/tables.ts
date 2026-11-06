@@ -1,5 +1,7 @@
 import type { TableDisplay } from "@beaver/agent-ui/host/types";
 import type { TableFillViewRequest } from "@beaver/agent-core/protocol/tableFillProtocol";
+import { logger } from "@beaver/agent-core/platform/logger";
+import { getPref } from "../../../src/utils/prefs";
 import {
     parseItemReference,
     resolveLibraryRef,
@@ -44,6 +46,33 @@ export async function openStoredTable(
         ...(options.focus ? { focus: options.focus } : {}),
         ...(options.request ? { request: options.request } : {}),
     });
+}
+
+const creationOpens = new WeakMap<Window, { runId: string; toolCallIds: Set<string> }>();
+
+/** Open once per creation, whether the fill starts or the tool returns first. */
+export async function openCreatedTable(
+    key: string,
+    origin: Window,
+    runId: string,
+    toolCallId: string,
+): Promise<void> {
+    if (getPref("tables.openAfterCreate") === false) return;
+    let opens = creationOpens.get(origin);
+    if (opens?.runId !== runId) {
+        opens = { runId, toolCallIds: new Set() };
+        creationOpens.set(origin, opens);
+    }
+    if (opens.toolCallIds.has(toolCallId)) return;
+    // Claim before awaiting: fill snapshots and tool returns can arrive together.
+    opens.toolCallIds.add(toolCallId);
+    try {
+        const outcome = await openStoredTable(key, origin);
+        if ("error" in outcome) throw new Error(outcome.error);
+    } catch (error) {
+        opens.toolCallIds.delete(toolCallId);
+        logger(`Opening the new table failed: ${String(error)}`, 1);
+    }
 }
 
 /**
