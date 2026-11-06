@@ -152,20 +152,52 @@ describe("update_column", () => {
         expect(result.reports[0]).toMatchObject({ cleared: 1, user_cleared: 1 });
         expect(design(result.spec).options!.map((o) => o.label)).toEqual(["RCT", "Observational"]);
     });
-    it("marks surviving answers stale when a defined option is removed, not an undefined one", () => {
+    it("keeps surviving answers fresh when an option is removed, defined or not, but still moves the revision", () => {
         let spec = correct(table(), "r2", "Other");
         const removed = apply(spec, { op: "update_column", column: "design", options: [{ label: "Observational" }, { label: "Other" }] });
         expect(cell(removed.spec, "r1")).toBeUndefined();
-        expect(cell(removed.spec, "r3")).toMatchObject({ stale: true });
-        expect(cell(removed.spec, "r2")).toMatchObject({ provenance: "user", stale: true, replaced: { stale: true } });
+        expect(cell(removed.spec, "r3").stale).toBeUndefined();
+        expect(cell(removed.spec, "r2")).toMatchObject({ provenance: "user" });
+        expect(cell(removed.spec, "r2").stale).toBeUndefined();
+        expect(removed.reports[0]).toEqual({ cleared: 1 });
+        // A fill planned against the old column no longer lands.
+        expect(design(removed.spec).revision).toBe(1);
         spec = table();
         const plain = apply(spec, { op: "update_column", column: "design", options: [{ label: "RCT" }, { label: "Observational" }] });
         expect(cell(plain.spec, "r1").stale).toBeUndefined();
     });
-    it("adds an option without a definition with no staleness", () => {
+    it("keeps answers fresh through a rename that sends its definition again, and a rename onto a removed label", () => {
+        const resent = apply(table(), { op: "update_column", column: "design", options: [{ label: "Randomized", previous_label: "RCT", description: "Random assignment." }, { label: "Observational" }, { label: "Other" }] });
+        expect(resent.spec.rows.every((row) => !row.cells.design.stale)).toBe(true);
+        expect(resent.reports[0]).toEqual({ relabelled: 1 });
+        // RCT takes over the label "Other", whose own option is removed.
+        const onto = apply(table(), { op: "update_column", column: "design", options: [{ label: "Other", previous_label: "RCT" }, { label: "Observational" }] });
+        expect(cell(onto.spec, "r1")).toMatchObject({ value: { label: "Other" } });
+        expect(cell(onto.spec, "r1").stale).toBeUndefined();
+        expect(cell(onto.spec, "r3")).toBeUndefined();
+        expect(design(onto.spec).options![0]).toMatchObject({ label: "Other", description: "Random assignment." });
+    });
+    it("marks the answers stale for a changed definition or a new defined option, alongside a removal or rename", () => {
+        const reworded = apply(table(), { op: "update_column", column: "design", options: [{ label: "Randomized", previous_label: "RCT", description: "Assigned by lottery." }, { label: "Observational" }] });
+        expect(reworded.reports[0]).toMatchObject({ stale: 2, cleared: 1, relabelled: 1 });
+        const added = apply(table(), { op: "update_column", column: "design", options: [{ label: "RCT" }, { label: "Observational" }, { label: "Review", description: "Summarizes other studies." }] });
+        expect(added.reports[0]).toMatchObject({ stale: 2, cleared: 1 });
+    });
+    it("lets refill mark the answers stale through a removal", () => {
+        const result = apply(table(), { op: "update_column", column: "design", options: [{ label: "Observational" }, { label: "Other" }], existing_answers: "refill" });
+        expect(result.reports[0]).toMatchObject({ stale: 2, cleared: 1 });
+    });
+    it("marks the answers stale when an option is added, with or without a definition", () => {
         const result = apply(table(), { op: "update_column", column: "design", options: [{ label: "RCT" }, { label: "Observational" }, { label: "Other" }, { label: "Case study" }] });
-        expect(result.spec.rows.every((row) => !row.cells.design.stale)).toBe(true);
+        expect(result.spec.rows.every((row) => row.cells.design.stale)).toBe(true);
+        expect(result.reports[0]).toEqual({ question_changed: true, stale: 3 });
         expect(design(result.spec).options![3].color).toBeDefined();
+        const kept = apply(table(), { op: "update_column", column: "design", options: [{ label: "RCT" }, { label: "Observational" }, { label: "Other" }, { label: "Case study" }], existing_answers: "keep" });
+        expect(kept.spec.rows.every((row) => !row.cells.design.stale)).toBe(true);
+    });
+    it("does not read a re-spelling, a reorder or a recolour as an added option", () => {
+        const result = apply(table(), { op: "update_column", column: "design", options: [{ label: "other", color: "red" }, { label: "rct" }, { label: "Observational" }] });
+        expect(result.spec.rows.every((row) => !row.cells.design.stale)).toBe(true);
     });
     it("marks user cells and their replaced answers stale when the question changes", () => {
         let spec = correct(table(), "r1", "Observational");

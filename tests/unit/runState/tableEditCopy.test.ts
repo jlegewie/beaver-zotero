@@ -23,6 +23,12 @@ describe("the change list of an edit", () => {
             { tone: "add", text: "Refreshed collection “Cash transfers” · 1 new item · 1 removed item left out · 1 no longer in it, kept" },
         ]);
     });
+    it("names the papers a collection held that the same edit removed", () => {
+        const change = { op: "add_source", source: "s3", type: "library", kind: "collection", name: "Labor", library_ref: "u", rows_added: 1, rows_restored: 0, removed_skipped: 2, duplicates: 7, rejected: [] } as const;
+        expect(tableChangeLines([change]).map((line) => line.text)).toEqual([
+            "Added collection “Labor” · 1 new item · 2 removed items left out · 7 already in the table",
+        ]);
+    });
     it("names the user's answers a removed option cleared", () => {
         const change = { op: "update_column", column: "design", header: "Design", fields: ["options"], stale: 0, cleared: 2, user_cleared: 1, relabelled: 0 } as const;
         expect(tableChangeLines([change])).toEqual([

@@ -99,8 +99,9 @@ export interface UpdateColumnOption {
 
 /**
  * Changes a column's declaration. Only the named fields move; an omitted field
- * is left alone. A change to the column's question ({@link questionHash}: its
- * description or an option definition) marks the cells below it stale — see
+ * is left alone. A change to the column's question (its description, an
+ * option's definition, or a new option) marks the cells below it stale;
+ * renaming, re-spelling or removing an option does not — see
  * {@link applyMutations}.
  */
 export interface UpdateColumnMutation {
@@ -122,7 +123,7 @@ export interface UpdateColumnMutation {
     type?: ColumnType;
     /**
      * `refill` marks the column's cells stale whatever changed; `keep` leaves
-     * them fresh whatever changed. Absent, the question hash decides.
+     * them fresh whatever changed. Absent, a new question decides.
      */
     existing_answers?: "keep" | "refill" | null;
 }
@@ -303,7 +304,11 @@ export interface SkippedCell {
  * counts a mutation can move are set.
  */
 export interface MutationReport {
-    /** `update_column` asked a new question (by {@link questionHash}). */
+    /**
+     * `update_column` asked a new question: a new option, or a change by
+     * {@link questionHash} with renamed options mapped back and removed ones
+     * left out.
+     */
     question_changed?: true;
     /** Cells marked out of date. */
     stale?: number;
@@ -989,17 +994,20 @@ function applyOptions(draft: Draft, column: Column, plan: OptionsPlan): void {
 // ---------------------------------------------------------------------------
 
 /**
- * The column as its question read before an options plan, with only the
- * plan's renames applied: a removed option stays, so removing a defined
- * category still changes the question.
+ * The column as its question read before an options plan, seen through the
+ * plan: renamed options carry their new labels and removed ones are dropped.
+ * Comparing the updated column's question with this one leaves out what a
+ * rename or a removal does to the question hash, so neither is a new
+ * question: the answers left were given to the same categories, and the
+ * cells holding a removed one are cleared.
  */
-function renamedColumn(column: Column, plan: OptionsPlan | undefined): Column {
+function plannedColumn(column: Column, plan: OptionsPlan | undefined): Column {
     if (!plan || !column.options) return column;
     return {
         ...column,
-        options: column.options.map((option) => {
+        options: column.options.flatMap((option) => {
             const label = plannedLabel(plan, option.label);
-            return label === null ? option : { ...option, label };
+            return label === null ? [] : [{ ...option, label }];
         }),
     };
 }
@@ -1074,7 +1082,7 @@ function updateColumn(
     }
 
     const before = { ...column };
-    const question = questionHash(renamedColumn(before, options));
+    const question = questionHash(plannedColumn(before, options));
     const vocabulary = optionVocabulary(before);
 
     if (typeChange) {
@@ -1096,9 +1104,11 @@ function updateColumn(
     if (options) applyOptions(draft, column, options);
     else if (mutation.options === null || (typeChange && type !== "select")) delete column.options;
 
-    // A write planned against the column before this change no longer
-    // lands: its type, its question or a label it may write moved.
-    const questionChanged = questionHash(column) !== question;
+    // A new category asks a new question, defined or not: an answer given
+    // before it existed may now belong in it. Each paired option maps one
+    // old label, so more options than mapped labels means one is new.
+    const added = !!options && options.options.length > options.labels.size;
+    const questionChanged = added || questionHash(column) !== question;
     if (questionChanged) draft.report.question_changed = true;
     const refill = mutation.existing_answers === "refill";
     if (
@@ -1114,8 +1124,8 @@ function updateColumn(
     // dropped: the value is still the best thing anyone has until the column
     // is filled again. A user cell is marked too ("the question changed
     // after your edit"), and so is the model answer it replaced; no fill
-    // selects a user cell. A header, colour, re-spelling or rename is not a
-    // new question; `keep` and `refill` override the hash.
+    // selects a user cell. A header, colour, re-spelling, rename or removed
+    // option is not a new question; `keep` and `refill` override the rule.
     const stale = refill || (questionChanged && mutation.existing_answers !== "keep");
     if (stale) {
         for (const row of draft.spec.rows) {

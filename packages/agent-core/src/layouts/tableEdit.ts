@@ -343,8 +343,8 @@ type ColumnChangeField = Extract<TableChange, { op: "update_column" }>["fields"]
 
 /**
  * What an update changed. Apart from a type change, whether the question changed is the engine's
- * answer, the one its staleness follows: renames and re-spellings are not a
- * new question, and removing an option counts only when it had a definition.
+ * answer, the one its staleness follows: renames, re-spellings and removed
+ * options are not a new question.
  */
 function columnFields(before: Column, after: Column, report: MutationReport): ColumnChangeField[] {
     const fields: ColumnChangeField[] = [];
@@ -366,9 +366,11 @@ function columnFields(before: Column, after: Column, report: MutationReport): Co
 /**
  * One `edit_table` call against the table as it stands: all of it or none of
  * it. The order is fixed: title and description; removals (rows, columns,
- * sources); column updates; column additions; source additions; refresh. An
- * id the table does not have refuses the whole call (`unknown_*`), as does an
- * addition over the row cap (`too_large`).
+ * sources); column updates; column additions; source additions; refresh. A
+ * collection, tag or saved search added by the call leaves out the papers its
+ * own `remove_rows` removed (`removed_skipped`); an items source naming one
+ * brings it back. An id the table does not have refuses the whole call
+ * (`unknown_*`), as does an addition over the row cap (`too_large`).
  */
 export function applyEdit(
     spec: TableSpec,
@@ -411,11 +413,18 @@ export function applyEdit(
     }
 
     // Removals: rows, then columns, then sources.
+    // The papers this call removes: a collection, tag or saved search the
+    // same call adds leaves them out rather than bringing them back.
+    const removedHere = new Set<string>();
     if (operations.remove_rows?.length) {
-        const known = new Set(current.rows.map((row) => row.id));
+        const known = new Map(current.rows.map((row) => [row.id, row]));
         const at = operations.remove_rows.findIndex((id) => !known.has(id));
         if (at !== -1)
             return { ok: false, code: "unknown_row", message: `remove_rows[${at}]: row ${operations.remove_rows[at]} does not exist. Read the table again.` };
+        for (const id of operations.remove_rows) {
+            const ref = known.get(id)!.ref;
+            if (ref) removedHere.add(paperKey(ref));
+        }
         const result = step([{ op: "remove_rows", rows: [...new Set(operations.remove_rows)], removed_at: now }], "remove_rows");
         if (failed(result)) return result;
         changes.push({ op: "remove_rows", rows: result[0].rows_removed ?? 0 });
@@ -481,7 +490,7 @@ export function applyEdit(
     // other new paper's (a DOI and PMID in one source join a PMID-only copy in
     // another). A paper counts as added by the first source that found it,
     // as a duplicate when it joins a stored row or an earlier source's paper.
-    const additions: { entry: SourceEntry; source: ResolvedSource }[] = [];
+    const additions: { entry: SourceEntry; source: ResolvedSource; papers: ResolvedPaper[] }[] = [];
     const scopes = new Set(
         (current.sources ?? []).flatMap((s) => (s.scope ? [`${s.scope.kind}\u0000${s.scope.library_ref}\u0000${s.scope.key ?? s.scope.tag}`] : [])),
     );
@@ -510,14 +519,20 @@ export function applyEdit(
             scopes.add(key);
             entry = { ...source.entry, id: `s${number++}` };
         }
-        additions.push({ entry, source });
+        // An items source names its papers, so it brings back even a paper
+        // this call removed; a library source leaves those out.
+        const papers =
+            draft.type === "items"
+                ? source.papers
+                : source.papers.filter((paper) => !paper.row.ref || !removedHere.has(paperKey(paper.row.ref)));
+        additions.push({ entry, source, papers });
     }
     if (additions.length) {
         const removed = removedKeys();
         const stored = new Set(current.rows.map((row) => row.id));
         const merged = mergeRows(
             current.rows,
-            additions.flatMap(({ entry, source }) => source.papers.map((paper) => withOrigin(paper, entry.id, today))),
+            additions.flatMap(({ entry, papers }) => papers.map((paper) => withOrigin(paper, entry.id, today))),
         );
         const result = step(
             [
@@ -531,11 +546,11 @@ export function applyEdit(
         const seen = new Set<string>();
         const newRows = new Map(merged.rows.filter((row) => !stored.has(row.id)).map((row) => [row.id, row]));
         let at = 0;
-        for (const { entry, source } of additions) {
+        for (const { entry, source, papers } of additions) {
             let added = 0;
             let restored = 0;
             let duplicates = 0;
-            for (let k = 0; k < source.papers.length; k++, at++) {
+            for (let k = 0; k < papers.length; k++, at++) {
                 const landed = merged.landed[at];
                 if (stored.has(landed) || seen.has(landed)) {
                     duplicates += 1;
@@ -553,6 +568,7 @@ export function applyEdit(
                 ...sourceName(entry),
                 rows_added: added,
                 rows_restored: restored,
+                ...(papers.length < source.papers.length ? { removed_skipped: source.papers.length - papers.length } : {}),
                 duplicates,
                 rejected: source.rejected,
             });

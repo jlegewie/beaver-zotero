@@ -75,6 +75,7 @@ export function tableChangeLines(changes: readonly TableChange[]): TableChangeLi
                         ? `Added ${plural(change.rows_added + change.rows_restored, "item")}`
                         : `Added ${sourceLabel(change)} · ${plural(change.rows_added, "new item")}`,
                     change.rows_restored ? `${change.rows_restored} restored` : null,
+                    change.removed_skipped ? `${plural(change.removed_skipped, "removed item")} left out` : null,
                     change.duplicates ? `${change.duplicates} already in the table` : null,
                     change.rejected.length ? `${change.rejected.length} could not be added` : null,
                 ].filter(Boolean);

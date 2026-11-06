@@ -263,9 +263,6 @@
                 },
                 {
                     "label": "Observational"
-                },
-                {
-                    "label": "Case study"
                 }
             ]
         }
@@ -331,10 +328,6 @@
                     {
                         "label": "Observational",
                         "color": "yellow"
-                    },
-                    {
-                        "label": "Case study",
-                        "color": "orange"
                     }
                 ]
             }

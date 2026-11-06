@@ -158,6 +158,11 @@ export type TableChange =
           rows_added: number;
           /** Removed papers this addition brought back. */
           rows_restored: number;
+          /**
+           * Papers a collection, tag or saved search holds that the same
+           * edit's `remove_rows` removed, left out. Absent when none.
+           */
+          removed_skipped?: number;
           /** Papers that were already rows (or found twice), merged. */
           duplicates: number;
           rejected: TableRejectedItem[];
