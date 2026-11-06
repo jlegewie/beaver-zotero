@@ -95,6 +95,7 @@ const commands = {
 const confirm = vi.fn(() => true);
 const onEdit = vi.fn();
 const onRowsAdded = vi.fn();
+const onColumnsAdded = vi.fn();
 
 function Harness({ table, readOnly, fillRunning }: { table: TableSpec; readOnly?: boolean; fillRunning?: boolean }) {
     const edits = useTableEditing({
@@ -108,6 +109,7 @@ function Harness({ table, readOnly, fillRunning }: { table: TableSpec; readOnly?
         newBySource: new Map([['s2', 3]]),
         onEdit,
         onRowsAdded,
+        onColumnsAdded,
     });
     return h(
         'div',
@@ -174,6 +176,7 @@ beforeEach(() => {
     confirm.mockReturnValue(true);
     onEdit.mockReset();
     onRowsAdded.mockReset();
+    onColumnsAdded.mockReset();
     (globalThis as any).Zotero = {
         __beaverTables: { local: { commands: () => commands } },
         Libraries: { get: () => ({ name: 'My Library' }) },
@@ -398,7 +401,7 @@ describe('the column editor', () => {
     it('adds a column from (+), and keeps the editor open with the refusal', async () => {
         commands.edit.mockResolvedValue({ ok: false, code: 'invalid_edit', message: 'add_columns[0]: no room' });
         mount();
-        await click($('button[aria-label="Add column"]'));
+        await click($('th.rt-th-add button[aria-label="Add column"]'));
         type($<HTMLInputElement>('input[aria-label="Column name"]')!, 'Sample');
         type($<HTMLTextAreaElement>('textarea[aria-label="Column question"]')!, 'How many?');
         await click(Array.from(container!.querySelectorAll('button')).find((b) => b.textContent === 'Add column' && b.closest('.rt-dialog')));
@@ -408,6 +411,36 @@ describe('the column editor', () => {
             expect.objectContaining({ seal: false }),
         );
         expect($('.rt-dialog-error')?.textContent).toBe('add_columns[0]: no room');
+    });
+
+    it('adds a column from the toolbar\'s + Column and hands the new column to be shown', async () => {
+        const grown = spec();
+        grown.columns = [...grown.columns, { id: 'sample', header: 'Sample', type: 'text', description: 'How many?' }];
+        commands.edit.mockResolvedValue({ ...committed([{ op: 'add_column', column: 'sample' }]), spec: grown });
+        mount();
+        await click($('.rt-toolbar .rt-add-column-action'));
+        type($<HTMLInputElement>('input[aria-label="Column name"]')!, 'Sample');
+        type($<HTMLTextAreaElement>('textarea[aria-label="Column question"]')!, 'How many?');
+        await click(Array.from(container!.querySelectorAll('button')).find((b) => b.textContent === 'Add column' && b.closest('.rt-dialog')));
+        expect(commands.edit).toHaveBeenCalledWith(
+            ref,
+            { add_columns: [{ header: 'Sample', type: 'text', description: 'How many?' }] },
+            expect.objectContaining({ seal: false }),
+        );
+        expect(onColumnsAdded).toHaveBeenCalledWith(['sample']);
+        expect(onRowsAdded).not.toHaveBeenCalled();
+        expect($('[aria-label="Edit column"]')).toBeNull();
+    });
+
+    it('hands nothing to be shown for an edit to an existing column', async () => {
+        commands.edit.mockResolvedValue(committed([]));
+        mount();
+        await openColumnMenu('Effect');
+        await click(menuItem('Edit column…'));
+        type($<HTMLInputElement>('input[aria-label="Column name"]')!, 'Effect size');
+        await click(Array.from(container!.querySelectorAll('button')).find((b) => b.textContent === 'Save'));
+        expect(commands.edit).toHaveBeenCalled();
+        expect(onColumnsAdded).not.toHaveBeenCalled();
     });
 });
 
@@ -460,7 +493,8 @@ describe('a read-only library', () => {
     it('disables every edit control with the reason and writes nothing', async () => {
         mount({ readOnly: true });
         expect($<HTMLButtonElement>('button[aria-label="Rename table"]')!.disabled).toBe(true);
-        expect($<HTMLButtonElement>('button[aria-label="Add column"]')!.disabled).toBe(true);
+        expect($<HTMLButtonElement>('th.rt-th-add button[aria-label="Add column"]')!.disabled).toBe(true);
+        expect($<HTMLButtonElement>('.rt-add-column-action')!.disabled).toBe(true);
         expect($<HTMLButtonElement>('.rt-add-papers')!.disabled).toBe(true);
         await click($('.rt-sources-button'));
         expect($<HTMLButtonElement>('button[aria-label="Remove source Trials"]')!.disabled).toBe(true);

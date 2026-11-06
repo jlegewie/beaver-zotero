@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { isColumnSortable, toPlainText, type Column, type Row, type TableSort, type TableSpec } from "@beaver/agent-core/layouts/table";
 import { cellsToFill } from "@beaver/agent-core/layouts/tableFill";
+import { addColumnBlockedReason } from "@beaver/agent-core/layouts/tableMutations";
 import type { TableFillCells } from "@beaver/agent-core/protocol/tableFillProtocol";
 import {
     ArrowDownIcon,
@@ -21,6 +22,7 @@ import {
     ListBulletIcon,
     MoreHorizontalIcon,
     PlayIcon,
+    PlusSignIcon,
     RepeatIcon,
     SearchIcon,
     TableIcon,
@@ -69,8 +71,9 @@ export interface ResearchTableEditing {
     disabledReason?: string;
     onTitle?(title: string): void;
     onDescription?(description: string): void;
-    /** The column menu's Edit column…; also the (+) after the last column. */
+    /** The column menu's Edit column…. */
     onEditColumn?(column: Column): void;
+    /** The toolbar's + Column and the (+) after the last column. */
     onAddColumn?(): void;
     onChangeType?(column: Column, type: ResearchColumnType): void;
     onRemoveColumn?(column: Column): void;
@@ -120,11 +123,12 @@ export interface ResearchTableFocus {
 }
 
 /**
- * Rows the user just added, to bring into view once the table has them.
- * `token` changes with each request.
+ * Rows or columns the user just added, to bring into view once the table has
+ * them. `token` changes with each request.
  */
 export interface ResearchTableReveal {
-    rowIds: readonly string[];
+    rowIds?: readonly string[];
+    columnIds?: readonly string[];
     token: number | string;
 }
 
@@ -174,8 +178,9 @@ export interface ResearchTableProps {
     /** Brings a row (and a cell, in the inspector) into view. */
     focus?: ResearchTableFocus | null;
     /**
-     * Rows the user just added: scrolled to and briefly highlighted. Rows the
-     * search or a filter hides are offered behind a Show button instead.
+     * Rows or columns the user just added: scrolled to and briefly
+     * highlighted. Rows the search or a filter hides are offered behind a
+     * Show button instead.
      */
     reveal?: ResearchTableReveal | null;
     /** The structural edit controls; absent, the table is display only. */
@@ -187,7 +192,7 @@ export interface ResearchTableProps {
 
 const NO_ROWS: ReadonlySet<string> = new Set();
 
-/** How long rows the user just added stay highlighted. */
+/** How long rows and columns the user just added stay highlighted. */
 const ADDED_HIGHLIGHT_MS = 2000;
 
 /** The side panel: a selected cell (a question, or the Paper cell) or the version history. */
@@ -257,6 +262,8 @@ export function ResearchTable({
     const [sourcesOpen, setSourcesOpen] = useState(false);
     const [editingCell, setEditingCell] = useState<CellAddress | null>(null);
     const editDisabled = editing?.disabledReason;
+    // Both Add column controls: the edit's own reason, else the table's limits.
+    const addColumnDisabled = editDisabled ?? addColumnBlockedReason(table);
     const scrollRef = useRef<HTMLDivElement>(null);
     // Holds the surface and its hover layers, which the provider draws beside it.
     const copyScopeRef = useRef<HTMLDivElement>(null);
@@ -266,6 +273,7 @@ export function ResearchTable({
     // Rows just added: those highlighted now, and those the view hides.
     const [addedRows, setAddedRows] = useState<ReadonlySet<string>>(NO_ROWS);
     const [hiddenAdded, setHiddenAdded] = useState<ReadonlySet<string>>(NO_ROWS);
+    const [addedColumns, setAddedColumns] = useState<ReadonlySet<string>>(NO_ROWS);
 
     // A change of sort, filters or search is the user's: the first render
     // only sets them up, and a focus request's reveal forgets the last view.
@@ -530,15 +538,25 @@ export function ResearchTable({
         }
         setHiddenAdded(new Set(table.rows.filter((row) => ids.has(row.id) && !shownIds.has(row.id)).map((row) => row.id)));
     };
+    // Columns the user just added are shown (should the view hide one) and
+    // highlighted; the grid then scrolls sideways to the first.
+    const showColumns = (ids: ReadonlySet<string>) => {
+        ids.forEach((id) => state.hiddenColumns.has(id) && state.toggleColumn(id));
+        setAddedColumns(ids);
+    };
     const lastReveal = useRef<ResearchTableReveal["token"] | null>(null);
     useLayoutEffect(() => {
         if (!reveal || reveal.token === lastReveal.current) return;
-        const ids = new Set(reveal.rowIds);
-        // The edit's result can arrive before the re-read that has its rows.
-        if (!table.rows.some((row) => ids.has(row.id))) return;
+        const rowIds = new Set(reveal.rowIds);
+        const columnIds = new Set(reveal.columnIds);
+        // The edit's result can arrive before the re-read that has its rows
+        // or columns.
+        if (rowIds.size && !table.rows.some((row) => rowIds.has(row.id))) return;
+        if (columnIds.size && !columns.questions.some((column) => columnIds.has(column.id))) return;
         lastReveal.current = reveal.token;
-        showRows(ids);
-    }, [reveal, table, state.rows]);
+        if (rowIds.size) showRows(rowIds);
+        if (columnIds.size) showColumns(columnIds);
+    }, [reveal, table, state.rows, columns.questions]);
     // Show: clears the search and filters, then reveals the rows in that view.
     const [showingAdded, setShowingAdded] = useState(false);
     useLayoutEffect(() => {
@@ -551,6 +569,13 @@ export function ResearchTable({
         const timer = setTimeout(() => setAddedRows(NO_ROWS), ADDED_HIGHLIGHT_MS);
         return () => clearTimeout(timer);
     }, [addedRows]);
+    useLayoutEffect(() => {
+        if (!addedColumns.size) return;
+        const first = columns.questions.find((column) => addedColumns.has(column.id));
+        if (first) scrollColumnIntoView(scrollRef.current, first.id, pinned);
+        const timer = setTimeout(() => setAddedColumns(NO_ROWS), ADDED_HIGHLIGHT_MS);
+        return () => clearTimeout(timer);
+    }, [addedColumns]);
 
     // The inspector's controls for the cell: the Edit pencil beside the
     // answer, and on the user's own answer Reset to Beaver's answer under it;
@@ -767,6 +792,21 @@ export function ResearchTable({
                                     </span>
                                 ) : null}
                                 {editing?.toolbarActions}
+                                {editing?.onAddColumn ? (
+                                    // A disabled button shows no tooltip of its own.
+                                    <span title={addColumnDisabled}>
+                                        <button
+                                            type="button"
+                                            className="rt-add-column-action"
+                                            aria-label="Add column"
+                                            disabled={!!addColumnDisabled}
+                                            onClick={editing.onAddColumn}
+                                        >
+                                            <Icon icon={PlusSignIcon} size={13} />
+                                            <span>Column</span>
+                                        </button>
+                                    </span>
+                                ) : null}
                             </div>
                         )}
                         <FilterChips table={menuTable} state={state} />
@@ -881,7 +921,7 @@ export function ResearchTable({
                                     rowMenuItems={rowMenu}
                                     columnMenuItems={columnMenu}
                                     onAddColumn={editing?.onAddColumn}
-                                    editDisabledReason={editDisabled}
+                                    addColumnDisabledReason={addColumnDisabled}
                                     onEditCell={cellEditing ? openEditor : undefined}
                                     cellEditDisabledReason={cellEditing?.disabledReason}
                                     onCopyCell={onCopy}
@@ -908,6 +948,7 @@ export function ResearchTable({
                                     }
                                     fills={fills}
                                     addedRows={addedRows}
+                                    addedColumns={addedColumns}
                                     virtualize={virtualize}
                                     emptyText="No items yet"
                                     filteredEmptyText="No rows match the search or filters"
@@ -1032,6 +1073,23 @@ function sourceNames(table: TableSpec): string | undefined {
             : (source.scope?.name ?? source.scope?.tag ?? source.type),
     );
     return names.length ? names.join("\n") : undefined;
+}
+
+/**
+ * Scrolls a column sideways into the grid's viewport, clear of the pinned
+ * rail and Paper column, leaving the vertical position as it is. A column
+ * wider than the room shows its start.
+ */
+function scrollColumnIntoView(scroller: HTMLElement | null, columnId: string, pinned: boolean): void {
+    const header = scroller?.querySelector<HTMLElement>(`th[data-column-id="${columnId.replace(/["\\]/g, "\\$&")}"]`);
+    if (!scroller || !header) return;
+    const view = scroller.getBoundingClientRect();
+    const column = header.getBoundingClientRect();
+    const paper = pinned ? scroller.querySelector<HTMLElement>(".rt-th-paper") : null;
+    const start = paper ? paper.getBoundingClientRect().right : view.left;
+    const end = view.left + scroller.clientWidth;
+    if (column.left < start) scroller.scrollLeft -= start - column.left;
+    else if (column.right > end) scroller.scrollLeft += Math.min(column.right - end, column.left - start);
 }
 
 /**

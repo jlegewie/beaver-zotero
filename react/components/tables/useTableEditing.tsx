@@ -12,6 +12,7 @@ import { getTablesApi } from '../../../src/services/artifacts/tablesApi';
 import type { TableRef } from '../../../src/services/artifacts/tableItemIdentity';
 import type { TableUndoTarget } from '../../../src/services/artifacts/tableStore';
 import type { TableUserEditResult } from '../../../src/services/artifacts/tableUserEdits';
+import type { TableChange } from '@beaver/agent-core/protocol/tableEditProtocol';
 import { tableActionErrorMessage } from '../../../src/ui/tableDocumentActions';
 import { TableColumnEditor, type ColumnEditorSave } from './TableColumnEditor';
 import { TableDocumentChooser, type RowDocumentChoice } from './TableDocumentChooser';
@@ -58,7 +59,7 @@ function newSessionId(): string {
 
 /**
  * The table tab's structural edits: the controls `ResearchTable` offers
- * (title and description, the column menu and editor, (+), the sources
+ * (title and description, the column menu and editor, + Column and (+), the sources
  * popover, + Items, the new-papers notice's Add, Remove from table) and
  * what they write.
  *
@@ -80,6 +81,7 @@ export function useTableEditing({
     newBySource,
     onEdit,
     onRowsAdded,
+    onColumnsAdded,
 }: {
     tableRef: TableRef;
     spec: TableSpec;
@@ -94,6 +96,8 @@ export function useTableEditing({
     onEdit?: () => void;
     /** Rows an addition of the user's put in the table, in the table's order. */
     onRowsAdded?: (rowIds: string[]) => void;
+    /** Columns an addition of the user's put in the table, in the table's order. */
+    onColumnsAdded?: (columnIds: string[]) => void;
 }) {
     const session = useRef(newSessionId()).current;
     const [toast, setToast] = useState<TableEditToast | null>(null);
@@ -108,6 +112,8 @@ export function useTableEditing({
     onEditRef.current = onEdit;
     const onRowsAddedRef = useRef(onRowsAdded);
     onRowsAddedRef.current = onRowsAdded;
+    const onColumnsAddedRef = useRef(onColumnsAdded);
+    onColumnsAddedRef.current = onColumnsAdded;
 
     const commands = useCallback(() => {
         const api = getTablesApi();
@@ -133,7 +139,8 @@ export function useTableEditing({
     /**
      * Writes one edit. A destructive edit that committed shows the Undo toast;
      * an addition shows what it added and, with `reveal`, hands its new rows
-     * to `onRowsAdded`. Returns the refusal's message, if any.
+     * to `onRowsAdded` and its new columns to `onColumnsAdded`. Returns the
+     * refusal's message, if any.
      */
     const run = useCallback(
         async (
@@ -169,8 +176,11 @@ export function useTableEditing({
                 setToast({ text: editToastText(result.changes), undo: { version: result.version, sha256: result.sha256 } });
             else if (options.report && result.changes.length) setToast({ text: editToastText(result.changes) });
             if (before && result.committed) {
-                const added = result.spec.rows.filter((row) => !before.has(row.id)).map((row) => row.id);
-                if (added.length) onRowsAddedRef.current?.(added);
+                const rows = result.spec.rows.filter((row) => !before.has(row.id)).map((row) => row.id);
+                if (rows.length) onRowsAddedRef.current?.(rows);
+                // Unlike rows, the change list names each added column.
+                const columns = result.changes.flatMap((change: TableChange) => (change.op === 'add_column' ? [change.column] : []));
+                if (columns.length) onColumnsAddedRef.current?.(columns);
             }
             return null;
         },
@@ -339,6 +349,7 @@ export function useTableEditing({
             setSaving(true);
             const refused = await run(operations, {
                 destructive,
+                reveal: !column,
                 change: column ? `Changed column “${column.header}”` : `Added column “${draft.column.header.trim()}”`,
             });
             setSaving(false);
