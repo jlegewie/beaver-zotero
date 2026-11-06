@@ -44,7 +44,16 @@ export default (env, argv) => {
             alias: {
                 '@beaver/agent-core': path.resolve(__dirname, 'packages', 'agent-core', 'src'),
                 '@beaver/agent-ui': path.resolve(__dirname, 'packages', 'agent-ui', 'src'),
-                '@beaver/agent-export': path.resolve(__dirname, 'packages', 'agent-export', 'src')
+                '@beaver/agent-export': path.resolve(__dirname, 'packages', 'agent-export', 'src'),
+                // The package's `browser` build decodes `&rsquo;` and other
+                // named entities by assigning them to `innerHTML`. Zotero's
+                // windows are XHTML documents, whose XML parser throws on any
+                // entity but the five XML built-ins, so Markdown containing
+                // `&nbsp;` would throw during render. The default build looks
+                // entities up in a table instead.
+                'decode-named-character-reference$': path.resolve(
+                    __dirname, 'node_modules', 'decode-named-character-reference', 'index.js'
+                )
             },
         },
         plugins: [
