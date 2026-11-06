@@ -472,6 +472,33 @@
     gap: 0.6rem;
 }
 
+.beaver-root .rt-header-actions button.rt-more,
+.beaver-root .rt-header-actions button.bt-fill-main,
+.beaver-root .rt-header-actions button.bt-fill-more {
+    height: 2.2rem;
+    font-size: 1.1rem;
+}
+
+.beaver-root .rt-header-actions button.rt-more {
+    width: 2.2rem;
+    justify-content: center;
+}
+
+.beaver-root .rt-header-actions button.rt-more svg,
+.beaver-root .rt-header-actions button.bt-fill-main svg,
+.beaver-root .rt-header-actions button.bt-fill-more svg {
+    width: 1.1em;
+    height: 1.1em;
+}
+
+.beaver-root .rt-header-actions button.bt-fill-main {
+    padding-inline: 0.8rem;
+}
+
+.beaver-root .rt-header-actions button.bt-fill-more {
+    padding-inline: 0.5rem;
+}
+
 /* Toolbar ------------------------------------------------------------------ */
 
 .beaver-root .rt-toolbar {
