@@ -302,20 +302,25 @@ export function ResearchTable({
     // The rail and Paper column are pinned only while the grid leaves at least
     // as much room beside them for answers; a narrow grid (a small window, the
     // inspector open) scrolls them away like any other column.
+    // The sticky header covers the grid's top, so its height is the scroller's
+    // scroll padding: a row or cell scrolled into view stops below it.
     const [pinned, setPinned] = useState(false);
     useLayoutEffect(() => {
         const scroller = scrollRef.current;
         const Observer = scroller?.ownerDocument.defaultView?.ResizeObserver;
         if (!scroller || !Observer) return;
+        const head = scroller.querySelector<HTMLElement>("thead");
         const update = () => {
             const width = ["rt-th-rail", "rt-th-paper"].reduce(
                 (sum, name) => sum + (scroller.querySelector<HTMLElement>(`.${name}`)?.offsetWidth ?? 0),
                 0,
             );
             setPinned(width > 0 && scroller.clientWidth >= 2 * width);
+            scroller.style.scrollPaddingTop = `${head?.offsetHeight ?? 0}px`;
         };
         const observer = new Observer(update);
         observer.observe(scroller);
+        if (head) observer.observe(head);
         update();
         return () => observer.disconnect();
     }, []);
