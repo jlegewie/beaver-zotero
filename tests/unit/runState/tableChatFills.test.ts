@@ -56,18 +56,27 @@ describe('chat fills', () => {
         let fills = recordChatFill(empty, snapshot({ job_id: 'old', state: 'done', started_at: 1 }));
         fills = recordChatFill(fills, snapshot({ job_id: 'new', started_at: 2 }));
         fills = recordChatFill(fills, snapshot({ job_id: 'other', thread: 'thread-2', started_at: 3 }));
-        expect(panelFill(fills, 'thread-1')?.snapshot.job_id).toBe('new');
-        expect(panelFill(fills, 'thread-2')?.snapshot.job_id).toBe('other');
-        expect(panelFill(fills, 'thread-3')).toBeNull();
-        expect(panelFill(fills, null)).toBeNull();
+        expect(panelFill(fills, 'thread-1', 'run-1')?.snapshot.job_id).toBe('new');
+        expect(panelFill(fills, 'thread-2', 'run-1')?.snapshot.job_id).toBe('other');
+        expect(panelFill(fills, 'thread-3', 'run-1')).toBeNull();
+        expect(panelFill(fills, null, 'run-1')).toBeNull();
+    });
+
+    it('shows only the fills of the thread\'s active run', () => {
+        let fills = recordChatFill(empty, snapshot({ job_id: 'earlier', run: 'run-1', started_at: 1 }));
+        fills = recordChatFill(fills, snapshot({ job_id: 'current', run: 'run-2', started_at: 2, state: 'done' }));
+        // The earlier run's fill still runs, but its run is over: its answer's receipt shows it.
+        expect(panelFill(fills, 'thread-1', 'run-2')?.snapshot.job_id).toBe('current');
+        expect(panelFill(fills, 'thread-1', 'run-1')?.snapshot.job_id).toBe('earlier');
+        expect(panelFill(fills, 'thread-1', null)).toBeNull();
     });
 
     it('turns into the result line when the fill ends, until dismissed', () => {
         let fills = recordChatFill(empty, snapshot({ state: 'done', rows_done: 10 }));
-        expect(panelFill(fills, 'thread-1')?.snapshot.state).toBe('done');
+        expect(panelFill(fills, 'thread-1', 'run-1')?.snapshot.state).toBe('done');
         fills = new Map(fills);
         fills.set('job-1', { ...fills.get('job-1')!, dismissed: true });
-        expect(panelFill(fills, 'thread-1')).toBeNull();
+        expect(panelFill(fills, 'thread-1', 'run-1')).toBeNull();
         // A later snapshot of the same job keeps it dismissed.
         expect(recordChatFill(fills, snapshot({ state: 'done', rows_done: 10, credits_charged: 2 })).get('job-1')?.dismissed).toBe(true);
     });

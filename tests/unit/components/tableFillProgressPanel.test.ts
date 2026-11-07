@@ -2,9 +2,9 @@
 
 /**
  * The chat's fill progress panel: shown only in the thread whose run started
- * the fill; the table and its actions on line one, what is happening on line
- * two; the result with its follow-ups (failed rows, adding credits) until
- * dismissed.
+ * the fill, while that run lasts; the table and its actions on line one, what
+ * is happening on line two; the result with its follow-ups (failed rows,
+ * adding credits) until dismissed or the run ends.
  */
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -22,7 +22,7 @@ const openPreferences = vi.fn();
 vi.mock('../../../react/ui/openPreferencesWindow', () => ({ openPreferencesWindow: (...args: unknown[]) => openPreferences(...args) }));
 
 import { setHost } from '@beaver/agent-ui/host';
-import { currentThreadIdAtom } from '@beaver/agent-core/run-state/atoms';
+import { activeRunAtom, currentThreadIdAtom } from '@beaver/agent-core/run-state/atoms';
 import { chatFillsAtom, recordChatFillAtom } from '@beaver/agent-core/run-state/tableChatFills';
 import TableFillProgressPanel from '../../../react/components/input/TableFillProgressPanel';
 
@@ -51,8 +51,10 @@ let container: HTMLDivElement;
 let store: ReturnType<typeof createStore>;
 const stop = vi.fn();
 
-function render(threadId: string) {
+/** Renders the panel in `threadId`, with `runId` as its active run (null: no run is active). */
+function render(threadId: string, runId: string | null = 'run-1') {
     store.set(currentThreadIdAtom, threadId);
+    store.set(activeRunAtom, runId ? ({ id: runId, status: 'in_progress', model_messages: [] } as never) : null);
     act(() => {
         root = createRoot(container);
         root.render(React.createElement(Provider, { store }, React.createElement(TableFillProgressPanel)));
@@ -159,6 +161,20 @@ describe('the fill progress panel', () => {
     it('shows nothing in another thread', () => {
         store.set(recordChatFillAtom, snapshot());
         render('thread-2');
+        expect(container.textContent).toBe('');
+    });
+
+    it('goes when the run that started the fill ends, leaving the fill to the receipt', () => {
+        store.set(recordChatFillAtom, snapshot());
+        render('thread-1', null);
+        expect(container.textContent).toBe('');
+        act(() => store.set(activeRunAtom, { id: 'run-1', status: 'in_progress', model_messages: [] } as never));
+        expect(lines()[0]).toContain('Trials');
+        // The run ends while the fill goes on in the background.
+        act(() => store.set(activeRunAtom, { id: 'run-1', status: 'completed', model_messages: [] } as never));
+        expect(container.textContent).toBe('');
+        // A later run in the same thread does not bring it back.
+        act(() => store.set(activeRunAtom, { id: 'run-2', status: 'in_progress', model_messages: [] } as never));
         expect(container.textContent).toBe('');
     });
 

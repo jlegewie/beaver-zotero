@@ -1395,6 +1395,106 @@
     border-radius: 2px;
 }
 
+/* The table receipt under an answer: two lines and one next move. Line one
+   names the table (or what changed about it), line two its condition now;
+   the actions sit at the right edge. A running fill borrows the progress
+   rule of the composer's fill bar along its top edge. */
+[id^="beaver-pane-"] .table-receipt {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+[id^="beaver-pane-"] .table-receipt-body {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+    padding: 0.5rem 0.75rem 0.5rem 0.75rem;
+}
+
+[id^="beaver-pane-"] .table-receipt-target {
+    flex: 1 1 auto;
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    font: inherit;
+    color: inherit;
+    text-align: left;
+}
+
+[id^="beaver-pane-"] button.table-receipt-target {
+    cursor: pointer;
+}
+
+[id^="beaver-pane-"] button.table-receipt-target:hover .table-receipt-headline {
+    text-decoration: underline;
+    text-decoration-color: var(--fill-tertiary);
+}
+
+[id^="beaver-pane-"] button.table-receipt-target:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: 2px;
+    border-radius: 3px;
+}
+
+[id^="beaver-pane-"] .table-receipt-glyph {
+    flex: none;
+    width: 16px;
+    height: 16px;
+    color: var(--accent-blue);
+}
+
+[id^="beaver-pane-"] .table-receipt-lines {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+[id^="beaver-pane-"] .table-receipt-headline {
+    font-size: 0.95rem;
+    font-weight: 600;
+    line-height: 1.35;
+    color: var(--fill-primary);
+}
+
+[id^="beaver-pane-"] .table-receipt-condition {
+    font-size: 0.85rem;
+    color: var(--fill-secondary);
+}
+
+[id^="beaver-pane-"] .table-receipt-warning {
+    color: var(--tag-orange-primary);
+}
+
+[id^="beaver-pane-"] .table-receipt-actions {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+[id^="beaver-pane-"] .table-receipt-message {
+    padding: 0 0.75rem 0.5rem;
+    font-size: 0.85rem;
+    color: var(--fill-tertiary);
+}
+
+/* The table is gone: the reason in grey, nothing to press. */
+[id^="beaver-pane-"] .table-receipt-muted .table-receipt-glyph,
+[id^="beaver-pane-"] .table-receipt-muted .table-receipt-headline {
+    color: var(--fill-secondary);
+}
+
+[id^="beaver-pane-"] .table-receipt-muted .table-receipt-condition {
+    color: var(--fill-tertiary);
+}
+
 @media (prefers-reduced-motion: reduce) {
     [id^="beaver-pane-"] .table-fill-progress-filled,
     [id^="beaver-pane-"] .table-fill-progress-failed {

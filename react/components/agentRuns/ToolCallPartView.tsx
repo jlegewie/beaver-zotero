@@ -448,8 +448,8 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
     const showStreamingPreview = !!streamingArgs && runStatus === 'in_progress'
         && STREAMING_PREVIEW_TOOLS.has(part.tool_name) && !showAgentActionView && !hasError;
 
-    // Table writes are cards like the note actions: the header names the table
-    // and opens it, the body carries the call's summary and reveal / open.
+    // Table writes are timeline lines naming the table, with fill status and
+    // notices; acting on the table belongs to the receipt under the answer.
     if (isTableWriteToolName(part.tool_name)) {
         return (
             <TableToolCallView
