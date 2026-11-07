@@ -116,7 +116,7 @@ export const RunArtifactExportButton: React.FC<{ items: MenuItem[]; exporting: b
         <IconButton
             icon={DownloadIcon}
             variant="ghost-secondary"
-            iconClassName="font-color-secondary scale-10"
+            iconClassName="font-color-secondary scale-11"
             onClick={() => {}}
             loading
             ariaLabel="Exporting"
@@ -125,7 +125,7 @@ export const RunArtifactExportButton: React.FC<{ items: MenuItem[]; exporting: b
         <MenuButton
             icon={DownloadIcon}
             variant="ghost-secondary"
-            iconClassName="font-color-secondary scale-10"
+            iconClassName="font-color-secondary scale-11"
             menuItems={items}
             tooltipContent="Export"
             ariaLabel="Export"
@@ -142,7 +142,7 @@ export const RunArtifactOpenButton: React.FC<{ label: string; onClick: (event: R
             icon={ArrowUpRightIcon}
             variant="ghost-secondary"
             className="run-artifact-open"
-            iconClassName="font-color-secondary scale-10"
+            iconClassName="font-color-secondary scale-11"
             onClick={(event) => onClick(event as React.SyntheticEvent)}
             ariaLabel={label}
         />
@@ -155,7 +155,7 @@ export const RunArtifactToggleButton: React.FC<{ expanded: boolean; onClick: () 
         icon={expanded ? ArrowDownIcon : ArrowRightIcon}
         variant="ghost-secondary"
         className="run-artifact-open"
-        iconClassName="font-color-secondary scale-10"
+        iconClassName="font-color-secondary scale-11"
         onClick={onClick}
         ariaLabel={expanded ? 'Hide' : 'Show all'}
     />

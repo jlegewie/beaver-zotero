@@ -28,7 +28,7 @@ export function TableChip({ title, tableKey, remove }: { title: string; tableKey
     return <>
         <ChipShell
             icon={
-                <span className="scale-80 display-flex">
+                <span className="scale-95 display-flex">
                     <Icon icon={TableIcon} />
                 </span>
             }

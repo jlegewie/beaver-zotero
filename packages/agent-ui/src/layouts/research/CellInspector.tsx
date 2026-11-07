@@ -131,7 +131,12 @@ export function CellInspector({
         const documentInEvidence = !!evidenceAnswer && hasEvidenceSection(evidenceAnswer);
         body = (
             <>
-                {column.description ? <p className="rt-inspector-text rt-inspector-question">{column.description}</p> : null}
+                {column.description && (
+                    <section className="rt-inspector-section">
+                        <div className="rt-inspector-heading">Question</div>
+                        <p className="rt-inspector-text rt-inspector-question">{column.description}</p>
+                    </section>
+                )}
                 {fill ? <FillNote fill={fill} replacing={content.kind !== "pending"} /> : null}
                 {/* The fill's note says an unfilled cell's answer is coming. */}
                 {fill && content.kind === "pending" ? null : (
@@ -329,8 +334,9 @@ function CellDetails({
 
 /**
  * Beaver's answer: the answer with where it was read from, its explanation,
- * and each passage with its tag under the row's document. On the user's cell
- * it is Beaver's earlier answer, headed "Beaver's answer" and drawn quieter.
+ * and each passage with its tag under the row's document. Headed "Answer"; on
+ * the user's cell it is Beaver's earlier answer, headed "Beaver's answer" and
+ * drawn quieter.
  */
 function AnswerSection({
     row,
@@ -357,7 +363,7 @@ function AnswerSection({
     return (
         <>
             <section className="rt-inspector-section rt-inspector-answer-section">
-                {primary ? null : <div className="rt-inspector-heading">Beaver’s answer</div>}
+                <div className="rt-inspector-heading">{primary ? "Answer" : "Beaver’s answer"}</div>
                 <div className="rt-inspector-answer-row">
                     <div className="rt-inspector-answer">
                         {answer.outcome === "answered" ? (

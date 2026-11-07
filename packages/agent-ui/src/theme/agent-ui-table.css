@@ -1588,16 +1588,20 @@
     cursor: default;
 }
 
-/* The panel's type: the title at 14px; content (the question, answers,
- * explanations, notes the user wrote, passages) at 13px; labels (headings,
- * the subtitle, the document line, links, status notes) at 12px. Answers and
- * headings are primary; supporting text is secondary. */
+/* The panel's type: the title at 14px; headings (bold) and content (the
+ * question, answers, explanations, notes the user wrote, passages) at 13px;
+ * labels (the subtitle, the document line, links, status notes) at 12px. The
+ * question, answers and headings are primary; supporting text is secondary. */
 .beaver-root .rt-inspector-text {
     margin: 0;
     font-size: 1rem;
     line-height: 1.46rem;
     color: var(--fill-secondary);
     overflow-wrap: anywhere;
+}
+
+.beaver-root .rt-inspector-question {
+    color: var(--fill-primary);
 }
 
 /* Selecting text ------------------------------------------------------------
@@ -1644,14 +1648,14 @@
     border-top: 1px solid var(--fill-quinary);
 }
 
-/* Explanation, Evidence, Your answer, Beaver's answer and the paper view's
- * questions: one heading style. */
+/* Question, Answer, Explanation, Evidence, Your answer, Beaver's answer and the
+ * paper view's questions: one heading style. */
 .beaver-root .rt-inspector-heading {
     display: flex;
     align-items: center;
     gap: 0.4rem;
     min-width: 0;
-    font-size: 0.92rem;
+    font-size: 1rem;
     font-weight: 600;
     line-height: 1.3rem;
     color: var(--fill-primary);
