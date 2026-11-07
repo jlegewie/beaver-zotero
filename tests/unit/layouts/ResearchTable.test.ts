@@ -561,11 +561,11 @@ describe('the cell inspector', () => {
         expect(paper.textContent).toBe('Baird 2011');
         expect(paper.title).toBe('Baird 2011 title');
         expect(panel.querySelector('.rt-inspector-head')?.textContent).not.toContain('The headline effect?');
-        expect(panel.querySelector('.rt-inspector-body > .rt-inspector-question')?.textContent).toBe('The headline effect?');
+        expect(panel.querySelector('.rt-inspector-body > .rt-inspector-section > .rt-inspector-question')?.textContent).toBe('The headline effect?');
         expect(panel.querySelector('.rt-inspector-answer')?.textContent).toBe('Conditional transfers raised enrollment.');
         // An answer read from the document has no source line: Evidence counts its passages.
         expect(panel.querySelector('.rt-inspector-answer-section .rt-tag')).toBeNull();
-        expect(headings()).toEqual(['Explanation', 'Evidence1']);
+        expect(headings()).toEqual(['Question', 'Answer', 'Explanation', 'Evidence1']);
         expect(panel.querySelector('.rt-inspector-reasoning')?.textContent).toBe('Table 2 reports it.');
         expect(panel.textContent).not.toContain('Beaver answered');
         expect(panel.querySelector('[role="tab"]')).toBeNull();
@@ -590,7 +590,7 @@ describe('the cell inspector', () => {
         const spec = table();
         spec.rows[1].cells.design = { outcome: 'not_reported', provenance: 'model', documents: [pdf], evidence: [passage, passage] } as Cell;
         act(() => root?.render(h(ResearchTable, { table: spec })));
-        expect(headings()).toEqual(['Closest passages2']);
+        expect(headings()).toEqual(['Question', 'Answer', 'Closest passages2']);
     });
 
     it('clamps a long explanation to three lines with More and Less', () => {
@@ -641,7 +641,7 @@ describe('the cell inspector', () => {
         mount();
         click(cell('r2', 'effect'));
         const panel = inspector()!;
-        expect(headings()).toEqual(['Your answer', 'Beaver’s answer', 'Explanation', 'Evidence1']);
+        expect(headings()).toEqual(['Question', 'Your answer', 'Beaver’s answer', 'Explanation', 'Evidence1']);
         const [mine, earlier] = Array.from(panel.querySelectorAll('.rt-inspector-answer-section'));
         expect(mine.querySelector('.rt-inspector-answer')?.textContent).toBe('Gains in consumption.');
         // The heading says who answered; the note follows as plain text.
