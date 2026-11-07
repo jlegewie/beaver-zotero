@@ -14,6 +14,7 @@ import ArtifactsList from './reviewChanges/ArtifactsList';
 import ChangesCard from './reviewChanges/ChangesCard';
 import { useArtifactRows, useChangesRows, useEditedNoteArtifacts } from './reviewChanges/useRunActionRows';
 import { useTableArtifactRows } from './reviewChanges/useTableArtifactRows';
+import { toolCallOrder } from './reviewChanges/runArtifacts';
 
 interface AgentActionsReviewProps {
     /** The one or more runs that make up a single answer. */
@@ -39,7 +40,9 @@ export const AgentActionsReview: React.FC<AgentActionsReviewProps> = ({ runs }) 
     const actionsByRun = useAtomValue(React.useMemo(() => agentActionsForRunsAtom(runIds), [runIds]));
     const changesRows = useChangesRows(runIds);
     const artifactRows = useArtifactRows(runIds);
-    const editedNotes = useEditedNoteArtifacts(runIds);
+    // The order the answer made its tool calls in, for the artifact cards.
+    const order = React.useMemo(() => toolCallOrder(runs), [runs]);
+    const editedNotes = useEditedNoteArtifacts(runIds, order);
     const tableRows = useTableArtifactRows(runs);
     const lastRun = runs[runs.length - 1];
 
@@ -90,7 +93,7 @@ export const AgentActionsReview: React.FC<AgentActionsReviewProps> = ({ runs }) 
         <div className="px-4 display-flex flex-col gap-2">
             {/* What the answer made comes first: it is the most likely thing to be
                 opened, and the answer above it has just finished describing it. */}
-            <ArtifactsList rows={artifactRows} tableRows={tableRows} editedNotes={editedNotes} />
+            <ArtifactsList rows={artifactRows} tableRows={tableRows} editedNotes={editedNotes} order={order} />
             {createItemActionsByRun.map(({ runId, actions }) => (
                 <CreateItemAgentActionDisplay
                     key={runId}

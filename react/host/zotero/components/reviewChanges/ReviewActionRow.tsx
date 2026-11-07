@@ -1,6 +1,6 @@
 import { useSurfaceWindow } from '../../../../runtime/SurfaceWindowContext';
 import React, { useCallback, useMemo, useState } from 'react';
-import { useAtomValue, useSetAtom, useStore } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import {
     agentActionItemTitleAtom,
     getAgentActionItemTitleKey,
@@ -27,7 +27,7 @@ import {
     unconfirmedCaption,
 } from '../agentActionViewHelpers';
 import { ActionPreview } from '../ActionPreview';
-import { getExportNoteTarget, getOpenNoteTarget, type ReviewRow } from '../reviewChangeRows';
+import type { ReviewRow } from '../reviewChangeRows';
 import {
     TickIcon,
     CancelIcon,
@@ -41,22 +41,14 @@ import {
 } from '../../../../components/icons/icons';
 import { getZoteroItemReferenceFromAgentAction, isCreateAnnotationsAgentAction } from '../../../../agents/agentActions';
 import { getCreateAnnotationsOpenLink } from '../createAnnotationsNavigation';
-import { getCurrentCollectionKeyForItem, openNoteByKey, revealSource } from '../../../../utils/sourceUtils';
+import { getCurrentCollectionKeyForItem, revealSource } from '../../../../utils/sourceUtils';
 import { getMergedItemReference } from '../../../../atoms/mergeItemsChoices';
 import { isStaleMergeProposal } from '../mergeItemsErrors';
 import { isStaleNoteEdit } from '../editNoteErrors';
 import { resolveLibraryRef } from '../../../../../src/utils/libraryIdentity';
-import { notifyReferenceUnavailable } from '../../sourceActions';
 import Button from '@beaver/agent-ui/primitives/Button';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
-import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
-import { DownloadIcon } from '@beaver/agent-ui/icons';
-import type { FileExportFormat } from '@beaver/agent-ui/host/types';
-import { exportNoteToFile, openExportedFile, revealExportedFile } from '../../fileExport';
-import { countPendingNoteEdits } from './useRunActionRows';
-import { exportWithFeedback, fileExportFormatMenuItems } from '../../../../utils/fileExportFeedback';
-import { addPopupMessageAtom } from '../../../../utils/popupMessageUtils';
 
 interface ReviewActionRowProps {
     row: ReviewRow;
@@ -221,48 +213,6 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
         ? getZoteroItemReferenceFromAgentAction(firstAction) ?? getMergedItemReference(firstAction)
         : null;
 
-    // See `getOpenNoteTarget`: a created note is opened, not revealed, on the
-    // same glyph the in-stream card uses for it.
-    const openNoteTarget = getOpenNoteTarget(row);
-
-    const handleOpenNote = useCallback(async () => {
-        if (!openNoteTarget) return;
-        // Resolve through the device-portable library_ref so a note created in a
-        // group library on another computer opens the right local item.
-        const libraryId = resolveLibraryRef(openNoteTarget);
-        if (libraryId) await openNoteByKey(libraryId, openNoteTarget.zotero_key);
-        else notifyReferenceUnavailable('item', 'library_unavailable');
-    }, [openNoteTarget]);
-
-    // A note row is an artifact: exported as the note is now in Zotero, with its
-    // citations, or as the agent wrote it when the note is not in the library.
-    const isNoteArtifact = row.actionType === 'create_note';
-    const [isExporting, setIsExporting] = useState(false);
-    const addPopupMessage = useSetAtom(addPopupMessageAtom);
-    const jotaiStore = useStore();
-
-    const handleExportNote = useCallback(async (format: FileExportFormat) => {
-        if (isExporting) return;
-        setIsExporting(true);
-        try {
-            const note = getExportNoteTarget(row);
-            await exportWithFeedback(
-                format,
-                () => exportNoteToFile({
-                    format,
-                    surface: 'run_artifacts',
-                    note,
-                    createdBy: { runId, toolCallId: row.toolcallId },
-                    pendingChanges: note ? countPendingNoteEdits(jotaiStore, note) : 0,
-                }),
-                addPopupMessage,
-                { reveal: revealExportedFile, open: openExportedFile },
-            );
-        } finally {
-            setIsExporting(false);
-        }
-    }, [isExporting, runId, row, addPopupMessage, jotaiStore]);
-
     const handleReveal = useCallback(async () => {
         if (!revealReference) return;
         // Reveal within the current collection when the item belongs to it,
@@ -275,8 +225,8 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
     }, [revealReference]);
 
     // The row's open link (↗), with the same destination as the action's card
-    // in the response: a note opens, annotations open in the reader, and any
-    // other single item is shown in the library.
+    // in the response: annotations open in the reader, and any other single
+    // item is shown in the library.
     const annotationOpenLink = row.actions.length === 1 && isCreateAnnotationsAgentAction(firstAction)
         ? getCreateAnnotationsOpenLink(
             firstAction.action_type === 'create_highlight_annotations' ? 'highlight' : 'note',
@@ -285,9 +235,7 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
             firstAction.status === 'applied',
         )
         : null;
-    const openLink = openNoteTarget
-        ? { tooltip: 'Open note', onClick: handleOpenNote }
-        : annotationOpenLink ?? (revealReference ? { tooltip: 'Reveal in library', onClick: handleReveal } : null);
+    const openLink = annotationOpenLink ?? (revealReference ? { tooltip: 'Reveal in library', onClick: handleReveal } : null);
 
     const toggleExpanded = useCallback(
         () => setExpanded({ key: expansionKey, expanded: !isExpanded }),
@@ -359,29 +307,7 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
                 <div className="flex-1" />
 
                 <div className="display-flex flex-row items-center gap-2 mr-3 mt-010" style={{ flexShrink: 0 }}>
-                    {isNoteArtifact && !isBusy && (isExporting ? (
-                        <IconButton
-                            icon={DownloadIcon}
-                            variant="ghost-secondary"
-                            iconClassName="font-color-secondary scale-10"
-                            onClick={() => {}}
-                            loading
-                            ariaLabel="Exporting"
-                        />
-                    ) : (
-                        <MenuButton
-                            icon={DownloadIcon}
-                            variant="ghost-secondary"
-                            iconClassName="font-color-secondary scale-10"
-                            menuItems={fileExportFormatMenuItems(handleExportNote)}
-                            tooltipContent="Export"
-                            ariaLabel="Export"
-                        />
-                    ))}
-
-                    {/* A note row is an artifact to open or export; deleting it stays
-                        on the note's own card in the response, away from those. */}
-                    {!isNoteArtifact && (config.showUndo || (isBusy && activeButton === 'undo')) && (
+                    {(config.showUndo || (isBusy && activeButton === 'undo')) && (
                         <Tooltip content="Undo" showArrow singleLine>
                             <IconButton
                                 icon={UndoIcon}

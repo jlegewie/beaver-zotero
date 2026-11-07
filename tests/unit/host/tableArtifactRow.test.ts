@@ -83,7 +83,7 @@ function mount(element: React.ReactElement, store = createStore()) {
 
 /** The receipt's actions, by their text or, for icons, their label. */
 const buttons = () =>
-    Array.from(container!.querySelectorAll('.table-receipt-actions button')).map(
+    Array.from(container!.querySelectorAll('.run-artifact-actions button')).map(
         (b) => b.textContent?.trim() || b.getAttribute('aria-label'),
     );
 const button = (label: string) =>
@@ -109,18 +109,23 @@ describe('the table receipt', () => {
         mount(h(TableArtifactRow, { row: artifact({ edits: null }, true) }));
         expect(buttons()).toEqual(['Export', 'Open table']);
         await act(async () => (container!.querySelector('button[aria-label="Open table"]') as HTMLButtonElement).click());
-        await act(async () => (container!.querySelector('button.table-receipt-target') as HTMLButtonElement).click());
+        await act(async () => (container!.querySelector('button.run-artifact-target') as HTMLButtonElement).click());
         expect(openTable).toHaveBeenCalledTimes(2);
+        // Anywhere on the card opens it; its Export does not.
+        await act(async () => (container!.querySelector('.run-artifact-body') as HTMLElement).click());
+        expect(openTable).toHaveBeenCalledTimes(3);
+        await act(async () => (container!.querySelector('button[aria-label="Export"]') as HTMLButtonElement).click());
+        expect(openTable).toHaveBeenCalledTimes(3);
         expect(openTable.mock.calls[0][0]).toBe('u-TABLEKEY');
     });
 
-    it('exports the table as Excel or CSV through the table\'s own export', async () => {
+    it('exports the table as Excel or CSV, each with its icon, through the table\'s own export', async () => {
         mount(h(TableArtifactRow, { row: artifact({ edits: null }, true) }));
         await act(async () => (container!.querySelector('button[aria-label="Export"]') as HTMLButtonElement).click());
         const item = (text: string) =>
             [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((el) => el.textContent?.startsWith(text));
-        expect(item('Excel…')).toBeTruthy();
-        expect(item('CSV…')).toBeTruthy();
+        expect(item('Excel…')?.querySelector('svg')).toBeTruthy();
+        expect(item('CSV…')?.querySelector('svg')).toBeTruthy();
         await act(async () => item('CSV…')!.click());
         expect(exportTable).toHaveBeenCalledWith(window, { libraryID: 1, key: 'TABLEKEY' }, expect.any(Function), 'csv');
     });
@@ -203,7 +208,7 @@ describe('the table receipt', () => {
         state.current = { ...state.current, live: { status: 'unavailable', reason: 'Table is in the trash.' } };
         mount(h(TableArtifactRow, { row: artifact({ edits: null }, true) }));
         expect(buttons()).toEqual([]);
-        expect(container!.querySelector('button.table-receipt-target')).toBeNull();
+        expect(container!.querySelector('button.run-artifact-target')).toBeNull();
         expect(container!.textContent).toContain('Table is in the trash.');
     });
 });
