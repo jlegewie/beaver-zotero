@@ -469,6 +469,43 @@ describe('pinned columns', () => {
             if (client) Object.defineProperty(Element.prototype, 'clientWidth', client);
         }
     });
+
+    it('keeps rows scrolled into view below the sticky header as its height changes', () => {
+        let headHeight = 64;
+        let resized: (() => void) | undefined;
+        const observed: Element[] = [];
+        const win = window as unknown as { ResizeObserver?: unknown };
+        const originalObserver = win.ResizeObserver;
+        win.ResizeObserver = class {
+            constructor(callback: () => void) {
+                resized = callback;
+            }
+            observe(target: Element) {
+                observed.push(target);
+            }
+            disconnect() {}
+        };
+        const offset = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight');
+        Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
+            configurable: true,
+            get(this: HTMLElement) {
+                return this.tagName === 'THEAD' ? headHeight : 0;
+            },
+        });
+        try {
+            mount();
+            const scroller = container!.querySelector<HTMLElement>('.rt-scroll')!;
+            expect(scroller.style.scrollPaddingTop).toBe('64px');
+            // Wrapped column descriptions make the header taller.
+            expect(observed).toContain(container!.querySelector('thead'));
+            headHeight = 88;
+            act(() => resized?.());
+            expect(scroller.style.scrollPaddingTop).toBe('88px');
+        } finally {
+            win.ResizeObserver = originalObserver;
+            if (offset) Object.defineProperty(HTMLElement.prototype, 'offsetHeight', offset);
+        }
+    });
 });
 
 describe('row menus', () => {
