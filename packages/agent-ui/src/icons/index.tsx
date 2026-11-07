@@ -33,6 +33,8 @@ export { default as LinkBackwardIcon } from './LinkBackwardIcon';
 export { default as PropertyEditIcon } from './propertyEditIcon';
 export { default as PdfIcon } from './PdfIcon';
 export { default as DocIcon } from './DocIcon';
+export { default as XlsIcon } from './XlsIcon';
+export { default as CsvIcon } from './CsvIcon';
 export { default as MarkdownIcon } from './MarkdownIcon';
 export { default as TexIcon } from './TexIcon';
 export { default as TagIcon } from './TagIcon';

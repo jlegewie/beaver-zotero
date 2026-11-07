@@ -1395,26 +1395,40 @@
     border-radius: 2px;
 }
 
-/* The table receipt under an answer: two lines and one next move. Line one
-   names the table (or what changed about it), line two its condition now;
-   the actions sit at the right edge. A running fill borrows the progress
-   rule of the composer's fill bar along its top edge. */
-[id^="beaver-pane-"] .table-receipt {
+/* An artifact at the end of a run, a note or a table: a glyph, two lines
+   (the artifact, then its condition) and the buttons at the right. The whole
+   card opens the artifact, so it lights up as one on hover. A running fill
+   draws the composer fill bar's progress rule along its top edge. */
+[id^="beaver-pane-"] .run-artifact {
     position: relative;
     display: flex;
     flex-direction: column;
     min-width: 0;
 }
 
-[id^="beaver-pane-"] .table-receipt-body {
+[id^="beaver-pane-"] .run-artifact-body {
     display: flex;
     align-items: center;
     gap: 0.5rem;
     min-width: 0;
     padding: 0.5rem 0.75rem 0.5rem 0.75rem;
+    transition: background-color 0.12s ease-in-out;
 }
 
-[id^="beaver-pane-"] .table-receipt-target {
+[id^="beaver-pane-"] .run-artifact-interactive > .run-artifact-body {
+    cursor: pointer;
+}
+
+[id^="beaver-pane-"] .run-artifact-interactive > .run-artifact-body:hover {
+    background-color: var(--fill-quinary);
+}
+
+/* The card's Open darkens with it: what a click anywhere on the card does. */
+[id^="beaver-pane-"] .run-artifact-interactive > .run-artifact-body:hover .run-artifact-open svg {
+    color: var(--fill-primary);
+}
+
+[id^="beaver-pane-"] .run-artifact-target {
     flex: 1 1 auto;
     display: flex;
     align-items: center;
@@ -1426,73 +1440,80 @@
     font: inherit;
     color: inherit;
     text-align: left;
+    cursor: inherit;
 }
 
-[id^="beaver-pane-"] button.table-receipt-target {
-    cursor: pointer;
-}
-
-[id^="beaver-pane-"] button.table-receipt-target:hover .table-receipt-headline {
-    text-decoration: underline;
-    text-decoration-color: var(--fill-tertiary);
-}
-
-[id^="beaver-pane-"] button.table-receipt-target:focus-visible {
+[id^="beaver-pane-"] button.run-artifact-target:focus-visible {
     outline: 2px solid var(--accent-blue);
     outline-offset: 2px;
     border-radius: 3px;
 }
 
-[id^="beaver-pane-"] .table-receipt-glyph {
+[id^="beaver-pane-"] .run-artifact-glyph {
     flex: none;
     width: 16px;
     height: 16px;
     color: var(--accent-blue);
 }
 
-[id^="beaver-pane-"] .table-receipt-lines {
+[id^="beaver-pane-"] .run-artifact-lines {
     display: flex;
     flex-direction: column;
     min-width: 0;
 }
 
-[id^="beaver-pane-"] .table-receipt-headline {
+[id^="beaver-pane-"] .run-artifact-headline {
     font-size: 0.95rem;
     font-weight: 600;
     line-height: 1.35;
     color: var(--fill-primary);
 }
 
-[id^="beaver-pane-"] .table-receipt-condition {
+[id^="beaver-pane-"] .run-artifact-condition {
     font-size: 0.85rem;
     color: var(--fill-secondary);
 }
 
-[id^="beaver-pane-"] .table-receipt-warning {
+[id^="beaver-pane-"] .run-artifact-warning {
     color: var(--tag-orange-primary);
 }
 
-[id^="beaver-pane-"] .table-receipt-actions {
+[id^="beaver-pane-"] .run-artifact-actions {
     flex: none;
     display: flex;
     align-items: center;
     gap: 0.25rem;
+    cursor: default;
 }
 
-[id^="beaver-pane-"] .table-receipt-message {
+[id^="beaver-pane-"] .run-artifact-message {
     padding: 0 0.75rem 0.5rem;
     font-size: 0.85rem;
     color: var(--fill-tertiary);
 }
 
-/* The table is gone: the reason in grey, nothing to press. */
-[id^="beaver-pane-"] .table-receipt-muted .table-receipt-glyph,
-[id^="beaver-pane-"] .table-receipt-muted .table-receipt-headline {
+/* The artifact is gone: the reason in grey, nothing to press. */
+[id^="beaver-pane-"] .run-artifact-muted .run-artifact-glyph,
+[id^="beaver-pane-"] .run-artifact-muted .run-artifact-headline {
     color: var(--fill-secondary);
 }
 
-[id^="beaver-pane-"] .table-receipt-muted .table-receipt-condition {
+[id^="beaver-pane-"] .run-artifact-muted .run-artifact-condition {
     color: var(--fill-tertiary);
+}
+
+/* A group's cards, unfolded under it: indented so their glyphs sit under
+   the group's lines, each divided from the next. */
+[id^="beaver-pane-"] .run-artifact-members {
+    border-top: 1px solid var(--fill-quinary);
+}
+
+[id^="beaver-pane-"] .run-artifact-members > .run-artifact + .run-artifact {
+    border-top: 1px solid var(--fill-quinary);
+}
+
+[id^="beaver-pane-"] .run-artifact-members .run-artifact-body {
+    padding-left: 2rem;
 }
 
 @media (prefers-reduced-motion: reduce) {

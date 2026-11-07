@@ -138,6 +138,8 @@
     "./src/icons/OneIcon.tsx",
     "./src/icons/PdfIcon.tsx",
     "./src/icons/DocIcon.tsx",
+    "./src/icons/XlsIcon.tsx",
+    "./src/icons/CsvIcon.tsx",
     "./src/icons/MarkdownIcon.tsx",
     "./src/icons/TexIcon.tsx",
     "./src/icons/PictureInPictureIcon.tsx",

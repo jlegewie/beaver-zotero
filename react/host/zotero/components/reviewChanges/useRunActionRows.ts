@@ -12,6 +12,7 @@ import {
     RunActionRowSet,
     summarizeNoteEdits,
 } from '../reviewChangeRows';
+import { actionsInAnswerOrder } from './runArtifacts';
 
 /**
  * Action ids the in-stream card and PendingActionsBar own. Only these runs'
@@ -61,13 +62,15 @@ export function useArtifactRows(runIds: string[]): ReviewRow[] {
  * edits that count are the answer's own; live approvals belong to the
  * in-stream card until they are decided.
  */
-export function useEditedNoteArtifacts(runIds: string[]): NoteEditSummary[] {
+export function useEditedNoteArtifacts(runIds: string[], order?: ReadonlyMap<string, number>): NoteEditSummary[] {
     const liveApprovalActionIds = useLiveApprovalActionIds(runIds);
     const actionsByRun = useActionsByRun(runIds);
-    return useMemo(
-        () => buildEditedNoteArtifacts(actionsByRun, { liveApprovalActionIds, completeNoteIdentity }),
-        [actionsByRun, liveApprovalActionIds],
-    );
+    return useMemo(() => {
+        // In the answer's order, so a note's summary is keyed by its first edit
+        // and the list can sort notes by it; the store can hold them out of order.
+        const ordered = order ? actionsInAnswerOrder(actionsByRun, order) : actionsByRun;
+        return buildEditedNoteArtifacts(ordered, { liveApprovalActionIds, completeNoteIdentity });
+    }, [actionsByRun, liveApprovalActionIds, order]);
 }
 
 /**
