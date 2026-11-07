@@ -274,19 +274,6 @@ export function pendingNoteChanges(summaries: NoteEditSummary[], target: OpenNot
 }
 
 /**
- * Header of an edited-note row: "Edited Note" and "3 changes, 1 pending".
- * Counts the edits to this one note, where the changes card counts notes.
- */
-export function getEditedNoteHeading(summary: NoteEditSummary): { label: string; detail: string } {
-    const { appliedChanges: applied, pendingChanges: pending } = summary;
-    if (applied === 0) return { label: 'Note Edits', detail: `${plural(pending, 'change')} pending` };
-    return {
-        label: 'Edited Note',
-        detail: pending > 0 ? `${plural(applied, 'change')}, ${pending} pending` : plural(applied, 'change'),
-    };
-}
-
-/**
  * Types the shared executor has no apply path for, all of them retired: the
  * per-annotation types, and `zotero_note` from before note creation moved to
  * the `create_note` tool. Threads still hold their records, and a row here

@@ -1,16 +1,14 @@
 import React, { useCallback, useState } from 'react';
 import type { TableArtifact } from '@beaver/agent-core/run-state/tableResults';
 import { getHost } from '@beaver/agent-ui/host';
-import { DownloadIcon } from '@beaver/agent-ui/icons';
+import { CsvIcon, XlsIcon } from '@beaver/agent-ui/icons';
 import Button from '@beaver/agent-ui/primitives/Button';
-import IconButton from '@beaver/agent-ui/primitives/IconButton';
-import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
-import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import { getTablesApi } from '../../../../../src/services/artifacts/tablesApi';
 import { exportTable, tableActionErrorMessage, type TableExportFormat } from '../../../../../src/ui/tableDocumentActions';
-import { ArrowUpRightIcon, Icon, StopStrokeIcon, TableIcon } from '../../../../components/icons/icons';
+import { StopStrokeIcon, TableIcon } from '../../../../components/icons/icons';
 import { FillProgressRule } from '../../../../components/tables/FillProgressRule';
 import { useSurfaceWindow } from '../../../../runtime/SurfaceWindowContext';
+import { RunArtifactCard, RunArtifactExportButton, RunArtifactOpenButton } from './RunArtifactCard';
 import { tableReceiptModel } from './tableReceipt';
 import { useTableReceiptState } from './useTableReceiptState';
 
@@ -26,8 +24,9 @@ const UNDONE_MESSAGE = 'Undone. The table is back to the version before this edi
  * Two lines (see `tableReceiptModel`): the table, or what the answer changed
  * about it, then its condition as it is now, including what is left to fill.
  * Filling happens in the table itself, whose Fill shows the plan and its
- * cost. The row offers Undo on an edit, Stop while a fill runs, and, like a
- * note's row, Export and Open as icons. The lines open the table too.
+ * cost. The card offers Undo on an edit, Stop while a fill runs, and, like a
+ * note's card, Export and Open as icons; a click anywhere on it opens the
+ * table.
  */
 export const TableArtifactRow: React.FC<TableArtifactRowProps> = ({ row }) => {
     const { record } = row;
@@ -98,39 +97,24 @@ export const TableArtifactRow: React.FC<TableArtifactRowProps> = ({ row }) => {
         setMessage('error' in outcome ? outcome.error : UNDONE_MESSAGE);
     }, [key, record.version, row.recordRunId]);
 
-    const lines = (
-        <>
-            <Icon icon={TableIcon} className="table-receipt-glyph" />
-            <span className="table-receipt-lines">
-                <span className="table-receipt-headline truncate" title={model.headline}>{model.headline}</span>
-                <span className="table-receipt-condition">
-                    {model.condition}
-                    {model.warning ? (
-                        <span className="table-receipt-warning">{model.condition ? ' · ' : ''}{model.warning}</span>
-                    ) : null}
-                </span>
-            </span>
-        </>
-    );
+    const exportItems = [
+        { label: 'Excel…', icon: XlsIcon, onClick: () => void handleExport('xlsx') },
+        { label: 'CSV…', icon: CsvIcon, onClick: () => void handleExport('csv') },
+    ];
 
     return (
-        <div className={`table-receipt${model.muted ? ' table-receipt-muted' : ''}`}>
-            {model.stop && job && <FillProgressRule job={job} />}
-            <div className="table-receipt-body">
-                {model.muted ? (
-                    <div className="table-receipt-target">{lines}</div>
-                ) : (
-                    <button
-                        type="button"
-                        className="table-receipt-target"
-                        title="Open table"
-                        aria-label={`Open table ${model.title}`}
-                        onClick={(event) => void handleOpen(event)}
-                    >
-                        {lines}
-                    </button>
-                )}
-                <div className="table-receipt-actions">
+        <RunArtifactCard
+            icon={TableIcon}
+            headline={model.headline}
+            condition={model.condition}
+            warning={model.warning}
+            muted={model.muted}
+            onActivate={model.open ? (event) => void handleOpen(event) : undefined}
+            activateLabel={`Open table ${model.title}`}
+            top={model.stop && job ? <FillProgressRule job={job} /> : undefined}
+            message={message}
+            actions={
+                <>
                     {model.undo && (
                         <Button
                             variant="ghost-secondary"
@@ -154,43 +138,11 @@ export const TableArtifactRow: React.FC<TableArtifactRowProps> = ({ row }) => {
                             Stop
                         </Button>
                     )}
-                    {model.export && (busy === 'export' ? (
-                        <IconButton
-                            icon={DownloadIcon}
-                            variant="ghost-secondary"
-                            iconClassName="font-color-secondary scale-10"
-                            onClick={() => {}}
-                            loading
-                            ariaLabel="Exporting"
-                        />
-                    ) : (
-                        <MenuButton
-                            icon={DownloadIcon}
-                            variant="ghost-secondary"
-                            iconClassName="font-color-secondary scale-10"
-                            menuItems={[
-                                { label: 'Excel…', onClick: () => void handleExport('xlsx') },
-                                { label: 'CSV…', onClick: () => void handleExport('csv') },
-                            ]}
-                            tooltipContent="Export"
-                            ariaLabel="Export"
-                        />
-                    ))}
-                    {model.open && (
-                        <Tooltip content="Open table" showArrow singleLine>
-                            <IconButton
-                                icon={ArrowUpRightIcon}
-                                variant="ghost-secondary"
-                                iconClassName="font-color-secondary scale-10"
-                                onClick={(event) => void handleOpen(event as React.SyntheticEvent)}
-                                ariaLabel="Open table"
-                            />
-                        </Tooltip>
-                    )}
-                </div>
-            </div>
-            {message && <div role="status" className="table-receipt-message">{message}</div>}
-        </div>
+                    {model.export && <RunArtifactExportButton items={exportItems} exporting={busy === 'export'} />}
+                    {model.open && <RunArtifactOpenButton label="Open table" onClick={(event) => void handleOpen(event)} />}
+                </>
+            }
+        />
     );
 };
 
