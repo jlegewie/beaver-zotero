@@ -1,18 +1,20 @@
 /**
  * Table fills a chat run started, as the chat shows them: the progress panel
- * above the composer and the `fill_table` tool call's status line.
+ * above the composer (while the run lasts) and the `fill_table` tool call's
+ * status line.
  *
  * Fed by the fill job's own snapshots (the same ones the table's tab
  * follows), never by backend events: a snapshot names the run's thread and
- * tool call (`origin.run`). State is keyed by job and kept per renderer, so a
- * fill stays visible past the end of its run, while the user keeps chatting
- * and when they leave the thread and come back. A finished fill stays as its
- * result line until the user dismisses it. Fills the user started in the tab
- * have no run and never appear here.
+ * tool call (`origin.run`). State is keyed by job and kept per renderer, so
+ * the tool call's status line can report a fill that went on in the
+ * background. A finished fill stays as its result line until the user
+ * dismisses it or the run ends. Fills the user started in the tab have no
+ * run and never appear here.
  */
 
 import { atom } from 'jotai/vanilla';
 import type { TableFillJobSnapshot } from '../protocol/tableFillProtocol';
+import { isRunActive } from '../agents/types';
 import { activeRunAtom, getRunToolResults } from './atoms';
 
 export interface ChatFill {
@@ -74,15 +76,23 @@ export const dismissChatFillAtom = atom(null, (get, set, jobId: string) => {
 
 /**
  * The fill the panel shows in `threadId`: a running one first, else the most
- * recently started finished one the user has not dismissed. Other threads'
- * fills never show.
+ * recently started finished one the user has not dismissed. Only fills the
+ * thread's active run started show: once that run ends, the table receipt
+ * under its answer carries the fill's progress and result, and a second
+ * copy above the composer would only crowd it. Other threads' fills never
+ * show.
  */
-export function panelFill(fills: Map<string, ChatFill>, threadId: string | null): ChatFill | null {
-    if (!threadId) return null;
+export function panelFill(
+    fills: Map<string, ChatFill>,
+    threadId: string | null,
+    activeRunId: string | null,
+): ChatFill | null {
+    if (!threadId || !activeRunId) return null;
     let running: ChatFill | null = null;
     let finished: ChatFill | null = null;
     for (const fill of fills.values()) {
         if (fill.threadId !== threadId) continue;
+        if (fill.snapshot.origin.run?.run_id !== activeRunId) continue;
         if (fill.snapshot.state !== 'done') {
             if (!running || fill.snapshot.started_at > running.snapshot.started_at) running = fill;
         } else if (!fill.dismissed) {
@@ -91,6 +101,12 @@ export function panelFill(fills: Map<string, ChatFill>, threadId: string | null)
     }
     return running ?? finished;
 }
+
+/** The id of the thread's run while it is active, for {@link panelFill}. */
+export const activeRunIdAtom = atom((get) => {
+    const run = get(activeRunAtom);
+    return isRunActive(run) ? run!.id : null;
+});
 
 /**
  * The running fill the active run waits on: one whose tool call has not

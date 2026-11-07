@@ -50,7 +50,7 @@ import {
     type TableCardDraft,
 } from '@beaver/agent-core/run-state/tableCardDraft';
 import { isCreateCard, isFillCard, type TableCardChoice } from '@beaver/agent-core/protocol/tableCardProtocol';
-import { chatFillsAtom, dismissChatFillAtom, panelFill } from '@beaver/agent-core/run-state/tableChatFills';
+import { activeRunIdAtom, chatFillsAtom, dismissChatFillAtom, panelFill } from '@beaver/agent-core/run-state/tableChatFills';
 import { resolveItems as resolveCardItems, resolveLibraryScope } from '../../components/tables/card/liveSources';
 import { sendComposedMessageAtom } from '../../atoms/actions';
 import {
@@ -689,7 +689,7 @@ export async function handleTestTableFillProgressHttpRequest(request?: any) {
         dismissed: fill.dismissed,
         result: fill.snapshot.result ?? null,
     }));
-    const shown = panelFill(all, store.get(currentThreadIdAtom));
+    const shown = panelFill(all, store.get(currentThreadIdAtom), store.get(activeRunIdAtom));
     return { ok: true, fills, panel: shown ? shown.snapshot.job_id : null, ...currentIds() };
 }
 

@@ -35,6 +35,8 @@ vi.mock("../../../src/services/artifacts/tableItemIdentity", async (importOrigin
     return {
         readTableItemSpec: deps.read,
         missingTableFileMessage: original.missingTableFileMessage,
+        tableFilesDownloadable: original.tableFilesDownloadable,
+        tableFilesEditable: original.tableFilesEditable,
     };
 });
 vi.mock("../../../src/services/artifacts/tablesApi", () => ({

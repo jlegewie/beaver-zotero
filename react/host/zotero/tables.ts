@@ -6,13 +6,25 @@ import {
     parseItemReference,
     resolveLibraryRef,
 } from "../../../src/utils/libraryIdentity";
-import { missingTableFileMessage, readTableItemSpec, type TableRef } from "../../../src/services/artifacts/tableItemIdentity";
+import { isFillableColumn, type TableSpec } from "@beaver/agent-core/layouts/table";
+import { pendingWork } from "@beaver/agent-core/layouts/tableFill";
+import { fillButtonRows } from "@beaver/agent-core/run-state/tableFillCopy";
+import {
+    missingTableFileMessage,
+    readTableItemSpec,
+    tableFilesDownloadable,
+    tableFilesEditable,
+    type TableRef,
+} from "../../../src/services/artifacts/tableItemIdentity";
+import { isLibrarySearchable } from "../../../src/services/agentDataProvider/utils";
+import type { TableReceiptLive } from "./components/reviewChanges/tableReceipt";
 import { getTablesApi } from "../../../src/services/artifacts/tablesApi";
 import type { OpenTableOptions, OpenTableOutcome } from "../../../src/ui/openTable";
 import { tryGetWindowRuntime } from "../../runtime/windowRuntime";
 import { notifyReferenceUnavailable, notifyTableOpenFailed } from "./sourceActions";
 
-function resolveTableRef(key: string) {
+/** The local table a portable table key names, or null when its library is not on this device. */
+export function resolveTableRef(key: string): TableRef | null {
     const parsed = parseItemReference(key);
     const libraryID = parsed && resolveLibraryRef(parsed);
     return parsed && libraryID ? { libraryID, key: parsed.zotero_key } : null;
@@ -146,8 +158,13 @@ export async function undoStoredTableEdit(
     }
 }
 
-/** Local display only; submission validates access through the provider separately. */
-export async function resolveTableDisplay(key: string): Promise<TableDisplay> {
+type DisplayedTable =
+    /** `openable`: the files are not here yet, and opening the table downloads them. */
+    | { status: "unavailable"; reason: string; openable?: boolean }
+    | { status: "read"; ref: TableRef; title: string; spec: TableSpec };
+
+/** Reads a table for local display, or says why it cannot be shown. */
+async function readDisplayedTable(key: string): Promise<DisplayedTable> {
     if (!getTablesApi())
         return { status: "unavailable", reason: "Table provider unavailable." };
     const ref = resolveTableRef(key);
@@ -167,25 +184,79 @@ export async function resolveTableDisplay(key: string): Promise<TableDisplay> {
             return { status: "unavailable", reason: "Table is in the trash." };
         const result = await readTableItemSpec(item);
         if (!result.ok)
-            return {
-                status: "unavailable",
-                reason:
-                    result.code === "no_file"
-                        ? missingTableFileMessage(item)
-                        : "Table document is unavailable.",
-            };
+            return result.code === "no_file"
+                ? {
+                      status: "unavailable",
+                      reason: missingTableFileMessage(item),
+                      ...(tableFilesDownloadable(item) ? { openable: true } : {}),
+                  }
+                : { status: "unavailable", reason: "Table document is unavailable." };
         return {
-            status: "available",
+            status: "read",
+            ref,
             title: String(
                 item.getField("title") || result.spec.title || "Untitled table",
             ),
-            rows: result.spec.rows.length,
-            columns: result.spec.columns.length,
-            contentColumns: result.spec.columns.filter((column) => !column.system).length,
+            spec: result.spec,
         };
     } catch {
         return { status: "unavailable", reason: "Table provider unavailable." };
     }
+}
+
+/** Local display only; submission validates access through the provider separately. */
+export async function resolveTableDisplay(key: string): Promise<TableDisplay> {
+    const read = await readDisplayedTable(key);
+    if (read.status === "unavailable") return { status: "unavailable", reason: read.reason };
+    return {
+        status: "available",
+        title: read.title,
+        rows: read.spec.rows.length,
+        columns: read.spec.columns.length,
+        contentColumns: read.spec.columns.filter((column) => !column.system).length,
+    };
+}
+
+/**
+ * The table as an answer's receipt shows it: its size, how much of it has
+ * been read, what the table's own Fill would fill, and whether Beaver may
+ * fill it. Local display only; a fill plans and checks access itself.
+ */
+export async function resolveTableReceipt(key: string): Promise<TableReceiptLive> {
+    const read = await readDisplayedTable(key);
+    if (read.status === "unavailable") return read;
+    const { ref, spec } = read;
+    const questions = spec.columns.filter(isFillableColumn);
+    let readRows = 0;
+    let failedRows = 0;
+    for (const row of spec.rows) {
+        if (row.failure) failedRows += 1;
+        else if (questions.some((column) => {
+            const cell = row.cells[column.id];
+            return cell !== undefined && cell.provenance !== "user";
+        })) readRows += 1;
+    }
+    const pending = pendingWork(spec);
+    // Nothing is blamed on an exclusion before the library scope has loaded.
+    const scopeKnown = !!Zotero.Beaver?.libraryScopeInitialized;
+    const blocked = scopeKnown && !isLibrarySearchable(ref.libraryID)
+        ? "library_excluded" as const
+        : !tableFilesEditable(Zotero.Libraries.get(ref.libraryID))
+          ? "read_only" as const
+          : null;
+    return {
+        status: "available",
+        title: read.title,
+        rows: spec.rows.length,
+        columns: spec.columns.filter((column) => !column.system).length,
+        questions: questions.length,
+        readRows,
+        failedRows,
+        fillRows: fillButtonRows(pending),
+        emptyCells: pending.cells,
+        version: spec.version ?? 0,
+        blocked,
+    };
 }
 
 export function subscribeTableChanges(

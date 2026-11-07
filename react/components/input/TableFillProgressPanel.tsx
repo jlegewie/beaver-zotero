@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { currentThreadIdAtom } from '@beaver/agent-core/run-state/atoms';
-import { chatFillsAtom, dismissChatFillAtom, panelFill } from '@beaver/agent-core/run-state/tableChatFills';
+import { activeRunIdAtom, chatFillsAtom, dismissChatFillAtom, panelFill } from '@beaver/agent-core/run-state/tableChatFills';
 import { failedRowsLink, progressLine, resultSummary, resultTone } from '@beaver/agent-core/run-state/tableFillCopy';
 import type { TableFillViewRequest } from '@beaver/agent-core/protocol/tableFillProtocol';
 import { getHost } from '@beaver/agent-ui/host';
@@ -10,6 +10,7 @@ import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import { libraryRefForLibraryID } from '../../../src/utils/libraryIdentity';
 import { watchChatFills } from '../../atoms/tableChatFills';
 import { openPreferencesWindow } from '../../ui/openPreferencesWindow';
+import { FillProgressRule } from '../tables/FillProgressRule';
 import {
     AlertIcon,
     ArrowUpRightIcon,
@@ -26,12 +27,13 @@ import {
  * The rule along the top edge is the run's shape: rows filled in blue, rows
  * that could not be read in orange, a sweep until the first row finishes.
  *
- * It shows only in the thread whose run started the fill, and stays through
- * the end of that run, new messages and thread switches. Stop stops the fill
- * only; a response waiting on it carries on and reports what was filled.
- * When the fill ends the rule goes, a glyph says how it ended, and line two
- * becomes its result until dismissed, so a fill running in the background
- * never ends unnoticed. The result is short: its cost is on the tool call
+ * It shows only in the thread whose run started the fill, and only while
+ * that run lasts: when the run ends, the table receipt under the answer
+ * takes over the fill's progress, Stop and result, and the bar goes so the
+ * two do not stack. Stop stops the fill only; a response waiting on it
+ * carries on and reports what was filled. When the fill ends during the
+ * run, the rule goes, a glyph says how it ended, and line two becomes its
+ * result until dismissed. The result is short: its cost is on the tool call
  * and in the table's banner. A result with failed rows links to them in the
  * table; one that ran out of credits links to adding more. It follows the job's snapshots,
  * the same the table's tab follows.
@@ -40,8 +42,9 @@ const TableFillProgressPanel: React.FC = () => {
     useEffect(() => watchChatFills(), []);
     const fills = useAtomValue(chatFillsAtom);
     const threadId = useAtomValue(currentThreadIdAtom);
+    const activeRunId = useAtomValue(activeRunIdAtom);
     const dismiss = useSetAtom(dismissChatFillAtom);
-    const fill = panelFill(fills, threadId);
+    const fill = panelFill(fills, threadId, activeRunId);
     const snapshot = fill?.snapshot ?? null;
     const libraryRef = snapshot ? libraryRefForLibraryID(snapshot.table.libraryID) : null;
     const tableKey = snapshot && libraryRef ? `${libraryRef}-${snapshot.table.key}` : null;
@@ -63,8 +66,6 @@ const TableFillProgressPanel: React.FC = () => {
 
     if (!fill || !snapshot) return null;
     const title = snapshot.table.title || 'Table';
-    const total = snapshot.rows_total;
-    const done = snapshot.rows_done;
     const finished = snapshot.state === 'done';
     const stopping = snapshot.state === 'stopping';
     const result = finished ? snapshot.result : undefined;
@@ -72,9 +73,6 @@ const TableFillProgressPanel: React.FC = () => {
     const outOfCredits = result?.stopped_by === 'insufficient_credits';
     const tone = finished ? resultTone(snapshot) : null;
     const line = finished ? { status: resultSummary(snapshot), failed: null } : progressLine(snapshot);
-
-    const share = total > 0 ? (done / total) * 100 : 0;
-    const failedShare = total > 0 ? (Math.min(snapshot.rows_failed, done) / total) * 100 : 0;
 
     const glyph =
         tone === 'clean' ? (
@@ -91,25 +89,7 @@ const TableFillProgressPanel: React.FC = () => {
             role="group"
             aria-label={finished ? 'Table fill result' : 'Table fill progress'}
         >
-            {!finished && (
-                <div
-                    className={`table-fill-progress-rule${stopping ? ' table-fill-progress-rule-stopping' : ''}`}
-                    role="progressbar"
-                    aria-valuemin={0}
-                    aria-valuemax={total}
-                    aria-valuenow={done}
-                    aria-valuetext={`${done} of ${total} items filled`}
-                >
-                    {done === 0 && !stopping ? (
-                        <div className="batch-progress-indeterminate" />
-                    ) : (
-                        <>
-                            <span className="table-fill-progress-filled" style={{ width: `${share - failedShare}%` }} />
-                            <span className="table-fill-progress-failed" style={{ width: `${failedShare}%` }} />
-                        </>
-                    )}
-                </div>
-            )}
+            {!finished && <FillProgressRule job={snapshot} />}
             <div className="table-fill-progress-body">
                 {glyph}
                 <div className="table-fill-progress-head">

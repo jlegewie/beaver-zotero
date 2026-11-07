@@ -34,6 +34,8 @@ export interface TableArtifact {
     toolcallId: string;
     /** Latest observation of the table within the answer. */
     record: TableRecord;
+    /** The run whose tool call returned `record`; a continued answer spans several. */
+    recordRunId: string;
     /** True when the answer created the table rather than editing an existing one. */
     created: boolean;
 }
@@ -61,6 +63,7 @@ export function collectTableArtifacts(
                     runId: existing?.runId ?? run.id,
                     toolcallId: existing?.toolcallId ?? part.tool_call_id,
                     record,
+                    recordRunId: run.id,
                     created:
                         existing?.created === true ||
                         part.tool_name === "create_table",

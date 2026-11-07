@@ -53,7 +53,7 @@ describe("table artifacts for the end-of-run list", () => {
         ).toBeNull();
     });
 
-    it("folds several writes to one table into one entry that keeps its first call and last record", () => {
+    it("folds several writes to one table into one entry that keeps its first call and last record, with that record's run", () => {
         const artifacts = collectTableArtifacts([
             run("run-1", [
                 tableReturn("create_table", "call-1", "u-AAAAAAAA", "Created table", 0),
@@ -77,12 +77,14 @@ describe("table artifacts for the end-of-run list", () => {
                 toolcallId: "call-1",
                 created: true,
                 record: expect.objectContaining({ change: "Added a column" }),
+                recordRunId: "run-2",
             },
             {
                 runId: "run-2",
                 toolcallId: "call-4",
                 created: false,
                 record: expect.objectContaining({ change: "Added a row" }),
+                recordRunId: "run-2",
             },
         ]);
     });
