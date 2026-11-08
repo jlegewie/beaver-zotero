@@ -17,7 +17,7 @@ import { CreateAnnotationsPreview } from './CreateAnnotationsPreview';
 import { EditAnnotationsPreview } from './EditAnnotationsPreview';
 import { DeleteAnnotationsPreview } from './DeleteAnnotationsPreview';
 import { resolveLibraryRef } from '../../../../src/utils/libraryIdentity';
-import type { ActionStatus, PreviewData } from './agentActionViewHelpers';
+import { isStaleProposal, type ActionStatus, type PreviewData } from './agentActionViewHelpers';
 import {
     getBatchRewriteOldContent,
     getEditNotePreviewKind,
@@ -100,6 +100,9 @@ export const ActionPreview: React.FC<{
         );
     }
     const editNotePreviewKind = getEditNotePreviewKind(toolName, previewData.actionType);
+    // A refused stale proposal wrote nothing and still awaits a decision; the
+    // card header says what changed, so the preview shows it as a proposal.
+    const tagOrCollectionStatus = actions?.some(isStaleProposal) ? 'pending' : status;
     if (toolName === 'edit_metadata' || previewData.actionType === 'edit_metadata') {
         const edits = previewData.actionData.edits || [];
 
@@ -117,6 +120,8 @@ export const ActionPreview: React.FC<{
 
         // For applied actions, show the applied values if available
         const appliedEdits = previewData.resultData?.applied_edits;
+        // Fields an apply could not set, while the rest of the edit was saved.
+        const failedEdits = previewData.resultData?.failed_edits;
 
         // Creator data: old from resultData, proposed_data, or currentValue
         const oldCreators = previewData.resultData?.old_creators
@@ -150,6 +155,7 @@ export const ActionPreview: React.FC<{
                 edits={edits}
                 currentValues={currentValues}
                 appliedEdits={appliedEdits}
+                failedEdits={failedEdits}
                 status={status}
                 oldCreators={oldCreators}
                 newCreators={newCreators}
@@ -212,7 +218,7 @@ export const ActionPreview: React.FC<{
             <ManageTagsPreview
                 actionData={previewData.actionData}
                 currentValue={previewData.currentValue}
-                status={status}
+                status={tagOrCollectionStatus}
                 resultData={previewData.resultData as any}
                 errorMessage={previewData.errorMessage}
             />
@@ -224,7 +230,7 @@ export const ActionPreview: React.FC<{
             <ManageCollectionsPreview
                 actionData={previewData.actionData}
                 currentValue={previewData.currentValue}
-                status={status}
+                status={tagOrCollectionStatus}
                 resultData={previewData.resultData as any}
                 errorMessage={previewData.errorMessage}
             />

@@ -25,6 +25,9 @@ import {
 import { truncateText } from '@beaver/agent-ui/utils/stringUtils';
 import { countEditAnnotationTargets, isUnconfirmedAction } from './reviewChangeRows';
 import { textAnnotationStyle } from '@beaver/agent-core/types/agentActions/createAnnotations';
+import { isStaleProposal, STALE_PROPOSAL_CODE } from '../../../../src/services/manualActions/staleProposal';
+
+export { isStaleProposal };
 
 export type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error';
 
@@ -96,6 +99,8 @@ export interface StatusConfig {
     showReject: boolean;
     showUndo: boolean;
     showRetry: boolean;
+    /** Offer to write the change although the library moved since the proposal. */
+    showApplyAnyway?: boolean;
 }
 
 export const STATUS_CONFIGS: Record<ActionStatus | 'awaiting', StatusConfig> = {
@@ -170,17 +175,55 @@ const UNCONFIRMED_STATUS_CONFIG: StatusConfig = {
     showRetry: false,
 };
 
+/** Tooltip on a collapsed stale card's ✓, which applies it anyway. */
+export const STALE_APPLY_ANYWAY_TOOLTIP = 'Changed since proposed. Apply anyway';
+
+/**
+ * How a card shows an apply refused because the library changed since the
+ * proposal (see `isStaleProposal`). Retrying fails the same way, so the card
+ * offers to apply it anyway or to reject it.
+ */
+const STALE_PROPOSAL_STATUS_CONFIG: StatusConfig = {
+    icon: AlertIcon,
+    label: 'Changed since proposed',
+    iconClassName: 'font-color-orange',
+    showApply: false,
+    showReject: true,
+    showUndo: false,
+    showRetry: false,
+    showApplyAnyway: true,
+};
+
 /**
  * The card config for `status`, with an unconfirmed outcome in place of a
- * failure when every failed action is unconfirmed. A batch that also holds a
- * known failure keeps Retry, which leaves its unconfirmed actions alone.
+ * failure when every failed action is unconfirmed, and a stale proposal's
+ * choices when every failed action is one. A batch that also holds a known
+ * failure keeps Retry, which leaves its unconfirmed actions alone.
  */
 export function getStatusConfig(status: ActionStatus | 'awaiting', actions: AgentAction[]): StatusConfig {
     const failed = actions.filter((action) => action.status === 'error');
     if (status === 'error' && failed.length > 0 && failed.every(isUnconfirmedAction)) {
         return UNCONFIRMED_STATUS_CONFIG;
     }
+    if (status === 'error' && failed.length > 0 && failed.every(isStaleProposal)) {
+        return STALE_PROPOSAL_STATUS_CONFIG;
+    }
     return STATUS_CONFIGS[status];
+}
+
+/**
+ * What changed since a proposal whose apply was refused: the executor's
+ * message, shown in the expanded card. Null when no action on the card is one.
+ */
+export function staleProposalDetail(actions: AgentAction[]): string | null {
+    const stale = actions.find(isStaleProposal);
+    if (!stale) return null;
+    return stale.error_message || 'The library changed after this was proposed.';
+}
+
+/** Whether an apply was refused because the library changed since the proposal. */
+export function wasRefusedAsStale(result: { failed: Array<{ errorDetails?: Record<string, any> }> }): boolean {
+    return result.failed.some((failure) => failure.errorDetails?.error_code === STALE_PROPOSAL_CODE);
 }
 
 /** For an unconfirmed action stored without the server's explanation. */

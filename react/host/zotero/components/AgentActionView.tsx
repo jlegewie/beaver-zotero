@@ -77,8 +77,12 @@ import {
     inFlightProgressMessage,
     hasFailedUndo,
     getStatusConfig,
+    STALE_APPLY_ANYWAY_TOOLTIP,
+    staleProposalDetail,
+    wasRefusedAsStale,
     unconfirmedCaption,
 } from './agentActionViewHelpers';
+import { StaleProposalNote } from './StaleProposalNote';
 import { isStaleMergeProposal } from './mergeItemsErrors';
 import { ActionPreview } from './ActionPreview';
 import { useApprovalRecovery } from './useApprovalRecovery';
@@ -189,7 +193,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const [isProcessingAction, setIsProcessingAction] = useState(false);
     const [isUndoError, setIsUndoError] = useState(false);
     const [isExternallyProcessing, setIsExternallyProcessing] = useState(false);
-    const [clickedButton, setClickedButton] = useState<'approve' | 'reject' | 'undo' | 'refresh' | null>(null);
+    const [clickedButton, setClickedButton] = useState<'approve' | 'applyAnyway' | 'reject' | 'undo' | 'refresh' | null>(null);
     const prevPendingApprovalRef = useRef<PendingApproval | null>(pendingApproval);
 
     const isRunPending = useAtomValue(isWSChatPendingAtom);
@@ -418,6 +422,8 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             : isReplyHeld ? RECONNECT_SENDING_CAPTION : null;
     // An unconfirmed action offers nothing to click; this says what to do.
     const unconfirmedNote = !isProcessing && !isConfirmAction ? unconfirmedCaption(actions) : null;
+    // An apply refused because the library changed: what changed, once expanded.
+    const staleDetail = !isProcessing && !isConfirmAction ? staleProposalDetail(actions) : null;
 
     const handleApprove = useCallback(() => {
         if (!pendingApproval) return;
@@ -475,19 +481,27 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         }
     }, [pendingApproval, setRunPermissionMode, runId, setProcessingApproval]);
 
-    const handleApplyPending = useCallback(async () => {
+    // `skipStaleCheck` is "Apply anyway": write a proposal the library has
+    // moved away from, after the user saw what changed.
+    const applyActions = useCallback(async (skipStaleCheck: boolean) => {
         if (actions.length === 0 || isProcessing) return;
 
         setIsUndoError(false);
         setIsProcessingAction(true);
-        setClickedButton('approve');
+        setClickedButton(skipStaleCheck ? 'applyAnyway' : 'approve');
         try {
-            await applyAgentActions({ actions, runId });
+            const result = await applyAgentActions({ actions, runId, skipStaleCheck });
+            // Refused because the library changed: open the card on what changed.
+            if (wasRefusedAsStale(result)) {
+                setExpanded({ key: expansionKey, expanded: true });
+            }
         } finally {
             setIsProcessingAction(false);
             setClickedButton(null);
         }
-    }, [actions, isProcessing, runId, applyAgentActions]);
+    }, [actions, isProcessing, runId, applyAgentActions, setExpanded, expansionKey]);
+    const handleApplyPending = useCallback(() => applyActions(false), [applyActions]);
+    const handleApplyAnyway = useCallback(() => applyActions(true), [applyActions]);
 
     const handleRejectPending = useCallback(() => {
         if (actions.length === 0 || isProcessing) return;
@@ -554,7 +568,9 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     // Reject in its header. Expanded, the footer's labeled buttons decide and
     // the header keeps the open link, so the item can be checked first.
     const isDecisionState = isAwaitingApproval || status === 'pending';
-    const showDecisionButtons = isDecisionState && !isExpanded && !isProcessing && !isConfirmAction && !hasNoActionData;
+    // A refused stale proposal awaits the same decision; its ✓ applies anyway.
+    const isStaleDecision = !isDecisionState && config.showApplyAnyway === true;
+    const showDecisionButtons = (isDecisionState || isStaleDecision) && !isExpanded && !isProcessing && !isConfirmAction && !hasNoActionData;
     const previewData = buildPreviewData(toolName, pendingApproval, action);
     const runPermissionMode: RunPermissionMode =
         isFullAccessGrantedForRun(runApprovalPolicy, runId) ? 'full_access' : 'ask';
@@ -751,13 +767,13 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                     disabled={isDecisionHeld}
                                 />
                             </Tooltip>
-                            <Tooltip content={heldTooltip ?? 'Apply'} showArrow singleLine>
+                            <Tooltip content={heldTooltip ?? (isStaleDecision ? STALE_APPLY_ANYWAY_TOOLTIP : 'Apply')} showArrow singleLine>
                                 <IconButton
                                     icon={TickIcon}
                                     variant="ghost-secondary"
                                     iconClassName="font-color-green scale-14"
-                                    onClick={isAwaitingApproval ? handleApprove : handleApplyPending}
-                                    ariaLabel="Apply"
+                                    onClick={isAwaitingApproval ? handleApprove : isStaleDecision ? handleApplyAnyway : handleApplyPending}
+                                    ariaLabel={isStaleDecision ? 'Apply anyway' : 'Apply'}
                                     disabled={isDecisionHeld}
                                 />
                             </Tooltip>
@@ -798,6 +814,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 
             {isExpanded && (
                 <div className="display-flex flex-col">
+                    {staleDetail && <StaleProposalNote detail={staleDetail} />}
                     {previewData ? (
                         <ActionPreview
                             toolName={toolName}
@@ -906,6 +923,19 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                 className="flex-none whitespace-nowrap"
                             >
                                 Refresh
+                            </Button>
+                        )}
+
+                        {((config.showApplyAnyway && !isProcessing) || (isProcessing && clickedButton === 'applyAnyway')) && (
+                            <Button
+                                variant="solid"
+                                onClick={handleApplyAnyway}
+                                loading={isProcessing && clickedButton === 'applyAnyway'}
+                                disabled={isProcessing}
+                                title="Make the change even though the library changed since it was proposed"
+                                className="flex-none whitespace-nowrap"
+                            >
+                                Apply anyway
                             </Button>
                         )}
 

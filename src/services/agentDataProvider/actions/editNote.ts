@@ -69,6 +69,7 @@ import type { ActionExecuteRequest, ActionValidateRequest, OperationContext } fr
 import { TimeoutContext, TimeoutError, checkAborted } from '../timeout';
 import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
 import { getExternalRefContext } from './noteCitationRendering';
+import { sha256Hex } from '../../../utils/hash';
 
 export { getExternalRefContext };
 
@@ -447,6 +448,8 @@ async function validateEditNoteAction(
                 total_lines: totalLines,
                 match_count: 1,
                 old_content: simplified,
+                // Stored with the proposal: a later apply checks the note is unchanged.
+                content_hash: await sha256Hex(rawHtml),
             },
             warnings: collectWarnings(...(externalRefContext.externalFileWarnings ?? [])),
             preference,
@@ -484,6 +487,8 @@ async function validateEditNoteAction(
                 note_title: noteTitle,
                 total_lines: totalLines,
                 match_count: 1,
+                // Stored with the proposal: a later apply checks the note is unchanged.
+                content_hash: await sha256Hex(rawHtml),
             },
             warnings: collectWarnings(...(externalRefContext.externalFileWarnings ?? [])),
             preference,

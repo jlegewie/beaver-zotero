@@ -11,6 +11,7 @@ import {
     setAgentActionsToErrorAtom,
     rejectAgentActionAtom,
     undoAgentActionAtom,
+    withoutActionsAppliedElsewhereAtom,
 } from '../../../agents/agentActions';
 import { AckActionLink } from '@beaver/agent-core/transport/clients/agentActionsService';
 import { AnnotationResultData } from '@beaver/agent-core/types/agentActions/annotations';
@@ -399,6 +400,7 @@ export const AnnotationToolCallView: React.FC<AnnotationToolCallViewProps> = ({ 
 
     // State management atoms
     const ackAgentActions = useSetAtom(ackAgentActionsAtom);
+    const withoutActionsAppliedElsewhere = useSetAtom(withoutActionsAppliedElsewhereAtom);
     const setAgentActionsToError = useSetAtom(setAgentActionsToErrorAtom);
     const rejectAgentAction = useSetAtom(rejectAgentActionAtom);
     const undoAgentAction = useSetAtom(undoAgentActionAtom);
@@ -498,12 +500,13 @@ export const AnnotationToolCallView: React.FC<AnnotationToolCallViewProps> = ({ 
                 return;
             }
 
-            // Filter annotations to apply
-            const annotationsToApply = annotations.filter((a) => {
+            // Filter annotations to apply, leaving out any applied in another
+            // window or on another device since this one loaded them.
+            const annotationsToApply = await withoutActionsAppliedElsewhere(runId, annotations.filter((a) => {
                 if (a.status === 'applied') return false;
                 if (annotationId && a.id !== annotationId) return false;
                 return true;
-            });
+            }));
 
             if (annotationsToApply.length === 0) {
                 setAnnotationPanelState({ key: toolCallId, updates: { isApplying: false } });
@@ -560,7 +563,7 @@ export const AnnotationToolCallView: React.FC<AnnotationToolCallViewProps> = ({ 
             logger(`AnnotationToolCallView: unexpected error: ${error}`, 1);
             setAnnotationPanelState({ key: toolCallId, updates: { isApplying: false } });
         }
-    }, [annotations, isAttachmentOpen, runId, toolCallId, ackAgentActions, setAgentActionsToError, setAnnotationPanelState]);
+    }, [annotations, isAttachmentOpen, runId, toolCallId, ackAgentActions, withoutActionsAppliedElsewhere, setAgentActionsToError, setAnnotationPanelState]);
 
     /**
      * Handle clicking on an annotation - navigate if applied, re-add if not

@@ -1,5 +1,7 @@
 import type { OperationContext } from '../agentDataProvider/operationContext';
 import { dismissNotePreviews } from '../notePreviews';
+import { sha256Hex } from '../../utils/hash';
+import { ManualApplyOptions, staleProposalError } from './staleProposal';
 /**
  * Utilities for executing and undoing edit_note agent actions.
  * These functions are used by AgentActionView for post-run action handling.
@@ -7,7 +9,7 @@ import { dismissNotePreviews } from '../notePreviews';
 
 import { AgentAction } from '@beaver/agent-core/agents/agentActionTypes';
 import { logger } from '@beaver/agent-core/platform/logger';
-import type { EditNoteOperation, EditNoteResultData } from '@beaver/agent-core/types/agentActions/editNote';
+import type { EditNoteBaseline, EditNoteOperation, EditNoteProposedData, EditNoteResultData } from '@beaver/agent-core/types/agentActions/editNote';
 import type {
     EditNoteBatchEditItem,
     EditNoteBatchProposedData,
@@ -533,6 +535,25 @@ function restoreEditFragment(params: RestoreEditFragmentParams): RestoreEditFrag
     };
 }
 
+/** Edit operations that do not anchor on matched text, so a changed note goes unnoticed. */
+function isUnanchoredOperation(operation: EditNoteOperation | undefined): boolean {
+    return operation === 'rewrite' || operation === 'append';
+}
+
+/**
+ * Throw `stale_proposal` when the note no longer hashes to the
+ * `baseline.content_hash` stored with the proposal. Called after the live
+ * editor has been flushed, so the stored HTML is what the user sees. A
+ * proposal without a hash is not checked.
+ */
+async function assertNoteUnchanged(item: Zotero.Item, proposedData: { baseline?: EditNoteBaseline | null }): Promise<void> {
+    const contentHash = proposedData.baseline?.content_hash;
+    if (typeof contentHash !== 'string' || !contentHash) return;
+    if (await sha256Hex(item.getNote()) !== contentHash) {
+        throw staleProposalError('The note changed after this edit was proposed.');
+    }
+}
+
 /**
  * Execute an edit_note agent action by applying string replacement on the note.
  * @param action The agent action to execute
@@ -541,6 +562,7 @@ function restoreEditFragment(params: RestoreEditFragmentParams): RestoreEditFrag
 export async function executeEditNoteAction(
     action: AgentAction,
     context: OperationContext,
+    options: ManualApplyOptions = {},
 ): Promise<EditNoteResultData> {
     const {
         library_id: requestedLibraryId,
@@ -614,6 +636,12 @@ export async function executeEditNoteAction(
                 logger(`executeEditNoteAction: diff-preview markup in ${library_id}-${zotero_key} could not be fully stripped; save will be refused by the preview guard`, 1);
             }
         }
+    }
+
+    // 2d. rewrite / append do not anchor on text in the note: refuse when the
+    //     note changed since the proposal, unless the user applies anyway.
+    if (isUnanchoredOperation(operation) && !options.skipStaleCheck) {
+        await assertNoteUnchanged(item, action.proposed_data as EditNoteProposedData);
     }
 
     const externalRefContext = await getExternalRefContext(new_string, context);
@@ -1386,6 +1414,7 @@ async function executeBatchSingleRewrite(
 export async function executeEditNoteBatchAction(
     action: AgentAction,
     context: OperationContext,
+    options: ManualApplyOptions = {},
 ): Promise<EditNoteBatchResultData> {
     const {
         library_id: requestedLibraryId,
@@ -1451,6 +1480,13 @@ export async function executeEditNoteBatchAction(
                 logger(`executeEditNoteBatchAction: diff-preview markup in ${library_id}-${zotero_key} could not be fully stripped; save will be refused by the preview guard`, 1);
             }
         }
+    }
+
+    // 2d. A batch with a rewrite or append does not anchor every edit on
+    //     text in the note: refuse when the note changed since the proposal,
+    //     unless the user applies anyway.
+    if (edits.some((edit) => isUnanchoredOperation(edit.operation)) && !options.skipStaleCheck) {
+        await assertNoteUnchanged(item, action.proposed_data as EditNoteBatchProposedData);
     }
 
     // 3. Snapshot the note once. Every edit resolves against this snapshot.

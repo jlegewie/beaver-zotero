@@ -419,7 +419,9 @@ export async function validateManageTagsAction(
             name: resolvedName,
             new_name: newName,
             is_merge: isMerge,
-            item_count: itemCount,
+            // Omitted when the lookup failed: it is also the drift baseline,
+            // and a guessed 0 would read as a change on a later apply.
+            ...(itemCountKnown ? { item_count: itemCount } : {}),
         },
         // Only resolved scalars go into normalized_action_data. Snapshots are
         // captured at execute time. `name` carries the auto-resolved tag name

@@ -1,7 +1,7 @@
 import { viewAttachment } from '../../../runtime/navigation';
 import { tryGetWindowRuntime } from '../../../runtime/windowRuntime';
 import React, { useEffect, useState, useCallback } from 'react';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import {
     ArrowUpRightIcon,
     DownloadIcon,
@@ -37,6 +37,7 @@ import {
     ackAgentActionsAtom,
     isImportItemAgentAction,
     setAgentActionsToErrorAtom,
+    withoutActionsAppliedElsewhereAtom,
 } from '../../../agents/agentActions';
 import { executeImportItemActions, importExternalReference } from '../../../utils/importItemActions';
 import { isOpenAlexWorkId } from '@beaver/agent-core/citations/externalRecords';
@@ -44,6 +45,7 @@ import { primaryExternalUrl } from '@beaver/agent-core/citations/externalRecordD
 import { trialDetails, workDetails } from '@beaver/agent-core/types/externalReferences';
 import { CreateItemResultData } from '@beaver/agent-core/types/agentActions/items';
 import { currentThreadIdAtom } from '../../../atoms/threads';
+import { getThreadIdForRun } from '../agentActionExecution';
 import { searchableLibraryIdsAtom } from '../../../atoms/profile';
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import type { ExternalReferenceActionMode, ExternalReferenceActionsProps } from '@beaver/agent-ui/host/types';
@@ -72,9 +74,7 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
     const getPendingCreateItemAction = useAtomValue(getPendingCreateItemActionBySourceIdAtom);
     const ackAgentActions = useSetAtom(ackAgentActionsAtom);
     const setAgentActionsToError = useSetAtom(setAgentActionsToErrorAtom);
-    // Active thread ID — used to stamp the background PDF fetch so the
-    // attachment_resolved ws event can route back to the live agent run.
-    const threadId = useAtomValue(currentThreadIdAtom);
+    const store = useStore();
     const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
     const websiteUrl = webUrl ?? primaryExternalUrl(item);
 
@@ -124,13 +124,27 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
             // fetch correlate its attachment_resolved ws event back to the right
             // action server-side.
             const matchingAction = item.source_id ? getPendingCreateItemAction(item.source_id) : null;
+            // Scopes import paths, routes the background PDF fetch's
+            // attachment_resolved event, and goes into the provenance note:
+            // the thread that owns the action's run, else the thread this
+            // reference is shown in.
+            const threadId = matchingAction
+                ? getThreadIdForRun(store.get, matchingAction.run_id)
+                : store.get(currentThreadIdAtom) ?? undefined;
+
+            // Applied in another window or on another device since this one
+            // loaded it: shown as the server has it instead of imported twice.
+            if (matchingAction) {
+                const [current] = await store.set(withoutActionsAppliedElsewhereAtom, matchingAction.run_id, [matchingAction]);
+                if (!current) return;
+            }
 
             // A v2 proposal for this reference is written through its own action,
             // so its resolved metadata, library, collections and tags apply.
             if (matchingAction && isImportItemAgentAction(matchingAction)) {
                 const batch = await executeImportItemActions([matchingAction], {
                     runId: matchingAction.run_id,
-                    threadId: threadId ?? undefined,
+                    threadId,
                 });
                 const failure = batch.failures[0];
                 if (failure) {
@@ -159,7 +173,7 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
             if (!matchingAction && item.source_id) {
                 let result;
                 try {
-                    result = await importExternalReference(item.source_id, { threadId: threadId ?? undefined });
+                    result = await importExternalReference(item.source_id, { threadId });
                 } catch (error: any) {
                     const existing = error?.details?.existing_item as ZoteroItemReference | undefined;
                     if (error?.code === 'already_in_library' && existing) {
@@ -192,7 +206,7 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
             const newItem = await createZoteroItem(item, {
                 actionId: matchingAction?.id,
                 runId: matchingAction?.run_id,
-                threadId: threadId ?? undefined,
+                threadId,
             });
 
             // Use the item's actual library ID (may differ from user library if in group)
@@ -213,7 +227,7 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
                     newZoteroRef,
                     {
                         reason: provenanceReason,
-                        threadId: threadId ?? undefined,
+                        threadId,
                         runId: matchingAction?.run_id,
                     },
                 );
@@ -281,7 +295,7 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
         } finally {
             setIsImporting(false);
         }
-    }, [item, isImporting, isLoading, threadId, markExternalReferenceImported, getPendingCreateItemAction, ackAgentActions, setAgentActionsToError]);
+    }, [item, isImporting, isLoading, store, markExternalReferenceImported, getPendingCreateItemAction, ackAgentActions, setAgentActionsToError]);
 
     // React to cache changes (e.g., when item is deleted and cache is invalidated)
     useEffect(() => {

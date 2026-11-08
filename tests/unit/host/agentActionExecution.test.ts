@@ -27,6 +27,7 @@ vi.mock('@beaver/agent-core/transport/clients/agentActionsService', () => ({
     agentActionsService: {
         acknowledgeActions: vi.fn().mockResolvedValue({ success: true, errors: [] }),
         updateAction: vi.fn().mockResolvedValue({ success: true, errors: [] }),
+        getActionsForRun: vi.fn().mockResolvedValue([]),
     },
 }));
 
@@ -35,6 +36,9 @@ import { executeCreateItemActions, undoCreateItemActions } from '../../../react/
 import { executeMergeItemsAction, refreshMergeItemsProposal } from '../../../react/utils/mergeItemsActions';
 import { agentActionsService } from '@beaver/agent-core/transport/clients/agentActionsService';
 import { threadAgentActionsAtom } from '../../../react/agents/agentActions';
+import { activeRunAtom, currentThreadIdAtom, threadRunsAtom } from '@beaver/agent-core/run-state/atoms';
+import { externalReferenceItemMappingAtom } from '@beaver/agent-core/citations/externalReferences';
+import { isStaleProposal, staleProposalError } from '../../../src/services/manualActions/staleProposal';
 import { mergeItemsChoicesAtom } from '../../../react/atoms/mergeItemsChoices';
 import {
     applyAgentActionsAtom,
@@ -82,7 +86,7 @@ describe('note-edit action execution', () => {
 
         // Let the executor reach the mocked note write after dismissing the
         // preview, then complete it and verify the action settles as applied.
-        await Promise.resolve();
+        await vi.waitFor(() => expect(finishApply).toBeTypeOf('function'));
         finishApply({ library_id: 1, zotero_key: 'NOTEKEY1' });
         await applyPromise;
 
@@ -298,5 +302,187 @@ describe('refreshing a stale merge proposal', () => {
             error_code: 'stale_snapshot',
             stale_changes: stale,
         });
+    });
+});
+
+
+describe('applying a stored action from a stale view', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        vi.mocked(agentActionsService.getActionsForRun).mockResolvedValue([]);
+        vi.mocked(agentActionsService.acknowledgeActions).mockResolvedValue({ success: true, errors: [] } as any);
+    });
+
+    it('does not write an action the server already has applied, and shows it as applied', async () => {
+        const store = createStore();
+        const stale = action();
+        store.set(threadAgentActionsAtom, [stale]);
+        vi.mocked(agentActionsService.getActionsForRun).mockResolvedValue([{
+            id: stale.id, run_id: 'run-1', action_type: 'edit_note', status: 'applied',
+            proposed_data: {}, result_data: { library_id: 1, zotero_key: 'OTHERDEVICE' },
+            created_at: '', updated_at: '',
+        }]);
+
+        const result = await store.set(applyAgentActionsAtom, { actions: [stale], runId: 'run-1' });
+
+        expect(executeEditNoteOrBatchAction).not.toHaveBeenCalled();
+        expect(agentActionsService.acknowledgeActions).not.toHaveBeenCalled();
+        expect(result).toEqual({ applied: [], failed: [] });
+        expect(store.get(threadAgentActionsAtom)[0]).toMatchObject({
+            status: 'applied',
+            result_data: { zotero_key: 'OTHERDEVICE' },
+        });
+    });
+
+    it('shows an import applied elsewhere as in the library wherever it is listed', async () => {
+        const store = createStore();
+        const stale: AgentAction = {
+            ...action(),
+            id: 'import-1',
+            action_type: 'import_item',
+            proposed_data: { source: { kind: 'external', external_id: 'W123' } },
+        };
+        store.set(threadAgentActionsAtom, [stale]);
+        vi.mocked(agentActionsService.getActionsForRun).mockResolvedValue([{
+            id: stale.id, run_id: 'run-1', action_type: 'import_item', status: 'applied',
+            proposed_data: {}, result_data: { library_id: 1, zotero_key: 'ITEMKEY1', library_ref: 'u' },
+            created_at: '', updated_at: '',
+        }]);
+
+        await store.set(applyAgentActionsAtom, { actions: [stale], runId: 'run-1' });
+
+        expect(store.get(externalReferenceItemMappingAtom).W123).toEqual({
+            library_id: 1, zotero_key: 'ITEMKEY1', library_ref: 'u',
+        });
+    });
+
+    it('re-applies an action the server has as undone or rejected', async () => {
+        const store = createStore();
+        const undone = action();
+        store.set(threadAgentActionsAtom, [undone]);
+        vi.mocked(agentActionsService.getActionsForRun).mockResolvedValue([{
+            id: undone.id, run_id: 'run-1', action_type: 'edit_note', status: 'undone',
+            proposed_data: {}, created_at: '', updated_at: '',
+        }]);
+        vi.mocked(executeEditNoteOrBatchAction).mockResolvedValue({ library_id: 1, zotero_key: 'NOTEKEY1' } as any);
+
+        const result = await store.set(applyAgentActionsAtom, { actions: [undone], runId: 'run-1' });
+
+        expect(result.applied).toEqual([undone.id]);
+    });
+
+    it('applies when the server cannot be read, leaving the acknowledgement to guard the record', async () => {
+        const store = createStore();
+        const pending = action();
+        store.set(threadAgentActionsAtom, [pending]);
+        vi.mocked(agentActionsService.getActionsForRun).mockRejectedValue(new Error('offline'));
+        vi.mocked(executeEditNoteOrBatchAction).mockResolvedValue({ library_id: 1, zotero_key: 'NOTEKEY1' } as any);
+
+        const result = await store.set(applyAgentActionsAtom, { actions: [pending], runId: 'run-1' });
+
+        expect(result.applied).toEqual([pending.id]);
+    });
+
+    it("acknowledges a user's apply only while the action has no result, and shows the server's record when it had one", async () => {
+        const store = createStore();
+        const pending = action();
+        store.set(threadAgentActionsAtom, [pending]);
+        vi.mocked(executeEditNoteOrBatchAction).mockResolvedValue({ library_id: 1, zotero_key: 'MINE' } as any);
+        vi.mocked(agentActionsService.acknowledgeActions).mockResolvedValue({
+            success: true, run_id: 'run-1', updated: 0, errors: [],
+            skipped: [{ action_id: pending.id, status: 'applied', result_data: { library_id: 1, zotero_key: 'FIRST' } }],
+        });
+
+        const result = await store.set(applyAgentActionsAtom, { actions: [pending], runId: 'run-1' });
+
+        expect(agentActionsService.acknowledgeActions).toHaveBeenCalledWith(
+            'run-1',
+            [{ action_id: pending.id, result_data: { library_id: 1, zotero_key: 'MINE' } }],
+            { onlyUnapplied: true },
+        );
+        expect(result.applied).toEqual([]);
+        expect(store.get(threadAgentActionsAtom)[0]).toMatchObject({
+            status: 'applied',
+            result_data: { zotero_key: 'FIRST' },
+        });
+    });
+});
+
+describe('a proposal the library has moved away from', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        vi.mocked(agentActionsService.getActionsForRun).mockResolvedValue([]);
+        vi.mocked(agentActionsService.acknowledgeActions).mockResolvedValue({ success: true, errors: [] } as any);
+    });
+
+    it('records a refused apply as a stale proposal, and applies it when the user asks to anyway', async () => {
+        const store = createStore();
+        const pending = action();
+        store.set(threadAgentActionsAtom, [pending]);
+        vi.mocked(executeEditNoteOrBatchAction)
+            .mockRejectedValueOnce(staleProposalError('The note changed after this edit was proposed.'))
+            .mockResolvedValueOnce({ library_id: 1, zotero_key: 'NOTEKEY1' } as any);
+
+        const refused = await store.set(applyAgentActionsAtom, { actions: [pending], runId: 'run-1' });
+
+        expect(refused.applied).toEqual([]);
+        const failed = store.get(threadAgentActionsAtom)[0];
+        expect(failed).toMatchObject({
+            status: 'error',
+            error_message: 'The note changed after this edit was proposed.',
+            error_details: { error_code: 'stale_proposal' },
+        });
+        expect(isStaleProposal(failed)).toBe(true);
+        expect(vi.mocked(executeEditNoteOrBatchAction).mock.calls[0][1]).toEqual({ skipStaleCheck: false });
+
+        const forced = await store.set(applyAgentActionsAtom, { actions: [failed], runId: 'run-1', skipStaleCheck: true });
+
+        expect(vi.mocked(executeEditNoteOrBatchAction).mock.calls[1][1]).toEqual({ skipStaleCheck: true });
+        expect(forced.applied).toEqual([pending.id]);
+        expect(store.get(threadAgentActionsAtom)[0]).toMatchObject({ status: 'applied', error_details: undefined });
+    });
+});
+
+describe('item imports apply in the thread that owns the run', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        vi.mocked(agentActionsService.getActionsForRun).mockResolvedValue([]);
+        vi.mocked(agentActionsService.acknowledgeActions).mockResolvedValue({ success: true, errors: [] } as any);
+        vi.mocked(executeCreateItemActions).mockResolvedValue({ successes: [], failures: [] } as any);
+    });
+
+    it("passes the run's thread, not the thread in view", async () => {
+        const store = createStore();
+        const pending = createItemAction('a', { status: 'pending', result_data: undefined });
+        store.set(threadAgentActionsAtom, [pending]);
+        store.set(threadRunsAtom, [{ id: 'run-1', thread_id: 'thread-of-run' } as any]);
+        store.set(currentThreadIdAtom, 'thread-in-view');
+
+        await store.set(applyAgentActionsAtom, { actions: [pending], runId: 'run-1' });
+
+        expect(vi.mocked(executeCreateItemActions).mock.calls[0][1]).toMatchObject({ runId: 'run-1', threadId: 'thread-of-run' });
+    });
+
+    it('uses the open thread for a streaming run that has no thread id yet', async () => {
+        const store = createStore();
+        const pending = createItemAction('a', { status: 'pending', result_data: undefined });
+        store.set(threadAgentActionsAtom, [pending]);
+        store.set(activeRunAtom, { id: 'run-1', thread_id: null } as any);
+        store.set(currentThreadIdAtom, 'thread-open');
+
+        await store.set(applyAgentActionsAtom, { actions: [pending], runId: 'run-1' });
+
+        expect(vi.mocked(executeCreateItemActions).mock.calls[0][1]).toMatchObject({ threadId: 'thread-open' });
+    });
+
+    it('passes no thread for a run this window does not hold', async () => {
+        const store = createStore();
+        const pending = createItemAction('a', { status: 'pending', result_data: undefined });
+        store.set(threadAgentActionsAtom, [pending]);
+        store.set(currentThreadIdAtom, 'thread-in-view');
+
+        await store.set(applyAgentActionsAtom, { actions: [pending], runId: 'run-1' });
+
+        expect(vi.mocked(executeCreateItemActions).mock.calls[0][1]).toMatchObject({ threadId: undefined });
     });
 });

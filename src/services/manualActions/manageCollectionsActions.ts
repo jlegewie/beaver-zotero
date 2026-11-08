@@ -31,9 +31,42 @@ import { AgentAction, ManageCollectionsAgentAction } from '@beaver/agent-core/ag
 import { logger } from '@beaver/agent-core/platform/logger';
 import type { ManageCollectionsProposedData, ManageCollectionsResultData } from '@beaver/agent-core/types/agentActions/base';
 import { libraryRefForLibraryID, resolveWriteTargetLibrary } from '../../utils/libraryIdentity';
+import { itemCountPhrase, joinList, ManualApplyOptions, staleProposalError } from './staleProposal';
 
+/**
+ * Throw `stale_proposal` when the collection changed since the proposal
+ * (`proposed_data.baseline`): its name, its parent, or (delete) the number of
+ * items in it. A proposal without a baseline is not checked. A null
+ * `parent_key` means top-level, unless nothing else was recorded either.
+ */
+function assertCollectionUnchanged(data: ManageCollectionsProposedData, collection: Zotero.Collection): void {
+    const baseline = data.baseline;
+    if (!baseline) return;
+    const hasName = typeof baseline.name === 'string';
+    const hasItemCount = typeof baseline.item_count === 'number';
+    if (!hasName && !hasItemCount && baseline.parent_key == null) return;
+    const label = hasName ? baseline.name : collection.name;
+    const changes: string[] = [];
+    if (hasName && collection.name !== baseline.name) {
+        changes.push(`was renamed to '${collection.name}'`);
+    }
+    const parentKey = collection.parentKey ? String(collection.parentKey) : null;
+    if (parentKey !== (baseline.parent_key ?? null)) {
+        changes.push('was moved');
+    }
+    if (hasItemCount) {
+        const count = (collection.getChildItems(true, false) as number[]).length;
+        if (count !== baseline.item_count) {
+            changes.push(`now has ${itemCountPhrase(count)}, not ${baseline.item_count}`);
+        }
+    }
+    if (changes.length > 0) {
+        throw staleProposalError(`The collection '${label}' changed after this was proposed: it ${joinList(changes)}.`);
+    }
+}
 export async function executeManageCollectionsAction(
-    action: AgentAction
+    action: AgentAction,
+    options: ManualApplyOptions = {},
 ): Promise<ManageCollectionsResultData> {
     const raw = action.proposed_data;
     const data = readCollectionActionData(raw) as ManageCollectionsProposedData;
@@ -58,6 +91,9 @@ export async function executeManageCollectionsAction(
     const lookup = recheckCollectionIfPresent(collection_key, resolvedLibraryID);
     if (!lookup) throw new CollectionResolutionError('collection_not_found', `Collection not found: ${collection_key}`);
     const collection = lookup.collection;
+    if (!options.skipStaleCheck) {
+        assertCollectionUnchanged(data, collection);
+    }
 
     // Snapshot the authoritative pre-apply state RIGHT BEFORE the op.
     const oldName: string = collection.name;

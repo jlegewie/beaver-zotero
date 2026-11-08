@@ -30,6 +30,7 @@ import {
     resolveWriteTargetLibrary,
 } from '../../utils/libraryIdentity';
 import { removeTagFromLibrary } from '../../utils/zoteroTags';
+import { itemCountPhrase, joinList, ManualApplyOptions, staleProposalError } from './staleProposal';
 
 const MAX_SNAPSHOT_ITEMS = 5000;
 
@@ -52,8 +53,47 @@ async function itemIdsToKeys(libraryID: number, itemIDs: number[]): Promise<stri
 }
 
 
+/**
+ * Throw `stale_proposal` when the tag changed since the proposal
+ * (`proposed_data.baseline`): it is on a different number of items, or
+ * (rename) whether the new name already exists, which decides between a
+ * rename and a merge, is no longer what the user saw. A proposal without a
+ * baseline, or a baseline value that is null, is not checked.
+ */
+async function assertTagUnchanged(
+    data: ManageTagsProposedData,
+    libraryID: number,
+    tagID: number | false | null | undefined,
+): Promise<void> {
+    const baseline = data.baseline;
+    if (!baseline) return;
+    const changes: string[] = [];
+    if (typeof baseline.item_count === 'number') {
+        const count = tagID !== false && tagID != null
+            ? (await Zotero.Tags.getTagItems(libraryID, tagID)).length
+            : 0;
+        if (count !== baseline.item_count) {
+            changes.push(`'${data.name}' is now on ${itemCountPhrase(count)}, not ${baseline.item_count}`);
+        }
+    }
+    if (data.action === 'rename' && typeof baseline.is_merge === 'boolean') {
+        const target = (data.new_name ?? '').trim();
+        const targetID = target ? Zotero.Tags.getID(target) : false;
+        const isMerge = targetID !== false && targetID != null;
+        if (isMerge !== baseline.is_merge) {
+            changes.push(isMerge
+                ? `'${target}' now exists, so renaming would merge the two tags`
+                : `'${target}' no longer exists, so this is no longer a merge`);
+        }
+    }
+    if (changes.length > 0) {
+        throw staleProposalError(`Tags changed after this was proposed: ${joinList(changes)}.`);
+    }
+}
+
 export async function executeManageTagsAction(
-    action: AgentAction
+    action: AgentAction,
+    options: ManualApplyOptions = {},
 ): Promise<ManageTagsResultData> {
     const data = action.proposed_data as ManageTagsProposedData;
     const { action: op, name, new_name, library_id, library_ref } = data;
@@ -72,8 +112,12 @@ export async function executeManageTagsAction(
     if (!resolution.ok) throw new Error(resolution.message);
     const resolvedLibraryID = resolution.libraryID;
 
-    // Snapshot the authoritative pre-apply state RIGHT BEFORE the op.
     const tagID = Zotero.Tags.getID(name);
+    if (!options.skipStaleCheck) {
+        await assertTagUnchanged(data, resolvedLibraryID, tagID);
+    }
+
+    // Snapshot the authoritative pre-apply state RIGHT BEFORE the op.
     let affectedItemIds: string[] = [];
     if (tagID !== false && tagID != null) {
         try {

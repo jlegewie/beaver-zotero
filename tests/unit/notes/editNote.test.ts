@@ -478,6 +478,9 @@ describe('validateEditNoteAction — success', () => {
             note_title: 'My Note',
             total_lines: 1,
             match_count: 1,
+            // An append does not anchor on note text, so a later apply
+            // compares the note with this fingerprint.
+            content_hash: expect.stringMatching(/^[0-9a-f]{64}$/),
         });
     });
 
