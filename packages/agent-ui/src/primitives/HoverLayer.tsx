@@ -256,13 +256,6 @@ export function HoverLayerProvider({ children }: { children: React.ReactNode }):
                         over.current.peek = true;
                         cancelClose('peek');
                     }}
-                    // A card opened from the peek stands clear of it, so the
-                    // pointer crosses the peek to reach it: keep it meanwhile.
-                    // Leaving the peek closes both, unless it enters the card.
-                    onOver={() => {
-                        const card = layersRef.current.card;
-                        if (card && peekRef.current?.contains(card.anchor)) cancelClose('card');
-                    }}
                     onLeave={() => {
                         over.current.peek = false;
                         hoverOut('peek');
@@ -276,7 +269,8 @@ export function HoverLayerProvider({ children }: { children: React.ReactNode }):
                     key={`card:${layers.card.id}`}
                     layer={layers.card}
                     elementRef={cardRef}
-                    clearOf={peekRef}
+                    // A card opened from the peek may overlap it: entering the
+                    // card keeps the peek; leaving it closes the card.
                     onEnter={() => {
                         over.current.card = true;
                         cancelClose('card');
@@ -300,20 +294,14 @@ export function HoverLayerProvider({ children }: { children: React.ReactNode }):
 function PlacedLayer({
     layer,
     elementRef,
-    clearOf,
     onEnter,
-    onOver,
     onLeave,
     onPress,
     onWheel,
 }: {
     layer: OpenLayer;
     elementRef?: React.MutableRefObject<HTMLDivElement | null>;
-    /** A layer a card opened from inside must not cover (the peek it came from). */
-    clearOf?: React.MutableRefObject<HTMLDivElement | null>;
     onEnter(): void;
-    /** The pointer moved onto an element inside the layer. */
-    onOver?(): void;
     onLeave(): void;
     onPress(): void;
     onWheel(event: React.WheelEvent<HTMLElement>, anchor: HTMLElement): void;
@@ -348,11 +336,9 @@ function PlacedLayer({
             setPosition({ left, top, width, minHeight: rect.height });
             return;
         }
-        // A card from a tag inside the peek keeps clear of the whole peek: the
-        // tags follow the cell's text, and a card above the tag would hide it.
-        const host = clearOf?.current;
-        const clear = host && host !== el && host.contains(anchor) ? host.getBoundingClientRect() : undefined;
-        const placement = placeCard(rect, box, { width: viewW, height: viewH }, clear);
+        // Placed against the anchor alone, even inside a peek: a card is
+        // read where the pointer is, and leaving the anchor closes it.
+        const placement = placeCard(rect, box, { width: viewW, height: viewH });
         // A tip is one short paragraph and does not scroll: only a card is bounded.
         setPosition(layer.variant === 'card' ? placement : { ...placement, maxHeight: undefined });
     }, [layer]);
@@ -376,7 +362,6 @@ function PlacedLayer({
                 visibility: position ? 'visible' : 'hidden',
             }}
             onMouseEnter={onEnter}
-            onMouseOver={onOver}
             onMouseLeave={onLeave}
             onMouseDown={(event) => {
                 if (event.button === 0) onPress();
@@ -403,46 +388,36 @@ const CARD_GAP_PX = 4;
 const MIN_CARD_PX = 160;
 
 /**
- * Places a card of `size` next to `anchor` without ever covering the anchor,
- * or `clear` when given (the peek the anchor sits in): below them, else above
- * them, else on the roomier of the two sides with its height bounded to that
- * room. Only when neither side has room for a usable card does it go beside
- * them. The card stays left-aligned with the anchor. A card above is held by
- * its bottom edge, so content that grows after placement (an expanded
- * passage) grows away from the anchor rather than over it.
+ * Places a card of `size` next to `anchor` without ever covering it: below,
+ * else above, else on the roomier of the two sides with its height bounded to
+ * that room. Only when neither side has room for a usable card does it go
+ * beside the anchor. The card stays left-aligned with the anchor. A card
+ * above is held by its bottom edge, so content that grows after placement (an
+ * expanded passage) grows away from the anchor rather than over it.
  */
 export function placeCard(
     anchor: { top: number; bottom: number; left: number; right: number },
     size: { width: number; height: number },
     view: { width: number; height: number },
-    clear?: { top: number; bottom: number; left: number; right: number },
 ): CardPlacement {
-    const keep = clear
-        ? {
-              top: Math.min(anchor.top, clear.top),
-              bottom: Math.max(anchor.bottom, clear.bottom),
-              left: Math.min(anchor.left, clear.left),
-              right: Math.max(anchor.right, clear.right),
-          }
-        : anchor;
     const clampLeft = (left: number) => Math.max(EDGE_PX, Math.min(left, view.width - size.width - EDGE_PX));
     const below: CardPlacement = {
         left: clampLeft(anchor.left),
-        top: keep.bottom + CARD_GAP_PX,
-        maxHeight: Math.max(0, view.height - EDGE_PX - keep.bottom - CARD_GAP_PX),
+        top: anchor.bottom + CARD_GAP_PX,
+        maxHeight: Math.max(0, view.height - EDGE_PX - anchor.bottom - CARD_GAP_PX),
     };
     const above: CardPlacement = {
         left: clampLeft(anchor.left),
-        bottom: view.height - keep.top + CARD_GAP_PX,
-        maxHeight: Math.max(0, keep.top - CARD_GAP_PX - EDGE_PX),
+        bottom: view.height - anchor.top + CARD_GAP_PX,
+        maxHeight: Math.max(0, anchor.top - CARD_GAP_PX - EDGE_PX),
     };
     if (size.height <= below.maxHeight) return below;
     if (size.height <= above.maxHeight) return above;
     const roomier = above.maxHeight > below.maxHeight ? above : below;
     if (roomier.maxHeight >= MIN_CARD_PX) return roomier;
     // Too little room above and below: beside, level with the anchor's top.
-    const right = keep.right + CARD_GAP_PX;
-    const left = keep.left - CARD_GAP_PX - size.width;
+    const right = anchor.right + CARD_GAP_PX;
+    const left = anchor.left - CARD_GAP_PX - size.width;
     const fitsRight = right + size.width <= view.width - EDGE_PX;
     if (!fitsRight && left < EDGE_PX) return roomier;
     const fullHeight = Math.max(0, view.height - 2 * EDGE_PX);
