@@ -3,9 +3,8 @@
  *
  * ## Why this exists
  *
- * `view/readerTableView.ts`, `src/ui/tableTab.ts` and `src/ui/tableItemPane.ts`
- * keep **module-level state**: the reader listener, the open tabs and the
- * registered pane id. `src/hooks.ts` imports them, so esbuild compiles them
+ * `view/readerTableView.ts` and `src/ui/tableTab.ts` keep **module-level
+ * state**: the reader listener and the open tabs. `src/hooks.ts` imports them, so esbuild compiles them
  * into `beaver.js`. If anything under `react/` imports them too, webpack
  * compiles a *second* copy into `reactBundle.js`, and the two copies never see
  * each other. CLAUDE.md states the rule this violates: "The two bundles cannot
@@ -20,8 +19,7 @@
  * ## The seam
  *
  * The **esbuild bundle owns these surfaces**, because that is where `hooks.ts`
- * runs and where the reader redirect, the tabs and the item-pane section
- * actually live. It publishes them here at startup; the webpack side reaches them
+ * runs and where the reader redirect and the tabs actually live. It publishes them here at startup; the webpack side reaches them
  * through {@link getTablesApi} instead of importing the modules.
  *
  * **This module must never gain a value import.** Types are erased, so the
@@ -51,7 +49,6 @@ import type {
 import type { TableUserEditOptions, TableUserEditResult } from './tableUserEdits';
 import type { TableCellEdit, TableUserEdit } from '@beaver/agent-core/layouts/tableEdit';
 import type { OpenTableOptions, OpenTableOutcome } from '../../ui/openTable';
-import type { TableItemPaneReport } from '../../ui/tableItemPane';
 import type { TableTabRenderReport } from '../../ui/tableTabTypes';
 
 /** The table tabs, owned by `src/ui/tableTab.ts`. */
@@ -67,18 +64,8 @@ export interface TablesTabsApi {
     }>;
 }
 
-/** The item-pane section, as the dev endpoint needs to see it. */
-export interface TablesItemPaneApi {
-    /** Whether the section is registered with Zotero right now. */
-    isRegistered(): boolean;
-    /** The namespaced pane id Zotero assigned, or null. */
-    paneID(): string | null;
-    /** What the section would render for one table. */
-    describe(ref: TableRef): Promise<TableItemPaneReport>;
-}
-
 /**
- * The recovery shadow, as the item-pane section and the dev endpoints need it.
+ * The recovery shadow, as table opens and the dev endpoints need it.
  *
  * The plugin owns both detection and restoration. Restoration enters the
  * instance mutation queue before acquiring the table lock, and remains
@@ -121,7 +108,6 @@ export interface TablesApi {
     local: {
         commands(win: Window): TableLocalCommands;
     };
-    itemPane: TablesItemPaneApi;
     shadow: TablesShadowApi;
     tabs: TablesTabsApi;
 }

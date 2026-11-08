@@ -2,8 +2,8 @@
  * `/beaver/test/table-tab` (development and staging only): fixed commands for
  * checking the Beaver tab on a running instance without driving the UI by
  * hand. No command evaluates code; each one drives a product path (the open
- * function, a double-click, a `zotero://open` link, the item-pane button) or
- * reports state (tabs, the saved session, render timings).
+ * function, a double-click, a `zotero://open` link) or reports state (tabs,
+ * the saved session, render timings).
  *
  * Timings are taken in the plugin realm with layout forced, not with
  * `requestAnimationFrame`, which Gecko throttles in a window that is not
@@ -251,7 +251,7 @@ export async function handleTableTabProbe(request: ProbeRequest = {}): Promise<a
             errors.length = 0;
             return { ok: true };
         case 'open': {
-            // The product open from this window, as the item pane calls it.
+            // The product open from this window, as chat cards and links call it.
             const ref = refOf(request);
             const before = tableTabStats();
             const t0 = Date.now();
@@ -328,23 +328,6 @@ export async function handleTableTabProbe(request: ProbeRequest = {}): Promise<a
                 stats: tableTabStats(),
                 tabs: tabsSummary(win),
             };
-        }
-        case 'item-pane': {
-            // The item pane's "Open table" button, clicked.
-            const ref = refOf(request);
-            const item = itemOf(ref);
-            tabs.select('zotero-pane');
-            await win.ZoteroPane.selectItem(item.id);
-            const button = await waitFor(() => {
-                const el = win.document.querySelector('[data-beaver-action="open"]');
-                return el && !el.disabled ? el : null;
-            }, timeoutMs, 25);
-            if (!button) return { error: 'The item pane has no enabled Open table button' };
-            const t0 = Date.now();
-            button.click();
-            const result = await landed(win, ref, t0, timeoutMs);
-            await sleep(300);
-            return { ...result, stats: tableTabStats(), tabs: tabsSummary(win) };
         }
         case 'session': {
             await Zotero.Session.save();

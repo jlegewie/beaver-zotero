@@ -56,7 +56,7 @@ as one to download. Reads never write. `table.json` is written atomically and
 syncs with its history, so a `table.json` missing beside a retained history is
 damage from outside: the table reads as `corrupt` and nothing rebuilds it. The
 tip's content went with `table.json`; reverting to an older retained version, or
-the item pane's "Recover my version" (this device's last write), writes a new one. A
+restoring the recovery shadow (this device's last write), writes a new one. A
 storage directory with no table, no history and no snapshot is a table whose
 files have not arrived yet (`file_missing`); a snapshot without a table is
 `no_spec`.
@@ -190,7 +190,7 @@ questions) in `skipped`.
 Outside the storage directory, the recovery shadow (`recoveryShadow.ts`) keeps
 one compressed copy per table: the version this device wrote last. Opening a
 table compares against it to detect a sync conflict that replaced the directory
-with an older copy, and the item pane's "Recover my version" writes it back as a
+with an older copy, and `restoreShadowVersion` writes it back as a
 new version. Every write replaces it, so recover before editing again.
 
 User-facing verbs stay distinct: Undo takes back one edit, Revert writes a
@@ -358,8 +358,7 @@ Provider access checks readable sidecar content before repairing interrupted
 bookkeeping from the committed table, then verifies all retained digests before
 returning history. Missing or corrupt older versions remain unavailable.
 
-The item-pane Edit action opens one persistent React editor in the existing Beaver
-window. Ordinary Open shows the table in the Beaver tab (`src/ui/tableTab.ts`), which
+Open shows the table in the Beaver tab (`src/ui/tableTab.ts`), which
 reads the committed `table.json` and re-reads it on the store's update event; a reader
 opened on a table, in a tab or a window, is replaced by that tab. Local edits, explicit
 history restore, and resets do not call the backend. Notifications reload current

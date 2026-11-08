@@ -17,24 +17,19 @@ const resolveNavigationWindow = vi.hoisted(() => vi.fn());
 const canHostTableTab = vi.hoisted(() => vi.fn(() => true));
 const openTableTab = vi.hoisted(() => vi.fn());
 const setTableTabWarning = vi.hoisted(() => vi.fn());
-const restoreCheck = vi.hoisted(() => vi.fn(async () => 'ok'));
 const tableRepairAllowed = vi.hoisted(() => vi.fn(() => true));
 
 vi.mock('../../../src/services/artifacts/tableItemIdentity', async (importOriginal) => {
     const original = await importOriginal<typeof import('../../../src/services/artifacts/tableItemIdentity')>();
     return {
-        UNREADABLE_TABLE_RECOVERY: original.UNREADABLE_TABLE_RECOVERY,
         TABLE_REPAIR_SKIPPED: original.TABLE_REPAIR_SKIPPED,
+        tableReadProblem: original.tableReadProblem,
         tableRepairAllowed,
-        unreadableTableRecovery: original.unreadableTableRecovery,
         resolveTableItem,
         readTableItemSpec,
         tableFilesDownloadable: original.tableFilesDownloadable,
     };
 });
-vi.mock('../../../src/services/artifacts/tablesApi', () => ({
-    getTablesApi: () => ({ shadow: { check: restoreCheck } }),
-}));
 vi.mock('../../../src/services/artifacts/tableRenderer', () => ({ snapshotIsCurrent }));
 vi.mock('../../../src/ui/tableTab', () => ({ canHostTableTab, openTableTab, setTableTabWarning }));
 vi.mock('../../../src/runtime/navigation', async (importOriginal) => ({
@@ -48,7 +43,7 @@ import { WindowUnavailableError } from '../../../src/runtime/navigation';
 
 const REF = { libraryID: 1, key: 'TABLEKEY' };
 const SPEC = { id: 't', key: REF.key, version: 4, title: 'Spec', columns: [], rows: [] };
-const ITEM = { id: 42, key: REF.key, libraryID: REF.libraryID };
+const ITEM = { id: 42, key: REF.key, libraryID: REF.libraryID, getField: () => 'Comparison' };
 
 const main = { closed: false, __beaverRuntime: { status: 'ready' } } as any;
 const other = { closed: false, __beaverRuntime: { status: 'ready' } } as any;
@@ -185,7 +180,7 @@ describe('openTable', () => {
     it('opens nothing for a table whose files are not on this device', async () => {
         readTableItemSpec.mockResolvedValue({ ok: false, code: 'no_file', message: 'Table TABLEKEY has no file on disk.' });
         const outcome = await openTable(REF, { window: main });
-        expect(outcome).toEqual({ error: `Could not open table ${REF.key} — it has no file on disk.` });
+        expect(outcome).toEqual({ error: "Couldn't open “Comparison”. Its file isn't on this device." });
         expect(openTableTab).not.toHaveBeenCalled();
         expect(resolveNavigationWindow).not.toHaveBeenCalled();
     });
@@ -208,7 +203,7 @@ describe('openTable', () => {
         (Zotero as any).Sync.Runner.downloadFile.mockImplementationOnce(download);
         readTableItemSpec.mockResolvedValue({ ok: false, code: 'no_file', message: 'Table TABLEKEY has no file on disk.' });
         await expect(openTable(REF, { window: main })).resolves.toEqual({
-            error: `Could not open table ${REF.key} — its files could not be downloaded to this device.`,
+            error: "Couldn't open “Comparison”. Its file couldn't be downloaded to this device.",
         });
         expect(readTableItemSpec).toHaveBeenCalledOnce();
         expect(openTableTab).not.toHaveBeenCalled();
@@ -218,7 +213,7 @@ describe('openTable', () => {
         const onDownload = vi.fn();
         readTableItemSpec.mockResolvedValue({ ok: false, code: 'no_file', message: 'Table TABLEKEY has no file on disk.' });
         await expect(openTable(REF, { window: main, onDownload })).resolves.toEqual({
-            error: `Could not open table ${REF.key} — it has no file on disk.`,
+            error: "Couldn't open “Comparison”. Its file isn't on this device.",
         });
         expect(onDownload).not.toHaveBeenCalled();
         expect((Zotero as any).Sync.Runner.downloadFile).not.toHaveBeenCalled();
@@ -249,22 +244,30 @@ describe('openTable', () => {
         expect((Zotero as any).Sync.Runner.downloadFile).toHaveBeenCalledOnce();
     });
 
-    it('opens nothing for a table that cannot be read, and says why', async () => {
-        readTableItemSpec.mockResolvedValue({ ok: false, code: 'corrupt', message: 'The table is corrupted.' });
+    it('opens nothing for a table that cannot be read, and says why in plain words', async () => {
+        readTableItemSpec.mockResolvedValue({
+            ok: false,
+            code: 'invalid',
+            message: `Table ${REF.key} is not readable JSON: SyntaxError: JSON.parse: unexpected character`,
+        });
         await expect(openTable(REF, { window: main })).resolves.toEqual({
-            error: `Could not open table ${REF.key} — The table is corrupted. Select the table in your library and use “Recover my version” in its Beaver Table section to write back the last version this device saved.`,
+            error: "Couldn't open “Comparison”. Its saved file is damaged, so Beaver can't read it.",
         });
         expect(openTableTab).not.toHaveBeenCalled();
     });
 
-    it('does not point to a restore that would not run', async () => {
-        readTableItemSpec.mockResolvedValue({ ok: false, code: 'corrupt', message: 'The table is corrupted.' });
-        for (const outcome of ['no_shadow', 'no_payload', 'not_writable']) {
-            restoreCheck.mockResolvedValueOnce(outcome);
-            await expect(openTable(REF, { window: main })).resolves.toEqual({
-                error: `Could not open table ${REF.key} — The table is corrupted.`,
-            });
-        }
+    it('says the file is missing when only the version history remains', async () => {
+        readTableItemSpec.mockResolvedValue({ ok: false, code: 'corrupt', message: 'Table TABLEKEY has no table.json; recover this device\'s version or revert to a retained version to repair it.' });
+        await expect(openTable(REF, { window: main })).resolves.toEqual({
+            error: "Couldn't open “Comparison”. Its saved file is missing, so Beaver can't read it.",
+        });
+    });
+
+    it('says a table from a newer format needs a Beaver update', async () => {
+        readTableItemSpec.mockResolvedValue({ ok: false, code: 'unsupported_version', message: 'Table TABLEKEY was written in another format (spec_version 99).' });
+        await expect(openTable(REF, { window: main })).resolves.toEqual({
+            error: "Couldn't open “Comparison”. It was saved in a format this version of Beaver can't read. Updating Beaver may fix this.",
+        });
     });
 
     it('never retargets a click from a window that closed while the table was read', async () => {

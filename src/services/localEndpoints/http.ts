@@ -3,7 +3,7 @@ import { handleTestProtectedCacheHttpRequest } from './handlers/testProtectedCac
 import { handleTestExportHttpRequest, handleTestExportNoteHttpRequest } from './handlers/testExportHandlers';
 import { handleTestNoteCreateHttpRequest, handleTestNoteDeleteHttpRequest, handleTestNoteReadHttpRequest } from './handlers/testNoteHandlers';
 import { handleTestTableFillHttpRequest, handleTestTablePendingHttpRequest } from './handlers/testTableFillHandlers';
-import { handleTestTableCreateHttpRequest, handleTestTableReadHttpRequest, handleTestTableListHttpRequest, handleTestTableWriteHttpRequest, handleTestTableEditHttpRequest, handleTestTableVersionsHttpRequest, handleTestTableRevertHttpRequest, handleTestTableDeleteHttpRequest, handleTestTableOpenHttpRequest, handleTestTableCorruptHttpRequest, handleTestTableShadowHttpRequest, handleTestTableRestoreShadowHttpRequest, handleTestTableTrimHttpRequest, handleTestTableItemPaneHttpRequest } from './handlers/testTableHandlers';
+import { handleTestTableCreateHttpRequest, handleTestTableReadHttpRequest, handleTestTableListHttpRequest, handleTestTableWriteHttpRequest, handleTestTableEditHttpRequest, handleTestTableVersionsHttpRequest, handleTestTableRevertHttpRequest, handleTestTableDeleteHttpRequest, handleTestTableOpenHttpRequest, handleTestTableCorruptHttpRequest, handleTestTableShadowHttpRequest, handleTestTableRestoreShadowHttpRequest, handleTestTableTrimHttpRequest } from './handlers/testTableHandlers';
 import {
     handleTestAttachmentImageHttpRequest,
     handleTestExcludedLibrariesHttpRequest,
@@ -1156,7 +1156,7 @@ export function registerEndpoints(): (() => void) | undefined {
 
         endpoints['/beaver/test/beaver-window'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/beaver-window', request));
 
-        // `openTable` itself — the product path the item-pane button takes.
+        // `openTable` itself — the product path chat cards and links take.
         endpoints['/beaver/test/open-stored-table'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/open-stored-table', request));
 
         // Stored tables (dev-only): create the real snapshot attachment, read
@@ -1201,10 +1201,6 @@ export function registerEndpoints(): (() => void) | undefined {
         endpoints['/beaver/test/table-shadow'] = createEndpoint(handleTestTableShadowHttpRequest);
 
         endpoints['/beaver/test/table-restore-shadow'] = createEndpoint(handleTestTableRestoreShadowHttpRequest);
-
-        // The item-pane section (dev-only): whether it is registered, and the
-        // fields it would render for one table.
-        endpoints['/beaver/test/table-item-pane'] = createEndpoint(handleTestTableItemPaneHttpRequest);
 
         endpoints['/beaver/test/beaver-sidebar'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/beaver-sidebar', request));
 

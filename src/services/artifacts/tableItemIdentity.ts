@@ -24,7 +24,6 @@
 import { readSpec, type TableSpec } from '@beaver/agent-core/layouts/table';
 import type { TableSummary } from '@beaver/agent-core/layouts/tableMutations';
 import { logger } from '@beaver/agent-core/platform/logger';
-import { getTablesApi } from './tablesApi';
 
 // ---------------------------------------------------------------------------
 // Marks
@@ -132,24 +131,6 @@ export function tableRepairAllowed(libraryID: number): boolean {
 /** Why a table's bookkeeping stays unrepaired where {@link tableRepairAllowed} is false. */
 export const TABLE_REPAIR_SKIPPED =
     'This table needs a repair, but Beaver does not change tables in a read-only library or one excluded from Beaver.';
-
-/** Where an unreadable table can be recovered: the item pane's recovery. */
-export const UNREADABLE_TABLE_RECOVERY =
-    'Select the table in your library and use “Recover my version” in its Beaver Table section to write back the last version this device saved.';
-
-/**
- * The recovery hint for an unreadable table, or '' when the item pane would
- * not offer the restore (no usable copy on this device, or a read-only
- * library). Never throws.
- */
-export async function unreadableTableRecovery(ref: TableRef): Promise<string> {
-    try {
-        const outcome = await getTablesApi()?.shadow.check(ref);
-        return outcome === 'ok' ? UNREADABLE_TABLE_RECOVERY : '';
-    } catch {
-        return '';
-    }
-}
 
 /** Error constructors differ between the plugin and renderer bundles. */
 export function isTableItemError(error: unknown): error is TableItemError {
@@ -548,8 +529,8 @@ export function missingTableFileMessage(item: Zotero.Item): string {
 
 /**
  * Who asked for a write. `tableStore.ts` owns what each value means for
- * collapsing; the shape lives here because readers on the esbuild side — the
- * item-pane section — need to name it without reaching the store.
+ * collapsing; the shape lives here because readers on the esbuild side need
+ * to name it without reaching the store.
  */
 export type TableActor = 'user' | 'agent' | 'system';
 
@@ -654,8 +635,7 @@ export async function readTableHistory(
  * A stored table, by the item that holds it.
  *
  * Declared here rather than in the store because the esbuild side addresses
- * tables too — `src/ui/openTable.ts` and the item-pane section both take one —
- * and `tableStore.ts` cannot be reached from that bundle. `tableStore.ts`
+ * tables too — `src/ui/openTable.ts` takes one — and `tableStore.ts` cannot be reached from that bundle. `tableStore.ts`
  * re-exports it, so nothing that already imports it from there has to change.
  */
 export interface TableRef {
@@ -688,6 +668,39 @@ export async function resolveTableItem(ref: TableRef, allowTrashed = false): Pro
     }
     return item;
 }
+
+/**
+ * Why a table cannot be shown, worded for the person using Beaver. A read's
+ * own message names the item key, the file and the parser error; that detail
+ * belongs in the log, agent responses and dev endpoints. Null for a code this
+ * does not describe, so the caller keeps its own message.
+ */
+export function tableReadProblem(
+    code: ReadTableFailureCode | TableItemErrorCode
+): string | null {
+    switch (code) {
+        case 'invalid':
+        case 'invalid_spec':
+        case 'version_corrupt':
+            return "Its saved file is damaged, so Beaver can't read it.";
+        case 'corrupt':
+            // On a read, `table.json` is gone while its version history remains.
+            return "Its saved file is missing, so Beaver can't read it.";
+        case 'unsupported_version':
+            return "It was saved in a format this version of Beaver can't read. Updating Beaver may fix this.";
+        case 'no_spec':
+            return 'The item has no table data.';
+        case 'not_a_table':
+            return "The item isn't a Beaver table.";
+        case 'no_file':
+        case 'file_missing':
+            return "Its file isn't on this device.";
+        default:
+            return null;
+    }
+}
+
+type ReadTableFailureCode = Extract<ReadTableItemResult, { ok: false }>['code'];
 
 /** Maps a read refusal onto the shared {@link TableItemErrorCode} vocabulary. */
 export function tableReadError(

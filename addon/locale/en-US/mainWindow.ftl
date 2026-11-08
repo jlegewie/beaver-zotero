@@ -29,11 +29,6 @@ beaver-note-export-submenu =
 beaver-note-export-format =
     .label = { $format }…
 
-beaver-table-section-header =
-    .label = Beaver Table
-beaver-table-section-sidenav =
-    .tooltiptext = Beaver Table
-
 beaver-window-new-chat =
     .label = New Chat
 beaver-window-settings =

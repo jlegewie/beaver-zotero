@@ -1,5 +1,6 @@
 import React from 'react';
 import { isTitleAbstractOnly, type TableSpec } from '@beaver/agent-core/layouts/table';
+import { logger } from '@beaver/agent-core/platform/logger';
 import { ResearchTable, type ResearchTableFocus, type ResearchTableReveal } from '@beaver/agent-ui/layouts';
 import { CitationReaderTargetContext } from '@beaver/agent-ui/chat/Citation';
 import MarkdownRenderer from '../messages/MarkdownRenderer';
@@ -7,7 +8,7 @@ import {
     isTableItemError,
     readTable,
     tableFilesEditable,
-    unreadableTableRecovery,
+    tableReadProblem,
     type TableRef,
 } from '../../../src/services/artifacts/tableItemIdentity';
 import { isTableChatEnabled } from '../../../src/services/tableCapability';
@@ -184,15 +185,14 @@ function sameTable(a: Loaded, b: Loaded): boolean {
 }
 
 /**
- * What the tab says when the table cannot be read, with the way back for a
- * damaged file when there is one.
+ * What the tab says when the table cannot be read. Over a table already on
+ * screen, it also says that what is shown is the last version that loaded.
  */
-async function readFailure(error: unknown, ref: TableRef): Promise<string> {
-    const message = String((error as Error)?.message ?? error).replace(/\.$/, '');
-    const damaged = isTableItemError(error) && error.code !== 'file_missing' && error.code !== 'not_a_table';
-    if (!damaged) return `${message}.`;
-    const recovery = await unreadableTableRecovery(ref);
-    return `This table could not be read — ${message}.${recovery ? ` ${recovery}` : ''}`;
+function readFailure(error: unknown, onScreen: boolean): string {
+    const problem = isTableItemError(error) ? tableReadProblem(error.code) : null;
+    if (!problem) return String((error as Error)?.message ?? error);
+    const message = `Beaver can't open this table. ${problem}`;
+    return onScreen ? `${message} You're seeing the last version that loaded.` : message;
 }
 
 const renderCellText = (text: string) => (
@@ -265,13 +265,12 @@ export default function TableTabView({
                 setState({ kind: 'table', table: read });
             } catch (error) {
                 if (!live || mine !== sequence) return;
-                const message = await readFailure(error, tableRef);
-                if (!live || mine !== sequence) return;
+                logger(`TableTabView: could not read ${tableRef.key}: ${String((error as Error)?.message ?? error)}`, 2);
                 // A table already on screen stays; the failure is reported over it.
                 setState((current) =>
                     current.kind === 'table'
-                        ? { kind: 'table', table: current.table, error: message }
-                        : { kind: 'error', message },
+                        ? { kind: 'table', table: current.table, error: readFailure(error, true) }
+                        : { kind: 'error', message: readFailure(error, false) },
                 );
             }
         };

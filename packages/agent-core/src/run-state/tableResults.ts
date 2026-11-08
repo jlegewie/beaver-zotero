@@ -166,7 +166,7 @@ export function tableResultMessages(value: unknown, toolName?: string): string[]
     }
     // `saved: false` / `repair_warning` (the write committed, its local
     // bookkeeping did not) is not a chat status: opening the table repairs it,
-    // and the table tab and item pane report what is still pending.
+    // and the table tab reports what is still pending.
     if (result.recording_warning) {
         messages.push(
             "The confirmed table outcome is unchanged, but saving its chat result failed. Do not repeat the table change to repair chat history.",

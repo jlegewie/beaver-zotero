@@ -1,8 +1,7 @@
 /**
  * Putting a stored table on screen: the Beaver tab.
  *
- * Every product path that opens a table — the item-pane button, chat cards,
- * request chips, a reader replaced by the Beaver tab — comes through
+ * Every product path that opens a table — chat cards, request chips, a reader replaced by the Beaver tab — comes through
  * {@link openTable}, so the window choice, the open repair and the warnings
  * are decided once.
  *
@@ -38,8 +37,8 @@ import {
     resolveTableItem,
     TABLE_REPAIR_SKIPPED,
     tableFilesDownloadable,
+    tableReadProblem,
     tableRepairAllowed,
-    unreadableTableRecovery,
     type TableRef,
 } from '../services/artifacts/tableItemIdentity';
 import { contextMainWindow, resolveNavigationWindow, WindowUnavailableError } from '../runtime/navigation';
@@ -178,14 +177,12 @@ export async function openTable(ref: TableRef, options: OpenTableOptions = {}): 
             }
         }
         if (!read.ok) {
-            if (read.code === 'no_file') {
-                if (!download) return { error: `Could not open table ${ref.key} — it has no file on disk.` };
-                return { error: `Could not open table ${ref.key} — its files could not be downloaded to this device.` };
-            }
-            const recovery = await unreadableTableRecovery(ref);
-            return {
-                error: `Could not open table ${ref.key} — ${read.message.replace(/\.$/, '')}.${recovery ? ` ${recovery}` : ''}`,
-            };
+            logger(`openTable: ${read.message}`, 2);
+            const title = String(item.getField('title') || '') || 'this table';
+            const problem = read.code === 'no_file' && download
+                ? "Its file couldn't be downloaded to this device."
+                : tableReadProblem(read.code) ?? read.message;
+            return { error: `Couldn't open “${title}”. ${problem}` };
         }
         const win = await tableTabWindow(options.window);
         const target = options.focus;

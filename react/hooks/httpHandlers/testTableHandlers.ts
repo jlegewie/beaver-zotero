@@ -1,11 +1,11 @@
-export { handleTestTableCreateHttpRequest, handleTestTableReadHttpRequest, handleTestTableListHttpRequest, handleTestTableWriteHttpRequest, handleTestTableEditHttpRequest, handleTestTableVersionsHttpRequest, handleTestTableRevertHttpRequest, handleTestTableDeleteHttpRequest, handleTestTableOpenHttpRequest, handleTestTableCorruptHttpRequest, handleTestTableShadowHttpRequest, handleTestTableRestoreShadowHttpRequest, handleTestTableTrimHttpRequest, handleTestTableItemPaneHttpRequest } from '../../../src/services/localEndpoints/handlers/testTableHandlers';
+export { handleTestTableCreateHttpRequest, handleTestTableReadHttpRequest, handleTestTableListHttpRequest, handleTestTableWriteHttpRequest, handleTestTableEditHttpRequest, handleTestTableVersionsHttpRequest, handleTestTableRevertHttpRequest, handleTestTableDeleteHttpRequest, handleTestTableOpenHttpRequest, handleTestTableCorruptHttpRequest, handleTestTableShadowHttpRequest, handleTestTableRestoreShadowHttpRequest, handleTestTableTrimHttpRequest } from '../../../src/services/localEndpoints/handlers/testTableHandlers';
 /**
  * Dev-only HTTP handlers for stored tables, registered by this renderer.
  *
  * The store handlers (`/beaver/test/table-create`, `-read`, `-write`, …) live
  * in the esbuild bundle and are re-exported here. `/beaver/test/open-stored-table`
- * takes the product path the item-pane button and the chat cards take, from
- * this renderer's window, and reports only whether the table got there.
+ * takes the product path the chat cards take, from this renderer's window,
+ * and reports only whether the table got there.
  */
 
 import { getHost } from '@beaver/agent-ui/host';
@@ -15,7 +15,7 @@ import type { TableRef } from '../../../src/services/artifacts/tableStore';
 import { tryGetWindowRuntime } from '../../runtime/windowRuntime';
 
 /**
- * `openTable` itself: the product path the item-pane button takes, from this
+ * `openTable` itself: the product path the chat cards take, from this
  * renderer's window. Reports the Beaver tab it landed in;
  * `/beaver/test/table-tab` inspects the tab.
  */

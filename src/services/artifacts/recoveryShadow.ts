@@ -32,8 +32,8 @@
  *
  * ## Bundle
  *
- * Esbuild-safe, deliberately: the item-pane section is compiled into
- * `beaver.js` and has to be able to say a table is in this state. So nothing
+ * Esbuild-safe, deliberately: `tablesApiHost.ts` publishes the inspection
+ * from `beaver.js`, so it has to be able to say a table is in this state. So nothing
  * here may import `tableStore.ts`/`tableItem.ts` or anything reaching `react/`.
  * The write-back lives in the store, which owns the write protocol —
  * `restoreShadowVersion`.
@@ -484,7 +484,7 @@ export function detectTableSyncConflict(
 
 /**
  * The shadow for a table plus the conflict, if any, against an observation the
- * caller already has. One shape for the dev endpoint and the item-pane section.
+ * caller already has.
  */
 export async function inspectTableShadow(
     ref: TableRef,

@@ -5,7 +5,7 @@ import { checkShadowRestore, registerTableShadowRestore } from './tableStore';
  * The counterpart to `tablesApi.ts`: that module is the seam both bundles may
  * hold (types and an accessor, no value imports), this one is the half only the
  * esbuild bundle may load, because it imports the modules that own the state —
- * the open tabs and the item-pane registration.
+ * the open tabs.
  *
  * Nothing here adds behaviour. It is a binding: every method forwards to the
  * module that already owns the surface, so there is exactly one registry per
@@ -15,11 +15,6 @@ import { checkShadowRestore, registerTableShadowRestore } from './tableStore';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { openTable } from '../../ui/openTable';
 import { listTableTabs } from '../../ui/tableTab';
-import {
-    describeTableItemPane,
-    isTableItemPaneRegistered,
-    tableItemPaneID,
-} from '../../ui/tableItemPane';
 import { inspectTableShadow } from './recoveryShadow';
 import {
     TABLE_SHADOW_RESTORE_UNAVAILABLE,
@@ -44,11 +39,6 @@ export function registerTablesApi(): void {
         local: { commands: getTableLocalCommands },
         tabs: {
             list: () => listTableTabs(),
-        },
-        itemPane: {
-            isRegistered: () => isTableItemPaneRegistered(),
-            paneID: () => tableItemPaneID(),
-            describe: (ref) => describeTableItemPane(ref),
         },
         shadow: {
             // Reading the shadow is esbuild-safe, so it is answered here.

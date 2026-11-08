@@ -1006,31 +1006,6 @@ export async function handleTestTableRestoreShadowHttpRequest(
     }
 }
 
-export async function handleTestTableItemPaneHttpRequest(
-    request: { key?: string; libraryID?: number } = {}
-): Promise<any> {
-    if (!request.key) return MISSING_KEY;
-    const api = getTablesApi();
-    if (!api) return TABLES_API_MISSING;
-
-    const ref: TableRef = {
-        libraryID: request.libraryID ?? Zotero.Libraries.userLibraryID,
-        key: request.key,
-    };
-    const report = await api.itemPane.describe(ref);
-    return {
-        ok: report.applies,
-        registered: report.registered,
-        pane_id: report.paneID,
-        key: report.key,
-        library_id: report.libraryID,
-        applies: report.applies,
-        reason: report.reason,
-        fields: report.fields,
-        actions: report.actions,
-    };
-}
-
 export async function handleTestTableTrimHttpRequest(
     request: TableStoreRequest & { run_ids?: string[] } = {}
 ): Promise<any> {

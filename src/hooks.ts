@@ -28,10 +28,6 @@ import { createInstanceAccount } from './services/instanceAccount';
 import { createInstanceTableFills } from './services/tableFills';
 import { InstancePreferences } from './services/instancePreferences';
 import { registerBeaverProtocolHandler, unregisterBeaverProtocolHandler } from "./services/protocolHandler";
-import {
-    cleanupTableItemPane,
-    initTableItemPane,
-} from "./ui/tableItemPane";
 import { BeaverUIFactory } from "./ui/ui";
 import { openTable } from "./ui/openTable";
 import { cleanupBeaverTabs, initBeaverTabs, recoverTabsAfterBeaverTabs, restoreBeaverTabs } from "./ui/beaverTabs";
@@ -449,14 +445,9 @@ async function onStartup() {
         // catches restored reader tabs and reader windows as they load.
         initTableReaderRedirect();
 
-        // -------- Describe a stored table in the item pane --------
-        // Registered once, globally: Zotero re-creates the section in every
-        // window's item pane from the same registration.
-        initTableItemPane();
-
         // -------- Publish the table surfaces to the other bundle --------
-        // The reader redirect and the item-pane registration keep module state,
-        // so they live in this bundle only. Anything on the webpack side reaches
+        // The reader redirect and the table tabs keep module state, so they
+        // live in this bundle only. Anything on the webpack side reaches
         // them through `Zotero.__beaverTables` rather than importing them,
         // which would give it a second, permanently empty copy.
         registerTablesApi();
@@ -782,7 +773,6 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         stopTableTabProbe();
         unregisterTablesApi();
         cleanupTableReaderRedirect();
-        cleanupTableItemPane();
 
         // 13. Unregister reader toolbar menu and the note editor export entry
         cleanupReaderToolbarMenu();
@@ -1069,7 +1059,6 @@ async function disposePlugin(): Promise<void> {
         stopTableTabProbe();
         unregisterTablesApi();
         cleanupTableReaderRedirect();
-        cleanupTableItemPane();
         cleanupReaderToolbarMenu();
         cleanupNoteEditorExportMenu();
         unregisterBeaverProtocolHandler();

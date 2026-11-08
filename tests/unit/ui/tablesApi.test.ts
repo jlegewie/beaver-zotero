@@ -1,10 +1,10 @@
 /**
  * The cross-bundle seam, and the rule that the dev handlers go through it.
  *
- * `src/ui/tableTab.ts`, `src/ui/tableItemPane.ts` and the reader redirect keep
- * module-level state and are compiled into the esbuild bundle. A handler in
- * the webpack bundle that imports one of them gets a *second* copy of that
- * state, one that nothing ever writes.
+ * `src/ui/tableTab.ts` and the reader redirect keep module-level state and are
+ * compiled into the esbuild bundle. A handler in the webpack bundle that
+ * imports one of them gets a *second* copy of that state, one that nothing
+ * ever writes.
  *
  * These tests fail if a handler goes back to reading module state:
  *
@@ -51,7 +51,6 @@ import {
 } from '../../../src/services/artifacts/tablesApi';
 import {
     handleTestOpenStoredTableHttpRequest,
-    handleTestTableItemPaneHttpRequest,
 } from '../../../react/hooks/httpHandlers/testTableHandlers';
 
 const ITEM = { id: 7, key: 'TABLEKEY', libraryID: 1 };
@@ -62,20 +61,6 @@ let win: any;
 function sentinelApi(overrides: Partial<TablesApi> = {}): TablesApi {
     return {
         openTable: vi.fn(async () => ({ ok: true as const })),
-        itemPane: {
-            isRegistered: vi.fn(() => true),
-            paneID: vi.fn(() => 'sentinel-pane'),
-            describe: vi.fn(async () => ({
-                registered: true,
-                paneID: 'sentinel-pane',
-                libraryID: ITEM.libraryID,
-                key: ITEM.key,
-                applies: true,
-                reason: null,
-                fields: null,
-                actions: { open: true, showInLibrary: true, restoreShadow: false },
-            })),
-        },
         ...overrides,
     } as unknown as TablesApi;
 }
@@ -134,15 +119,6 @@ describe('handlers report honestly when the esbuild half is not up', () => {
         expect(result).toMatchObject({ ok: false, code: 'tables_api_unavailable' });
         expect((Zotero as any).Reader.open).not.toHaveBeenCalled();
     });
-
-    it('refuses the item-pane endpoint instead of guessing at the registration', async () => {
-        const result = await handleTestTableItemPaneHttpRequest({ key: ITEM.key });
-
-        expect(result).toMatchObject({ ok: false, code: 'tables_api_unavailable' });
-        // The lie this replaces: `registered: false`, which reads as "the
-        // section is not up" rather than "ask the other half".
-        expect(result).not.toHaveProperty('registered');
-    });
 });
 
 describe('handlers read the namespace, not module state', () => {
@@ -170,19 +146,6 @@ describe('handlers read the namespace, not module state', () => {
         const result = await handleTestOpenStoredTableHttpRequest({ key: ITEM.key });
 
         expect(result).toMatchObject({ ok: false, error: 'it has no file on disk' });
-    });
-
-    it('describes the item-pane section through the namespace', async () => {
-        const api = sentinelApi();
-        setTablesApi(api);
-
-        const result = await handleTestTableItemPaneHttpRequest({ key: ITEM.key });
-
-        expect(api.itemPane.describe).toHaveBeenCalledWith({
-            libraryID: ITEM.libraryID,
-            key: ITEM.key,
-        });
-        expect(result).toMatchObject({ ok: true, pane_id: 'sentinel-pane' });
     });
 
     it('requires a key before it reaches the namespace at all', async () => {
