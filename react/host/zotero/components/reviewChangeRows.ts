@@ -1,6 +1,7 @@
 import { isUnconfirmedAction, type AgentAction } from '@beaver/agent-core/agents/agentActionTypes';
 import { textAnnotationStyle } from '@beaver/agent-core/types/agentActions/createAnnotations';
 import { getActionToolGroup } from '../../../atoms/runApprovalPolicy';
+import { isStaleProposal } from '../../../../src/services/manualActions/staleProposal';
 
 /** A tool call the changes card lists, with all of its actions. */
 export interface ReviewRow {
@@ -572,8 +573,15 @@ export function getChangesCardHeading(rows: ReviewRow[]): { lead: string; trail?
             label: (count: number) => `${count} unconfirmed`,
         },
         {
+            // Refused because the library changed since the proposal: nothing
+            // was written, and the row offers "Apply anyway".
+            key: 'stale',
+            actions: settledErrors.filter(isStaleProposal),
+            label: (count: number) => `${count} changed since proposed`,
+        },
+        {
             key: 'failed',
-            actions: settledErrors.filter((action) => action.result_data == null),
+            actions: settledErrors.filter((action) => action.result_data == null && !isStaleProposal(action)),
             label: (count: number) => `${count} failed`,
         },
         {

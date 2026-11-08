@@ -67,6 +67,8 @@ import { buildPreviewableEditOperations } from '../../../utils/editNotePreviewOp
 import { getEditNoteRetryOrder } from './editNoteRetryOrder';
 import { isStaleNoteEdit, STALE_NOTE_EDIT_MESSAGE } from './editNoteErrors';
 import { isUnconfirmedAction } from './reviewChangeRows';
+import { isStaleProposal, STALE_APPLY_ANYWAY_TOOLTIP, staleProposalDetail, wasRefusedAsStale } from './agentActionViewHelpers';
+import { StaleProposalNote } from './StaleProposalNote';
 import {
     applyAgentActionsAtom,
     inFlightAgentActionIdsAtom,
@@ -248,11 +250,15 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
     // An edit whose target is gone from the note fails the same way on every
     // retry, so it is reported instead of offered for Retry. So is one whose
     // outcome is unknown: it may already be in the note.
+    // An edit refused because the note changed since the proposal is offered
+    // "Apply anyway" instead: a retry would be refused the same way.
     const errorActions = useMemo(
-        () => allActions.filter((a) => a.status === 'error' && !isStaleNoteEdit(a) && !isUnconfirmedAction(a)),
+        () => allActions.filter((a) => a.status === 'error' && !isStaleNoteEdit(a) && !isUnconfirmedAction(a) && !isStaleProposal(a)),
         [allActions],
     );
     const hasStaleEdit = useMemo(() => allActions.some(isStaleNoteEdit), [allActions]);
+    const staleProposalActions = useMemo(() => allActions.filter(isStaleProposal), [allActions]);
+    const staleProposalNote = staleProposalDetail(staleProposalActions);
     const rowStatuses = useMemo(
         () => partStates.map((state) => state.effectiveStatus),
         [partStates],
@@ -360,7 +366,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
 
     const [isLocallyProcessing, setIsLocallyProcessing] = useState(false);
     const [isExternallyProcessing, setIsExternallyProcessing] = useState(false);
-    const [clickedButton, setClickedButton] = useState<'approve' | 'reject' | 'undo' | 'retry' | null>(null);
+    const [clickedButton, setClickedButton] = useState<'approve' | 'applyAnyway' | 'reject' | 'undo' | 'retry' | null>(null);
     const [perEditUndoErrors, setPerEditUndoErrors] = useState<Record<string, string>>({});
     const isWriting = allActions.some((action) => inFlightActionIds.has(action.id));
     const isProcessing = isLocallyProcessing || isExternallyProcessing || isWriting;
@@ -405,12 +411,16 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
             if (reapplicableActions.length === 0) return;
             await dismissActiveEditNotePreview();
 
+            let refusedAsStale = false;
             for (const action of reapplicableActions) {
                 const result = await applyAgentActions({ actions: [action], runId });
                 if (result.applied.includes(action.id)) {
                     logger(`EditNoteGroupView: Applied ${action.action_type} action ${action.id}`, 1);
                 }
+                refusedAsStale ||= wasRefusedAsStale(result);
             }
+            // Refused because the note changed: open the card on what changed.
+            if (refusedAsStale) setExpanded({ key: expansionKey, expanded: true });
         } finally {
             setIsLocallyProcessing(false);
             if (!shouldWaitForExternalProcessing) {
@@ -428,6 +438,8 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         setPendingApprovals,
         applyAgentActions,
         runId,
+        setExpanded,
+        expansionKey,
     ]);
 
     // Switching to full access answers every pending card in this group too, so
@@ -493,8 +505,9 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         } else {
             // The shared atom checks every action against the in-flight claim
             // before rejecting and dismisses any active note-edit preview.
-            rejectAgentActions({ actions: reapplicableActions });
-            logger(`EditNoteGroupView: Rejected ${reapplicableActions.length} edit_note actions for ${noteKeyLabel}`, 1);
+            const toReject = [...reapplicableActions, ...staleProposalActions];
+            rejectAgentActions({ actions: toReject });
+            logger(`EditNoteGroupView: Rejected ${toReject.length} edit_note actions for ${noteKeyLabel}`, 1);
         }
         setTimeout(() => setClickedButton(null), 100);
     }, [
@@ -505,8 +518,29 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         sendApprovalResponse,
         setPendingApprovals,
         reapplicableActions,
+        staleProposalActions,
         rejectAgentActions,
     ]);
+
+    // Applies the edits refused because the note changed since they were
+    // proposed, after the user saw that it did.
+    const handleApplyAnyway = useCallback(async () => {
+        if (isProcessing || staleProposalActions.length === 0) return;
+        setIsLocallyProcessing(true);
+        setClickedButton('applyAnyway');
+        try {
+            await dismissActiveEditNotePreview();
+            for (const action of staleProposalActions) {
+                const result = await applyAgentActions({ actions: [action], runId, skipStaleCheck: true });
+                if (result.applied.includes(action.id)) {
+                    logger(`EditNoteGroupView: Applied ${action.action_type} action ${action.id} despite note changes`, 1);
+                }
+            }
+        } finally {
+            setIsLocallyProcessing(false);
+            setClickedButton(null);
+        }
+    }, [isProcessing, staleProposalActions, applyAgentActions, runId]);
 
     const handleUndoAll = useCallback(async () => {
         if (isProcessing) return;
@@ -733,10 +767,14 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
     const pendingCoveredCount = useAtomValue(
         hasPendingApprovals ? pendingApprovalsCoveredByFullAccessCountAtom : noPendingApprovalsCoveredCountAtom,
     );
+    // Only refused stale edits left to decide: the collapsed ✓ applies them anyway.
+    const isStaleOnlyDecision = staleProposalActions.length > 0 && reapplicableActions.length === 0 && !hasPendingApprovals;
     const showCollapsedHeaderActions =
-        !isProcessing && !hasStreamingChild && (aggregateStatus === 'awaiting' || aggregateStatus === 'pending') && !isExpanded;
+        !isProcessing && !hasStreamingChild && !isExpanded
+        && (aggregateStatus === 'awaiting' || aggregateStatus === 'pending' || isStaleOnlyDecision);
     const rejectableActionCount = useMemo(
-        () => pendingApprovalsForGroup.length + allActions.filter((a) => a.status === 'pending').length,
+        () => pendingApprovalsForGroup.length
+            + allActions.filter((a) => a.status === 'pending' || isStaleProposal(a)).length,
         [pendingApprovalsForGroup, allActions],
     );
 
@@ -748,6 +786,8 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         appliedCount > 0 || (isProcessing && clickedButton === 'undo');
     const showFooterRetry =
         errorActions.length > 0 || (isProcessing && clickedButton === 'retry');
+    const showFooterApplyAnyway =
+        (staleProposalActions.length > 0 && !isProcessing) || (isProcessing && clickedButton === 'applyAnyway');
     // Gate on both the global kill switch and the runtime Zotero capability
     // check so the button is hidden on Zotero 7 (where showDiffPreview would
     // silently no-op) without requiring a version bump of strict_min_version.
@@ -769,7 +809,8 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         );
 
     const showFooter =
-        showFooterApply || showFooterReject || showFooterUndo || showFooterRetry || canShowPreview || hasPendingApprovals;
+        showFooterApply || showFooterReject || showFooterUndo || showFooterRetry || showFooterApplyAnyway
+        || canShowPreview || hasPendingApprovals;
 
     return (
         <div
@@ -835,13 +876,13 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                                     ariaLabel="Reject all"
                                 />
                             </Tooltip>
-                            <Tooltip content="Apply all" showArrow singleLine>
+                            <Tooltip content={isStaleOnlyDecision ? STALE_APPLY_ANYWAY_TOOLTIP : 'Apply all'} showArrow singleLine>
                                 <IconButton
                                     icon={TickIcon}
                                     variant="ghost-secondary"
                                     iconClassName="font-color-green scale-14"
-                                    onClick={handleApplyAll}
-                                    ariaLabel="Apply all"
+                                    onClick={isStaleOnlyDecision ? handleApplyAnyway : handleApplyAll}
+                                    ariaLabel={isStaleOnlyDecision ? 'Apply anyway' : 'Apply all'}
                                 />
                             </Tooltip>
                         </>
@@ -900,6 +941,10 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                             <Icon icon={AlertIcon} className="font-color-red flex-shrink-0 mt-010" />
                             <span>{STALE_NOTE_EDIT_MESSAGE}</span>
                         </div>
+                    )}
+
+                    {staleProposalNote && (
+                        <StaleProposalNote detail={staleProposalNote} className={`px-3 pt-2${showFooter ? '' : ' pb-2'}`} />
                     )}
 
                     {showFooter && (
@@ -977,6 +1022,19 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                                     className="flex-none whitespace-nowrap"
                                 >
                                     Retry All
+                                </Button>
+                            )}
+
+                            {showFooterApplyAnyway && (
+                                <Button
+                                    variant="outline"
+                                    onClick={handleApplyAnyway}
+                                    loading={isProcessing && clickedButton === 'applyAnyway'}
+                                    disabled={isProcessing}
+                                    title="Make the edit even though the note changed since it was proposed"
+                                    className="flex-none whitespace-nowrap"
+                                >
+                                    Apply anyway
                                 </Button>
                             )}
 

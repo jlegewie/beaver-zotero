@@ -1,6 +1,6 @@
 import { tryGetWindowRuntime } from '../../../runtime/windowRuntime';
 import React, { useState, useCallback, useRef } from 'react';
-import { useSetAtom, useAtomValue } from 'jotai';
+import { useSetAtom, useAtomValue, useStore } from 'jotai';
 import {
     Spinner,
     AlertIcon,
@@ -25,6 +25,7 @@ import {
     setAgentActionsToErrorAtom,
     rejectAgentActionAtom,
     undoAgentActionAtom,
+    withoutActionsAppliedElsewhereAtom,
 } from '../../../agents/agentActions';
 import { AckActionLink } from '@beaver/agent-core/transport/clients/agentActionsService';
 import { CreateItemResultData } from '@beaver/agent-core/types/agentActions/items';
@@ -41,7 +42,7 @@ import {
     toggleAnnotationPanelVisibilityAtom
 } from '../../../atoms/messageUIState';
 import { markExternalReferenceDeletedAtom, markExternalReferenceImportedAtom } from '../../../atoms/externalReferences';
-import { currentThreadIdAtom } from '../../../atoms/threads';
+import { getThreadIdForRun } from '../agentActionExecution';
 import { ToolDisplayFooter } from '../../../components/messages/ToolDisplayFooter';
 import AgentActionItemButtons from './AgentActionItemButtons';
 import { isUnconfirmedAction } from './reviewChangeRows';
@@ -210,9 +211,11 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
     const undoAgentAction = useSetAtom(undoAgentActionAtom);
     const markExternalReferenceImported = useSetAtom(markExternalReferenceImportedAtom);
     const markExternalReferenceDeleted = useSetAtom(markExternalReferenceDeletedAtom);
-    // Active thread ID — used to stamp the background PDF fetch so the
-    // attachment_resolved ws event can route back to the live agent run.
-    const threadId = useAtomValue(currentThreadIdAtom);
+    const withoutActionsAppliedElsewhere = useSetAtom(withoutActionsAppliedElsewhereAtom);
+    // Read at the click: the thread that owns this run scopes import paths and
+    // routes the background PDF fetch's attachment_resolved event, whichever
+    // thread is in view by then.
+    const store = useStore();
     const referenceMapping = useAtomValue(externalReferenceMappingAtom);
     const referenceFor = useCallback((action: ItemCreatingAgentAction): ExternalReference => (
         isImportItemAgentAction(action)
@@ -288,12 +291,10 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
      * Create the item for one import_item action: resolved at this click, written
      * into the library being viewed. A work already in the library fails the
      * action (nothing is adopted); the card then shows it as already there.
+     * `threadId` is the run's thread, read at the click.
      */
-    const applyImportItems = useCallback(async (actions: ItemCreatingAgentAction[]): Promise<AckActionLink[]> => {
-        const batch = await executeImportItemActions(actions, {
-            runId,
-            threadId: threadId ?? undefined,
-        });
+    const applyImportItems = useCallback(async (actions: ItemCreatingAgentAction[], threadId: string | undefined): Promise<AckActionLink[]> => {
+        const batch = await executeImportItemActions(actions, { runId, threadId });
         for (const failure of batch.failures) {
             const existing = failure.errorDetails?.existing_item as ZoteroItemReference | undefined;
             const externalId = itemActionExternalId(failure.action);
@@ -313,7 +314,7 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
             }
             return { action_id: success.action.id, result_data: success.result } as AckActionLink;
         });
-    }, [markExternalReferenceImported, runId, setAgentActionsToError, threadId]);
+    }, [markExternalReferenceImported, runId, setAgentActionsToError]);
 
     /**
      * Apply a single create item action
@@ -322,9 +323,14 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
         setBusyState({ key: groupId, annotationId: action.id, isBusy: true });
 
         try {
+            const threadId = getThreadIdForRun(store.get, runId);
+            // Applied in another window or on another device since this one
+            // loaded it: shown as the server has it instead of created twice.
+            const [current] = await withoutActionsAppliedElsewhere(runId, [action]);
+            if (!current) return;
             let result: CreateItemResultData;
             if (isImportItemAgentAction(action)) {
-                const [link] = await applyImportItems([action]);
+                const [link] = await applyImportItems([action], threadId);
                 if (!link) return;
                 result = link.result_data as CreateItemResultData;
             } else {
@@ -335,7 +341,7 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
                 result = await applyCreateItemData(action.proposed_data, {
                     actionId: action.id,
                     runId,
-                    threadId: threadId ?? undefined,
+                    threadId,
                 });
 
                 // Update external reference cache
@@ -376,7 +382,7 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
         } finally {
             setBusyState({ key: groupId, annotationId: action.id, isBusy: false });
         }
-    }, [ackAgentActions, applyImportItems, groupId, markExternalReferenceImported, runId, threadId, setBusyState, setAgentActionsToError]);
+    }, [ackAgentActions, applyImportItems, groupId, markExternalReferenceImported, runId, store, setBusyState, setAgentActionsToError, withoutActionsAppliedElsewhere]);
 
     /**
      * Apply all pending items
@@ -387,9 +393,12 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
         setPanelState({ key: groupId, updates: { isApplying: true } });
 
         try {
-            const actionsToApply = actions.filter(
+            const threadId = getThreadIdForRun(store.get, runId);
+            // Leaves out what was applied in another window or on another
+            // device since this one loaded it.
+            const actionsToApply = await withoutActionsAppliedElsewhere(runId, actions.filter(
                 action => action.status === 'pending' || isRetryable(action)
-            );
+            )) as ItemCreatingAgentAction[];
 
             if (actionsToApply.length === 0) {
                 setPanelState({ key: groupId, updates: { isApplying: false } });
@@ -410,7 +419,7 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
             const importActions = actionsToApply.filter(isImportItemAgentAction);
             if (importActions.length > 0) {
                 try {
-                    applyResults.push(...await applyImportItems(importActions));
+                    applyResults.push(...await applyImportItems(importActions, threadId));
                 } finally {
                     importActions.forEach((action) => setBusyState({ key: groupId, annotationId: action.id, isBusy: false }));
                 }
@@ -431,7 +440,7 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
                             const result: CreateItemResultData = await applyCreateItemData(action.proposed_data, {
                                 actionId: action.id,
                                 runId,
-                                threadId: threadId ?? undefined,
+                                threadId,
                             });
 
                             // Update external reference cache
@@ -491,7 +500,7 @@ const CreateItemAgentActionDisplay: React.FC<CreateItemAgentActionDisplayProps> 
             logger(`handleApplyAll: unexpected error: ${error}`, 1);
             setPanelState({ key: groupId, updates: { isApplying: false } });
         }
-    }, [ackAgentActions, actions, applyImportItems, groupId, markExternalReferenceImported, runId, threadId, setPanelState, setAgentActionsToError, setBusyState]);
+    }, [ackAgentActions, actions, applyImportItems, groupId, markExternalReferenceImported, runId, store, setPanelState, setAgentActionsToError, setBusyState, withoutActionsAppliedElsewhere]);
 
     /**
      * Handle rejecting an item (for pending items) or deleting (for applied items)

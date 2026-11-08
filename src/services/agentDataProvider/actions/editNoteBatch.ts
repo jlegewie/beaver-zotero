@@ -74,6 +74,7 @@ import {
     buildMarkdownRenderFields,
     getExternalRefContext,
 } from './editNote';
+import { sha256Hex } from '../../../utils/hash';
 
 // =============================================================================
 // Shared helpers
@@ -567,6 +568,11 @@ async function validateEditNoteBatchAction(
             note_title: noteTitle,
             total_lines: totalLines,
             ...(isSingleRewrite ? { old_content: simplified } : {}),
+            // Stored with the proposal: a later apply of a batch with a rewrite
+            // or append checks the note is unchanged.
+            ...(edits.some((edit) => opOf(edit) === 'rewrite' || opOf(edit) === 'append')
+                ? { content_hash: await sha256Hex(rawHtml) }
+                : {}),
         },
         preference: getDeferredToolPreference(isDestructiveRewrite ? 'destructive_note_rewrite' : 'edit_note_batch',
             { library_id: resolvedLibraryId, zotero_key }, request.operation),

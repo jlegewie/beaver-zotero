@@ -123,6 +123,78 @@ describe("undoManageTagsAction", () => {
     expect(result).toMatchObject({ items_affected: 0, affected_item_ids: [] });
     expect(Zotero.Tags.removeFromLibrary).not.toHaveBeenCalled();
   });
+
+  it("refuses a delete without writing when the tag's item count changed since the proposal", async () => {
+    (Zotero.Tags.getTagItems as any).mockResolvedValue([101, 102, 103]);
+
+    await expect(executeManageTagsAction({
+      proposed_data: {
+        library_id: 7,
+        library_ref: "g42",
+        action: "delete",
+        name: "reviewed",
+        baseline: { item_count: 1, is_merge: null },
+      },
+    } as any)).rejects.toMatchObject({
+      code: "stale_proposal",
+      message: expect.stringContaining("is now on 3 items, not 1"),
+    });
+    expect(Zotero.Tags.removeFromLibrary).not.toHaveBeenCalled();
+  });
+
+  it("deletes anyway when the user skips the check", async () => {
+    (Zotero.Tags.getTagItems as any).mockResolvedValue([101, 102, 103]);
+
+    await executeManageTagsAction({
+      proposed_data: {
+        library_id: 7,
+        library_ref: "g42",
+        action: "delete",
+        name: "reviewed",
+        baseline: { item_count: 1 },
+      },
+    } as any, { skipStaleCheck: true });
+
+    expect(Zotero.Tags.removeFromLibrary).toHaveBeenCalledWith(12, [33]);
+  });
+
+  it("refuses a rename that would now merge into a tag created since the proposal", async () => {
+    (Zotero.Tags as any).rename = vi.fn().mockResolvedValue(undefined);
+    (Zotero.Tags.getID as any).mockImplementation((name: string) => (name === "reviewed" || name === "done" ? 33 : false));
+
+    await expect(executeManageTagsAction({
+      proposed_data: {
+        library_id: 7,
+        library_ref: "g42",
+        action: "rename",
+        name: "reviewed",
+        new_name: "done",
+        baseline: { item_count: 1, is_merge: false },
+      },
+    } as any)).rejects.toMatchObject({
+      code: "stale_proposal",
+      message: expect.stringContaining("'done' now exists"),
+    });
+    expect((Zotero.Tags as any).rename).not.toHaveBeenCalled();
+  });
+
+  it("applies a proposal whose tag is as the user saw it", async () => {
+    (Zotero.Tags as any).rename = vi.fn().mockResolvedValue(undefined);
+    (Zotero.Tags.getID as any).mockImplementation((name: string) => (name === "reviewed" ? 33 : false));
+
+    await executeManageTagsAction({
+      proposed_data: {
+        library_id: 7,
+        library_ref: "g42",
+        action: "rename",
+        name: "reviewed",
+        new_name: "done",
+        baseline: { item_count: 1, is_merge: false },
+      },
+    } as any);
+
+    expect((Zotero.Tags as any).rename).toHaveBeenCalledWith(12, "reviewed", "done");
+  });
 });
 
 beforeEach(installMutationInstance);

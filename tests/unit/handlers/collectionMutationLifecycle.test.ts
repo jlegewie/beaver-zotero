@@ -367,3 +367,57 @@ it.each([1, 7])('undoes legacy create-collection history with a numeric collecti
     expect(other.eraseTx).not.toHaveBeenCalled();
     expect(collections).not.toContain(target);
 });
+
+describe('applying a stored manage_collections proposal later', () => {
+    const rename = (baseline?: Record<string, unknown> | null) => ({
+        library_ref: 'g12345', library_id: 7, collection_id: 'g12345-SAMEKEY1', action: 'rename', new_name: 'Sorted',
+        ...(baseline !== undefined ? { baseline } : {}),
+    });
+
+    it('refuses without writing when the collection was renamed since the proposal', async () => {
+        collections[1].name = 'Renamed by the user';
+        await expect(manualManage.executeManageCollectionsAction(action('manage_collections', rename({ name: 'Inbox', parent_key: null, item_count: null }))))
+            .rejects.toMatchObject({ code: 'stale_proposal', message: expect.stringContaining("renamed to 'Renamed by the user'") });
+        expect(collections[1].name).toBe('Renamed by the user');
+        expect(collections[1].saveTx).not.toHaveBeenCalled();
+    });
+
+    it('refuses when a top-level collection was moved since the proposal', async () => {
+        collection(7, 'PARENT01', 'Parent');
+        collections[1].parentKey = 'PARENT01';
+        await expect(manualManage.executeManageCollectionsAction(action('manage_collections', rename({ name: 'Inbox', parent_key: null }))))
+            .rejects.toMatchObject({ code: 'stale_proposal', message: expect.stringContaining('was moved') });
+    });
+
+    it('checks the parent when the baseline records only a parent', async () => {
+        await expect(manualManage.executeManageCollectionsAction(action('manage_collections', rename({ parent_key: 'PARENT01' }))))
+            .rejects.toMatchObject({ code: 'stale_proposal', message: expect.stringContaining('was moved') });
+    });
+
+    it('refuses a delete when the number of items in the collection changed', async () => {
+        collections[1].getChildItems = () => [1, 2, 3];
+        const data = { library_ref: 'g12345', library_id: 7, collection_id: 'g12345-SAMEKEY1', action: 'delete', baseline: { name: 'Inbox', parent_key: null, item_count: 1 } };
+        await expect(manualManage.executeManageCollectionsAction(action('manage_collections', data)))
+            .rejects.toMatchObject({ code: 'stale_proposal', message: expect.stringContaining('now has 3 items, not 1') });
+        expect(collections[1].deleted).toBe(false);
+    });
+
+    it('applies anyway when the user skips the check', async () => {
+        collections[1].name = 'Renamed by the user';
+        await manualManage.executeManageCollectionsAction(
+            action('manage_collections', rename({ name: 'Inbox', parent_key: null })),
+            { skipStaleCheck: true },
+        );
+        expect(collections[1].name).toBe('Sorted');
+    });
+
+    it('does not check a proposal without a baseline, or with nothing recorded in it', async () => {
+        collection(7, 'PARENT01', 'Parent');
+        collections[1].parentKey = 'PARENT01';
+        await manualManage.executeManageCollectionsAction(action('manage_collections', rename(null)));
+        expect(collections[1].name).toBe('Sorted');
+        collections[1].name = 'Inbox';
+        await manualManage.executeManageCollectionsAction(action('manage_collections', rename({ name: null, parent_key: null, item_count: null })));
+        expect(collections[1].name).toBe('Sorted');
+    });
+});

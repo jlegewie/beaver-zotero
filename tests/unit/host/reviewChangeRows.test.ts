@@ -255,6 +255,15 @@ describe('getChangesCardHeading trail', () => {
             .toEqual({ lead: 'Library changes', trail: '10 edited items' });
     });
 
+    it('counts a refused stale proposal apart from failures', () => {
+        const rows = rowsOf([
+            action({ toolcall_id: 'call-1', action_type: 'manage_tags', status: 'error', error_details: { error_code: 'stale_proposal' } }),
+            action({ toolcall_id: 'call-2', action_type: 'manage_tags', status: 'error', error_details: { error_code: 'other' } }),
+        ]);
+
+        expect(getChangesCardHeading(rows).trail).toBe('1 changed since proposed, 1 failed');
+    });
+
     it('names underlines apart from highlights', () => {
         const created = (count: number) => ({
             created: Array.from({ length: count }, (_, index) => ({ client_item_id: `c${index}` })),
