@@ -1,11 +1,13 @@
-// @vitest-environment jsdom
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
-import { renderTableDocumentActions } from "../../../src/ui/tableDocumentActions";
+import {
+    exportTable,
+    revertFailureMessage,
+    tableActionErrorMessage,
+} from "../../../src/ui/tableDocumentActions";
 import {
     getTableLocalCommands,
-    setTablesApi,
     tableLocalCommands,
-    type TablesApi,
+    type TableLocalCommands,
 } from "../../../src/services/artifacts/tablesApi";
 
 const ref = { libraryID: 1, key: "TABLE001" };
@@ -37,35 +39,15 @@ const spec = {
     ],
 };
 const read = vi.fn();
-const history = vi.fn();
-const revert = vi.fn();
-const commands = vi.fn();
+const commands = () => ({ read }) as unknown as TableLocalCommands;
 const init = vi.fn();
 const show = vi.fn();
-let root: HTMLElement;
-let origin: Window;
-let library: { editable: boolean; filesEditable: boolean };
-const savedZotero: Record<string, unknown> = {};
+const win = { closed: false } as Window;
+const savedBeaver = (Zotero as any).Beaver;
 
 beforeEach(() => {
     vi.clearAllMocks();
-    const zotero = Zotero as any;
-    savedZotero.Libraries = zotero.Libraries;
-    savedZotero.Beaver = zotero.Beaver;
-    library = { editable: true, filesEditable: true };
-    zotero.Libraries = { get: () => library };
-    zotero.Beaver = { ...zotero.Beaver, libraryScopeInitialized: true, searchableLibraryIds: [ref.libraryID] };
     read.mockResolvedValue({ spec, version: 2 });
-    history.mockResolvedValue([
-        {
-            version: 1,
-            actor: "user",
-            change: "Initial comparison",
-            at: "2026-09-11T12:00:00Z",
-        },
-    ]);
-    revert.mockResolvedValue({ ok: true, version: 3, saved: true });
-    commands.mockReturnValue({ read, history, revert });
     show.mockResolvedValue(0);
     vi.stubGlobal("ChromeUtils", {
         importESModule: () => ({
@@ -82,124 +64,64 @@ beforeEach(() => {
     vi.stubGlobal("IOUtils", {
         writeUTF8: vi.fn().mockResolvedValue(undefined),
     });
-    setTablesApi({ local: { commands } } as unknown as TablesApi);
-    // A separate document catches accidental use of the global/main window.
-    const frame = document.createElement("iframe");
-    document.body.append(frame);
-    origin = frame.contentWindow! as unknown as Window;
-    root = renderTableDocumentActions(frame.contentDocument!, ref);
-    frame.contentDocument!.body.append(root);
+    vi.stubGlobal("PathUtils", {
+        filename: (path: string) => path.split("/").pop(),
+    });
 });
 afterEach(() => {
-    (Zotero as any).Libraries = savedZotero.Libraries;
-    (Zotero as any).Beaver = savedZotero.Beaver;
-    document.body.replaceChildren();
-    setTablesApi(null);
+    (Zotero as any).Beaver = savedBeaver;
     tableLocalCommands().clear();
     vi.unstubAllGlobals();
 });
-async function click(action: string) {
-    root.querySelector<HTMLButtonElement>(
-        `[data-beaver-action="${action}"]`,
-    )!.click();
-    await vi.waitFor(() =>
-        expect(
-            root.querySelector<HTMLButtonElement>(
-                '[data-beaver-action="export-csv"]',
-            )!.disabled,
-        ).toBe(false),
-    );
-}
-async function selectVersion() {
-    await click("history");
-    const select = root.querySelector("select")!;
-    select.value = "1";
-    select.dispatchEvent(new Event("change"));
-}
-it("exports a fresh persisted spec after the originating window picker returns", async () => {
+
+it("exports the spec read after the picker returns, in the originating window", async () => {
     read.mockResolvedValueOnce({ spec: { ...spec, rows: [] }, version: 1 });
-    await click("export-csv");
-    expect(commands).toHaveBeenCalledWith(origin);
-    expect(init).toHaveBeenCalledWith(origin, "Export table", 1);
+    const file = await exportTable(win, ref, commands, "csv");
+    expect(init).toHaveBeenCalledWith(win, "Export table", 1);
     expect(read).toHaveBeenCalledTimes(2);
     // Values only: no evidence, reasoning, confidence or state companions.
     expect(IOUtils.writeUTF8).toHaveBeenCalledWith(
         "/tmp/comparison.csv",
         "Answer\r\nFresh answer",
     );
-    expect(root.textContent).toContain("Exported comparison.csv.");
+    expect(file).toBe("comparison.csv");
 });
+
 it("exports an Excel workbook through the plugin-realm exporter", async () => {
     const writeTableWorkbook = vi.fn().mockResolvedValue(undefined);
-    (Zotero as any).Beaver = { ...(Zotero as any).Beaver, exporter: { writeTableWorkbook } };
-    await click("export-xlsx");
+    (Zotero as any).Beaver = { ...savedBeaver, exporter: { writeTableWorkbook } };
+    await exportTable(win, ref, commands, "xlsx");
     expect(writeTableWorkbook).toHaveBeenCalledWith("/tmp/comparison.csv", spec, spec.rows);
     expect(IOUtils.writeUTF8).not.toHaveBeenCalled();
-    expect(root.textContent).toContain("Exported comparison.csv.");
 });
+
+it("refuses an Excel export when the exporter is absent", async () => {
+    (Zotero as any).Beaver = { ...savedBeaver, exporter: undefined };
+    await expect(exportTable(win, ref, commands, "xlsx")).rejects.toThrow("Excel export is unavailable");
+    expect(show).not.toHaveBeenCalled();
+});
+
 it("treats cancellation as no action", async () => {
     show.mockResolvedValue(2);
-    await click("export-csv");
+    expect(await exportTable(win, ref, commands, "csv")).toBeNull();
     expect(IOUtils.writeUTF8).not.toHaveBeenCalled();
-    expect(root.querySelector('[role="status"]')!.textContent).toBe("");
 });
-it("reports missing-file and write failures", async () => {
+
+it("surfaces missing-file and write failures", async () => {
     read.mockRejectedValueOnce(new Error("Missing local snapshot"));
-    await click("export-csv");
-    expect(root.textContent).toContain("Missing local snapshot");
+    await expect(exportTable(win, ref, commands, "csv")).rejects.toThrow("Missing local snapshot");
     expect(show).not.toHaveBeenCalled();
     vi.mocked(IOUtils.writeUTF8).mockRejectedValueOnce(new Error("Disk full"));
-    await click("export-csv");
-    expect(root.textContent).toContain("Disk full");
+    await expect(exportTable(win, ref, commands, "csv")).rejects.toThrow("Disk full");
 });
-it("loads retained versions on request and restores only the explicit selection", async () => {
-    expect(history).not.toHaveBeenCalled();
-    await selectVersion();
-    expect(root.textContent).toContain("Version 1 · Initial comparison");
-    expect(root.textContent).toContain("saves it as a new current version");
-    expect(revert).not.toHaveBeenCalled();
-    await click("restore-version");
-    expect(revert).toHaveBeenCalledExactlyOnceWith(ref, 1);
-    expect(root.textContent).toContain("Reverted to version 1, saved as version 3");
-});
-it.each([
-    "Version is unavailable",
-    "Library is read-only",
-    "Connection interrupted",
-])("reports %s without retrying an ambiguous restore", async (message) => {
-    await selectVersion();
-    revert.mockRejectedValueOnce(new Error(message));
-    await click("restore-version");
-    expect(root.textContent).toContain(message);
-    expect(root.textContent).toContain(
-        "Check the current table before trying again",
-    );
-    expect(revert).toHaveBeenCalledTimes(1);
-});
-it("reports committed content with incomplete bookkeeping as saved", async () => {
-    await selectVersion();
-    revert.mockResolvedValueOnce({ ok: true, saved: false, version: 3 });
-    await click("restore-version");
-    expect(root.textContent).toContain(
-        "saved, but its version history could not be updated",
-    );
-    expect(root.textContent).toContain("do not revert again");
-});
-it("reports unavailable store/history instead of exposing an editor", async () => {
-    history.mockRejectedValueOnce(new Error("History is unavailable"));
-    await click("history");
-    expect(root.textContent).toContain("History is unavailable");
-    setTablesApi(null);
-    await click("export-csv");
-    expect(root.textContent).toContain("actions are unavailable");
-    expect(root.querySelector("textarea, input")).toBeNull();
-});
+
 it("selects a live renderer for a standalone reader and never calls a closed owner", () => {
     const entries = tableLocalCommands();
     const closed = { closed: true } as Window;
     const live = { closed: false } as Window;
+    const origin = { closed: false } as Window;
     const first = { read } as any;
-    const second = { history } as any;
+    const second = { read } as any;
     entries.set(closed, first);
     entries.set(live, second);
     expect(getTableLocalCommands(origin)).toBe(second);
@@ -207,43 +129,25 @@ it("selects a live renderer for a standalone reader and never calls a closed own
     expect(() => getTableLocalCommands(origin)).toThrow("unavailable");
 });
 
-it("says plainly that a revert waits for a running fill", async () => {
-    await selectVersion();
-    revert.mockRejectedValueOnce({ code: "fill_running", message: "A fill of this table is running. Try again when it ends." });
-    await click("restore-version");
-    expect(root.textContent).toContain("A fill of this table is running. Try again when it ends.");
-    expect(root.textContent).not.toContain("Revert was not confirmed");
-});
-it("addresses exclusion errors to the user during version restore", async () => {
-    await selectVersion();
-    revert.mockRejectedValueOnce({ code: "library_excluded", message: "Tell the user to re-enable access." });
-    await click("restore-version");
-    expect(root.textContent).toContain("You can re-enable access");
-    expect(root.textContent).not.toContain("Tell the user");
+it("says plainly that a revert waits for a running fill", () => {
+    const message = revertFailureMessage(
+        { code: "fill_running", message: "A fill of this table is running. Try again when it ends." },
+        ref,
+    );
+    expect(message).toBe("A fill of this table is running. Try again when it ends.");
 });
 
-
-it("keeps local repair failures visible and retries without a content mutation", async () => {
-    read.mockResolvedValueOnce({ spec, version: 1, recovered: [{ kind: 'bookkeeping_pending' }] });
-    await click('repair');
-    expect(root.textContent).toContain('version history still could not be updated');
-    expect(revert).not.toHaveBeenCalled();
-    read.mockResolvedValueOnce({ spec, version: 1, recovered: [] });
-    await click('repair');
-    expect(root.textContent).toContain('needs no repair');
-    expect(revert).not.toHaveBeenCalled();
+it("asks for a check after a revert that may have landed", () => {
+    const message = revertFailureMessage(new Error("Connection interrupted"), ref);
+    expect(message).toContain("Connection interrupted");
+    expect(message).toContain("Check the current table before trying again");
 });
 
-it("does not offer a version restore in a read-only library", async () => {
-    library.filesEditable = false;
-    await click("history");
-    expect(root.querySelector<HTMLButtonElement>('[data-beaver-action="restore-version"]')!.hidden).toBe(true);
-    expect(root.textContent).toContain("read-only");
-});
-
-it("does not promise a repair where Beaver may not modify the table", async () => {
-    (Zotero as any).Beaver.searchableLibraryIds = [];
-    read.mockResolvedValueOnce({ spec, version: 1, recovered: [{ kind: 'bookkeeping_pending' }] });
-    await click('repair');
-    expect(root.textContent).toContain('does not change tables');
+it("addresses exclusion errors to the user", () => {
+    const message = tableActionErrorMessage(
+        { code: "library_excluded", message: "Tell the user to re-enable access." },
+        ref,
+    );
+    expect(message).toContain("You can re-enable access");
+    expect(message).not.toContain("Tell the user");
 });

@@ -10,8 +10,6 @@ export type FluentMessageId =
   | 'beaver-menu-upsert'
   | 'beaver-note-export-format'
   | 'beaver-note-export-submenu'
-  | 'beaver-table-section-header'
-  | 'beaver-table-section-sidenav'
   | 'beaver-window-close'
   | 'beaver-window-new-chat'
   | 'beaver-window-settings'

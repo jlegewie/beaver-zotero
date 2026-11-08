@@ -115,7 +115,6 @@ vi.mock('../../src/modules/noteEditorExportMenu', () => ({ initNoteEditorExportM
 vi.mock('../../src/services/artifacts/view/readerTableView', () => ({
     initTableReaderRedirect: vi.fn(), cleanupTableReaderRedirect: vi.fn(),
 }));
-vi.mock('../../src/ui/tableItemPane', () => ({ initTableItemPane: vi.fn(), cleanupTableItemPane: vi.fn() }));
 vi.mock('../../src/ui/tableTab', () => ({ initTableTabs: vi.fn(), cleanupTableTabs: vi.fn() }));
 vi.mock('../../src/ui/beaverTabs', () => ({
     initBeaverTabs: vi.fn(), cleanupBeaverTabs: vi.fn(),

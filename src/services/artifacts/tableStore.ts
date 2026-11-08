@@ -162,7 +162,7 @@ export type {
 // The sync conflict is part of what opening a table tells you, so its shape is
 // re-exported here for the same reason the log's is: one import for callers of
 // the store. Detection and retention live next door, esbuild-side, because the
-// item-pane section has to reach them without reaching this module.
+// plugin-realm tables API has to reach them without reaching this module.
 export type {
     TableShadowEntry,
     TableSyncConflict,

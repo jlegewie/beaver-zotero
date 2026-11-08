@@ -71,4 +71,4 @@ saved. Neither warning changes the content outcome to failure. Unknown outcomes
 require inspection, never automatic replacement creation or repeated extraction.
 
 Conversation retry and turn deletion do not call table trim, revert, or delete.
-Retained-version restore stays an explicit item-pane operation.
+Retained-version restore stays an explicit table-tab operation.

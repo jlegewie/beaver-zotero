@@ -50,8 +50,8 @@ declare namespace Zotero {
     let __beaverWrittenAnnotationKeys: Map<string, number> | undefined;
     /**
      * The stored-table surfaces, published by the esbuild bundle at startup.
-     * The reader-view registry and the item-pane registration keep module
-     * state, so they must exist in one bundle only; the webpack side reaches
+     * The reader-view registry and the table tabs keep module state, so they
+     * must exist in one bundle only; the webpack side reaches
      * them through here. See src/services/artifacts/tablesApi.ts.
      */
     let __beaverTables:
@@ -60,8 +60,8 @@ declare namespace Zotero {
     /**
      * The write half of the stored-table recovery shadow, published by the
      * *webpack* bundle. Restoring goes through `tableStore.ts`, which is
-     * webpack-only (it imports the library-exclusion check), so the
-     * esbuild-side item pane reaches it through here.
+     * webpack-only (it imports the library-exclusion check), so esbuild-side
+     * callers reach it through here.
      */
     let __beaverTableLocalCommands:
         | Map<Window, import("../src/services/artifacts/tablesApi").TableLocalCommands>

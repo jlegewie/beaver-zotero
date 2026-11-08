@@ -489,8 +489,6 @@ export default tseslint.config(
             "src/ui/tableTab.ts",
             "src/ui/tableTabTypes.ts",
             "src/ui/tableTabProbe.ts",
-            "src/ui/tableItemPane.ts",
-            "src/ui/tableItemPaneModel.ts",
         ],
         rules: {
             "no-restricted-imports": [
@@ -527,16 +525,14 @@ export default tseslint.config(
         files: [
             "src/services/artifacts/tableItemIdentity.ts",
             "src/services/artifacts/tableDocument.ts",
-            // The recovery shadow: the item-pane section reads it to say a
-            // table went backwards, so it has to be esbuild-safe too.
+            // The recovery shadow: `tablesApiHost.ts` publishes its inspection
+            // from the esbuild bundle, so it has to be esbuild-safe too.
             "src/services/artifacts/recoveryShadow.ts",
             "src/services/artifacts/view/**/*.ts",
             "src/ui/openTable.ts",
             "src/ui/tableTab.ts",
             "src/ui/tableTabTypes.ts",
             "src/ui/tableTabProbe.ts",
-            "src/ui/tableItemPane.ts",
-            "src/ui/tableItemPaneModel.ts",
         ],
         rules: {
             "no-restricted-imports": [
@@ -602,7 +598,6 @@ export default tseslint.config(
                                 "**/ui/openTable",
                                 "**/ui/tableTab",
                                 "**/ui/tableTabProbe",
-                                "**/ui/tableItemPane",
                                 "**/artifacts/view/readerTableView",
                                 "**/artifacts/tablesApiHost",
                             ],

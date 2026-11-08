@@ -24,8 +24,8 @@
  * `fileHandler.snapshot` preference (Settings → General → "Open snapshots
  * using"). Set to anything but Zotero, the file goes to a browser or another
  * application and no reader is created, so the table opens as the static page.
- * That is honoured rather than intercepted. The item pane's button calls
- * `openTable` (`src/ui/openTable.ts`) and always gets the Beaver tab.
+ * That is honoured rather than intercepted. Beaver's own links call
+ * `openTable` (`src/ui/openTable.ts`) and always get the Beaver tab.
  *
  * The listener is registered on Zotero's reader, which outlives every window,
  * so it belongs to the plugin realm and is removed at plugin shutdown.
