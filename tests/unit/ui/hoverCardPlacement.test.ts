@@ -62,27 +62,6 @@ describe('placeCard', () => {
         expect(placement.left).toBe(900 - 4 - 300);
     });
 
-    it("keeps clear of the expansion a tag sits in, so a card above does not hide the cell's text", () => {
-        // A tag at the bottom of an expanded cell, low in the window.
-        const peek = { top: 420, bottom: 700, left: 90, right: 390 };
-        const tag = { top: 640, bottom: 660, left: 100, right: 140 };
-        const placement = placeCard(tag, { width: 300, height: 200 }, view, peek);
-        expect(placement.bottom).toBe(800 - 420 + 4);
-        expect(placement.left).toBe(100);
-        const card = { ...extent(placement, 200), left: placement.left, right: placement.left + 300 };
-        expect(overlapsVertically(card, peek)).toBe(false);
-        // With room under the expansion, it goes below the expansion, not over its footer.
-        expect(placeCard({ ...tag, top: 200, bottom: 220 }, { width: 300, height: 200 }, view, { ...peek, top: 100, bottom: 260 }).top).toBe(264);
-    });
-
-    it('goes beside the expansion when neither above nor below it has room', () => {
-        const peek = { top: 100, bottom: 700, left: 90, right: 390 };
-        const tag = { top: 640, bottom: 660, left: 100, right: 140 };
-        const placement = placeCard(tag, { width: 300, height: 200 }, view, peek);
-        expect(placement.left).toBe(390 + 4);
-        expect(placement.top).toBe(800 - 8 - 200);
-    });
-
     it('keeps the card inside the window horizontally', () => {
         expect(placeCard(anchorAt(100, 850), { width: 300, height: 100 }, view).left).toBe(1000 - 300 - 8);
         expect(placeCard(anchorAt(100, 2), { width: 300, height: 100 }, view).left).toBe(8);

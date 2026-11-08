@@ -395,7 +395,7 @@ describe("a page tag's passage card", () => {
         expect(container!.querySelector('.bt-hover-card .rt-link-button')?.textContent).toBe('Open in PDF');
     });
 
-    it("stays open while the pointer crosses the cell's expansion on its way to the card", () => {
+    it("closes when the pointer leaves the tag for elsewhere in the cell's expansion", () => {
         fullHeight.value = 40;
         openCard('Enrollment rose by 3.4 points.');
         const expansion = peek()!;
@@ -409,12 +409,35 @@ describe("a page tag's passage card", () => {
         try {
             act(() => move(tag, text));
             act(() => vi.advanceTimersByTime(1000));
+            expect(container!.querySelector('.bt-hover-card')).toBeNull();
+            // The expansion itself stays while the pointer is over it.
+            expect(peek()).not.toBeNull();
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('stays open from the tag onto the card, and closes alone when the pointer returns to the expansion', () => {
+        fullHeight.value = 40;
+        const card = openCard('Enrollment rose by 3.4 points.');
+        const expansion = peek()!;
+        const tag = expansion.querySelector<HTMLElement>('.rt-tag-page')!;
+        const text = expansion.querySelector<HTMLElement>('.rt-peek-body')!;
+        const move = (from: Element, to: Element) => {
+            from.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: to }));
+            to.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: from }));
+        };
+        vi.useFakeTimers();
+        try {
+            act(() => move(tag, card));
+            act(() => vi.advanceTimersByTime(1000));
             expect(container!.querySelector('.bt-hover-card')).not.toBeNull();
-            // Leaving the expansion for anywhere but the card closes both.
-            act(() => move(text, document.body));
+            expect(peek()).not.toBeNull();
+            // Back into the expansion: the card closes, the expansion stays.
+            act(() => move(card, text));
             act(() => vi.advanceTimersByTime(1000));
             expect(container!.querySelector('.bt-hover-card')).toBeNull();
-            expect(peek()).toBeNull();
+            expect(peek()).not.toBeNull();
         } finally {
             vi.useRealTimers();
         }
