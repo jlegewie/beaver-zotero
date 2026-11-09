@@ -74,6 +74,14 @@
     contain: inline-size;
 }
 
+/* A table window shows the Beaver tab's surface in a window of its own:
+ * the same plain background, overlays and width containment. */
+#beaver-pane-table-window {
+    --beaver-surface-overlay: var(--material-background);
+    background-color: var(--material-background);
+    contain: inline-size;
+}
+
 /* Preferences window: two-column shell. The sidebar keeps the window's
  * sidepane material; the settings column sits on the plain background so the
  * cards read against it the way they do in Zotero's own settings. */

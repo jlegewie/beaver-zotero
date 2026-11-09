@@ -61,6 +61,8 @@ export async function resolveChatWindow(
 ): Promise<MainWindow> {
     if (origin?.closed) throw new WindowUnavailableError();
     const own = origin && Zotero.Beaver?.runtime.resolveWindowFrom(origin);
+    // A table window has no chat: its commands choose one as originless ones do.
+    if (own?.kind === 'table') return resolveChatWindow();
     if (own) return own.hostWindow as MainWindow;
     const hasLocalOwner = origin && (isMainWindow(origin) || origin.__beaverRuntime || origin.__beaverOwnerWindowRef);
     const win = await resolveNavigationWindow(hasLocalOwner ? origin : undefined);

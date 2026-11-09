@@ -107,6 +107,12 @@ export interface BeaverTabKind<Ref = unknown> {
      * already showing it. Used to reopen a closed tab and to restore tabs.
      */
     open(ref: Ref, options: BeaverTabOpenOptions): Promise<BeaverTabOpenOutcome>;
+    /**
+     * Opens `ref` in a window of its own, for the tab menu's "Move to New
+     * Window"; the tab closes once it has. A kind without it keeps its tabs in
+     * their window.
+     */
+    moveToNewWindow?(ref: Ref): Promise<BeaverTabOpenOutcome>;
 }
 
 type TabHook = (...args: any[]) => unknown;
@@ -283,6 +289,23 @@ function installTabHooks(win: Window): boolean {
         }
         return false;
     };
+    // The tab menu's Move Tab → Move to New Window: the kind opens the
+    // content in its own window, then the tab closes. A failed open keeps it.
+    (hooks.moveToNewWindow ??= {})[BEAVER_TAB_CONTENT_TYPE] = async (tab: { id: string; data?: SessionTab['data'] }) => {
+        const target = tabDataOf(tab?.data);
+        const kind = target && active ? kinds.get(target.kind) : undefined;
+        if (!target || !kind?.moveToNewWindow) return;
+        try {
+            const outcome = await kind.moveToNewWindow(target.ref);
+            if ('error' in outcome) {
+                Zotero.alert(win as any, 'Beaver', outcome.error);
+                return;
+            }
+            closeBeaverTab(tab.id);
+        } catch (error) {
+            logger(`beaverTabs: move to a new window failed: ${String(error)}`, 1);
+        }
+    };
     // Keyboard selection and dragging move focus into the tab's content
     // through these; without them focus stays on the tab strip.
     (hooks.focusFirst ??= {})[BEAVER_TAB_CONTENT_TYPE] = async (tab: { id: string }) => {
@@ -324,6 +347,7 @@ function uninstallTabHooks(win: Window): void {
     delete hooks.getTitle?.[BEAVER_TAB_CONTENT_TYPE];
     delete hooks.restoreState?.[BEAVER_TAB_CONTENT_TYPE];
     delete hooks.undoClose?.[BEAVER_TAB_CONTENT_TYPE];
+    delete hooks.moveToNewWindow?.[BEAVER_TAB_CONTENT_TYPE];
     delete hooks.focusFirst?.[BEAVER_TAB_CONTENT_TYPE];
     delete hooks.refocus?.[BEAVER_TAB_CONTENT_TYPE];
 }

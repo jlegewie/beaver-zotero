@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { isColumnSortable, toPlainText, type Column, type Row, type TableSort, type TableSpec } from "@beaver/agent-core/layouts/table";
 import { cellsToFill } from "@beaver/agent-core/layouts/tableFill";
 import { addColumnBlockedReason } from "@beaver/agent-core/layouts/tableMutations";
@@ -133,6 +133,53 @@ export interface ResearchTableReveal {
     token: number | string;
 }
 
+/** The view as the host's menus show it: what {@link ResearchTableHandle} would act on. */
+export interface ResearchTableViewState {
+    density: TableDensity;
+    /** Question columns the viewer has hidden. */
+    hiddenColumns: number;
+    /** The search or a filter narrows the rows. */
+    filtered: boolean;
+    sorted: boolean;
+    /** Selected rows, in view order. */
+    selectedRowIds: string[];
+    /** Rows in view. */
+    rows: number;
+    /** The search box is shown (the table has rows, whatever the view hides). */
+    searchable: boolean;
+    /** Text is selected in the table (its cells, expansions or inspector). */
+    hasSelectedText: boolean;
+    /** The More actions the host offers. */
+    canCopy: boolean;
+    canExport: boolean;
+    hasVersionHistory: boolean;
+    /** The sources can be shown and changed (the Sources popover). */
+    canEditSources: boolean;
+}
+
+/**
+ * Drives the surface from outside it: a host's native menus and shortcuts
+ * reach the same view state and actions as the toolbar.
+ */
+export interface ResearchTableHandle {
+    viewState(): ResearchTableViewState;
+    setDensity(density: TableDensity): void;
+    showHiddenColumns(): void;
+    /** Clears the search and the filters. */
+    clearFilters(): void;
+    clearSort(): void;
+    showVersionHistory(): void;
+    copyAsText(): void;
+    exportTable(format: "xlsx" | "csv"): void;
+    /** Puts the cursor in the search box. */
+    focusSearch(): void;
+    /** Selects every row in view. */
+    selectAllRows(): void;
+    /** Copies the text selected in the table; false when none is. */
+    copySelection(): boolean;
+    openSources(): void;
+}
+
 export interface ResearchTableProps {
     table: TableSpec;
     renderText?: TextRenderer;
@@ -190,6 +237,8 @@ export interface ResearchTableProps {
     virtualize?: boolean;
     /** Opens Beaver's chat on this table: offered by the empty table's guide. */
     onAskBeaver?: () => void;
+    /** Receives the surface's {@link ResearchTableHandle}. */
+    handleRef?: React.Ref<ResearchTableHandle>;
     className?: string;
 }
 
@@ -239,6 +288,7 @@ export function ResearchTable({
     editing,
     virtualize,
     onAskBeaver,
+    handleRef,
     className,
 }: ResearchTableProps): React.ReactElement {
     const columns = useMemo(() => researchColumns(table), [table]);
@@ -637,23 +687,19 @@ export function ResearchTable({
               ) : null
         : undefined;
 
+    const copyAsText = () => {
+        // The paper and the year are always columns here, though the shared
+        // view state hides system columns by default.
+        const visible = table.columns.filter(
+            (column) =>
+                column === columns.paper ||
+                column === columns.year ||
+                (columns.questions.includes(column) && !state.hiddenColumns.has(column.id)),
+        );
+        onCopy?.(toPlainText(table, state.rows, visible));
+    };
     const moreItems: MenuItem[] = [];
-    if (onCopy)
-        moreItems.push({
-            label: "Copy as text",
-            icon: CopyIcon,
-            onClick: () => {
-                // The paper and the year are always columns here, though the
-                // shared view state hides system columns by default.
-                const visible = table.columns.filter(
-                    (column) =>
-                        column === columns.paper ||
-                        column === columns.year ||
-                        (columns.questions.includes(column) && !state.hiddenColumns.has(column.id)),
-                );
-                onCopy(toPlainText(table, state.rows, visible));
-            },
-        });
+    if (onCopy) moreItems.push({ label: "Copy as text", icon: CopyIcon, onClick: copyAsText });
     if (onExport)
         moreItems.push(
             { label: "Export to Excel", icon: DownloadIcon, onClick: () => onExport("xlsx", state.sort) },
@@ -664,6 +710,53 @@ export function ResearchTable({
         moreItems.push({ label: "Version history", icon: ClockIcon, onClick: () => setPanel({ kind: "history" }) });
 
     const selectedIds = state.rows.filter((row) => state.selectedRows.has(row.id)).map((row) => row.id);
+
+    // Rebuilt every render, so a host reads the view as it is now.
+    useImperativeHandle(handleRef, () => ({
+        viewState: () => ({
+            density: state.density,
+            hiddenColumns: hiddenQuestions.length,
+            filtered: state.hasFilters,
+            sorted: !!state.sort,
+            selectedRowIds: selectedIds,
+            rows: state.rows.length,
+            searchable: table.rows.length > 0,
+            hasSelectedText: !!selectedTextWithin(copyScopeRef.current).trim(),
+            canCopy: !!onCopy,
+            canExport: !!onExport,
+            hasVersionHistory: !!renderVersionHistory,
+            canEditSources: !!editing?.renderSources,
+        }),
+        setDensity: (density) => state.setDensity(density),
+        showHiddenColumns: () => hiddenQuestions.forEach((column) => state.toggleColumn(column.id)),
+        clearFilters: () => state.clearFilters(),
+        clearSort: () => state.setSort(undefined),
+        showVersionHistory: () => {
+            if (renderVersionHistory) setPanel({ kind: "history" });
+        },
+        copyAsText,
+        exportTable: (format) => onExport?.(format, state.sort),
+        focusSearch: () => {
+            const input = copyScopeRef.current?.querySelector<HTMLInputElement>(".rt-search input");
+            input?.focus();
+            input?.select();
+        },
+        selectAllRows: () => {
+            if (!state.allInViewSelected) state.toggleSelectAll();
+        },
+        copySelection: () => {
+            const text = selectedTextWithin(copyScopeRef.current);
+            if (!text.trim() || !onCopy) return false;
+            onCopy(text);
+            return true;
+        },
+        openSources: () => {
+            if (!editing?.renderSources) return;
+            // The popover hangs off the Sources chip, which a row selection hides.
+            state.clearSelection();
+            setSourcesOpen(true);
+        },
+    }));
     const sourceCount = table.sources?.length ?? 0;
     const items = table.rows.length;
     // An empty table that can be edited shows how to start it where its rows

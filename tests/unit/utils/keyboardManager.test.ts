@@ -67,6 +67,25 @@ describe('KeyboardManager', () => {
         expect(callback).toHaveBeenCalledTimes(2);
     });
 
+    it('hears a window it is attached to that is neither a main window nor a reader', () => {
+        manager = new KeyboardManager();
+        const callback = vi.fn();
+        manager.register(callback);
+        const tableWindow = new EventTarget() as unknown as Window;
+        tableWindow.dispatchEvent(keydown({ key: 'j', code: 'KeyJ', metaKey: true }));
+        expect(callback).not.toHaveBeenCalled();
+
+        manager.attachWindow(tableWindow);
+        tableWindow.dispatchEvent(keydown({ key: 'j', code: 'KeyJ', metaKey: true }));
+        expect(callback).toHaveBeenCalledTimes(1);
+
+        // It stops listening when the window closes.
+        tableWindow.dispatchEvent(new Event('unload'));
+        const later = keydown({ key: 'k', code: 'KeyK', metaKey: true });
+        tableWindow.dispatchEvent(later);
+        expect(callback).toHaveBeenCalledTimes(1);
+    });
+
     it('ignores modifier-only presses', () => {
         manager = new KeyboardManager();
         const callback = vi.fn();

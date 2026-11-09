@@ -1,9 +1,16 @@
 /**
- * Putting a stored table on screen: the Beaver tab.
+ * Putting a stored table on screen: the Beaver tab, or a table window.
  *
- * Every product path that opens a table — chat cards, request chips, a reader replaced by the Beaver tab — comes through
- * {@link openTable}, so the window choice, the open repair and the warnings
- * are decided once.
+ * Every product path that opens a table — chat cards, request chips, a reader
+ * replaced by the table, "Open in New Window", a restored window — comes
+ * through {@link openTable}, so the surface, the window choice, the open
+ * repair and the warnings are decided once.
+ *
+ * The surface: `openIn: 'window'` opens the table in its own window
+ * (`tableWindow.ts`), or brings forward the one already showing it. Otherwise
+ * a table already in a window is brought forward there, as Zotero brings
+ * forward a reader window rather than opening the item again; and with no
+ * window, it opens in a tab. `openIn: 'tab'` always means the tab.
  *
  * Three rules shape the file:
  *
@@ -16,7 +23,8 @@
  *    and what it reports is shown in the tab and returned.
  * 3. **The tab opens where the user is.** The caller passes the window the
  *    interaction came from; the tab opens in that window's main window (the
- *    standalone Beaver window's is the main window it follows). Only an
+ *    standalone Beaver window's, or a table window's, is the main window it
+ *    follows). Only an
  *    originless command — or a standalone window with no main window left —
  *    falls back to the most recent main window, opening one if none is open.
  *
@@ -43,14 +51,23 @@ import {
 } from '../services/artifacts/tableItemIdentity';
 import { contextMainWindow, resolveNavigationWindow, WindowUnavailableError } from '../runtime/navigation';
 import { canHostTableTab, openTableTab, setTableTabWarning } from './tableTab';
+import { findTableWindow, openTableWindow, setTableWindowWarning } from './tableWindow';
 import type { TableFocusTarget, TableTabRequest } from './tableTabTypes';
 
 export type OpenTableOutcome =
     /**
      * `focus` answers a focus request: `missing` when the table no longer
-     * has that row or column, and then nothing is focused.
+     * has that row or column, and then nothing is focused. `tabID` names the
+     * tab when the table opened in one; a table window has none.
      */
-    | { ok: true; tabID: string; reused: boolean; warning?: string; focus?: 'found' | 'missing' }
+    | {
+          ok: true;
+          surface: 'tab' | 'window';
+          tabID?: string;
+          reused: boolean;
+          warning?: string;
+          focus?: 'found' | 'missing';
+      }
     | { error: string };
 
 export interface OpenTableOptions {
@@ -69,6 +86,12 @@ export interface OpenTableOptions {
     focus?: TableFocusTarget;
     /** A fill's failed rows for the tab to show. */
     request?: TableTabRequest;
+    /**
+     * `window`: the table's own window. `tab`: a Beaver tab even when a
+     * window already shows the table. Absent: the window showing it, if
+     * any, else a tab.
+     */
+    openIn?: 'tab' | 'window';
 }
 
 /** How long to wait for a main window's Beaver renderer to come up. */
@@ -184,26 +207,39 @@ export async function openTable(ref: TableRef, options: OpenTableOptions = {}): 
                 : tableReadProblem(read.code) ?? read.message;
             return { error: `Couldn't open “${title}”. ${problem}` };
         }
-        const win = await tableTabWindow(options.window);
         const target = options.focus;
         const found = target
             && read.spec.rows.some((row) => row.id === target.rowId)
             && (!target.columnId || read.spec.columns.some((column) => column.id === target.columnId));
-        const { tabID, reused } = openTableTab(win, item, ref, {
+        const shown = {
             initial: { spec: read.spec, version: read.spec.version ?? 0 },
-            background: options.background,
-            index: options.index,
             ...(found ? { focus: target } : {}),
             ...(options.request ? { request: options.request } : {}),
+        };
+        const focusOutcome = target ? { focus: found ? ('found' as const) : ('missing' as const) } : {};
+
+        if (options.openIn === 'window' || (options.openIn !== 'tab' && findTableWindow(ref))) {
+            const { win, reused } = openTableWindow(item, ref, shown);
+            const warning = await repairOnOpen(item, ref);
+            setTableWindowWarning(win, warning ?? null);
+            return { ok: true, surface: 'window', reused, ...(warning ? { warning } : {}), ...focusOutcome };
+        }
+
+        const win = await tableTabWindow(options.window);
+        const { tabID, reused } = openTableTab(win, item, ref, {
+            ...shown,
+            background: options.background,
+            index: options.index,
         });
         const warning = await repairOnOpen(item, ref);
         setTableTabWarning(tabID, warning ?? null);
         return {
             ok: true,
+            surface: 'tab',
             tabID,
             reused,
             ...(warning ? { warning } : {}),
-            ...(target ? { focus: found ? 'found' : 'missing' } : {}),
+            ...focusOutcome,
         };
     } catch (error) {
         if (error instanceof WindowUnavailableError) {
