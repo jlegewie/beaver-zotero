@@ -4,7 +4,7 @@ import { createRoot } from "react-dom/client";
 import { atom, createStore, Provider } from "jotai";
 import { expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ validate: vi.fn(), popup: vi.fn() }));
+const mocks = vi.hoisted(() => ({ validate: vi.fn(), popup: vi.fn(), target: null as any }));
 vi.mock("../../../react/atoms/profile", () => ({
     searchableLibraryIdsAtom: atom([1]),
 }));
@@ -32,6 +32,7 @@ vi.mock("../../../react/components/ui/menus/AddSourcesMenu", async () => {
     const { createElement, forwardRef } = await import("react");
     return {
         default: forwardRef(function MockSourcesMenu({ target }: any, _ref) {
+            mocks.target = target;
             return createElement(
                 "button",
                 {
@@ -123,6 +124,62 @@ it("reports failed table picks, releases the pending hold, and permits retry wit
         await act(async () => container.querySelector("button")!.click());
         expect(added).toHaveBeenCalledExactlyOnceWith([restored], 7);
         expect(pending).toHaveBeenLastCalledWith(false);
+    } finally {
+        act(() => root.unmount());
+        container.remove();
+    }
+});
+
+it("attaches a picked saved search to the edited message, and detaches it on a second pick", async () => {
+    const search = { libraryID: 1, key: "SRCH0001", name: "Recent RCTs", deleted: false };
+    (globalThis as any).Zotero = {
+        Searches: { getByLibraryAndKey: () => search },
+    };
+    const view = { type: "saved_search" as const, library_ref: "u", zotero_key: "SRCH0001", name: "Recent RCTs" };
+    const added = vi.fn();
+    const removed = vi.fn();
+    const props = (attachments: any[]): RequestSourcesMenuProps => ({
+        attachments,
+        filters: null,
+        editSessionId: 3,
+        onAddAttachments: added,
+        onRemoveAttachment: removed,
+        onFiltersChange: vi.fn(),
+        isMenuOpen: true,
+        menuPosition: { x: 0, y: 0 },
+        searchQuery: "",
+        querySource: "menu",
+        menuRef: { current: null },
+        onQueryChange: vi.fn(),
+        onOpen: vi.fn(),
+        onDismiss: vi.fn(),
+        onCommit: vi.fn(),
+        onResetQuery: vi.fn(),
+    });
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    const store = createStore();
+    const render = (attachments: any[]) => act(async () =>
+        root.render(
+            React.createElement(
+                Provider,
+                { store },
+                React.createElement(RequestSourcesMenu, props(attachments)),
+            ),
+        ),
+    );
+    try {
+        await render([]);
+        expect(mocks.target.isSavedSearchPicked(search)).toBe(false);
+        act(() => mocks.target.pickSavedSearch(search));
+        expect(added).toHaveBeenCalledExactlyOnceWith([view], 3);
+
+        await render([view]);
+        expect(mocks.target.isSavedSearchPicked(search)).toBe(true);
+        act(() => mocks.target.pickSavedSearch(search));
+        expect(removed).toHaveBeenCalledExactlyOnceWith("search:u-SRCH0001");
+        expect(added).toHaveBeenCalledTimes(1);
     } finally {
         act(() => root.unmount());
         container.remove();

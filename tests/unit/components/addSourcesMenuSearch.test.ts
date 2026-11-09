@@ -39,6 +39,7 @@ vi.mock('../../../react/atoms/messageComposition', async () => {
     return {
         currentMessageFiltersAtom: atom({ libraryIds: [], collectionIds: [], tagSelections: [] }),
         currentMessageItemsAtom: atom([]),
+        currentMessageViewsAtom: atom([]),
         addItemToCurrentMessageItemsAtom: atom(null, () => {}),
         removeItemFromMessageAtom: atom(null, () => {}),
     };
@@ -68,6 +69,10 @@ vi.mock('../../../react/components/ui/menus/hooks/useLibrariesMenu', () => ({ us
 vi.mock('../../../react/components/ui/menus/hooks/useCollectionsMenu', () => ({ useCollectionsMenu: () => ({ menuItems: [] }) }));
 vi.mock('../../../react/components/ui/menus/hooks/useTagsMenu', () => ({ useTagsMenu: () => ({ menuItems: [] }) }));
 vi.mock('../../../react/components/ui/menus/hooks/useNotesMenu', () => ({ useNotesMenu: () => ({ menuItems: [] }) }));
+vi.mock('../../../react/components/ui/menus/hooks/useSavedSearchesMenu', () => ({
+    useSavedSearchesMenu: () => ({ menuItems: [] }),
+    availableSavedSearches: async () => [],
+}));
 
 import AddSourcesMenu from '../../../react/components/ui/menus/AddSourcesMenu';
 import { currentMessageFiltersAtom } from '../../../react/atoms/messageComposition';
