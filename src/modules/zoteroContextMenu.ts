@@ -34,7 +34,7 @@ import { exportNoteWithProgress, NOTE_EXPORT_FORMATS } from './noteExportCommand
 import { canCreateTableIn, createAndOpenTable, newTableScope, newTableTitle } from './newTableCommand';
 import type { LibraryScope } from '@beaver/agent-core/layouts/table';
 import { isTableChatEnabled } from '../services/tableCapability';
-import { labelTableOpenEntries } from './tableOpenMenuLabel';
+import { detachAllTableOpenLabels } from './tableOpenMenuLabel';
 import config from '../../package.json';
 
 // ---------------------------------------------------------------------------
@@ -254,6 +254,7 @@ export function cleanupContextMenus(): void {
     // We unregister from cache and manually remove stale DOM elements.
     unregisterMenus();
     removeStaleMenuDOM();
+    detachAllTableOpenLabels();
 }
 
 // ---------------------------------------------------------------------------
@@ -321,13 +322,6 @@ function registerMenus(): void {
             l10nID: 'beaver-context-menu-submenu',
             onShowing: safeOnShowing('item-submenu', (_event: any, context: any) => {
                 const { items, setVisible } = context;
-
-                // Zotero's own entries, so a failure here never hides ours.
-                try {
-                    labelTableOpenEntries(context.menuElem?.parentElement, items);
-                } catch (e) {
-                    ztoolkit.log(`zoteroContextMenu: could not label table open entries: ${e}`);
-                }
 
                 // Reset module-level state
                 selectionComposition = null;

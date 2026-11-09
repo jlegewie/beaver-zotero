@@ -13,7 +13,12 @@ vi.mock('../../../src/services/artifacts/tableItemIdentity', () => ({
     },
 }));
 
-import { labelTableOpenEntries } from '../../../src/modules/tableOpenMenuLabel';
+import {
+    attachTableOpenLabels,
+    detachAllTableOpenLabels,
+    detachTableOpenLabels,
+    labelTableOpenEntries,
+} from '../../../src/modules/tableOpenMenuLabel';
 
 const Z = (globalThis as any).Zotero;
 const table = { table: true } as unknown as Zotero.Item;
@@ -43,6 +48,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+    detachAllTableOpenLabels();
     popup.remove();
     delete (document as any).l10n;
 });
@@ -114,5 +120,97 @@ describe('labelling the open entries of a table', () => {
         delete (document as any).l10n;
         labelTableOpenEntries(popup, [table]);
         expect(setAttributes).not.toHaveBeenCalled();
+    });
+});
+
+describe('relabelling when the item menu opens', () => {
+    let selection: Zotero.Item[];
+    let win: Window;
+
+    beforeEach(() => {
+        popup.id = 'zotero-itemmenu';
+        selection = [table];
+        win = { document, ZoteroPane: { getSelectedItems: () => selection } } as unknown as Window;
+    });
+
+    function openMenu(target: Element = popup): void {
+        target.dispatchEvent(new Event('popupshowing', { bubbles: true }));
+    }
+
+    it('labels the entries from the selection each time the item menu opens', () => {
+        const entry = addEntry({ attachmentType: 'snapshot', numAttachments: 1, openIn: 'tab' });
+        attachTableOpenLabels(win);
+
+        openMenu();
+        expect(setAttributes).toHaveBeenCalledWith(entry, 'beaver-item-menu-view-table', { count: 1, openIn: 'tab' });
+
+        // Zotero rebuilds the entries for the next opening.
+        entry.remove();
+        const next = addEntry({ attachmentType: 'snapshot', numAttachments: 2, openIn: 'window' });
+        selection = [table, table];
+        openMenu();
+        expect(setAttributes).toHaveBeenLastCalledWith(next, 'beaver-item-menu-view-table', { count: 2, openIn: 'window' });
+    });
+
+    it('relabels without opening any submenu, so grouped plugin entries do not matter', () => {
+        // Zotero's overflow submenu for plugin entries stays closed.
+        const group = document.createElement('menu');
+        group.appendChild(document.createElement('menupopup'));
+        popup.appendChild(group);
+        addEntry({ attachmentType: 'snapshot', numAttachments: 1, openIn: 'tab' });
+        attachTableOpenLabels(win);
+
+        openMenu();
+
+        expect(setAttributes).toHaveBeenCalledOnce();
+    });
+
+    it("ignores a submenu's popupshowing bubbling up to the item menu", () => {
+        const submenu = document.createElement('menupopup');
+        popup.appendChild(submenu);
+        addEntry({ attachmentType: 'snapshot', numAttachments: 1, openIn: 'tab' });
+        attachTableOpenLabels(win);
+
+        openMenu(submenu);
+
+        expect(setAttributes).not.toHaveBeenCalled();
+    });
+
+    it('attaches once however often the window is set up', () => {
+        addEntry({ attachmentType: 'snapshot', numAttachments: 1, openIn: 'tab' });
+        attachTableOpenLabels(win);
+        attachTableOpenLabels(win);
+
+        openMenu();
+
+        expect(setAttributes).toHaveBeenCalledOnce();
+    });
+
+    it('stops relabelling once detached from the window or on shutdown', () => {
+        addEntry({ attachmentType: 'snapshot', numAttachments: 1, openIn: 'tab' });
+        attachTableOpenLabels(win);
+        detachTableOpenLabels(win);
+        openMenu();
+
+        attachTableOpenLabels(win);
+        detachAllTableOpenLabels();
+        openMenu();
+
+        expect(setAttributes).not.toHaveBeenCalled();
+    });
+
+    it("never breaks Zotero's menu when the selection cannot be read", () => {
+        addEntry({ attachmentType: 'snapshot', numAttachments: 1, openIn: 'tab' });
+        (win as any).ZoteroPane.getSelectedItems = () => { throw new Error('no items view'); };
+        attachTableOpenLabels(win);
+
+        expect(() => openMenu()).not.toThrow();
+        expect(setAttributes).not.toHaveBeenCalled();
+    });
+
+    it('does nothing in a window without the item menu', () => {
+        popup.id = '';
+        expect(() => attachTableOpenLabels(win)).not.toThrow();
+        detachTableOpenLabels(win);
     });
 });
