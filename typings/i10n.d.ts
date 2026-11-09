@@ -7,6 +7,7 @@ export type FluentMessageId =
   | 'beaver-context-menu-add-action'
   | 'beaver-context-menu-context-header'
   | 'beaver-context-menu-submenu'
+  | 'beaver-item-menu-view-table'
   | 'beaver-menu-upsert'
   | 'beaver-new-table'
   | 'beaver-new-table-from-selection'

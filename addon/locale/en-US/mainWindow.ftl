@@ -39,6 +39,15 @@ beaver-new-table-from-selection =
        *[collection] New Table from Collection
     }
 
+beaver-item-menu-view-table =
+    .label = Open { $count ->
+        [one] Beaver Table
+       *[other] Beaver Tables
+    } { $openIn ->
+        [tab] in New Tab
+       *[window] in New Window
+    }
+
 beaver-window-new-chat =
     .label = New Chat
 beaver-window-settings =
