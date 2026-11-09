@@ -32,12 +32,8 @@ beaver-note-export-format =
 beaver-new-table =
     .label = New Beaver Table
 
-beaver-new-table-from-selection =
-    .label = { $kind ->
-        [saved_search] New Table from Saved Search
-        [multiple] New Table from Selection
-       *[collection] New Table from Collection
-    }
+beaver-create-table =
+    .label = Create Beaver Table
 
 beaver-item-menu-view-table =
     .label = Open { $count ->
