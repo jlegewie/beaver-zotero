@@ -8,6 +8,8 @@ export type FluentMessageId =
   | 'beaver-context-menu-context-header'
   | 'beaver-context-menu-submenu'
   | 'beaver-menu-upsert'
+  | 'beaver-new-table'
+  | 'beaver-new-table-from-selection'
   | 'beaver-note-export-format'
   | 'beaver-note-export-submenu'
   | 'beaver-window-close'

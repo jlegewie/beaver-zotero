@@ -85,6 +85,17 @@ describe("creating a table", () => {
         expect(buildTable({ id: "t", title: "T" }, [source("s2", [], { error: "Gone." })], "d")).toMatchObject({ ok: false, code: "source_unavailable", message: "sources[0]: Gone." });
         expect(buildTable({ id: "t", title: "T" }, [source("s1", [paper("AAAAAAAA"), paper("BBBBBBBB")])], "d", 1)).toMatchObject({ ok: false, code: "too_large" });
     });
+    it("builds a table the user starts empty, keeping a source that has no items yet", () => {
+        const empty = buildTable({ id: "t", title: "T" }, [], "d", undefined, { allowEmpty: true });
+        expect(empty.ok && empty.spec.columns.map((c) => c.id)).toEqual(["_reference", "_year", "_identifier"]);
+        expect(empty.ok && empty.spec.rows).toEqual([]);
+        const fromEmptySource = buildTable({ id: "t", title: "T" }, [source("s1", [])], "d", undefined, { allowEmpty: true });
+        expect(fromEmptySource.ok && fromEmptySource.spec.sources?.map((entry) => entry.id)).toEqual(["s1"]);
+        expect(fromEmptySource.ok && fromEmptySource.spec.rows).toEqual([]);
+        // Still refused: a source cut short or one that cannot be used.
+        expect(buildTable({ id: "t", title: "T" }, [source("s2", [paper("AAAAAAAA")], { truncated: true, total: 1800 })], "d", undefined, { allowEmpty: true })).toMatchObject({ ok: false, code: "too_large" });
+        expect(buildTable({ id: "t", title: "T" }, [source("s2", [], { error: "Gone." })], "d", undefined, { allowEmpty: true })).toMatchObject({ ok: false, code: "source_unavailable" });
+    });
     it("derives unique column ids from headers, a generic one for a header without letters", () => {
         const result = buildTable(
             { id: "t", title: "T", columns: [{ header: "Sample size", type: "text" }, { header: "Sample size", type: "text" }, { header: "研究", type: "text" }] },

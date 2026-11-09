@@ -29,6 +29,16 @@ beaver-note-export-submenu =
 beaver-note-export-format =
     .label = { $format }…
 
+beaver-new-table =
+    .label = New Beaver Table
+
+beaver-new-table-from-selection =
+    .label = { $kind ->
+        [saved_search] New Table from Saved Search
+        [multiple] New Table from Selection
+       *[collection] New Table from Collection
+    }
+
 beaver-window-new-chat =
     .label = New Chat
 beaver-window-settings =

@@ -31,6 +31,7 @@ import { FILL_RUNNING_REASON, useTableEditing } from './useTableEditing';
 import TableCardDropZone from './card/TableCardDropZone';
 import { useAtomValue } from 'jotai';
 import { searchableLibraryIdsAtom } from '../../atoms/profile';
+import { eventManager } from '../../events/eventManager';
 
 /** A value the tab's owner sets from outside React, read with `useSyncExternalStore`. */
 export interface TableTabWarningSource {
@@ -193,6 +194,15 @@ function readFailure(error: unknown, onScreen: boolean): string {
     if (!problem) return String((error as Error)?.message ?? error);
     const message = `Beaver can't open this table. ${problem}`;
     return onScreen ? `${message} You're seeing the last version that loaded.` : message;
+}
+
+/**
+ * Opens Beaver's chat beside the tab, with the table as its context, and puts
+ * the cursor in the composer once the chat has mounted.
+ */
+function askBeaver(): void {
+    eventManager.dispatch('toggleChat', { forceOpen: true });
+    setTimeout(() => eventManager.dispatch('focusInput', {}), 0);
 }
 
 const renderCellText = (text: string) => (
@@ -433,6 +443,7 @@ export default function TableTabView({
                     documents={documents}
                     newPapers={newPapers.notice}
                     virtualize
+                    onAskBeaver={fillEnabled ? askBeaver : undefined}
                     editing={edits.editing}
                     cellEditing={edits.cellEditing}
                     fill={fill}
