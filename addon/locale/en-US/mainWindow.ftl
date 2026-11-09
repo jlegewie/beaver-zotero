@@ -35,6 +35,15 @@ beaver-new-table =
 beaver-create-table =
     .label = Create Beaver Table
 
+beaver-item-menu-view-table =
+    .label = Open { $count ->
+        [one] Beaver Table
+       *[other] Beaver Tables
+    } { $openIn ->
+        [tab] in New Tab
+       *[window] in New Window
+    }
+
 beaver-window-new-chat =
     .label = New Chat
 beaver-window-settings =

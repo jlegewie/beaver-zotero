@@ -34,6 +34,7 @@ import { exportNoteWithProgress, NOTE_EXPORT_FORMATS } from './noteExportCommand
 import { canCreateTableIn, createAndOpenTable, newTableScope, newTableTitle } from './newTableCommand';
 import type { LibraryScope } from '@beaver/agent-core/layouts/table';
 import { isTableChatEnabled } from '../services/tableCapability';
+import { detachAllTableOpenLabels } from './tableOpenMenuLabel';
 import config from '../../package.json';
 
 // ---------------------------------------------------------------------------
@@ -257,6 +258,7 @@ export function cleanupContextMenus(): void {
     // We unregister from cache and manually remove stale DOM elements.
     unregisterMenus();
     removeStaleMenuDOM();
+    detachAllTableOpenLabels();
 }
 
 // ---------------------------------------------------------------------------
