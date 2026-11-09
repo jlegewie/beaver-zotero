@@ -33,6 +33,15 @@ import { BeaverUIFactory } from "./ui/ui";
 import { openTable } from "./ui/openTable";
 import { cleanupBeaverTabs, initBeaverTabs, recoverTabsAfterBeaverTabs, restoreBeaverTabs } from "./ui/beaverTabs";
 import { cleanupTableTabs, initTableTabs } from "./ui/tableTab";
+import {
+    cleanupTableWindows,
+    initTableWindows,
+    onTableWindowCommand,
+    onTableWindowLoad,
+    onTableWindowMenuShowing,
+    onTableWindowUnload,
+    restoreTableWindows,
+} from "./ui/tableWindow";
 import { stopTableTabProbe } from "./ui/tableTabProbe";
 import { cancelAllActiveTasks } from "./utils/backgroundTasks";
 import { compareVersions } from "./utils/compareVersions";
@@ -307,6 +316,7 @@ async function onStartup() {
     // window of a cold start is repaired in `onMainWindowLoad`.
     initBeaverTabs();
     initTableTabs((ref, options) => openTable(ref, options));
+    initTableWindows((ref) => openTable(ref, { openIn: 'window' }));
 
     await Promise.all([
         Zotero.initializationPromise,
@@ -507,6 +517,12 @@ function onStandaloneWindowLoad(win: Window): void {
     BeaverUIFactory.registerChatPanel(win);
 }
 
+/** A table window loaded: its table (`tableWindow.ts`), and Beaver's shortcuts. */
+function onTableWindowLoaded(win: Window): void {
+    onTableWindowLoad(win);
+    BeaverUIFactory.attachShortcuts(win);
+}
+
 function onStandaloneWindowUnload(win: Window): void {
     const runtime = addon.runtime.getWindow(win);
     if (!runtime || !addon.runtime.markClosing(win)) return;
@@ -552,7 +568,7 @@ async function onMainWindowLoad(win: Window): Promise<void> {
     }
 
     BeaverUIFactory.registerChatPanel(win);
-    attachTableOpenLabels(win);
+    attachTableOpenLabels(win, (ref) => openTable(ref, { openIn: 'window' }));
 
     // Tabs a cold start's session restore lost to a saved Beaver tab, then
     // the Beaver tabs a quit, plugin reload or last-window close left for this
@@ -561,6 +577,10 @@ async function onMainWindowLoad(win: Window): Promise<void> {
         .catch((error) => ztoolkit.log(`recoverTabsAfterBeaverTabs: ${error}`))
         .then(() => restoreBeaverTabs(win))
         .catch((error) => ztoolkit.log(`restoreBeaverTabs: ${error}`));
+    // Table windows a quit or a Beaver shutdown left open. They need no main
+    // window's renderer; the record is consumed, so only the first window to
+    // load reopens them.
+    void restoreTableWindows().catch((error) => ztoolkit.log(`restoreTableWindows: ${error}`));
 
     ztoolkit.log("UI ready");
     
@@ -996,6 +1016,8 @@ async function disposePlugin(): Promise<void> {
 
     try {
         BeaverUIFactory.closeBeaverWindow();
+        // Recorded first, so the next start reopens them.
+        cleanupTableWindows();
         const openWindows = Zotero.getMainWindows?.().filter(w => w && !w.closed) ?? [];
         for (const win of openWindows) addon.runtime.markClosing(win);
         for (const win of openWindows) {
@@ -1097,6 +1119,10 @@ export default {
     onAppShutdown,
     onStandaloneWindowLoad,
     onStandaloneWindowUnload,
+    onTableWindowLoad: onTableWindowLoaded,
+    onTableWindowUnload,
+    onTableWindowCommand,
+    onTableWindowMenuShowing,
     onMainWindowLoad,
     onMainWindowUnload,
 };

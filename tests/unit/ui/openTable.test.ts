@@ -18,6 +18,9 @@ const canHostTableTab = vi.hoisted(() => vi.fn(() => true));
 const openTableTab = vi.hoisted(() => vi.fn());
 const setTableTabWarning = vi.hoisted(() => vi.fn());
 const tableRepairAllowed = vi.hoisted(() => vi.fn(() => true));
+const findTableWindow = vi.hoisted(() => vi.fn(() => null as unknown));
+const openTableWindow = vi.hoisted(() => vi.fn());
+const setTableWindowWarning = vi.hoisted(() => vi.fn());
 
 vi.mock('../../../src/services/artifacts/tableItemIdentity', async (importOriginal) => {
     const original = await importOriginal<typeof import('../../../src/services/artifacts/tableItemIdentity')>();
@@ -32,6 +35,7 @@ vi.mock('../../../src/services/artifacts/tableItemIdentity', async (importOrigin
 });
 vi.mock('../../../src/services/artifacts/tableRenderer', () => ({ snapshotIsCurrent }));
 vi.mock('../../../src/ui/tableTab', () => ({ canHostTableTab, openTableTab, setTableTabWarning }));
+vi.mock('../../../src/ui/tableWindow', () => ({ findTableWindow, openTableWindow, setTableWindowWarning }));
 vi.mock('../../../src/runtime/navigation', async (importOriginal) => ({
     ...(await importOriginal<typeof import('../../../src/runtime/navigation')>()),
     contextMainWindow,
@@ -47,6 +51,7 @@ const ITEM = { id: 42, key: REF.key, libraryID: REF.libraryID, getField: () => '
 
 const main = { closed: false, __beaverRuntime: { status: 'ready' } } as any;
 const other = { closed: false, __beaverRuntime: { status: 'ready' } } as any;
+const tableWin = { closed: false, __beaverRuntime: { status: 'ready', kind: 'table' } } as any;
 let run: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
@@ -58,6 +63,8 @@ beforeEach(() => {
     contextMainWindow.mockImplementation((origin: any) => (origin === main || origin?.context === main ? main : null));
     resolveNavigationWindow.mockImplementation(async (origin?: any) => origin ?? other);
     openTableTab.mockReturnValue({ tabID: 'tab-1', reused: false });
+    findTableWindow.mockReturnValue(null);
+    openTableWindow.mockReturnValue({ win: tableWin, reused: false });
     run = vi.fn().mockResolvedValue({ recovered: [], sha256: 'a'.repeat(64) });
     (Zotero as any).Beaver = { ...(Zotero as any).Beaver, libraryOperations: { run } };
     (Zotero as any).Promise = { delay: vi.fn(async () => {}) };
@@ -69,7 +76,7 @@ beforeEach(() => {
 
 describe('openTable', () => {
     it("opens the Beaver tab in the origin's main window with the spec it read", async () => {
-        await expect(openTable(REF, { window: main })).resolves.toEqual({ ok: true, tabID: 'tab-1', reused: false });
+        await expect(openTable(REF, { window: main })).resolves.toEqual({ ok: true, surface: 'tab', tabID: 'tab-1', reused: false });
         expect(resolveNavigationWindow).toHaveBeenCalledWith(main);
         expect(openTableTab).toHaveBeenCalledWith(main, ITEM, REF, {
             initial: { spec: SPEC, version: 4 },
@@ -290,6 +297,55 @@ describe('openTable', () => {
     it('passes background and position through, for a reader replaced behind the selected tab', async () => {
         await openTable(REF, { window: main, background: true, index: 2 });
         expect(openTableTab).toHaveBeenCalledWith(main, ITEM, REF, expect.objectContaining({ background: true, index: 2 }));
+    });
+
+    it('opens the table in its own window when asked, with the spec it read', async () => {
+        await expect(openTable(REF, { openIn: 'window' })).resolves.toEqual({ ok: true, surface: 'window', reused: false });
+        expect(openTableWindow).toHaveBeenCalledWith(ITEM, REF, { initial: { spec: SPEC, version: 4 } });
+        expect(openTableTab).not.toHaveBeenCalled();
+        // A window needs no main window to host it.
+        expect(resolveNavigationWindow).not.toHaveBeenCalled();
+    });
+
+    it('opens the window before the repair and shows what the repair reports there', async () => {
+        const order: string[] = [];
+        openTableWindow.mockImplementation(() => { order.push('window'); return { win: tableWin, reused: false }; });
+        run.mockImplementation(async () => { order.push('repair'); return { recovered: [{ kind: 'bookkeeping_pending' }] }; });
+        const outcome = await openTable(REF, { openIn: 'window' });
+        expect(order).toEqual(['window', 'repair']);
+        expect(outcome).toMatchObject({ ok: true, surface: 'window', warning: expect.stringContaining('version history') });
+        expect(setTableWindowWarning).toHaveBeenCalledWith(tableWin, expect.stringContaining('version history'));
+    });
+
+    it('brings forward the window already showing the table, with a cited cell', async () => {
+        findTableWindow.mockReturnValue(tableWin);
+        openTableWindow.mockReturnValue({ win: tableWin, reused: true });
+        const spec = { ...SPEC, columns: [{ id: 'design', header: 'Design', type: 'select' }], rows: [{ id: 'r1', cells: {} }] };
+        readTableItemSpec.mockResolvedValue({ ok: true, spec, file: { spec } });
+        await expect(openTable(REF, { window: main, focus: { rowId: 'r1', columnId: 'design' } }))
+            .resolves.toEqual({ ok: true, surface: 'window', reused: true, focus: 'found' });
+        expect(openTableWindow).toHaveBeenCalledWith(ITEM, REF, expect.objectContaining({ focus: { rowId: 'r1', columnId: 'design' } }));
+        expect(openTableTab).not.toHaveBeenCalled();
+    });
+
+    it('opens a tab when asked for one, even with the table in a window', async () => {
+        findTableWindow.mockReturnValue(tableWin);
+        await expect(openTable(REF, { window: main, openIn: 'tab' })).resolves.toMatchObject({ ok: true, surface: 'tab' });
+        expect(openTableWindow).not.toHaveBeenCalled();
+        expect(openTableTab).toHaveBeenCalledOnce();
+    });
+
+    it('opens no window for a table that cannot be read', async () => {
+        readTableItemSpec.mockResolvedValue({ ok: false, code: 'invalid', message: 'bad' });
+        await expect(openTable(REF, { openIn: 'window' })).resolves.toHaveProperty('error');
+        expect(openTableWindow).not.toHaveBeenCalled();
+    });
+
+    it('never throws: a window that cannot be opened becomes a returned error', async () => {
+        openTableWindow.mockImplementation(() => { throw new Error('Beaver is not running.'); });
+        await expect(openTable(REF, { openIn: 'window' })).resolves.toEqual({
+            error: expect.stringContaining('Beaver is not running'),
+        });
     });
 
     it('never throws: a lookup that rejects becomes a returned error', async () => {

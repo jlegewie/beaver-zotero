@@ -71,6 +71,13 @@ describe('navigation ownership', () => {
         b.__beaverRuntime = { status: 'ready', contextWindow: b };
         expect(await resolveChatWindow({ closed: false } as any)).toBe(b);
     });
+    it('never picks a table window as the chat: it chooses one as an originless command does', async () => {
+        b.__beaverRuntime = { status: 'ready', contextWindow: b };
+        const tableWindow = { closed: false } as any;
+        const tableRuntime = { kind: 'table', status: 'ready', hostWindow: tableWindow, contextWindow: a };
+        (Zotero as any).Beaver = { runtime: { resolveWindowFrom: vi.fn((win: any) => (win === tableWindow ? tableRuntime : undefined)) } };
+        expect(await resolveChatWindow(tableWindow)).toBe(b);
+    });
 });
 
 describe('tab notifications', () => {

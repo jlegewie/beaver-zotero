@@ -3,7 +3,7 @@ import { isRunActive } from "@beaver/agent-core/agents/types";
 import { getCredentialGeneration } from "@beaver/agent-core/transport/credentials";
 import { atom, type Getter } from "jotai";
 import { isWSChatPendingAtom } from "../atoms/agentRunAtoms";
-import { accountGenerationAtom } from "../atoms/profile";
+import { accountGenerationAtom, searchableLibraryIdsAtom } from "../atoms/profile";
 import { threadAdmissionAtom, type AdmissionSnapshot } from "./threadAdmission";
 import { threadPresenceAtom } from "./threadProjection";
 import { currentWriter } from "./threadWriter";
@@ -19,6 +19,7 @@ import {
     activeRunAtom,
 } from "@beaver/agent-core/run-state/atoms";
 import {
+    addItemToCurrentMessageItemsAtom,
     composerDraftAtom,
     hasComposerDraftAtom,
 } from "../atoms/messageComposition";
@@ -112,6 +113,29 @@ function waitForSurface(win: Window, delay: number): Promise<void> {
 
 /** Commands cross renderer boundaries as persisted ids. */
 export const windowCommands = {
+    /**
+     * Opens this window's chat with a stored table attached: "Ask Beaver"
+     * from a table in its own window, which has no chat. A table in an
+     * excluded library opens the chat without it.
+     */
+    "ask-about-table": async (request: { libraryID: number; key: string }) => {
+        const win = getHostWindow();
+        const item = Number.isInteger(request?.libraryID) && request?.key
+            ? await Zotero.Items.getByLibraryAndKeyAsync(request.libraryID, request.key)
+            : false;
+        if (win.closed || win.__beaverRuntime?.status === "closing") return { ok: false, canceled: true };
+        win.focus();
+        // Only the table: the library selection is not part of this question.
+        eventManager.dispatch("toggleChat", { forceOpen: true, skipAutoPopulate: true });
+        // The chat history would cover the chat and its composer.
+        store.set(isThreadListViewAtom, false);
+        const attached = !!item && store.get(searchableLibraryIdsAtom).includes(item.libraryID);
+        if (attached) await store.set(addItemToCurrentMessageItemsAtom, item);
+        // The composer focus handler defers focus until its surface has mounted.
+        win.setTimeout(() => eventManager.dispatch("focusInput", {}), 0);
+        return { ok: true, attached };
+    },
+
     "open-chat": async (request: { threadId: string }) => {
         if (!request.threadId) throw new Error("A persisted chat is required");
         const win = getHostWindow();

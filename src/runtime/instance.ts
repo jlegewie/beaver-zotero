@@ -4,7 +4,12 @@ import { ReaderWidthDispatcher } from './readerWidth';
 export interface WindowRuntime {
     readonly id: string;
     readonly hostWindow: Window;
-    readonly kind: "main" | "standalone";
+    /**
+     * `main`: a Zotero main window. `standalone`: the separate Beaver chat
+     * window. `table`: a stored table in its own window, without a chat.
+     * The last two follow the active main window as their context.
+     */
+    readonly kind: "main" | "standalone" | "table";
     contextWindow: Window | null;
     readonly events: EventTarget;
     status: 'attaching' | 'ready' | 'closing';
@@ -90,7 +95,7 @@ export class BeaverInstance {
         const context = preferred ?? this.activeMainWindow();
         for (const runtime of this.windows.values()) {
             if (
-                runtime.kind !== "standalone" ||
+                runtime.kind === "main" ||
                 runtime.status === "closing" ||
                 runtime.contextWindow === context
             )

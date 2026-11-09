@@ -23,6 +23,7 @@ vi.mock('../../../src/services/artifacts/view/readerTableView', () => ({
 import {
     TABLE_TAB_TYPE,
     cleanupTableTabs,
+    findTableTab,
     initTableTabs,
     listTableTabs,
     openTableTab,
@@ -259,7 +260,28 @@ describe('tab hooks', () => {
     it('reopens a closed table through the product open on undo-close', async () => {
         const hook = windows[0].Zotero_Tabs.tabHooks.undoClose.beaver;
         await expect(hook({ data: { itemID: 42, beaverTab: { kind: 'table', ref: REF } } }, 3)).resolves.toBe(false);
-        expect(opener).toHaveBeenCalledWith(REF, { window: windows[0], index: 3 });
+        expect(opener).toHaveBeenCalledWith(REF, { window: windows[0], index: 3, openIn: 'tab' });
+    });
+
+    it('moves a table tab to a window of its own, closing the tab once the window opened', async () => {
+        const win = windows[0];
+        const { tabID } = openTableTab(win, tableItem(), REF);
+        const hook = win.Zotero_Tabs.tabHooks.moveToNewWindow.beaver;
+        opener.mockResolvedValueOnce({ ok: true });
+        await hook({ id: tabID, data: { itemID: 42, beaverTab: { kind: 'table', ref: REF } } }, 1);
+        expect(opener).toHaveBeenCalledWith(REF, { openIn: 'window' });
+        expect(findTableTab(win, REF)).toBeNull();
+    });
+
+    it('keeps the tab when its window could not be opened', async () => {
+        const win = windows[0];
+        const { tabID } = openTableTab(win, tableItem(), REF);
+        const hook = win.Zotero_Tabs.tabHooks.moveToNewWindow.beaver;
+        opener.mockResolvedValueOnce({ error: 'Could not open table TABLEKEY — no.' });
+        (Zotero as any).alert = vi.fn();
+        await hook({ id: tabID, data: { itemID: 42, beaverTab: { kind: 'table', ref: REF } } }, 1);
+        expect(findTableTab(win, REF)).toBe(tabID);
+        expect((Zotero as any).alert).toHaveBeenCalledWith(win, 'Beaver', 'Could not open table TABLEKEY — no.');
     });
 
     it('moves keyboard focus into the tab, back to where it was when that is still there', async () => {
@@ -354,21 +376,13 @@ describe('readers on a table item', () => {
         expect(opener).toHaveBeenCalledWith(REF, { window: win, background: true });
     });
 
-    it('closes a reader window on a table and opens the tab in the most recent main window', async () => {
-        const win = windows[0];
-        const focus = vi.fn();
-        win.focus = focus;
-        opener.mockImplementationOnce(async () => {
-            const { tabID } = openTableTab(win, tableItem(), REF);
-            return { ok: true, tabID };
-        });
+    it('closes a reader window on a table and opens the table in a window of its own', async () => {
+        opener.mockResolvedValueOnce({ ok: true });
         const close = vi.fn();
         const before = tableTabStats().redirected;
         expect(redirect.current?.({ _window: {}, close }, tableItem())).toBe(true);
         expect(close).toHaveBeenCalledOnce();
-        // No origin: the open picks the most recent main window itself.
-        expect(opener).toHaveBeenCalledWith(REF, {});
-        await vi.waitFor(() => expect(focus).toHaveBeenCalledOnce());
+        expect(opener).toHaveBeenCalledWith(REF, { openIn: 'window' });
         expect(tableTabStats().redirected).toBe(before + 1);
     });
 
@@ -600,7 +614,7 @@ describe('reopening Beaver tabs after a lifecycle close', () => {
 
         expect(layout(win)).toEqual(['library:', 'reader:7', 'table:TABLEONE', 'reader:8', 'table:TABLETWO']);
         expect(selected(win)).toBe('table:TABLETWO');
-        expect(open).toHaveBeenCalledWith(T1, { window: win, background: true, index: 2 });
+        expect(open).toHaveBeenCalledWith(T1, { window: win, background: true, index: 2, openIn: 'tab' });
         expect(prefs.get('beaverTabsToRestore')).toBe('');
     });
 

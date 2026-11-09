@@ -141,6 +141,10 @@ pref("interruptedThread", "");
 // session.
 pref("beaverTabsToRestore", "");
 
+// Table windows open when Zotero quit or Beaver shut down, reopened by the
+// first main window that loads afterwards.
+pref("tableWindowsToRestore", "");
+
 // Throttle for the automatic pre-sync thread claim: the
 // `${beaverUserId}:${zoteroUserId}:${localUserKey}` combination that was
 // last claimed successfully. Empty = never claimed (or cleared after
