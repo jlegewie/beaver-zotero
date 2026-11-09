@@ -1,7 +1,7 @@
 import React, { forwardRef, useMemo, useState, useCallback } from 'react';
 import { useAtomValue } from 'jotai';
 import { AgentRun, ToolCallPart, isRunActive } from '@beaver/agent-core/agents/types';
-import { hasInProgressToolCall, shouldShowRunStatus } from '@beaver/agent-core/run-state/runStatusVisibility';
+import { hasInProgressToolCall, isRunWithNothingToShow, shouldShowRunStatus } from '@beaver/agent-core/run-state/runStatusVisibility';
 import { wasRunContinued } from '@beaver/agent-core/run-state/runResumeHelpers';
 import { PARTIAL_RESPONSE_NOTE } from '@beaver/agent-core/transport/connectionFailure';
 import { UserRequestView } from './UserRequestView';
@@ -171,13 +171,44 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
     // Allow editing when run is in a terminal state (not actively streaming or awaiting approval)
     const canEdit = !isStreaming && isTerminal;
 
+    // What the card draws besides the user message and model messages. Each
+    // flag gates its own section below and also decides whether the run is
+    // drawn at all, so the two cannot disagree.
+    const showWarnings = runWarnings.length > 0;
+    const showPartialNotice = isPartialResponse && !wasResumed;
+    const showErrorArea = hasError && !!run.error && !wasResumed && !autoReplacementPending;
+    const showFooter = showAgentRunFooter && !wasResumed;
+    const showSuggestions = suggestionParts.length > 0 && !suggestionsDismissed;
+    // Not for a run that finished: a completed run can now be continued too —
+    // it had work left, not an interruption — and this line would call an
+    // answer that arrived in full an interrupted one.
+    const showResumeLine = wasResumed && run.status !== 'completed';
+
+    // A continuation that left nothing to read. Skipped entirely rather than
+    // drawn empty: the thread spaces its runs with a flex gap, so even an empty
+    // card adds a blank strip.
+    const hasNothingToShow = isRunWithNothingToShow(run, {
+        isLastRun,
+        showsRunSections:
+            showStatusIndicator ||
+            showWarnings ||
+            showPartialNotice ||
+            showErrorArea ||
+            !!replacementNote ||
+            showFooter ||
+            showRunOutcomes ||
+            showSuggestions ||
+            showResumeLine,
+    });
+    if (hasNothingToShow) return null;
+
     const runCard = (
         <div id={`run-${run.id}`} className="display-flex flex-col gap-4" ref={ref}>
             {/* User's message */}
             {showUserMessage && <UserRequestView userPrompt={run.user_prompt} runId={run.id} canEdit={canEdit} />}
 
             {/* Warning display (dismissable, non-persistent) */}
-            {runWarnings.length > 0 && (
+            {showWarnings && (
                 <div className="px-5 display-flex flex-col gap-2">
                     {runWarnings.map((warning) => (
                         <RunWarningDisplay key={warning.id} warning={warning} />
@@ -201,10 +232,10 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
                 statusHideIcon={reconnectUnderToolCall}
             />
 
-            {isPartialResponse && !wasResumed && <RunNotice text={PARTIAL_RESPONSE_NOTE} />}
+            {showPartialNotice && <RunNotice text={PARTIAL_RESPONSE_NOTE} />}
 
             {/* Error display (includes retry/resume buttons) - hide if run was resumed */}
-            {hasError && run.error && !wasResumed && !autoReplacementPending && (
+            {showErrorArea && run.error && (
                 resolutionView
                     ? <ReattachResolutionNotice view={resolutionView} />
                     : <RunErrorDisplay runId={run.id} error={run.error} isLastRun={isLastRun} />
@@ -213,7 +244,7 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
             {replacementNote && <RunNotice text={replacementNote} />}
 
             {/* Footer with sources and action buttons (only for completed runs, or error runs that were resumed) */}
-            {(showAgentRunFooter && !wasResumed) && (
+            {showFooter && (
                 <AgentRunFooter run={run} />
             )}
 
@@ -232,7 +263,7 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
             )}
 
             {/* Suggestions (only for the last run, rendered below footer) */}
-            {suggestionParts.length > 0 && !suggestionsDismissed && (
+            {showSuggestions && (
                 <div className="px-4">
                     {suggestionParts.map((part) => (
                         <SuggestionsView
@@ -244,11 +275,8 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
                 </div>
             )}
 
-            {/* Resuming failed request display. Not for a run that finished:
-                a completed run can now be continued too — it had work left,
-                not an interruption — and this line would call an answer that
-                arrived in full an interrupted one. */}
-            {wasResumed && run.status !== 'completed' && <RunResumeDisplay runId={run.id} />}
+            {/* Resuming failed request display */}
+            {showResumeLine && <RunResumeDisplay runId={run.id} />}
 
         </div>
     );
