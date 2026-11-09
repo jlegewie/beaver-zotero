@@ -1,6 +1,8 @@
 import { isTableItemError, tableFilePath } from '../../artifacts/tableItemIdentity';
 import type { Cell, Column, Row, TableSpec } from '@beaver/agent-core/layouts/table';
-import { allocateRowId, validateTableSpec, TABLE_SPEC_VERSION, type Evidence, type RowRef } from '@beaver/agent-core/layouts/table';
+import { allocateRowId, validateTableSpec, IDENTIFIER_COLUMN_ID, REFERENCE_COLUMN_ID, TABLE_SPEC_VERSION, YEAR_COLUMN_ID, type Evidence, type RowRef } from '@beaver/agent-core/layouts/table';
+import { systemColumns } from '@beaver/agent-core/layouts/tableEdit';
+import { identifierCell, normalizeIdentifiers } from '@beaver/agent-core/layouts/tableMerge';
 import { zoteroLinkScope, zoteroLinksFor } from '../../artifacts/view/tableLinks';
 import type { TableMutation } from '@beaver/agent-core/layouts/tableMutations';
 import { summarize } from '@beaver/agent-core/layouts/tableMutations';
@@ -126,29 +128,6 @@ function put(row: Row, columnId: string, cell: Cell | undefined): void {
     if (cell) row.cells[columnId] = cell;
 }
 
-export function typeColumn(items: DemoItem[]): Column {
-    const labels = [...new Set(items.map((item) => typeLabelFor(item)))];
-    return {
-        id: '_type',
-        header: 'Type',
-        type: 'select',
-        system: true,
-        options: labels.map((label) => ({ label, color: 'gray' })),
-    };
-}
-
-export function typeLabelFor(item: DemoItem): string {
-    return Zotero.ItemTypes.getLocalizedString(item.itemType) || item.itemType;
-}
-
-export function typeCell(item: DemoItem): Cell {
-    return {
-        outcome: 'answered',
-        value: { kind: 'select', label: typeLabelFor(item) },
-        provenance: 'system',
-    };
-}
-
 export async function buildDemoTable(
     variant: 'search' | 'extraction',
     limit: number
@@ -159,6 +138,7 @@ export async function buildDemoTable(
         : buildSearchDemo(items);
 }
 
+/** A demo row for an item, with the system cells (reference, year, identifier) a real table's row gets. */
 export function referenceRow(item: DemoItem): Row {
     const ref: RowRef = {
         kind: 'item',
@@ -167,12 +147,13 @@ export function referenceRow(item: DemoItem): Row {
         library_ref: item.libraryRef ?? 'u',
     };
     const document = documentIdFor(item);
+    const identifier = identifierCell(normalizeIdentifiers({ doi: item.doi }));
     return {
         id: allocateRowId(),
         ref,
         ...(document ? { documents: [document] } : {}),
         cells: {
-            ref: {
+            [REFERENCE_COLUMN_ID]: {
                 outcome: 'answered',
                 value: {
                     kind: 'reference',
@@ -184,16 +165,17 @@ export function referenceRow(item: DemoItem): Row {
                 },
                 provenance: 'system',
             },
-            _type: typeCell(item),
+            ...(item.year
+                ? { [YEAR_COLUMN_ID]: { outcome: 'answered', value: { kind: 'date', value: item.year }, provenance: 'system' } as Cell }
+                : {}),
+            ...(identifier ? { [IDENTIFIER_COLUMN_ID]: identifier } : {}),
         },
     };
 }
 
 export function buildSearchDemo(items: DemoItem[]): TableSpec {
     const columns: Column[] = [
-        { id: 'ref', header: 'Item', type: 'reference' },
-        typeColumn(items),
-        { id: 'year', header: 'Year', type: 'date' },
+        ...systemColumns(),
         { id: 'cites', header: 'Citations', type: 'text' },
         {
             id: 'type',
@@ -208,13 +190,10 @@ export function buildSearchDemo(items: DemoItem[]): TableSpec {
         },
         { id: 'oa', header: 'OA', type: 'boolean' },
         { id: 'abstract', header: 'Abstract', type: 'text' },
-        { id: 'doi', header: 'DOI', type: 'link' },
     ];
 
     const rows: Row[] = items.map((item, i) => {
         const row = referenceRow(item);
-        if (item.year)
-            row.cells.year = { outcome: 'answered', value: { kind: 'date', value: item.year }, provenance: 'system' };
         // Stand-in metrics: the demo is about the rendering, not the numbers.
         row.cells.cites = {
             outcome: 'answered',
@@ -232,16 +211,6 @@ export function buildSearchDemo(items: DemoItem[]): TableSpec {
             provenance: 'system',
         };
         put(row, 'abstract', textCell(item.abstract));
-        if (item.doi)
-            row.cells.doi = {
-                outcome: 'answered',
-                value: {
-                    kind: 'link',
-                    url: `https://doi.org/${item.doi}`,
-                    label: item.doi,
-                },
-                provenance: 'system',
-            };
         return row;
     });
 
@@ -252,7 +221,7 @@ export function buildSearchDemo(items: DemoItem[]): TableSpec {
         ref: { kind: 'external', source: 'openalex', source_id: 'demo-failed' },
         failure: { code: 'download_failed', message: 'The file could not be downloaded from the source.' },
         cells: {
-            ref: {
+            [REFERENCE_COLUMN_ID]: {
                 outcome: 'answered',
                 value: {
                     kind: 'reference',
@@ -270,7 +239,7 @@ export function buildSearchDemo(items: DemoItem[]): TableSpec {
         spec_version: TABLE_SPEC_VERSION,
         title: 'External search — demo',
         description: 'Built from your library. Citation counts and OA flags are stand-ins.',
-        anchor_column_id: 'ref',
+        anchor_column_id: REFERENCE_COLUMN_ID,
         columns,
         rows,
         sort: { column_id: 'cites', direction: 'desc' },
@@ -280,9 +249,7 @@ export function buildSearchDemo(items: DemoItem[]): TableSpec {
 
 export function buildExtractionDemo(items: DemoItem[]): TableSpec {
     const columns: Column[] = [
-        { id: 'ref', header: 'Item', type: 'reference' },
-        typeColumn(items),
-        { id: 'year', header: 'Year', type: 'date' },
+        ...systemColumns(),
         {
             id: 'sample',
             header: 'Sample & setting',
@@ -319,8 +286,6 @@ export function buildExtractionDemo(items: DemoItem[]): TableSpec {
 
     const rows: Row[] = items.map((item, i) => {
         const row = referenceRow(item);
-        if (item.year)
-            row.cells.year = { outcome: 'answered', value: { kind: 'date', value: item.year }, provenance: 'system' };
         // Short, the way a real extracted field is, each with its evidence so
         // the marker, its tooltip and the source list have something real to
         // resolve against.
@@ -371,7 +336,7 @@ export function buildExtractionDemo(items: DemoItem[]): TableSpec {
         spec_version: TABLE_SPEC_VERSION,
         title: 'Extraction — demo',
         description: 'Built from your library. Cell contents are excerpts, not real extractions.',
-        anchor_column_id: 'ref',
+        anchor_column_id: REFERENCE_COLUMN_ID,
         columns,
         rows,
         capabilities: { row_actions: ['reveal'] },

@@ -248,10 +248,10 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
     const [buttonDirection, setButtonDirection] = useState<'above' | 'below' | null>(null);
     const openDirection = querySource === 'menu' && buttonDirection ? buttonDirection : verticalPosition;
     const [activeZoteroLibraryId, setActiveZoteroLibraryId] = useState<number | null>(null);
-    // The searchable library the saved-searches row resolved; kept apart from
-    // the active library, which the effect below resets to the raw (possibly
-    // excluded) one whenever the menu mode changes.
-    const [savedSearchesLibraryId, setSavedSearchesLibraryId] = useState<number | null>(null);
+    // The searchable library the tags or saved-searches row resolved; kept
+    // apart from the active library, which the effect below resets to the raw
+    // (possibly excluded) one whenever the menu mode changes.
+    const [submenuLibraryId, setSubmenuLibraryId] = useState<number | null>(null);
     const buttonRef = useRef<HTMLButtonElement | null>(null);
     const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
     const selectedZoteroItems = useAtomValue(selectedZoteroItemsAtom);
@@ -343,13 +343,13 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
     }, [onResetQuery]);
 
     const handleNavigateToTags = useCallback((libraryId: number) => {
-        setActiveZoteroLibraryId(libraryId);
+        setSubmenuLibraryId(libraryId);
         onResetQuery();
         setMenuMode('tags');
     }, [onResetQuery]);
 
     const handleNavigateToSavedSearches = useCallback((libraryId: number) => {
-        setSavedSearchesLibraryId(libraryId);
+        setSubmenuLibraryId(libraryId);
         onResetQuery();
         setMenuMode('savedSearches');
     }, [onResetQuery]);
@@ -586,6 +586,7 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
     const tagsMenu = useTagsMenu({
         isActive: isMenuOpen && menuMode === 'tags',
         searchQuery,
+        libraryId: submenuLibraryId,
         searchableLibraryIds,
         tagMenuItemContext,
         verticalPosition: openDirection
@@ -594,7 +595,7 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
     const savedSearchesMenu = useSavedSearchesMenu({
         isActive: isMenuOpen && menuMode === 'savedSearches',
         searchQuery,
-        libraryId: savedSearchesLibraryId,
+        libraryId: submenuLibraryId,
         savedSearchMenuItemContext,
         verticalPosition: openDirection
     });
