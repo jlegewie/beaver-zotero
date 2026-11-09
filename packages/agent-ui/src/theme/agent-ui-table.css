@@ -2421,6 +2421,60 @@
     margin: 0 0.1rem;
 }
 
+.beaver-root .rt-empty-guide .rt-nowrap {
+    white-space: nowrap;
+}
+
+/* Beside the rows: a table with items but no question yet shows the guide
+ * over the (+) column's empty cells, whose row lines it hides, and keeps it
+ * just under the sticky header as the rows scroll. The layer spans the grid's
+ * height so the guide can stick; only the guide itself takes the pointer. */
+.beaver-root .rt-columns-guide {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    pointer-events: none;
+}
+
+.beaver-root .rt-columns-guide-sticky {
+    position: sticky;
+    top: 0;
+    padding-top: var(--rt-head-h, 3rem);
+}
+
+.beaver-root .rt-grid[data-columns-guide] {
+    min-height: 100%;
+}
+
+.beaver-root .rt-grid[data-columns-guide] .rt-row > .rt-td-add {
+    border-bottom-color: transparent;
+    background: transparent;
+    box-shadow: none;
+    animation: none;
+}
+
+.beaver-root .rt-empty-guide-beside {
+    position: static;
+    justify-content: flex-start;
+    padding: 1.75rem 2rem 2rem 1.05rem;
+    pointer-events: auto;
+}
+
+.beaver-root .rt-empty-guide-beside .rt-empty-steps {
+    background: var(--material-background);
+}
+
+/* A step already done: its tick, and quieter text. */
+.beaver-root .rt-empty-step-done .rt-empty-step-icon {
+    background: color-mix(in srgb, var(--accent-green) 14%, transparent);
+    color: var(--accent-green);
+}
+
+.beaver-root .rt-empty-step-done .rt-empty-step-title {
+    color: var(--fill-secondary);
+}
+
 /* Editing cells -------------------------------------------------------------- */
 
 /* A button in a cell's expansion: Edit, the row's actions and its menu. */

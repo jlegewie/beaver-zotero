@@ -160,7 +160,11 @@ const COLLECTION_MENU_ID = 'beaver-collection-context-menu';
 const NOTE_EXPORT_MENU_ID = 'beaver-note-export-menu';
 const NEW_TABLE_FILE_MENU_ID = 'beaver-new-table-file-menu';
 const NEW_TABLE_COLLECTION_MENU_ID = 'beaver-new-table-collection-menu';
+// Menu icons. Only for menus where Zotero shows icons on its own entries (the
+// item and collection context menus); MenuManager renders them the same way,
+// so they appear exactly where Zotero's own icons do on each platform.
 const TABLE_ICON = `chrome://${config.config.addonRef}/content/icons/table.svg`;
+const ACTIONS_ICON = `chrome://${config.config.addonRef}/content/icons/beaver-actions.svg`;
 const PLUGIN_ID = config.config.addonID;
 
 // Store the namespaced keys returned by MenuManager.registerMenu().
@@ -320,6 +324,7 @@ function registerMenus(): void {
         menus: [{
             menuType: 'submenu' as const,
             l10nID: 'beaver-context-menu-submenu',
+            icon: ACTIONS_ICON,
             onShowing: safeOnShowing('item-submenu', (_event: any, context: any) => {
                 const { items, setVisible } = context;
 
@@ -361,6 +366,7 @@ function registerMenus(): void {
         menus: [{
             menuType: 'submenu' as const,
             l10nID: 'beaver-context-menu-submenu',
+            icon: ACTIONS_ICON,
             onShowing: safeOnShowing('collection-submenu', (_event: any, context: any) => {
                 const { setVisible } = context;
                 setVisible(collectionTargetRows(context).length > 0);

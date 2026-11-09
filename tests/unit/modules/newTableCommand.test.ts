@@ -236,6 +236,17 @@ describe('the menu entries', () => {
         expect(submenu.menus.some((m: any) => m.l10nID === 'beaver-create-table')).toBe(false);
     });
 
+    it('marks both Beaver Actions submenus with the actions icon', () => {
+        initContextMenus();
+        const submenus = registered
+            .filter((m) => m.menuID === 'beaver-item-context-menu' || m.menuID === 'beaver-collection-context-menu')
+            .map((m) => m.menus[0]);
+        expect(submenus).toHaveLength(2);
+        for (const submenu of submenus) {
+            expect(submenu).toMatchObject({ l10nID: 'beaver-context-menu-submenu', icon: 'chrome://beaver/content/icons/beaver-actions.svg' });
+        }
+    });
+
     it('adds no table entries where tables are not enabled', () => {
         Z.Beaver.data.env = 'production';
         initContextMenus();
