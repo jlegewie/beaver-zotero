@@ -62,6 +62,12 @@ export interface ResearchGridProps {
     emptyText: string;
     filteredEmptyText: string;
     /**
+     * Shown under the header in place of `emptyText`: the empty table's guide,
+     * passed only while the table has no rows. It stays in view as the grid
+     * scrolls sideways.
+     */
+    emptyContent?: React.ReactNode;
+    /**
      * Opens the cell editor: the Edit in a cell's expansion. Absent, cells
      * are not editable here.
      */
@@ -138,6 +144,7 @@ export function ResearchGrid({
     virtualize = false,
     emptyText,
     filteredEmptyText,
+    emptyContent,
     onEditCell,
     cellEditDisabledReason,
     onCopyCell,
@@ -174,13 +181,21 @@ export function ResearchGrid({
         .join(" + ") || "0px"})`;
     const columnCount = 2 + (columns.year ? 1 : 0) + questions.length + (addColumn ? 1 : 0);
     const selectable = table.rows.length > 0;
+    // With every column at a fixed width (no question, or only Yes / no and
+    // Category ones), a fixed-layout table would spread the leftover width
+    // over all of them. The last column takes it instead: the (+) column,
+    // whose button then sits right after the last column, else the paper.
+    const flexTail = !questions.some((column) => questionWidth(column) === undefined);
+    const paperWidth = flexTail && !addColumn ? undefined : "20rem";
+    // Before the first question column, the (+) says what it adds.
+    const labelAdd = columns.questions.length === 0;
 
     return (
         <div ref={rootRef} className="rt-grid" data-density={state.density} data-table-id={table.id}>
             <table className="bt-table rt-table" style={{ minWidth }}>
                 <colgroup>
                     <col style={{ width: "2.75rem" }} />
-                    <col style={{ width: "20rem" }} />
+                    <col style={{ width: paperWidth }} />
                     {columns.year ? <col style={{ width: YEAR_WIDTH }} /> : null}
                     {questions.map((column) => (
                         <col
@@ -189,7 +204,7 @@ export function ResearchGrid({
                             style={{ width: questionWidth(column) }}
                         />
                     ))}
-                    {addColumn ? <col style={{ width: ADD_WIDTH }} /> : null}
+                    {addColumn ? <col style={{ width: flexTail ? undefined : ADD_WIDTH }} /> : null}
                 </colgroup>
                 <thead>
                     <tr className="rt-head-row">
@@ -237,16 +252,21 @@ export function ResearchGrid({
                         ))}
                         {addColumn ? (
                             // The reason sits on the cell too: a disabled button shows no tooltip of its own.
-                            <th className="rt-th rt-th-add" scope="col" title={addColumnDisabledReason}>
+                            <th
+                                className={`rt-th rt-th-add${flexTail ? " rt-th-add-tail" : ""}`}
+                                scope="col"
+                                title={addColumnDisabledReason}
+                            >
                                 <button
                                     type="button"
-                                    className="rt-icon-button rt-add-column"
+                                    className={labelAdd ? "rt-add-column rt-add-column-labeled" : "rt-icon-button rt-add-column"}
                                     aria-label="Add column"
                                     title={addColumnDisabledReason ?? "Add column"}
                                     disabled={!!addColumnDisabledReason}
                                     onClick={onAddColumn}
                                 >
                                     <Icon icon={PlusSignIcon} size={14} />
+                                    {labelAdd ? <span>Add column</span> : null}
                                 </button>
                             </th>
                         ) : null}
@@ -280,7 +300,7 @@ export function ResearchGrid({
                         />
                     ))}
                     {rowWindow.padBottom > 0 ? <Spacer height={rowWindow.padBottom} /> : null}
-                    {state.rows.length === 0 ? (
+                    {state.rows.length === 0 && !emptyContent ? (
                         <tr>
                             <SpanningCell colSpan={columnCount} className="rt-empty">
                                 {table.rows.length === 0 ? emptyText : filteredEmptyText}
@@ -289,6 +309,7 @@ export function ResearchGrid({
                     ) : null}
                 </tbody>
             </table>
+            {emptyContent}
             {cellEditor ? <CellEditorLayer rootRef={rootRef} {...cellEditor} /> : null}
         </div>
     );

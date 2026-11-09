@@ -39,6 +39,7 @@ import { useTableState } from "../useTableState";
 import { CellEditor, editsAsList, type CellEditInput } from "./CellEditor";
 import { CellInspector, type CellActionControls } from "./CellInspector";
 import { cellFill, isNewRow, PAPER_HEADER, researchColumns, rowFills, sortOrderLabel, type TableDocuments } from "./cellModel";
+import { EmptyTableGuide } from "./EmptyTableGuide";
 import { ResearchGrid, type CellAddress } from "./ResearchGrid";
 import { AnchoredPopover, InlineText } from "./TableEditing";
 
@@ -81,8 +82,8 @@ export interface ResearchTableEditing {
     renderSources?(close: () => void): React.ReactNode;
     /** The new-papers notice's Add. */
     onAddNewPapers?(): void;
-    /** Controls after the notice (+ Items). */
-    toolbarActions?: React.ReactNode;
+    /** The + Items menu: in the toolbar after the notice, and in the empty table's guide. */
+    addItems?: React.ReactNode;
 }
 
 /**
@@ -187,6 +188,8 @@ export interface ResearchTableProps {
     editing?: ResearchTableEditing;
     /** Window the rows, for a long table. */
     virtualize?: boolean;
+    /** Opens Beaver's chat on this table: offered by the empty table's guide. */
+    onAskBeaver?: () => void;
     className?: string;
 }
 
@@ -235,6 +238,7 @@ export function ResearchTable({
     reveal,
     editing,
     virtualize,
+    onAskBeaver,
     className,
 }: ResearchTableProps): React.ReactElement {
     const columns = useMemo(() => researchColumns(table), [table]);
@@ -662,6 +666,18 @@ export function ResearchTable({
     const selectedIds = state.rows.filter((row) => state.selectedRows.has(row.id)).map((row) => row.id);
     const sourceCount = table.sources?.length ?? 0;
     const items = table.rows.length;
+    // An empty table that can be edited shows how to start it where its rows
+    // would be, and none of the controls that act on rows.
+    const emptyGuide =
+        items === 0 && editing && !editDisabled ? (
+            <EmptyTableGuide
+                addItems={editing.addItems}
+                onAddColumn={columns.questions.length === 0 ? editing.onAddColumn : undefined}
+                addColumnDisabledReason={addColumnDisabled}
+                onAskBeaver={onAskBeaver}
+                canFill={!!fill}
+            />
+        ) : null;
     const sourcesLabel = `${sourceCount ? `${sourceCount} ${sourceCount === 1 ? "source" : "sources"} · ` : ""}${items} ${items === 1 ? "item" : "items"}`;
     const filterItems = buildFilterMenu(menuTable, state);
     const sortItems = buildSortMenu(menuTable, state);
@@ -796,7 +812,7 @@ export function ResearchTable({
                                         ) : null}
                                     </span>
                                 ) : null}
-                                {editing?.toolbarActions}
+                                {editing?.addItems}
                                 {editing?.onAddColumn ? (
                                     // A disabled button shows no tooltip of its own.
                                     <span title={addColumnDisabled}>
@@ -843,61 +859,65 @@ export function ResearchTable({
                             </button>
                         ) : null}
                         <span className="rt-spacer" />
-                        <label className="rt-search">
-                            <Icon icon={SearchIcon} size={14} />
-                            <input
-                                type="text"
-                                placeholder="Search rows"
-                                aria-label="Search rows"
-                                value={state.quickFilter}
-                                onChange={(event) => state.setQuickFilter(event.target.value)}
-                            />
-                        </label>
-                        {filterItems.length ? (
-                            <MenuButton
-                                menuItems={filterItems}
-                                variant={state.filters.length ? "surface" : "ghost-secondary"}
-                                icon={FilterIcon}
-                                buttonLabel="Filter"
-                                className="rt-toolbar-button"
-                                ariaLabel="Filter rows"
-                                maxHeight="24rem"
-                                width="16rem"
-                            />
+                        {items > 0 ? (
+                            <>
+                                <label className="rt-search">
+                                    <Icon icon={SearchIcon} size={14} />
+                                    <input
+                                        type="text"
+                                        placeholder="Search rows"
+                                        aria-label="Search rows"
+                                        value={state.quickFilter}
+                                        onChange={(event) => state.setQuickFilter(event.target.value)}
+                                    />
+                                </label>
+                                {filterItems.length ? (
+                                    <MenuButton
+                                        menuItems={filterItems}
+                                        variant={state.filters.length ? "surface" : "ghost-secondary"}
+                                        icon={FilterIcon}
+                                        buttonLabel="Filter"
+                                        className="rt-toolbar-button"
+                                        ariaLabel="Filter rows"
+                                        maxHeight="24rem"
+                                        width="16rem"
+                                    />
+                                ) : null}
+                                {sortItems.length ? (
+                                    <MenuButton
+                                        menuItems={sortItems}
+                                        variant={sortColumn ? "surface" : "ghost-secondary"}
+                                        icon={ChevronIcon}
+                                        buttonLabel={
+                                            sortColumn
+                                                ? `Sort: ${sortColumn.header} ${state.sort!.direction === "asc" ? "↑" : "↓"}`
+                                                : "Sort"
+                                        }
+                                        className="rt-toolbar-button"
+                                        ariaLabel="Sort rows"
+                                        maxHeight="24rem"
+                                        width="16rem"
+                                    />
+                                ) : null}
+                                <div className="rt-density" role="group" aria-label="Row height">
+                                    {DENSITY_OPTIONS.map((option) => (
+                                        <button
+                                            key={option.density}
+                                            type="button"
+                                            aria-label={option.label}
+                                            title={option.label}
+                                            aria-pressed={state.density === option.density}
+                                            className={state.density === option.density ? "rt-active" : ""}
+                                            onClick={() => state.setDensity(option.density)}
+                                        >
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+                                                <path d={option.lines.map((y) => `M4 ${y}h16`).join("")} />
+                                            </svg>
+                                        </button>
+                                    ))}
+                                </div>
+                            </>
                         ) : null}
-                        {sortItems.length ? (
-                            <MenuButton
-                                menuItems={sortItems}
-                                variant={sortColumn ? "surface" : "ghost-secondary"}
-                                icon={ChevronIcon}
-                                buttonLabel={
-                                    sortColumn
-                                        ? `Sort: ${sortColumn.header} ${state.sort!.direction === "asc" ? "↑" : "↓"}`
-                                        : "Sort"
-                                }
-                                className="rt-toolbar-button"
-                                ariaLabel="Sort rows"
-                                maxHeight="24rem"
-                                width="16rem"
-                            />
-                        ) : null}
-                        <div className="rt-density" role="group" aria-label="Row height">
-                            {DENSITY_OPTIONS.map((option) => (
-                                <button
-                                    key={option.density}
-                                    type="button"
-                                    aria-label={option.label}
-                                    title={option.label}
-                                    aria-pressed={state.density === option.density}
-                                    className={state.density === option.density ? "rt-active" : ""}
-                                    onClick={() => state.setDensity(option.density)}
-                                >
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
-                                        <path d={option.lines.map((y) => `M4 ${y}h16`).join("")} />
-                                    </svg>
-                                </button>
-                            ))}
-                        </div>
                     </div>
 
                     <div className="rt-body">
@@ -957,6 +977,7 @@ export function ResearchTable({
                                     virtualize={virtualize}
                                     emptyText="No items yet"
                                     filteredEmptyText="No rows match the search or filters"
+                                    emptyContent={emptyGuide}
                                 />
                             </div>
                         </div>
