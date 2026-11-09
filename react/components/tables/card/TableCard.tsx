@@ -92,11 +92,13 @@ import type { SourceEntry } from '@beaver/agent-core/layouts/table';
 import { resolveSources } from '../../../../src/services/artifacts/tableSources';
 import {
     TABLE_MENU_ENTRIES,
+    hasSavedSearchScope,
     paperOf,
     pickedCollectionScope,
     pickedTagScope,
     portableItemId,
     rowForItem,
+    scopeForSavedSearch,
     scopeMenuFilters,
 } from './cardItems';
 import AutoGrowTextarea from './AutoGrowTextarea';
@@ -478,6 +480,10 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
         [draft.sources],
     );
     const filters = useMemo(() => scopeMenuFilters(libraryScopes), [libraryScopes]);
+    const isSavedSearchPicked = useCallback(
+        (search: Zotero.Search) => hasSavedSearchScope(libraryScopes, search),
+        [libraryScopes],
+    );
 
     const toggleScope = useCallback((scope: TableCardLibraryScope) => {
         setDraft((prev) => {
@@ -522,9 +528,14 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
             const scope = pickedTagScope(tag);
             if (scope) toggleScope(scope);
         },
+        pickSavedSearch: (search) => {
+            const scope = scopeForSavedSearch(search, searchableLibraryIds);
+            if (scope) toggleScope(scope);
+        },
+        isSavedSearchPicked,
         attachFiles: () => {},
         entries: TABLE_MENU_ENTRIES,
-    }), [isAttached, canAdd, asSourceItem, rowIdOf, filters, toggleScope, setDraft]);
+    }), [isAttached, canAdd, asSourceItem, rowIdOf, filters, toggleScope, setDraft, searchableLibraryIds, isSavedSearchPicked]);
 
     const menuPortalContainer = containerRef.current?.closest(
         '[id^="beaver-react-root-"], #beaver-pane-window',

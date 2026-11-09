@@ -435,7 +435,7 @@ export function useTableEditing({
             />
         ),
         onAddNewPapers: () => refresh([...newBySource.keys()]),
-        toolbarActions: addMenu('Items', 'rt-add-papers'),
+        addItems: addMenu('Items', 'rt-add-papers'),
     };
 
     const selectionActions = (rowIds: string[]) => (

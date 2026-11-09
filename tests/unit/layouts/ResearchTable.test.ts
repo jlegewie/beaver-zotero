@@ -950,7 +950,7 @@ describe('structural edit controls', () => {
 
     it('offers + Column in the toolbar, which adds a column like (+)', () => {
         const onAddColumn = vi.fn();
-        mount({ editing: { onAddColumn, toolbarActions: h('button', { className: 'probe-items' }, 'Items') } });
+        mount({ editing: { onAddColumn, addItems: h('button', { className: 'probe-items' }, 'Items') } });
         const toolbar = container!.querySelector('.rt-toolbar-left')!;
         const button = toolbar.querySelector<HTMLButtonElement>('button.rt-add-column-action')!;
         expect(button.textContent).toBe('Column');
@@ -1852,5 +1852,154 @@ describe('selecting and copying text', () => {
         pressCopy();
         expect(onCopy).toHaveBeenCalledTimes(2);
         outside.remove();
+    });
+});
+
+describe('an empty table', () => {
+    const empty = (): TableSpec => ({ id: 't', key: 'TABLEKEY', title: 'New table', columns: [], rows: [] }) as unknown as TableSpec;
+    const withQuestions = (): TableSpec => ({ ...table(), rows: [] });
+    const guide = () => container!.querySelector<HTMLElement>('[data-empty-table-guide]');
+    const steps = () => Array.from(guide()!.querySelectorAll<HTMLElement>('.rt-empty-step')).map((step) => step.dataset.step);
+    const step = (name: string) => guide()!.querySelector<HTMLElement>(`.rt-empty-step[data-step="${name}"]`)!;
+
+    it('shows how to start it, with the controls the toolbar has for each step', () => {
+        const onAddColumn = vi.fn();
+        const onAskBeaver = vi.fn();
+        mount({
+            table: empty(),
+            editing: { onAddColumn, addItems: h('button', { className: 'probe-add-items' }, 'Items') },
+            onAskBeaver,
+            fill: { onFillRows: vi.fn(), onFillColumn: vi.fn() },
+        });
+        expect(steps()).toEqual(['items', 'columns', 'ask']);
+        expect(step('items').querySelector('.probe-add-items')).not.toBeNull();
+        click(step('columns').querySelector('button')!);
+        expect(onAddColumn).toHaveBeenCalledTimes(1);
+        click(step('ask').querySelector('button')!);
+        expect(onAskBeaver).toHaveBeenCalledTimes(1);
+        expect(guide()!.textContent).toContain('Fill has Beaver answer every cell');
+        expect(container!.textContent).not.toContain('No items yet');
+    });
+
+    it('leaves out the steps the host cannot offer and those already done', () => {
+        mount({ table: withQuestions(), editing: { onAddColumn: vi.fn() } });
+        expect(steps()).toEqual(['items']);
+        expect(guide()!.textContent).not.toContain('Fill');
+    });
+
+    it('drops the row controls from the toolbar until the table has rows', () => {
+        mount({ table: empty(), editing: { onAddColumn: vi.fn() } });
+        expect(container!.querySelector('input[aria-label="Search rows"]')).toBeNull();
+        expect(container!.querySelector('[aria-label="Row height"]')).toBeNull();
+        expect(container!.querySelector('.rt-add-column-action')).not.toBeNull();
+    });
+
+    it('shows only that it is empty on a display-only or read-only table', () => {
+        mount({ table: empty() });
+        expect(guide()).toBeNull();
+        expect(container!.querySelector('.rt-empty')!.textContent).toBe('No items yet');
+        act(() => root?.unmount());
+        container?.remove();
+        root = null;
+        mount({ table: empty(), editing: { disabledReason: 'This library is read-only.', onAddColumn: vi.fn() } });
+        expect(guide()).toBeNull();
+        expect(container!.querySelector('.rt-empty')!.textContent).toBe('No items yet');
+    });
+
+    it('gives the leftover width to the (+) column, which names what it adds', () => {
+        mount({ table: empty(), editing: { onAddColumn: vi.fn() } });
+        const cols = Array.from(container!.querySelectorAll<HTMLElement>('colgroup col'));
+        // The rail, the paper and the (+): only the (+) is left without a width.
+        expect(cols.map((col) => col.style.width)).toEqual(['2.75rem', '20rem', '']);
+        const plus = container!.querySelector<HTMLButtonElement>('th.rt-th-add button')!;
+        expect(plus.closest('th')!.classList.contains('rt-th-add-tail')).toBe(true);
+        expect(plus.textContent).toBe('Add column');
+    });
+
+    it('keeps the (+) narrow and unlabeled once a column takes the leftover width', () => {
+        mount({ editing: { onAddColumn: vi.fn() } });
+        const cols = Array.from(container!.querySelectorAll<HTMLElement>('colgroup col'));
+        expect(cols.at(-1)!.style.width).toBe('3.25rem');
+        const plus = container!.querySelector<HTMLButtonElement>('th.rt-th-add button')!;
+        expect(plus.closest('th')!.classList.contains('rt-th-add-tail')).toBe(false);
+        expect(plus.textContent).toBe('');
+    });
+
+    it('lets the paper column take the leftover width when there is no (+)', () => {
+        mount({ table: empty() });
+        const cols = Array.from(container!.querySelectorAll<HTMLElement>('colgroup col'));
+        expect(cols.map((col) => col.style.width)).toEqual(['2.75rem', '']);
+    });
+});
+
+describe('a table with items but no question', () => {
+    const itemsOnly = (): TableSpec => {
+        const spec = table();
+        return { ...spec, columns: spec.columns.filter((column) => column.system) };
+    };
+    const guide = () => container!.querySelector<HTMLElement>('[data-empty-table-guide]');
+    const steps = () => Array.from(guide()!.querySelectorAll<HTMLElement>('.rt-empty-step')).map((step) => step.dataset.step);
+    const step = (name: string) => guide()!.querySelector<HTMLElement>(`.rt-empty-step[data-step="${name}"]`)!;
+    const editing = (onAddColumn = vi.fn()) => ({ onAddColumn, addItems: h('button', { className: 'probe-add-items' }, 'Items') });
+
+    it('shows the guide beside the rows, with the items step done', () => {
+        const onAddColumn = vi.fn();
+        const onAskBeaver = vi.fn();
+        mount({ table: itemsOnly(), editing: editing(onAddColumn), onAskBeaver, fill: { onFillRows: vi.fn(), onFillColumn: vi.fn() } });
+        expect(container!.querySelectorAll('tbody tr[data-row-id]')).toHaveLength(3);
+        expect(guide()!.closest('.rt-columns-guide')).not.toBeNull();
+        expect(container!.querySelector('.rt-grid')!.hasAttribute('data-columns-guide')).toBe(true);
+        expect(steps()).toEqual(['items', 'columns', 'ask']);
+        expect(step('items').classList.contains('rt-empty-step-done')).toBe(true);
+        expect(step('items').textContent).toContain('3 items added');
+        // The toolbar already has + Items; the done step offers no control.
+        expect(step('items').querySelector('button')).toBeNull();
+        expect(step('ask').textContent).toContain('Beaver suggests columns for these items');
+        click(step('columns').querySelector('button')!);
+        expect(onAddColumn).toHaveBeenCalledTimes(1);
+        click(step('ask').querySelector('button')!);
+        expect(onAskBeaver).toHaveBeenCalledTimes(1);
+        expect(guide()!.textContent).toContain('Fill has Beaver answer every cell');
+    });
+
+    it('starts the guide where the (+) column does, and keeps that column wide enough for it', () => {
+        mount({ table: itemsOnly(), editing: editing() });
+        const layer = container!.querySelector<HTMLElement>('.rt-columns-guide')!;
+        // The rail, the paper and the year: 2.75rem + 20rem + 5.5rem.
+        expect(layer.style.left).toBe('calc(28.25rem)');
+        // As wide as the column even when the table overflows a narrow grid.
+        expect(layer.style.minWidth).toBe('32rem');
+        const cols = Array.from(container!.querySelectorAll<HTMLElement>('colgroup col'));
+        expect(cols.map((col) => col.style.width)).toEqual(['2.75rem', '20rem', '5.5rem', '']);
+        expect(container!.querySelector<HTMLElement>('table.rt-table')!.style.minWidth).toContain('32rem');
+        // The rows keep their search and row-height controls.
+        expect(container!.querySelector('input[aria-label="Search rows"]')).not.toBeNull();
+    });
+
+    it('goes once the table has a question', () => {
+        mount({ editing: editing() });
+        expect(guide()).toBeNull();
+        expect(container!.querySelector('.rt-grid')!.hasAttribute('data-columns-guide')).toBe(false);
+    });
+
+    it('steps aside while a search hides every row', () => {
+        mount({ table: itemsOnly(), editing: editing() });
+        const search = container!.querySelector<HTMLInputElement>('input[aria-label="Search rows"]')!;
+        act(() => {
+            Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, 'no row matches this');
+            search.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+        expect(guide()).toBeNull();
+        expect(container!.querySelector('.rt-empty')!.textContent).toBe('No rows match the search or filters');
+    });
+
+    it('is not shown on a read-only or display-only table', () => {
+        mount({ table: itemsOnly() });
+        expect(guide()).toBeNull();
+        act(() => root?.unmount());
+        container?.remove();
+        root = null;
+        mount({ table: itemsOnly(), editing: { disabledReason: 'This library is read-only.', onAddColumn: vi.fn() } });
+        expect(guide()).toBeNull();
     });
 });

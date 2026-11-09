@@ -37,6 +37,33 @@ type ThreadViewProps = {
 };
 
 /**
+ * The element of the run nearest to `runId` that is drawn, earlier runs first.
+ *
+ * A run with nothing to show renders no element (see `isRunWithNothingToShow`),
+ * so a scroll target naming one lands on the answer it continues instead. Null
+ * when the run is not in the thread. Call only after the runs have committed:
+ * before that, a missing element means not yet mounted rather than skipped.
+ */
+function findNearestDrawnRun(
+    container: HTMLElement,
+    runs: readonly { id: string }[],
+    runId: string,
+): HTMLElement | null {
+    const index = runs.findIndex((run) => run.id === runId);
+    if (index < 0) return null;
+    const lookup = (id: string) => container.querySelector<HTMLElement>(`#run-${CSS.escape(id)}`);
+    for (let i = index - 1; i >= 0; i--) {
+        const element = lookup(runs[i].id);
+        if (element) return element;
+    }
+    for (let i = index + 1; i < runs.length; i++) {
+        const element = lookup(runs[i].id);
+        if (element) return element;
+    }
+    return null;
+}
+
+/**
  * ThreadView renders all agent runs for the current thread.
  * Uses allRunsAtom which combines completed runs with any active streaming run.
  */
@@ -112,7 +139,8 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
 
             const element = targetElement
                 ?? pendingRunElementRef.current
-                ?? container.querySelector<HTMLElement>(`#run-${CSS.escape(pendingRunId)}`);
+                ?? container.querySelector<HTMLElement>(`#run-${CSS.escape(pendingRunId)}`)
+                ?? (isLoadingThread ? null : findNearestDrawnRun(container, runs, pendingRunId));
 
             if (!element) {
                 if (!isLoadingThread && !runs.some((run) => run.id === pendingRunId)) {

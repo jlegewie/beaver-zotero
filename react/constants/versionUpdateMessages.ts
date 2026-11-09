@@ -7,7 +7,7 @@ import type { FeatureTipId } from './featureTips';
  * draws for the id. An id rather than the component: this list is read by the
  * plugin bundle at startup, which has no React.
  */
-export type VersionShowcaseId = 'quick-prompt';
+export type VersionShowcaseId = 'quick-prompt' | 'research-table';
 
 /** A chord a release note can draw as keycaps; the label comes from `react/utils/quickPromptShortcut.ts`. */
 export type VersionShortcutId = 'quick-prompt' | 'beaver-window';
@@ -644,6 +644,15 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
             },
         ],
         footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.26.0" target='_blank'>Full changelog</a>`,
+    },
+    {
+        version: "0.27.0",
+        title: "Research tables, right in Zotero",
+        text: "Compare the papers in your library side by side. Beaver reads each one, answers your questions, and links every answer to the exact passage.",
+        showcase: 'research-table',
+        primaryAction: { type: 'open-beaver', label: 'Try it' },
+        inPanel: false,
+        footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.27.0" target='_blank'>Full changelog</a>`,
     },
 ];
 

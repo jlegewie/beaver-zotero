@@ -2272,6 +2272,209 @@
     border-right: 0;
 }
 
+/* The (+) column taking the width no other column takes: its button sits
+ * right after the last column. */
+.beaver-root .rt-th-add-tail {
+    padding-left: 0.45rem;
+    text-align: start;
+}
+
+.beaver-root .rt-th-add-tail .rt-add-column {
+    margin: 0;
+}
+
+/* Before the first question column, the (+) says what it adds. */
+.beaver-root .rt-add-column-labeled {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    height: 1.85rem;
+    padding: 0 0.6rem;
+    border: 0;
+    border-radius: 0.4rem;
+    background: transparent;
+    color: var(--fill-secondary);
+    font: inherit;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.beaver-root .rt-add-column-labeled:hover:not(:disabled) {
+    background: var(--fill-quinary);
+    color: var(--fill-primary);
+}
+
+.beaver-root .rt-add-column-labeled:disabled {
+    opacity: 0.35;
+    cursor: default;
+}
+
+/* The empty table's guide ----------------------------------------------------
+ * Under the header where the rows would be. Sticky at the left, so it stays
+ * in view when the header is wider than the tab. */
+
+.beaver-root .rt-empty-guide {
+    position: sticky;
+    left: 0;
+    display: flex;
+    justify-content: center;
+    padding: 2.5rem 1.5rem 3rem;
+}
+
+.beaver-root .rt-empty-guide-inner {
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+    width: 100%;
+    max-width: 36rem;
+}
+
+.beaver-root .rt-empty-guide-title {
+    margin: 0;
+    font-size: 1.15rem;
+    font-weight: 600;
+    color: var(--fill-primary);
+}
+
+.beaver-root .rt-empty-steps {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    border: 1px solid var(--rt-border);
+    border-radius: 0.7rem;
+}
+
+.beaver-root .rt-empty-step {
+    display: flex;
+    align-items: center;
+    gap: 0.85rem;
+    padding: 0.9rem 1rem;
+}
+
+.beaver-root .rt-empty-step + .rt-empty-step {
+    border-top: 1px solid var(--rt-border);
+}
+
+.beaver-root .rt-empty-step-icon {
+    flex: 0 0 auto;
+    display: grid;
+    place-items: center;
+    width: 2.1rem;
+    height: 2.1rem;
+    border-radius: 0.55rem;
+    background: var(--fill-quinary);
+    color: var(--fill-secondary);
+}
+
+.beaver-root .rt-empty-step-body {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+
+.beaver-root .rt-empty-step-title {
+    font-weight: 600;
+    color: var(--fill-primary);
+}
+
+.beaver-root .rt-empty-step-text {
+    color: var(--fill-secondary);
+    line-height: 1.4;
+}
+
+.beaver-root .rt-empty-step-action {
+    flex: 0 0 auto;
+}
+
+.beaver-root .rt-empty-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    height: 2.15rem;
+    padding: 0 0.7rem;
+    border: 1px solid var(--color-border50);
+    border-radius: 0.55rem;
+    background: transparent;
+    color: var(--fill-primary);
+    font: inherit;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.beaver-root .rt-empty-action:hover:not(:disabled) {
+    background: var(--fill-quinary);
+}
+
+.beaver-root .rt-empty-action:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.beaver-root .rt-empty-guide-foot {
+    margin: 0;
+    color: var(--fill-secondary);
+}
+
+.beaver-root .rt-empty-inline-icon {
+    margin: 0 0.1rem;
+}
+
+.beaver-root .rt-empty-guide .rt-nowrap {
+    white-space: nowrap;
+}
+
+/* Beside the rows: a table with items but no question yet shows the guide
+ * over the (+) column's empty cells, whose row lines it hides, and keeps it
+ * just under the sticky header as the rows scroll. The layer spans the grid's
+ * height so the guide can stick; only the guide itself takes the pointer. */
+.beaver-root .rt-columns-guide {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    pointer-events: none;
+}
+
+.beaver-root .rt-columns-guide-sticky {
+    position: sticky;
+    top: 0;
+    padding-top: var(--rt-head-h, 3rem);
+}
+
+.beaver-root .rt-grid[data-columns-guide] {
+    min-height: 100%;
+}
+
+.beaver-root .rt-grid[data-columns-guide] .rt-row > .rt-td-add {
+    border-bottom-color: transparent;
+    background: transparent;
+    box-shadow: none;
+    animation: none;
+}
+
+.beaver-root .rt-empty-guide-beside {
+    position: static;
+    justify-content: flex-start;
+    padding: 1.75rem 2rem 2rem 1.05rem;
+    pointer-events: auto;
+}
+
+.beaver-root .rt-empty-guide-beside .rt-empty-steps {
+    background: var(--material-background);
+}
+
+/* A step already done: its tick, and quieter text. */
+.beaver-root .rt-empty-step-done .rt-empty-step-icon {
+    background: color-mix(in srgb, var(--accent-green) 14%, transparent);
+    color: var(--accent-green);
+}
+
+.beaver-root .rt-empty-step-done .rt-empty-step-title {
+    color: var(--fill-secondary);
+}
+
 /* Editing cells -------------------------------------------------------------- */
 
 /* A button in a cell's expansion: Edit, the row's actions and its menu. */

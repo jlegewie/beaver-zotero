@@ -10,6 +10,7 @@ import { cleanupReaderIntegration, initReaderIntegration } from "./modules/reade
 import { cleanupReaderToolbarMenu, initReaderToolbarMenu } from "./modules/readerToolbarMenu";
 import { cleanupNoteEditorExportMenu, initNoteEditorExportMenu } from "./modules/noteEditorExportMenu";
 import { cleanupContextMenus, initContextMenus } from "./modules/zoteroContextMenu";
+import { attachTableOpenLabels, detachTableOpenLabels } from "./modules/tableOpenMenuLabel";
 import {
     registerTablesApi,
     unregisterTablesApi
@@ -551,6 +552,7 @@ async function onMainWindowLoad(win: Window): Promise<void> {
     }
 
     BeaverUIFactory.registerChatPanel(win);
+    attachTableOpenLabels(win);
 
     // Tabs a cold start's session restore lost to a saved Beaver tab, then
     // the Beaver tabs a quit, plugin reload or last-window close left for this
@@ -679,6 +681,7 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         // flag and skip any fire-and-forget DB/network operations.
         BeaverUIFactory.removeChatPanel(win);
         addon.runtime.detachWindow(win);
+        detachTableOpenLabels(win);
 
         // Remove the <link rel="localization"> we added in onMainWindowLoad.
         // Leaving it behind after disable causes the locale bundle to log

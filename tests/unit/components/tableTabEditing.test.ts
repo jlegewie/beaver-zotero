@@ -263,6 +263,30 @@ describe('ordinary edits', () => {
         expect(onEdit).toHaveBeenCalledTimes(2);
     });
 
+    it('adds a saved search picked in + Papers as a source, and checks one the table already has', async () => {
+        commands.edit.mockResolvedValue(
+            committed([{ op: 'add_source', source: 's3', type: 'library', rows_added: 2, rows_restored: 0, duplicates: 0, rejected: [] }]),
+        );
+        mount();
+        const target = mocks.targets.at(-1);
+        const search = { libraryID: 1, key: 'SRCH0001', name: 'Recent RCTs', deleted: false };
+        expect(target.isSavedSearchPicked(search)).toBe(false);
+        await act(async () => target.pickSavedSearch(search));
+        expect(commands.edit).toHaveBeenCalledWith(
+            ref,
+            { add_sources: [{ type: 'library', scope: { kind: 'saved_search', library_ref: 'u', key: 'SRCH0001', name: 'Recent RCTs' } }] },
+            expect.objectContaining({ seal: false }),
+        );
+    });
+
+    it('does not add a saved search from an excluded library or in the trash', async () => {
+        mount();
+        const target = mocks.targets.at(-1);
+        await act(async () => target.pickSavedSearch({ libraryID: 9, key: 'SRCH0009', name: 'Elsewhere', deleted: false }));
+        await act(async () => target.pickSavedSearch({ libraryID: 1, key: 'SRCH0002', name: 'Trashed', deleted: true }));
+        expect(commands.edit).not.toHaveBeenCalled();
+    });
+
     it('does not add a collection the table already has', async () => {
         mount();
         const target = mocks.targets.at(-1);

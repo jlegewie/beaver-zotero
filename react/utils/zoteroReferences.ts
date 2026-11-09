@@ -57,6 +57,21 @@ export function viewToAttachment(view: ViewSelection): ViewAttachment | null {
     };
 }
 
+/** A saved search's message attachment, or null when it cannot be attached. */
+export function savedSearchAttachment(search: Zotero.Search): ViewAttachment | null {
+    return viewToAttachment({ type: 'search', libraryId: search.libraryID, key: search.key, name: search.name });
+}
+
+/**
+ * A saved search's portable id, `<library_ref>-<key>`: the key its message
+ * attachment and its table source are compared by. Null when its library has
+ * no portable ref on this device.
+ */
+export function savedSearchId(search: Zotero.Search): string | null {
+    const libraryRef = libraryRefForLibraryID(search.libraryID);
+    return libraryRef ? `${libraryRef}-${search.key}` : null;
+}
+
 /**
  * Whether a collection or view target is in one of `libraryIds` on this
  * device. Saved searches carry only their portable library, so the local id is

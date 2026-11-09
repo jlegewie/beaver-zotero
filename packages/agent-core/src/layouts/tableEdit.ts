@@ -225,13 +225,15 @@ export function previewFacts(resolved: readonly ResolvedSource[], rowCap = MAX_R
  * A new table from approved sources and columns: the system columns, the
  * question columns, the merged rows with their origins, and the sources as
  * resolved. Refuses a source cut short or rows over the cap (`too_large`), no
- * rows (`no_rows`) and a column the engine refuses (`invalid_edit`).
+ * rows (`no_rows`, unless `allowEmpty`: a table the user starts empty) and a
+ * column the engine refuses (`invalid_edit`).
  */
 export function buildTable(
     input: { id: string; title: string; description?: string | null; columns?: TableColumnDraft[] | null },
     resolved: readonly ResolvedSource[],
     today: string,
     rowCap = MAX_ROWS,
+    { allowEmpty = false }: { allowEmpty?: boolean } = {},
 ): EditResult | EditFailure {
     const unusable = resolved.findIndex((source) => source.error);
     if (unusable !== -1)
@@ -247,7 +249,7 @@ export function buildTable(
                     ? `sources[${cut}]: the source holds ${resolved[cut].total} items and a table holds at most ${rowCap}. Narrow it or remove it.`
                     : `the sources hold ${facts.rows} items and a table holds at most ${rowCap}. Narrow a source or remove one.`,
         };
-    if (!facts.rows) return { ok: false, code: "no_rows", message: "The approved sources yield no items." };
+    if (!facts.rows && !allowEmpty) return { ok: false, code: "no_rows", message: "The approved sources yield no items." };
     const base: TableSpec = {
         id: input.id,
         spec_version: TABLE_SPEC_VERSION,

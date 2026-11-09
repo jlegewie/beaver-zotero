@@ -23,11 +23,13 @@ vi.mock('../../../react/atoms/messageUIState', () => ({
 vi.mock('../../../react/runtime/SurfaceWindowContext', () => ({ useSurfaceWindow: () => window }));
 vi.mock('../../../react/components/agentRuns/AgentRunView', () => ({
     // Model the DOM replacement caused by the streaming-only context provider.
-    AgentRunView: ({ run }: any) => React.createElement(run.status === 'in_progress' ? 'section' : 'article', { id: `run-${run.id}` }),
+    // A `hidden` run models one with nothing to show, which renders no element.
+    AgentRunView: ({ run }: any) => run.hidden ? null : React.createElement(run.status === 'in_progress' ? 'section' : 'article', { id: `run-${run.id}` }),
 }));
 
 import { ThreadView } from '../../../react/components/agentRuns/ThreadView';
 import { allRunsAtom, activeRunAtom } from '@beaver/agent-core/run-state/atoms';
+import { pendingScrollToRunAtom } from '../../../react/atoms/threads';
 import { store } from '../../../react/store';
 import { scrollAtoms } from '../../../react/utils/scrollPosition';
 
@@ -167,4 +169,22 @@ it('respects a reader who scrolls back before a queued terminal frame', () => {
     height = 1800;
     flushFrames();
     expect(container.scrollTop).toBe(500);
+});
+
+it('lands a scroll target naming a skipped run on the answer it continues', () => {
+    const scrolledTo: string[] = [];
+    vi.stubGlobal('CSS', { escape: (value: string) => value });
+    (HTMLElement.prototype as any).scrollIntoView = function (this: HTMLElement) { scrolledTo.push(this.id); };
+    try {
+        act(() => {
+            store.set(allRunsAtom, [run('completed', 'one'), { ...run('completed', 'two'), hidden: true }, run('completed', 'three')]);
+            store.set(activeRunAtom, null);
+        });
+        act(() => store.set(pendingScrollToRunAtom, 'two'));
+        expect(scrolledTo).toEqual(['run-one']);
+        // Cleared, so restore and bottom-following are not held back by it.
+        expect(store.get(pendingScrollToRunAtom)).toBeNull();
+    } finally {
+        delete (HTMLElement.prototype as any).scrollIntoView;
+    }
 });
