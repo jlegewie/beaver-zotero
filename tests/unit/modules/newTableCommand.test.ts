@@ -1,6 +1,7 @@
+// @vitest-environment jsdom
 /**
- * New tables from Zotero's menus: the New Note menu's empty table and the
- * collection menu's table from a collection or saved search, as registered
+ * New tables from Zotero's menus: File ▸ New Beaver Table's empty table and
+ * the collection menu's table from a collection or saved search, as registered
  * with Zotero's MenuManager and as created and opened.
  */
 
@@ -160,43 +161,64 @@ describe('the menu entries', () => {
         return { menuElem: { ownerDocument: { defaultView: { ...win, ZoteroPane: pane } } } };
     };
 
-    it('adds New Beaver Table to the New Note menu, disabled where a table cannot be filed', async () => {
+    /** A popup holding Zotero's `anchor` entry, with the plugin item appended at the end as MenuManager does. */
+    const popupWith = (anchor: { id?: string; className?: string }) => {
+        const popup = document.createElement('div');
+        const own = document.createElement('div');
+        Object.assign(own, anchor);
+        const separator = document.createElement('div');
+        separator.className = 'zotero-custom-menu-group-separator';
+        const menuElem = document.createElement('div');
+        popup.append(own, document.createElement('div'), separator, menuElem);
+        return { own, menuElem };
+    };
+
+    it('adds New Beaver Table to the File menu below New Note, for library tabs where a table can be filed', async () => {
         initContextMenus();
-        const menu = registered.find((m) => m.target === 'main/library/addNote');
-        const item = menu.menus.find((m: any) => m.l10nID === 'beaver-new-table');
+        expect(registered.some((m) => m.target === 'main/library/addNote')).toBe(false);
+        const item = registered.find((m) => m.target === 'main/menubar/file').menus[0];
+        expect(item.l10nID).toBe('beaver-new-table');
+
+        const { own, menuElem } = popupWith({ id: 'menu_noteAdd' });
+        item.onShowing(null, { ...menuState(), menuElem, tabType: 'library' });
+        expect(own.nextElementSibling).toBe(menuElem);
+
         const open = menuState();
-        item.onShowing(null, { ...open, ...paneContext(1, false) });
-        expect(open.state.enabled).toBe(true);
+        item.onShowing(null, { ...open, ...paneContext(1, false), tabType: 'library' });
+        expect(open.state).toMatchObject({ visible: true, enabled: true });
+
         const excluded = menuState();
-        item.onShowing(null, { ...excluded, ...paneContext(3, false) });
+        item.onShowing(null, { ...excluded, ...paneContext(3, false), tabType: 'library' });
         expect(excluded.state.enabled).toBe(false);
+        const reader = menuState();
+        item.onShowing(null, { ...reader, ...paneContext(1, false), tabType: 'reader' });
+        expect(reader.state.visible).toBe(false);
 
         item.onCommand(null, paneContext(1, { id: 9 }));
         await vi.waitFor(() => expect(mocks.createTable).toHaveBeenCalled());
         expect(mocks.createTable.mock.calls[0][0]).toMatchObject({ libraryID: 1, collectionID: 9, title: 'New table' });
     });
 
-    it('starts the collection menu with New Table from Collection, only for collections and saved searches', async () => {
+    it('adds Create Beaver Table below Generate Report, only for collections and saved searches', async () => {
         initContextMenus();
-        const submenu = registered.find((m) => m.target === 'main/library/collection').menus[0];
-        const [item, separator] = submenu.menus;
-        expect(item.l10nID).toBe('beaver-new-table-from-selection');
+        const menu = registered.find((m) => m.target === 'main/library/collection' && m.menuID === 'beaver-new-table-collection-menu');
+        const item = menu.menus[0];
+        expect(item).toMatchObject({ l10nID: 'beaver-create-table', icon: 'chrome://beaver/content/icons/table.svg' });
 
+        const { own, menuElem } = popupWith({ className: 'zotero-menuitem-create-report' });
         const one = menuState();
-        item.onShowing(null, { ...one, collectionTreeRows: [collectionRow('COLL0001', 'Cash')] });
-        expect(one.state).toMatchObject({ visible: true, enabled: true, l10nArgs: JSON.stringify({ kind: 'collection' }) });
+        item.onShowing(null, { ...one, menuElem, collectionTreeRows: [collectionRow('COLL0001', 'Cash')] });
+        expect(own.nextElementSibling).toBe(menuElem);
+        expect(one.state).toMatchObject({ visible: true, enabled: true });
 
         const several = menuState();
         item.onShowing(null, { ...several, collectionTreeRows: [collectionRow('COLL0001', 'Cash'), searchRow('SRCH0001', 'RCTs')] });
-        expect(several.state.l10nArgs).toBe(JSON.stringify({ kind: 'multiple' }));
+        expect(several.state.visible).toBe(true);
 
         for (const rows of [[viewRow], [collectionRow('COLL0001', 'Cash', 1), collectionRow('COLL0002', 'Loans', 5)]]) {
             const hidden = menuState();
             item.onShowing(null, { ...hidden, collectionTreeRows: rows });
             expect(hidden.state.visible).toBe(false);
-            const line = menuState();
-            separator.onShowing(null, { ...line, collectionTreeRows: rows });
-            expect(line.state.visible).toBe(false);
         }
 
         const excluded = menuState();
@@ -208,11 +230,16 @@ describe('the menu entries', () => {
         expect(mocks.createTable.mock.calls[0][0]).toMatchObject({ libraryID: 1, collectionID: 7, title: 'Cash' });
     });
 
+    it('leaves the Beaver Actions submenu to actions', () => {
+        initContextMenus();
+        const submenu = registered.find((m) => m.menuID === 'beaver-collection-context-menu').menus[0];
+        expect(submenu.menus.some((m: any) => m.l10nID === 'beaver-create-table')).toBe(false);
+    });
+
     it('adds no table entries where tables are not enabled', () => {
         Z.Beaver.data.env = 'production';
         initContextMenus();
-        expect(registered.some((m) => m.target === 'main/library/addNote')).toBe(false);
-        const submenu = registered.find((m) => m.target === 'main/library/collection').menus[0];
-        expect(submenu.menus.some((m: any) => m.l10nID === 'beaver-new-table-from-selection')).toBe(false);
+        expect(registered.some((m) => m.target === 'main/menubar/file')).toBe(false);
+        expect(registered.some((m) => m.menuID === 'beaver-new-table-collection-menu')).toBe(false);
     });
 });

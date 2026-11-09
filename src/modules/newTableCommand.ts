@@ -1,7 +1,7 @@
 /**
- * New tables from Zotero's own menus: an empty one from the New Note menu,
- * and one holding the items of the collections or saved searches the user
- * right-clicked. The table is created in the plugin realm and opened in a
+ * New tables from Zotero's own menus: an empty one from File ▸ New Beaver
+ * Table, and one holding the items of the collections or saved searches the
+ * user right-clicked (Create Beaver Table). The table is created in the plugin realm and opened in a
  * Beaver tab.
  *
  * Lives in the esbuild bundle — must NOT import from react/store or Jotai.

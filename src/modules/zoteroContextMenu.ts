@@ -157,7 +157,9 @@ function hasEligibleItems(action: Action, c: SelectionComposition): boolean {
 const ITEM_MENU_ID = 'beaver-item-context-menu';
 const COLLECTION_MENU_ID = 'beaver-collection-context-menu';
 const NOTE_EXPORT_MENU_ID = 'beaver-note-export-menu';
-const NEW_TABLE_MENU_ID = 'beaver-new-table-menu';
+const NEW_TABLE_FILE_MENU_ID = 'beaver-new-table-file-menu';
+const NEW_TABLE_COLLECTION_MENU_ID = 'beaver-new-table-collection-menu';
+const TABLE_ICON = `chrome://${config.config.addonRef}/content/icons/table.svg`;
 const PLUGIN_ID = config.config.addonID;
 
 // Store the namespaced keys returned by MenuManager.registerMenu().
@@ -391,42 +393,68 @@ function registerMenus(): void {
     });
     if (noteExportKey) registeredKeys.push(noteExportKey);
 
-    // --- New table: the New Note menu (the items toolbar's button and File ▸
-    // New Note), filed like a new note in the selected library and collection ---
     if (isTableChatEnabled()) {
-        const newTableKey = MenuManager.registerMenu({
-            menuID: NEW_TABLE_MENU_ID,
+        // --- File ▸ New Beaver Table, below New Note. An empty table, filed
+        // like a new note in the selected library and collection ---
+        const fileKey = MenuManager.registerMenu({
+            menuID: NEW_TABLE_FILE_MENU_ID,
             pluginID: PLUGIN_ID,
-            target: 'main/library/addNote',
-            menus: [
-                { menuType: 'separator' as const },
-                {
-                    menuType: 'menuitem' as const,
-                    l10nID: 'beaver-new-table',
-                    onShowing: safeOnShowing('new-table', (_event: any, context: any) => {
-                        const libraryID = getSelectedLibraryId(paneOf(context));
-                        context.setEnabled(libraryID !== null && canCreateTableIn(libraryID));
-                    }),
-                    onCommand: (_event: any, context: any) => {
-                        const pane = paneOf(context);
-                        const win = context?.menuElem?.ownerDocument?.defaultView;
-                        const libraryID = getSelectedLibraryId(pane);
-                        if (!win || libraryID === null) return;
-                        const collection = getSelectedCollection(pane);
-                        void createAndOpenTable(win, {
-                            libraryID,
-                            ...(collection ? { collectionID: collection.id } : {}),
-                            scopes: [],
-                            title: 'New table',
-                        });
-                    },
+            target: 'main/menubar/file',
+            menus: [{
+                menuType: 'menuitem' as const,
+                l10nID: 'beaver-new-table',
+                onShowing: safeOnShowing('new-table', (_event: any, context: any) => {
+                    placeAfter(context?.menuElem, '#menu_noteAdd');
+                    // Like New Note, a library-tab command.
+                    context.setVisible(context?.tabType === 'library');
+                    const libraryID = getSelectedLibraryId(paneOf(context));
+                    context.setEnabled(libraryID !== null && canCreateTableIn(libraryID));
+                }),
+                onCommand: (_event: any, context: any) => {
+                    const pane = paneOf(context);
+                    const win = context?.menuElem?.ownerDocument?.defaultView;
+                    const libraryID = getSelectedLibraryId(pane);
+                    if (!win || libraryID === null) return;
+                    const collection = getSelectedCollection(pane);
+                    void createAndOpenTable(win, {
+                        libraryID,
+                        ...(collection ? { collectionID: collection.id } : {}),
+                        scopes: [],
+                        title: 'New table',
+                    });
                 },
-            ],
+            }],
         });
-        if (newTableKey) registeredKeys.push(newTableKey);
+        if (fileKey) registeredKeys.push(fileKey);
+
+        // --- Collection menu ▸ Create Beaver Table, below Generate Report.
+        // Rows come from the selected collections and saved searches ---
+        const collectionTableKey = MenuManager.registerMenu({
+            menuID: NEW_TABLE_COLLECTION_MENU_ID,
+            pluginID: PLUGIN_ID,
+            target: 'main/library/collection',
+            menus: [newTableFromSelectionItem()],
+        });
+        if (collectionTableKey) registeredKeys.push(collectionTableKey);
     }
 
     ztoolkit.log(`zoteroContextMenu: Registered menus (${itemActions.length} item actions, ${collectionActions.length} collection actions)`);
+}
+
+/**
+ * Moves a plugin menu item to just after one of Zotero's own entries.
+ * MenuManager appends plugin items to the end of a menu (below the plugin
+ * separator) every time it opens and then runs onShowing, so onShowing calls
+ * this on each opening. Without the anchor (a menu MenuManager folded into its
+ * overflow submenu, or a Zotero version without that entry) the item stays put.
+ */
+function placeAfter(menuElem: Element | null | undefined, anchorSelector: string): void {
+    try {
+        const anchor = menuElem?.parentElement?.querySelector(`:scope > ${anchorSelector}`);
+        if (menuElem && anchor && anchor !== menuElem && anchor.nextElementSibling !== menuElem) {
+            anchor.after(menuElem);
+        }
+    } catch { /* placement is cosmetic */ }
 }
 
 /** The library pane of the window a menu opened in. */
@@ -435,7 +463,7 @@ function paneOf(context: any): any {
 }
 
 /**
- * The collections and saved searches a collection-menu "New Table from…"
+ * The collections and saved searches a collection-menu "Create Beaver Table"
  * starts from: every selected row, all of them collections or saved searches
  * in one library. Null for any other selection.
  */
@@ -518,8 +546,7 @@ function buildItemMenuItems(itemActions: Action[]): any[] {
 }
 
 function buildCollectionMenuItems(collectionActions: Action[]): any[] {
-    const items: any[] = isTableChatEnabled() ? newTableFromSelectionItems() : [];
-    items.push(...collectionActions.map(action => ({
+    const items: any[] = collectionActions.map(action => ({
         menuType: 'menuitem' as const,
         l10nID: 'beaver-context-menu-action',
         l10nArgs: JSON.stringify({ title: action.title }),
@@ -529,7 +556,7 @@ function buildCollectionMenuItems(collectionActions: Action[]): any[] {
         onCommand: (_event: any, context: any) => {
             void dispatchAction(action, context, 'collection', _event?.target?.ownerDocument?.defaultView).catch(Zotero.logError);
         },
-    })));
+    }));
 
     if (items.length > 0) {
         items.push({ menuType: 'separator' as const });
@@ -546,33 +573,25 @@ function buildCollectionMenuItems(collectionActions: Action[]): any[] {
     return items;
 }
 
-/** "New Table from Collection" and the separator after it, shown for collections and saved searches. */
-function newTableFromSelectionItems(): any[] {
-    const showFor = (context: any) => newTableSelection(context) !== null;
-    return [
-        {
-            menuType: 'menuitem' as const,
-            l10nID: 'beaver-new-table-from-selection',
-            onShowing: safeOnShowing('new-table-from-selection', (_event: any, context: any) => {
-                const selection = newTableSelection(context);
-                context.setVisible(!!selection);
-                if (!selection) return;
-                const kind = selection.scopes.length > 1 ? 'multiple' : selection.scopes[0].kind;
-                context.setL10nArgs(JSON.stringify({ kind }));
-                context.setEnabled(canCreateTableIn(selection.libraryID));
-            }),
-            onCommand: (event: any, context: any) => {
-                const selection = newTableSelection(context);
-                const win = event?.target?.ownerDocument?.defaultView ?? context?.menuElem?.ownerDocument?.defaultView;
-                if (!selection || !win) return;
-                void createAndOpenTable(win, { ...selection, title: newTableTitle(selection.scopes) });
-            },
+/** "Create Beaver Table", shown for collections and saved searches next to Generate Report. */
+function newTableFromSelectionItem(): any {
+    return {
+        menuType: 'menuitem' as const,
+        l10nID: 'beaver-create-table',
+        icon: TABLE_ICON,
+        onShowing: safeOnShowing('create-table', (_event: any, context: any) => {
+            placeAfter(context?.menuElem, '.zotero-menuitem-create-report');
+            const selection = newTableSelection(context);
+            context.setVisible(!!selection);
+            if (selection) context.setEnabled(canCreateTableIn(selection.libraryID));
+        }),
+        onCommand: (event: any, context: any) => {
+            const selection = newTableSelection(context);
+            const win = event?.target?.ownerDocument?.defaultView ?? context?.menuElem?.ownerDocument?.defaultView;
+            if (!selection || !win) return;
+            void createAndOpenTable(win, { ...selection, title: newTableTitle(selection.scopes) });
         },
-        {
-            menuType: 'separator' as const,
-            onShowing: safeOnShowing('new-table-separator', (_event: any, context: any) => context.setVisible(showFor(context))),
-        },
-    ];
+    };
 }
 
 // ---------------------------------------------------------------------------
