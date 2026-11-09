@@ -69,6 +69,15 @@ export interface TagMenuItemContext {
 }
 
 /**
+ * Context for creating saved-search menu items
+ */
+export interface SavedSearchMenuItemContext {
+    /** Whether the target already has the saved search, for its checkmark. */
+    isPicked: (search: Zotero.Search) => boolean;
+    onSelect: (search: Zotero.Search) => void;
+}
+
+/**
  * Create a menu item from a Zotero item (for sources mode)
  */
 export async function createSourceMenuItem(
@@ -261,8 +270,32 @@ export function createCollectionMenuItem(
 }
 
 /**
- * Create a menu item from a Zotero tag (for tags mode)
+ * Create a menu item from a Zotero saved search (for saved-searches mode)
  */
+export function createSavedSearchMenuItem(
+    search: Zotero.Search,
+    context: SavedSearchMenuItemContext,
+    /** Active search query, for highlighting what matched. */
+    searchQuery = ''
+): SearchMenuItem {
+    const isSelected = context.isPicked(search);
+    return {
+        label: search.name,
+        onClick: () => context.onSelect(search),
+        customContent: (
+            <div className={'display-flex flex-row gap-2 items-start min-w-0'}>
+                <CSSIcon name="search" className="icon-16 scale-90" />
+                <div className="display-flex flex-row justify-between flex-1 min-w-0 font-color-secondary">
+                    <span className="truncate">
+                        {highlightQuery(search.name, searchQuery)}
+                    </span>
+                    {isSelected && <Icon icon={TickIcon} className="scale-12 ml-2" />}
+                </div>
+            </div>
+        ),
+    };
+}
+
 /**
  * Create a menu item from a Zotero note item (for notes mode)
  */

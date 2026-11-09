@@ -4,6 +4,7 @@ import { getRecentAsync, loadFullItemData } from '../../../../../src/utils/zoter
 import { getActiveZoteroLibraryId } from '../../../../utils/zoteroTargetContext';
 import { ArrowRightIcon, CSSIcon, FileLinkIcon, Icon } from '../../../icons/icons';
 import { SourceMenuItemContext, createSourceMenuItem } from '../utils/menuItemFactories';
+import { availableSavedSearches } from './useSavedSearchesMenu';
 
 interface UseSourcesMenuOptions {
     isActive: boolean;
@@ -25,6 +26,11 @@ interface UseSourcesMenuOptions {
     onNavigateToLibraries: () => void;
     onNavigateToCollections: (libraryId: number) => void;
     onNavigateToTags: (libraryId: number) => void;
+    /**
+     * Open the saved-searches submenu. The row is offered only when set: only
+     * a target that can take a saved search passes it.
+     */
+    onNavigateToSavedSearches?: (libraryId: number) => void;
     onNavigateToNotes: () => void;
     /** Open a file picker to attach external files (files from disk). */
     onSelectFiles: () => void;
@@ -38,14 +44,14 @@ interface UseSourcesMenuOptions {
 
 /**
  * The action rows a picker target offers. The composer offers all of them; a
- * target that only takes items, collections and tags (the table card) hides
- * the rest and names the scope rows for what a pick does.
+ * target that only takes items and scopes (collections, tags, saved searches:
+ * the table card) hides the rest and names the scope rows for what a pick does.
  */
 export interface SourcesMenuEntries {
     libraries: boolean;
     notes: boolean;
     files: boolean;
-    /** How collection and tag rows are labelled: "Filter by Collections" or "Add Collection". */
+    /** How scope rows are labelled: "Filter by Collections" or "Add Collection". */
     scopeVerb: 'filter' | 'add';
 }
 
@@ -90,6 +96,7 @@ export const useSourcesMenu = ({
     onNavigateToLibraries,
     onNavigateToCollections,
     onNavigateToTags,
+    onNavigateToSavedSearches,
     onNavigateToNotes,
     onSelectFiles,
     getRecentItems,
@@ -99,6 +106,7 @@ export const useSourcesMenu = ({
 }: UseSourcesMenuOptions): UseSourcesMenuResult => {
     const collectionsLabel = entries?.scopeVerb === 'add' ? 'Add Collection' : 'Filter by Collections';
     const tagsLabel = entries?.scopeVerb === 'add' ? 'Add Tag' : 'Filter by Tags';
+    const savedSearchesLabel = entries?.scopeVerb === 'add' ? 'Add Saved Search' : 'Filter by Saved Searches';
     const [menuItems, setMenuItems] = useState<SearchMenuItem[]>([]);
     const [builtFrom, setBuiltFrom] = useState<Zotero.Item[] | null>(null);
 
@@ -209,6 +217,10 @@ export const useSourcesMenu = ({
             let collectionIds: number[] = [];
 
             let hasTagsInLibrary = false;
+            // Read alongside the collections and tags below, not after them.
+            const savedSearchesRead = effectiveLibraryId && onNavigateToSavedSearches
+                ? availableSavedSearches(effectiveLibraryId).then((searches) => searches.length > 0, () => false)
+                : Promise.resolve(false);
 
             if (effectiveLibraryId) {
                 try {
@@ -223,6 +235,7 @@ export const useSourcesMenu = ({
                     hasTagsInLibrary = false;
                 }
             }
+            const hasSavedSearchesInLibrary = await savedSearchesRead;
 
             const canSelectCollections = Boolean(
                 effectiveLibraryId &&
@@ -311,6 +324,28 @@ export const useSourcesMenu = ({
                                 />
                                 <div>{tagsLabel}</div>
                             </div>
+                        </div>
+                        <div className="flex-1" />
+                        <Icon icon={ArrowRightIcon} className="scale-12 mt-020" />
+                    </div>
+                )
+            });
+
+            if (onNavigateToSavedSearches) filterItems.push({
+                label: `"${savedSearchesLabel}"`,
+                onClick: async () => {
+                    const latestEffectiveLibraryId = getEffectiveLibraryId(getActiveZoteroLibraryId());
+                    if (!latestEffectiveLibraryId) {
+                        return;
+                    }
+                    onNavigateToSavedSearches(latestEffectiveLibraryId);
+                },
+                disabled: !hasSavedSearchesInLibrary,
+                customContent: (
+                    <div className={'display-flex flex-row flex-1 items-start font-color-secondary'}>
+                        <div className="display-flex flex-row gap-2">
+                            <CSSIcon name="search" className="icon-16 font-color-secondary scale-90" />
+                            <div>{savedSearchesLabel}</div>
                         </div>
                         <div className="flex-1" />
                         <Icon icon={ArrowRightIcon} className="scale-12 mt-020" />
@@ -417,6 +452,7 @@ export const useSourcesMenu = ({
         onNavigateToLibraries,
         onNavigateToCollections,
         onNavigateToTags,
+        onNavigateToSavedSearches,
         onNavigateToNotes,
         onSelectFiles,
         getRecentItems,
@@ -425,6 +461,7 @@ export const useSourcesMenu = ({
         entries,
         collectionsLabel,
         tagsLabel,
+        savedSearchesLabel,
     ]);
 
     return { menuItems, isBuilding: builtFrom !== searchResults };

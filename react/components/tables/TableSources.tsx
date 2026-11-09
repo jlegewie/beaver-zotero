@@ -11,11 +11,13 @@ import { resolveLibraryRef } from '../../../src/utils/libraryIdentity';
 import { getItemDisplayName } from '../../../src/utils/itemDisplayName';
 import {
     TABLE_MENU_ENTRIES,
+    hasSavedSearchScope,
     paperOf,
     pickedCollectionScope,
     pickedTagScope,
     portableItemId,
     rowForItem,
+    scopeForSavedSearch,
     scopeMenuFilters,
 } from './card/cardItems';
 import { sourceKindIcon } from './sourceKinds';
@@ -36,7 +38,8 @@ export function removedPaperId(paper: RemovedPaper): string | null {
 
 /**
  * The composer's Add Sources menu, writing to a table: a picked paper joins
- * the table's items entry, a picked collection or tag becomes a source. A
+ * the table's items entry, a picked collection, tag or saved search becomes a
+ * source. A
  * paper already in the table shows checked; it is removed from the row's
  * menu, not here. Excluded libraries are not offered. Each instance owns its
  * menu state, so the toolbar's + Items and the sources popover's "Add items
@@ -93,7 +96,12 @@ export function TableAddSources({
     const canAdd = useCallback((item: Zotero.Item) => rowIdOf(item) !== null, [rowIdOf]);
     const asSourceItem = useCallback((item: Zotero.Item) => paperOf(item), []);
     const scopes = spec.sources;
-    const filters = useMemo(() => scopeMenuFilters((scopes ?? []).flatMap((source) => (source.scope ? [source.scope] : []))), [scopes]);
+    const libraryScopes = useMemo(() => (scopes ?? []).flatMap((source) => (source.scope ? [source.scope] : [])), [scopes]);
+    const filters = useMemo(() => scopeMenuFilters(libraryScopes), [libraryScopes]);
+    const isSavedSearchPicked = useCallback(
+        (search: Zotero.Search) => hasSavedSearchScope(libraryScopes, search),
+        [libraryScopes],
+    );
 
     const addScope = (scope: TableCardLibraryScope) => onAddRef.current({ type: 'library', scope: libraryScope(scope) });
     const target = useMemo<AddSourcesTarget>(
@@ -116,10 +124,15 @@ export function TableAddSources({
                 const scope = pickedTagScope(tag);
                 if (scope) addScope(scope);
             },
+            pickSavedSearch: (search) => {
+                const scope = scopeForSavedSearch(search, searchableLibraryIds);
+                if (scope) addScope(scope);
+            },
+            isSavedSearchPicked,
             attachFiles: () => {},
             entries: TABLE_MENU_ENTRIES,
         }),
-        [isAttached, canAdd, asSourceItem, rowIdOf, filters],
+        [isAttached, canAdd, asSourceItem, rowIdOf, filters, searchableLibraryIds, isSavedSearchPicked],
     );
 
     return (
