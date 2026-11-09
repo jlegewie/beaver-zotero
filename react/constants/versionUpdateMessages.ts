@@ -647,8 +647,8 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
     },
     {
         version: "0.27.0",
-        title: "Research tables: compare papers side by side",
-        text: "Ask Beaver for a table of your papers. It reads each one, answers your questions in columns, and links every answer to its page.",
+        title: "Research tables, right in Zotero",
+        text: "Compare the papers in your library side by side. Beaver reads each one, answers your questions, and links every answer to the exact passage.",
         showcase: 'research-table',
         primaryAction: { type: 'open-beaver', label: 'Try it' },
         inPanel: false,
