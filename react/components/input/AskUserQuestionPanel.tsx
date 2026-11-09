@@ -7,6 +7,7 @@ import {
     sendAskUserQuestionResponseAtom,
 } from '../../atoms/agentRunAtoms';
 import { useStopRun } from '../../hooks/useStopRun';
+import { useWriteInsteadOfParkedCard } from '../../hooks/useWriteInsteadOfParkedCard';
 import AskUserQuestionCard from '@beaver/agent-ui/chat/AskUserQuestionCard';
 import { RECONNECT_HELD_CAPTION } from '@beaver/agent-core/transport/connectionFailure';
 import { useRunReconnectShown } from '../../hooks/useVisibleReconnect';
@@ -45,12 +46,14 @@ export const AskUserQuestionPanel: React.FC<AskUserQuestionPanelProps> = ({ pend
     }, [sendResponse, pendingQuestion]);
 
     const handleStop = useStopRun('AskUserQuestionPanel');
+    const writeInstead = useWriteInsteadOfParkedCard(pendingQuestion.toolcallId);
 
     return (
         <AskUserQuestionCard
             pendingQuestion={pendingQuestion}
             onSubmit={handleSubmit}
-            onStop={handleStop}
+            onStop={writeInstead ? undefined : handleStop}
+            onWriteInstead={writeInstead}
             disabled={isReconnecting}
             heldCaption={reconnectShown ? RECONNECT_HELD_CAPTION : undefined}
         />

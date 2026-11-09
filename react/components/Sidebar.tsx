@@ -6,6 +6,7 @@ import CreditConfirmationPanel from "./input/CreditConfirmationPanel"
 import TableCardPanel from "./tables/card/TableCardPanel"
 import { pendingApprovalsAtom } from '../agents/agentActions';
 import { pendingQuestionsAtom } from '@beaver/agent-core/run-state/pendingQuestions';
+import { isThreadParkedAtom, setAsideParkedCardsAtom } from '../atoms/parkedRuns';
 import { pendingBatchApprovalsAtom } from '@beaver/agent-core/run-state/pendingBatchApprovals';
 import { pendingCreditConfirmationsAtom } from '@beaver/agent-core/run-state/pendingCreditConfirmations';
 import { pendingTableCardsAtom } from '@beaver/agent-core/run-state/pendingTableCards';
@@ -106,6 +107,20 @@ const getFocusableElements = (root: HTMLElement): HTMLElement[] => {
 
     return elements;
 };
+
+/**
+ * The cards of `cards` the user has not set aside. Only a parked run's cards
+ * can be set aside; a live run's always take the composer.
+ */
+function withoutSetAside<T>(
+    cards: ReadonlyMap<string, T>,
+    toolCallIdOf: (card: T) => string,
+    isThreadParked: boolean,
+    setAside: ReadonlySet<string>,
+): ReadonlyMap<string, T> {
+    if (!isThreadParked || setAside.size === 0) return cards;
+    return new Map([...cards].filter(([, card]) => !setAside.has(toolCallIdOf(card))));
+}
 
 const SidebarShell = ({
     children,
@@ -225,12 +240,16 @@ const Sidebar = ({ location, isWindow = false, header: headerOverride }: Sidebar
     const pendingBatchApprovalsMap = useAtomValue(pendingBatchApprovalsAtom);
     const pendingCreditConfirmationsMap = useAtomValue(pendingCreditConfirmationsAtom);
     const pendingTableCardsMap = useAtomValue(pendingTableCardsAtom);
+    // A parked run's card the user set aside to write a message instead
+    // gives the composer back.
+    const setAsideParkedCards = useAtomValue(setAsideParkedCardsAtom);
+    const isThreadParked = useAtomValue(isThreadParkedAtom);
     const composerTakeover = selectComposerTakeover({
         pendingApprovalCount: pendingApprovalsMap.size,
-        batchApprovals: pendingBatchApprovalsMap,
-        tableCards: pendingTableCardsMap,
+        batchApprovals: withoutSetAside(pendingBatchApprovalsMap, (approval) => approval.toolcallId, isThreadParked, setAsideParkedCards),
+        tableCards: withoutSetAside(pendingTableCardsMap, (card) => card.toolcall_id, isThreadParked, setAsideParkedCards),
         creditConfirmations: pendingCreditConfirmationsMap,
-        questions: pendingQuestionsMap,
+        questions: withoutSetAside(pendingQuestionsMap, (question) => question.toolcallId, isThreadParked, setAsideParkedCards),
     });
 
     // Find in chat. Component state, not an atom: one Jotai store is shared by

@@ -178,6 +178,24 @@ export interface BeaverAgentPrompt {
     origin?: PromptOrigin;
     /** Saved actions invoked as /command tokens in `content` */
     actions?: PromptAction[];
+    /**
+     * Answers to cards of the thread's open parked run, keyed by tool call id.
+     * Each value is the response the card sends live, `type` included. Its
+     * presence makes the request a resume of the run named in
+     * `resumes_run_id`, with empty `content`; it may answer any non-empty
+     * subset of the open cards.
+     */
+    deferred_results?: Record<string, ParkedCardAnswer>;
+}
+
+/** The live response object of a card, as a parked resume carries it. */
+export interface ParkedCardAnswer {
+    type: string;
+}
+
+/** Whether a prompt continues an earlier run rather than starting a turn. */
+export function isContinuationPrompt(prompt: BeaverAgentPrompt): boolean {
+    return !!prompt.is_resume || !!prompt.deferred_results;
 }
 
 // ============================================================================
@@ -302,7 +320,44 @@ export interface ToolCallPart {
 // Agent Run Types
 // ============================================================================
 
-export type AgentRunStatus = 'in_progress' | 'completed' | 'error' | 'canceled' | 'awaiting_deferred';
+export type AgentRunStatus = 'in_progress' | 'completed' | 'error' | 'canceled' | 'awaiting_deferred' | 'parked';
+
+/**
+ * Whether a run ended normally: it finished, or it parked on cards the user
+ * has yet to answer. Either way the answer it wrote so far is complete.
+ */
+export function isRunFinished(run: { status: AgentRunStatus } | null | undefined): boolean {
+    return run?.status === 'completed' || run?.status === 'parked';
+}
+
+/** The kinds of card a run can park on. */
+export type ParkedCardKind = 'ask_user_question' | 'agent_action_approval' | 'batch_approval' | 'table_card';
+
+/**
+ * One open tool call of a parked run. `request` is the card's wire request,
+ * exactly as it was (or would have been) sent live. Other stored fields are
+ * the backend's and are not read here.
+ */
+export interface ParkedDeferral {
+    kind: ParkedCardKind | string;
+    tool_call_id: string;
+    tool_name: string;
+    /** question_id / action_id / approval_id / card_id */
+    correlation_id: string;
+    request: Record<string, any>;
+}
+
+/**
+ * The open cards of a run that ended waiting on the user. Stored on the run
+ * (`AgentRun.parked`) and sent on its `run_complete`. A run that answers some
+ * of them and parks again lists only the rest.
+ */
+export interface ParkedRun {
+    version: number;
+    parked_at: string;
+    reason: 'timeout' | 'client_left' | 'connection_lost' | string;
+    requests: ParkedDeferral[];
+}
 
 /**
  * Whether a run is still live: streaming, or paused waiting on the user to
@@ -377,6 +432,13 @@ export interface AgentRun {
      * before the field existed; `continuationOfferFor` covers those.
      */
     continuation?: ContinuationOffer | null;
+
+    /**
+     * Set on a run that ended waiting on the user (status `parked`): its open
+     * cards. The run stays answerable while it is the thread's last run with a
+     * transcript.
+     */
+    parked?: ParkedRun | null;
 
     /** The model messages (built incrementally during streaming) */
     model_messages: ModelMessage[];

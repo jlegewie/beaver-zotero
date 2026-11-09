@@ -72,6 +72,11 @@ export interface BatchApprovalCardProps {
      * answers are unavailable then, and this is the one way out.
      */
     onStop?: () => void;
+    /**
+     * Set the card aside and write a message instead, for a run that has
+     * already ended waiting on the decision: a message moves on without it.
+     */
+    onWriteInstead?: () => void;
 }
 
 /**
@@ -117,6 +122,7 @@ export const BatchApprovalCard: React.FC<BatchApprovalCardProps> = ({
     disabled = false,
     heldCaption,
     onStop,
+    onWriteInstead,
 }) => {
     const [draft, setDraft] = useState<BatchApprovalDraft>(
         () => initialDraft(approval.defaultMode, approval.userInstructionsPrefill),
@@ -359,6 +365,19 @@ export const BatchApprovalCard: React.FC<BatchApprovalCardProps> = ({
                                 style={{ padding: '2px 6px', fontSize: '0.95rem' }}
                             />
                         </div>
+                    )}
+                    {onWriteInstead && (
+                        <Tooltip content="Write a message instead" showArrow singleLine>
+                            <Button
+                                variant="ghost"
+                                ariaLabel="Write a message instead"
+                                style={{ padding: '2px 5px' }}
+                                onClick={onWriteInstead}
+                                className="flex-none"
+                            >
+                                Write instead
+                            </Button>
+                        </Tooltip>
                     )}
                     {disabled && onStop && (
                         <Tooltip content="Stop the agent run" showArrow singleLine>

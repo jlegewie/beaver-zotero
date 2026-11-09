@@ -2,7 +2,7 @@ import { threadReadOnlyAtom } from '../../runtime/threadProjection';
 import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
 import React, { useMemo, useEffect, useState, useCallback } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { AgentRun } from '@beaver/agent-core/agents/types';
+import { AgentRun, isRunFinished } from '@beaver/agent-core/agents/types';
 import { RepeatIcon, MoreHorizontalIcon, ArrowDownIcon, ArrowRightIcon, CopyIcon, LinkIcon, ToolsIcon } from '../icons/icons';
 import { copyToClipboard } from '../../utils/clipboard';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
@@ -356,7 +356,7 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
                     />
 
                     {/* Usage display */}
-                    {(getHost().config?.isDevelopment() ?? false) && run.status === 'completed' && chainUsage != null && chainCost != null && (
+                    {(getHost().config?.isDevelopment() ?? false) && isRunFinished(run) && chainUsage != null && chainCost != null && (
                         <TokenUsageDisplay usage={chainUsage} cost={chainCost} />
                     )}
 

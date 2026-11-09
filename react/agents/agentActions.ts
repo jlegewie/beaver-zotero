@@ -1101,12 +1101,15 @@ export const clearAgentActionsAtom = atom(
 export const pendingApprovalsAtom = atom<Map<string, PendingApproval>>(new Map());
 
 /**
- * Add a pending approval from a WS event.
- * Supports multiple concurrent approvals for parallel tool calls.
+ * Add a pending approval from a WS event, or from the stored card of a parked
+ * run. Supports multiple concurrent approvals for parallel tool calls.
+ *
+ * `silent` skips the OS notification: a parked card restored on load is not
+ * news to the user.
  */
 export const addPendingApprovalAtom = atom(
     null,
-    (_, set, event: WSDeferredApprovalRequest) => {
+    (_, set, event: WSDeferredApprovalRequest, options?: { silent?: boolean }) => {
         set(pendingApprovalsAtom, (prev) => {
             const next = new Map(prev);
             next.set(event.action_id, {
@@ -1132,7 +1135,7 @@ export const addPendingApprovalAtom = atom(
 
         // Surface an OS-native notification if the user can't currently see
         // the approval UI (e.g. working in another app).
-        notifyApprovalRequest(event);
+        if (!options?.silent) notifyApprovalRequest(event);
     }
 );
 
@@ -1212,10 +1215,11 @@ export const hasPendingApprovalsAtom = atom(
     (get) => get(pendingApprovalsAtom).size > 0
 );
 
-// Note: `pendingApprovalsAtom` means "the backend is blocked waiting on this
-// decision". Do not rebuild entries from stored pending actions — an action left
-// pending by a timeout has no waiter, so a re-added entry would show an
-// "awaiting approval" card whose Approve button sends into the void. Such
-// actions are applied locally through the `status === 'pending'` controls
-// instead, and `staleApprovalActionIdsAtom` marks approvals whose channel has
-// closed.
+// Note: `pendingApprovalsAtom` means "a run is waiting on this decision".
+// Do not rebuild entries from stored pending actions — an action left pending
+// by a timeout has no waiter, so a re-added entry would show an "awaiting
+// approval" card whose Approve button sends into the void. Such actions are
+// applied locally through the `status === 'pending'` controls instead, and
+// `staleApprovalActionIdsAtom` marks approvals whose channel has closed. The
+// one exception is the open parked run: its stored cards are restored by
+// `syncParkedCardsAtom`, and an answer to one resumes that run.

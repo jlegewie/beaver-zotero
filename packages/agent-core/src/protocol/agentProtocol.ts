@@ -253,6 +253,22 @@ export interface WSRunCompleteEvent extends WSBaseEvent {
      * the wire for clients released before that change.
      */
     soft_cap_triggered?: boolean;
+    /**
+     * Set when the run ended waiting on the user: its open cards, which stay
+     * answerable. Each answer resumes the run. Absent otherwise.
+     */
+    parked?: import('../agents/types').ParkedRun | null;
+}
+
+/**
+ * The backend refused a `park` frame: the run waits on something that cannot
+ * park (a credit confirmation, say), so it keeps running. The client stops it
+ * as it would without parking.
+ */
+export interface WSParkRefusedEvent extends WSBaseEvent {
+    event: 'park_refused';
+    run_id?: string | null;
+    reason: 'not_parkable' | string;
 }
 
 /**
@@ -2799,6 +2815,52 @@ export interface WSAskUserQuestionResponse {
     cancelled: boolean;
 }
 
+// The response objects below are what each card sends live. A parked card's
+// answer is the same object, carried in `BeaverAgentPrompt.deferred_results`.
+
+export function deferredApprovalResponse(
+    actionId: string,
+    approved: boolean,
+    userInstructions?: string | null,
+    actionChanges?: import('./duplicates').MergeItemsChoices,
+): WSDeferredApprovalResponse {
+    return {
+        type: 'deferred_approval_response',
+        action_changes: actionChanges,
+        action_id: actionId,
+        approved,
+        user_instructions: userInstructions,
+    };
+}
+
+export function batchApprovalResponse(
+    approvalId: string,
+    approved: boolean,
+    mode: BatchApprovalMode,
+    userInstructions?: string | null,
+): WSBatchApprovalResponse {
+    return {
+        type: 'batch_approval_response',
+        approval_id: approvalId,
+        approved,
+        mode,
+        user_instructions: userInstructions,
+    };
+}
+
+export function askUserQuestionResponse(
+    questionId: string,
+    answers: AskUserQuestionAnswer[],
+    cancelled: boolean = false,
+): WSAskUserQuestionResponse {
+    return {
+        type: 'ask_user_question_response',
+        question_id: questionId,
+        answers,
+        cancelled,
+    };
+}
+
 /** Union type for all WebSocket events */
 export type WSEvent =
     | WSReadyEvent
@@ -2862,7 +2924,8 @@ export type WSEvent =
     | import('./tableCardProtocol').WSTableCardRequest
     | import('./tableCardProtocol').WSTableCardStale
     // User interaction events
-    | WSAskUserQuestionRequest;
+    | WSAskUserQuestionRequest
+    | WSParkRefusedEvent;
 
 // =============================================================================
 // Client Message Types (sent from frontend to backend)
@@ -3144,6 +3207,14 @@ export const CLIENT_FEATURES = {
      * its execute, so a lost result leaves a record to complete.
      */
     UNDELIVERED_ACTION_ACK: 'undelivered_action_ack',
+    /**
+     * A run whose card goes unanswered parks instead of giving up: it ends
+     * with its open cards stored (`run_complete.parked`, `AgentRun.parked`),
+     * the client keeps them answerable, and each answer resumes the run
+     * (`deferred_results` on the prompt). The client also sends a `park` frame
+     * when it leaves a run that is waiting only on such cards.
+     */
+    PARKED_RUNS: 'parked_runs',
 } as const;
 
 /** Client type identifier for the Zotero plugin. */

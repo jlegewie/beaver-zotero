@@ -10,6 +10,8 @@ const attachCollectionsMock = vi.fn();
 const cancelMock = vi.fn();
 const leaveRunMock = vi.fn(() => false);
 const canLeaveReconnectingRunMock = vi.fn(() => false);
+const parkableRunIdMock = vi.fn((): string | null => null);
+const parkRunMock = vi.fn(async () => 'ended');
 const getThreadRunsMock = vi.fn();
 const getThreadMock = vi.fn();
 vi.mock('@beaver/agent-core/transport/agentService', () => ({
@@ -22,7 +24,14 @@ vi.mock('@beaver/agent-core/transport/agentService', () => ({
             return { tail_run_id: history.tail_run_id, activity: history.activity };
         },
     },
-    agentService: { cancel: (...args: unknown[]) => cancelMock(...args), cancelHandoff: () => null, canLeaveRun: () => false, leaveRun: (...args: unknown[]) => leaveRunMock(...(args as [])), isReattaching: () => false },
+    agentService: {
+        cancel: (...args: unknown[]) => cancelMock(...args),
+        cancelHandoff: () => null,
+        canLeaveRun: () => false,
+        leaveRun: (...args: unknown[]) => leaveRunMock(...(args as [])),
+        isReattaching: () => false,
+        parkRun: (...args: unknown[]) => parkRunMock(...(args as [])),
+    },
 }));
 
 vi.mock('@beaver/agent-core/transport/threadService', () => ({
@@ -140,6 +149,15 @@ vi.mock('../../../react/atoms/agentRunAtoms', async () => {
         isWSChatPendingAtom: atom(false),
         isWSConnectedAtom: atom(false),
         isWSReadyAtom: atom(false),
+        parkableRunId: () => parkableRunIdMock(),
+    };
+});
+
+vi.mock('../../../react/atoms/parkedRuns', async () => {
+    const { atom } = await import('jotai');
+    return {
+        clearParkedAnswersAtom: atom(null, () => {}),
+        syncParkedCardsAtom: atom(null, () => {}),
     };
 });
 
@@ -221,6 +239,7 @@ describe('interrupt-active-run confirm', () => {
         confirmMock.mockReturnValue(true);
         leaveRunMock.mockReturnValue(false);
         canLeaveReconnectingRunMock.mockReturnValue(false);
+        parkableRunIdMock.mockReturnValue(null);
         getThreadRunsMock.mockResolvedValue({ runs: [], agent_actions: [] });
         getThreadMock.mockResolvedValue({ name: 'Thread', zotero_user_id: '111', zotero_local_id: 'CURKEY' });
     });
@@ -400,6 +419,36 @@ describe('interrupt-active-run confirm', () => {
             // Already incremented by the time the id is written, so nothing can
             // observe the new chat under the old count.
             expect(seenWhenIdChanged).toContain(before + 1);
+        });
+    });
+
+    describe('leaving a run that waits only on cards', () => {
+        beforeEach(() => {
+            parkableRunIdMock.mockReturnValue('run-1');
+        });
+
+        it('starts a new chat without asking, parking the run instead of stopping it', async () => {
+            store.set(activeRunAtom, run('in_progress'));
+            store.set(isWSChatPendingAtom, true);
+
+            await store.set(newThreadAtom, { skipAutoPopulate: true });
+
+            expect(confirmMock).not.toHaveBeenCalled();
+            expect(parkRunMock).toHaveBeenCalledWith('run-1');
+            expect(cancelMock).not.toHaveBeenCalled();
+            expect(store.get(activeRunAtom)).toBeNull();
+        });
+
+        it('opens another chat without asking, parking the run instead of stopping it', async () => {
+            store.set(activeRunAtom, run('in_progress'));
+            store.set(isWSChatPendingAtom, true);
+
+            await store.set(loadThreadAtom, loadArgs);
+
+            expect(confirmMock).not.toHaveBeenCalled();
+            expect(parkRunMock).toHaveBeenCalledWith('run-1');
+            expect(cancelMock).not.toHaveBeenCalled();
+            expect(store.get(currentThreadIdAtom)).toBe('thread-1');
         });
     });
 

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { AgentRunStatus, ToolCallPart } from '@beaver/agent-core/agents/types';
-import { getToolCallStatus, runToolResultsAtom } from '@beaver/agent-core/run-state/atoms';
+import { getToolCallStatus, toolResultsForCallsAtom } from '@beaver/agent-core/run-state/atoms';
 import {
     AgentAction,
     agentActionsForToolcallsAtom,
@@ -17,6 +17,7 @@ import {
     sendApprovalResponseAtom,
     staleApprovalActionIdsAtom,
 } from '../../../atoms/agentRunAtoms';
+import { pendingParkedAnswerIdsAtom } from '../../../atoms/parkedRuns';
 import {
     agentActionItemTitleAtom,
     getAgentActionItemTitleKey,
@@ -110,13 +111,13 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
     const isRunStreaming = runStatus === 'in_progress';
     const [isHovered, setIsHovered] = useState(false);
 
-    // Scoped to this run: every call in the group belongs to it, and a
-    // thread-wide subscription would re-render the group on every streamed frame.
-    const resultsMap = useAtomValue(useMemo(() => runToolResultsAtom(runId), [runId]));
     // The actions and live approvals of this group's calls only, one entry per
     // part: partStates re-derives when one of them changes, and an action or
     // approval elsewhere in the thread leaves the group alone.
     const toolcallIds = useMemo(() => parts.map((part) => part.tool_call_id), [parts]);
+    // Scoped to the group's calls, wherever in the thread they returned: the
+    // result of a parked run's call arrives with the run that answered it.
+    const resultsMap = useAtomValue(useMemo(() => toolResultsForCallsAtom(toolcallIds), [toolcallIds]));
     const groupActions = useAtomValue(
         useMemo(() => agentActionsForToolcallsAtom(toolcallIds), [toolcallIds]),
     );
@@ -243,9 +244,15 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         [partStates],
     );
 
+    // A call whose parked card was answered is decided by the run that
+    // resumes it: its action is not applied or rejected here meanwhile. Each
+    // row also shows its own answer as being applied.
+    const pendingParkedAnswerIds = useAtomValue(pendingParkedAnswerIdsAtom);
     const reapplicableActions = useMemo(
-        () => allActions.filter((a) => a.status === 'pending' || a.status === 'rejected' || a.status === 'undone'),
-        [allActions],
+        () => allActions.filter((a) =>
+            (a.status === 'pending' || a.status === 'rejected' || a.status === 'undone')
+            && !(a.toolcall_id && pendingParkedAnswerIds.has(a.toolcall_id))),
+        [allActions, pendingParkedAnswerIds],
     );
     // An edit whose target is gone from the note fails the same way on every
     // retry, so it is reported instead of offered for Retry. So is one whose
@@ -774,8 +781,9 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         && (aggregateStatus === 'awaiting' || aggregateStatus === 'pending' || isStaleOnlyDecision);
     const rejectableActionCount = useMemo(
         () => pendingApprovalsForGroup.length
-            + allActions.filter((a) => a.status === 'pending' || isStaleProposal(a)).length,
-        [pendingApprovalsForGroup, allActions],
+            + allActions.filter((a) =>
+                (a.status === 'pending' || isStaleProposal(a)) && !(a.toolcall_id && pendingParkedAnswerIds.has(a.toolcall_id))).length,
+        [pendingApprovalsForGroup, allActions, pendingParkedAnswerIds],
     );
 
     const showFooterApply =
@@ -951,7 +959,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                         <div ref={footer.ref} className="display-flex flex-row items-center gap-2 px-2 py-2">
                             {/* Only while the run is waiting on this card: once
                                 it is not, there is no run left to grant. */}
-                            {hasPendingApprovals && (
+                            {hasPendingApprovals && runStatus !== 'parked' && (
                                 <div className="flex-none">
                                     <RunPermissionButton
                                         mode={runPermissionMode}

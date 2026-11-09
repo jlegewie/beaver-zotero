@@ -39,6 +39,12 @@ export interface AskUserQuestionCardProps {
      */
     onStop?: () => void;
     /**
+     * Set the card aside and write a message instead. Offered in place of
+     * Stop when the run has already ended waiting on the answer: there is no
+     * run to stop, and a message moves on without the answer.
+     */
+    onWriteInstead?: () => void;
+    /**
      * Hold the answer back for now (the run's connection is being recovered).
      * The user can still work through the questions and stop the run.
      */
@@ -69,6 +75,7 @@ export const AskUserQuestionCard: React.FC<AskUserQuestionCardProps> = ({
     pendingQuestion,
     onSubmit,
     onStop,
+    onWriteInstead,
     disabled = false,
     heldCaption,
 }) => {
@@ -313,7 +320,18 @@ export const AskUserQuestionCard: React.FC<AskUserQuestionCardProps> = ({
 
                 {/* Footer: Stop ... Skip Next/Submit */}
                 <div className="display-flex flex-row items-center pt-2 gap-2">
-                    {onStop && (
+                    {onWriteInstead ? (
+                        <Tooltip content="Write a message instead" showArrow singleLine>
+                            <Button
+                                variant="ghost"
+                                ariaLabel="Write a message instead"
+                                style={{ padding: '2px 5px' }}
+                                onClick={onWriteInstead}
+                            >
+                                Write instead
+                            </Button>
+                        </Tooltip>
+                    ) : onStop && (
                         <Tooltip content="Stop the agent run" showArrow singleLine>
                             <Button
                                 variant="outline"

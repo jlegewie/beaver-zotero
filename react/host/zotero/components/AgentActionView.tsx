@@ -19,6 +19,7 @@ import {
     removeApprovalResponseIntentAtom,
     sendApprovalResponseAtom,
 } from '../../../atoms/agentRunAtoms';
+import { pendingParkedAnswerIdsAtom } from '../../../atoms/parkedRuns';
 import {
     agentActionItemTitleAtom,
     getAgentActionItemTitleKey,
@@ -306,6 +307,15 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         const wasAwaiting = previousPendingApproval !== null;
         const isNoLongerAwaiting = pendingApproval === null;
 
+        // Waiting on a decision again: a parked card whose answer did not
+        // reach a run (the resume failed) is answerable once more.
+        if (!wasAwaiting && !isNoLongerAwaiting && (isProcessingApproval || isExternallyProcessing)) {
+            setIsProcessingApproval(false);
+            setIsExternallyProcessing(false);
+            setProcessingApproval(null);
+            setClickedButton(null);
+        }
+
         if (wasAwaiting && isNoLongerAwaiting) {
             const previousActionId = previousPendingApproval.actionId;
             // Read when the approval resolves rather than subscribed to: only
@@ -334,6 +344,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     }, [
         pendingApproval,
         isProcessingApproval,
+        isExternallyProcessing,
         isRunPending,
         hasToolReturn,
         jotaiStore,
@@ -355,7 +366,9 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         }
     }, [isProcessingApproval, isExternallyProcessing, action?.status, hasToolReturn, isRunPending, action, setProcessingApproval]);
 
-    const isProcessing = isProcessingApproval || isProcessingAction || isExternallyProcessing;
+    // An answer to this parked card is on its way to the run that resumes it.
+    const isParkedAnswerPending = useAtomValue(pendingParkedAnswerIdsAtom).has(toolcallId);
+    const isProcessing = isProcessingApproval || isProcessingAction || isExternallyProcessing || isParkedAnswerPending;
     const actionDisplayStatus = action ? getCreateAnnotationsDisplayStatus(action) : null;
     const status: ActionStatus | 'awaiting' = (isAwaitingApproval || isProcessing)
         ? 'awaiting'
@@ -836,7 +849,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                             control is about this run; once it is not, there is
                             no run left to grant, so it goes back to being the
                             standing per-tool preference. */}
-                        {isAwaitingApproval && !hasNoActionData && !isConfirmAction && (
+                        {isAwaitingApproval && runStatus !== 'parked' && !hasNoActionData && !isConfirmAction && (
                             <div className="flex-none">
                                 <RunPermissionButton
                                     mode={runPermissionMode}

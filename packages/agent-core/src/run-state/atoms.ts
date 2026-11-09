@@ -77,7 +77,7 @@ export const resumedRunIdsAtom = atom((get) => {
     const resumedIds = new Set<string>();
 
     for (const run of runs) {
-        if (run.user_prompt.is_resume && run.user_prompt.resumes_run_id) {
+        if (run.user_prompt.resumes_run_id) {
             resumedIds.add(run.user_prompt.resumes_run_id);
         }
     }
@@ -337,6 +337,7 @@ export const toolResultsMapAtom = atom((get) => mergeRunToolResults(get(allRunsA
 // mutated in place.
 
 const toolResultAtomCache = new Map<string, Atom<ToolResult | undefined>>();
+const toolResultsForCallsAtomCache = new Map<string, Atom<ReadonlyMap<string, ToolResult>>>();
 const runToolResultsAtomCache = new Map<string, Atom<ReadonlyMap<string, ToolResult>>>();
 const resumeChainAtomCache = new Map<string, Atom<AgentRun[]>>();
 const resumeChainValueCache = new Map<string, AgentRun[]>();
@@ -347,6 +348,32 @@ export function toolResultAtom(toolCallId: string): Atom<ToolResult | undefined>
     if (!cached) {
         cached = atom((get) => get(toolResultsMapAtom).get(toolCallId));
         toolResultAtomCache.set(toolCallId, cached);
+    }
+    return cached;
+}
+
+/**
+ * Results of the given tool calls, found anywhere in the thread: a call a
+ * parked run made returns in the later run that answered it. Holds its
+ * previous Map while none of these results changed.
+ */
+export function toolResultsForCallsAtom(toolCallIds: readonly string[]): Atom<ReadonlyMap<string, ToolResult>> {
+    const key = toolCallIds.join('\u0000');
+    let cached = toolResultsForCallsAtomCache.get(key);
+    if (!cached) {
+        let previous: ReadonlyMap<string, ToolResult> = EMPTY_TOOL_RESULTS;
+        cached = atom((get) => {
+            const next = new Map<string, ToolResult>();
+            for (const toolCallId of toolCallIds) {
+                const result = get(toolResultAtom(toolCallId));
+                if (result) next.set(toolCallId, result);
+            }
+            const unchanged = next.size === previous.size
+                && [...next].every(([toolCallId, result]) => previous.get(toolCallId) === result);
+            if (!unchanged) previous = next;
+            return previous;
+        });
+        toolResultsForCallsAtomCache.set(key, cached);
     }
     return cached;
 }
@@ -409,6 +436,7 @@ export function resumeChainAtom(runId: string): Atom<AgentRun[]> {
  */
 export function resetRunSelectorCaches(): void {
     toolResultAtomCache.clear();
+    toolResultsForCallsAtomCache.clear();
     runToolResultsAtomCache.clear();
     resumeChainAtomCache.clear();
     resumeChainValueCache.clear();
@@ -570,6 +598,9 @@ export function getToolCallStatusFromResult(
     runStatus?: AgentRunStatus
 ): ToolCallStatus {
     if (!result && runStatus && runStatus === 'in_progress') return 'in_progress';
+    // A parked run's open calls wait on the user; their results arrive with
+    // the run that answers them, which `toolResultAtom` finds thread-wide.
+    if (!result && runStatus === 'parked') return 'in_progress';
     if (!result) return 'error';
 
     // Two shapes reach here: a retry request (the model was asked to fix its
@@ -770,7 +801,9 @@ export function updateRunWithToolCallArgsStream(run: AgentRun, event: WSToolCall
 export function updateRunComplete(run: AgentRun, event: WSRunCompleteEvent): AgentRun {
     return {
         ...run,
-        status: 'completed',
+        status: event.parked ? 'parked' : 'completed',
+        // The cards this run left open, when it ended waiting on the user.
+        parked: event.parked ?? null,
         total_usage: event.usage ?? undefined,
         total_cost: event.cost ?? undefined,
         completed_at: new Date().toISOString(),
