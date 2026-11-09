@@ -320,7 +320,10 @@ export function ResearchTable({
                 0,
             );
             setPinned(width > 0 && scroller.clientWidth >= 2 * width);
-            scroller.style.scrollPaddingTop = `${head?.offsetHeight ?? 0}px`;
+            const headHeight = `${head?.offsetHeight ?? 0}px`;
+            scroller.style.scrollPaddingTop = headHeight;
+            // The start guide beside the rows sits under the sticky header.
+            scroller.style.setProperty("--rt-head-h", headHeight);
         };
         const observer = new Observer(update);
         observer.observe(scroller);
@@ -666,16 +669,20 @@ export function ResearchTable({
     const selectedIds = state.rows.filter((row) => state.selectedRows.has(row.id)).map((row) => row.id);
     const sourceCount = table.sources?.length ?? 0;
     const items = table.rows.length;
-    // An empty table that can be edited shows how to start it where its rows
-    // would be, and none of the controls that act on rows.
-    const emptyGuide =
-        items === 0 && editing && !editDisabled ? (
+    // A table that can be edited shows how to start it until it has rows and
+    // a question: where its rows would be while it has none (and none of the
+    // controls that act on rows), then beside the rows, where the questions'
+    // columns will be, until the first question is added. Not while a search
+    // or filter hides every row: the grid says so instead.
+    const startGuide =
+        editing && !editDisabled && (items === 0 || (columns.questions.length === 0 && editing.onAddColumn && state.rows.length > 0)) ? (
             <EmptyTableGuide
                 addItems={editing.addItems}
                 onAddColumn={columns.questions.length === 0 ? editing.onAddColumn : undefined}
                 addColumnDisabledReason={addColumnDisabled}
                 onAskBeaver={onAskBeaver}
                 canFill={!!fill}
+                itemCount={items}
             />
         ) : null;
     const sourcesLabel = `${sourceCount ? `${sourceCount} ${sourceCount === 1 ? "source" : "sources"} · ` : ""}${items} ${items === 1 ? "item" : "items"}`;
@@ -977,7 +984,8 @@ export function ResearchTable({
                                     virtualize={virtualize}
                                     emptyText="No items yet"
                                     filteredEmptyText="No rows match the search or filters"
-                                    emptyContent={emptyGuide}
+                                    emptyContent={items === 0 ? startGuide : null}
+                                    columnsGuide={items > 0 ? startGuide : null}
                                 />
                             </div>
                         </div>
