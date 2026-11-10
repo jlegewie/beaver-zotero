@@ -3,6 +3,8 @@ import { useAtomValue } from 'jotai';
 import { allLibrariesExcludedAtom } from "../../atoms/profile";
 import RecentChats from "../RecentChats";
 import HomeLauncher from "../HomeLauncher";
+import FeatureCreditsCard from "../featureCredits/FeatureCreditsCard";
+import { activeFeatureTaskAtom, featureCreditsCardVisibleAtom } from "../../atoms/featureCredits";
 import InputArea from "../input/InputArea";
 import DragDropWrapper from "../input/DragDropWrapper";
 import PopupOverlayContainer from "../PopupOverlayContainer";
@@ -36,6 +38,10 @@ const AllLibrariesExcludedMessage = () => (
 
 const HomePage: React.FC<HomePageProps> = ({ isWindow = false, inputRef }) => {
     const allLibrariesExcluded = useAtomValue(allLibrariesExcludedAtom);
+    const featureCreditsVisible = useAtomValue(featureCreditsCardVisibleAtom);
+    const activeFeatureTask = useAtomValue(activeFeatureTaskAtom);
+    // A setup card stays while its task is open, even if the list is dismissed.
+    const showFeatureCredits = !allLibrariesExcluded && (featureCreditsVisible || !!activeFeatureTask);
 
     // Beta versions use a pre-release tag (e.g. "0.20.0-beta.1")
     const isBeta = /-beta\.\d+$/.test(Zotero.Beaver?.pluginVersion ?? "");
@@ -69,6 +75,9 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false, inputRef }) => {
 
                     {/* Bottom spacer */}
                     <div className="flex-1" />
+
+                    {/* Feature-credit tasks, above recent chats */}
+                    {showFeatureCredits && <FeatureCreditsCard />}
                 </div>
             </div>
 

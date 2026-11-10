@@ -129,6 +129,23 @@ describe('locked action mutation guards', () => {
     });
 });
 
+describe('built-in-only fields on duplicated actions', () => {
+    it('drops argumentRequired when a built-in is duplicated into a custom action', () => {
+        const annotate = BUILTIN_ACTIONS.find(a => a.id === 'builtin-annotate')!;
+        const store = makeStore([annotate]);
+
+        const result = store.set(importActionAtom, { ...annotate, title: `${annotate.title} (copy)` });
+
+        expect(result.action.argumentRequired).toBeUndefined();
+        expect(result.action.argumentRequiredHint).toBeUndefined();
+        const saved = saveActionCustomizationsMock.mock.calls[0][0];
+        const copy = saved.custom.find((a: Action) => a.id === result.action.id);
+        expect(copy.argumentRequired).toBeUndefined();
+        // The built-in itself keeps it: it is not an override field.
+        expect(saved.overrides[annotate.id]).toBeUndefined();
+    });
+});
+
 describe('importActionAtom — conflict handling', () => {
     it('keeps a free id and a free command untouched', () => {
         const store = makeStore();

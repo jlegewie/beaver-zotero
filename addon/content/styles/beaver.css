@@ -6319,3 +6319,148 @@
 .beaver-root .tool-header-toggle[aria-expanded="true"] {
     background-color: var(--fill-quinary);
 }
+
+/* Feature credits: the home card ("Get more out of Beaver") and the
+   completion card shown in a chat once a task is earned. */
+.beaver-root .feature-credits-card {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px 8px 8px 12px;
+    border: 1px solid var(--beaver-border-subtle);
+    border-radius: var(--beaver-radius-card);
+    background-color: var(--beaver-fill-subtle);
+    font-size: 0.95rem;
+}
+.beaver-root .feature-credits-header {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+.beaver-root .feature-credits-title {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--fill-primary);
+}
+.beaver-root .feature-credits-text {
+    margin: 0;
+    padding-right: 4px;
+    color: var(--fill-secondary);
+    line-height: 1.45;
+}
+.beaver-root .feature-credits-list {
+    list-style: none;
+    margin: 0 0 0 -6px;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+}
+.beaver-root .feature-credits-row {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 8px;
+    width: 100%;
+    padding: 5px 6px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    text-align: left;
+    font: inherit;
+    color: inherit;
+}
+.beaver-root .feature-credits-row-button {
+    cursor: pointer;
+}
+.beaver-root .feature-credits-row-button:hover {
+    background-color: var(--beaver-fill-hover);
+}
+.beaver-root .feature-credits-row-mark {
+    flex: none;
+    margin-top: 2px;
+}
+.beaver-root .feature-credits-row-arrow {
+    flex: none;
+    margin-top: 2px;
+}
+.beaver-root .feature-credits-row-text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    line-height: 1.3;
+}
+.beaver-root .feature-credits-row-subtitle {
+    font-size: 0.9em;
+    color: var(--fill-tertiary);
+}
+.beaver-root .feature-credits-steps {
+    list-style: none;
+    margin: 0;
+    padding: 0 4px 0 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    color: var(--fill-secondary);
+    line-height: 1.45;
+}
+.beaver-root .feature-credits-step {
+    display: flex;
+    flex-direction: row;
+    gap: 6px;
+}
+.beaver-root .feature-credits-step-marker {
+    flex: none;
+    min-width: 1.1em;
+    color: var(--fill-tertiary);
+}
+.beaver-root .feature-credits-command {
+    font-family: var(--beaver-font-mono, monospace);
+    font-size: 0.95em;
+    color: var(--fill-primary);
+}
+.beaver-root .feature-credits-completion {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+}
+.beaver-root .feature-credits-progress {
+    flex: none;
+    font-size: 0.9em;
+    color: var(--fill-tertiary);
+}
+.beaver-root .feature-credits-result {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    color: var(--fill-primary);
+}
+.beaver-root .feature-credits-divider {
+    height: 1px;
+    background-color: var(--fill-quinary);
+}
+.beaver-root .feature-credits-next {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+    margin: -4px -6px;
+    padding: 4px 6px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    font: inherit;
+    color: var(--fill-primary);
+    text-align: left;
+    cursor: pointer;
+}
+.beaver-root .feature-credits-next:hover {
+    background-color: var(--beaver-fill-hover);
+}

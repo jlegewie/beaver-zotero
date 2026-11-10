@@ -6,7 +6,7 @@
 
 import { atom } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
-import { Action, ActionOverride, ActionTargetType, generateActionId, sameTargets } from '@beaver/agent-core/types/actions';
+import { Action, ActionOverride, ActionTargetType, generateActionId, sameTargets, stripBuiltinOnlyFields } from '@beaver/agent-core/types/actions';
 import { ALL_BUILTIN_ACTIONS } from '../types/builtinActions';
 import {
     getMergedActions,
@@ -16,7 +16,7 @@ import {
     isBuiltinAction,
     isLockedBuiltinAction,
 } from '../types/actionStorage';
-import { zoteroContextAtom } from './zoteroContext';
+import { zoteroContextAtom, currentNoteItemAtom } from './zoteroContext';
 import { isActionVisible, ActionContext } from '../utils/actionVisibility';
 import {
     resolvePromptVariables,
@@ -33,6 +33,11 @@ import {
     messageItemDataRevisionAtom,
     currentMessageViewsAtom,
     addViewsToCurrentMessageAtom,
+    currentMessageContentAtom,
+    currentMessagePillsAtom,
+    currentMessageExternalFilesAtom,
+    currentMessageFiltersAtom,
+    currentReaderAttachmentAtom,
 } from './messageComposition';
 import { CollectionReference, collectionReferenceKey } from '@beaver/agent-core/types/zotero';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
@@ -44,6 +49,7 @@ import { MessageAttachment, ViewAttachment, isViewAttachment, messageAttachmentI
 import { toValidatedMessageAttachment } from '../types/attachments/converters';
 import { resolveLibraryRef } from '../../src/utils/libraryIdentity';
 import { isTargetInLibraries } from '../utils/zoteroReferences';
+import { getActionRequirementBlock, type ActionRequirementBlock } from '../utils/actionRequirements';
 
 // ---------------------------------------------------------------------------
 // Base atom — initialised once from prefs + built-ins
@@ -104,9 +110,9 @@ export const saveActionsAtom = atom(
                 }
             } else {
                 // Custom action — strip runtime-only `lastUsed` and the
-                // built-in-only `locked` flag (locking is code-defined and must
-                // never live in user data) before persisting.
-                const { lastUsed: _lastUsed, locked: _locked, ...rest } = action;
+                // built-in-only fields (`locked`, `argumentRequired`: code-defined,
+                // they must never live in user data) before persisting.
+                const { lastUsed: _lastUsed, ...rest } = stripBuiltinOnlyFields(action);
                 newCustom.push(rest);
             }
         }
@@ -178,8 +184,9 @@ export const importActionAtom = atom(
         const name = commandRenamed ? command : incoming.name;
 
         // Strip local/runtime and built-in-only fields the importer owns.
-        // `locked` never rides along: a duplicated/imported action is editable.
-        const { lastUsed: _lastUsed, deprecated: _deprecated, locked: _locked, ...rest } = incoming;
+        // `locked` and `argumentRequired` never ride along: a duplicated or
+        // imported action is the user's, and its editor cannot show them.
+        const { lastUsed: _lastUsed, deprecated: _deprecated, ...rest } = stripBuiltinOnlyFields(incoming);
         const newAction: Action = {
             ...rest,
             id,
@@ -450,6 +457,10 @@ export const stageActionPillAtom = atom(
         contextOverride?: TargetTypeContext;
         /** Window whose editor should receive the pill (where the user acted). */
         targetWindow?: Window;
+        /** Text to put right after the pill, replacing whatever follows it.
+         *  When the editor already holds a pill for this action, no second pill
+         *  is inserted: only the text after the existing one is replaced. */
+        argumentText?: string;
     }): boolean => {
         const descriptor = set(resolveActionForStagingAtom, {
             actionId: payload.actionId,
@@ -463,11 +474,45 @@ export const stageActionPillAtom = atom(
         // action the user launched whose targets are already attached.
         set(pendingPillInsertsAtom, [
             ...get(pendingPillInsertsAtom),
-            { descriptor, targetWindow: payload.targetWindow },
+            { descriptor, targetWindow: payload.targetWindow, argumentText: payload.argumentText },
         ]);
         return true;
     },
 );
+
+// ---------------------------------------------------------------------------
+// Requirement check for the composer's /command pills.
+//
+// While a pill's action cannot run on what the message holds (no text after a
+// command that needs it, no document for a document action, nothing to act on
+// for an item or collection action), the composer disables Send and shows the
+// hint. The send path below keeps its own checks as a backstop. See
+// `getActionRequirementBlock` for the rules.
+// ---------------------------------------------------------------------------
+
+export const actionRequirementBlockAtom = atom<ActionRequirementBlock | null>((get) => {
+    const pills = get(currentMessagePillsAtom);
+    if (pills.length === 0) return null;
+    const searchableLibraryIds = get(searchableLibraryIdsAtom);
+    const filters = get(currentMessageFiltersAtom);
+    return getActionRequirementBlock({
+        content: get(currentMessageContentAtom),
+        pills,
+        actions: get(actionsAtom),
+        // The same condition the send path applies to a collection action.
+        hasCollectionTarget: [...get(currentMessageCollectionsAtom), ...get(currentMessageViewsAtom)]
+            .some(target => isTargetInLibraries(target, searchableLibraryIds)),
+        // The open reader attachment is sent with every message, like an
+        // attached item.
+        hasDocumentContext: get(currentMessageItemsAtom).length > 0
+            || get(currentMessageExternalFilesAtom).length > 0
+            || get(currentReaderAttachmentAtom) !== null,
+        hasOtherItemContext: get(currentNoteItemAtom) !== null
+            || filters.libraryIds.length > 0
+            || filters.collectionIds.length > 0
+            || filters.tagSelections.length > 0,
+    });
+});
 
 // ---------------------------------------------------------------------------
 // Build the structured wire actions for the /command pills in a message.

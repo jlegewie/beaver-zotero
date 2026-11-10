@@ -5,12 +5,14 @@ const mocks = vi.hoisted(() => ({
     preference: vi.fn(),
     claim: vi.fn(),
     dispose: vi.fn(),
+    sync: vi.fn(),
 }));
 vi.mock("@beaver/agent-core/transport/clients/accountService", () => ({
     accountService: {
         getProfileWithPlan: mocks.profile,
         updateExcludedLibraries: mocks.exclusion,
         updatePreference: mocks.preference,
+        syncFeatureCredits: mocks.sync,
     },
 }));
 vi.mock("@beaver/agent-core/transport/threadService", () => ({
@@ -81,6 +83,7 @@ describe("instance account ownership", () => {
         const beaver = {
             backgroundExtractor: { abortJobsWithoutAccess: vi.fn(), notify: vi.fn() },
             processingReconciler: { notify: vi.fn() },
+            data: { env: "production" },
         };
         (Zotero as any).Beaver = beaver;
         (Zotero.Libraries.getAll as any).mockReturnValue([
@@ -850,6 +853,118 @@ describe("instance account ownership", () => {
                 .getAuthDiagnostics()
                 .find((entry) => entry.event === "restore_failed");
             expect(failure?.detail).toContain("AuthRetryableFetchError");
+        });
+    });
+
+    describe("feature-credit checks", () => {
+        const withTasks = (done: string[] = []) => {
+            const data = profile();
+            data.profile.feature_credits = {
+                tasks: ["annotate", "note"].map((key) => ({
+                    key,
+                    credits: 5,
+                    completed_at: done.includes(key) ? "2026-11-20T10:00:00Z" : null,
+                    source: null,
+                })),
+            };
+            return data;
+        };
+        const loadWith = async (data: any) => {
+            mocks.profile.mockResolvedValue(data);
+            await load();
+            mocks.profile.mockClear();
+        };
+
+        it("checks once after triggers go quiet, and refreshes the profile when something was granted", async () => {
+            await loadWith(withTasks());
+            mocks.sync.mockResolvedValue({ granted: ["annotate"] });
+            account.syncFeatureCredits();
+            await vi.advanceTimersByTimeAsync(2_000);
+            account.syncFeatureCredits();
+            await vi.advanceTimersByTimeAsync(2_999);
+            expect(mocks.sync).not.toHaveBeenCalled();
+            await vi.advanceTimersByTimeAsync(1);
+            expect(mocks.sync).toHaveBeenCalledTimes(1);
+            expect(mocks.profile).toHaveBeenCalledTimes(1);
+        });
+
+        it("does not refresh the profile when nothing was granted", async () => {
+            await loadWith(withTasks());
+            mocks.sync.mockResolvedValue({ granted: [] });
+            account.syncFeatureCredits();
+            await vi.advanceTimersByTimeAsync(3_000);
+            expect(mocks.sync).toHaveBeenCalledTimes(1);
+            expect(mocks.profile).not.toHaveBeenCalled();
+        });
+
+        it("checks within the maximum wait while triggers keep arriving", async () => {
+            await loadWith(withTasks());
+            mocks.sync.mockResolvedValue({ granted: [] });
+            for (let elapsed = 0; elapsed < 15_000; elapsed += 1_000) {
+                account.syncFeatureCredits();
+                await vi.advanceTimersByTimeAsync(1_000);
+            }
+            expect(mocks.sync).toHaveBeenCalledTimes(1);
+        });
+
+        it.each([
+            ["the feature is off", () => profile()],
+            ["every task is done", () => withTasks(["annotate", "note"])],
+        ])("does nothing when %s", async (_label, data) => {
+            await loadWith(data());
+            account.syncFeatureCredits();
+            await vi.advanceTimersByTimeAsync(20_000);
+            expect(mocks.sync).not.toHaveBeenCalled();
+        });
+
+        it("skips a catch-up shortly after a check, but not a write trigger", async () => {
+            await loadWith(withTasks());
+            mocks.sync.mockResolvedValue({ granted: [] });
+            account.syncFeatureCredits();
+            await vi.advanceTimersByTimeAsync(3_000);
+            account.syncFeatureCredits({ catchUp: true });
+            await vi.advanceTimersByTimeAsync(3_000);
+            expect(mocks.sync).toHaveBeenCalledTimes(1);
+            account.syncFeatureCredits();
+            await vi.advanceTimersByTimeAsync(3_000);
+            expect(mocks.sync).toHaveBeenCalledTimes(2);
+        });
+
+        it("runs a trigger that arrives during a check as a check of its own", async () => {
+            await loadWith(withTasks());
+            const pending = deferred<any>();
+            mocks.sync.mockReturnValueOnce(pending.promise).mockResolvedValue({ granted: [] });
+            account.syncFeatureCredits();
+            await vi.advanceTimersByTimeAsync(3_000);
+            account.syncFeatureCredits();
+            await vi.advanceTimersByTimeAsync(3_000);
+            expect(mocks.sync).toHaveBeenCalledTimes(1);
+            pending.resolve({ granted: [] });
+            await vi.advanceTimersByTimeAsync(3_000);
+            expect(mocks.sync).toHaveBeenCalledTimes(2);
+        });
+
+        it("cancels a pending check when the account signs out", async () => {
+            await loadWith(withTasks());
+            account.syncFeatureCredits();
+            sdk.auth.getSession.mockResolvedValue({ data: { session: null }, error: null });
+            await account.auth.signOut();
+            await vi.advanceTimersByTimeAsync(20_000);
+            expect(mocks.sync).not.toHaveBeenCalled();
+        });
+
+        it("ignores a grant that returns after the account changed", async () => {
+            await loadWith(withTasks());
+            const pending = deferred<any>();
+            mocks.sync.mockReturnValueOnce(pending.promise);
+            account.syncFeatureCredits();
+            await vi.advanceTimersByTimeAsync(3_000);
+            event("SIGNED_IN", session("b"));
+            await vi.advanceTimersByTimeAsync(0);
+            mocks.profile.mockClear();
+            pending.resolve({ granted: ["annotate"] });
+            await vi.advanceTimersByTimeAsync(0);
+            expect(mocks.profile).not.toHaveBeenCalled();
         });
     });
 });

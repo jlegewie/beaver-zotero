@@ -645,6 +645,21 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
         ],
         footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.26.0" target='_blank'>Full changelog</a>`,
     },
+    {
+        version: "0.27.0",
+        title: "Compare papers in research tables",
+        featureList: [
+            {
+                title: "Compare papers in a table",
+                description: "One row per paper, one column per question. Every cell links to the quote behind it. Try /research-table.",
+            },
+            {
+                title: "/organize",
+                description: "A new action for collections, tags, metadata and duplicates, following your instructions.",
+            },
+        ],
+        footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.27.0" target='_blank'>Full changelog</a>`,
+    },
 ];
 
 versionUpdateMessageList.sort((a, b) => compareVersions(a.version, b.version));

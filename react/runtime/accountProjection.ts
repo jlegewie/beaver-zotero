@@ -42,6 +42,7 @@ import {
     clearMessageContextAtom,
 } from "../atoms/messageComposition";
 import { agentService } from "@beaver/agent-core/transport/agentService";
+import { agentActionsService } from "@beaver/agent-core/transport/clients/agentActionsService";
 import {
     firstRunNextStepsDismissedAtom,
     firstRunReturnRequestedAtom,
@@ -162,4 +163,10 @@ export function attachAccountProjection(runtime: WindowRuntime): void {
         store.set(loginLoadingAtom, snapshot.authenticating);
     });
     Zotero.Beaver.runtime.addWindowCleanup(runtime, unsubscribe);
+    // Accepted changes written from this renderer's copy of the client can
+    // complete a feature-credit task; the account decides when to check.
+    const removeAppliedWriteListener = agentActionsService.onAppliedWrite(
+        () => Zotero.Beaver.account?.syncFeatureCredits(),
+    );
+    Zotero.Beaver.runtime.addWindowCleanup(runtime, removeAppliedWriteListener);
 }

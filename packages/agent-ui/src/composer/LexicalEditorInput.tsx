@@ -20,6 +20,7 @@ import {
     $isElementNode,
     $isLineBreakNode,
     $isRangeSelection,
+    $isRootOrShadowRoot,
     BEFORE_INPUT_COMMAND,
     COMMAND_PRIORITY_HIGH,
     COMMAND_PRIORITY_LOW,
@@ -131,6 +132,36 @@ function $deleteTrailingQuery(length: number): void {
             remaining = 0;
         }
     }
+}
+
+/** Replace everything after the first pill of `actionId` with a space and
+ *  `text` (whitespace collapsed to single spaces), caret at the end. Returns
+ *  false when no such pill exists. Must be called inside an update context. */
+function $setCommandArgument(actionId: string, text: string): boolean {
+    let pill: SlashCommandNode | null = null;
+    const pending: LexicalNode[] = [...$getRoot().getChildren()].reverse();
+    while (pending.length > 0 && !pill) {
+        const node = pending.pop()!;
+        if ($isSlashCommandNode(node) && node.getActionId() === actionId) pill = node;
+        else if ($isElementNode(node)) pending.push(...[...node.getChildren()].reverse());
+    }
+    if (!pill) return false;
+
+    // Drop what follows the pill at every level up to the root: the rest of
+    // its line, then every block after that line.
+    let node: LexicalNode = pill;
+    for (;;) {
+        node.getNextSiblings().forEach(sibling => sibling.remove());
+        const parent: LexicalNode | null = node.getParent();
+        if (!parent || $isRootOrShadowRoot(parent)) break;
+        node = parent;
+    }
+
+    const argument = text.replace(/\s+/g, ' ').trim();
+    const tail = $createTextNode(argument ? ` ${argument}` : ' ');
+    pill.insertAfter(tail);
+    tail.selectEnd();
+    return true;
 }
 
 /** Build editor nodes for `text`, materializing known `/command` tokens as
@@ -302,6 +333,13 @@ export type LexicalEditorInputHandle = {
      *  after the pill. With `null`, nothing is removed and the pill is
      *  appended after the existing content (programmatic staging flow). */
     insertSlashCommand: (descriptor: SlashCommandDescriptor, queryLength: number | null, keepAfter?: number) => void;
+    /**
+     * Sets the text after the first pill of `actionId`: everything after that
+     * pill (the rest of its line and every line below) is replaced by a space
+     * and `text`, and the caret is left at the end. Returns false, changing
+     * nothing, when the editor holds no pill for that action.
+     */
+    setCommandArgument: (actionId: string, text: string) => boolean;
     /** Returns the command pills currently in the editor, in document order. */
     getSlashCommands: () => SlashCommandDescriptor[];
     /**
@@ -605,6 +643,24 @@ const EditorApi = forwardRef<LexicalEditorInputHandle, {
                     // caret behind the pill or to the start of the input. See
                     // PinnedEndCaretPlugin.
                     pinnedEndCaretRef.current = true;
+                },
+                setCommandArgument: (actionId, text) => {
+                    let found = false;
+                    // Discrete, so the edit is committed (and published to the
+                    // parent's value and pills) before this returns.
+                    editor.update(() => {
+                        found = $setCommandArgument(actionId, text);
+                    }, { discrete: true });
+                    if (!found) return false;
+                    selectionRepairGenerationRef.current++;
+                    blurSelectionRef.current = null;
+                    editor.focus(() => { /* noop */ }, { defaultSelection: 'rootEnd' });
+                    // The same end-of-content pin as a staged pill insert: the
+                    // caret belongs after the new text, and the UI churn around
+                    // a programmatic edit can drop it elsewhere (see
+                    // PinnedEndCaretPlugin).
+                    pinnedEndCaretRef.current = true;
+                    return true;
                 },
                 getSlashCommands: () => {
                     let result: SlashCommandDescriptor[] = [];

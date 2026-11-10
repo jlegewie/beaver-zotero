@@ -10,6 +10,7 @@ import { isFirstRunVisibleAtom } from '../atoms/firstRun';
 import { whereToStartVisibleAtom } from '../atoms/whereToStart';
 import { useReportBeaverUIVisibility } from '../hooks/useProfileSync';
 import { NoteExportTipTrigger } from '../hooks/useNoteExportTip';
+import { useFeatureCreditCompletions } from '../hooks/useFeatureCreditCompletions';
 
 /**
  * WindowSidebar is rendered in the separate Beaver window.
@@ -26,6 +27,8 @@ const WindowSidebar = () => {
     // The standalone has no GlobalContextInitializer; report its visibility so the
     // account keeps the in-use profile refresh cadence while it is open.
     useReportBeaverUIVisibility();
+    // Its chats are its own, so it shows their feature-credit cards itself.
+    useFeatureCreditCompletions();
 
     const collapsed = useAtomValue(windowNavCollapsedAtom);
     const chatAccessGate = useAtomValue(chatAccessGateAtom);

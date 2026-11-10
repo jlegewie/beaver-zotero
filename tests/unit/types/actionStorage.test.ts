@@ -378,4 +378,90 @@ describe('actionStorage', () => {
         saveActionCustomizations(c);
         expect(getMergedActions().some(a => a.id === archived.id)).toBe(false);
     });
+
+    // ── Required arguments (built-in-only, like `locked`) ───────────────
+
+    it('keeps argumentRequired on a built-in through field overrides', () => {
+        const annotate = BUILTIN_ACTIONS.find(a => a.id === 'builtin-annotate')!;
+        saveActionCustomizations({
+            version: 1,
+            overrides: { [annotate.id]: { title: 'Highlight', text: 'My own prompt', targets: ['attachment'] } },
+            custom: [],
+        });
+        const merged = getMergedActions().find(a => a.id === annotate.id)!;
+        expect(merged.title).toBe('Highlight');
+        expect(merged.argumentRequired).toBe(true);
+        expect(merged.argumentRequiredHint).toBe(annotate.argumentRequiredHint);
+    });
+
+    it('ignores argumentRequired smuggled into a stored override', () => {
+        const annotate = BUILTIN_ACTIONS.find(a => a.id === 'builtin-annotate')!;
+        Prefs.set('extensions.zotero.beaver.actions', JSON.stringify({
+            version: 1,
+            overrides: { [annotate.id]: { argumentRequired: false } },
+            custom: [],
+        }));
+        expect(getMergedActions().find(a => a.id === annotate.id)?.argumentRequired).toBe(true);
+    });
+
+    it('strips argumentRequired from custom actions, read and written', () => {
+        const custom = {
+            id: 'custom-required',
+            title: 'Custom action',
+            text: 'Do the thing',
+            targets: ['global'],
+            argumentRequired: true,
+            argumentRequiredHint: 'Say what',
+        };
+        Prefs.set('extensions.zotero.beaver.actions', JSON.stringify({ version: 1, overrides: {}, custom: [custom] }));
+        const read = getMergedActions().find(a => a.id === 'custom-required')!;
+        expect(read.argumentRequired).toBeUndefined();
+        expect(read.argumentRequiredHint).toBeUndefined();
+
+        saveActionCustomizations({ version: 1, overrides: {}, custom: [custom as any] });
+        const stored = JSON.parse(prefStore.get('extensions.zotero.beaver.actions') as string);
+        expect(stored.custom[0].argumentRequired).toBeUndefined();
+        expect(stored.custom[0].argumentRequiredHint).toBeUndefined();
+    });
+});
+
+describe('built-in action catalog', () => {
+    const byId = (id: string) => BUILTIN_ACTIONS.find(a => a.id === id);
+
+    it('ships /organize and /research-table as global actions that need an argument', () => {
+        const organize = byId('builtin-organize')!;
+        const table = byId('builtin-research-table')!;
+        expect(getActionCommand(organize)).toBe('organize');
+        expect(organize).toMatchObject({ targets: ['global'], category: 'organize', argumentRequired: true });
+        expect(getActionCommand(table)).toBe('research-table');
+        expect(table).toMatchObject({ targets: ['global'], category: 'research', argumentRequired: true });
+        expect(organize.locked).toBeUndefined();
+        expect(table.locked).toBeUndefined();
+    });
+
+    it('requires an argument for /annotate, /create-note, /organize and /research-table only', () => {
+        const required = BUILTIN_ACTIONS.filter(a => a.argumentRequired).map(a => a.id).sort();
+        expect(required).toEqual([
+            'builtin-annotate',
+            'builtin-create-note',
+            'builtin-organize',
+            'builtin-research-table',
+        ]);
+        for (const id of required) {
+            expect(byId(id)!.argumentRequiredHint, id).toBeTruthy();
+            expect(byId(id)!.argumentHint, id).toBeTruthy();
+        }
+    });
+
+    it('lists the new actions next to /annotate and /create-note', () => {
+        const order = (id: string) => byId(id)!.sortOrder!;
+        expect(order('builtin-annotate')).toBeLessThan(order('builtin-create-note'));
+        expect(order('builtin-create-note')).toBeLessThan(order('builtin-research-table'));
+        expect(order('builtin-research-table')).toBeLessThan(order('builtin-organize'));
+        expect(order('builtin-organize')).toBeLessThan(order('builtin-tidy-up'));
+    });
+
+    it('bases /create-note on attached papers or a collection when present', () => {
+        expect(byId('builtin-create-note')!.text).toContain('If I attached papers or a collection, base the note on those');
+    });
 });
