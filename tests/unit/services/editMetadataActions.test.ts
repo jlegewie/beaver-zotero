@@ -30,6 +30,7 @@ import {
     executeEditMetadataAction,
     undoEditMetadataAction,
 } from '../../../src/services/manualActions/editMetadataActions';
+import { executeEditMetadataAction as executeOverSocket } from '../../../src/services/agentDataProvider/actions/editMetadata';
 
 const DOCUMENT_FIELDS = new Set(['title', 'publisher']);
 
@@ -236,5 +237,43 @@ describe('applying a stored edit_metadata proposal later', () => {
             { field: 'title', old_value: 'Original', new_value: 'Proposed' },
         ]))).rejects.toMatchObject({ code: 'save_failed' });
         expect(fields.title).toBe('Original');
+    });
+});
+
+describe('an edit_metadata applied over the socket', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        resolveFieldForItemType.mockImplementation((_typeID: number, field: string) => field);
+    });
+
+    const execute = (edits: unknown[]) => executeOverSocket(
+        { request_id: 'r1', action_type: 'edit_metadata', action_data: { library_id: 1, zotero_key: 'ABCD1234', edits } } as any,
+        { signal: new AbortController().signal, timeoutSeconds: 25, startTime: Date.now() },
+    );
+
+    it('succeeds when some fields were saved, listing the refused ones, as a local Apply does', async () => {
+        const fields: Record<string, string> = { title: 'Original' };
+        resolveItemReference.mockResolvedValue({ status: 'found', item: makeDocumentItem(fields) });
+
+        const response = await execute([
+            { field: 'title', new_value: 'Proposed' },
+            { field: 'pages', new_value: '1-10' },
+        ]);
+
+        expect(response.success).toBe(true);
+        expect(response.result_data).toMatchObject({
+            applied_edits: [{ field: 'title', applied_value: 'Proposed' }],
+            failed_edits: [{ field: 'pages' }],
+        });
+        expect(fields.title).toBe('Proposed');
+    });
+
+    it('fails when nothing could be saved', async () => {
+        resolveItemReference.mockResolvedValue({ status: 'found', item: makeDocumentItem({}) });
+
+        const response = await execute([{ field: 'pages', new_value: '1-10' }]);
+
+        expect(response).toMatchObject({ success: false, error_code: 'edit_failed' });
+        expect(response.result_data).toBeUndefined();
     });
 });

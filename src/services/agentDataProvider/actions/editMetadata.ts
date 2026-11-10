@@ -15,7 +15,7 @@ import { SETTABLE_PRIMARY_FIELDS, canSetField, getCreatorTypeInfo, resolveFieldF
 import type { ActionExecuteRequest, ActionValidateRequest } from '../operationContext';
 import { TimeoutContext, TimeoutError, checkAborted } from '../timeout';
 import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
-import { actionError, assertLibraryNotExcluded, assertLibraryRefNotExcluded, failureResponse } from './actionExecution';
+import { actionError, assertLibraryNotExcluded, assertLibraryRefNotExcluded, toExecuteResponse } from './actionExecution';
 
 
 /**
@@ -580,9 +580,10 @@ export interface EditMetadataApplyHooks {
  * for undo.
  *
  * A field Zotero refuses is listed in `failed_edits` and the others are still
- * saved; whether that counts as a failed action is the caller's call. A failed
- * save restores the item's in-memory state, so the refused edits cannot ride
- * along with a later, unrelated save.
+ * saved, so the result records what to undo. Only when nothing could be saved
+ * does the apply fail (`edit_failed`). A failed save restores the item's
+ * in-memory state, so the refused edits cannot ride along with a later,
+ * unrelated save.
  */
 export async function applyEditMetadata(
     data: EditMetadataProposedData,
@@ -693,6 +694,13 @@ export async function applyEditMetadata(
         throw error;
     }
 
+    if (failedEdits.length > 0 && appliedEdits.length === 0 && !creatorsApplied) {
+        throw actionError(
+            'edit_failed',
+            `No edits could be applied: ${failedEdits.map(e => `${e.field} (${e.error})`).join(', ')}`,
+        );
+    }
+
     return {
         library_id: resolvedLibraryId,
         zotero_key,
@@ -705,29 +713,14 @@ export async function applyEditMetadata(
     };
 }
 
-/**
- * Execute an edit_metadata action for the backend during a run. Any refused
- * field fails the response, with the edits that were saved in `result_data`.
- */
+/** Execute an edit_metadata action for the backend during a run. */
 async function executeEditMetadataAction(
     request: ActionExecuteRequest,
     ctx: TimeoutContext,
 ): Promise<WSAgentActionExecuteResponse> {
     const timing: Record<string, number> = {};
-    try {
-        const resultData = await applyEditMetadata(request.action_data as EditMetadataProposedData, ctx, { timing });
-        const allSucceeded = resultData.failed_edits.length === 0;
-        return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: allSucceeded,
-            error: allSucceeded ? undefined : `Some edits failed: ${resultData.failed_edits.map(e => e.field).join(', ')}`,
-            result_data: resultData as unknown as Record<string, any>,
-            timing,
-        };
-    } catch (error) {
-        return { ...failureResponse(request.request_id, 'executeEditMetadataAction', error), timing };
-    }
+    return toExecuteResponse(request.request_id, 'executeEditMetadataAction',
+        () => applyEditMetadata(request.action_data as EditMetadataProposedData, ctx, { timing }), () => timing);
 }
 
 export { executeEditMetadataAction, validateEditMetadataAction };

@@ -8,7 +8,7 @@ import { logger } from '@beaver/agent-core/platform/logger';
 import { AppliedMetadataEdit, CreatorJSON, EditMetadataProposedData, EditMetadataResultData, MetadataEdit } from '@beaver/agent-core/types/agentActions/base';
 import { resolveItemReference } from '../../utils/libraryIdentity';
 import { resolveFieldForItemType, sanitizeCreators } from '../../utils/zoteroUtils';
-import { actionError, unboundedExecutionContext } from '../agentDataProvider/actions/actionExecution';
+import { unboundedExecutionContext } from '../agentDataProvider/actions/actionExecution';
 import { applyEditMetadata } from '../agentDataProvider/actions/editMetadata';
 import { joinList, ManualApplyOptions, staleProposalError } from './staleProposal';
 
@@ -123,22 +123,11 @@ export async function executeEditMetadataAction(
     options: ManualApplyOptions = {},
 ): Promise<EditMetadataResultData> {
     const data = action.proposed_data as EditMetadataProposedData;
-    const result = await applyEditMetadata(data, unboundedExecutionContext(), {
+    return applyEditMetadata(data, unboundedExecutionContext(), {
         assertUnchanged: options.skipStaleCheck
             ? undefined
             : (item) => assertMetadataUnchanged(item, data.edits, data.creators, data.old_creators),
     });
-
-    // Nothing saved: fail the action. Once something is saved, the result is
-    // recorded (with its failures) so the saved fields can be undone.
-    const nothingSaved = result.applied_edits.length === 0 && !result.new_creators;
-    if (result.failed_edits.length > 0 && nothingSaved) {
-        throw actionError(
-            'edit_failed',
-            `No edits could be applied: ${result.failed_edits.map(e => `${e.field} (${e.error})`).join(', ')}`,
-        );
-    }
-    return result;
 }
 
 /**
