@@ -328,6 +328,24 @@ describe('isRunWithNothingToShow', () => {
         ).toBe(true);
     });
 
+    it('skips an earlier card-answer continuation that drew nothing', () => {
+        const cardAnswer: AgentRun = {
+            ...run([], 'completed'),
+            user_prompt: {
+                content: '',
+                attachments: [],
+                deferred_results: { 'call-1': { type: 'approved' } },
+            },
+        };
+        expect(isRunWithNothingToShow(cardAnswer, earlier)).toBe(true);
+        expect(
+            isRunWithNothingToShow(
+                { ...cardAnswer, model_messages: [response(text('Done.'))] },
+                earlier,
+            ),
+        ).toBe(false);
+    });
+
     it('keeps a continuation with any response that draws', () => {
         expect(isRunWithNothingToShow(continuation([response(text('More.'))]), earlier)).toBe(false);
         expect(isRunWithNothingToShow(continuation([response(thinking('Hmm'))]), earlier)).toBe(false);
