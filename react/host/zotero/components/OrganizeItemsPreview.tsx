@@ -37,6 +37,8 @@ export const OrganizeItemsPreview: React.FC<OrganizeItemsPreviewProps> = ({
 }) => {
     const [collectionNames, setCollectionNames] = useState<Record<string, string>>({});
     const [resolvedItems, setResolvedItems] = useState<Zotero.Item[]>([]);
+    const notAppliedCount = (resultData?.skipped_items?.length ?? 0)
+        + Object.keys(resultData?.failed_items ?? {}).length;
 
     // Resolve items from item IDs
     useEffect(() => {
@@ -249,10 +251,10 @@ export const OrganizeItemsPreview: React.FC<OrganizeItemsPreviewProps> = ({
                     </div>
                 )}
 
-                {/* Error info for failed items */}
-                {isApplied && resultData?.failed_items && Object.keys(resultData.failed_items).length > 0 && (
+                {/* Items the apply left alone: not found on this device (or, in older records, failed) */}
+                {isApplied && notAppliedCount > 0 && (
                     <div className="text-sm text-red-600 mt-1">
-                        Failed: {Object.keys(resultData.failed_items).length} item{Object.keys(resultData.failed_items).length !== 1 ? 's' : ''}
+                        Not applied: {notAppliedCount} item{notAppliedCount !== 1 ? 's' : ''}
                     </div>
                 )}
             </div>

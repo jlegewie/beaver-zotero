@@ -5,7 +5,6 @@ import type { AgentAction } from '@beaver/agent-core/agents/agentActionTypes';
 vi.mock('../../../react/utils/editNoteActions', () => ({
     executeEditNoteOrBatchAction: vi.fn(),
     undoEditNoteOrBatchAction: vi.fn(),
-    getUserFacingErrorMessage: vi.fn((_error: unknown, fallback: string) => fallback),
 }));
 
 vi.mock('../../../react/host/zotero/editNotePreviewLifecycle', () => ({
@@ -15,6 +14,11 @@ vi.mock('../../../react/host/zotero/editNotePreviewLifecycle', () => ({
 vi.mock('../../../react/utils/createItemActions', () => ({
     executeCreateItemActions: vi.fn(),
     undoCreateItemActions: vi.fn(),
+}));
+
+vi.mock('../../../react/utils/createNoteActions', () => ({
+    executeCreateNoteAction: vi.fn(),
+    undoCreateNoteAction: vi.fn(),
 }));
 
 vi.mock('../../../react/utils/mergeItemsActions', () => ({
@@ -40,6 +44,7 @@ import { activeRunAtom, currentThreadIdAtom, threadRunsAtom } from '@beaver/agen
 import { externalReferenceItemMappingAtom } from '@beaver/agent-core/citations/externalReferences';
 import { isStaleProposal, staleProposalError } from '../../../src/services/manualActions/staleProposal';
 import { mergeItemsChoicesAtom } from '../../../react/atoms/mergeItemsChoices';
+import { executeCreateNoteAction } from '../../../react/utils/createNoteActions';
 import {
     applyAgentActionsAtom,
     inFlightAgentActionIdsAtom,
@@ -440,6 +445,58 @@ describe('a proposal the library has moved away from', () => {
         expect(vi.mocked(executeEditNoteOrBatchAction).mock.calls[1][1]).toEqual({ skipStaleCheck: true });
         expect(forced.applied).toEqual([pending.id]);
         expect(store.get(threadAgentActionsAtom)[0]).toMatchObject({ status: 'applied', error_details: undefined });
+    });
+});
+
+describe('a refused apply on the action card', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        vi.mocked(agentActionsService.getActionsForRun).mockResolvedValue([]);
+        vi.mocked(agentActionsService.acknowledgeActions).mockResolvedValue({ success: true, errors: [] } as any);
+    });
+
+    it('shows the wording written for the user, keeping the code the executor reported', async () => {
+        const store = createStore();
+        const pending = action();
+        store.set(threadAgentActionsAtom, [pending]);
+        vi.mocked(executeEditNoteOrBatchAction).mockRejectedValueOnce(Object.assign(
+            new Error('Library 2 is excluded; do not retry (model wording)'),
+            { code: 'library_not_searchable', userMessage: 'This library is excluded from Beaver.' },
+        ));
+
+        await store.set(applyAgentActionsAtom, { actions: [pending], runId: 'run-1' });
+
+        expect(store.get(threadAgentActionsAtom)[0]).toMatchObject({
+            status: 'error',
+            error_message: 'This library is excluded from Beaver.',
+            error_details: { error_code: 'library_not_searchable' },
+        });
+    });
+
+    it("edits a note on behalf of the run's thread, not the thread in view", async () => {
+        const store = createStore();
+        const pending = action();
+        store.set(threadAgentActionsAtom, [pending]);
+        store.set(threadRunsAtom, [{ id: 'run-1', thread_id: 'thread-of-run' } as any]);
+        store.set(currentThreadIdAtom, 'thread-in-view');
+        vi.mocked(executeEditNoteOrBatchAction).mockResolvedValueOnce({ library_id: 1, zotero_key: 'NOTEKEY1' } as any);
+
+        await store.set(applyAgentActionsAtom, { actions: [pending], runId: 'run-1' });
+
+        expect(vi.mocked(executeEditNoteOrBatchAction).mock.calls[0][1]).toMatchObject({ threadId: 'thread-of-run' });
+    });
+
+    it("creates a note on behalf of the run's thread, not the thread in view", async () => {
+        const store = createStore();
+        const pending = { ...action(), id: 'create-note-1', action_type: 'create_note' } as AgentAction;
+        store.set(threadAgentActionsAtom, [pending]);
+        store.set(threadRunsAtom, [{ id: 'run-1', thread_id: 'thread-of-run' } as any]);
+        store.set(currentThreadIdAtom, 'thread-in-view');
+        vi.mocked(executeCreateNoteAction).mockResolvedValueOnce({ library_id: 1, zotero_key: 'NOTEKEY2' } as any);
+
+        await store.set(applyAgentActionsAtom, { actions: [pending], runId: 'run-1' });
+
+        expect(vi.mocked(executeCreateNoteAction).mock.calls[0].slice(1)).toEqual(['run-1', 'thread-of-run']);
     });
 });
 
