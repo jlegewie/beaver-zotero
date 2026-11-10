@@ -10,7 +10,7 @@
 import { credentials, getCredentialGeneration, assertCredentialGeneration } from './credentials';
 import { getApiBaseUrl } from './config';
 import { logger } from '../platform/logger';
-import { AgentRun } from '../agents/types';
+import { AgentRun, type ParkedCardAnswer } from '../agents/types';
 import type { AgentAction } from '../agents/agentActionTypes';
 import { toAgentAction } from '../agents/agentActionTypes';
 import { ApiService } from './apiService';
@@ -2194,6 +2194,15 @@ export class AgentService {
     sendTableCardResponse(response: WSTableCardResponse): boolean {
         logger(`AgentService: Sending table card response for ${response.card_id}: ${response.approved ? response.choice ?? 'create' : 'declined'}`, 1);
         return this.sendDecision(response);
+    }
+
+    /**
+     * Send an answer built for a parked card as the live response it is:
+     * the card was shown again by the run on this socket.
+     */
+    sendCardAnswer(answer: ParkedCardAnswer): boolean {
+        logger(`AgentService: Sending "${answer.type}" to a card shown again`, 1);
+        return this.sendDecision(answer as unknown as Record<string, any>);
     }
 
     /**

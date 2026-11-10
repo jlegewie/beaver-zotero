@@ -18,6 +18,7 @@ import { threadWarningsAtom } from '../../atoms/warnings';
 import { resumeChainAtom, runToolResultsAtom, resumedRunIdsAtom, threadRunsAtom } from '@beaver/agent-core/run-state/atoms';
 import { streamQuietAtom } from '@beaver/agent-core/run-state/streamActivity';
 import { autoReplacementPendingRunIdsAtom, streamingDoneRunIdsAtom } from '../../atoms/agentRunAtoms';
+import { isThreadParkedAtom } from '../../atoms/parkedRuns';
 import { useVisibleReconnect } from '../../hooks/useVisibleReconnect';
 import { getHost } from '@beaver/agent-ui/host';
 import BatchRunReceipt, { hasBatchReceipt } from '@beaver/agent-ui/chat/BatchRunReceipt';
@@ -123,7 +124,11 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
     // mid-answer or waiting on a card, since nothing else on screen moves —
     // once it has lasted longer than a blip.
     const isReconnecting = useVisibleReconnect() !== null && isRunActive(run);
-    const showStatusIndicator = isLastRun && (runHasNothingToShow || autoReplacementPending || isReconnecting);
+    // A resume that waits for the parked run's other cards is not generating:
+    // those cards are what the reader is asked for.
+    const waitsOnParkedCards = useAtomValue(isThreadParkedAtom) && isRunActive(run);
+    const showStatusIndicator = isLastRun
+        && ((runHasNothingToShow && !waitsOnParkedCards) || autoReplacementPending || isReconnecting);
     // A tool call still waiting on its result already spins for the same
     // wait; the reconnect line under it drops its own spinner and only says
     // why.

@@ -10,7 +10,7 @@
 
 import { atom } from 'jotai';
 import { isRunActive, type ParkedCardAnswer } from '@beaver/agent-core/agents/types';
-import { activeRunAtom } from '@beaver/agent-core/run-state/atoms';
+import { activeRunAtom, toolResultsMapAtom } from '@beaver/agent-core/run-state/atoms';
 import { openParkedRunAtom, parkedCardRequests } from '@beaver/agent-core/run-state/parkedRun';
 import { addPendingQuestionAtom, pendingQuestionsAtom } from '@beaver/agent-core/run-state/pendingQuestions';
 import { addPendingBatchApprovalAtom, pendingBatchApprovalsAtom } from '@beaver/agent-core/run-state/pendingBatchApprovals';
@@ -35,7 +35,7 @@ export interface QueuedParkedAnswer {
  */
 export const parkedAnswerQueueAtom = atom<ReadonlyMap<string, QueuedParkedAnswer>>(new Map());
 
-/** Tool calls whose answers the resume now running carries. */
+/** Tool calls whose answers the resume now running carries, until each returns. */
 export const parkedAnswersInFlightAtom = atom<ReadonlySet<string>>(new Set<string>());
 
 /**
@@ -50,13 +50,23 @@ export const addLiveCardAnswerAtom = atom(null, (get, set, toolCallId: string) =
     set(liveCardAnswersAtom, new Set([...get(liveCardAnswersAtom), toolCallId]));
 });
 
-export const removeLiveCardAnswerAtom = atom(null, (get, set, toolCallId: string) => {
-    const current = get(liveCardAnswersAtom);
-    if (!current.has(toolCallId)) return;
-    const next = new Set(current);
-    next.delete(toolCallId);
-    set(liveCardAnswersAtom, next);
+/** A card's call returned: its answer, given live or carried by a resume, has landed. */
+export const releaseCardAnswerAtom = atom(null, (get, set, toolCallId: string) => {
+    for (const answers of [liveCardAnswersAtom, parkedAnswersInFlightAtom]) {
+        const current = get(answers);
+        if (!current.has(toolCallId)) continue;
+        const next = new Set(current);
+        next.delete(toolCallId);
+        set(answers, next);
+    }
 });
+
+/**
+ * Cards of the open parked run that the resume now running shows again and
+ * waits for live. An answer to one of them goes over the resume's socket
+ * instead of starting another resume.
+ */
+export const resumeLiveCardsAtom = atom<ReadonlySet<string>>(new Set<string>());
 
 /**
  * Tool calls whose takeover card (question, batch, table) the user set aside
@@ -64,15 +74,6 @@ export const removeLiveCardAnswerAtom = atom(null, (get, set, toolCallId: string
  * goes back to the card.
  */
 export const setAsideParkedCardsAtom = atom<ReadonlySet<string>>(new Set<string>());
-
-/**
- * Whether the open thread rests on a parked run: no run is going, and the
- * last one is waiting on cards the user can answer or write past.
- */
-export const isThreadParkedAtom = atom((get) => {
-    if (isRunActive(get(activeRunAtom))) return false;
-    return get(openParkedRunAtom) !== null;
-});
 
 /**
  * Tool calls whose parked card has an answer on its way: queued, or carried
@@ -86,11 +87,45 @@ export const pendingParkedAnswerIdsAtom = atom<ReadonlySet<string>>((get) => {
     return new Set([...queued.keys(), ...inFlight]);
 });
 
+/**
+ * Whether the open thread waits on the user's answers to a parked run's
+ * cards, which they can give or write past: no run is going and the last one
+ * parked, or the run going resumes it with some answers and waits for the
+ * rest. The thread looks parked throughout, so answering one card changes
+ * only that card until the last answer lets the model continue.
+ */
+export const isThreadParkedAtom = atom((get) => {
+    const open = get(openParkedRunAtom);
+    if (!open) return false;
+    const activeRun = get(activeRunAtom);
+    if (!isRunActive(activeRun)) return true;
+    if (activeRun?.user_prompt?.resumes_run_id !== open.runId) return false;
+    const answering = get(liveCardAnswersAtom);
+    const pending = get(pendingParkedAnswerIdsAtom);
+    return [...open.toolCallIds].some((toolCallId) => !pending.has(toolCallId) && !answering.has(toolCallId));
+});
+
+/**
+ * Whether the run going is a resume that now only waits for cards it shows
+ * again: the answers it carried have come back, and no answer given since is
+ * on its way. Such a run can be parked, to leave the chat or to write a
+ * message instead.
+ */
+export const isResumeWaitingAtom = atom((get) => {
+    const shown = get(resumeLiveCardsAtom);
+    const open = get(openParkedRunAtom);
+    if (shown.size === 0 || !open || ![...shown].some((toolCallId) => open.toolCallIds.has(toolCallId))) return false;
+    if (get(liveCardAnswersAtom).size > 0 || get(parkedAnswerQueueAtom).size > 0) return false;
+    const results = get(toolResultsMapAtom);
+    return [...get(parkedAnswersInFlightAtom)].every((toolCallId) => results.has(toolCallId));
+});
+
 /** Forget every answer on its way to a resume, e.g. when the thread changes. */
 export const clearParkedAnswersAtom = atom(null, (get, set) => {
     if (get(parkedAnswerQueueAtom).size) set(parkedAnswerQueueAtom, new Map());
     if (get(parkedAnswersInFlightAtom).size) set(parkedAnswersInFlightAtom, new Set<string>());
     if (get(setAsideParkedCardsAtom).size) set(setAsideParkedCardsAtom, new Set<string>());
+    if (get(resumeLiveCardsAtom).size) set(resumeLiveCardsAtom, new Set<string>());
 });
 
 /**

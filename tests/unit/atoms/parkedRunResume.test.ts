@@ -4,21 +4,24 @@
  * A run that ends waiting on cards (`run_complete.parked`) keeps them on
  * screen and answerable. Each answer resumes the run at once: a new request
  * carrying the answer in `deferred_results` and the parked run in
- * `resumes_run_id`. The cards still open stay answerable while it runs, and
- * answers given meanwhile go out together once it ends.
+ * `resumes_run_id`. The resume shows the cards still open again and waits
+ * for them live: answers to them go over its socket. Answers given before it
+ * does go out as soon as it does, or together once it ends.
  *
  * The transport is a stand-in that hands back the callbacks each run was
  * started with; the atoms and the store are the real thing.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { connectMock, closeMock, sendApprovalResponseMock, sendQuestionResponseMock, isConnectedMock, transport } = vi.hoisted(() => ({
+const { connectMock, closeMock, sendApprovalResponseMock, sendQuestionResponseMock, sendCardAnswerMock, parkRunMock, isConnectedMock, transport } = vi.hoisted(() => ({
     connectMock: vi.fn(),
     // Like the real service, closing reports the close to the run's callbacks.
     transport: { callbacks: null as null | { onClose?: (code: number, reason: string, wasClean: boolean) => void } },
     closeMock: vi.fn(),
     sendApprovalResponseMock: vi.fn(() => true),
     sendQuestionResponseMock: vi.fn(() => true),
+    sendCardAnswerMock: vi.fn(() => true),
+    parkRunMock: vi.fn(async () => 'ended'),
     isConnectedMock: vi.fn(() => true),
 }));
 
@@ -37,6 +40,8 @@ vi.mock('@beaver/agent-core/transport/agentService', () => ({
         sendApprovalResponse: sendApprovalResponseMock,
         sendAskUserQuestionResponse: sendQuestionResponseMock,
         sendPark: vi.fn(() => true),
+        sendCardAnswer: sendCardAnswerMock,
+        parkRun: parkRunMock,
     },
     AgentConnectionError: class AgentConnectionError extends Error {},
 }));
@@ -83,11 +88,15 @@ import {
 import { pendingApprovalsAtom, removePendingApprovalAtom } from '../../../react/agents/agentActions';
 import {
     clearParkedAnswersAtom,
+    isResumeWaitingAtom,
     isThreadParkedAtom,
     liveCardAnswersAtom,
+    parkedAnswerQueueAtom,
     pendingParkedAnswerIdsAtom,
+    resumeLiveCardsAtom,
 } from '../../../react/atoms/parkedRuns';
 import { threadAdmissionAtom } from '../../../react/runtime/threadAdmission';
+import { threadNavigationSeqAtom } from '../../../react/atoms/threads';
 import { selectedModelAtom } from '../../../react/atoms/models';
 import { sessionAtom } from '../../../react/atoms/auth';
 
@@ -200,6 +209,31 @@ async function returnTool(callbacks: WSCallbacks, runId: string, toolCallId: str
     } as any);
 }
 
+/** A fresh chat on a connected client. */
+function resetChat(): void {
+    vi.clearAllMocks();
+    connectMock.mockReset();
+    closeMock.mockImplementation(() => transport.callbacks?.onClose?.(1000, 'Client closing', true));
+    sendApprovalResponseMock.mockReturnValue(true);
+    sendQuestionResponseMock.mockReturnValue(true);
+    sendCardAnswerMock.mockReturnValue(true);
+    isConnectedMock.mockReturnValue(true);
+    store.set(sessionAtom, { user: { id: 'user-1' } } as any);
+    store.set(selectedModelAtom, { id: 'model-1', name: 'Model', provider: 'test' } as any);
+    store.set(threadRunsAtom, []);
+    store.set(activeRunAtom, null);
+    store.set(currentThreadIdAtom, THREAD);
+    store.set(threadAdmissionAtom, { threadId: THREAD, tailRunId: null, activity: { state: 'idle', run_id: null } });
+    store.set(wsErrorAtom, null);
+    store.set(isWSChatPendingAtom, false);
+    store.set(pendingApprovalsAtom, new Map());
+    store.set(pendingQuestionsAtom, new Map());
+    store.set(pendingCreditConfirmationsAtom, new Map());
+    store.set(pendingTableCardsAtom, new Map());
+    store.set(tableCardDraftsAtom, new Map());
+    store.set(clearParkedAnswersAtom);
+}
+
 /** A live run that parks on two approvals (one never shown live) and a question. */
 async function parkRun(): Promise<{ runId: string; callbacks: WSCallbacks }> {
     const connected = nextConnection();
@@ -214,28 +248,7 @@ async function parkRun(): Promise<{ runId: string; callbacks: WSCallbacks }> {
 }
 
 describe('answering the cards of a parked run', () => {
-    beforeEach(() => {
-        vi.clearAllMocks();
-        connectMock.mockReset();
-        closeMock.mockImplementation(() => transport.callbacks?.onClose?.(1000, 'Client closing', true));
-        sendApprovalResponseMock.mockReturnValue(true);
-        sendQuestionResponseMock.mockReturnValue(true);
-        isConnectedMock.mockReturnValue(true);
-        store.set(sessionAtom, { user: { id: 'user-1' } } as any);
-        store.set(selectedModelAtom, { id: 'model-1', name: 'Model', provider: 'test' } as any);
-        store.set(threadRunsAtom, []);
-        store.set(activeRunAtom, null);
-        store.set(currentThreadIdAtom, THREAD);
-        store.set(threadAdmissionAtom, { threadId: THREAD, tailRunId: null, activity: { state: 'idle', run_id: null } });
-        store.set(wsErrorAtom, null);
-        store.set(isWSChatPendingAtom, false);
-        store.set(pendingApprovalsAtom, new Map());
-        store.set(pendingQuestionsAtom, new Map());
-        store.set(pendingCreditConfirmationsAtom, new Map());
-        store.set(pendingTableCardsAtom, new Map());
-        store.set(tableCardDraftsAtom, new Map());
-        store.set(clearParkedAnswersAtom);
-    });
+    beforeEach(resetChat);
 
     it('keeps every card the run parked on, including one it never showed', async () => {
         const { runId } = await parkRun();
@@ -385,14 +398,14 @@ describe('answering the cards of a parked run', () => {
         expect(store.get(tableCardDraftsAtom).get('card-call-1')).toBe(draft);
     });
 
-    it('stops rather than parks a resume when the user leaves the thread', async () => {
+    it('stops rather than parks a resume that has not shown its cards again', async () => {
         await parkRun();
         const resumed = nextConnection();
         store.set(sendApprovalResponseAtom, { actionId: 'action-call-1', approved: true });
         store.set(removePendingApprovalAtom, 'action-call-1');
         await resumed;
 
-        // The parked run's other cards are on screen, but the resume waits on none of them.
+        // The parked run's other cards are on screen, but the resume waits on none of them yet.
         expect(store.get(pendingApprovalsAtom).size).toBe(1);
         expect(parkableRunId(store.get)).toBeNull();
     });
@@ -423,6 +436,189 @@ describe('answering the cards of a parked run', () => {
         expect(sendApprovalResponseMock).toHaveBeenCalledWith('action-call-1', true, undefined, undefined);
         expect(connectMock).toHaveBeenCalledTimes(1);
         expect(store.get(liveCardAnswersAtom).has('call-1')).toBe(true);
+    });
+});
+
+describe('a resume waiting for the cards it shows again', () => {
+    beforeEach(resetChat);
+
+    /** Park, answer call-1, and return the resume that carries the answer. */
+    async function resume(): Promise<{ callbacks: WSCallbacks; resumeRunId: string }> {
+        await parkRun();
+        const resumed = nextConnection();
+        store.set(sendApprovalResponseAtom, { actionId: 'action-call-1', approved: true });
+        store.set(removePendingApprovalAtom, 'action-call-1');
+        const { callbacks } = await resumed;
+        store.set(isWSReadyAtom, true);
+        return { callbacks, resumeRunId: store.get(activeRunAtom)!.id };
+    }
+
+    function showAgain(callbacks: WSCallbacks): void {
+        callbacks.onDeferredApprovalRequest?.(approval('call-2').request as any);
+        callbacks.onAskUserQuestionRequest?.(question('call-3').request as any);
+    }
+
+    it('keeps the cards on screen as they were and answers them over its socket', async () => {
+        const { callbacks, resumeRunId } = await resume();
+        const questionCard = store.get(pendingQuestionsAtom).get('call-3');
+
+        showAgain(callbacks);
+
+        expect([...store.get(resumeLiveCardsAtom)].sort()).toEqual(['call-2', 'call-3']);
+        expect(store.get(pendingQuestionsAtom).get('call-3')).toBe(questionCard);
+        expect([...store.get(pendingApprovalsAtom).keys()]).toEqual(['action-call-2']);
+        // The thread still looks parked: the model waits for the other cards.
+        expect(store.get(isThreadParkedAtom)).toBe(true);
+
+        await returnTool(callbacks, resumeRunId, 'call-1');
+        // The answer the resume carried has landed: its card shows the result, not a spinner.
+        expect(store.get(pendingParkedAnswerIdsAtom).has('call-1')).toBe(false);
+        store.set(sendApprovalResponseAtom, { actionId: 'action-call-2', approved: true });
+
+        expect(sendApprovalResponseMock).toHaveBeenCalledWith('action-call-2', true, undefined, undefined);
+        expect(connectMock).toHaveBeenCalledTimes(2);
+        expect(store.get(parkedAnswerQueueAtom).size).toBe(0);
+        expect(store.get(isThreadParkedAtom)).toBe(true);
+
+        store.set(sendAskUserQuestionResponseAtom, {
+            questionId: 'question-call-3',
+            toolcallId: 'call-3',
+            answers: [{ item_id: 'q0', selected_option_ids: ['q0-o0'] }],
+        });
+
+        expect(sendQuestionResponseMock).toHaveBeenCalledTimes(1);
+        expect(connectMock).toHaveBeenCalledTimes(2);
+        // Every card has an answer on its way: the model continues in this run.
+        expect(store.get(isThreadParkedAtom)).toBe(false);
+    });
+
+    it('sends an answer given before the resume shows its card again once it does', async () => {
+        const { callbacks } = await resume();
+        store.set(sendAskUserQuestionResponseAtom, {
+            questionId: 'question-call-3',
+            toolcallId: 'call-3',
+            answers: [{ item_id: 'q0', selected_option_ids: ['q0-o0'] }],
+        });
+        expect([...store.get(parkedAnswerQueueAtom).keys()]).toEqual(['call-3']);
+
+        callbacks.onAskUserQuestionRequest?.(question('call-3').request as any);
+
+        expect(sendCardAnswerMock).toHaveBeenCalledWith(expect.objectContaining({
+            type: 'ask_user_question_response',
+            question_id: 'question-call-3',
+        }));
+        expect(store.get(parkedAnswerQueueAtom).size).toBe(0);
+        expect(store.get(pendingQuestionsAtom).has('call-3')).toBe(false);
+        expect(store.get(liveCardAnswersAtom).has('call-3')).toBe(true);
+        expect(connectMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('sends a table card answer given before the resume shows the card again once it does', async () => {
+        const connected = nextConnection();
+        await store.set(sendWSMessageAtom, 'make a table');
+        const { callbacks } = await connected;
+        const runId = store.get(activeRunAtom)!.id;
+        streamToolCalls(callbacks, runId, ['call-1', 'call-2']);
+        callbacks.onDeferredApprovalRequest?.(approval('call-1').request as any);
+        callbacks.onTableCardRequest?.(tableCard('call-2').request as any);
+        await finish(callbacks, runId, parked([approval('call-1'), tableCard('call-2')]));
+
+        const resumed = nextConnection();
+        store.set(sendApprovalResponseAtom, { actionId: 'action-call-1', approved: true });
+        store.set(removePendingApprovalAtom, 'action-call-1');
+        const { callbacks: resumeCallbacks } = await resumed;
+        store.set(sendTableCardResponseAtom, { type: 'table_card_response', card_id: 'card-call-2', approved: true } as any);
+        expect([...store.get(parkedAnswerQueueAtom).keys()]).toEqual(['call-2']);
+
+        resumeCallbacks.onTableCardRequest?.(tableCard('call-2').request as any);
+
+        expect(sendCardAnswerMock).toHaveBeenCalledWith(expect.objectContaining({ type: 'table_card_response', card_id: 'card-call-2' }));
+        expect(store.get(pendingTableCardsAtom).has('card-call-2')).toBe(false);
+        expect(connectMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('can be parked only once its own answers came back and it waits on a card', async () => {
+        const { callbacks, resumeRunId } = await resume();
+        expect(parkableRunId(store.get)).toBeNull();
+
+        showAgain(callbacks);
+        expect(parkableRunId(store.get)).toBeNull();
+
+        await returnTool(callbacks, resumeRunId, 'call-1');
+        expect(store.get(isResumeWaitingAtom)).toBe(true);
+        expect(parkableRunId(store.get)).toBe(resumeRunId);
+
+        store.set(sendApprovalResponseAtom, { actionId: 'action-call-2', approved: true });
+        expect(parkableRunId(store.get)).toBeNull();
+    });
+
+    it('parks the resume before sending a message written instead', async () => {
+        const { callbacks, resumeRunId } = await resume();
+        showAgain(callbacks);
+        await returnTool(callbacks, resumeRunId, 'call-1');
+        parkRunMock.mockImplementationOnce(async () => {
+            await finish(callbacks, resumeRunId, parked([approval('call-2'), question('call-3')]));
+            return 'ended';
+        });
+        const superseding = nextConnection();
+
+        await store.set(sendWSMessageAtom, 'something else');
+        const { request } = await superseding;
+
+        expect(parkRunMock).toHaveBeenCalledWith(resumeRunId, expect.any(Number));
+        expect(store.get(threadRunsAtom).at(-1)).toMatchObject({ id: resumeRunId, status: 'parked' });
+        expect(request.user_prompt.content).toBe('something else');
+        expect(request.user_prompt.deferred_results).toBeUndefined();
+        expect(request.expected_tail_run_id).toBe(resumeRunId);
+        expect(store.get(pendingApprovalsAtom).size).toBe(0);
+        expect(store.get(pendingQuestionsAtom).size).toBe(0);
+    });
+
+    it('drops a message written instead when the user leaves the chat while the resume parks', async () => {
+        const { callbacks, resumeRunId } = await resume();
+        showAgain(callbacks);
+        await returnTool(callbacks, resumeRunId, 'call-1');
+        parkRunMock.mockImplementationOnce(async () => {
+            store.set(threadNavigationSeqAtom, (seq) => seq + 1);
+            await finish(callbacks, resumeRunId, parked([approval('call-2'), question('call-3')]));
+            return 'ended';
+        });
+
+        await store.set(sendWSMessageAtom, 'something else');
+
+        expect(parkRunMock).toHaveBeenCalledTimes(1);
+        expect(connectMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not send a message while the resume still applies its answer', async () => {
+        await resume();
+
+        await store.set(sendWSMessageAtom, 'something else');
+
+        expect(parkRunMock).not.toHaveBeenCalled();
+        expect(connectMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('leaves the cards answerable when the resume parks again', async () => {
+        const { callbacks, resumeRunId } = await resume();
+        showAgain(callbacks);
+        await returnTool(callbacks, resumeRunId, 'call-1');
+
+        await finish(callbacks, resumeRunId, parked([approval('call-2'), question('call-3')]));
+
+        expect(store.get(resumeLiveCardsAtom).size).toBe(0);
+        expect([...store.get(pendingApprovalsAtom).keys()]).toEqual(['action-call-2']);
+        expect([...store.get(pendingQuestionsAtom).keys()]).toEqual(['call-3']);
+
+        const next = nextConnection();
+        store.set(sendAskUserQuestionResponseAtom, {
+            questionId: 'question-call-3',
+            toolcallId: 'call-3',
+            answers: [{ item_id: 'q0', selected_option_ids: ['q0-o0'] }],
+        });
+        const { request } = await next;
+        expect(request.user_prompt.resumes_run_id).toBe(resumeRunId);
+        expect(Object.keys(request.user_prompt.deferred_results)).toEqual(['call-3']);
     });
 });
 

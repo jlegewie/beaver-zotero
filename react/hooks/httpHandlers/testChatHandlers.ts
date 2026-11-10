@@ -99,7 +99,7 @@ import { pendingQuestionsAtom } from '@beaver/agent-core/run-state/pendingQuesti
 import { pendingBatchApprovalsAtom } from '@beaver/agent-core/run-state/pendingBatchApprovals';
 import { openParkedRunAtom } from '@beaver/agent-core/run-state/parkedRun';
 import type { AskUserQuestionAnswer } from '@beaver/agent-core/protocol/agentProtocol';
-import { isThreadParkedAtom, pendingParkedAnswerIdsAtom } from '../../atoms/parkedRuns';
+import { isResumeWaitingAtom, isThreadParkedAtom, pendingParkedAnswerIdsAtom, resumeLiveCardsAtom } from '../../atoms/parkedRuns';
 import {
     currentMessageItemsAtom,
     currentMessageCollectionsAtom,
@@ -236,6 +236,8 @@ function currentIds() {
                 toolCallIds: [...open.toolCallIds],
                 kinds: open.deferrals.map((deferral) => deferral.kind),
                 isThreadParked: store.get(isThreadParkedAtom),
+                resumeLiveCards: [...store.get(resumeLiveCardsAtom)],
+                isResumeWaiting: store.get(isResumeWaitingAtom),
             } : null;
         })(),
         pendingParkedAnswers: [...store.get(pendingParkedAnswerIdsAtom)],
@@ -250,11 +252,12 @@ function currentIds() {
     };
 }
 
-type SettleReason = 'done' | 'parked' | 'approval' | 'question' | 'credit-confirmation' | 'table-card' | 'batch-approval' | 'timeout';
+type SettleReason = 'done' | 'parked' | 'resume-waiting' | 'approval' | 'question' | 'credit-confirmation' | 'table-card' | 'batch-approval' | 'timeout';
 
 /**
  * Poll until the run settles: it finished streaming (`done`), ended waiting
- * on cards that stay answerable (`parked`), paused for a write approval
+ * on cards that stay answerable (`parked`), resumed with some answers and
+ * now waits live for the other cards (`resume-waiting`), paused for a write approval
  * (`approval`), paused for an ask_user_question (`question`), paused for a
  * run-level credit confirmation (`credit-confirmation`), or the timeout
  * elapsed. A paused run keeps `isWSChatPendingAtom` true, so we must break on
@@ -264,6 +267,7 @@ type SettleReason = 'done' | 'parked' | 'approval' | 'question' | 'credit-confir
 async function waitForRunSettle(timeoutMs: number, pollMs = 300): Promise<SettleReason> {
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
+        if (store.get(isResumeWaitingAtom)) return 'resume-waiting';
         if (store.get(pendingParkedAnswerIdsAtom).size > 0) {
             await sleep(pollMs);
             continue;

@@ -138,7 +138,12 @@ const InputArea: React.FC<InputAreaProps> = ({
     const sendWSMessage = useSetAtom(sendWSMessageAtom);
     const sendComposedMessage = useSetAtom(sendComposedMessageAtom);
     const stopRun = useStopRun('InputArea');
-    const isPending = useAtomValue(isWSChatPendingAtom);
+    // Cards of a parked run do not block the composer: a message instead of
+    // an answer moves on without them. The approvals bar still offers to
+    // answer them. A resume that waits for the rest of the cards looks the
+    // same: sending a message parks it first.
+    const isParked = useAtomValue(isThreadParkedAtom);
+    const isPending = useAtomValue(isWSChatPendingAtom) && !isParked;
 
     // A file staged for THIS composition is still being attached, so sending is
     // held until it lands. Work left over from a composition the user has since
@@ -152,10 +157,6 @@ const InputArea: React.FC<InputAreaProps> = ({
     const pendingApprovalsMap = useAtomValue(pendingApprovalsAtom);
     const answerPendingApprovals = useSetAtom(answerPendingApprovalsAtom);
     const clearComposer = useSetAtom(clearComposerAtom);
-    // Cards of a parked run do not block the composer: a message instead of
-    // an answer moves on without them. The approvals bar still offers to
-    // answer them.
-    const isParked = useAtomValue(isThreadParkedAtom);
     const hasPendingApprovals = pendingApprovalsMap.size > 0;
     const isAwaitingApproval = hasPendingApprovals && !isParked;
     // Takeover cards of the parked run the user set aside to write instead.
