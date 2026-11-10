@@ -1,0 +1,173 @@
+<?xml version="1.0"?>
+<?xml-stylesheet href="chrome://global/skin/" type="text/css"?>
+<?xml-stylesheet href="chrome://zotero/skin/zotero.css" type="text/css"?>
+<?xml-stylesheet href="chrome://zotero/skin/overlay.css" type="text/css"?>
+<?xml-stylesheet href="chrome://zotero-platform/content/zotero.css" type="text/css"?>
+<?xml-stylesheet href="chrome://beaver/content/styles/agent-ui-tokens.css" type="text/css"?>
+<?xml-stylesheet href="chrome://beaver/content/styles/agent-ui-utilities.css" type="text/css"?>
+<?xml-stylesheet href="chrome://beaver/content/styles/agent-ui-components.css" type="text/css"?>
+<?xml-stylesheet href="chrome://beaver/content/styles/agent-ui-table.css" type="text/css"?>
+<?xml-stylesheet href="chrome://beaver/content/styles/beaver.css" type="text/css"?>
+<?xml-stylesheet href="chrome://beaver/content/styles/katex-embedded.css" type="text/css"?>
+<!DOCTYPE window>
+<!-- A stored table in a window of its own (src/ui/tableWindow.ts). The title
+     is the table's, set once the table loads. -->
+<window
+    id="beaver-table-window"
+    orient="vertical"
+    width="1200"
+    height="760"
+    minwidth="560"
+    minheight="360"
+    title="Beaver Table"
+    persist="screenX screenY width height"
+    windowtype="beaver:table"
+    xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+    xmlns:html="http://www.w3.org/1999/xhtml"
+>
+    <linkset>
+        <html:link rel="localization" href="browser/menubar.ftl"/>
+        <html:link rel="localization" href="browser/browserSets.ftl"/>
+        <html:link rel="localization" href="toolkit/global/textActions.ftl"/>
+        <html:link rel="localization" href="beaver-mainWindow.ftl"/>
+    </linkset>
+
+    <script type="application/javascript" src="chrome://beaver/content/beaverTableWindow.js"/>
+
+    <!-- Handlers are attached in beaverTableWindow.js: the chrome CSP blocks
+         inline on* attributes. Every table action is a command whose
+         data-table-command names it for src/ui/tableWindow.ts, which also
+         enables and disables them as a menu opens. -->
+    <commandset id="beaverTableCommands">
+        <command id="cmd_beaverTableShowInLibrary" data-table-command="show-in-library"/>
+        <command id="cmd_beaverTableExportXlsx" data-table-command="export-xlsx"/>
+        <command id="cmd_beaverTableExportCsv" data-table-command="export-csv"/>
+        <command id="cmd_beaverTableCopyText" data-table-command="copy-text"/>
+        <command id="cmd_beaverTableFind" data-table-command="find"/>
+        <command id="cmd_beaverTableDensityCompact" data-table-command="density-compact"/>
+        <command id="cmd_beaverTableDensityCozy" data-table-command="density-cozy"/>
+        <command id="cmd_beaverTableDensityTall" data-table-command="density-tall"/>
+        <command id="cmd_beaverTableShowHiddenColumns" data-table-command="show-hidden-columns"/>
+        <command id="cmd_beaverTableClearFilters" data-table-command="clear-filters"/>
+        <command id="cmd_beaverTableClearSort" data-table-command="clear-sort"/>
+        <command id="cmd_beaverTableVersionHistory" data-table-command="version-history"/>
+        <command id="cmd_beaverTableSources" data-table-command="sources"/>
+        <command id="cmd_beaverTableAddItems" data-table-command="add-items"/>
+        <command id="cmd_beaverTableAddColumn" data-table-command="add-column"/>
+        <command id="cmd_beaverTableAddNewItems" data-table-command="add-new-items"/>
+        <command id="cmd_beaverTableFillPending" data-table-command="fill-pending"/>
+        <command id="cmd_beaverTableFillTrial" data-table-command="fill-trial"/>
+        <command id="cmd_beaverTableFillSelected" data-table-command="fill-selected"/>
+        <command id="cmd_beaverTableFillRetry" data-table-command="fill-retry"/>
+        <command id="cmd_beaverTableFillStop" data-table-command="fill-stop"/>
+        <command id="cmd_beaverTableRemoveSelected" data-table-command="remove-selected"/>
+        <command id="cmd_beaverTableAskBeaver" data-table-command="ask-beaver"/>
+    </commandset>
+    <commandset>
+        <command id="cmd_close"/>
+        <command id="minimizeWindow" data-l10n-id="window-minimize-command"/>
+        <command id="zoomWindow" data-l10n-id="window-zoom-command"/>
+    </commandset>
+
+    <keyset id="mainKeyset">
+        <key id="key_close" key="W" modifiers="accel" command="cmd_close"/>
+        <key id="key_find" key="F" modifiers="accel" command="cmd_beaverTableFind"/>
+    </keyset>
+    <!-- Text commands come from Zotero's editMenuOverlay.js. -->
+    <keyset id="editMenuKeys">
+        <key id="key_undo" data-l10n-id="text-action-undo-shortcut" modifiers="accel" command="cmd_undo"/>
+        <!-- l10n and modifiers set in platformKeys.js -->
+        <key id="key_redo" command="cmd_redo"/>
+        <key id="key_cut" data-l10n-id="text-action-cut-shortcut" modifiers="accel" command="cmd_cut"/>
+        <key id="key_copy" data-l10n-id="text-action-copy-shortcut" modifiers="accel" command="cmd_copy"/>
+        <key id="key_paste" data-l10n-id="text-action-paste-shortcut" modifiers="accel" command="cmd_paste"/>
+        <key id="key_selectAll" data-l10n-id="text-action-select-all-shortcut" modifiers="accel" command="cmd_selectAll"/>
+    </keyset>
+    <keyset id="macKeyset">
+        <key id="key_minimizeWindow"
+             command="minimizeWindow"
+             data-l10n-id="window-minimize-shortcut"
+             modifiers="accel"
+             internal="true"/>
+    </keyset>
+
+    <menubar id="beaver-table-menubar">
+        <menu id="fileMenu" data-l10n-id="menu-file">
+            <menupopup id="menu_FilePopup">
+                <menuitem data-l10n-id="beaver-table-window-show-in-library" command="cmd_beaverTableShowInLibrary"/>
+                <menuseparator/>
+                <menuitem data-l10n-id="beaver-table-window-export-xlsx" command="cmd_beaverTableExportXlsx"/>
+                <menuitem data-l10n-id="beaver-table-window-export-csv" command="cmd_beaverTableExportCsv"/>
+                <menuitem data-l10n-id="beaver-table-window-copy-text" command="cmd_beaverTableCopyText"/>
+                <menuseparator/>
+                <menuitem id="menu_close" data-l10n-id="beaver-window-close" command="cmd_close" key="key_close"/>
+            </menupopup>
+        </menu>
+
+        <menu id="edit-menu" data-l10n-id="menu-edit">
+            <menupopup id="menu_EditPopup">
+                <menuitem id="menu_undo" key="key_undo" command="cmd_undo" data-l10n-id="text-action-undo"/>
+                <menuitem id="menu_redo" key="key_redo" command="cmd_redo" data-l10n-id="text-action-redo"/>
+                <menuseparator/>
+                <menuitem id="menu_cut" key="key_cut" command="cmd_cut" data-l10n-id="text-action-cut"/>
+                <menuitem id="menu_copy" key="key_copy" command="cmd_copy" data-l10n-id="text-action-copy"/>
+                <menuitem id="menu_paste" key="key_paste" command="cmd_paste" data-l10n-id="text-action-paste"/>
+                <menuseparator/>
+                <menuitem id="menu_selectAll" key="key_selectAll" command="cmd_selectAll" data-l10n-id="text-action-select-all"/>
+                <menuseparator/>
+                <menuitem data-l10n-id="beaver-table-window-find" command="cmd_beaverTableFind" key="key_find"/>
+            </menupopup>
+        </menu>
+
+        <menu id="view-menu" data-l10n-id="menu-view">
+            <menupopup id="menu_viewPopup">
+                <menuitem type="radio" name="beaver-table-density" data-density="compact"
+                          data-l10n-id="beaver-table-window-density-compact" command="cmd_beaverTableDensityCompact"/>
+                <menuitem type="radio" name="beaver-table-density" data-density="cozy"
+                          data-l10n-id="beaver-table-window-density-cozy" command="cmd_beaverTableDensityCozy"/>
+                <menuitem type="radio" name="beaver-table-density" data-density="tall"
+                          data-l10n-id="beaver-table-window-density-tall" command="cmd_beaverTableDensityTall"/>
+                <menuseparator/>
+                <menuitem data-l10n-id="beaver-table-window-show-hidden-columns" command="cmd_beaverTableShowHiddenColumns"/>
+                <menuitem data-l10n-id="beaver-table-window-clear-filters" command="cmd_beaverTableClearFilters"/>
+                <menuitem data-l10n-id="beaver-table-window-clear-sort" command="cmd_beaverTableClearSort"/>
+                <menuseparator/>
+                <menuitem data-l10n-id="beaver-table-window-version-history" command="cmd_beaverTableVersionHistory"/>
+            </menupopup>
+        </menu>
+
+        <menu id="beaver-table-menu" data-l10n-id="beaver-table-window-menu-table">
+            <menupopup id="menu_beaverTablePopup">
+                <menuitem data-l10n-id="beaver-table-window-add-items" command="cmd_beaverTableAddItems"/>
+                <menuitem data-l10n-id="beaver-table-window-add-column" command="cmd_beaverTableAddColumn"/>
+                <menuitem data-l10n-id="beaver-table-window-add-new-items" command="cmd_beaverTableAddNewItems"/>
+                <menuitem data-l10n-id="beaver-table-window-sources" command="cmd_beaverTableSources"/>
+                <menuseparator data-table-fill=""/>
+                <menuitem data-table-fill="" data-l10n-id="beaver-table-window-fill-pending" command="cmd_beaverTableFillPending"/>
+                <menuitem data-table-fill="" data-l10n-id="beaver-table-window-fill-trial" command="cmd_beaverTableFillTrial"/>
+                <menuitem data-table-fill="" data-l10n-id="beaver-table-window-fill-selected" command="cmd_beaverTableFillSelected"/>
+                <menuitem data-table-fill="" data-l10n-id="beaver-table-window-fill-retry" command="cmd_beaverTableFillRetry"/>
+                <menuitem data-table-fill="" data-l10n-id="beaver-table-window-fill-stop" command="cmd_beaverTableFillStop"/>
+                <menuseparator/>
+                <menuitem data-l10n-id="beaver-table-window-remove-selected" command="cmd_beaverTableRemoveSelected"/>
+                <menuseparator data-table-fill=""/>
+                <menuitem data-table-fill="" data-l10n-id="beaver-table-window-ask-beaver" command="cmd_beaverTableAskBeaver"/>
+            </menupopup>
+        </menu>
+
+        <!-- macOS only: the window list comes from macWindowMenu.js, and
+             platformKeys.js adds Window → Zotero. -->
+        <menu id="windowMenu" data-l10n-id="menu-window-menu">
+            <menupopup id="windowPopup">
+                <menuitem command="minimizeWindow" key="key_minimizeWindow"/>
+                <menuitem command="zoomWindow"/>
+                <menuseparator id="sep-window-list"/>
+            </menupopup>
+        </menu>
+    </menubar>
+
+    <!-- React mount point. `beaver-root` is the scoping root for the shared
+         @beaver/agent-ui sheets, which select `.beaver-root .foo`; it belongs on
+         every element carrying a `beaver-pane-*` id. -->
+    <html:div id="beaver-pane-table-window" class="beaver-root display-flex flex-1 flex-col h-full w-full min-w-0 min-h-0" style="height: 100%; width: 100%; display: flex; overflow: hidden;"></html:div>
+</window>

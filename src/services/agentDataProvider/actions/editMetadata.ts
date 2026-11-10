@@ -3,12 +3,19 @@ import {
     WSAgentActionExecuteResponse,
     WSAgentActionValidateResponse
 } from '@beaver/agent-core/protocol/agentProtocol';
-import { MetadataEdit } from '@beaver/agent-core/types/agentActions/base';
+import type {
+    AppliedMetadataEdit,
+    EditMetadataProposedData,
+    EditMetadataResultData,
+    FailedMetadataEdit,
+    MetadataEdit,
+} from '@beaver/agent-core/types/agentActions/base';
 import { libraryRefForLibraryID, modelObjectIdFromReference, resolveItemReference, resolveLibraryRef } from '../../../utils/libraryIdentity';
 import { SETTABLE_PRIMARY_FIELDS, canSetField, getCreatorTypeInfo, resolveFieldForItemType, sanitizeCreators } from '../../../utils/zoteroUtils';
 import type { ActionExecuteRequest, ActionValidateRequest } from '../operationContext';
 import { TimeoutContext, TimeoutError, checkAborted } from '../timeout';
 import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
+import { actionError, assertLibraryNotExcluded, assertLibraryRefNotExcluded, toExecuteResponse } from './actionExecution';
 
 
 /**
@@ -560,77 +567,61 @@ async function validateEditMetadataAction(
 }
 
 
+export interface EditMetadataApplyHooks {
+    /** Called with the item right before any field is set; throws to refuse the edit. */
+    assertUnchanged?: (item: Zotero.Item) => void;
+    /** Filled with per-phase durations (`resolve_ms`, `save_ms`) for the execute response. */
+    timing?: Record<string, number>;
+}
+
 /**
- * Execute an edit_metadata action.
- * Applies the field edits to the Zotero item.
+ * Apply an edit_metadata action's field and creator edits to its item and
+ * return its `result_data`, with each field's value before the edit recorded
+ * for undo.
+ *
+ * A field Zotero refuses is listed in `failed_edits` and the others are still
+ * saved, so the result records what to undo. Only when nothing could be saved
+ * does the apply fail (`edit_failed`). A failed save restores the item's
+ * in-memory state, so the refused edits cannot ride along with a later,
+ * unrelated save.
  */
-async function executeEditMetadataAction(
-    request: ActionExecuteRequest,
+export async function applyEditMetadata(
+    data: EditMetadataProposedData,
     ctx: TimeoutContext,
-): Promise<WSAgentActionExecuteResponse> {
-    const { library_id, library_ref, zotero_key, edits, creators } = request.action_data as {
-        library_id: number;
-        library_ref?: string;
-        zotero_key: string;
-        edits: MetadataEdit[];
-        creators?: Array<{ firstName?: string; lastName?: string; name?: string; creatorType: string }> | null;
-    };
+    hooks: EditMetadataApplyHooks = {},
+): Promise<EditMetadataResultData> {
+    const { library_id, library_ref, zotero_key, edits, creators } = data;
+    const timing = hooks.timing ?? {};
 
     // TOCTOU guard: never edit an item in a library the user excluded from Beaver,
-    // even if validation passed earlier or the execute request skipped it.
+    // even if validation passed earlier or the action waited for approval.
     // Resolve and gate the library before resolving/loading the item.
-    const targetLibraryId = resolveLibraryRef({ library_id, library_ref });
-    const targetExcluded = targetLibraryId === null ? null : checkLibraryExcluded(targetLibraryId);
-    if (targetExcluded) {
-        return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: false,
-            error: targetExcluded.message,
-            error_code: 'library_not_searchable',
-        };
-    }
+    assertLibraryRefNotExcluded({ library_id, library_ref });
+
     // Per-phase timing: the save is where slow executes spend their time
     // (Zotero awaits every notifier observer inside the transaction), and
     // separating it from item resolution is what makes that visible.
-    const timing: Record<string, number> = {};
     ctx.reportPhase?.('resolving');
     const resolveStartedAt = Date.now();
     const resolved = await resolveItemReference({ library_id, library_ref, zotero_key });
     timing.resolve_ms = Date.now() - resolveStartedAt;
     if (resolved.status !== 'found') {
-        return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: false,
-            error: resolved.status === 'library_unavailable'
-                ? `Library not available for item: ${library_ref || library_id}-${zotero_key}`
-                : `Item not found: ${modelObjectIdFromReference({ library_id, library_ref, zotero_key })}`,
-            error_code: resolved.status === 'library_unavailable' ? 'library_unavailable' : 'item_not_found',
-            timing,
-        };
+        throw resolved.status === 'library_unavailable'
+            ? actionError('library_unavailable', `Library not available for item: ${library_ref || library_id}-${zotero_key}`)
+            : actionError('item_not_found', `Item not found: ${modelObjectIdFromReference({ library_id, library_ref, zotero_key })}`);
     }
     const item = resolved.item;
     const resolvedLibraryId = item.libraryID;
+    assertLibraryNotExcluded(resolvedLibraryId);
+    hooks.assertUnchanged?.(item);
 
-    const excluded = checkLibraryExcluded(resolvedLibraryId);
-    if (excluded) {
-        return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: false,
-            error: excluded.message,
-            error_code: 'library_not_searchable',
-        };
-    }
-
-    const appliedEdits: Array<{ field: string; old_value: string | null; new_value: string }> = [];
-    const failedEdits: Array<{ field: string; error: string }> = [];
+    const appliedEdits: AppliedMetadataEdit[] = [];
+    const failedEdits: FailedMetadataEdit[] = [];
     // Snapshot original field values for in-memory rollback on failure
     const fieldSnapshots: Array<{ field: string; originalValue: any }> = [];
     // Snapshot original creators for in-memory rollback on failure
     let creatorSnapshot: any[] | null = null;
-    let oldCreatorsJSON: any[] | null = null;
+    let oldCreatorsJSON: CreatorJSON[] | null = null;
     let creatorsApplied = false;
 
     try {
@@ -646,19 +637,17 @@ async function executeEditMetadataAction(
                 const resolvedField = resolveFieldForItemType(item.itemTypeID, edit.field) ?? edit.field;
                 // includeBaseMapped=true so base fields (e.g. 'publicationTitle')
                 // resolve to the type-specific field (e.g. 'bookTitle' on bookSection)
-                const oldValue = item.getField(resolvedField, false, true);
+                const oldValue = item.getField(resolvedField, false, true) ?? null;
                 fieldSnapshots.push({ field: resolvedField, originalValue: oldValue });
                 item.setField(resolvedField, edit.new_value);
                 appliedEdits.push({
                     // Report the field the agent supplied so the backend can
                     // match applied edits to its request.
                     field: edit.field,
-                    old_value: oldValue ? String(oldValue) : null,
-                    new_value: edit.new_value,
+                    applied_value: edit.new_value,
+                    old_value: oldValue,
                 });
             } catch (error) {
-                // Re-throw TimeoutError so it propagates to the outer catch
-                if (error instanceof TimeoutError) throw error;
                 failedEdits.push({
                     field: edit.field,
                     error: String(error),
@@ -670,12 +659,11 @@ async function executeEditMetadataAction(
         if (creators && creators.length > 0) {
             try {
                 creatorSnapshot = item.getCreators();
-                oldCreatorsJSON = item.getCreatorsJSON();
+                oldCreatorsJSON = item.getCreatorsJSON() as CreatorJSON[];
                 // Type assertion: creatorType has been validated by the validate handler
                 item.setCreators(sanitizeCreators(creators) as any[]);
                 creatorsApplied = true;
             } catch (error) {
-                if (error instanceof TimeoutError) throw error;
                 failedEdits.push({
                     field: 'creators',
                     error: String(error),
@@ -692,55 +680,47 @@ async function executeEditMetadataAction(
             try {
                 await item.saveTx();
                 timing.save_ms = Date.now() - saveStartedAt;
-                logger(`executeEditMetadataAction: Saved ${appliedEdits.length} edits${creatorsApplied ? ' + creators' : ''} to ${library_id}-${zotero_key} (${timing.save_ms}ms)`, 1);
+                logger(`applyEditMetadata: Saved ${appliedEdits.length} edits${creatorsApplied ? ' + creators' : ''} to ${resolvedLibraryId}-${zotero_key} (${timing.save_ms}ms)`, 1);
             } catch (error) {
                 timing.save_ms = Date.now() - saveStartedAt;
                 if (error instanceof TimeoutError) throw error;
-                // Save failed — restore in-memory state so dirty fields don't leak
-                restoreFieldSnapshots(item, fieldSnapshots);
-                restoreCreatorSnapshots(item, creatorSnapshot);
-                return {
-                    type: 'agent_action_execute_response',
-                    request_id: request.request_id,
-                    success: false,
-                    error: `Failed to save item: ${error}`,
-                    error_code: 'save_failed',
-                    timing,
-                };
+                throw actionError('save_failed', `Failed to save item: ${error}`);
             }
         }
-
-        const allSucceeded = failedEdits.length === 0;
-
-        // Build result data
-        const resultData: Record<string, any> = {
-            library_id: resolvedLibraryId,
-            zotero_key,
-            library_ref: libraryRefForLibraryID(resolvedLibraryId) ?? undefined,
-            applied_edits: appliedEdits,
-            failed_edits: failedEdits,
-        };
-
-        // Include creator change info in result
-        if (creatorsApplied) {
-            resultData.old_creators = oldCreatorsJSON;
-            resultData.new_creators = item.getCreatorsJSON();
-        }
-
-        return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: allSucceeded,
-            error: allSucceeded ? undefined : `Some edits failed: ${failedEdits.map(e => e.field).join(', ')}`,
-            result_data: resultData,
-            timing,
-        };
     } catch (error) {
-        // Restore in-memory state on any unhandled error (including TimeoutError)
+        // Restore in-memory state on any failure (including TimeoutError)
         restoreFieldSnapshots(item, fieldSnapshots);
         restoreCreatorSnapshots(item, creatorSnapshot);
         throw error;
     }
+
+    if (failedEdits.length > 0 && appliedEdits.length === 0 && !creatorsApplied) {
+        throw actionError(
+            'edit_failed',
+            `No edits could be applied: ${failedEdits.map(e => `${e.field} (${e.error})`).join(', ')}`,
+        );
+    }
+
+    return {
+        library_id: resolvedLibraryId,
+        zotero_key,
+        library_ref: libraryRefForLibraryID(resolvedLibraryId) ?? undefined,
+        applied_edits: appliedEdits,
+        rejected_edits: [],
+        failed_edits: failedEdits,
+        old_creators: creatorsApplied ? oldCreatorsJSON : null,
+        new_creators: creatorsApplied ? item.getCreatorsJSON() as CreatorJSON[] : null,
+    };
+}
+
+/** Execute an edit_metadata action for the backend during a run. */
+async function executeEditMetadataAction(
+    request: ActionExecuteRequest,
+    ctx: TimeoutContext,
+): Promise<WSAgentActionExecuteResponse> {
+    const timing: Record<string, number> = {};
+    return toExecuteResponse(request.request_id, 'executeEditMetadataAction',
+        () => applyEditMetadata(request.action_data as EditMetadataProposedData, ctx, { timing }), () => timing);
 }
 
 export { executeEditMetadataAction, validateEditMetadataAction };

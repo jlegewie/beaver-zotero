@@ -1,7 +1,7 @@
 /**
  * `/beaver/test/table-tab` (development and staging only): fixed commands for
- * checking the Beaver tab on a running instance without driving the UI by
- * hand. No command evaluates code; each one drives a product path (the open
+ * checking the Beaver tab, and the table window (`window-*` commands), on a
+ * running instance without driving the UI by hand. No command evaluates code; each one drives a product path (the open
  * function, a double-click, a `zotero://open` link) or reports state (tabs,
  * the saved session, render timings).
  *
@@ -15,6 +15,14 @@
 import { openTable } from './openTable';
 import { listTableTabs, tableTabStats, TABLE_TAB_KIND, TABLE_TAB_TYPE } from './tableTab';
 import { beaverTabStartup } from './beaverTabs';
+import {
+    findTableWindow,
+    listTableWindows,
+    onTableWindowCommand,
+    onTableWindowMenuShowing,
+    tableWindowMenuState,
+    tableWindowStats,
+} from './tableWindow';
 import { readTable, type TableRef } from '../services/artifacts/tableItemIdentity';
 import type { TableTabRenderReport } from './tableTabTypes';
 
@@ -32,6 +40,8 @@ interface ProbeRequest {
     timeoutMs?: number;
     withHook?: boolean;
     readerItemID?: number;
+    /** A table window command (`TableViewCommand`). */
+    tableCommand?: string;
 }
 
 const errors: Array<{ t: number; message: string }> = [];
@@ -222,6 +232,38 @@ async function screenshot(win: any, path: string): Promise<number> {
     return bytes.length;
 }
 
+/** The table windows, their menu state for `ref`, and the counters. */
+function windowsSummary(ref?: TableRef) {
+    return {
+        windows: listTableWindows().map(({ renders, ...rest }) => ({ ...rest, renders: renders.slice(-3) })),
+        stats: tableWindowStats(),
+        ...(ref ? { menuState: tableWindowMenuState(ref) } : {}),
+    };
+}
+
+/** Waits until the table window showing `ref` has mounted its table. */
+async function windowMounted(ref: TableRef, timeoutMs: number): Promise<boolean> {
+    return !!(await waitFor(
+        () => listTableWindows().some((entry) => entry.key === ref.key && entry.libraryID === ref.libraryID && entry.mounted),
+        timeoutMs,
+        20,
+    ));
+}
+
+/** What a menu shows in the table window: each command's state, the checked row height, hidden entries. */
+function windowMenus(tableWin: Window) {
+    onTableWindowMenuShowing(tableWin);
+    const doc = tableWin.document;
+    const commands: Record<string, boolean> = {};
+    for (const element of Array.from(doc.querySelectorAll('command[data-table-command]')) as Element[]) {
+        commands[element.getAttribute('data-table-command')!] = !element.hasAttribute('disabled');
+    }
+    const checked = (Array.from(doc.querySelectorAll('menuitem[data-density][checked]')) as Element[])
+        .map((item) => item.getAttribute('data-density'));
+    const fillHidden = (Array.from(doc.querySelectorAll('[data-table-fill]')) as Element[]).every((item) => item.hasAttribute('hidden'));
+    return { commands, density: checked, fillHidden, title: doc.title };
+}
+
 /** Waits until `ref` is the selected Beaver tab in `win`, timing it from `t0`. */
 async function landed(win: any, ref: TableRef, t0: number, timeoutMs: number) {
     const tabID = await waitFor(() => selectedBeaverTabFor(win, ref), timeoutMs, 5);
@@ -313,21 +355,87 @@ export async function handleTableTabProbe(request: ProbeRequest = {}): Promise<a
         }
         case 'reader-window': {
             // A reader window on the table, as Zotero opens one with
-            // "Open in new window" set: it lands in the Beaver tab instead.
+            // "Open in new window" set: it becomes a table window.
             const ref = refOf(request);
             const item = itemOf(ref);
             const t0 = Date.now();
             await (Zotero.Reader as any).open(item.id, null, { openInWindow: true });
-            const result = await landed(win, ref, t0, timeoutMs);
+            const mounted = await windowMounted(ref, timeoutMs);
             await sleep(300);
             const readers = ((Zotero.Reader as any)._readers ?? []).filter((r: any) => r?.itemID === item.id);
             return {
-                ...result,
+                mountedMs: mounted ? Date.now() - t0 : null,
                 readersLeft: readers.length,
                 readerWindowsOpen: readers.filter((r: any) => !r.tabID && r._window && !r._window.closed).length,
-                stats: tableTabStats(),
+                tabStats: tableTabStats(),
                 tabs: tabsSummary(win),
+                ...windowsSummary(ref),
             };
+        }
+        case 'open-window': {
+            // The product open in a window, as "Open in New Window" calls it.
+            const ref = refOf(request);
+            const t0 = Date.now();
+            const outcome = await openTable(ref, { openIn: 'window' });
+            const openReturnedMs = Date.now() - t0;
+            const mounted = await windowMounted(ref, timeoutMs);
+            return { outcome, openReturnedMs, mountedMs: mounted ? Date.now() - t0 : null, ...windowsSummary(ref) };
+        }
+        case 'windows':
+            return windowsSummary(request.key ? refOf(request) : undefined);
+        case 'window-menus': {
+            const ref = refOf(request);
+            const tableWin = findTableWindow(ref);
+            if (!tableWin) return { error: 'no table window shows this table' };
+            return windowMenus(tableWin);
+        }
+        case 'window-command': {
+            // A menu command or its shortcut, as the window's script hands it over.
+            const ref = refOf(request);
+            const tableWin = findTableWindow(ref);
+            if (!tableWin) return { error: 'no table window shows this table' };
+            if (!request.tableCommand) return { error: 'tableCommand is required' };
+            onTableWindowCommand(tableWin, request.tableCommand);
+            await sleep(300);
+            return { ...windowMenus(tableWin), menuState: tableWindowMenuState(ref) };
+        }
+        case 'window-edit-command': {
+            // Edit's Undo / Copy / Select All through the window's command
+            // dispatcher, as the Edit menu and its shortcuts run them.
+            const ref = refOf(request);
+            const tableWin = findTableWindow(ref) as any;
+            if (!tableWin) return { error: 'no table window shows this table' };
+            const command = request.tableCommand ?? 'cmd_undo';
+            const controller = tableWin.document.commandDispatcher.getControllerForCommand(command);
+            const enabled = !!controller?.isCommandEnabled(command);
+            tableWin.goDoCommand?.(command);
+            await sleep(300);
+            return { command, enabled, menuState: tableWindowMenuState(ref) };
+        }
+        case 'window-move-tab': {
+            // The tab menu's Move Tab → Move to New Window on the table's tab.
+            const ref = refOf(request);
+            const entry = listTableTabs().find((tab) => tab.key === ref.key && tab.libraryID === ref.libraryID);
+            if (!entry) return { error: 'no Beaver tab shows this table' };
+            const tab = tabs._tabs?.find((t: any) => t.id === entry.tabID);
+            await tabs.tabHooks.moveToNewWindow?.beaver?.(tab, tabs._tabs.indexOf(tab));
+            const mounted = await windowMounted(ref, timeoutMs);
+            return { mounted, tabStillOpen: !!entryFor(entry.tabID), tabs: tabsSummary(win), ...windowsSummary(ref) };
+        }
+        case 'window-close': {
+            const ref = refOf(request);
+            const tableWin = findTableWindow(ref);
+            if (!tableWin) return { closed: 0 };
+            tableWin.close();
+            await sleep(500);
+            return { closed: 1, ...windowsSummary(ref) };
+        }
+        case 'window-screenshot': {
+            const ref = refOf(request);
+            const tableWin = findTableWindow(ref);
+            if (!tableWin) return { error: 'no table window shows this table' };
+            const path = request.path ?? PathUtils.join(PathUtils.tempDir, 'beaver-table-window.png');
+            return { path, bytes: await screenshot(tableWin, path) };
         }
         case 'session': {
             await Zotero.Session.save();

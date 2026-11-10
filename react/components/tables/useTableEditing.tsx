@@ -508,5 +508,21 @@ export function useTableEditing({
         [addSources],
     );
 
-    return { editing, cellEditing, selectionActions, rowMenuItems, toast: toastView, clearToast, overlay, error, onDrop };
+    // For the window's Edit > Undo: the toast's Undo, while it offers one.
+    const canUndo = !!toast?.undo && !fillRunning;
+
+    return {
+        editing,
+        cellEditing,
+        selectionActions,
+        rowMenuItems,
+        toast: toastView,
+        clearToast,
+        overlay,
+        error,
+        onDrop,
+        canUndo,
+        undo,
+        removeRows,
+    };
 }

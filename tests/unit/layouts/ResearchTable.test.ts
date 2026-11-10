@@ -10,7 +10,7 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Cell, TableSpec } from '@beaver/agent-core/layouts/table';
 import type { TableFillCells } from '@beaver/agent-core/protocol/tableFillProtocol';
-import { ResearchTable } from '@beaver/agent-ui/layouts/research/ResearchTable';
+import { ResearchTable, type ResearchTableHandle } from '@beaver/agent-ui/layouts/research/ResearchTable';
 import { setHost } from '@beaver/agent-ui/host';
 import { CitationReaderTargetContext } from '@beaver/agent-ui/chat/Citation';
 import { hoverPeek } from '../../helpers/hoverPeek';
@@ -1929,6 +1929,123 @@ describe('an empty table', () => {
         mount({ table: empty() });
         const cols = Array.from(container!.querySelectorAll<HTMLElement>('colgroup col'));
         expect(cols.map((col) => col.style.width)).toEqual(['2.75rem', '']);
+    });
+});
+
+describe('the handle a host drives from its own menus', () => {
+    function mountWithHandle(props: Partial<React.ComponentProps<typeof ResearchTable>> = {}) {
+        const handleRef = React.createRef<ResearchTableHandle>();
+        mount({ handleRef, ...props });
+        return handleRef;
+    }
+
+    it('reports the view as it is now', () => {
+        const handle = mountWithHandle({ onCopy: vi.fn(), onExport: vi.fn() });
+        expect(handle.current!.viewState()).toMatchObject({
+            density: 'cozy',
+            hiddenColumns: 0,
+            filtered: false,
+            sorted: false,
+            selectedRowIds: [],
+            rows: 3,
+            searchable: true,
+            hasSelectedText: false,
+            canCopy: true,
+            canExport: true,
+            hasVersionHistory: false,
+            canEditSources: false,
+        });
+    });
+
+    it('changes the row height, selects every row and clears the selection-free view controls', () => {
+        const handle = mountWithHandle();
+        act(() => handle.current!.setDensity('tall'));
+        expect(handle.current!.viewState().density).toBe('tall');
+        expect(container!.querySelector('button[aria-label="Tall rows"]')?.getAttribute('aria-pressed')).toBe('true');
+
+        act(() => handle.current!.selectAllRows());
+        expect(handle.current!.viewState().selectedRowIds).toEqual(['r1', 'r2', 'r3']);
+        // Selecting all again keeps them selected rather than toggling off.
+        act(() => handle.current!.selectAllRows());
+        expect(handle.current!.viewState().selectedRowIds).toHaveLength(3);
+    });
+
+    it('puts the cursor in the search, and clears the search with the filters', () => {
+        const handle = mountWithHandle();
+        act(() => handle.current!.focusSearch());
+        const search = container!.querySelector<HTMLInputElement>('.rt-search input')!;
+        expect(document.activeElement).toBe(search);
+        act(() => {
+            const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+            setter.call(search, 'Baird');
+            search.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+        expect(handle.current!.viewState()).toMatchObject({ filtered: true, rows: 1 });
+        act(() => handle.current!.clearFilters());
+        expect(handle.current!.viewState()).toMatchObject({ filtered: false, rows: 3 });
+    });
+
+    it('sorts off and shows hidden columns again', () => {
+        const handle = mountWithHandle();
+        click(container!.querySelector('button[aria-label="Column menu: Design"]')!);
+        click(menuEntry('Sort A → Z')!);
+        expect(handle.current!.viewState().sorted).toBe(true);
+        act(() => handle.current!.clearSort());
+        expect(handle.current!.viewState().sorted).toBe(false);
+
+        click(container!.querySelector('button[aria-label="Column menu: Design"]')!);
+        click(menuEntry('Hide column')!);
+        expect(handle.current!.viewState().hiddenColumns).toBe(1);
+        act(() => handle.current!.showHiddenColumns());
+        expect(handle.current!.viewState().hiddenColumns).toBe(0);
+    });
+
+    it('copies the view as text and exports it in the view sort order', () => {
+        const onCopy = vi.fn();
+        const onExport = vi.fn();
+        const handle = mountWithHandle({ onCopy, onExport });
+        act(() => handle.current!.copyAsText());
+        expect(onCopy.mock.calls[0][0]).toContain('Baird 2011');
+        act(() => handle.current!.exportTable('csv'));
+        expect(onExport).toHaveBeenCalledWith('csv', undefined);
+    });
+
+    it('copies only text selected in the table', () => {
+        const onCopy = vi.fn();
+        const handle = mountWithHandle({ onCopy });
+        expect(handle.current!.copySelection()).toBe(false);
+        const title = container!.querySelector('.rt-title')!;
+        const range = document.createRange();
+        range.selectNodeContents(title);
+        document.getSelection()!.removeAllRanges();
+        document.getSelection()!.addRange(range);
+        expect(handle.current!.viewState().hasSelectedText).toBe(true);
+        expect(handle.current!.copySelection()).toBe(true);
+        expect(onCopy).toHaveBeenCalledWith('Cash transfers');
+        document.getSelection()!.removeAllRanges();
+    });
+
+    it('opens the Sources popover even with rows selected, clearing the selection that hides its chip', () => {
+        const handle = mountWithHandle({
+            editing: { renderSources: () => h('p', { className: 'sources-body' }, 'Sources') } as never,
+        });
+        act(() => handle.current!.selectAllRows());
+        expect(container!.querySelector('.rt-sources-button')).toBeNull();
+        act(() => handle.current!.openSources());
+        expect(handle.current!.viewState().selectedRowIds).toEqual([]);
+        expect(document.querySelector('.sources-body')?.textContent).toBe('Sources');
+    });
+
+    it('opens the version history only when the host offers one', () => {
+        const handle = mountWithHandle();
+        act(() => handle.current!.showVersionHistory());
+        expect(container!.querySelector('aside[aria-label="Version history"]')).toBeNull();
+
+        act(() => root?.unmount());
+        container?.remove();
+        const withHistory = mountWithHandle({ renderVersionHistory: () => h('p', null, 'History') });
+        act(() => withHistory.current!.showVersionHistory());
+        expect(container!.querySelector('aside[aria-label="Version history"]')?.textContent).toContain('History');
     });
 });
 

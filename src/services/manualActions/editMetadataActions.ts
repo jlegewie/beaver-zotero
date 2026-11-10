@@ -5,9 +5,11 @@
 
 import { AgentAction } from '@beaver/agent-core/agents/agentActionTypes';
 import { logger } from '@beaver/agent-core/platform/logger';
-import { AppliedMetadataEdit, CreatorJSON, EditMetadataResultData, FailedMetadataEdit, MetadataEdit } from '@beaver/agent-core/types/agentActions/base';
-import { libraryRefForLibraryID, resolveItemReference } from '../../utils/libraryIdentity';
+import { AppliedMetadataEdit, CreatorJSON, EditMetadataProposedData, EditMetadataResultData, MetadataEdit } from '@beaver/agent-core/types/agentActions/base';
+import { resolveItemReference } from '../../utils/libraryIdentity';
 import { resolveFieldForItemType, sanitizeCreators } from '../../utils/zoteroUtils';
+import { unboundedExecutionContext } from '../agentDataProvider/actions/actionExecution';
+import { applyEditMetadata } from '../agentDataProvider/actions/editMetadata';
 import { joinList, ManualApplyOptions, staleProposalError } from './staleProposal';
 
 /**
@@ -107,120 +109,25 @@ function assertMetadataUnchanged(
 }
 
 /**
- * Execute an edit_metadata agent action by applying edits to the Zotero item.
- * Captures current values BEFORE applying so undo can reliably restore them.
+ * Apply a stored edit_metadata action through the shared executor
+ * (`applyEditMetadata`), which records each field's value before the edit for
+ * undo.
  *
  * Refuses with `stale_proposal` when an edited field changed since the
  * proposal, unless `options.skipStaleCheck`. When some edits fail but others
  * are saved, the result lists the failures in `failed_edits`, so the saved
  * ones stay undoable; it throws only when nothing was saved.
- * @param action The agent action to execute
- * @returns Result data including applied edits with old values for undo
  */
 export async function executeEditMetadataAction(
     action: AgentAction,
     options: ManualApplyOptions = {},
 ): Promise<EditMetadataResultData> {
-    const { library_id, zotero_key, edits, creators, old_creators } = action.proposed_data as {
-        library_id: number;
-        library_ref?: string;
-        zotero_key: string;
-        edits: MetadataEdit[];
-        creators?: CreatorJSON[] | null;
-        old_creators?: CreatorJSON[] | null;
-    };
-
-    const resolved = await resolveItemReference(action.proposed_data as any);
-    if (resolved.status === 'library_unavailable') {
-        throw new Error(`Library unavailable for item: ${library_id}-${zotero_key}`);
-    }
-    if (resolved.status === 'not_found') {
-        throw new Error(`Item not found: ${library_id}-${zotero_key}`);
-    }
-    const item = resolved.item;
-
-    if (!options.skipStaleCheck) {
-        assertMetadataUnchanged(item, edits, creators, old_creators);
-    }
-
-    const appliedEdits: AppliedMetadataEdit[] = [];
-    const failedEdits: FailedMetadataEdit[] = [];
-    let oldCreatorsJSON: CreatorJSON[] | null = null;
-    let newCreatorsJSON: CreatorJSON[] | null = null;
-    let creatorsApplied = false;
-
-    // Apply each field edit, capturing current value BEFORE applying for reliable undo
-    for (const edit of edits) {
-        try {
-            // The agent may supply a label belonging to another item type
-            // (e.g. 'institution' on a document). Validation accepts it via the
-            // shared base field, but setField() rejects wrong-type labels, so
-            // read and write the type-resolved field.
-            const field = resolveFieldForItemType(item.itemTypeID, edit.field) ?? edit.field;
-
-            // Capture current value before applying (for undo)
-            const oldValue = readField(item, field);
-
-            // Apply the new value
-            item.setField(field, edit.new_value);
-            appliedEdits.push({
-                // Keep the field the agent supplied so results match its request.
-                field: edit.field,
-                applied_value: edit.new_value,
-                old_value: oldValue, // Store for undo
-            });
-        } catch (error) {
-            failedEdits.push({
-                field: edit.field,
-                error: String(error),
-            });
-        }
-    }
-
-    // Apply creators if provided (non-empty array)
-    if (creators && creators.length > 0) {
-        try {
-            oldCreatorsJSON = item.getCreatorsJSON();
-            item.setCreators(sanitizeCreators(creators) as any[]);
-            creatorsApplied = true;
-        } catch (error) {
-            failedEdits.push({
-                field: 'creators',
-                error: String(error),
-            });
-        }
-    }
-
-    // Save the item if any changes were applied
-    if (appliedEdits.length > 0 || creatorsApplied) {
-        try {
-            await item.saveTx();
-            logger(`executeEditMetadataAction: Saved ${appliedEdits.length} edits${creatorsApplied ? ' + creators' : ''} to ${item.libraryID}-${zotero_key}`, 1);
-        } catch (error) {
-            throw new Error(`Failed to save item: ${error}`);
-        }
-    }
-
-    if (creatorsApplied) {
-        newCreatorsJSON = item.getCreatorsJSON();
-    }
-
-    // Nothing saved: fail the action. Once something is saved, the result is
-    // recorded (with its failures) so the saved fields can be undone.
-    if (failedEdits.length > 0 && appliedEdits.length === 0 && !creatorsApplied) {
-        throw new Error(`No edits could be applied: ${failedEdits.map(e => `${e.field} (${e.error})`).join(', ')}`);
-    }
-
-    return {
-        library_id: item.libraryID,
-        zotero_key,
-        library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
-        applied_edits: appliedEdits,
-        rejected_edits: [],
-        failed_edits: failedEdits,
-        old_creators: oldCreatorsJSON,
-        new_creators: newCreatorsJSON,
-    };
+    const data = action.proposed_data as EditMetadataProposedData;
+    return applyEditMetadata(data, unboundedExecutionContext(), {
+        assertUnchanged: options.skipStaleCheck
+            ? undefined
+            : (item) => assertMetadataUnchanged(item, data.edits, data.creators, data.old_creators),
+    });
 }
 
 /**

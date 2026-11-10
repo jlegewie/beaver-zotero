@@ -227,6 +227,28 @@ describe('targeted window commands', () => {
     });
 });
 
+it("lets a table window follow the active main window as its context, as the standalone does", () => {
+    const instance = new BeaverInstance();
+    const a = makeWindow(),
+        b = makeWindow(),
+        tableWindow = makeWindow();
+    (Zotero as any).getMainWindow = vi.fn(() => a);
+    const ra = instance.attachWindow(a),
+        rb = instance.attachWindow(b);
+    const table = instance.attachWindow(tableWindow, "table");
+    ra.status = rb.status = table.status = "ready";
+    expect(table.kind).toBe("table");
+    expect(table.contextWindow).toBe(a);
+    // It is not the separate Beaver window.
+    expect(instance.standaloneWindow).toBeUndefined();
+    instance.refreshContext(b);
+    expect(table.contextWindow).toBe(b);
+    instance.markClosing(b);
+    instance.markClosing(a);
+    expect(table.contextWindow).toBeNull();
+    expect(instance.resolveWindow(table.id)).toBe(table);
+});
+
 it("rebinds standalone context across main-window focus and closure without detaching its renderer", () => {
     const instance = new BeaverInstance();
     const a = makeWindow(),

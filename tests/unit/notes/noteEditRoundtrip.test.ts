@@ -1049,6 +1049,7 @@ describe('executeEditNoteAction + undoEditNoteAction', () => {
             key: 'NOTE0001',
             libraryID: 1,
             id: 42,
+            isNote: vi.fn(() => true),
             loadDataType: vi.fn().mockResolvedValue(undefined),
             getNote: vi.fn(() => currentHtml),
             setNote: vi.fn((html: string) => { currentHtml = html; return true; }),
@@ -1595,7 +1596,8 @@ describe('executeEditNoteAction + undoEditNoteAction', () => {
     });
 
     it('undo succeeds when saved note strips inline itemData from new citations', async () => {
-        const noteHtml = wrap('<p>Hello world</p>');
+        // PM-normalize so the edit pipeline produces canonical HTML
+        const noteHtml = normalizeNoteHtml(wrap('<p>Hello world</p>'));
         const item = makeMockItem(noteHtml);
         (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(item);
         (globalThis as any).Zotero.Notes._editorInstances = [];

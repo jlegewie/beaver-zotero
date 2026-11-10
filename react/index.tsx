@@ -48,7 +48,7 @@ import LibrarySidebar from './components/LibrarySidebar';
 import PreferencesWindow from './components/PreferencesWindow';
 import ReaderSidebar from './components/ReaderSidebar';
 import WindowSidebar from './components/WindowSidebar';
-import TableTabView from './components/tables/TableTabView';
+import TableTabView, { type TableViewCommands } from './components/tables/TableTabView';
 import type { TableRef } from '../src/services/artifacts/tableItemIdentity';
 import type { TableFocusTarget, TableTabHandle, TableTabMountOptions, TableTabRequest } from '../src/ui/tableTabTypes';
 import { eventManager } from './events/eventManager';
@@ -289,8 +289,10 @@ export function renderWindowSidebar(domElement: HTMLElement) {
 
 /**
  * Renders a stored table into a Beaver tab of this main window
- * (`src/ui/tableTab.ts` owns the tab and calls this). The handle carries the
- * open's warning in after the mount, without remounting the table.
+ * (`src/ui/tableTab.ts` owns the tab and calls this), or into a table window
+ * (`src/ui/tableWindow.ts`, with `surface: 'window'`). The handle carries the
+ * open's warning in after the mount, without remounting the table, and the
+ * native menus' commands and state.
  */
 export function renderTableTab(
     domElement: HTMLElement,
@@ -303,6 +305,7 @@ export function renderTableTab(
     const focusListeners = new Set<(target: TableFocusTarget) => void>();
     const requestListeners = new Set<(request: TableTabRequest) => void>();
     const selectionListeners = new Set<() => void>();
+    const commands = React.createRef<TableViewCommands>();
     const warnings = {
         get: () => warning,
         subscribe(listener: () => void) {
@@ -326,7 +329,7 @@ export function renderTableTab(
             return () => { selectionListeners.delete(listener); };
         },
     };
-    mountSurface(domElement, <TableTabView tableRef={tableRef} options={options} warnings={warnings} />);
+    mountSurface(domElement, <TableTabView tableRef={tableRef} options={options} warnings={warnings} commandsRef={commands} />);
     return {
         setWarning(next) {
             if (next === warning) return;
@@ -344,6 +347,12 @@ export function renderTableTab(
         },
         selectionChanged() {
             for (const listener of selectionListeners) listener();
+        },
+        command(command) {
+            return commands.current?.command(command) ?? false;
+        },
+        menuState() {
+            return commands.current?.menuState() ?? null;
         },
     };
 }
@@ -417,6 +426,8 @@ export function initializeRuntime(runtime: WindowRuntime) {
     Zotero.Beaver.runtime.subscribeWindow(runtime, 'notification:popup', detail => {
         store.set(addPopupMessageAtom, detail);
     });
+    // A table window shows one table: it has no chat, so it follows no thread.
+    if (runtime.kind === "table") return;
     attachThreadProjection(runtime);
     attachThreadAdmission(runtime);
     if (runtime.kind === "main") initializeReactUI(runtime.hostWindow);

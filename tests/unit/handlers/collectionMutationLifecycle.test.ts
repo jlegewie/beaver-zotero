@@ -94,12 +94,26 @@ describe('collection mutation identity lifecycle', () => {
             .rejects.toMatchObject({ code: 'library_collection_mismatch' });
     });
 
+    it.each(['automatic', 'manual'])('erases the new collection when adding its items fails (%s)', async route => {
+        const target = item(7, 'ITEMKEY1');
+        const data = { library_ref: 'g12345', name: 'New', item_ids: ['g12345-ITEMKEY1'] };
+        Zotero.DB.executeTransaction = async () => { throw new Error('database is locked'); };
+        if (route === 'manual') {
+            await expect(manualCreate.executeCreateCollectionAction(action('create_collection', data)))
+                .rejects.toMatchObject({ code: 'create_failed' });
+        } else {
+            expect(await executeCreateCollectionAction(request(data), context())).toMatchObject({ success: false, error_code: 'create_failed' });
+        }
+        expect(collections.some(c => c.key === 'NEWCOLL1')).toBe(false);
+        expect(target.memberships).toEqual([]);
+    });
+
     it('does not substitute a same-named parent deleted after approval', async () => {
         const validation = await validateCreateCollectionAction(request({ library_ref: 'g12345', parent_key: 'Inbox', name: 'New' }));
         collections[1].deleted = true;
         collection(7, 'OTHERKEY', 'Inbox');
         await expect(manualCreate.executeCreateCollectionAction(action('create_collection', { name: 'New', ...validation.normalized_action_data })))
-            .rejects.toMatchObject({ code: 'collection_not_found' });
+            .rejects.toMatchObject({ code: 'parent_not_found' });
         expect(collections.some(c => c.key === 'NEWCOLL1')).toBe(false);
     });
 
@@ -168,14 +182,35 @@ describe('collection mutation identity lifecycle', () => {
     });
 });
 
-it('skips an approved manual membership whose destination was deleted', async () => {
+it('refuses an approved manual membership whose destination was deleted, without writing', async () => {
     const target = item(7, 'ITEMKEY1');
     const prepared = await validateOrganizeItemsAction(request({ item_ids: ['g12345-ITEMKEY1'], collections: { add: ['Inbox'] } }));
     collections[1].deleted = true;
-    const result = await manualOrganize.executeOrganizeItemsAction(action('organize_items', prepared.normalized_action_data));
-    expect(result.items_modified).toBe(0);
-    expect(target.saveTx).not.toHaveBeenCalled();
+    await expect(manualOrganize.executeOrganizeItemsAction(action('organize_items', prepared.normalized_action_data)))
+        .rejects.toMatchObject({ code: 'collection_not_found' });
+    expect(target.save).not.toHaveBeenCalled();
     expect(target.memberships).toEqual([]);
+});
+
+it('applies a manual organize as one transaction, restoring every item when one save fails', async () => {
+    const first = item(7, 'ITEMKEY1');
+    const second = item(7, 'ITEMKEY2');
+    second.save.mockRejectedValueOnce(new Error('database is locked'));
+    const data = { item_ids: ['g12345-ITEMKEY1', 'g12345-ITEMKEY2'], collections: { add: ['SAMEKEY1'] } };
+    await expect(manualOrganize.executeOrganizeItemsAction(action('organize_items', data)))
+        .rejects.toMatchObject({ code: 'transaction_failed' });
+    // The database rolls back; the cached items are put back as they were.
+    expect(first.setCollections).toHaveBeenCalledWith([]);
+    expect(second.setCollections).toHaveBeenCalledWith([]);
+});
+
+it('reports items missing on this device as skipped and still applies the rest', async () => {
+    const present = item(7, 'ITEMKEY1');
+    const data = { item_ids: ['g12345-ITEMKEY1', 'g12345-MISSING1'], collections: { add: ['SAMEKEY1'] } };
+    const result = await manualOrganize.executeOrganizeItemsAction(action('organize_items', data));
+    expect(result).toMatchObject({ items_modified: 1, skipped_items: ['g12345-MISSING1'] });
+    expect(result.failed_items).toBeUndefined();
+    expect(present.memberships).toEqual([collections[1].id]);
 });
 
 it.each(['read-only', 'excluded'])('refuses an approved manual membership when the destination becomes %s', async change => {
@@ -283,12 +318,12 @@ it.each([[1, 'u'], [7, 'g12345']] as const)('restores tags and collections after
     expect(row.memberships).toEqual([added.id]);
     expect(result.current_state?.[itemId]).toEqual({ tags: ['removed', 'unchanged'], collections: ['REMOVED1'] });
     expect(result.items_modified).toBe(1);
-    expect(row.saveTx).toHaveBeenCalledTimes(1);
+    expect(row.save).toHaveBeenCalledTimes(1);
 
     await manualOrganize.undoOrganizeItemsAction(action('organize_items', data, result));
     expect(tags).toEqual(new Set(['removed', 'unchanged']));
     expect(row.memberships).toEqual([removed.id]);
-    expect(row.saveTx).toHaveBeenCalledTimes(2);
+    expect(row.saveTx).toHaveBeenCalledTimes(1);
 });
 
 it('uses null portable parent fields for manual move and undo despite stale native parents', async () => {
@@ -325,10 +360,12 @@ it('applies and undoes manual tag-only edits in an unmapped library without coll
     expect(result.collection_ids_added).toBeUndefined();
     expect(result.collection_ids_removed).toBeUndefined();
 
+    expect(row.save).toHaveBeenCalledTimes(1);
+
     await manualOrganize.undoOrganizeItemsAction(action('organize_items', data, result));
     expect(tags).toEqual(new Set(['original']));
     expect(lookup).toHaveBeenCalledTimes(2);
-    expect(row.saveTx).toHaveBeenCalledTimes(2);
+    expect(row.saveTx).toHaveBeenCalledTimes(1);
 });
 
 it.each(['excluded', 'read-only'])('keeps manual tag-only apply and undo blocked for an %s library', async restriction => {
@@ -343,6 +380,7 @@ it.each(['excluded', 'read-only'])('keeps manual tag-only apply and undo blocked
         .rejects.toThrow();
     expect((row as any).addTag).not.toHaveBeenCalled();
     expect((row as any).removeTag).not.toHaveBeenCalled();
+    expect(row.save).not.toHaveBeenCalled();
     expect(row.saveTx).not.toHaveBeenCalled();
 });
 

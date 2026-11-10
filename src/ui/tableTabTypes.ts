@@ -33,7 +33,51 @@ export interface TableTabRenderReport {
     rowsInDom: number;
 }
 
+/** Where a table is mounted: a Beaver tab of a main window, or its own window. */
+export type TableSurface = 'tab' | 'window';
+
+/** A command from a host's native menus or shortcuts, for the mounted table. */
+export type TableViewCommand =
+    | 'show-in-library'
+    | 'export-xlsx'
+    | 'export-csv'
+    | 'copy-text'
+    | 'undo'
+    | 'copy-selection'
+    | 'select-all-rows'
+    | 'find'
+    | 'density-compact'
+    | 'density-cozy'
+    | 'density-tall'
+    | 'show-hidden-columns'
+    | 'clear-filters'
+    | 'clear-sort'
+    | 'version-history'
+    | 'sources'
+    | 'add-items'
+    | 'add-column'
+    | 'add-new-items'
+    | 'fill-pending'
+    | 'fill-trial'
+    | 'fill-selected'
+    | 'fill-retry'
+    | 'fill-stop'
+    | 'remove-selected'
+    | 'ask-beaver';
+
+/** What a host's menus show for the mounted table. */
+export interface TableViewMenuState {
+    /** Which commands can run now. */
+    enabled: Record<TableViewCommand, boolean>;
+    /** The row height in view; null before the table has rendered. */
+    density: 'compact' | 'cozy' | 'tall' | null;
+    /** Fill (and Ask Beaver) are offered in this build. */
+    fillAvailable: boolean;
+}
+
 export interface TableTabMountOptions {
+    /** Where the table is mounted; a tab when absent. */
+    surface?: TableSurface;
     /** The spec the open just read, so the first paint needs no second read. */
     initial?: { spec: TableSpec; version: number };
     /** A row or cell to bring into view once the table is on screen. */
@@ -59,6 +103,10 @@ export interface TableTabHandle {
     request(request: TableTabRequest): void;
     /** The window's selected tab changed: the tab may have been shown or hidden. */
     selectionChanged(): void;
+    /** Runs a menu command; false when the table cannot run it now. */
+    command(command: TableViewCommand): boolean;
+    /** The state the menus show, or null before the table has mounted. */
+    menuState(): TableViewMenuState | null;
 }
 
 export type RenderTableTab = (

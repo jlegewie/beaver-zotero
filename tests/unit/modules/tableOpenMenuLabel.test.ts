@@ -21,7 +21,7 @@ import {
 } from '../../../src/modules/tableOpenMenuLabel';
 
 const Z = (globalThis as any).Zotero;
-const table = { table: true } as unknown as Zotero.Item;
+const table = { table: true, libraryID: 1, key: 'TABLEKEY' } as unknown as Zotero.Item;
 const snapshot = { table: false } as unknown as Zotero.Item;
 
 let popup: HTMLElement;
@@ -212,5 +212,100 @@ describe('relabelling when the item menu opens', () => {
         popup.id = '';
         expect(() => attachTableOpenLabels(win)).not.toThrow();
         detachTableOpenLabels(win);
+    });
+});
+
+describe('opening tables in their own windows from the item menu', () => {
+    let selection: Zotero.Item[];
+    let win: Window;
+    let open: ReturnType<typeof vi.fn>;
+    let zoteroOpen: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+        popup.id = 'zotero-itemmenu';
+        selection = [table];
+        win = { document, closed: false, ZoteroPane: { getSelectedItems: () => selection } } as unknown as Window;
+        open = vi.fn(async () => ({ ok: true }));
+        zoteroOpen = vi.fn();
+    });
+
+    /** Zotero's entry, with the command listener Zotero puts on it. */
+    function zoteroEntry(openIn: string): HTMLElement {
+        const entry = addEntry({ attachmentType: 'snapshot', numAttachments: selection.length, openIn });
+        entry.addEventListener('command', zoteroOpen);
+        return entry;
+    }
+
+    function choose(entry: Element): void {
+        popup.dispatchEvent(new Event('popupshowing'));
+        entry.dispatchEvent(new Event('command', { bubbles: true }));
+    }
+
+    it("opens each selected table in a window instead of Zotero's reader window", () => {
+        const second = { table: true, libraryID: 2, key: 'SECONDKY' } as unknown as Zotero.Item;
+        selection = [table, second];
+        const entry = zoteroEntry('window');
+        attachTableOpenLabels(win, open);
+
+        choose(entry);
+
+        expect(zoteroOpen).not.toHaveBeenCalled();
+        expect(open.mock.calls.map((call) => call[0])).toEqual([
+            { libraryID: 1, key: 'TABLEKEY' },
+            { libraryID: 2, key: 'SECONDKY' },
+        ]);
+    });
+
+    it('does so in every language, where the label stays Zotero\'s', () => {
+        Z.locale = 'de';
+        const entry = zoteroEntry('window');
+        attachTableOpenLabels(win, open);
+
+        choose(entry);
+
+        expect(setAttributes).not.toHaveBeenCalled();
+        expect(open).toHaveBeenCalledOnce();
+        expect(zoteroOpen).not.toHaveBeenCalled();
+    });
+
+    it("leaves the tab entry and a mixed selection to Zotero's open", () => {
+        const tab = zoteroEntry('tab');
+        attachTableOpenLabels(win, open);
+        choose(tab);
+        expect(zoteroOpen).toHaveBeenCalledOnce();
+
+        selection = [table, snapshot];
+        tab.remove();
+        const windowEntry = zoteroEntry('window');
+        choose(windowEntry);
+        expect(zoteroOpen).toHaveBeenCalledTimes(2);
+        expect(open).not.toHaveBeenCalled();
+    });
+
+    it("leaves the window entry to Zotero without a table window to open", () => {
+        const entry = zoteroEntry('window');
+        attachTableOpenLabels(win);
+        choose(entry);
+        expect(zoteroOpen).toHaveBeenCalledOnce();
+    });
+
+    it('says why when a table could not be opened', async () => {
+        (Zotero as any).alert = vi.fn();
+        open.mockResolvedValueOnce({ error: 'Could not open table TABLEKEY — gone.' });
+        const entry = zoteroEntry('window');
+        attachTableOpenLabels(win, open);
+        choose(entry);
+        await vi.waitFor(() =>
+            expect((Zotero as any).alert).toHaveBeenCalledWith(win, 'Beaver', 'Could not open table TABLEKEY — gone.'),
+        );
+    });
+
+    it('stops opening table windows once detached', () => {
+        const entry = zoteroEntry('window');
+        attachTableOpenLabels(win, open);
+        detachTableOpenLabels(win);
+        choose(entry);
+        expect(open).not.toHaveBeenCalled();
+        expect(zoteroOpen).toHaveBeenCalledOnce();
     });
 });

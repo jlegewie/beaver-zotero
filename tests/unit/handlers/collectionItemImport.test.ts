@@ -5,10 +5,11 @@ vi.mock('../../../src/utils/backgroundTasks', () => ({ isPdfFetchInProgress: () 
 vi.mock('../../../src/utils/pdfResolvers', () => ({ buildPdfResolvers: vi.fn() }));
 vi.mock('../../../src/services/pdfAttachmentFetch', () => ({ fetchPdfAttachment: vi.fn() }));
 vi.mock('../../../src/utils/batchFindExistingReferences', () => ({ batchFindExistingReferences: async () => ({ results: [], timing: { total_ms: 0 } }) }));
-vi.mock('../../../src/services/agentDataProvider/utils', () => ({ getDeferredToolPreference: () => 'always_ask', checkLibraryExcluded: () => null, excludedLibraryMessage: () => 'Unavailable' }));
+const excluded = vi.hoisted(() => new Set<number>());
+vi.mock('../../../src/services/agentDataProvider/utils', () => ({ getDeferredToolPreference: () => 'always_ask', checkLibraryExcluded: (id: number) => (excluded.has(id) ? { message: `Library ${id} is excluded` } : null), excludedLibraryMessage: () => 'Unavailable' }));
 import { applyCreateItemData, createZoteroItem } from '../../../src/services/itemImport/legacy';
 import { validateCreateItemAction, executeCreateItemAction } from '../../../src/services/agentDataProvider/actions/createItems';
-import { executeCreateItemAction as manualExecute, undoCreateItemAction } from '../../../src/services/manualActions/createItemActions';
+import { executeCreateItemAction as manualExecute, executeCreateItemActions, undoCreateItemAction } from '../../../src/services/manualActions/createItemActions';
 
 let collections: any[];
 let created: any[];
@@ -49,6 +50,30 @@ it.each(['automatic', 'manual'])('resolves memberships before approval and prese
     expect(result).toMatchObject({ collection_ids: ['g12345-SAMEKEY1'], collection_keys: ['SAMEKEY1'] });
     await undoCreateItemAction({ result_data: result } as any);
     expect(created[0].eraseTx).toHaveBeenCalledOnce();
+});
+
+it('refuses a stored create_item into a library excluded after the proposal', async () => {
+    excluded.add(7);
+    try {
+        await expect(manualExecute({ id: 'a1', proposed_data: { library_ref: 'g12345', item: { title: 'Paper' } } } as any))
+            .rejects.toMatchObject({ code: 'library_not_searchable' });
+        expect(created).toHaveLength(0);
+    } finally {
+        excluded.delete(7);
+    }
+});
+
+it('reports a refused batch item with card wording and its code', async () => {
+    excluded.add(7);
+    try {
+        const result = await executeCreateItemActions([{ id: 'a1', proposed_data: { library_ref: 'g12345', item: { title: 'Paper' } } } as any]);
+        expect(result.failures[0]).toMatchObject({
+            error: expect.stringMatching(/excluded from Beaver/),
+            errorDetails: { error_code: 'library_not_searchable' },
+        });
+    } finally {
+        excluded.delete(7);
+    }
 });
 
 it('creates the item without an approved membership that no longer exists', async () => {
