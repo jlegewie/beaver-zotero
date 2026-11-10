@@ -1,6 +1,5 @@
 import { logger } from '@beaver/agent-core/platform/logger';
 import {
-    WSAgentActionExecuteRequest,
     WSAgentActionExecuteResponse,
     WSAgentActionValidateResponse
 } from '@beaver/agent-core/protocol/agentProtocol';
@@ -8,70 +7,45 @@ import { normalizePageLocations } from '@beaver/agent-core/types/agentActions/an
 import type {
     CreatedAnnotationResult,
     CreateHighlightAnnotationsProposedData,
+    CreateHighlightAnnotationsResultData,
     FailedAnnotationResult,
     HighlightAnnotationItem,
 } from '@beaver/agent-core/types/agentActions/createAnnotations';
 import { normalizeAnnotationTags, textAnnotationStyle } from '@beaver/agent-core/types/agentActions/createAnnotations';
-import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
-import { hasLibraryIdentity, libraryRefForLibraryID, resolveItemReference, resolveLibraryRef } from '../../../utils/libraryIdentity';
+import { hasLibraryIdentity, resolveLibraryRef } from '../../../utils/libraryIdentity';
 import { shortItemTitle } from '../../../utils/zoteroUtils';
 import { getParentItemAsync } from '../../../utils/zoteroDataLoading';
 import {
     createEpubHighlightAnnotation,
     createPdfHighlightForItem,
     createSnapshotHighlightAnnotation,
-    EpubAnnotationError,
     HighlightPageSpanError,
     highlightPageSpan,
-    MissingPageGeometryError,
     prepareSnapshotAnnotationDocument,
-    SnapshotAnnotationError,
 } from '../../annotations/createAnnotation';
-import { getReadableContentKind } from '../../documentExtraction/attachmentResolution';
 import { canUseReaderContentType } from '../../attachmentContentType';
 import type { ActionExecuteRequest, ActionValidateRequest } from '../operationContext';
-import { checkAborted, TimeoutContext, TimeoutError } from '../timeout';
+import { checkAborted, TimeoutContext } from '../timeout';
 import { checkLibraryExcluded, getAttachmentFileStatus, getDeferredToolPreference, validateLibraryAccess } from '../utils';
+import { toExecuteResponse } from './actionExecution';
+import {
+    annotationBatchError,
+    createdRow,
+    epubSectionOrdinal,
+    failedRow,
+    getAnnotationContentKind,
+    normalizeRef,
+    resolveAnnotationAttachment,
+    resolveAnnotationTarget,
+    stopForDeadline,
+} from './annotationBatch';
 
-function mapAnnotationErrorCode(error: unknown): string {
-    if (error instanceof MissingPageGeometryError) {
-        return error.reason === 'extraction_failed'
-            ? 'page_extraction_failed'
-            : 'page_geometry_unavailable';
-    }
-    if (
-        error instanceof EpubAnnotationError
-        || error instanceof SnapshotAnnotationError
-        || error instanceof HighlightPageSpanError
-    ) {
-        return error.code;
-    }
-    return 'apply_failed';
+function getActionData(request: ActionValidateRequest): CreateHighlightAnnotationsProposedData {
+    return normalizeActionData(request.action_data ?? {});
 }
 
-/** PDF, EPUB, and snapshots are the supported annotation targets; else rejected. */
-function getAnnotationContentKind(attachment: Zotero.Item): 'pdf' | 'epub' | 'snapshot' | null {
-    const kind = getReadableContentKind(attachment);
-    return kind === 'pdf' || kind === 'epub' || kind === 'snapshot' ? kind : null;
-}
-
-/** A numeric page_label doubles as the 1-based EPUB section ordinal fallback. */
-function epubSectionOrdinal(pageLabel: string | null | undefined): number | undefined {
-    return pageLabel && /^\d+$/.test(pageLabel) ? Number(pageLabel) : undefined;
-}
-
-function normalizeRef(raw: any): ZoteroItemReference {
-    const libraryRef = raw?.library_ref ?? raw?.libraryRef;
-    return {
-        library_id: typeof raw?.library_id === 'number' ? raw.library_id : Number(raw?.libraryId ?? raw?.library_id ?? 0),
-        zotero_key: String(raw?.zotero_key ?? raw?.zoteroKey ?? ''),
-        // Carry the device-portable library_ref through unchanged when present.
-        ...(typeof libraryRef === 'string' && libraryRef ? { library_ref: libraryRef } : {}),
-    };
-}
-
-function getActionData(request: ActionValidateRequest | WSAgentActionExecuteRequest): CreateHighlightAnnotationsProposedData {
-    const raw = request.action_data ?? {};
+/** Read stored or requested action data into its normalized shape. */
+function normalizeActionData(raw: Record<string, any>): CreateHighlightAnnotationsProposedData {
     return {
         requested_ref: normalizeRef(raw.requested_ref ?? raw.requestedRef ?? {}),
         resolved_ref: normalizeRef(raw.resolved_ref ?? raw.resolvedRef ?? {}),
@@ -98,14 +72,6 @@ function normalizeItem(raw: any): HighlightAnnotationItem {
         section_ordinal: raw?.section_ordinal ?? raw?.sectionOrdinal ?? null,
         anchor_id: raw?.anchor_id ?? raw?.anchorId ?? null,
     };
-}
-
-async function resolveAttachment(ref: ZoteroItemReference): Promise<Zotero.Item | null> {
-    // A portable `library_ref` is a complete target on its own, so the numeric
-    // `library_id` may legitimately be the unresolved sentinel.
-    if (!hasLibraryIdentity(ref) || !ref.zotero_key) return null;
-    const resolved = await resolveItemReference(ref);
-    return resolved.status === 'found' ? resolved.item : null;
 }
 
 async function getAttachmentTitle(attachment: Zotero.Item): Promise<string> {
@@ -181,7 +147,7 @@ export async function validateCreateHighlightAnnotationsAction(
         };
     }
 
-    const attachment = await resolveAttachment(resolved_ref);
+    const attachment = await resolveAnnotationAttachment(resolved_ref);
     const contentKind = attachment ? getAnnotationContentKind(attachment) : null;
     if (!attachment || !contentKind) {
         return {
@@ -296,186 +262,112 @@ export async function validateCreateHighlightAnnotationsAction(
 }
 
 /**
- * Execute a create_highlight_annotations action headlessly.
+ * Create the highlight (or underline) annotations of a
+ * create_highlight_annotations action and return its `result_data`.
+ *
+ * Each item succeeds or fails on its own; failures are listed in `failed`.
+ * A deadline reached between items stops the batch: the items not attempted
+ * are listed as failed with `timeout`, so the annotations already created stay
+ * on record for undo. With nothing created yet, the timeout propagates.
  */
+export async function applyCreateHighlightAnnotations(
+    rawData: Record<string, any>,
+    ctx: TimeoutContext,
+): Promise<CreateHighlightAnnotationsResultData> {
+    const data = normalizeActionData(rawData);
+    const { requested_ref, resolved_ref, items, tags } = data;
+    const style = textAnnotationStyle(data.style);
+    const { attachment, contentKind } = await resolveAnnotationTarget(resolved_ref);
+
+    let snapshotDoc: Awaited<ReturnType<typeof prepareSnapshotAnnotationDocument>> | undefined;
+    try {
+        await getAttachmentFileStatus(attachment, false);
+        checkAborted(ctx, 'create_highlight_annotations:after_extract');
+        // Snapshots: parse the HTML once for the whole batch so each item resolves
+        // against the shared Document instead of re-reading + re-parsing the file.
+        snapshotDoc = contentKind === 'snapshot'
+            ? await prepareSnapshotAnnotationDocument(attachment)
+            : undefined;
+    } catch (error) {
+        throw annotationBatchError(error);
+    }
+
+    const created: CreatedAnnotationResult[] = [];
+    const failed: FailedAnnotationResult[] = [];
+
+    for (const [position, item] of items.entries()) {
+        if (stopForDeadline(ctx, `create_highlight_annotations:item_${item.index}`, items, position, created, failed)) break;
+
+        if (contentKind === 'epub') {
+            try {
+                const ref = await createEpubHighlightAnnotation(attachment, {
+                    sectionHref: item.section_href ?? undefined,
+                    sectionOrdinal: item.section_ordinal ?? epubSectionOrdinal(item.page_label),
+                    anchorId: item.anchor_id ?? undefined,
+                    text: item.text ?? '',
+                    color: item.color,
+                    comment: item.comment ?? '',
+                    pageLabel: item.page_label ?? null,
+                    tags,
+                    style,
+                });
+                created.push(createdRow(item, ref));
+            } catch (error) {
+                failed.push(failedRow(item, error));
+            }
+            continue;
+        }
+
+        if (contentKind === 'snapshot') {
+            try {
+                const ref = await createSnapshotHighlightAnnotation(attachment, {
+                    anchorId: item.anchor_id ?? undefined,
+                    text: item.text ?? '',
+                    color: item.color,
+                    comment: item.comment ?? '',
+                    tags,
+                    style,
+                }, snapshotDoc);
+                created.push(createdRow(item, ref));
+            } catch (error) {
+                failed.push(failedRow(item, error));
+            }
+            continue;
+        }
+
+        if (!item.page_locations?.length) {
+            failed.push({
+                client_item_id: item.client_item_id,
+                index: item.index,
+                loc_raw: item.loc_raw,
+                error: 'No page locations provided',
+                error_code: 'page_geometry_unavailable',
+            });
+            continue;
+        }
+
+        try {
+            created.push(await createPdfHighlightForItem(attachment, item, tags, style));
+        } catch (error) {
+            failed.push(failedRow(item, error));
+        }
+    }
+
+    return {
+        requested_ref,
+        resolved_ref,
+        created,
+        failed,
+        total_created: created.length,
+        total_failed: failed.length,
+    };
+}
+
+/** Create a highlight batch for the backend during a run. */
 export async function executeCreateHighlightAnnotationsAction(
     request: ActionExecuteRequest,
     ctx: TimeoutContext,
 ): Promise<WSAgentActionExecuteResponse> {
-    const data = getActionData(request);
-    const { requested_ref, resolved_ref, items, tags } = data;
-    const style = textAnnotationStyle(data.style);
-
-    // TOCTOU guard: never annotate an attachment in a library the user excluded
-    // from Beaver, even if validation passed earlier or the request skipped it.
-    // Resolve and gate the library before resolving/loading the attachment.
-    const targetLibraryId = resolveLibraryRef(resolved_ref);
-    const targetExcluded = targetLibraryId === null ? null : checkLibraryExcluded(targetLibraryId);
-    if (targetExcluded) {
-        return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: false,
-            error: targetExcluded.message,
-            error_code: 'library_not_searchable',
-        };
-    }
-    if (targetLibraryId === null) {
-        return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: false,
-            error: `The library (${resolved_ref.library_ref}) holding this attachment is not available on this computer.`,
-            error_code: 'library_unavailable',
-        };
-    }
-    const attachment = await resolveAttachment(resolved_ref);
-    const contentKind = attachment ? getAnnotationContentKind(attachment) : null;
-    if (!attachment || !contentKind) {
-        return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: false,
-            error: 'Resolved item is not a local PDF or EPUB attachment',
-            error_code: 'invalid_attachment',
-        };
-    }
-    const excluded = checkLibraryExcluded(attachment.libraryID);
-    if (excluded) {
-        return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: false,
-            error: excluded.message,
-            error_code: 'library_not_searchable',
-        };
-    }
-
-    try {
-        await getAttachmentFileStatus(attachment, false);
-        checkAborted(ctx, 'create_highlight_annotations:after_extract');
-
-        const created: CreatedAnnotationResult[] = [];
-        const failed: FailedAnnotationResult[] = [];
-
-        // Snapshots: parse the HTML once for the whole batch so each item resolves
-        // against the shared Document instead of re-reading + re-parsing the file.
-        const snapshotDoc = contentKind === 'snapshot'
-            ? await prepareSnapshotAnnotationDocument(attachment)
-            : undefined;
-
-        for (const item of items) {
-            checkAborted(ctx, `create_highlight_annotations:item_${item.index}`);
-
-            if (contentKind === 'epub') {
-                try {
-                    const ref = await createEpubHighlightAnnotation(attachment, {
-                        sectionHref: item.section_href ?? undefined,
-                        sectionOrdinal: item.section_ordinal ?? epubSectionOrdinal(item.page_label),
-                        anchorId: item.anchor_id ?? undefined,
-                        text: item.text ?? '',
-                        color: item.color,
-                        comment: item.comment ?? '',
-                        pageLabel: item.page_label ?? null,
-                        tags,
-                        style,
-                    });
-                    created.push({
-                        client_item_id: item.client_item_id,
-                        index: item.index,
-                        loc_raw: item.loc_raw,
-                        library_id: ref.library_id,
-                        zotero_key: ref.zotero_key,
-                        library_ref: libraryRefForLibraryID(ref.library_id) ?? undefined,
-                    });
-                } catch (error: any) {
-                    failed.push({
-                        client_item_id: item.client_item_id,
-                        index: item.index,
-                        loc_raw: item.loc_raw,
-                        error: error?.message ?? String(error),
-                        error_code: mapAnnotationErrorCode(error),
-                    });
-                }
-                continue;
-            }
-
-            if (contentKind === 'snapshot') {
-                try {
-                    const ref = await createSnapshotHighlightAnnotation(attachment, {
-                        anchorId: item.anchor_id ?? undefined,
-                        text: item.text ?? '',
-                        color: item.color,
-                        comment: item.comment ?? '',
-                        tags,
-                        style,
-                    }, snapshotDoc);
-                    created.push({
-                        client_item_id: item.client_item_id,
-                        index: item.index,
-                        loc_raw: item.loc_raw,
-                        library_id: ref.library_id,
-                        zotero_key: ref.zotero_key,
-                        library_ref: libraryRefForLibraryID(ref.library_id) ?? undefined,
-                    });
-                } catch (error: any) {
-                    failed.push({
-                        client_item_id: item.client_item_id,
-                        index: item.index,
-                        loc_raw: item.loc_raw,
-                        error: error?.message ?? String(error),
-                        error_code: mapAnnotationErrorCode(error),
-                    });
-                }
-                continue;
-            }
-
-            if (!item.page_locations?.length) {
-                failed.push({
-                    client_item_id: item.client_item_id,
-                    index: item.index,
-                    loc_raw: item.loc_raw,
-                    error: 'No page locations provided',
-                    error_code: 'page_geometry_unavailable',
-                });
-                continue;
-            }
-
-            try {
-                created.push(await createPdfHighlightForItem(attachment, item, tags, style));
-            } catch (error: any) {
-                failed.push({
-                    client_item_id: item.client_item_id,
-                    index: item.index,
-                    loc_raw: item.loc_raw,
-                    error: error?.message ?? String(error),
-                    error_code: mapAnnotationErrorCode(error),
-                });
-            }
-        }
-
-        return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: true,
-            result_data: {
-                requested_ref,
-                resolved_ref,
-                created,
-                failed,
-                total_created: created.length,
-                total_failed: failed.length,
-            },
-        };
-    } catch (error) {
-        if (error instanceof TimeoutError) throw error;
-        logger(`executeCreateHighlightAnnotationsAction: Failed: ${error}`, 1);
-        return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: false,
-            error: String(error),
-            error_code: mapAnnotationErrorCode(error),
-        };
-    }
+    return toExecuteResponse(request.request_id, 'executeCreateHighlightAnnotationsAction',
+        () => applyCreateHighlightAnnotations(request.action_data ?? {}, ctx));
 }

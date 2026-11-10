@@ -29,11 +29,8 @@ import {
     undoCreateAnnotationsAction,
 } from '../../utils/createAnnotationsActions';
 import { executeEditAnnotationsAction, undoEditAnnotationsAction } from '../../utils/editAnnotationsActions';
-import {
-    executeEditNoteOrBatchAction,
-    getUserFacingErrorMessage,
-    undoEditNoteOrBatchAction,
-} from '../../utils/editNoteActions';
+import { executeEditNoteOrBatchAction, undoEditNoteOrBatchAction } from '../../utils/editNoteActions';
+import { getUserFacingErrorMessage } from '../../../src/utils/userFacingError';
 import { confirmOverwriteManualChanges } from './components/agentActionViewHelpers';
 import { isUnconfirmedAction } from './components/reviewChangeRows';
 import { isStaleMergeProposal } from './components/mergeItemsErrors';
@@ -93,20 +90,26 @@ export function getThreadIdForRun(get: Getter, runId: string): string | undefine
     return run.thread_id ?? get(currentThreadIdAtom) ?? undefined;
 }
 
+/**
+ * Options for one apply: the user's "Apply anyway", and the thread that owns
+ * the action's run (resolved at the click).
+ */
+type ApplyOptions = ManualApplyOptions & { threadId?: string };
+
 /** Action types applied by one call whose result is acked as-is. */
-const APPLY_EXECUTORS = new Map<string, (action: AgentAction, runId: string, options: ManualApplyOptions) => Promise<any>>([
-    ['edit_metadata', (action, _runId, options) => executeEditMetadataAction(action, options)],
+const APPLY_EXECUTORS = new Map<string, (action: AgentAction, runId: string, options: ApplyOptions) => Promise<any>>([
+    ['edit_metadata', (action, _runId, { skipStaleCheck }) => executeEditMetadataAction(action, { skipStaleCheck })],
     ['edit_note', (action, _runId, options) => executeEditNoteOrBatchAction(action, options)],
     ['edit_note_batch', (action, _runId, options) => executeEditNoteOrBatchAction(action, options)],
     ['create_collection', (action) => executeCreateCollectionAction(action)],
     ['organize_items', (action) => executeOrganizeItemsAction(action)],
     ['merge_items', (action) => executeMergeItemsAction(action)],
-    ['manage_tags', (action, _runId, options) => executeManageTagsAction(action, options)],
-    ['manage_collections', (action, _runId, options) => executeManageCollectionsAction(action, options)],
-    ['create_note', (action, runId) => executeCreateNoteAction(action, runId)],
+    ['manage_tags', (action, _runId, { skipStaleCheck }) => executeManageTagsAction(action, { skipStaleCheck })],
+    ['manage_collections', (action, _runId, { skipStaleCheck }) => executeManageCollectionsAction(action, { skipStaleCheck })],
+    ['create_note', (action, runId, { threadId }) => executeCreateNoteAction(action, runId, threadId)],
     ['create_highlight_annotations', (action) => executeCreateHighlightAnnotationsAction(action)],
     ['create_note_annotations', (action) => executeCreateNoteAnnotationsAction(action)],
-    ['edit_annotations', (action) => executeEditAnnotationsAction(action)],
+    ['edit_annotations', (action, _runId, { skipStaleCheck }) => executeEditAnnotationsAction(action, { skipStaleCheck })],
 ]);
 
 /** Action types undone by one call with no confirmation step. */
@@ -337,13 +340,13 @@ async function applyClaimedActions(
                 return { applied, failed: unsupportedActionTypeFailures(actions, actionType, 'apply') };
             }
 
-            const result = await executeAction(action, runId, { skipStaleCheck });
+            const result = await executeAction(action, runId, { skipStaleCheck, threadId });
             const response = await set(ackAgentActionsAtom, runId, [{ action_id: action.id, result_data: result }]);
             applied.push(...recordedIds([action.id], response));
             logger(`agentActionExecution: Applied ${actionType} action ${action.id}`, 1);
         }
     } catch (error: any) {
-        const errorMessage = error?.message || 'Failed to apply action';
+        const errorMessage = getUserFacingErrorMessage(error, 'Failed to apply action');
         const stackTrace = error?.stack || '';
         logger(`agentActionExecution: Failed to apply actions: ${errorMessage}\nStack trace:\n${stackTrace}`, 1);
         const errorDetails = {
@@ -443,9 +446,10 @@ async function undoClaimedActions(set: Setter, actions: AgentAction[], window?: 
             logger(`agentActionExecution: Undone ${actionType} action ${action.id}`, 1);
         }
     } catch (error: any) {
-        const errorMessage = actionType === 'edit_note' || actionType === 'edit_note_batch'
-            ? getUserFacingErrorMessage(error, 'Failed to undo note edit')
-            : error?.message || 'Failed to undo action';
+        const errorMessage = getUserFacingErrorMessage(
+            error,
+            actionType === 'edit_note' || actionType === 'edit_note_batch' ? 'Failed to undo note edit' : 'Failed to undo action',
+        );
         const stackTrace = error?.stack || '';
         logger(`agentActionExecution: Failed to undo actions: ${errorMessage}\nStack trace:\n${stackTrace}`, 1);
 

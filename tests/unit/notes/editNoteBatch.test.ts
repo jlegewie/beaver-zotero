@@ -140,6 +140,7 @@ vi.mock('../../../src/utils/noteCitationExpand', () => ({
     preloadStructuralLocatorPages: vi.fn().mockResolvedValue({ pages: {}, unresolved: [] }),
     buildUnresolvedLocatorWarning: vi.fn(() => null),
     isCitationRefNotFoundError: vi.fn(() => false),
+    ensureCitedLibrariesLoaded: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('../../../src/utils/editNoteStrippers', () => ({
@@ -1116,6 +1117,30 @@ describe('executeEditNoteBatchAction — atomicity and failures', () => {
         expect(item.saveTx).toHaveBeenCalledTimes(1);
     });
 
+    it('applies a stored rewrite the user approved with Apply, even after the note grew', async () => {
+        // The user's click on the stored card is the approval the re-check
+        // above stands in for; drift on the stored card is caught by its
+        // content-hash baseline instead.
+        const paragraphs = Array.from(
+            { length: 40 },
+            (_, i) => `<p>Paragraph ${i} of a long research note about corrugator activity.</p>`,
+        );
+        const item = useNote(`<div data-schema-version="9">${paragraphs.join('')}</div>`);
+
+        await executeLocalEditNoteBatchAction({
+            id: 'local-rewrite',
+            action_type: 'edit_note_batch',
+            proposed_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                edits: [{ index: 0, operation: 'rewrite', new_string: paragraphs[3] }],
+            },
+        } as any);
+
+        expect(item.setNote).toHaveBeenCalledTimes(1);
+        expect(item.saveTx).toHaveBeenCalledTimes(1);
+    });
+
     it('rolls back with setNote(oldHtml) and reports save_failed when saveTx throws', async () => {
         const item = makeMockItem({
             saveTx: vi.fn().mockRejectedValue(new Error('DB write failed')),
@@ -1275,6 +1300,24 @@ describe('local apply against a note the editor would re-serialize', () => {
                 library_id: 1,
                 zotero_key: 'NOTE0001',
                 edits: [{ index: 0, operation: 'str_replace', old_string: OLD_STRING, new_string: 'Progress so far' }],
+            },
+        } as any);
+
+        expect(item.setNote).toHaveBeenCalledTimes(1);
+        expect(item.setNote.mock.calls[0][0]).toContain('<p>Progress so far</p>');
+    });
+
+    it('applies a single edit whose old_string spans a re-serialized citation', async () => {
+        const item = useRawNote();
+        await executeLocalEditNoteAction({
+            id: 'local-normalized-single',
+            action_type: 'edit_note',
+            proposed_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                operation: 'str_replace',
+                old_string: OLD_STRING,
+                new_string: 'Progress so far',
             },
         } as any);
 

@@ -417,6 +417,14 @@ function resolveNoteAsync(item: ReturnType<typeof createMockNoteItem>): void {
 }
 
 /**
+ * The note an apply-then-undo restores: applies write the note as the editor
+ * serializes it (`normalizeNoteHtml`), so undo returns the normalized original.
+ */
+function normalizedStripped(noteHtml: string): string {
+    return stripDataCitationItems(normalizeNoteHtml(noteHtml));
+}
+
+/**
  * Undo an edit via the real undoEditNoteAction.
  */
 async function undoEdit(
@@ -503,7 +511,7 @@ describe('apply-undo roundtrip (no PM normalization)', () => {
         });
 
         const restored = await undoEdit(item, action);
-        expect(restored).toBe(stripDataCitationItems(NOTE_WITH_CITATION));
+        expect(restored).toBe(normalizedStripped(NOTE_WITH_CITATION));
     });
 
     it('append at end of note via last paragraph anchor: undo restores original', async () => {
@@ -549,7 +557,7 @@ describe('apply-undo roundtrip (no PM normalization)', () => {
         expect(item._getHtml()).not.toContain('test');
 
         const restored = await undoEdit(item, action);
-        expect(restored).toBe(stripDataCitationItems(note));
+        expect(restored).toBe(normalizedStripped(note));
     });
 });
 
@@ -1007,7 +1015,7 @@ describe('replace_all undo with PM normalization', () => {
         expect(item._getHtml()).not.toContain('word');
 
         const restored = await undoEdit(item, action);
-        expect(restored).toBe(stripDataCitationItems(note));
+        expect(restored).toBe(normalizedStripped(note));
     });
 });
 
@@ -1025,7 +1033,7 @@ describe('citation-related undo edge cases', () => {
         });
 
         const restored = await undoEdit(item, action);
-        expect(restored).toBe(stripDataCitationItems(NOTE_WITH_CITATION));
+        expect(restored).toBe(normalizedStripped(NOTE_WITH_CITATION));
     });
 
     it('undo edit between two citations to same item', async () => {
@@ -1036,7 +1044,7 @@ describe('citation-related undo edge cases', () => {
         });
 
         const restored = await undoEdit(item, action);
-        expect(restored).toBe(stripDataCitationItems(NOTE_MULTI_CITE));
+        expect(restored).toBe(normalizedStripped(NOTE_MULTI_CITE));
     });
 
     it('insert new citation then undo with PM normalization', async () => {
@@ -1231,7 +1239,7 @@ describe('whitespace and special character edge cases', () => {
         });
 
         const restored = await undoEdit(item, action);
-        expect(restored).toBe(stripDataCitationItems(note));
+        expect(restored).toBe(normalizedStripped(note));
     });
 
     it('undo works when PM decodes HTML entities (&#x27; → apostrophe)', async () => {
@@ -1248,8 +1256,8 @@ describe('whitespace and special character edge cases', () => {
             // No PM normalization during apply — editor is closed
         });
 
-        // Verify edit applied with entities intact
-        expect(item._getHtml()).toContain('Sayeh Dashti&#x27;s MEMOIR');
+        // The apply writes the note as the editor serializes it, so the entity is decoded
+        expect(item._getHtml()).toContain("Sayeh Dashti's MEMOIR");
 
         // Now simulate PM normalizing the note (editor opens, or Notifier fires)
         item._setHtml(simulatePMNormalization(item._getHtml()));
@@ -1378,7 +1386,7 @@ describe('whitespace and special character edge cases', () => {
         });
 
         const restored = await undoEdit(item, action);
-        expect(restored).toBe(stripDataCitationItems(note));
+        expect(restored).toBe(normalizedStripped(note));
     });
 });
 
@@ -1437,7 +1445,7 @@ describe('page ranges in apply-undo cycle', () => {
 
         // Undo should restore the original
         const restored = await undoEdit(item, action);
-        expect(restored).toBe(stripDataCitationItems(NOTE_WITH_CITATION));
+        expect(restored).toBe(normalizedStripped(NOTE_WITH_CITATION));
         expect(restored).not.toContain('RANGECIT');
     });
 
@@ -1457,7 +1465,7 @@ describe('page ranges in apply-undo cycle', () => {
         );
 
         const restored = await undoEdit(item, action);
-        expect(restored).toBe(stripDataCitationItems(NOTE_WITH_CITATION));
+        expect(restored).toBe(normalizedStripped(NOTE_WITH_CITATION));
     });
 
     it('full apply-undo-apply-undo cycle with page-range citation', async () => {
@@ -1473,10 +1481,11 @@ describe('page ranges in apply-undo cycle', () => {
 
         // Undo
         await undoEdit(item, action1);
-        expect(stripDataCitationItems(item._getHtml())).toBe(stripDataCitationItems(original));
+        expect(stripDataCitationItems(item._getHtml())).toBe(normalizedStripped(original));
         expect(item._getHtml()).not.toContain('CYCLEREF');
 
         // Re-apply
+        const afterFirstUndo = item._getHtml();
         (Zotero.Items.getByLibraryAndKeyAsync as any).mockResolvedValue(item);
         const action2 = makeAction(1, 'TESTKEY', oldStr, newStr);
         const result2 = await executeEditNoteAction(action2);
@@ -1487,7 +1496,7 @@ describe('page ranges in apply-undo cycle', () => {
 
         // Re-undo
         await undoEdit(item, action2);
-        expect(stripDataCitationItems(item._getHtml())).toBe(stripDataCitationItems(original));
+        expect(stripDataCitationItems(item._getHtml())).toBe(normalizedStripped(afterFirstUndo));
     });
 
     it('existing citation page changed to range: range kept, apply + undo works', async () => {

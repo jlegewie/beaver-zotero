@@ -2,111 +2,22 @@
  * Utilities for executing and undoing create_collection agent actions.
  * These functions are used by AgentActionView for post-run action handling.
  */
-import { readCollectionActionData } from '@beaver/agent-core/identity/collectionActionData';
-import { formatCollectionId } from '../collections/collectionIdentity';
-import { assertLibraryWritable, recheckCollection, recheckCollectionForUndo } from '../collections/collectionMutations';
+import { assertLibraryWritable, recheckCollectionForUndo } from '../collections/collectionMutations';
 import { AgentAction } from '@beaver/agent-core/agents/agentActionTypes';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { CreateCollectionResultData } from '@beaver/agent-core/types/agentActions/base';
-import {
-    libraryRefForLibraryID,
-    resolveItemReference,
-    resolveLibraryRef,
-    resolveObjectId,
-    resolveWriteTargetLibrary,
-} from '../../utils/libraryIdentity';
+import { resolveLibraryRef } from '../../utils/libraryIdentity';
+import { unboundedExecutionContext } from '../agentDataProvider/actions/actionExecution';
+import { applyCreateCollection } from '../agentDataProvider/actions/createCollection';
 
 /**
- * Execute a create_collection agent action by creating the collection in Zotero.
- * @param action The agent action to execute
- * @returns Result data including the created collection's key and ID
+ * Apply a stored create_collection action through the shared executor.
+ * There is no drift check: a new collection overwrites nothing.
  */
 export async function executeCreateCollectionAction(
     action: AgentAction
 ): Promise<CreateCollectionResultData> {
-    const { library_id: rawLibraryId, library_ref, library_name, name, parent_key, item_ids } = readCollectionActionData(action.proposed_data) as {
-        library_id?: number | null;
-        library_ref?: string | null;
-        library_name?: string | null;
-        name: string;
-        parent_key?: string | null;
-        item_ids?: string[];
-    };
-
-    const targetLibrary = resolveWriteTargetLibrary({ library_ref, library_id: rawLibraryId, library_name });
-    if (!targetLibrary.ok) throw new Error(targetLibrary.message);
-    const library_id = targetLibrary.libraryID;
-
-    assertLibraryWritable(library_id);
-
-    // Build collection params
-    const collectionParams: { name: string; libraryID: number; parentID?: number } = {
-        name,
-        libraryID: library_id,
-    };
-
-    // Set parent if provided. A parent deleted since approval raises a typed
-    // `collection_not_found`; never fall back to creating at top level or to a
-    // same-named replacement.
-    if (parent_key) {
-        collectionParams.parentID = recheckCollection(parent_key, library_id).collection.id;
-    }
-
-    // Create the collection
-    const collection = new Zotero.Collection(collectionParams);
-
-    // Save the collection
-    const collectionID = await collection.saveTx();
-    logger(`executeCreateCollectionAction: Created collection "${name}" with ID ${collectionID}`, 1);
-
-    let itemsAdded = 0;
-    // Reported by id so the backend can settle each one; a bare count cannot
-    // say which items were left out.
-    const skippedItemIds: string[] = [];
-
-    // Add items to the collection if specified
-    if (item_ids && item_ids.length > 0) {
-        await Zotero.DB.executeTransaction(async () => {
-            const itemIdsToAdd: number[] = [];
-            
-            // Accepts both the portable "<library_ref>-<zotero_key>" grammar and
-            // the legacy numeric grammar; unresolved or missing items are skipped
-            // (mirrors the WS executor in agentDataProvider/actions/createCollection.ts).
-            for (const itemIdStr of item_ids) {
-                const parsedRef = resolveObjectId(itemIdStr);
-                if (!parsedRef) {
-                    skippedItemIds.push(itemIdStr);
-                    continue;
-                }
-                const resolved = await resolveItemReference(parsedRef);
-                if (resolved.status !== 'found') {
-                    skippedItemIds.push(itemIdStr);
-                    continue;
-                }
-                const item = resolved.item;
-                if (item.libraryID === library_id && !item.isAttachment() && !item.isNote() && !item.isAnnotation()) {
-                    itemIdsToAdd.push(item.id);
-                } else {
-                    skippedItemIds.push(itemIdStr);
-                }
-            }
-
-            if (itemIdsToAdd.length > 0) {
-                await collection.addItems(itemIdsToAdd);
-                itemsAdded = itemIdsToAdd.length;
-                logger(`executeCreateCollectionAction: Added ${itemsAdded} items to collection`, 1);
-            }
-        });
-    }
-
-    return {
-        library_id,
-        library_ref: libraryRefForLibraryID(library_id) ?? undefined,
-        collection_key: collection.key,
-        collection_id: formatCollectionId(collection.libraryID, collection.key),
-        items_added: itemsAdded,
-        skipped_item_ids: skippedItemIds,
-    };
+    return applyCreateCollection(action.proposed_data, unboundedExecutionContext());
 }
 
 /**

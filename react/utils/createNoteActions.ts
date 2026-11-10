@@ -8,8 +8,9 @@ export function undoCreateNoteAction(...args: Parameters<typeof operations.undoC
     return runWindowOperation('undoCreateNoteAction', args);
 }
 
-export async function executeCreateNoteAction(action: Parameters<typeof operations.executeCreateNoteAction>[0], runId?: string): ReturnType<typeof operations.executeCreateNoteAction> {
+/** `threadId` is the thread that owns `runId`; the note's Beaver footer links to it. */
+export async function executeCreateNoteAction(action: Parameters<typeof operations.executeCreateNoteAction>[0], runId?: string, threadId?: string): ReturnType<typeof operations.executeCreateNoteAction> {
     const options = captureWindowMutationOptions();
-    const context = await prepareOperationRendering('create_note', action.proposed_data, captureNoteOperationContext());
+    const context = await prepareOperationRendering('create_note', action.proposed_data, captureNoteOperationContext(threadId));
     return runWindowOperation('executeCreateNoteAction', [action, runId, context!], options);
 }

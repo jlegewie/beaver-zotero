@@ -11,6 +11,7 @@ import type {
     AnnotationRelocation,
     EditAnnotationsPatch,
     EditAnnotationsProposedData,
+    EditAnnotationsResultData,
     NativeAnnotationColor,
     SkippedAnnotation,
 } from "@beaver/agent-core/types/agentActions/editAnnotations";
@@ -38,6 +39,7 @@ import {
     prepareRelocation,
     type RelocatableAnnotationType,
 } from "./annotationPlacement";
+import { actionError, assertLibraryRefNotExcluded, toExecuteResponse } from "./actionExecution";
 
 /** Skip reason for an annotation that sits in the trash. */
 const TRASHED_REASON = "annotation is in the trash";
@@ -1208,31 +1210,28 @@ function nextTags(
     return [...kept, ...added];
 }
 
-export async function executeEditAnnotationsAction(
-    request: ActionExecuteRequest,
+/**
+ * Edit, move or delete the annotations of an edit_annotations action in one
+ * transaction and return its `result_data`, with each annotation's state
+ * before the write recorded for undo.
+ *
+ * Targets that can no longer be used are dropped and listed in `skipped`. An
+ * edit that would now overwrite content the user wrote, when it did not at
+ * validation, fails with `annotation_state_changed` unless `skipDriftCheck`
+ * (the user's "Apply anyway" on a stored action).
+ */
+export async function applyEditAnnotations(
+    rawData: Record<string, any> | null | undefined,
     ctx: TimeoutContext,
-): Promise<WSAgentActionExecuteResponse> {
-    const normalized = normalizeData(request.action_data);
-    if (!normalized.ok)
-        return {
-            type: "agent_action_execute_response",
-            request_id: request.request_id,
-            success: false,
-            error: normalized.error,
-            error_code: normalized.code,
-        };
+    options: { skipDriftCheck?: boolean } = {},
+): Promise<EditAnnotationsResultData> {
+    const normalized = normalizeData(rawData);
+    if (!normalized.ok) throw actionError(normalized.code, normalized.error);
 
     // Re-checked here, not just at validation: a library can be excluded while
     // the approval card is open.
-    const excluded = excludedTargetMessage(normalized.data);
-    if (excluded)
-        return {
-            type: "agent_action_execute_response",
-            request_id: request.request_id,
-            success: false,
-            error: excluded,
-            error_code: "library_not_searchable",
-        };
+    for (const ref of editAnnotationsTargets(normalized.data))
+        assertLibraryRefNotExcluded(ref);
 
     // Re-resolve rather than trusting the validate pass: the library can
     // change while the approval card is open. Anything that has since become
@@ -1244,15 +1243,10 @@ export async function executeEditAnnotationsAction(
     checkAborted(ctx, "edit_annotations:after_partition");
     const skipped = mergeSkips(normalized.data.skipped, partition.skipped);
     if (!partition.targets.length) {
-        return {
-            type: "agent_action_execute_response",
-            request_id: request.request_id,
-            success: false,
-            error:
-                describeSkips(partition.skipped) ||
-                "No annotations could be resolved",
-            error_code: "annotation_validation_failed",
-        };
+        throw actionError(
+            "annotation_validation_failed",
+            describeSkips(partition.skipped) || "No annotations could be resolved",
+        );
     }
 
     const changesByGroup = new Map<number, EditAnnotationsPatch | undefined>();
@@ -1287,7 +1281,10 @@ export async function executeEditAnnotationsAction(
             // that was already destructive when the user saw it stays
             // approved. Inside the transaction, so nothing can slip in between
             // the check and the writes.
-            if (turnedDestructive(normalized.data, partition.targets))
+            if (
+                !options.skipDriftCheck &&
+                turnedDestructive(normalized.data, partition.targets)
+            )
                 throw new AnnotationStateChangedError();
 
             for (let index = 0; index < partition.targets.length; index++) {
@@ -1362,61 +1359,59 @@ export async function executeEditAnnotationsAction(
             );
         }
         return {
-            type: "agent_action_execute_response",
-            request_id: request.request_id,
-            success: true,
-            result_data: {
-                operation: normalized.data.operation,
-                applied_refs: appliedRefs,
-                before: partition.targets.map((target) => target.before),
-                // Re-resolution can drop a target the approval card still
-                // listed, so the result carries the full skip list rather than
-                // letting a partial batch read as an unqualified success.
-                ...(skipped.length || trashedSkips.length
-                    ? { skipped: mergeSkips(skipped, trashedSkips) }
-                    : {}),
-            },
-        };
+            operation: normalized.data.operation,
+            applied_refs: appliedRefs,
+            before: partition.targets.map((target) => target.before),
+            // Re-resolution can drop a target the approval card still
+            // listed, so the result carries the full skip list rather than
+            // letting a partial batch read as an unqualified success.
+            ...(skipped.length || trashedSkips.length
+                ? { skipped: mergeSkips(skipped, trashedSkips) }
+                : {}),
+        } as EditAnnotationsResultData;
     } catch (error) {
         if (error instanceof AllTargetsTrashedError) {
             // Thrown before the first write, so there is nothing to roll back.
-            return {
-                type: "agent_action_execute_response",
-                request_id: request.request_id,
-                success: false,
-                error:
-                    describeSkips(mergeSkips(skipped, trashedSkips)) ||
+            throw actionError(
+                "annotation_validation_failed",
+                describeSkips(mergeSkips(skipped, trashedSkips)) ||
                     "No annotations could be resolved",
-                error_code: "annotation_validation_failed",
-            };
+            );
         }
         if (error instanceof AnnotationStateChangedError) {
             // Thrown before the first write, so there is nothing to roll back
             // in memory and the snapshots describe the annotations as they
             // stand.
-            return {
-                type: "agent_action_execute_response",
-                request_id: request.request_id,
-                success: false,
-                error:
-                    "These annotations changed since the edit was proposed and " +
+            throw actionError(
+                ANNOTATION_STATE_CHANGED,
+                "These annotations changed since the edit was proposed and " +
                     "it would now overwrite content the user wrote. Read them " +
                     "again and propose the edit against their current state.",
-                error_code: "annotation_state_changed",
-            };
+            );
         }
         restoreSnapshots(partition.targets);
         if (error instanceof TimeoutError) throw error;
         logger(
-            `executeEditAnnotationsAction: transaction rolled back: ${error}`,
+            `applyEditAnnotations: transaction rolled back: ${error}`,
             1,
         );
-        return {
-            type: "agent_action_execute_response",
-            request_id: request.request_id,
-            success: false,
-            error: String(error),
-            error_code: "transaction_failed",
-        };
+        throw actionError("transaction_failed", String(error), {
+            userMessage: (error as Error)?.message || String(error),
+        });
     }
+}
+
+/** Code for an edit that turned destructive since validation. */
+export const ANNOTATION_STATE_CHANGED = "annotation_state_changed";
+
+/** Edit annotations for the backend during a run. */
+export async function executeEditAnnotationsAction(
+    request: ActionExecuteRequest,
+    ctx: TimeoutContext,
+): Promise<WSAgentActionExecuteResponse> {
+    return toExecuteResponse(
+        request.request_id,
+        "executeEditAnnotationsAction",
+        () => applyEditAnnotations(request.action_data, ctx),
+    );
 }

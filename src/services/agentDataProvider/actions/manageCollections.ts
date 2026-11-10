@@ -30,8 +30,10 @@ import {
     resolveWriteTargetLibrary,
     writeTargetLibraryError,
 } from '../../../utils/libraryIdentity';
-import { checkAborted, TimeoutContext, TimeoutError } from '../timeout';
-import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference, isLibrarySearchable } from '../utils';
+import type { ManageCollectionsProposedData, ManageCollectionsResultData } from '@beaver/agent-core/types/agentActions/base';
+import { checkAborted, TimeoutContext } from '../timeout';
+import { excludedLibraryMessage, getDeferredToolPreference, isLibrarySearchable } from '../utils';
+import { actionError, resolveActionWriteLibrary, toExecuteResponse } from './actionExecution';
 
 interface SubcollectionSummary {
     key: string;
@@ -349,181 +351,112 @@ export async function validateManageCollectionsAction(
 }
 
 
+/** Called with the collection right before the write; throws to refuse it. */
+export interface ManageCollectionsApplyHooks {
+    assertUnchanged?: (collection: Zotero.Collection) => void;
+}
+
+/**
+ * Rename, move or trash a collection and return its `result_data`, with the
+ * pre-apply name and parent captured right before the write for undo.
+ */
+export async function applyManageCollections(
+    rawData: Record<string, any>,
+    ctx: TimeoutContext,
+    hooks: ManageCollectionsApplyHooks = {},
+): Promise<ManageCollectionsResultData> {
+    const data = readCollectionActionData(rawData) as ManageCollectionsProposedData;
+    const { action, collection_key, new_name, new_parent_key } = data;
+    const resolvedLibraryId = resolveActionWriteLibrary(data);
+
+    let lookup;
+    try {
+        lookup = recheckCollection(collection_key, resolvedLibraryId);
+    } catch (error) {
+        if (!(error instanceof CollectionResolutionError) || error.code !== 'collection_not_found') throw error;
+        throw actionError('collection_not_found', collectionDeletedSinceValidationMessage('Collection', collection_key),
+            { userMessage: `Collection not found: ${collection_key}` });
+    }
+    const collection = lookup.collection;
+    hooks.assertUnchanged?.(collection);
+
+    // Re-snapshot the authoritative pre-apply state at execute time.
+    // A re-apply after manual library edits produces a fresh snapshot
+    // that the next undo can correctly reverse.
+    const oldName: string = collection.name;
+    const oldParentKey: string | null = collection.parentKey ? String(collection.parentKey) : null;
+    let itemsAffected: number | null = null;
+    if (action === 'delete') {
+        // Refuse when subcollections exist, here as in validation: they may
+        // have been added since. A trashed subtree gives each descendant its
+        // own trash row, so restoring the parent alone would not bring them
+        // back, and undo promises a single collection with its items attached.
+        if (collection.hasChildCollections(false)) {
+            const subs = summarizeChildCollections(collection);
+            const list = formatSubcollectionList(subs);
+            throw actionError(
+                'has_subcollections',
+                `Cannot delete collection '${oldName}' because it now contains ${subs.length} subcollection${subs.length === 1 ? '' : 's'}. `
+                    + `Delete or move each subcollection first, then retry:\n${list}`,
+            );
+        }
+        itemsAffected = (collection.getChildItems(true, false) as number[]).length;
+    }
+
+    if (action === 'rename') {
+        const target = (new_name ?? '').trim();
+        if (!target) throw actionError('invalid_new_name', 'new_name required for rename');
+        checkAborted(ctx, 'manage_collections:before_rename');
+        collection.name = target;
+        await collection.saveTx();
+        logger(`applyManageCollections: Renamed collection ${resolvedLibraryId}-${collection_key} → '${target}'`, 1);
+    } else if (action === 'move') {
+        // Zotero uses `false` to signal top-level (see collection.js parentKey setter).
+        checkAborted(ctx, 'manage_collections:before_move');
+        try {
+            (collection as any).parentKey = recheckCollectionParent(collection, new_parent_key) || false;
+        } catch (error) {
+            if (!(error instanceof CollectionResolutionError) || error.code !== 'collection_not_found') throw error;
+            throw actionError('parent_not_found', collectionDeletedSinceValidationMessage('Parent collection', String(new_parent_key)),
+                { userMessage: `Parent collection not found: ${new_parent_key}` });
+        }
+        await collection.saveTx();
+        logger(`applyManageCollections: Moved collection ${resolvedLibraryId}-${collection_key} to parent ${new_parent_key ?? 'top-level'}`, 1);
+    } else if (action === 'delete') {
+        checkAborted(ctx, 'manage_collections:before_delete');
+        // Soft-delete (trash): collection is hidden from the library view,
+        // items stay attached via collectionItems. Reversible with
+        // `collection.deleted = false; saveTx()` until the user explicitly
+        // empties the trash — Zotero's `trashAutoEmptyDays` timer only
+        // auto-empties trashed items, not trashed collections
+        // (see Zotero.Items.startEmptyTrashTimer in items.js).
+        (collection as any).deleted = true;
+        await collection.saveTx();
+        logger(`applyManageCollections: Trashed collection ${resolvedLibraryId}-${collection_key}`, 1);
+    } else {
+        throw actionError('invalid_action', `Unsupported action: '${action}'`);
+    }
+
+    return {
+        library_id: resolvedLibraryId,
+        library_ref: libraryRefForLibraryID(resolvedLibraryId) ?? undefined,
+        action,
+        collection_key: collection.key,
+        collection_id: lookup.collectionId,
+        new_name: new_name ?? null,
+        new_parent_key: new_parent_key ? collection.parentKey || null : null,
+        new_parent_collection_id: new_parent_key && collection.parentKey ? formatCollectionId(resolvedLibraryId, collection.parentKey) : null,
+        items_affected: itemsAffected,
+        old_name: oldName,
+        old_parent_collection_id: oldParentKey ? formatCollectionId(resolvedLibraryId, oldParentKey) : null,
+        old_parent_key: oldParentKey,
+    };
+}
+
 export async function executeManageCollectionsAction(
     request: ActionExecuteRequest,
     ctx: TimeoutContext,
 ): Promise<WSAgentActionExecuteResponse> {
-    const { action, collection_key, new_name, new_parent_key, library_id, library_ref } = readCollectionActionData(request.action_data) as {
-        action: 'rename' | 'move' | 'delete';
-        collection_key: string;
-        new_name?: string | null;
-        new_parent_key?: string | null;
-        library_id: number;
-        library_ref?: string | null;
-    };
-
-    // A device-portable library_ref is a valid target on its own, so only
-    // reject when neither a usable library_id nor a library_ref is present.
-    if ((!library_id || typeof library_id !== 'number') && !library_ref) {
-        return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: false,
-            error: 'library_id missing or invalid in action_data',
-            error_code: 'invalid_library_id',
-        };
-    }
-
-    const targetResolution = resolveWriteTargetLibrary({ library_id, library_ref });
-    if (!targetResolution.ok) {
-        return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: false,
-            ...writeTargetLibraryError(targetResolution),
-        };
-    }
-    const resolvedLibraryId = targetResolution.libraryID;
-
-    // TOCTOU guard: never rename/move/delete collections in a library the user
-    // excluded from Beaver, even if validation passed earlier or was skipped.
-    const excluded = checkLibraryExcluded(resolvedLibraryId);
-    if (excluded) {
-        return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: false,
-            error: excluded.message,
-            error_code: 'library_not_searchable',
-        };
-    }
-
-    try {
-        let lookup;
-        try {
-            lookup = recheckCollection(collection_key, resolvedLibraryId);
-        } catch (error) {
-            if (!(error instanceof CollectionResolutionError) || error.code !== 'collection_not_found') throw error;
-            return {
-                type: 'agent_action_execute_response',
-                request_id: request.request_id,
-                success: false,
-                error: collectionDeletedSinceValidationMessage('Collection', collection_key),
-                error_code: 'collection_not_found',
-            };
-        }
-        const collection = lookup.collection;
-
-        // Re-snapshot the authoritative pre-apply state at execute time.
-        // A re-apply after manual library edits produces a fresh snapshot
-        // that the next undo can correctly reverse.
-        const oldName: string = collection.name;
-        const oldParentKey: string | null = collection.parentKey ? String(collection.parentKey) : null;
-        let itemsAffected: number | null = null;
-        if (action === 'delete') {
-            // Defensive re-check: subcollections may have been added between
-            // validation and execute (manual edit, race). Refuse here too so
-            // the undo contract ("single collection, items stay attached")
-            // always holds.
-            if (collection.hasChildCollections(false)) {
-                const subs = summarizeChildCollections(collection);
-                const list = formatSubcollectionList(subs);
-                return {
-                    type: 'agent_action_execute_response',
-                    request_id: request.request_id,
-                    success: false,
-                    error:
-                        `Cannot delete collection '${oldName}' because it now contains ${subs.length} subcollection${subs.length === 1 ? '' : 's'}. ` +
-                        `Delete or move each subcollection first, then retry:\n${list}`,
-                    error_code: 'has_subcollections',
-                };
-            }
-            itemsAffected = (collection.getChildItems(true, false) as number[]).length;
-        }
-
-        if (action === 'rename') {
-            const target = (new_name ?? '').trim();
-            if (!target) {
-                return {
-                    type: 'agent_action_execute_response',
-                    request_id: request.request_id,
-                    success: false,
-                    error: 'new_name required for rename',
-                    error_code: 'invalid_new_name',
-                };
-            }
-            checkAborted(ctx, 'manage_collections:before_rename');
-            collection.name = target;
-            await collection.saveTx();
-            logger(`executeManageCollectionsAction: Renamed collection ${resolvedLibraryId}-${collection_key} → '${target}'`, 1);
-        } else if (action === 'move') {
-            // Zotero uses `false` to signal top-level (see collection.js parentKey setter).
-            checkAborted(ctx, 'manage_collections:before_move');
-            try {
-                (collection as any).parentKey = recheckCollectionParent(collection, new_parent_key) || false;
-            } catch (error) {
-                if (!(error instanceof CollectionResolutionError) || error.code !== 'collection_not_found') throw error;
-                return {
-                    type: 'agent_action_execute_response',
-                    request_id: request.request_id,
-                    success: false,
-                    error: collectionDeletedSinceValidationMessage('Parent collection', String(new_parent_key)),
-                    error_code: 'parent_not_found',
-                };
-            }
-            await collection.saveTx();
-            logger(`executeManageCollectionsAction: Moved collection ${resolvedLibraryId}-${collection_key} to parent ${new_parent_key ?? 'top-level'}`, 1);
-        } else if (action === 'delete') {
-            checkAborted(ctx, 'manage_collections:before_delete');
-            // Soft-delete (trash): collection is hidden from the library view,
-            // items stay attached via collectionItems. Reversible with
-            // `collection.deleted = false; saveTx()` until the user explicitly
-            // empties the trash — Zotero's `trashAutoEmptyDays` timer only
-            // auto-empties trashed items, not trashed collections
-            // (see Zotero.Items.startEmptyTrashTimer in items.js).
-            (collection as any).deleted = true;
-            await collection.saveTx();
-            logger(`executeManageCollectionsAction: Trashed collection ${resolvedLibraryId}-${collection_key}`, 1);
-        } else {
-            return {
-                type: 'agent_action_execute_response',
-                request_id: request.request_id,
-                success: false,
-                error: `Unsupported action: '${action}'`,
-                error_code: 'invalid_action',
-            };
-        }
-
-        return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: true,
-            result_data: {
-                library_id: resolvedLibraryId,
-                library_ref: libraryRefForLibraryID(resolvedLibraryId) ?? undefined,
-                action,
-                collection_key: collection.key,
-                collection_id: lookup.collectionId,
-                new_name: new_name ?? null,
-                new_parent_key: new_parent_key ? collection.parentKey || null : null,
-                new_parent_collection_id: new_parent_key && collection.parentKey ? formatCollectionId(resolvedLibraryId, collection.parentKey) : null,
-                items_affected: itemsAffected,
-                old_name: oldName,
-                old_parent_collection_id: oldParentKey ? formatCollectionId(resolvedLibraryId, oldParentKey) : null,
-                old_parent_key: oldParentKey,
-            },
-        };
-    } catch (error) {
-        if (error instanceof TimeoutError) {
-            throw error;
-        }
-        logger(`executeManageCollectionsAction: Failed: ${error}`, 1);
-        return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: false,
-            error: String(error),
-            error_code: (error as { code?: string }).code ?? 'execution_failed',
-        };
-    }
+    return toExecuteResponse(request.request_id, 'executeManageCollectionsAction',
+        () => applyManageCollections(request.action_data, ctx));
 }

@@ -1,12 +1,14 @@
 import { formatCollectionId, CollectionResolutionError } from '../../collections/collectionIdentity';
-import { collectionDeletedSinceValidationMessage, resolveOrganizeLibrary, resolveCollectionMemberships, recheckCollection, recheckExistingCollections } from '../../collections/collectionMutations';
+import { assertLibraryWritable, collectionDeletedSinceValidationMessage, resolveOrganizeLibrary, resolveCollectionMemberships, recheckCollection, recheckExistingCollections } from '../../collections/collectionMutations';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { WSAgentActionExecuteResponse, WSAgentActionValidateResponse } from '@beaver/agent-core/protocol/agentProtocol';
+import type { OrganizeItemsResultData } from '@beaver/agent-core/types/agentActions/base';
 import { modelObjectId, parseItemReference, resolveItemReference, resolveLibraryRef } from '../../../utils/libraryIdentity';
 import { TimingAccumulator } from '../../../utils/timing';
 import type { ActionExecuteRequest, ActionValidateRequest } from '../operationContext';
 import { TimeoutContext, TimeoutError, checkAborted } from '../timeout';
-import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
+import { excludedLibraryMessage, getDeferredToolPreference } from '../utils';
+import { actionError, assertLibraryNotExcluded, toExecuteResponse } from './actionExecution';
 
 
 /**
@@ -339,30 +341,43 @@ export async function validateOrganizeItemsAction(
 
 
 /**
- * Execute an organize_items action.
- * Adds/removes tags and collection memberships for the specified items.
- * 
- * All modifications are batched in a single database transaction for performance.
- * This is an all-or-nothing operation: if any item fails to save, the entire
- * transaction rolls back. Items that don't exist are skipped (not an error).
+ * Add and remove tags and collection memberships on a set of items and return
+ * the action's `result_data`.
+ *
+ * All modifications are batched in a single database transaction: if any item
+ * fails to save, the whole change rolls back and the items' in-memory state is
+ * restored. Items that don't exist on this device are listed in
+ * `skipped_items`, and items that already held every requested change in
+ * `unchanged_items`; neither is an error. An excluded or read-only library
+ * fails the action before anything is written.
  */
-export async function executeOrganizeItemsAction(
-    request: ActionExecuteRequest,
+export async function applyOrganizeItems(
+    data: Record<string, any>,
     ctx: TimeoutContext,
-): Promise<WSAgentActionExecuteResponse> {
+    hooks: { timing?: Record<string, number> } = {},
+): Promise<OrganizeItemsResultData> {
     const start = Date.now();
     const ta = new TimingAccumulator();
     // tx_total_ms (wall-clock around executeTransaction) minus tx_work_ms
     // (time inside the callback) = SQLite write-queue wait. Concurrent
     // organize_items calls serialize on the single writer, so this gap is
     // the answer to "is the slowness queue-wait or actual work?"
-    const buildTiming = (extra?: Record<string, number>): Record<string, number> => ({
-        total_ms: Date.now() - start,
-        ...ta.getAll(),
-        ...(extra ?? {}),
-    });
+    const counts: Record<string, number> = {};
+    try {
+        return await organizeItems(data, ctx, ta, start, counts);
+    } finally {
+        if (hooks.timing) Object.assign(hooks.timing, { total_ms: Date.now() - start, ...ta.getAll(), ...counts });
+    }
+}
 
-    const { item_ids: requestedItemIds, tags, collections: requestedCollections } = request.action_data as {
+async function organizeItems(
+    data: Record<string, any>,
+    ctx: TimeoutContext,
+    ta: TimingAccumulator,
+    start: number,
+    counts: Record<string, number>,
+): Promise<OrganizeItemsResultData> {
+    const { item_ids: requestedItemIds, tags, collections: requestedCollections } = data as {
         item_ids: string[];
         tags?: { add?: string[]; remove?: string[] } | null;
         collections?: { add?: string[]; remove?: string[] } | null;
@@ -375,24 +390,19 @@ export async function executeOrganizeItemsAction(
     // second rollback snapshot would capture the already-modified state.
     const item_ids = [...new Set(requestedItemIds)];
 
-    // TOCTOU guard: never mutate items in a library the user excluded from Beaver,
-    // even if validation passed earlier or the execute request skipped it.
+    const hasCollectionChanges = !!(collections && ((collections.add && collections.add.length > 0) || (collections.remove && collections.remove.length > 0)));
+
+    // TOCTOU guard: never mutate items in a library the user excluded from
+    // Beaver or that became read-only, even if validation passed earlier or
+    // the action waited for approval. Tag-only changes need no portable
+    // library identity; collection keys do.
     for (const itemId of item_ids) {
         const parsed = parseItemReference(itemId);
         if (!parsed) continue; // malformed → skipped in the main loop
         const libraryId = resolveLibraryRef(parsed);
         if (libraryId == null) continue; // library not on this device → skipped in the main loop
-        const excluded = checkLibraryExcluded(libraryId);
-        if (excluded) {
-            return {
-                type: 'agent_action_execute_response',
-                request_id: request.request_id,
-                success: false,
-                error: excluded.message,
-                error_code: 'library_not_searchable',
-                timing: buildTiming(),
-            };
-        }
+        assertLibraryNotExcluded(libraryId);
+        assertLibraryWritable(libraryId, { requirePortable: hasCollectionChanges });
     }
 
     let itemsModified = 0;
@@ -423,7 +433,6 @@ export async function executeOrganizeItemsAction(
     // the collection was deleted between validate and execute.
     const addCollections = new Map<string, { id: number }>();
     const removeCollections = new Map<string, { id: number }>();
-    const hasCollectionChanges = !!(collections && ((collections.add && collections.add.length > 0) || (collections.remove && collections.remove.length > 0)));
     // Library the collection keys were resolved against; null when no requested
     // item exists on this device (every item is skipped below, so there is
     // nothing to resolve keys for).
@@ -445,7 +454,8 @@ export async function executeOrganizeItemsAction(
                         addCollections.set(entry.key, entry.collection);
                     } catch (error) {
                         if (error instanceof CollectionResolutionError && error.code === 'collection_not_found') {
-                            throw new CollectionResolutionError('collection_not_found', collectionDeletedSinceValidationMessage('Collection', collKey));
+                            throw actionError('collection_not_found', collectionDeletedSinceValidationMessage('Collection', collKey),
+                                { userMessage: `Collection not found: ${collKey}` });
                         }
                         throw error;
                     }
@@ -586,6 +596,12 @@ export async function executeOrganizeItemsAction(
             }
         }));
     } catch (error) {
+        Object.assign(counts, {
+            item_count: item_ids.length,
+            items_modified: itemsModified,
+            items_skipped: skippedItems.length,
+            items_unchanged: unchangedItems.length,
+        });
         // Restore in-memory state for all snapshotted items.
         // The DB transaction rolled back, but in-memory item objects still
         // carry the modifications — restore them to prevent leaking into future saves.
@@ -594,49 +610,43 @@ export async function executeOrganizeItemsAction(
         // Re-throw TimeoutError so it propagates to the main handler
         if (error instanceof TimeoutError) throw error;
         // Transaction failed and rolled back - no items were modified
-        logger(`executeOrganizeItemsAction: Transaction failed: ${error}`, 1);
-        return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: false,
-            error: `Failed to organize items: ${error}`,
-            error_code: 'transaction_failed',
-            timing: buildTiming({
-                item_count: item_ids.length,
-                items_modified: itemsModified,
-                items_skipped: skippedItems.length,
-                items_unchanged: unchangedItems.length,
-            }),
-        };
+        logger(`applyOrganizeItems: Transaction failed: ${error}`, 1);
+        throw actionError('transaction_failed', `Failed to organize items: ${error}`,
+            { userMessage: `Failed to organize items: ${(error as Error)?.message || error}` });
     }
 
-    logger(`executeOrganizeItemsAction: Modified ${itemsModified} items, skipped ${skippedItems.length}, unchanged ${unchangedItems.length}`, 1);
+    logger(`applyOrganizeItems: Modified ${itemsModified} items, skipped ${skippedItems.length}, unchanged ${unchangedItems.length}`, 1);
+    Object.assign(counts, {
+        item_count: item_ids.length,
+        items_modified: itemsModified,
+        items_skipped: skippedItems.length,
+        items_unchanged: unchangedItems.length,
+    });
 
     return {
-        type: 'agent_action_execute_response',
-        request_id: request.request_id,
-        success: true,
-        result_data: {
-            items_modified: itemsModified,
-            current_state: Object.fromEntries([...itemSnapshots].map(([id, snapshot]) => [id, {
-                tags: snapshot.tags.map(tag => tag.tag),
-                collections: snapshot.collections.map(id => Zotero.Collections.get(id)?.key).filter(Boolean),
-            }])),
-            // Store actual changes (not requested changes) for safe undo
-            tags_added: actualTagsAdded.size > 0 ? [...actualTagsAdded] : undefined,
-            tags_removed: actualTagsRemoved.size > 0 ? [...actualTagsRemoved] : undefined,
-            collection_ids_added: actualCollectionsAdded.size > 0 && collectionLibraryId != null ? [...actualCollectionsAdded].map(key => formatCollectionId(collectionLibraryId!, key)) : undefined,
-            collection_ids_removed: actualCollectionsRemoved.size > 0 && collectionLibraryId != null ? [...actualCollectionsRemoved].map(key => formatCollectionId(collectionLibraryId!, key)) : undefined,
-            collections_added: actualCollectionsAdded.size > 0 ? [...actualCollectionsAdded] : undefined,
-            collections_removed: actualCollectionsRemoved.size > 0 ? [...actualCollectionsRemoved] : undefined,
-            skipped_items: skippedItems.length > 0 ? skippedItems : undefined,
-            unchanged_items: unchangedItems.length > 0 ? unchangedItems : undefined,
-        },
-        timing: buildTiming({
-            item_count: item_ids.length,
-            items_modified: itemsModified,
-            items_skipped: skippedItems.length,
-            items_unchanged: unchangedItems.length,
-        }),
+        items_modified: itemsModified,
+        current_state: Object.fromEntries([...itemSnapshots].map(([id, snapshot]) => [id, {
+            tags: snapshot.tags.map(tag => tag.tag),
+            collections: snapshot.collections.map(id => Zotero.Collections.get(id)?.key).filter((key): key is string => !!key),
+        }])),
+        // Store actual changes (not requested changes) for safe undo
+        tags_added: actualTagsAdded.size > 0 ? [...actualTagsAdded] : undefined,
+        tags_removed: actualTagsRemoved.size > 0 ? [...actualTagsRemoved] : undefined,
+        collection_ids_added: actualCollectionsAdded.size > 0 && collectionLibraryId != null ? [...actualCollectionsAdded].map(key => formatCollectionId(collectionLibraryId!, key)) : undefined,
+        collection_ids_removed: actualCollectionsRemoved.size > 0 && collectionLibraryId != null ? [...actualCollectionsRemoved].map(key => formatCollectionId(collectionLibraryId!, key)) : undefined,
+        collections_added: actualCollectionsAdded.size > 0 ? [...actualCollectionsAdded] : undefined,
+        collections_removed: actualCollectionsRemoved.size > 0 ? [...actualCollectionsRemoved] : undefined,
+        skipped_items: skippedItems.length > 0 ? skippedItems : undefined,
+        unchanged_items: unchangedItems.length > 0 ? unchangedItems : undefined,
     };
+}
+
+/** Organize items for the backend during a run. */
+export async function executeOrganizeItemsAction(
+    request: ActionExecuteRequest,
+    ctx: TimeoutContext,
+): Promise<WSAgentActionExecuteResponse> {
+    const timing: Record<string, number> = {};
+    return toExecuteResponse(request.request_id, 'executeOrganizeItemsAction',
+        () => applyOrganizeItems(request.action_data, ctx, { timing }), () => timing);
 }
