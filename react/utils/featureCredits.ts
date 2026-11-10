@@ -185,3 +185,52 @@ export class FeatureCreditCompletionTracker {
         return ready;
     }
 }
+
+/** Credits a task run needs, roughly: below this the Beaver model can't run one. */
+export const FEATURE_TASK_MIN_CREDITS = 2;
+
+/** What the user can run a task with right now. */
+export interface ModelAccess {
+    /** The chat input's model runs on Beaver credits. */
+    onBeaverModel: boolean;
+    /** The account has enough Beaver credits for a task run. */
+    hasBeaverCredits: boolean;
+    /** The user has a model of their own (an API key or a custom model). */
+    hasOwnModel: boolean;
+}
+
+/** A line on a setup card about which model to run the task with. */
+export interface ModelNote {
+    text: string;
+    /** Offer a link that switches the chat input to the Beaver model. */
+    offerBeaverModel: boolean;
+    /** Show it as a numbered step: the task does not work without it. */
+    required: boolean;
+}
+
+/** Whether the user can run a task at all, with Beaver credits or a model of their own. */
+export function canRunFeatureTasks(access: ModelAccess): boolean {
+    return access.hasBeaverCredits || access.hasOwnModel;
+}
+
+/**
+ * What a setup card says about the model, or null when the chat input is
+ * already set up to run the task well. Tables only run on Beaver credits;
+ * the other tasks run on any model but work best with the Beaver model.
+ */
+export function featureTaskModelNote(taskKey: string, access: ModelAccess): ModelNote | null {
+    const needsBeaverCredits = taskKey === 'research_table';
+    if (!access.hasBeaverCredits) {
+        if (needsBeaverCredits) {
+            return { text: "Tables run on Beaver credits, and you don't have enough left.", offerBeaverModel: false, required: true };
+        }
+        if (!access.onBeaverModel) return null;
+        return access.hasOwnModel
+            ? { text: "You don't have enough Beaver credits left. Choose your own model in the chat input to try this.", offerBeaverModel: false, required: true }
+            : { text: "You don't have enough Beaver credits left. Add credits or your own API key to try this.", offerBeaverModel: false, required: true };
+    }
+    if (access.onBeaverModel) return null;
+    return needsBeaverCredits
+        ? { text: 'Tables run on Beaver credits.', offerBeaverModel: true, required: true }
+        : { text: 'These tasks work best with the Beaver model.', offerBeaverModel: true, required: false };
+}

@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
     claim: vi.fn(),
     dispose: vi.fn(),
     sync: vi.fn(),
+    seen: vi.fn(),
 }));
 vi.mock("@beaver/agent-core/transport/clients/accountService", () => ({
     accountService: {
@@ -13,6 +14,7 @@ vi.mock("@beaver/agent-core/transport/clients/accountService", () => ({
         updateExcludedLibraries: mocks.exclusion,
         updatePreference: mocks.preference,
         syncFeatureCredits: mocks.sync,
+        markFeatureCreditsCardSeen: mocks.seen,
     },
 }));
 vi.mock("@beaver/agent-core/transport/threadService", () => ({
@@ -951,6 +953,21 @@ describe("instance account ownership", () => {
             await account.auth.signOut();
             await vi.advanceTimersByTimeAsync(20_000);
             expect(mocks.sync).not.toHaveBeenCalled();
+        });
+
+        it("reports the card as shown once per account, and again after a failed report", async () => {
+            await loadWith(withTasks());
+            mocks.seen.mockRejectedValueOnce(new Error("offline")).mockResolvedValue(undefined);
+            account.markFeatureCreditsCardSeen();
+            await vi.advanceTimersByTimeAsync(0);
+            account.markFeatureCreditsCardSeen();
+            account.markFeatureCreditsCardSeen();
+            await vi.advanceTimersByTimeAsync(0);
+            expect(mocks.seen).toHaveBeenCalledTimes(2);
+            event("SIGNED_IN", session("b"));
+            await vi.advanceTimersByTimeAsync(0);
+            account.markFeatureCreditsCardSeen();
+            expect(mocks.seen).toHaveBeenCalledTimes(3);
         });
 
         it("ignores a grant that returns after the account changed", async () => {

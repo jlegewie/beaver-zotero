@@ -7,6 +7,8 @@ import {
     featureCreditEntriesAtom,
     featureCreditsCardDismissedAtom,
     featureTaskAttachmentSummaryAtom,
+    featureTaskModelAccessAtom,
+    selectBeaverModelAtom,
     startFeatureTaskAtom,
     type FeatureCreditEntry,
 } from '../../atoms/featureCredits';
@@ -15,8 +17,9 @@ import { searchableLibraryIdsAtom } from '../../atoms/profile';
 import { actionsAtom } from '../../atoms/actions';
 import { getActionCommand } from '@beaver/agent-ui/composer/slashCommands';
 import { examplesForLibrary, getFeatureCreditTask, type FeatureTaskDefinition, type LibraryShape } from '../../constants/featureCreditTasks';
-import { attachStep, topicStatus, type AttachStep } from '../../utils/featureCredits';
-import { readLibraryShape } from '../../utils/libraryShape';
+import { attachStep, featureTaskModelNote, topicStatus } from '../../utils/featureCredits';
+import { countLibraryItems, readLibraryShape } from '../../utils/libraryShape';
+import { SMALL_LIBRARY_THRESHOLD } from '../../atoms/zoteroContext';
 
 /** One task in the list: done, or a button that opens its setup card. */
 const TaskRow: React.FC<{ entry: FeatureCreditEntry; onStart: (key: string, win: Window | null) => void }> = ({ entry, onStart }) => {
@@ -50,23 +53,13 @@ const TaskRow: React.FC<{ entry: FeatureCreditEntry; onStart: (key: string, win:
     );
 };
 
-/** A step line: ✓ status, or a numbered instruction. */
-const StepLine: React.FC<{ number: number; step: AttachStep }> = ({ number, step }) => (
-    <li className="feature-credits-step">
-        <span className={`feature-credits-step-marker ${step.done ? 'font-color-green' : ''}`} aria-hidden="true">
-            {step.done ? '✓' : `${number}.`}
-        </span>
-        <span>
-            <strong className="font-medium">{step.lead}</strong> {step.text}
-        </span>
-    </li>
-);
-
 /** The setup card: what the skill does and how to start it in the chat input. */
 const SetupView: React.FC<{ definition: FeatureTaskDefinition; credits: number; onBack: () => void }> = ({ definition, credits, onBack }) => {
     const summary = useAtomValue(featureTaskAttachmentSummaryAtom);
     const startTask = useSetAtom(startFeatureTaskAtom);
     const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
+    const modelAccess = useAtomValue(featureTaskModelAccessAtom);
+    const selectBeaverModel = useSetAtom(selectBeaverModelAtom);
     const [shape, setShape] = useState<LibraryShape | null>(null);
     const needsShape = definition.examples.some((example) => example.when);
 
@@ -84,10 +77,58 @@ const SetupView: React.FC<{ definition: FeatureTaskDefinition; credits: number; 
     // The command as the user knows it: built-ins can be renamed.
     const action = useAtomValue(actionsAtom).find((candidate) => candidate.id === definition.actionId);
     const command = `/${action ? getActionCommand(action) : definition.actionId.replace(/^builtin-/, '')}`;
-    const step1 = attachStep(definition.attach, summary);
+    const attach = attachStep(definition.attach, summary);
     const status = definition.attach.kind === 'topic' ? topicStatus(summary) : null;
     const examples = examplesForLibrary(definition, shape);
-    const instructionNumber = step1 ? 2 : 1;
+    const modelNote = featureTaskModelNote(definition.key, modelAccess);
+    const beaverModelLink = (
+        <a href="#" className="text-link" onClick={(event) => { event.preventDefault(); selectBeaverModel(); }}>
+            Use the Beaver model
+        </a>
+    );
+
+    // Numbered in order; a done step shows ✓ and keeps its place.
+    const steps: { done?: boolean; content: React.ReactNode }[] = [];
+    if (modelNote?.required) {
+        steps.push({
+            content: (
+                <>
+                    {modelNote.text}
+                    {modelNote.offerBeaverModel && <> {beaverModelLink}</>}
+                </>
+            ),
+        });
+    }
+    if (attach) {
+        steps.push({ done: attach.done, content: <><strong className="font-medium">{attach.lead}</strong> {attach.text}</> });
+    }
+    steps.push({
+        content: (
+            <>
+                After <span className="feature-credits-command">{command}</span>, {definition.instruction}.
+                {examples.length > 0 && <> For example:{' '}</>}
+                {examples.map((example, index) => (
+                    <React.Fragment key={example.text}>
+                        {index > 0 && (example.illustration ? ' or ' : ' · ')}
+                        {example.illustration ? (
+                            <span className="feature-credits-illustration">“{example.text}”</span>
+                        ) : (
+                            <a href="#" className="text-link" onClick={(event) => applyExample(example.text, event)}>
+                                {example.text}
+                            </a>
+                        )}
+                    </React.Fragment>
+                ))}
+            </>
+        ),
+    });
+    steps.push({
+        content: (
+            <>
+                {definition.finalStep} <strong className="font-medium font-color-green">+{credits} credits</strong>
+            </>
+        ),
+    });
 
     const applyExample = (text: string, event: React.MouseEvent<HTMLAnchorElement>) => {
         event.preventDefault();
@@ -107,28 +148,21 @@ const SetupView: React.FC<{ definition: FeatureTaskDefinition; credits: number; 
                     <strong className="font-medium">{status.lead}</strong> {status.text}
                 </p>
             )}
+            {modelNote && !modelNote.required && (
+                <p className="feature-credits-text">
+                    {modelNote.text}
+                    {modelNote.offerBeaverModel && <> {beaverModelLink}</>}
+                </p>
+            )}
             <ol className="feature-credits-steps">
-                {step1 && <StepLine number={1} step={step1} />}
-                <li className="feature-credits-step">
-                    <span className="feature-credits-step-marker" aria-hidden="true">{instructionNumber}.</span>
-                    <span>
-                        After <span className="feature-credits-command">{command}</span>, {definition.instruction}. For example:{' '}
-                        {examples.map((example, index) => (
-                            <React.Fragment key={example.text}>
-                                {index > 0 && ' · '}
-                                <a href="#" className="text-link" onClick={(event) => applyExample(example.text, event)}>
-                                    {example.text}
-                                </a>
-                            </React.Fragment>
-                        ))}
-                    </span>
-                </li>
-                <li className="feature-credits-step">
-                    <span className="feature-credits-step-marker" aria-hidden="true">{instructionNumber + 1}.</span>
-                    <span>
-                        {definition.finalStep} <strong className="font-medium font-color-green">+{credits} credits</strong>
-                    </span>
-                </li>
+                {steps.map((step, index) => (
+                    <li key={index} className="feature-credits-step">
+                        <span className={`feature-credits-step-marker ${step.done ? 'font-color-green' : ''}`} aria-hidden="true">
+                            {step.done ? '✓' : `${index + 1}.`}
+                        </span>
+                        <span>{step.content}</span>
+                    </li>
+                ))}
             </ol>
             {definition.footnote && <p className="feature-credits-text font-color-tertiary">{definition.footnote}</p>}
         </>
@@ -149,6 +183,21 @@ const FeatureCreditsCard: React.FC = () => {
     const startTask = useSetAtom(startFeatureTaskAtom);
     const pills = useAtomValue(currentMessagePillsAtom);
     const pendingPills = useAtomValue(pendingPillInsertsAtom);
+
+    const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
+    // The tasks need papers to work on: the list waits for a library of a
+    // useful size (the threshold first run uses). Checked when the card
+    // mounts, so papers added since show it on the next visit to home.
+    const [libraryReady, setLibraryReady] = useState<boolean | null>(null);
+    useEffect(() => {
+        let cancelled = false;
+        void countLibraryItems(SMALL_LIBRARY_THRESHOLD, searchableLibraryIds).then((count) => {
+            if (!cancelled) setLibraryReady(count !== null && count >= SMALL_LIBRARY_THRESHOLD);
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, [searchableLibraryIds]);
 
     // Ask the server to catch up on anything earned since the last check.
     useEffect(() => {
@@ -182,14 +231,21 @@ const FeatureCreditsCard: React.FC = () => {
         if (activeKey && (!activeEntry || activeEntry.task.completed_at)) setActiveKey(null);
     }, [activeKey, activeEntry, setActiveKey]);
 
-    if (!entries) return null;
+    const showSetup = !!(activeEntry && activeDefinition && !activeEntry.task.completed_at);
+    // A setup someone asked for (Next, Plan & Usage) shows whatever the library size.
+    const shown = !!entries && (showSetup || libraryReady === true);
+    useEffect(() => {
+        if (shown) Zotero.Beaver?.account?.markFeatureCreditsCardSeen();
+    }, [shown]);
+
+    if (!entries || !shown) return null;
 
     const onStart = (key: string, win: Window | null) => {
         pillSeenRef.current = false;
         startTask({ key, targetWindow: win ?? undefined });
     };
 
-    if (activeEntry && activeDefinition && !activeEntry.task.completed_at) {
+    if (showSetup && activeEntry && activeDefinition) {
         return (
             <section className="feature-credits-card" aria-label={`${activeDefinition.title}: how to start`}>
                 <SetupView

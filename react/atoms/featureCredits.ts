@@ -7,7 +7,16 @@
  */
 import { atom } from 'jotai';
 import type { FeatureCreditTask } from '@beaver/agent-core/types/profile';
-import { profileWithPlanAtom } from './profile';
+import { profileBalanceAtom, profileWithPlanAtom } from './profile';
+import {
+    anthropicApiKeyAtom,
+    availableModelsAtom,
+    beaverDefaultModelAtom,
+    googleApiKeyAtom,
+    isUsingBeaverCreditsAtom,
+    openAiApiKeyAtom,
+    updateSelectedModelAtom,
+} from './models';
 import { preferencesRevisionAtom } from './preferences';
 import { getPref, setPref } from '../../src/utils/prefs';
 import { stageActionPillAtom } from './actions';
@@ -20,7 +29,7 @@ import {
     messageItemDataRevisionAtom,
 } from './messageComposition';
 import { FeatureTaskDefinition, getFeatureCreditTask } from '../constants/featureCreditTasks';
-import type { AttachmentSummary } from '../utils/featureCredits';
+import { canRunFeatureTasks, FEATURE_TASK_MIN_CREDITS, type AttachmentSummary, type ModelAccess } from '../utils/featureCredits';
 import { getDisplayNameFromItem } from '../utils/sourceUtils';
 import { resolveLibraryRef } from '../../src/utils/libraryIdentity';
 import { logger } from '@beaver/agent-core/platform/logger';
@@ -68,13 +77,42 @@ export const featureCreditsCardDismissedAtom = atom(
     (_get, _set, dismissed: boolean) => setPref('featureCreditsCardDismissed', dismissed),
 );
 
-/** Whether the home card shows: after first run, while a task is open, unless dismissed. */
+/** What the user can run a task with: Beaver credits, a model of their own, or neither. */
+export const featureTaskModelAccessAtom = atom<ModelAccess>((get) => {
+    const apiKeys: Record<string, boolean> = {
+        google: !!get(googleApiKeyAtom),
+        openai: !!get(openAiApiKeyAtom),
+        anthropic: !!get(anthropicApiKeyAtom),
+    };
+    return {
+        onBeaverModel: get(isUsingBeaverCreditsAtom),
+        hasBeaverCredits: get(profileBalanceAtom).chatCreditsRemaining >= FEATURE_TASK_MIN_CREDITS,
+        hasOwnModel: get(availableModelsAtom).some(
+            (model) => model.is_custom || (model.allow_byok && apiKeys[model.provider]),
+        ),
+    };
+});
+
+/**
+ * Whether the home card shows: after first run, while a task is open, unless
+ * dismissed, and only while the user can run a task at all. The card also
+ * waits for a library of a useful size (see `FeatureCreditsCard`).
+ */
 export const featureCreditsCardVisibleAtom = atom((get) => {
     const profile = get(profileWithPlanAtom);
     if (!profile?.first_run_completed_at) return false;
     if (get(featureCreditsCardDismissedAtom)) return false;
+    if (!canRunFeatureTasks(get(featureTaskModelAccessAtom))) return false;
     const entries = get(featureCreditEntriesAtom);
     return !!entries?.some(({ task }) => !task.completed_at);
+});
+
+/** Switch the chat input to the Beaver model, as the setup card's link does. */
+export const selectBeaverModelAtom = atom(null, (get, set): boolean => {
+    const model = get(beaverDefaultModelAtom);
+    if (!model) return false;
+    set(updateSelectedModelAtom, { ...model, access_mode: 'app_key' });
+    return true;
 });
 
 const activeFeatureTaskStateAtom = atom<{ key: string; composerResetToken: number } | null>(null);

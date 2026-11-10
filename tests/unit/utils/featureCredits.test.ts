@@ -4,8 +4,11 @@ import {
     COMPLETION_GRACE_MS,
     FeatureCreditCompletionTracker,
     attachStep,
+    canRunFeatureTasks,
+    featureTaskModelNote,
     topicStatus,
     type AttachmentSummary,
+    type ModelAccess,
 } from '../../../react/utils/featureCredits';
 import { FEATURE_CREDIT_TASKS, examplesForLibrary, getFeatureCreditTask } from '../../../react/constants/featureCreditTasks';
 
@@ -157,5 +160,62 @@ describe('completion tracker', () => {
         tracker.updateTasks(null, 2);
         tracker.updateTasks([task('annotate', 't1')], 2);
         expect(tracker.takeReady(true)).toEqual([]);
+    });
+});
+
+describe('model and credits', () => {
+    const access = (overrides: Partial<ModelAccess>): ModelAccess => ({
+        onBeaverModel: true,
+        hasBeaverCredits: true,
+        hasOwnModel: false,
+        ...overrides,
+    });
+
+    it('says nothing when the Beaver model can run the task', () => {
+        for (const key of ['annotate', 'note', 'organize', 'research_table']) {
+            expect(featureTaskModelNote(key, access({}))).toBeNull();
+        }
+    });
+
+    it('recommends the Beaver model to someone on their own model, and requires it for tables', () => {
+        const own = access({ onBeaverModel: false, hasOwnModel: true });
+        expect(featureTaskModelNote('annotate', own)).toEqual({
+            text: 'These tasks work best with the Beaver model.',
+            offerBeaverModel: true,
+            required: false,
+        });
+        expect(featureTaskModelNote('research_table', own)).toMatchObject({ offerBeaverModel: true, required: true });
+    });
+
+    it('without Beaver credits, points to the own model and says tables cannot run', () => {
+        const ownSelected = access({ onBeaverModel: false, hasBeaverCredits: false, hasOwnModel: true });
+        expect(featureTaskModelNote('note', ownSelected)).toBeNull();
+        expect(featureTaskModelNote('research_table', ownSelected)).toMatchObject({ offerBeaverModel: false, required: true });
+        const beaverSelected = access({ hasBeaverCredits: false, hasOwnModel: true });
+        expect(featureTaskModelNote('organize', beaverSelected)?.text).toContain('Choose your own model');
+        // Reached from Plan & Usage with no way to run a task at all.
+        const neither = access({ hasBeaverCredits: false, hasOwnModel: false });
+        expect(featureTaskModelNote('organize', neither)?.text).toBe("You don't have enough Beaver credits left. Add credits or your own API key to try this.");
+    });
+
+    it('can run tasks with Beaver credits or a model of their own, not with neither', () => {
+        expect(canRunFeatureTasks(access({}))).toBe(true);
+        expect(canRunFeatureTasks(access({ hasBeaverCredits: false, hasOwnModel: true }))).toBe(true);
+        expect(canRunFeatureTasks(access({ hasBeaverCredits: false }))).toBe(false);
+    });
+});
+
+describe('setup card examples', () => {
+    it('shows topic examples for tables as text, not as links that fill the input', () => {
+        const table = getFeatureCreditTask('research_table')!;
+        expect(table.examples.length).toBeGreaterThan(0);
+        expect(table.examples.every((example) => example.illustration)).toBe(true);
+    });
+
+    it('keeps one-click examples only where they fit any library', () => {
+        const linked = FEATURE_CREDIT_TASKS
+            .filter((task) => task.key !== 'research_table')
+            .flatMap((task) => task.examples.map((example) => example.text));
+        expect(linked).not.toContain('what my library says about measurement error');
     });
 });

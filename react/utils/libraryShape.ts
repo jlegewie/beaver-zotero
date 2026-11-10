@@ -29,3 +29,35 @@ export async function readLibraryShape(libraryIds: number[]): Promise<LibrarySha
         return null;
     }
 }
+
+/**
+ * Regular items (not notes, attachments or annotations) that are not in the
+ * trash, counted up to `cap`: in the given libraries, or in every library
+ * except feeds when none are given. The scan stops at `cap`, so the query
+ * stays cheap on a large library. Null when the query fails.
+ */
+export async function countLibraryItems(cap: number, libraryIds?: number[]): Promise<number | null> {
+    if (libraryIds?.length === 0) return 0;
+    const scope = libraryIds
+        ? `i.libraryID IN (${libraryIds.map(() => '?').join(', ')})`
+        : `i.libraryID IN (SELECT libraryID FROM libraries WHERE type != 'feed')`;
+    try {
+        let count = 0;
+        await Zotero.DB.queryAsync(
+            `SELECT 1 FROM items i
+             WHERE ${scope}
+               AND i.itemTypeID NOT IN (
+                   SELECT itemTypeID FROM itemTypes
+                   WHERE typeName IN ('note', 'attachment', 'annotation')
+               )
+               AND i.itemID NOT IN (SELECT itemID FROM deletedItems)
+             LIMIT ?`,
+            [...(libraryIds ?? []), cap],
+            { onRow: () => { count++; } },
+        );
+        return count;
+    } catch (error) {
+        logger(`countLibraryItems failed: ${String(error)}`, 2);
+        return null;
+    }
+}

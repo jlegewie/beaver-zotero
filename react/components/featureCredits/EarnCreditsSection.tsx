@@ -3,7 +3,8 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import Button from '@beaver/agent-ui/primitives/Button';
 import { SectionLabel, SettingsGroup, SettingsRow } from '../preferences/components/SettingsElements';
 import { CheckmarkCircleSolidIcon, Icon } from '../icons/icons';
-import { featureCreditEntriesAtom, featureCreditTotalsAtom, startFeatureTaskAtom } from '../../atoms/featureCredits';
+import { featureCreditEntriesAtom, featureCreditTotalsAtom, featureTaskModelAccessAtom, startFeatureTaskAtom } from '../../atoms/featureCredits';
+import { canRunFeatureTasks } from '../../utils/featureCredits';
 import { newThreadAtom } from '../../atoms/threads';
 import { eventManager } from '../../events/eventManager';
 
@@ -16,6 +17,7 @@ const EarnCreditsSection: React.FC = () => {
     const totals = useAtomValue(featureCreditTotalsAtom);
     const startTask = useSetAtom(startFeatureTaskAtom);
     const newThread = useSetAtom(newThreadAtom);
+    const canRun = canRunFeatureTasks(useAtomValue(featureTaskModelAccessAtom));
 
     if (!entries || totals.done === totals.count) return null;
 
@@ -37,6 +39,11 @@ const EarnCreditsSection: React.FC = () => {
                         <span className="font-color-secondary">
                             Learn {entries.length === 4 ? 'four' : entries.length} skills. Each earns credits once you
                             accept Beaver's changes, whether you start from here or on your own.
+                            {!canRun && (
+                                <>
+                                    {' '}Each task needs a few credits to run, or your own API key, and pays them back.
+                                </>
+                            )}
                         </span>
                     }
                 />

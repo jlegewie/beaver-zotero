@@ -153,6 +153,8 @@ export class InstanceAccount {
     private featureSyncFirstTriggerAt = 0;
     private featureSyncInFlight = false;
     private featureSyncLastRunAt = 0;
+    /** The account generation the feature-credits card was reported seen for. */
+    private featureCardSeenGeneration = -1;
     private featureSyncAgain = false;
     private restoring?: Promise<void>;
     /** Bumped when restoring ends, so a late attempt result cannot apply. */
@@ -930,6 +932,24 @@ export class InstanceAccount {
             this.featureSyncFirstTriggerAt = 0;
             void this.runFeatureCreditsSync(generation);
         }, delay);
+    }
+    /**
+     * Report, once per signed-in account, that the feature-credits card was
+     * shown. Fire-and-forget; a failed report is retried the next time the
+     * card shows.
+     */
+    markFeatureCreditsCardSeen(): void {
+        if (this.disposed || !this.snapshot.session) return;
+        const generation = this.snapshot.generation;
+        if (this.featureCardSeenGeneration === generation) return;
+        this.featureCardSeenGeneration = generation;
+        accountService.markFeatureCreditsCardSeen({ timeoutMs: 15_000 }).catch((error) => {
+            if (this.featureCardSeenGeneration === generation) this.featureCardSeenGeneration = -1;
+            logger(
+                `instanceAccount: feature-credits card report failed: ${error instanceof Error ? error.message : String(error)}`,
+                2,
+            );
+        });
     }
     private cancelFeatureCreditsSync(): void {
         if (this.featureSyncTimer) clearTimeout(this.featureSyncTimer);

@@ -6464,3 +6464,7 @@
 .beaver-root .feature-credits-next:hover {
     background-color: var(--beaver-fill-hover);
 }
+/* An example instruction shown as text (not a link that fills the input). */
+.beaver-root .feature-credits-illustration {
+    color: var(--fill-primary);
+}

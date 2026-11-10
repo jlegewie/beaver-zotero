@@ -28,6 +28,12 @@ export interface FeatureTaskExample {
     text: string;
     /** Shown only when this returns true for the user's library. */
     when?: (shape: LibraryShape) => boolean;
+    /**
+     * Shown as plain text, not as a link that fills in the chat input: the
+     * example names a topic, which only fits some libraries, so it shows the
+     * form of an instruction rather than one to send.
+     */
+    illustration?: boolean;
 }
 
 export interface FeatureTaskFollowUp {
@@ -78,7 +84,7 @@ export const FEATURE_CREDIT_TASKS: FeatureTaskDefinition[] = [
             { text: 'the key passages I need to skim the paper' },
             { text: 'every definition of social capital' },
         ],
-        finalStep: 'Press Send, then accept the highlights.',
+        finalStep: 'Press Send. Accept the highlights if Beaver asks.',
         completion: {
             more: 'Beaver can annotate a whole collection at once, e.g. "highlight every definition of social capital", with a comment on each highlight.',
             followUp: { label: 'Annotate a whole collection', actionId: 'builtin-annotate' },
@@ -96,9 +102,8 @@ export const FEATURE_CREDIT_TASKS: FeatureTaskDefinition[] = [
         examples: [
             { text: 'a summary of this paper' },
             { text: 'a literature review of the papers in this collection' },
-            { text: 'what my library says about measurement error' },
         ],
-        finalStep: 'Press Send, then accept the note.',
+        finalStep: 'Press Send. Accept the note if Beaver asks.',
         completion: {
             more: 'Click a citation in the note to open the page. Beaver can also edit your existing notes, and notes export to Word.',
             followUp: { label: 'Export to Word', exportNote: true },
@@ -118,7 +123,7 @@ export const FEATURE_CREDIT_TASKS: FeatureTaskDefinition[] = [
             { text: 'tag the papers in this collection', when: (shape) => shape.usesTags },
             { text: 'fill in missing abstracts and DOIs' },
         ],
-        finalStep: 'Press Send, then accept the changes.',
+        finalStep: 'Press Send. Accept the changes if Beaver asks.',
         completion: {
             more: 'Beaver can also merge duplicates, split a big collection into sub-collections, and set up a collection for a new project.',
             followUp: { label: 'Tidy up my whole library', actionId: 'builtin-tidy-up' },
@@ -134,15 +139,14 @@ export const FEATURE_CREDIT_TASKS: FeatureTaskDefinition[] = [
         attach: { kind: 'topic' },
         instruction: 'name a topic and what to compare',
         examples: [
-            { text: 'neighborhood effects on school outcomes: method, sample and main finding' },
-            { text: 'social capital: definition used and how it is measured' },
-            { text: 'minimum wage studies: data source, country and estimated effect' },
+            { text: 'neighborhood effects on school outcomes: method, sample and main finding', illustration: true },
+            { text: 'social capital: definition used and how it is measured', illustration: true },
         ],
         finalStep: 'Press Send, check the papers and questions Beaver proposes, then create the table with "Fill the table now" ticked.',
         footnote: 'Filling a table uses credits per row. You see the cost before anything is filled.',
         completion: {
             more: "Click a cell to see the quote behind it. Add a column with a new question, sort, and fill the remaining rows when you're happy.",
-            docsUrl: `${DOCS_BASE_URL}/tables`,
+            docsUrl: `${DOCS_BASE_URL}/research-tables`,
         },
     },
 ];
