@@ -4,7 +4,7 @@ import type { MessageFiltersState } from '../../../atoms/messageComposition';
 import type { SourcesMenuEntries } from '../../ui/menus/hooks/useSourcesMenu';
 import { libraryRefForLibraryID, resolveLibraryRef } from '../../../../src/utils/libraryIdentity';
 
-/** The Add Sources menu's rows for a table: papers, collections and tags, added rather than filtered. */
+/** The Add Sources menu's rows for a table: papers and scopes (collections, tags, saved searches), added rather than filtered. */
 export const TABLE_MENU_ENTRIES: SourcesMenuEntries = { libraries: false, notes: false, files: false, scopeVerb: 'add' };
 
 /**
@@ -33,6 +33,13 @@ export function pickedCollectionScope(collectionId: number): TableCardLibrarySco
     const collection = Zotero.Collections.get(collectionId) as Zotero.Collection | false;
     const ref = collection ? libraryRefForLibraryID(collection.libraryID) : null;
     return collection && ref ? { kind: 'collection', library_ref: ref, key: collection.key, name: collection.name } : null;
+}
+
+/** Whether `scopes` include the saved search, for the menu's checkmark. */
+export function hasSavedSearchScope(scopes: readonly TableCardLibraryScope[], search: Zotero.Search): boolean {
+    const ref = libraryRefForLibraryID(search.libraryID);
+    return !!ref && scopes.some((scope) =>
+        scope.kind === 'saved_search' && scope.key === search.key && scope.library_ref === ref);
 }
 
 /** The tag a menu pick names, as a source scope. */

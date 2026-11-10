@@ -23,14 +23,15 @@
  *
  * A reader opened on a table — double-click, `zotero://open`, anything that
  * calls `Zotero.Reader.open` while no table tab is open — is closed and the
- * table tab opened instead. A reader tab is heard on the `tab` notifier's
+ * table opened instead: a reader tab becomes the table tab (or brings forward
+ * the table's window, when one shows it), a reader window becomes a table
+ * window (`tableWindow.ts`). A reader tab is heard on the `tab` notifier's
  * `add`, which Zotero fires inside `Zotero_Tabs.add`, before the reader loads,
  * so the snapshot never paints. The observer stays short and never awaits the
  * reader's initialisation: the notifier runs its observers one after another.
  * Restored, unloaded reader tabs and reader *windows* load without an `add`;
  * `readerTableView`'s toolbar hook hands those over through
- * {@link redirectLoadedReader}. A reader window is closed and the tab opens in
- * the most recent main window, as for any command without an origin.
+ * {@link redirectLoadedReader}.
  */
 
 import { TABLE_TAB_TYPE, collapseTableTabContextPane, isBeaverChatOpen } from './tableTabContextPane';
@@ -79,12 +80,13 @@ interface TableTabEntry {
 
 /**
  * Opens a table the way the product does: `openTable` with its repair. No
- * `window` is a command without an origin (a reader window being replaced).
+ * `window` is a command without an origin. `openIn` picks the surface; see
+ * `openTable`.
  */
 export type TableTabOpener = (
     ref: TableRef,
-    options: { window?: Window; background?: boolean; index?: number }
-) => Promise<{ error: string } | { ok: true; tabID: string }>;
+    options: { window?: Window; background?: boolean; index?: number; openIn?: 'tab' | 'window' }
+) => Promise<{ error: string } | { ok: true }>;
 
 const entries = new Map<string, TableTabEntry>();
 const stats = { opened: 0, reused: 0, closed: 0, unmounted: 0, redirected: 0 };
@@ -306,9 +308,8 @@ function closeTableTabsForItems(ids: Array<string | number>): void {
 }
 
 /**
- * Closes a reader window on a table item and opens the table tab in the most
- * recent main window (opening one if none is left), then brings that window
- * forward. The open is not awaited, as for a reader tab.
+ * Closes a reader window on a table item and opens the table in a window of
+ * its own, which comes forward. The open is not awaited, as for a reader tab.
  */
 function replaceReaderWindow(reader: { close?: () => void }, item: Zotero.Item): boolean {
     if (!opener || typeof reader?.close !== 'function') return false;
@@ -319,16 +320,13 @@ function replaceReaderWindow(reader: { close?: () => void }, item: Zotero.Item):
         return false;
     }
     stats.redirected += 1;
-    void opener({ libraryID: item.libraryID, key: item.key }, {}).then(
+    void opener({ libraryID: item.libraryID, key: item.key }, { openIn: 'window' }).then(
         (outcome) => {
-            if (!('error' in outcome)) {
-                windowOfTab(outcome.tabID)?.focus();
-                return;
-            }
-            logger(`tableTab: redirect to the table tab failed: ${outcome.error}`, 1);
+            if (!('error' in outcome)) return;
+            logger(`tableTab: redirect to the table window failed: ${outcome.error}`, 1);
             Zotero.alert(Zotero.getMainWindow() ?? null, 'Beaver', outcome.error);
         },
-        (error) => logger(`tableTab: redirect to the table tab failed: ${String(error)}`, 1),
+        (error) => logger(`tableTab: redirect to the table window failed: ${String(error)}`, 1),
     );
     return true;
 }
@@ -366,7 +364,9 @@ export function initTableTabs(open: TableTabOpener): void {
         kind: TABLE_TAB_KIND,
         parseRef: parseTableRef,
         sameRef,
-        open: (ref, options) => open(ref, options),
+        // Restoring or reopening a tab is a tab, whatever windows are open.
+        open: (ref, options) => open(ref, { ...options, openIn: 'tab' }),
+        moveToNewWindow: (ref) => open(ref, { openIn: 'window' }),
     });
 
     notifierID = Zotero.Notifier.registerObserver(

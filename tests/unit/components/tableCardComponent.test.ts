@@ -233,6 +233,30 @@ describe('TableCard', () => {
         expect(sent[0].sources).toHaveLength(2);
     });
 
+    it('adds a saved search picked through "+ Source" as a source, checks it, and a second pick removes it', async () => {
+        mocks.resolveLibraryScope.mockResolvedValue({
+            resolved: { count: 2, total: 2, truncated: false, without_pdf: 0, sample: [] },
+            rows: ['u-SRCH0101', 'u-SRCH0102'].map((id) => ({ item_id: id, display_name: id })),
+            name: 'Recent RCTs',
+        });
+        render(fixture('create-items'));
+        const search = { libraryID: 1, key: 'SRCH0001', name: 'Recent RCTs', deleted: false };
+        expect(mocks.target.isSavedSearchPicked(search)).toBe(false);
+        await act(async () => { mocks.target.pickSavedSearch(search); });
+        expect(mocks.resolveLibraryScope).toHaveBeenCalledWith(
+            expect.objectContaining({ kind: 'saved_search', library_ref: 'u', key: 'SRCH0001', name: 'Recent RCTs' }),
+        );
+        expect(mocks.target.isSavedSearchPicked(search)).toBe(true);
+        await click('Next');
+        expect(doneStep('Sources')).toBe('4 items from 2 sources');
+        await click('Back');
+
+        await act(async () => { mocks.target.pickSavedSearch(search); });
+        expect(mocks.target.isSavedSearchPicked(search)).toBe(false);
+        await click('Next');
+        expect(doneStep('Sources')).toBe('2 items from 1 source');
+    });
+
     it('counts merged papers from the same items the source counts, without one trashed since the proposal', async () => {
         // PAPER002 went to the trash while the card was open.
         mocks.resolveItems.mockImplementation(async (ids: string[]) => {

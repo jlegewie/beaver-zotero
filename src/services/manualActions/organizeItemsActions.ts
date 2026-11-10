@@ -2,151 +2,26 @@
  * Utilities for executing and undoing organize_items agent actions.
  * These functions are used by AgentActionView for post-run action handling.
  */
-import { formatCollectionId } from '../collections/collectionIdentity';
-import { assertLibraryWritable, resolveOrganizeLibrary, recheckCollectionForUndo, recheckExistingCollections } from '../collections/collectionMutations';
+import { assertLibraryWritable, recheckCollectionForUndo } from '../collections/collectionMutations';
 import { AgentAction } from '@beaver/agent-core/agents/agentActionTypes';
 import { logger } from '@beaver/agent-core/platform/logger';
 import type { CollectionChanges, OrganizeItemsResultData, TagChanges } from '@beaver/agent-core/types/agentActions/base';
 import { parseItemReference, resolveItemReference } from '../../utils/libraryIdentity';
+import { unboundedExecutionContext } from '../agentDataProvider/actions/actionExecution';
+import { applyOrganizeItems } from '../agentDataProvider/actions/organizeItems';
 
 /**
- * Execute an organize_items agent action.
- * Adds/removes tags and collection memberships for items.
- * @param action The agent action to execute
- * @returns Result data with changes applied
+ * Apply a stored organize_items action through the shared executor
+ * (`applyOrganizeItems`): one transaction, all or nothing.
+ *
+ * There is no drift check: memberships are not a baseline, and the executor
+ * records each item's tags and collections right before the write, which is
+ * what undo restores.
  */
 export async function executeOrganizeItemsAction(
     action: AgentAction
 ): Promise<OrganizeItemsResultData> {
-    const { item_ids, tags, collections } = action.proposed_data as {
-        item_ids: string[];
-        tags?: TagChanges | null;
-        collections?: CollectionChanges | null;
-    };
-
-    const hasCollections = !!(collections?.add?.length || collections?.remove?.length);
-    const libraryID = hasCollections ? await resolveOrganizeLibrary(item_ids, true) : null;
-    if (libraryID != null) {
-        // Access, editability and library mismatches fail before any item is
-        // written. Collections that no longer exist (e.g. recreated under a new
-        // key by a redo) are skipped, so the rest of the action still applies.
-        recheckExistingCollections(collections?.add ?? [], libraryID);
-        recheckExistingCollections(collections?.remove ?? [], libraryID);
-    }
-    const currentState: Record<string, { tags: string[]; collections: string[] }> = {};
-
-    let itemsModified = 0;
-    const failedItems: Record<string, string> = {};
-    // Track actual changes (not just requested changes) for safe undo
-    const actualTagsAdded = new Set<string>();
-    const actualTagsRemoved = new Set<string>();
-    const actualCollectionsAdded = new Set<string>();
-    const actualCollectionsRemoved = new Set<string>();
-
-    // Process each item
-    for (const itemId of new Set(item_ids)) {
-        try {
-            // Accept both portable "<library_ref>-<key>" and legacy numeric ids.
-            const parsed = parseItemReference(itemId);
-            if (!parsed) {
-                failedItems[itemId] = 'Invalid item id';
-                continue;
-            }
-            const resolved = await resolveItemReference(parsed);
-            if (resolved.status !== 'found') {
-                failedItems[itemId] = 'Item not found';
-                continue;
-            }
-            const item = resolved.item;
-            assertLibraryWritable(item.libraryID, { requirePortable: hasCollections });
-
-            let modified = false;
-
-            // Tags apply to any item type; collections only apply to top-level
-            // items (annotations/attachments/notes inherit from their parent).
-            const isTopLevel = item.isTopLevelItem();
-            // Item lookups and saves yield between iterations; validate this item's
-            // memberships before changing its cached tags or collections.
-            const addCollections = isTopLevel && hasCollections ? recheckExistingCollections(collections?.add ?? [], item.libraryID) : [];
-            const removeCollections = isTopLevel && hasCollections ? recheckExistingCollections(collections?.remove ?? [], item.libraryID) : [];
-
-            // Get current state before modifications
-            const existingTags = new Set(item.getTags().map((t: { tag: string }) => t.tag));
-            const existingCollections = isTopLevel
-                ? new Set(item.getCollections().map((collectionId: number) => {
-                    const collection = Zotero.Collections.get(collectionId);
-                    return collection ? collection.key : null;
-                }).filter(Boolean) as string[])
-                : new Set<string>();
-
-            currentState[itemId] = { tags: [...existingTags], collections: [...existingCollections] };
-
-            // Add tags (only if not already present)
-            if (tags?.add && tags.add.length > 0) {
-                for (const tagName of tags.add) {
-                    if (!existingTags.has(tagName)) {
-                        item.addTag(tagName);
-                        actualTagsAdded.add(tagName);
-                        modified = true;
-                    }
-                }
-            }
-
-            // Remove tags (only if present)
-            if (tags?.remove && tags.remove.length > 0) {
-                for (const tagName of tags.remove) {
-                    if (existingTags.has(tagName) && item.removeTag(tagName)) {
-                        actualTagsRemoved.add(tagName);
-                        modified = true;
-                    }
-                }
-            }
-
-            for (const { key, collection } of addCollections) {
-                if (!existingCollections.has(key)) {
-                    item.addToCollection(collection.id);
-                    actualCollectionsAdded.add(key);
-                    modified = true;
-                }
-            }
-            for (const { key, collection } of removeCollections) {
-                if (existingCollections.has(key)) {
-                    item.removeFromCollection(collection.id);
-                    actualCollectionsRemoved.add(key);
-                    modified = true;
-                }
-            }
-
-            // Save if modified
-            if (modified) {
-                await item.saveTx();
-                itemsModified++;
-            }
-        } catch (error) {
-            failedItems[itemId] = String(error);
-        }
-    }
-
-    const hasFailures = Object.keys(failedItems).length > 0;
-
-    if (hasFailures && itemsModified === 0) {
-        throw new Error(`All items failed: ${Object.values(failedItems).join(', ')}`);
-    }
-
-    logger(`executeOrganizeItemsAction: Modified ${itemsModified} items, ${Object.keys(failedItems).length} failures`, 1);
-
-    return {
-        items_modified: itemsModified,
-        current_state: currentState,
-        // Store actual changes (not requested changes) for safe undo
-        tags_added: actualTagsAdded.size > 0 ? [...actualTagsAdded] : undefined,
-        tags_removed: actualTagsRemoved.size > 0 ? [...actualTagsRemoved] : undefined,
-        collection_ids_added: actualCollectionsAdded.size > 0 && libraryID != null ? [...actualCollectionsAdded].map(key => formatCollectionId(libraryID, key)) : undefined,
-        collection_ids_removed: actualCollectionsRemoved.size > 0 && libraryID != null ? [...actualCollectionsRemoved].map(key => formatCollectionId(libraryID, key)) : undefined,
-        collections_added: actualCollectionsAdded.size > 0 ? [...actualCollectionsAdded] : undefined,
-        collections_removed: actualCollectionsRemoved.size > 0 ? [...actualCollectionsRemoved] : undefined,
-        failed_items: hasFailures ? failedItems : undefined,
-    };
+    return applyOrganizeItems(action.proposed_data, unboundedExecutionContext());
 }
 
 /** Recorded memberships whose collection still exists; the rest are nothing to undo. */

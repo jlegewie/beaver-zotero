@@ -257,6 +257,19 @@ export interface ManageTagsProposedData {
     action: 'rename' | 'delete';
     name: string;
     new_name?: string | null;
+    /** The library as the user saw it when proposed; absent on older proposals. */
+    baseline?: ManageTagsBaseline | null;
+}
+
+/**
+ * The tag as it was when a manage_tags action was proposed, compared before a
+ * later apply. Not an undo snapshot: undo reads `result_data` only.
+ */
+export interface ManageTagsBaseline {
+    /** Items carrying the tag. */
+    item_count?: number | null;
+    /** Whether `new_name` already existed (rename only; null for delete). */
+    is_merge?: boolean | null;
 }
 
 /**
@@ -305,6 +318,24 @@ export interface ManageCollectionsProposedData {
     /** Target parent key for move; null means top-level */
     new_parent_collection_id?: string | null;
     new_parent_key?: string | null;
+    /** The collection as the user saw it when proposed; absent on older proposals. */
+    baseline?: ManageCollectionsBaseline | null;
+}
+
+/**
+ * The collection as it was when a manage_collections action was proposed,
+ * compared before a later apply. Not an undo snapshot: undo reads
+ * `result_data` only.
+ */
+export interface ManageCollectionsBaseline {
+    name?: string | null;
+    /**
+     * Parent collection key; null means top-level, unless `name` and
+     * `item_count` are null too, in which case nothing was recorded.
+     */
+    parent_key?: string | null;
+    /** Items in the collection (recorded for delete). */
+    item_count?: number | null;
 }
 
 /**

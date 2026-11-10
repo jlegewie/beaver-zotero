@@ -10,8 +10,10 @@ import { AgentAction } from '@beaver/agent-core/agents/agentActionTypes';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { CreateItemProposedData, CreateItemResultData } from '@beaver/agent-core/types/agentActions/items';
 import { cancelTasksForItem } from '../../utils/backgroundTasks';
-import { hasLibraryIdentity, modelObjectIdFromReference, resolveItemReference, resolveLibraryRef, resolveWriteTargetLibrary } from '../../utils/libraryIdentity';
-import { applyCreateItemData } from '../itemImport/legacy';
+import { hasLibraryIdentity, modelObjectIdFromReference, resolveItemReference, resolveLibraryRef } from '../../utils/libraryIdentity';
+import { unboundedExecutionContext } from '../agentDataProvider/actions/actionExecution';
+import { applyCreateItem } from '../agentDataProvider/actions/createItems';
+import { getUserFacingErrorMessage } from '../../utils/userFacingError';
 import type { AttachmentResolvedPayload } from '../attachmentResolved';
 
 /** Maximum concurrent item creations in batch jobs */
@@ -24,39 +26,19 @@ interface ExecuteCreateItemActionOptions {
 }
 
 /**
- * Execute a create_item agent action.
- * Creates the item in Zotero and returns the result data.
+ * Apply a stored create_item action through the shared executor
+ * (`applyCreateItem`). There is no drift check: a new item overwrites nothing.
  */
 export async function executeCreateItemAction(
     action: AgentAction,
     opts?: ExecuteCreateItemActionOptions,
 ): Promise<CreateItemResultData> {
-    const proposedData = action.proposed_data as CreateItemProposedData;
-    
-    if (!proposedData || !proposedData.item) {
-        throw new Error('Invalid action: missing item data');
-    }
-
-    const targetLibrary = resolveWriteTargetLibrary(proposedData);
-    if (!targetLibrary.ok) throw new Error(targetLibrary.message);
-    const libraryId = targetLibrary.libraryID;
-
-    logger(`executeCreateItemAction: Creating item "${proposedData.item.title}" in library ${libraryId}`, 1);
-
-    // Create the item using the existing utility function
-    // Pass resolved library to target the correct library
-    const result = await applyCreateItemData(proposedData, {
-        libraryId,
+    return applyCreateItem(action.proposed_data as CreateItemProposedData, unboundedExecutionContext(), {
         actionId: action.id,
         onAttachmentResolved: opts?.onAttachmentResolved,
         runId: opts?.runId,
         threadId: opts?.threadId,
     });
-
-    logger(`executeCreateItemAction: Successfully created item ${result.library_id}-${result.zotero_key}`, 1);
-
-
-    return result;
 }
 
 /**
@@ -141,10 +123,11 @@ export async function executeCreateItemActions(
                 const itemResult = await executeCreateItemAction(action, opts);
                 return { success: true as const, action, result: itemResult };
             } catch (error: any) {
-                const errorMessage = error?.message || 'Failed to create item';
+                const errorMessage = getUserFacingErrorMessage(error, 'Failed to create item');
                 const errorDetails = {
                     stack_trace: error?.stack || '',
                     error_name: error?.name,
+                    ...(error?.code ? { error_code: error.code } : {}),
                 };
                 logger(`executeCreateItemActions: Failed to execute action ${action.id}: ${errorMessage}`, 2);
                 return { success: false as const, action, error: errorMessage, errorDetails };

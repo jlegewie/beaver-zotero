@@ -18,7 +18,7 @@ import type {
 
 type ResponsePart = ModelResponse['parts'][number];
 
-import { shouldShowRunStatus } from '@beaver/agent-core/run-state/runStatusVisibility';
+import { isRunWithNothingToShow, shouldShowRunStatus } from '@beaver/agent-core/run-state/runStatusVisibility';
 
 function run(
     messages: ModelMessage[],
@@ -289,6 +289,70 @@ describe('shouldShowRunStatus during a quiet stream', () => {
                 run([response(text('Done.'))], 'completed'),
                 noResults,
                 quiet,
+            ),
+        ).toBe(false);
+    });
+});
+
+/**
+ * A run the thread skips. Getting it wrong one way hides part of an answer;
+ * the other way leaves a blank strip between runs.
+ */
+describe('isRunWithNothingToShow', () => {
+    const continuation = (
+        messages: ModelMessage[],
+        status: AgentRun['status'] = 'completed',
+    ): AgentRun => ({
+        ...run(messages, status),
+        user_prompt: { content: '', attachments: [], is_resume: true },
+    });
+    const suggestions: ResponsePart = {
+        part_kind: 'tool-call',
+        tool_name: 'return_suggestions',
+        args: null,
+        tool_call_id: 's1',
+    };
+    const earlier = { isLastRun: false, showsRunSections: false };
+
+    it('skips an earlier continuation that drew nothing', () => {
+        expect(isRunWithNothingToShow(continuation([]), earlier)).toBe(true);
+        expect(
+            isRunWithNothingToShow(
+                continuation([
+                    toolResultMessage(),
+                    response(toolCall('auto_load_1')),
+                    response(suggestions),
+                ]),
+                earlier,
+            ),
+        ).toBe(true);
+    });
+
+    it('keeps a continuation with any response that draws', () => {
+        expect(isRunWithNothingToShow(continuation([response(text('More.'))]), earlier)).toBe(false);
+        expect(isRunWithNothingToShow(continuation([response(thinking('Hmm'))]), earlier)).toBe(false);
+        expect(isRunWithNothingToShow(continuation([response(toolCall('call-1'))]), earlier)).toBe(false);
+    });
+
+    it('keeps the last run and a streaming run', () => {
+        expect(
+            isRunWithNothingToShow(continuation([]), { ...earlier, isLastRun: true }),
+        ).toBe(false);
+        expect(isRunWithNothingToShow(continuation([], 'in_progress'), earlier)).toBe(false);
+    });
+
+    it('keeps a run that draws a section outside its messages', () => {
+        expect(
+            isRunWithNothingToShow(continuation([]), { ...earlier, showsRunSections: true }),
+        ).toBe(false);
+    });
+
+    it('keeps a run with a prompt: ordinary, or a continuation carrying text', () => {
+        expect(isRunWithNothingToShow(run([], 'completed'), earlier)).toBe(false);
+        expect(
+            isRunWithNothingToShow(
+                { ...continuation([]), user_prompt: { content: 'Go on', attachments: [], is_resume: true } },
+                earlier,
             ),
         ).toBe(false);
     });

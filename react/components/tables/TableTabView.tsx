@@ -1,7 +1,8 @@
 import React from 'react';
 import { isTitleAbstractOnly, type TableSpec } from '@beaver/agent-core/layouts/table';
+import { addColumnBlockedReason } from '@beaver/agent-core/layouts/tableMutations';
 import { logger } from '@beaver/agent-core/platform/logger';
-import { ResearchTable, type ResearchTableFocus, type ResearchTableReveal } from '@beaver/agent-ui/layouts';
+import { ResearchTable, type ResearchTableFocus, type ResearchTableHandle, type ResearchTableReveal } from '@beaver/agent-ui/layouts';
 import { CitationReaderTargetContext } from '@beaver/agent-ui/chat/Citation';
 import MarkdownRenderer from '../messages/MarkdownRenderer';
 import {
@@ -16,11 +17,17 @@ import { TableFillButton, useFillResultBanner, useTableFillJob, type TableFillBu
 import type { TableFillScope } from '@beaver/agent-core/protocol/tableFillProtocol';
 import type { ResearchTableFill } from '@beaver/agent-ui/layouts';
 import { TABLE_UPDATED_EVENT, type TableUpdatedDetail } from '../../../src/services/artifacts/tableStore';
-import type { TableFocusTarget, TableTabMountOptions, TableTabRenderReport, TableTabRequest } from '../../../src/ui/tableTabTypes';
+import type {
+    TableFocusTarget,
+    TableTabMountOptions,
+    TableTabRenderReport,
+    TableTabRequest,
+    TableViewCommand,
+    TableViewMenuState,
+} from '../../../src/ui/tableTabTypes';
 import { getWindowRuntime } from '../../runtime/windowRuntime';
 import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
 import { useDocumentVisible } from '../../hooks/useDocumentVisible';
-import { selectItemById } from '../../utils/selectItem';
 import { describeItems } from './card/liveSources';
 import { libraryRefForLibraryID } from '../../../src/utils/libraryIdentity';
 import { exportTable, tableActionErrorMessage } from '../../../src/ui/tableDocumentActions';
@@ -31,6 +38,9 @@ import { FILL_RUNNING_REASON, useTableEditing } from './useTableEditing';
 import TableCardDropZone from './card/TableCardDropZone';
 import { useAtomValue } from 'jotai';
 import { searchableLibraryIdsAtom } from '../../atoms/profile';
+import { eventManager } from '../../events/eventManager';
+import { askAboutTableInChat, showTableInLibrary } from './tableWindowActions';
+import { runTableViewCommand, tableViewMenuState, type TableViewCommandContext } from './tableViewCommands';
 
 /** A value the tab's owner sets from outside React, read with `useSyncExternalStore`. */
 export interface TableTabWarningSource {
@@ -44,6 +54,12 @@ export interface TableTabWarningSource {
     onRequest(listener: (request: TableTabRequest) => void): () => void;
     /** Called when the window's selected tab changes. */
     onSelectionChange(listener: () => void): () => void;
+}
+
+/** What the tab's native menus run and read; see `TableTabHandle`. */
+export interface TableViewCommands {
+    command(command: TableViewCommand): boolean;
+    menuState(): TableViewMenuState;
 }
 
 type Loaded = { spec: TableSpec; version: number };
@@ -195,6 +211,17 @@ function readFailure(error: unknown, onScreen: boolean): string {
     return onScreen ? `${message} You're seeing the last version that loaded.` : message;
 }
 
+/**
+ * Opens Beaver's chat beside the tab, with the table as its context, and puts
+ * the cursor in the composer once the chat has mounted. A table in its own
+ * window has no chat beside it: `askAboutTableInChat` attaches it to a main
+ * window's chat instead.
+ */
+function askBeaver(): void {
+    eventManager.dispatch('toggleChat', { forceOpen: true });
+    setTimeout(() => eventManager.dispatch('focusInput', {}), 0);
+}
+
 const renderCellText = (text: string) => (
     // `markdown` is what the chat's citation styling is scoped to.
     <MarkdownRenderer content={text} className="markdown bt-md" />
@@ -220,12 +247,16 @@ export default function TableTabView({
     tableRef,
     options,
     warnings,
+    commandsRef,
 }: {
     tableRef: TableRef;
     options: TableTabMountOptions;
     warnings: TableTabWarningSource;
+    /** Receives the native menus' commands and state for the table on screen. */
+    commandsRef?: React.Ref<TableViewCommands>;
 }): React.ReactElement {
     const surfaceWindow = useSurfaceWindow();
+    const inWindow = options.surface === 'window';
     const [state, setState] = React.useState<ViewState>(() =>
         options.initial ? { kind: 'table', table: options.initial } : { kind: 'loading' },
     );
@@ -397,6 +428,47 @@ export default function TableTabView({
         });
     }, [table]);
 
+    const itemID = Zotero.Items.getIDFromLibraryAndKey(tableRef.libraryID, tableRef.key);
+    const research = React.useRef<ResearchTableHandle>(null);
+    const onAskBeaver = fillEnabled
+        ? inWindow
+            ? () => void askAboutTableInChat(tableRef)
+            : askBeaver
+        : undefined;
+    const onShowInLibrary = itemID
+        ? () => void showTableInLibrary(itemID, inWindow ? null : surfaceWindow)
+        : undefined;
+
+    // The native menus' view of the tab, rebuilt every render so a menu reads
+    // and acts on what is on screen now.
+    React.useImperativeHandle(commandsRef, () => {
+        const context = (): TableViewCommandContext => ({
+            view: research.current,
+            host: hostRef.current,
+            editDisabled: !!tableDisabledReason,
+            sourcesEditable: !readOnly,
+            canUndo: edits.canUndo,
+            undo: () => void edits.undo(),
+            canAddColumn: !!table && !addColumnBlockedReason(table.spec),
+            addColumn: edits.editing.onAddColumn,
+            newItems: newPapers.notice?.count ?? 0,
+            addNewItems: edits.editing.onAddNewPapers,
+            removeRows: edits.removeRows,
+            fillAvailable: fillEnabled,
+            fillRunning,
+            openFillPlan: requestFill,
+            stopFill: () => {
+                if (fillJob) void Zotero.Beaver.tableFills?.stop(fillJob.job_id);
+            },
+            showInLibrary: onShowInLibrary,
+            askBeaver: onAskBeaver,
+        });
+        return {
+            command: (command) => runTableViewCommand(command, context()),
+            menuState: () => tableViewMenuState(context()),
+        };
+    });
+
     if (state.kind === 'loading') {
         return <div className="p-4 font-color-secondary">Loading table…</div>;
     }
@@ -409,7 +481,6 @@ export default function TableTabView({
     }
 
     const notices = [warning, state.error, actionError, edits.error, dropNotice].filter(Boolean);
-    const itemID = Zotero.Items.getIDFromLibraryAndKey(tableRef.libraryID, tableRef.key);
 
     return (
         // A citation opened from the table must not replace the tab it is in.
@@ -433,6 +504,8 @@ export default function TableTabView({
                     documents={documents}
                     newPapers={newPapers.notice}
                     virtualize
+                    onAskBeaver={onAskBeaver}
+                    handleRef={research}
                     editing={edits.editing}
                     cellEditing={edits.cellEditing}
                     fill={fill}
@@ -473,11 +546,7 @@ export default function TableTabView({
                             setActionError(tableActionErrorMessage(error, tableRef)),
                         );
                     }}
-                    onShowInLibrary={
-                        itemID
-                            ? () => void selectItemById(itemID, true, undefined, surfaceWindow)
-                            : undefined
-                    }
+                    onShowInLibrary={onShowInLibrary}
                     renderVersionHistory={() => (
                         <TableVersionHistory
                             tableRef={tableRef}

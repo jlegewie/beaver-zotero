@@ -1,5 +1,7 @@
 import type { OperationContext } from '../agentDataProvider/operationContext';
 import { dismissNotePreviews } from '../notePreviews';
+import { sha256Hex } from '../../utils/hash';
+import { ManualApplyOptions, staleProposalError } from './staleProposal';
 /**
  * Utilities for executing and undoing edit_note agent actions.
  * These functions are used by AgentActionView for post-run action handling.
@@ -7,85 +9,45 @@ import { dismissNotePreviews } from '../notePreviews';
 
 import { AgentAction } from '@beaver/agent-core/agents/agentActionTypes';
 import { logger } from '@beaver/agent-core/platform/logger';
-import type { EditNoteOperation, EditNoteResultData } from '@beaver/agent-core/types/agentActions/editNote';
+import type { EditNoteBaseline, EditNoteOperation, EditNoteProposedData, EditNoteResultData } from '@beaver/agent-core/types/agentActions/editNote';
 import type {
-    EditNoteBatchEditItem,
     EditNoteBatchProposedData,
     EditNoteBatchResultData,
     EditNoteBatchUndoRecord,
 } from '@beaver/agent-core/types/agentActions/editNoteBatch';
 import {
-    applyResolvedEdits,
-    buildAmbiguousMatchError,
-    captureUndoContexts,
-    detectOverlaps,
-    resolveBatchEdits,
-    type BatchEditFailure,
-    type ResolveBatchContext
-} from '../../utils/editNoteBatchCore';
-import {
-    expandBase,
-    findBestMatch,
-    type BaseExpansion,
-    type MatchInput,
-} from '../../utils/editNoteMatcher';
-import {
-    buildExecutionZeroMatchHint,
     findWhitespaceTolerant,
     locateEditFragment,
     normalizeUndoComparisonHtml,
-    resolveEditTargetAtRuntime,
 } from '../../utils/editNotePositionLookup';
 import { findRangeByContexts } from '../../utils/editNoteRawPosition';
 import {
-    buildPartialSimplifiedTagMessage,
-    checkDuplicateCitations,
-    detectPartialSimplifiedTag,
-} from '../../utils/editNoteValidation';
-import {
-    libraryRefForLibraryID,
     resolveItemReference,
-    resolveLibraryRef,
 } from '../../utils/libraryIdentity';
 import {
-    buildUnresolvedLocatorWarning,
     expandToRawHtml,
     preloadNotePageLabels,
     preloadPageLabelsForNewCitations,
-    preloadStructuralLocatorPages,
-    type ExternalRefContext,
 } from '../../utils/noteCitationExpand';
-import { addOrUpdateEditFooter, getBeaverFooterAppendPoint } from '../../utils/noteEditFooter';
 import {
     clearNoteEditorSelection,
-    flushLiveEditorToDB,
     getLatestNoteHtml,
     waitForNoteSaveStabilization,
-    waitForPMNormalization,
 } from '../../utils/noteEditorIO';
 import { decodeHtmlEntities } from '../../utils/noteHtmlEntities';
 import {
     getOrSimplify,
     invalidateSimplificationCache,
-    normalizeNoteHtml,
-    type SimplificationMetadata,
 } from '../../utils/noteHtmlSimplifier';
-import { assertNoPreviewMarkers, containsPreviewMarkers, stripPreviewMarkers } from '../../utils/notePreviewGuard';
+import { assertNoPreviewMarkers } from '../../utils/notePreviewGuard';
 import {
     extractDataCitationItems,
-    hasSchemaVersionWrapper,
     rebuildDataCitationItems,
     stripDataCitationItems,
 } from '../../utils/noteWrapper';
-import { getExternalRefContext } from '../agentDataProvider/actions/editNote';
-import {
-    buildAppliedList,
-    buildUndoList,
-    checkBatchShape,
-    preloadBatchLabels,
-    prepareSpecs,
-} from '../agentDataProvider/actions/editNoteBatch';
-import { checkLibraryExcluded, excludedLibraryUserMessage } from '../agentDataProvider/utils';
+import { assertLibraryRefNotExcluded, unboundedExecutionContext } from '../agentDataProvider/actions/actionExecution';
+import { applyEditNote, getExternalRefContext } from '../agentDataProvider/actions/editNote';
+import { applyEditNoteBatch } from '../agentDataProvider/actions/editNoteBatch';
 
 /**
  * Undo a str_replace_all edit by locating each occurrence via its stored context anchors.
@@ -255,41 +217,6 @@ export function undoBatchReplaceAllViaContexts(
 }
 
 /**
- * An error whose `message` is model-facing but which also carries wording fit
- * for the UI. Callers that render a failure to the user should prefer
- * `userMessage` (see `getUserFacingErrorMessage`); callers that hand the failure
- * back to the model keep using `message` unchanged.
- */
-interface UserFacingError extends Error {
-    userMessage?: string;
-}
-
-/**
- * Message to show a user for a thrown error: the user-facing override when the
- * thrower supplied one, otherwise the raw message.
- */
-export function getUserFacingErrorMessage(error: unknown, fallback: string): string {
-    const err = error as UserFacingError | null | undefined;
-    return err?.userMessage || err?.message || fallback;
-}
-
-/** Reject a local note mutation before any item lookup crosses the boundary. */
-function assertNoteLibraryNotExcluded(
-    ref: { library_id?: number | null; library_ref?: string | null },
-): void {
-    const libraryId = resolveLibraryRef(ref);
-    if (libraryId === null) return;
-    const exclusion = checkLibraryExcluded(libraryId);
-    if (!exclusion) return;
-    // These paths serve both the model (WS execute) and the user (sidebar
-    // apply/undo), so the thrown message stays model-facing and the UI wording
-    // rides along separately.
-    const error: UserFacingError = new Error(exclusion.message);
-    error.userMessage = excludedLibraryUserMessage(libraryId);
-    throw error;
-}
-
-/**
  * Check if the edit appears already undone using context anchors when available.
  * Falls back to bare `includes()` when no context is stored.
  */
@@ -355,10 +282,6 @@ export function isBatchReplaceAllAlreadyUndone(
 const UNDO_CONTEXT_LENGTH = 200;
 
 /** Combine optional warning strings into a `warnings` array, or undefined when empty. */
-function collectWarnings(...warnings: Array<string | null | undefined>): string[] | undefined {
-    const filtered = warnings.filter((w): w is string => !!w);
-    return filtered.length > 0 ? filtered : undefined;
-}
 
 interface RestoreEditFragmentParams {
     strippedHtml: string;
@@ -533,464 +456,44 @@ function restoreEditFragment(params: RestoreEditFragmentParams): RestoreEditFrag
     };
 }
 
+/** Edit operations that do not anchor on matched text, so a changed note goes unnoticed. */
+function isUnanchoredOperation(operation: EditNoteOperation | undefined): boolean {
+    return operation === 'rewrite' || operation === 'append';
+}
+
 /**
- * Execute an edit_note agent action by applying string replacement on the note.
- * @param action The agent action to execute
- * @returns Result data including the exact applied HTML fragment for undo
+ * Throw `stale_proposal` when the note no longer hashes to the
+ * `baseline.content_hash` stored with the proposal. Called after the live
+ * editor has been flushed, so the stored HTML is what the user sees. A
+ * proposal without a hash is not checked.
+ */
+async function assertNoteUnchanged(item: Zotero.Item, proposedData: { baseline?: EditNoteBaseline | null }): Promise<void> {
+    const contentHash = proposedData.baseline?.content_hash;
+    if (typeof contentHash !== 'string' || !contentHash) return;
+    if (await sha256Hex(item.getNote()) !== contentHash) {
+        throw staleProposalError('The note changed after this edit was proposed.');
+    }
+}
+
+/**
+ * Apply a stored edit_note action through the shared executor
+ * (`applyEditNote`), which records the exact HTML written for undo.
+ *
+ * rewrite and append do not anchor on text in the note, so they are refused
+ * as `stale_proposal` when the note changed since the proposal, unless the
+ * user applies anyway (`options.skipStaleCheck`). A replacement re-matches its
+ * text against the current note instead.
  */
 export async function executeEditNoteAction(
     action: AgentAction,
     context: OperationContext,
+    options: ManualApplyOptions = {},
 ): Promise<EditNoteResultData> {
-    const {
-        library_id: requestedLibraryId,
-        library_ref,
-        zotero_key,
-        old_string,
-        new_string,
-        operation: rawOp,
-    } = action.proposed_data as {
-        library_id: number;
-        library_ref?: string;
-        zotero_key: string;
-        old_string?: string;
-        new_string: string;
-        operation?: EditNoteOperation;
-        target_before_context?: string;
-        target_after_context?: string;
-    };
-    // For insert_after / insert_before, new_string is already normalized by
-    // validation to merge old_string with new_string (via normalized_action_data):
-    //   - insert_after:  new_string = old_string + new_string
-    //   - insert_before: new_string = new_string + old_string
-    // so the rest of the function treats it as a regular str_replace.
-    const operation: EditNoteOperation = rawOp ?? 'str_replace';
-    let {
-        target_before_context,
-        target_after_context,
-    } = action.proposed_data as {
-        target_before_context?: string;
-        target_after_context?: string;
-    };
-
-    // Library exclusions can change after validation/action creation. Enforce
-    // the boundary again before resolving or loading the note.
-    assertNoteLibraryNotExcluded({
-        library_id: requestedLibraryId,
-        library_ref,
+    const data = action.proposed_data as EditNoteProposedData;
+    const checkDrift = isUnanchoredOperation(data.operation) && !options.skipStaleCheck;
+    return applyEditNote(data, unboundedExecutionContext(), context, {
+        assertUnchanged: checkDrift ? (item) => assertNoteUnchanged(item, data) : undefined,
     });
-
-    // 1. Load item. Resolve through library_ref (with legacy library_id
-    //    fallback) so a note in a group library resolves to the right local
-    //    library even when this device numbers that group differently.
-    const resolved = await resolveItemReference({ library_id: requestedLibraryId, library_ref, zotero_key });
-    if (resolved.status !== 'found') {
-        throw new Error(resolved.status === 'library_unavailable'
-            ? `Note library is not available on this computer: ${library_ref || requestedLibraryId}-${zotero_key}`
-            : `Item not found: ${requestedLibraryId}-${zotero_key}`);
-    }
-    const item = resolved.item;
-    const library_id = item.libraryID;
-
-    // 2. Load note data
-    await item.loadDataType('note');
-
-    // 2b. Promote any unsaved editor content into the DB so this apply sees
-    //     the same HTML validation saw. See flushLiveEditorToDB for rationale.
-    await flushLiveEditorToDB(item);
-
-    // 2c. Repair notes that contain persisted diff-preview markup, mirroring
-    //     the agent execute path.
-    {
-        const persistedHtml: string = item.getNote();
-        if (containsPreviewMarkers(persistedHtml)) {
-            const repaired = stripPreviewMarkers(persistedHtml);
-            if (!containsPreviewMarkers(repaired)) {
-                logger(`executeEditNoteAction: repairing persisted diff-preview markup in ${library_id}-${zotero_key}`, 1);
-                item.setNote(repaired);
-                await item.saveTx();
-                await waitForNoteSaveStabilization(item, repaired);
-            } else {
-                logger(`executeEditNoteAction: diff-preview markup in ${library_id}-${zotero_key} could not be fully stripped; save will be refused by the preview guard`, 1);
-            }
-        }
-    }
-
-    const externalRefContext = await getExternalRefContext(new_string, context);
-
-    // 3. Get current note HTML
-    const oldHtml: string = item.getNote();
-
-    // 4. Get metadata from cache or re-simplify
-    const noteId = `${library_id}-${zotero_key}`;
-    const pageLabelsByItemId = await preloadNotePageLabels(oldHtml, library_id);
-    const { simplified, metadata } = getOrSimplify(noteId, oldHtml, library_id, pageLabelsByItemId);
-
-    // 5. Pre-load page labels so new citations resolve page indices to labels.
-    //    The resolved map is threaded explicitly into every expandToRawHtml
-    //    call below so expansion stays synchronous.
-    const newPageLabels = await preloadPageLabelsForNewCitations(new_string);
-    // 5b. Resolve structural (non-page) locators in new_string to their page so
-    //     citations keep a page locator instead of dropping it on save.
-    const structuralLocators = await preloadStructuralLocatorPages(new_string);
-    const resolvedLocatorPages = structuralLocators.pages;
-    const locatorWarning = buildUnresolvedLocatorWarning(
-        structuralLocators.unresolved,
-        structuralLocators.unavailable,
-        structuralLocators.missing,
-    );
-
-    // ── rewrite mode: replace entire note body ──
-    if (operation === 'rewrite') {
-        let expandedNew: string;
-        try {
-            expandedNew = expandToRawHtml(new_string, metadata, 'new', externalRefContext, newPageLabels, resolvedLocatorPages);
-        } catch (e: any) {
-            throw new Error(e.message || String(e));
-        }
-
-        const existingCitationCache = extractDataCitationItems(oldHtml);
-        const strippedHtml = stripDataCitationItems(oldHtml);
-
-        // Preserve wrapper div
-        const trimmed = strippedHtml.trim();
-        let wrapperOpen = '';
-        let wrapperClose = '';
-        if (trimmed.startsWith('<div') && trimmed.endsWith('</div>')) {
-            const closeAngle = trimmed.indexOf('>');
-            wrapperOpen = trimmed.substring(0, closeAngle + 1);
-            wrapperClose = '</div>';
-        }
-
-        let newHtml = wrapperOpen + expandedNew + wrapperClose;
-
-        const threadId = context.threadId ?? null;
-        if (threadId) {
-            newHtml = addOrUpdateEditFooter(newHtml, threadId);
-        }
-
-        // Preserve pre-edit itemData so citations to foreign/unresolved URIs
-        // don't lose their labels after the round-trip through ProseMirror.
-        newHtml = rebuildDataCitationItems(newHtml, existingCitationCache);
-
-        const hadSchemaVersion = hasSchemaVersionWrapper(strippedHtml);
-        if (hadSchemaVersion && !hasSchemaVersionWrapper(newHtml)) {
-            throw new Error('The note wrapper <div data-schema-version="..."> must not be removed.');
-        }
-
-        try {
-            assertNoPreviewMarkers(newHtml, 'editNoteActions:rewrite:apply');
-            item.setNote(newHtml);
-            await item.saveTx();
-            logger(`executeEditNoteAction: Saved rewrite edit to ${noteId}`, 1);
-        } catch (error) {
-            try {
-                assertNoPreviewMarkers(oldHtml, 'editNoteActions:rewrite:rollback');
-                item.setNote(oldHtml);
-            } catch (_) { /* best-effort */ }
-            throw new Error(`Failed to save note: ${error}`);
-        }
-
-        await waitForNoteSaveStabilization(item, newHtml);
-        clearNoteEditorSelection(library_id, zotero_key);
-        invalidateSimplificationCache(noteId);
-
-        const duplicateWarning = checkDuplicateCitations(new_string, metadata, old_string);
-        const warnings = collectWarnings(duplicateWarning, locatorWarning, ...(externalRefContext.externalFileWarnings ?? []));
-
-        return {
-            library_id,
-            zotero_key,
-            library_ref: libraryRefForLibraryID(library_id) ?? undefined,
-            occurrences_replaced: 1,
-            warnings,
-            undo_full_html: strippedHtml,
-        };
-    }
-
-    // ── append mode: add new_string to the end of the note body ──
-    if (operation === 'append') {
-        let expandedNew: string;
-        try {
-            expandedNew = expandToRawHtml(new_string, metadata, 'new', externalRefContext, newPageLabels, resolvedLocatorPages);
-        } catch (e: any) {
-            throw new Error(e.message || String(e));
-        }
-
-        const existingCitationCache = extractDataCitationItems(oldHtml);
-        const strippedHtml = stripDataCitationItems(oldHtml);
-
-        const insertAt = getBeaverFooterAppendPoint(strippedHtml);
-        let undoBeforeContext = strippedHtml.substring(Math.max(0, insertAt - UNDO_CONTEXT_LENGTH), insertAt);
-        let undoAfterContext = strippedHtml.substring(insertAt, insertAt + UNDO_CONTEXT_LENGTH);
-        let newHtml = strippedHtml.slice(0, insertAt) + expandedNew + strippedHtml.slice(insertAt);
-
-        const threadId = context.threadId ?? null;
-        if (threadId) {
-            newHtml = addOrUpdateEditFooter(newHtml, threadId);
-        }
-
-        newHtml = rebuildDataCitationItems(newHtml, existingCitationCache);
-
-        const hadSchemaVersion = hasSchemaVersionWrapper(strippedHtml);
-        if (hadSchemaVersion && !hasSchemaVersionWrapper(newHtml)) {
-            throw new Error('The note wrapper <div data-schema-version="..."> must not be removed.');
-        }
-
-        const postEditStripped = stripDataCitationItems(newHtml);
-        undoBeforeContext = postEditStripped.substring(
-            Math.max(0, insertAt - UNDO_CONTEXT_LENGTH),
-            insertAt,
-        );
-        undoAfterContext = postEditStripped.substring(
-            insertAt + expandedNew.length,
-            insertAt + expandedNew.length + UNDO_CONTEXT_LENGTH,
-        );
-
-        try {
-            assertNoPreviewMarkers(newHtml, 'editNoteActions:append:apply');
-            item.setNote(newHtml);
-            await item.saveTx();
-            logger(`executeEditNoteAction: Saved append edit to ${noteId}`, 1);
-        } catch (error) {
-            try {
-                assertNoPreviewMarkers(oldHtml, 'editNoteActions:append:rollback');
-                item.setNote(oldHtml);
-            } catch (_) { /* best-effort */ }
-            throw new Error(`Failed to save note: ${error}`);
-        }
-
-        await waitForNoteSaveStabilization(item, newHtml);
-        clearNoteEditorSelection(library_id, zotero_key);
-        invalidateSimplificationCache(noteId);
-
-        const duplicateWarning = checkDuplicateCitations(new_string, metadata, old_string);
-        const warnings = collectWarnings(duplicateWarning, locatorWarning, ...(externalRefContext.externalFileWarnings ?? []));
-
-        const result: EditNoteResultData = {
-            library_id,
-            zotero_key,
-            library_ref: libraryRefForLibraryID(library_id) ?? undefined,
-            occurrences_replaced: 1,
-            warnings,
-            undo_old_html: '',
-            undo_new_html: expandedNew,
-            undo_before_context: undoBeforeContext,
-            undo_after_context: undoAfterContext,
-        };
-
-        const savedStrippedHtml = stripDataCitationItems(newHtml);
-        await waitForPMNormalization(item, savedStrippedHtml, result, strippedHtml);
-
-        return result;
-    }
-
-    // ── String replacement mode (default) ──
-
-    // 6. Strip data-citation-items from raw HTML for matching.
-    //    Snapshot the cache first so rebuild can preserve itemData for
-    //    URIs that don't resolve in the current library.
-    const existingCitationCache = extractDataCitationItems(oldHtml);
-    const strippedHtml = stripDataCitationItems(oldHtml);
-
-    // 7. Run the ranked matcher (same chain the validator and WS executor use).
-    //    Defense-in-depth: validator normally normalizes via normalized_action_data,
-    //    but the note may have drifted between validation and execution
-    //    (PM re-normalization, concurrent edit) so we re-match here against
-    //    the current HTML.
-    const matchInput: MatchInput = {
-        oldString: old_string ?? '',
-        newString: new_string,
-        operation,
-        metadata,
-        simplified,
-        strippedHtml,
-        externalRefContext,
-        pageLabels: newPageLabels,
-        resolvedLocatorPages,
-    };
-    let base: BaseExpansion;
-    try {
-        base = expandBase(matchInput);
-    } catch (e: any) {
-        const err = new Error(e.message || String(e));
-        (err as any).code = 'expansion_failed';
-        throw err;
-    }
-
-    const match = findBestMatch(matchInput, base);
-    if (!match) {
-        // Defense-in-depth: same partial-tag check as the WS executor
-        // (editNote.ts:836-847) — the executor may receive un-normalized
-        // action_data on stale paths.
-        const partial = detectPartialSimplifiedTag(old_string ?? '');
-        if (partial) {
-            const err = new Error(buildPartialSimplifiedTagMessage(partial, operation));
-            (err as any).code = 'partial_simplified_tag';
-            throw err;
-        }
-        const hint = buildExecutionZeroMatchHint(simplified, old_string ?? '');
-        const err = new Error(hint.message);
-        (err as any).code = 'old_string_not_found';
-        if (hint.candidates.length > 0) (err as any).candidates = hint.candidates;
-        throw err;
-    }
-
-    // 7a. Transform validator-supplied context anchors the same way the
-    //     matcher transformed the haystack needle (entity decode/encode, NFKC).
-    //     Mutation-style strategies use identity, so this is a no-op for them.
-    if (target_before_context != null) target_before_context = match.normalizeAnchor(target_before_context);
-    if (target_after_context != null) target_after_context = match.normalizeAnchor(target_after_context);
-
-    const expandedOld = match.expandedOld;
-    const expandedNew = match.expandedNew;
-    const matchCount = match.matchCount;
-
-    // 9. Perform replacement and capture context
-    let newHtml: string;
-    let undoBeforeContext: string | undefined;
-    let undoAfterContext: string | undefined;
-    let undoOccurrenceContexts: Array<{ before: string; after: string }> | undefined;
-    let replacementCount: number;
-    let editPos = -1; // Position of the edit in strippedHtml (single-occurrence only)
-
-    if (operation === 'str_replace_all') {
-        replacementCount = matchCount;
-
-        // Capture per-occurrence context anchors before replacing
-        undoOccurrenceContexts = [];
-        let searchFrom = 0;
-        while (true) {
-            const idx = strippedHtml.indexOf(expandedOld, searchFrom);
-            if (idx === -1) break;
-            undoOccurrenceContexts.push({
-                before: strippedHtml.substring(Math.max(0, idx - UNDO_CONTEXT_LENGTH), idx),
-                after: strippedHtml.substring(
-                    idx + expandedOld.length,
-                    idx + expandedOld.length + UNDO_CONTEXT_LENGTH
-                ),
-            });
-            searchFrom = idx + expandedOld.length;
-        }
-        newHtml = strippedHtml.split(expandedOld).join(expandedNew);
-    } else {
-        replacementCount = 1;
-        let rawPos = -1;
-
-        // When expandedOld matches multiple times in raw HTML (e.g. duplicate citations),
-        // first use the conservative matcher, then fall back to the exact target
-        // context captured during validation.
-        if (matchCount > 1) {
-            rawPos = resolveEditTargetAtRuntime({
-                strippedHtml, simplified,
-                oldString: old_string ?? '',
-                expandedOld,
-                metadata,
-                targetBeforeContext: target_before_context,
-                targetAfterContext: target_after_context,
-            }).rawPosition;
-        }
-
-        if (rawPos === -1) {
-            if (matchCount > 1) {
-                // insert_after / insert_before flow through this branch as a
-                // merged str_replace, so use the operation-aware wording.
-                throw new Error(buildAmbiguousMatchError(matchCount, operation));
-            }
-            rawPos = strippedHtml.indexOf(expandedOld);
-        }
-
-        // Capture surrounding context for robust undo of single-occurrence edits.
-        undoBeforeContext = strippedHtml.substring(Math.max(0, rawPos - UNDO_CONTEXT_LENGTH), rawPos);
-        const afterStart = rawPos + expandedOld.length;
-        undoAfterContext = strippedHtml.substring(afterStart, afterStart + UNDO_CONTEXT_LENGTH);
-
-        newHtml = strippedHtml.substring(0, rawPos) + expandedNew
-            + strippedHtml.substring(afterStart);
-        editPos = rawPos;
-    }
-
-    // 10b. Add/update "Edited by Beaver" footer
-    const threadId = context.threadId ?? null;
-    if (threadId) {
-        newHtml = addOrUpdateEditFooter(newHtml, threadId);
-    }
-
-    // 11. Rebuild data-citation-items, preserving pre-edit itemData so
-    //     citations to foreign/unresolved URIs don't lose their labels.
-    newHtml = rebuildDataCitationItems(newHtml, existingCitationCache);
-
-    // 12. Wrapper div protection — only error if the edit removed it
-    const hadSchemaVersion = hasSchemaVersionWrapper(strippedHtml);
-    if (hadSchemaVersion && !hasSchemaVersionWrapper(newHtml)) {
-        throw new Error('The note wrapper <div data-schema-version="..."> must not be removed.');
-    }
-
-    // 12b. Recapture undo contexts from the post-edit, post-footer stripped HTML.
-    // The initial capture (from pre-edit strippedHtml at step 9) may be stale
-    // because addOrUpdateEditFooter inserts/moves content before </div>, causing
-    // the after-context to diverge from what the note actually contains after saving.
-    // The edit position is unchanged since the footer is appended at the end.
-    if (editPos !== -1 && undoBeforeContext !== undefined) {
-        const postEditStripped = stripDataCitationItems(newHtml);
-        const posInNew = editPos + expandedNew.length;
-        undoBeforeContext = postEditStripped.substring(
-            Math.max(0, editPos - UNDO_CONTEXT_LENGTH), editPos);
-        undoAfterContext = postEditStripped.substring(
-            posInNew, posInNew + UNDO_CONTEXT_LENGTH);
-    }
-
-    // 13. Save
-    try {
-        assertNoPreviewMarkers(newHtml, 'editNoteActions:strReplace:apply');
-        item.setNote(newHtml);
-        await item.saveTx();
-        logger(`executeEditNoteAction: Saved note edit to ${noteId} (${replacementCount} occurrence(s) replaced)`, 1);
-    } catch (error) {
-        // Restore in-memory state on save failure
-        try {
-            assertNoPreviewMarkers(oldHtml, 'editNoteActions:strReplace:rollback');
-            item.setNote(oldHtml);
-        } catch (_) {
-            // Best-effort restoration
-        }
-        throw new Error(`Failed to save note: ${error}`);
-    }
-
-    // 13b. Wait for PM's async save-back to settle before any subsequent edit
-    await waitForNoteSaveStabilization(item, newHtml);
-
-    // 13c. Clear editor selection so it doesn't shift to unrelated text
-    clearNoteEditorSelection(library_id, zotero_key);
-
-    // 14. Invalidate cache
-    invalidateSimplificationCache(noteId);
-
-    // 15. Check for duplicate citation warnings
-    const duplicateWarning = checkDuplicateCitations(new_string, metadata, old_string);
-    const warnings = collectWarnings(duplicateWarning, locatorWarning, ...(externalRefContext.externalFileWarnings ?? []));
-
-    const result: EditNoteResultData = {
-        library_id,
-        zotero_key,
-        library_ref: libraryRefForLibraryID(library_id) ?? undefined,
-        occurrences_replaced: replacementCount,
-        warnings,
-        undo_old_html: expandedOld,
-        undo_new_html: expandedNew,
-        undo_before_context: undoBeforeContext,
-        undo_after_context: undoAfterContext,
-        undo_occurrence_contexts: undoOccurrenceContexts,
-    };
-
-    // 16. Wait for ProseMirror to normalize the note and update undo data.
-    // When the note is open in the editor, PM re-normalizes after saveTx().
-    // We poll until PM processes or timeout, then update undo_new_html in-place
-    // so the returned result already has correct undo data.
-    const savedStrippedHtml = stripDataCitationItems(newHtml);
-    await waitForPMNormalization(item, savedStrippedHtml, result, strippedHtml);
-
-    return result;
 }
 
 /**
@@ -1026,7 +529,7 @@ export async function undoEditNoteAction(
 
     // Undo is a fresh mutation and must respect exclusions that changed after
     // the action was originally applied. Check before resolving/loading.
-    assertNoteLibraryNotExcluded({
+    assertLibraryRefNotExcluded({
         library_id: requestedLibraryId,
         library_ref,
     });
@@ -1257,318 +760,26 @@ export async function undoEditNoteAction(
 // Batch variants (edit_note_batch): one action, ordered edits, one save
 // =============================================================================
 
-/** Build the thrown Error for a batch that failed the pre-check re-validation pass. */
-function buildPrepFailureError(failures: BatchEditFailure[]): Error {
-    const first = failures[0];
-    return Object.assign(new Error(
-        `Batch cannot be applied: ${failures.length} edit(s) failed re-validation `
-        + `(edit ${first.index}: ${first.error})`
-    ), { code: first.errorCode });
-}
-
-/** Build the thrown Error for a batch whose edits no longer resolve against the current note. */
-function buildResolveFailureError(failures: BatchEditFailure[]): Error {
-    const first = failures[0];
-    return Object.assign(new Error(
-        `Batch cannot be applied: ${failures.length} edit(s) no longer resolve against the current note `
-        + `(edit ${first.index}: ${first.error})`
-    ), { code: first.errorCode });
-}
-
 /**
- * Apply a single-rewrite batch using the same wrapper-preserving semantics as
- * the single-edit rewrite path (see the `operation === 'rewrite'` branch of
- * `executeEditNoteAction` above), wrapped in the batch result envelope. The
- * undo record carries the FULL pre-edit stripped body in `undo_old_html`.
- */
-async function executeBatchSingleRewrite(
-    item: Zotero.Item,
-    edit: EditNoteBatchEditItem,
-    library_id: number,
-    zotero_key: string,
-    oldHtml: string,
-    strippedHtml: string,
-    existingCitationCache: ReturnType<typeof extractDataCitationItems>,
-    metadata: SimplificationMetadata,
-    externalRefContext: ExternalRefContext,
-    threadId: string | null,
-    noteId: string,
-): Promise<EditNoteBatchResultData> {
-    const newPageLabels = await preloadPageLabelsForNewCitations(edit.new_string);
-    const structuralLocators = await preloadStructuralLocatorPages(edit.new_string);
-    const resolvedLocatorPages = structuralLocators.pages;
-    const locatorWarning = buildUnresolvedLocatorWarning(
-        structuralLocators.unresolved,
-        structuralLocators.unavailable,
-        structuralLocators.missing,
-    );
-
-    let expandedNew: string;
-    try {
-        expandedNew = expandToRawHtml(edit.new_string, metadata, 'new', externalRefContext, newPageLabels, resolvedLocatorPages);
-    } catch (e: any) {
-        throw new Error(e.message || String(e));
-    }
-
-    // Preserve wrapper div
-    const trimmed = strippedHtml.trim();
-    let wrapperOpen = '';
-    let wrapperClose = '';
-    if (trimmed.startsWith('<div') && trimmed.endsWith('</div>')) {
-        const closeAngle = trimmed.indexOf('>');
-        wrapperOpen = trimmed.substring(0, closeAngle + 1);
-        wrapperClose = '</div>';
-    }
-
-    let newHtml = wrapperOpen + expandedNew + wrapperClose;
-    if (threadId) {
-        newHtml = addOrUpdateEditFooter(newHtml, threadId);
-    }
-    newHtml = rebuildDataCitationItems(newHtml, existingCitationCache);
-
-    const hadSchemaVersion = hasSchemaVersionWrapper(strippedHtml);
-    if (hadSchemaVersion && !hasSchemaVersionWrapper(newHtml)) {
-        throw new Error('The note wrapper <div data-schema-version="..."> must not be removed.');
-    }
-
-    try {
-        assertNoPreviewMarkers(newHtml, 'editNoteActions:batch:rewrite:apply');
-        item.setNote(newHtml);
-        await item.saveTx();
-        logger(`executeEditNoteBatchAction: Saved rewrite edit to ${noteId}`, 1);
-    } catch (error) {
-        try {
-            assertNoPreviewMarkers(oldHtml, 'editNoteActions:batch:rewrite:rollback');
-            item.setNote(oldHtml);
-        } catch (_) { /* best-effort */ }
-        throw new Error(`Failed to save note: ${error}`);
-    }
-
-    await waitForNoteSaveStabilization(item, newHtml);
-    clearNoteEditorSelection(library_id, zotero_key);
-    invalidateSimplificationCache(noteId);
-
-    const duplicateWarning = checkDuplicateCitations(edit.new_string, metadata);
-    const warnings = collectWarnings(duplicateWarning, locatorWarning, ...(externalRefContext.externalFileWarnings ?? []));
-
-    return {
-        library_id,
-        zotero_key,
-        library_ref: libraryRefForLibraryID(library_id) ?? undefined,
-        applied: [{
-            index: edit.index,
-            client_item_id: edit.client_item_id,
-            occurrences_replaced: 1,
-        }],
-        ...(warnings ? { warnings } : {}),
-        undo: [{
-            index: edit.index,
-            client_item_id: edit.client_item_id,
-            operation: 'rewrite',
-            undo_old_html: strippedHtml,
-        }],
-    };
-}
-
-/**
- * Apply an edit_note_batch action: resolve every edit against one snapshot of
- * the note, verify no ranges overlap, splice in descending offset order, and
- * persist with a single save. All-or-nothing — throws without writing when any
- * edit fails to resolve or two edits conflict.
+ * Apply a stored edit_note_batch action through the shared executor
+ * (`applyEditNoteBatch`): every edit resolves against one snapshot of the note
+ * and is saved in a single write, all or nothing.
  *
- * This is the UI-initiated re-apply path (user clicks Apply/Retry on a pending
- * or errored batch action). It mirrors `executeEditNoteAction`'s guard
- * sequence above but delegates resolution/overlap/apply to the shared
- * `editNoteBatchCore`, reusing the same pre-check/preload helpers the WS
- * executor uses (`prepareSpecs`, `preloadBatchLabels`) for defense-in-depth
- * re-validation against a note that may have drifted since approval.
+ * A batch with a rewrite or append does not anchor every edit on text in the
+ * note, so it is refused as `stale_proposal` when the note changed since the
+ * proposal, unless the user applies anyway (`options.skipStaleCheck`).
  */
 export async function executeEditNoteBatchAction(
     action: AgentAction,
     context: OperationContext,
+    options: ManualApplyOptions = {},
 ): Promise<EditNoteBatchResultData> {
-    const {
-        library_id: requestedLibraryId,
-        library_ref,
-        zotero_key,
-        edits,
-    } = action.proposed_data as EditNoteBatchProposedData;
-
-    const shapeError = checkBatchShape(edits);
-    if (shapeError) {
-        throw new Error(shapeError.error);
-    }
-
-    // Library exclusions can change after validation/action creation. Enforce
-    // the boundary again before resolving or loading the note.
-    assertNoteLibraryNotExcluded({
-        library_id: requestedLibraryId,
-        library_ref,
+    const data = action.proposed_data as EditNoteBatchProposedData;
+    const checkDrift = (data.edits ?? []).some((edit) => isUnanchoredOperation(edit.operation)) && !options.skipStaleCheck;
+    return applyEditNoteBatch(data, unboundedExecutionContext(), context, {
+        assertUnchanged: checkDrift ? (item) => assertNoteUnchanged(item, data) : undefined,
+        userApproved: true,
     });
-
-    // 1. Load item. Resolve through library_ref (with legacy library_id
-    //    fallback) so a note in a group library resolves to the right local
-    //    library even when this device numbers that group differently.
-    const resolved = await resolveItemReference({ library_id: requestedLibraryId, library_ref, zotero_key });
-    if (resolved.status !== 'found') {
-        throw new Error(resolved.status === 'library_unavailable'
-            ? `Note library is not available on this computer: ${library_ref || requestedLibraryId}-${zotero_key}`
-            : `Item not found: ${requestedLibraryId}-${zotero_key}`);
-    }
-    const item = resolved.item;
-    const library_id = item.libraryID;
-
-    if (!item.isNote()) {
-        throw new Error(`Item ${library_id}-${zotero_key} is not a note`);
-    }
-
-    // Library editability can change after validation (TOCTOU): fail with a
-    // clear message instead of a raw Zotero save error.
-    const targetLibrary = Zotero.Libraries.get(library_id);
-    if (targetLibrary && !targetLibrary.editable) {
-        throw new Error(`Library '${targetLibrary.name}' is read-only and cannot be edited`);
-    }
-
-    // 2. Load note data
-    await item.loadDataType('note');
-
-    // 2b. Promote any unsaved editor content into the DB so this apply sees
-    //     the same HTML validation saw. See flushLiveEditorToDB for rationale.
-    await flushLiveEditorToDB(item);
-
-    // 2c. Repair notes that contain persisted diff-preview markup, mirroring
-    //     the agent execute path.
-    {
-        const persistedHtml: string = item.getNote();
-        if (containsPreviewMarkers(persistedHtml)) {
-            const repaired = stripPreviewMarkers(persistedHtml);
-            if (!containsPreviewMarkers(repaired)) {
-                logger(`executeEditNoteBatchAction: repairing persisted diff-preview markup in ${library_id}-${zotero_key}`, 1);
-                item.setNote(repaired);
-                await item.saveTx();
-                await waitForNoteSaveStabilization(item, repaired);
-            } else {
-                logger(`executeEditNoteBatchAction: diff-preview markup in ${library_id}-${zotero_key} could not be fully stripped; save will be refused by the preview guard`, 1);
-            }
-        }
-    }
-
-    // 3. Snapshot the note once. Every edit resolves against this snapshot.
-    //    Page labels are pre-seeded first, as the agent executor does, so the
-    //    simplified note renders citation locators the way validation did.
-    const externalRefContext = await getExternalRefContext(edits.map(edit => edit.new_string).join('\n<!-- edit boundary -->\n'), context);
-    await preloadNotePageLabels(item.getNote(), library_id, { extractOnCacheMiss: true });
-    const oldHtml: string = item.getNote();
-    const noteId = `${library_id}-${zotero_key}`;
-    const pageLabelsByItemId = await preloadNotePageLabels(oldHtml, library_id);
-    const { simplified, metadata } = getOrSimplify(noteId, oldHtml, library_id, pageLabelsByItemId);
-
-    // Match and splice against the note as the editor serializes it: citation
-    // expansion produces that canonical form, so the raw stored HTML can miss.
-    const normalizedOldHtml = normalizeNoteHtml(oldHtml);
-    const existingCitationCache = extractDataCitationItems(normalizedOldHtml);
-    const strippedHtml = stripDataCitationItems(normalizedOldHtml);
-
-    const threadId = context.threadId ?? null;
-
-    // ── Single-rewrite batch: same wrapper-preserving semantics as v1's
-    //    rewrite branch, wrapped in the batch result envelope. ──
-    if (edits.length === 1 && (edits[0].operation ?? 'str_replace') === 'rewrite') {
-        return await executeBatchSingleRewrite(
-            item, edits[0], library_id, zotero_key, oldHtml, strippedHtml,
-            existingCitationCache, metadata, externalRefContext, threadId, noteId,
-        );
-    }
-
-    // ── General batch ──
-
-    // 4. Preload page labels + structural locators for every edit, then run
-    //    the same no-op/precheck/enrichment/Markdown-fallback pass the WS
-    //    executor runs before resolution.
-    const labels = await preloadBatchLabels(edits);
-    const { specs, failures: prepFailures } = await prepareSpecs(
-        edits, metadata, externalRefContext, labels, library_id, context,
-    );
-    if (prepFailures.length > 0) {
-        throw buildPrepFailureError(prepFailures);
-    }
-
-    const appendPoint = getBeaverFooterAppendPoint(strippedHtml);
-    const resolveCtx: ResolveBatchContext = {
-        strippedHtml, simplified, metadata, externalRefContext,
-        pageLabels: labels.pageLabels,
-        resolvedLocatorPages: labels.resolvedLocatorPages,
-        appendPoint,
-        mode: 'execute',
-    };
-    const { resolved: resolvedEdits, failures: resolveFailures } = resolveBatchEdits(resolveCtx, specs);
-    if (resolveFailures.length > 0) {
-        throw buildResolveFailureError(resolveFailures);
-    }
-
-    const overlaps = detectOverlaps(resolvedEdits);
-    if (overlaps.length > 0) {
-        const o = overlaps[0];
-        throw Object.assign(new Error(
-            `Batch cannot be applied: edits ${o.firstIndex} and ${o.secondIndex} now target overlapping `
-            + 'regions of the note.'
-        ), { code: 'overlapping_edits' });
-    }
-
-    // 5. Apply ALL edits in one pass, footer + citation-item rebuild ONCE.
-    const { newStrippedHtml, undoDrafts } = applyResolvedEdits(strippedHtml, resolvedEdits);
-
-    let newHtml = newStrippedHtml;
-    if (threadId) {
-        newHtml = addOrUpdateEditFooter(newHtml, threadId);
-    }
-    newHtml = rebuildDataCitationItems(newHtml, existingCitationCache);
-
-    const hadSchemaVersion = hasSchemaVersionWrapper(strippedHtml);
-    if (hadSchemaVersion && !hasSchemaVersionWrapper(newHtml)) {
-        throw new Error('The note wrapper <div data-schema-version="..."> must not be removed.');
-    }
-
-    // 6. Save ONCE.
-    try {
-        assertNoPreviewMarkers(newHtml, 'editNoteActions:batch:apply');
-        item.setNote(newHtml);
-        await item.saveTx();
-        logger(`executeEditNoteBatchAction: Saved ${resolvedEdits.length} edit(s) to ${noteId}`, 1);
-    } catch (error) {
-        try {
-            assertNoPreviewMarkers(oldHtml, 'editNoteActions:batch:rollback');
-            item.setNote(oldHtml);
-        } catch (_) { /* best-effort */ }
-        throw new Error(`Failed to save note: ${error}`);
-    }
-
-    await waitForNoteSaveStabilization(item, newHtml);
-    clearNoteEditorSelection(library_id, zotero_key);
-    invalidateSimplificationCache(noteId);
-
-    // 7. Refresh undo contexts against the final (post-footer, PM-normalized) HTML.
-    const finalStripped = stripDataCitationItems(getLatestNoteHtml(item));
-    captureUndoContexts(finalStripped, undoDrafts, newStrippedHtml);
-
-    // 8. Warnings: per-edit duplicate-citation + batch locator warnings.
-    const warnings: string[] = [...labels.locatorWarnings, ...(externalRefContext.externalFileWarnings ?? [])];
-    for (const edit of edits) {
-        const dup = checkDuplicateCitations(edit.new_string, metadata, edit.old_string);
-        if (dup) warnings.push(dup);
-    }
-
-    const applied = buildAppliedList(resolvedEdits);
-    const undo = buildUndoList(undoDrafts);
-
-    return {
-        library_id,
-        zotero_key,
-        library_ref: libraryRefForLibraryID(library_id) ?? undefined,
-        applied,
-        ...(warnings.length > 0 ? { warnings } : {}),
-        undo,
-    };
 }
 
 /**
@@ -1709,7 +920,7 @@ export async function undoEditNoteBatchAction(action: AgentAction): Promise<void
 
     // Undo is a fresh mutation and must respect exclusions that changed after
     // the action was originally applied. Check before resolving/loading.
-    assertNoteLibraryNotExcluded({
+    assertLibraryRefNotExcluded({
         library_id: requestedLibraryId,
         library_ref,
     });

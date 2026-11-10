@@ -9,6 +9,7 @@ import { ActionCategoryFilter } from "@beaver/agent-core/types/actions";
 
 import { contextMainWindow, resolveChatWindow } from "../runtime/navigation";
 import { attachViewRowDrag, detachViewRowDrag } from "../modules/viewRowDrag";
+import { loadRendererBundle } from "./rendererBundle";
 
 let keyboardManager: KeyboardManager | null = null;
 
@@ -20,7 +21,9 @@ let keyboardManager: KeyboardManager | null = null;
  */
 function resolveShortcutWindow(ev: KeyboardEvent): Window | null {
     const origin = (ev.target as HTMLElement | null)?.ownerDocument?.defaultView;
-    return Zotero.Beaver?.runtime.resolveWindowFrom(origin)?.hostWindow ?? Zotero.getMainWindow() ?? null;
+    const runtime = Zotero.Beaver?.runtime.resolveWindowFrom(origin);
+    // A table window has no chat to toggle.
+    return (runtime?.kind !== 'table' ? runtime?.hostWindow : null) ?? Zotero.getMainWindow() ?? null;
 }
 
 function getKeyboardManager(): KeyboardManager {
@@ -113,115 +116,100 @@ export class BeaverUIFactory {
         ztoolkit.log("registerChatPanel: toolbar button setup finished");
 
         // Load React bundle
-        const script = win.document.createElement("script");
-        script.type = "text/javascript";
-        script.src = "chrome://beaver/content/reactBundle.js";
-        ztoolkit.log("registerChatPanel: injected reactBundle.js script tag");
-
         const runtime = win.__beaverRuntime;
-        script.onload = () => {
-            try {
-                if (!runtime || runtime.status === "closing" || win.__beaverRuntime !== runtime || win.closed) return;
-                if (!win.BeaverReact?.initializeRuntime) throw new Error("Beaver renderer API unavailable");
-                win.BeaverReact.initializeRuntime(runtime);
-                ztoolkit.log("registerChatPanel: reactBundle.js loaded");
-                if (win.BeaverReact &&
-                    typeof win.BeaverReact.renderAiSidebar === 'function' &&
-                    typeof win.BeaverReact.renderGlobalInitializer === 'function' &&
-                    typeof win.BeaverReact.unmountFromElement === 'function') {
+        loadRendererBundle(win, runtime, () => {
+            ztoolkit.log("registerChatPanel: reactBundle.js loaded");
+            if (win.BeaverReact &&
+                typeof win.BeaverReact.renderAiSidebar === 'function' &&
+                typeof win.BeaverReact.renderGlobalInitializer === 'function' &&
+                typeof win.BeaverReact.unmountFromElement === 'function') {
 
-                    ztoolkit.log("registerChatPanel: BeaverReact API verified");
-                } else {
-                    throw new Error("Beaver renderer API incomplete");
-                }
-
-
-                // Initialize roots tracking for this window
-                if (!this.windowRoots.has(win)) {
-                    this.windowRoots.set(win, new Set());
-                }
-                const roots = this.windowRoots.get(win)!;
-
-                // Create and render global initializer once
-                let globalInitializerRoot = win.document.getElementById("beaver-global-initializer-root");
-                if (!globalInitializerRoot) {
-                    globalInitializerRoot = win.document.createElement("div");
-                    globalInitializerRoot.id = "beaver-global-initializer-root";
-                    globalInitializerRoot.style.display = "none";
-                    win.document.documentElement.appendChild(globalInitializerRoot);
-                    ztoolkit.log("registerChatPanel: created global initializer root element");
-
-                    if (typeof win.BeaverReact?.renderGlobalInitializer === 'function') {
-                        const root = win.BeaverReact.renderGlobalInitializer(globalInitializerRoot);
-                        if (root) roots.add(root);
-                        ztoolkit.log("registerChatPanel: renderGlobalInitializer mounted");
-                    } else {
-                        ztoolkit.log("Beaver Error: renderGlobalInitializer function not found on window object.");
-                    }
-                } else {
-                    ztoolkit.log("registerChatPanel: global initializer root already existed");
-                }
-
-                // Create and render floating popup overlay
-                let floatingPopupRoot = win.document.getElementById("beaver-pane-floating-popup");
-                if (!floatingPopupRoot) {
-                    floatingPopupRoot = win.document.createElement("div");
-                    floatingPopupRoot.id = "beaver-pane-floating-popup";
-                    // Scoping root for the shared agent-ui sheets, as above.
-                    floatingPopupRoot.className = "beaver-root";
-                    win.document.documentElement.appendChild(floatingPopupRoot);
-                    ztoolkit.log("registerChatPanel: created floating popup root element");
-
-                    if (typeof win.BeaverReact?.renderFloatingPopup === 'function') {
-                        const root = win.BeaverReact.renderFloatingPopup(floatingPopupRoot);
-                        if (root) roots.add(root);
-                        ztoolkit.log("registerChatPanel: renderFloatingPopup mounted");
-                    } else {
-                        ztoolkit.log("Beaver Error: renderFloatingPopup function not found on window object.");
-                    }
-                } else {
-                    ztoolkit.log("registerChatPanel: floating popup root already existed");
-                }
-
-                if (standalone) {
-                    const container =
-                        win.document.getElementById("beaver-pane-window");
-                    if (container)
-                        roots.add(
-                            win.BeaverReact.renderWindowSidebar(container),
-                        );
-                }
-
-                // Render React components for actual sidebars
-                const libraryRootEl = win.document.getElementById("beaver-react-root-library");
-                const readerRootEl = win.document.getElementById("beaver-react-root-reader");
-
-                if (libraryRootEl && typeof win.BeaverReact?.renderAiSidebar === 'function') {
-                    const root = win.BeaverReact.renderAiSidebar(libraryRootEl, "library");
-                    if (root) roots.add(root);
-                    ztoolkit.log("registerChatPanel: renderAiSidebar mounted for library");
-                }
-                if (readerRootEl && typeof win.BeaverReact?.renderAiSidebar === 'function') {
-                    const root = win.BeaverReact.renderAiSidebar(readerRootEl, "reader");
-                    if (root) roots.add(root);
-                    ztoolkit.log("registerChatPanel: renderAiSidebar mounted for reader");
-                }
-                // The renderer marks readiness after its command subscriptions mount.
-            } catch (error) {
-                if (win.__beaverRuntime === runtime) {
-                    this.removeChatPanel(win);
-                    Zotero.Beaver.runtime.detachWindow(win);
-                }
-                Zotero.logError(error as Error);
+                ztoolkit.log("registerChatPanel: BeaverReact API verified");
+            } else {
+                throw new Error("Beaver renderer API incomplete");
             }
-        };
-        script.onerror = () => {
-            if (win.__beaverRuntime !== runtime) return;
-            this.removeChatPanel(win);
-            Zotero.Beaver.runtime.detachWindow(win);
-            ztoolkit.log("Beaver renderer failed to load");
-        };
-        win.document.documentElement.appendChild(script);
+
+
+            // Initialize roots tracking for this window
+            if (!this.windowRoots.has(win)) {
+                this.windowRoots.set(win, new Set());
+            }
+            const roots = this.windowRoots.get(win)!;
+
+            // Create and render global initializer once
+            let globalInitializerRoot = win.document.getElementById("beaver-global-initializer-root");
+            if (!globalInitializerRoot) {
+                globalInitializerRoot = win.document.createElement("div");
+                globalInitializerRoot.id = "beaver-global-initializer-root";
+                globalInitializerRoot.style.display = "none";
+                win.document.documentElement.appendChild(globalInitializerRoot);
+                ztoolkit.log("registerChatPanel: created global initializer root element");
+
+                if (typeof win.BeaverReact?.renderGlobalInitializer === 'function') {
+                    const root = win.BeaverReact.renderGlobalInitializer(globalInitializerRoot);
+                    if (root) roots.add(root);
+                    ztoolkit.log("registerChatPanel: renderGlobalInitializer mounted");
+                } else {
+                    ztoolkit.log("Beaver Error: renderGlobalInitializer function not found on window object.");
+                }
+            } else {
+                ztoolkit.log("registerChatPanel: global initializer root already existed");
+            }
+
+            // Create and render floating popup overlay
+            let floatingPopupRoot = win.document.getElementById("beaver-pane-floating-popup");
+            if (!floatingPopupRoot) {
+                floatingPopupRoot = win.document.createElement("div");
+                floatingPopupRoot.id = "beaver-pane-floating-popup";
+                // Scoping root for the shared agent-ui sheets, as above.
+                floatingPopupRoot.className = "beaver-root";
+                win.document.documentElement.appendChild(floatingPopupRoot);
+                ztoolkit.log("registerChatPanel: created floating popup root element");
+
+                if (typeof win.BeaverReact?.renderFloatingPopup === 'function') {
+                    const root = win.BeaverReact.renderFloatingPopup(floatingPopupRoot);
+                    if (root) roots.add(root);
+                    ztoolkit.log("registerChatPanel: renderFloatingPopup mounted");
+                } else {
+                    ztoolkit.log("Beaver Error: renderFloatingPopup function not found on window object.");
+                }
+            } else {
+                ztoolkit.log("registerChatPanel: floating popup root already existed");
+            }
+
+            if (standalone) {
+                const container =
+                    win.document.getElementById("beaver-pane-window");
+                if (container)
+                    roots.add(
+                        win.BeaverReact.renderWindowSidebar(container),
+                    );
+            }
+
+            // Render React components for actual sidebars
+            const libraryRootEl = win.document.getElementById("beaver-react-root-library");
+            const readerRootEl = win.document.getElementById("beaver-react-root-reader");
+
+            if (libraryRootEl && typeof win.BeaverReact?.renderAiSidebar === 'function') {
+                const root = win.BeaverReact.renderAiSidebar(libraryRootEl, "library");
+                if (root) roots.add(root);
+                ztoolkit.log("registerChatPanel: renderAiSidebar mounted for library");
+            }
+            if (readerRootEl && typeof win.BeaverReact?.renderAiSidebar === 'function') {
+                const root = win.BeaverReact.renderAiSidebar(readerRootEl, "reader");
+                if (root) roots.add(root);
+                ztoolkit.log("registerChatPanel: renderAiSidebar mounted for reader");
+            }
+            // The renderer marks readiness after its command subscriptions mount.
+        }, (error) => {
+            if (win.__beaverRuntime === runtime) {
+                this.removeChatPanel(win);
+                Zotero.Beaver.runtime.detachWindow(win);
+            }
+            if (error) Zotero.logError(error as Error);
+            else ztoolkit.log("Beaver renderer failed to load");
+        });
+        ztoolkit.log("registerChatPanel: injected reactBundle.js script tag");
     }
 
     private static addToolbarButton(win: BeaverWindow) {
@@ -600,6 +588,11 @@ export class BeaverUIFactory {
                 }
             }
         );
+    }
+
+    /** Beaver's shortcuts in a table window, as in main windows and readers. */
+    static attachShortcuts(win: Window) {
+        keyboardManager?.attachWindow(win);
     }
 
     /**

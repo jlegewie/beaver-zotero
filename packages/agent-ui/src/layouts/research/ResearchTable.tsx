@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { isColumnSortable, toPlainText, type Column, type Row, type TableSort, type TableSpec } from "@beaver/agent-core/layouts/table";
 import { cellsToFill } from "@beaver/agent-core/layouts/tableFill";
 import { addColumnBlockedReason } from "@beaver/agent-core/layouts/tableMutations";
@@ -39,6 +39,7 @@ import { useTableState } from "../useTableState";
 import { CellEditor, editsAsList, type CellEditInput } from "./CellEditor";
 import { CellInspector, type CellActionControls } from "./CellInspector";
 import { cellFill, isNewRow, PAPER_HEADER, researchColumns, rowFills, sortOrderLabel, type TableDocuments } from "./cellModel";
+import { EmptyTableGuide } from "./EmptyTableGuide";
 import { ResearchGrid, type CellAddress } from "./ResearchGrid";
 import { AnchoredPopover, InlineText } from "./TableEditing";
 
@@ -81,8 +82,8 @@ export interface ResearchTableEditing {
     renderSources?(close: () => void): React.ReactNode;
     /** The new-papers notice's Add. */
     onAddNewPapers?(): void;
-    /** Controls after the notice (+ Items). */
-    toolbarActions?: React.ReactNode;
+    /** The + Items menu: in the toolbar after the notice, and in the empty table's guide. */
+    addItems?: React.ReactNode;
 }
 
 /**
@@ -130,6 +131,53 @@ export interface ResearchTableReveal {
     rowIds?: readonly string[];
     columnIds?: readonly string[];
     token: number | string;
+}
+
+/** The view as the host's menus show it: what {@link ResearchTableHandle} would act on. */
+export interface ResearchTableViewState {
+    density: TableDensity;
+    /** Question columns the viewer has hidden. */
+    hiddenColumns: number;
+    /** The search or a filter narrows the rows. */
+    filtered: boolean;
+    sorted: boolean;
+    /** Selected rows, in view order. */
+    selectedRowIds: string[];
+    /** Rows in view. */
+    rows: number;
+    /** The search box is shown (the table has rows, whatever the view hides). */
+    searchable: boolean;
+    /** Text is selected in the table (its cells, expansions or inspector). */
+    hasSelectedText: boolean;
+    /** The More actions the host offers. */
+    canCopy: boolean;
+    canExport: boolean;
+    hasVersionHistory: boolean;
+    /** The sources can be shown and changed (the Sources popover). */
+    canEditSources: boolean;
+}
+
+/**
+ * Drives the surface from outside it: a host's native menus and shortcuts
+ * reach the same view state and actions as the toolbar.
+ */
+export interface ResearchTableHandle {
+    viewState(): ResearchTableViewState;
+    setDensity(density: TableDensity): void;
+    showHiddenColumns(): void;
+    /** Clears the search and the filters. */
+    clearFilters(): void;
+    clearSort(): void;
+    showVersionHistory(): void;
+    copyAsText(): void;
+    exportTable(format: "xlsx" | "csv"): void;
+    /** Puts the cursor in the search box. */
+    focusSearch(): void;
+    /** Selects every row in view. */
+    selectAllRows(): void;
+    /** Copies the text selected in the table; false when none is. */
+    copySelection(): boolean;
+    openSources(): void;
 }
 
 export interface ResearchTableProps {
@@ -187,6 +235,10 @@ export interface ResearchTableProps {
     editing?: ResearchTableEditing;
     /** Window the rows, for a long table. */
     virtualize?: boolean;
+    /** Opens Beaver's chat on this table: offered by the empty table's guide. */
+    onAskBeaver?: () => void;
+    /** Receives the surface's {@link ResearchTableHandle}. */
+    handleRef?: React.Ref<ResearchTableHandle>;
     className?: string;
 }
 
@@ -235,6 +287,8 @@ export function ResearchTable({
     reveal,
     editing,
     virtualize,
+    onAskBeaver,
+    handleRef,
     className,
 }: ResearchTableProps): React.ReactElement {
     const columns = useMemo(() => researchColumns(table), [table]);
@@ -316,7 +370,10 @@ export function ResearchTable({
                 0,
             );
             setPinned(width > 0 && scroller.clientWidth >= 2 * width);
-            scroller.style.scrollPaddingTop = `${head?.offsetHeight ?? 0}px`;
+            const headHeight = `${head?.offsetHeight ?? 0}px`;
+            scroller.style.scrollPaddingTop = headHeight;
+            // The start guide beside the rows sits under the sticky header.
+            scroller.style.setProperty("--rt-head-h", headHeight);
         };
         const observer = new Observer(update);
         observer.observe(scroller);
@@ -633,23 +690,19 @@ export function ResearchTable({
               ) : null
         : undefined;
 
+    const copyAsText = () => {
+        // The paper and the year are always columns here, though the shared
+        // view state hides system columns by default.
+        const visible = table.columns.filter(
+            (column) =>
+                column === columns.paper ||
+                column === columns.year ||
+                (columns.questions.includes(column) && !state.hiddenColumns.has(column.id)),
+        );
+        onCopy?.(toPlainText(table, state.rows, visible));
+    };
     const moreItems: MenuItem[] = [];
-    if (onCopy)
-        moreItems.push({
-            label: "Copy as text",
-            icon: CopyIcon,
-            onClick: () => {
-                // The paper and the year are always columns here, though the
-                // shared view state hides system columns by default.
-                const visible = table.columns.filter(
-                    (column) =>
-                        column === columns.paper ||
-                        column === columns.year ||
-                        (columns.questions.includes(column) && !state.hiddenColumns.has(column.id)),
-                );
-                onCopy(toPlainText(table, state.rows, visible));
-            },
-        });
+    if (onCopy) moreItems.push({ label: "Copy as text", icon: CopyIcon, onClick: copyAsText });
     if (onExport)
         moreItems.push(
             { label: "Export to Excel", icon: DownloadIcon, onClick: () => onExport("xlsx", state.sort) },
@@ -660,8 +713,71 @@ export function ResearchTable({
         moreItems.push({ label: "Version history", icon: ClockIcon, onClick: () => setPanel({ kind: "history" }) });
 
     const selectedIds = state.rows.filter((row) => state.selectedRows.has(row.id)).map((row) => row.id);
+
+    // Rebuilt every render, so a host reads the view as it is now.
+    useImperativeHandle(handleRef, () => ({
+        viewState: () => ({
+            density: state.density,
+            hiddenColumns: hiddenQuestions.length,
+            filtered: state.hasFilters,
+            sorted: !!state.sort,
+            selectedRowIds: selectedIds,
+            rows: state.rows.length,
+            searchable: table.rows.length > 0,
+            hasSelectedText: !!selectedTextWithin(copyScopeRef.current).trim(),
+            canCopy: !!onCopy,
+            canExport: !!onExport,
+            hasVersionHistory: !!renderVersionHistory,
+            canEditSources: !!editing?.renderSources,
+        }),
+        setDensity: (density) => state.setDensity(density),
+        showHiddenColumns: () => hiddenQuestions.forEach((column) => state.toggleColumn(column.id)),
+        clearFilters: () => state.clearFilters(),
+        clearSort: () => state.setSort(undefined),
+        showVersionHistory: () => {
+            if (renderVersionHistory) setPanel({ kind: "history" });
+        },
+        copyAsText,
+        exportTable: (format) => onExport?.(format, state.sort),
+        focusSearch: () => {
+            const input = copyScopeRef.current?.querySelector<HTMLInputElement>(".rt-search input");
+            input?.focus();
+            input?.select();
+        },
+        selectAllRows: () => {
+            if (!state.allInViewSelected) state.toggleSelectAll();
+        },
+        copySelection: () => {
+            const text = selectedTextWithin(copyScopeRef.current);
+            if (!text.trim() || !onCopy) return false;
+            onCopy(text);
+            return true;
+        },
+        openSources: () => {
+            if (!editing?.renderSources) return;
+            // The popover hangs off the Sources chip, which a row selection hides.
+            state.clearSelection();
+            setSourcesOpen(true);
+        },
+    }));
     const sourceCount = table.sources?.length ?? 0;
     const items = table.rows.length;
+    // A table that can be edited shows how to start it until it has rows and
+    // a question: where its rows would be while it has none (and none of the
+    // controls that act on rows), then beside the rows, where the questions'
+    // columns will be, until the first question is added. Not while a search
+    // or filter hides every row: the grid says so instead.
+    const startGuide =
+        editing && !editDisabled && (items === 0 || (columns.questions.length === 0 && editing.onAddColumn && state.rows.length > 0)) ? (
+            <EmptyTableGuide
+                addItems={editing.addItems}
+                onAddColumn={columns.questions.length === 0 ? editing.onAddColumn : undefined}
+                addColumnDisabledReason={addColumnDisabled}
+                onAskBeaver={onAskBeaver}
+                canFill={!!fill}
+                itemCount={items}
+            />
+        ) : null;
     const sourcesLabel = `${sourceCount ? `${sourceCount} ${sourceCount === 1 ? "source" : "sources"} · ` : ""}${items} ${items === 1 ? "item" : "items"}`;
     const filterItems = buildFilterMenu(menuTable, state);
     const sortItems = buildSortMenu(menuTable, state);
@@ -796,7 +912,7 @@ export function ResearchTable({
                                         ) : null}
                                     </span>
                                 ) : null}
-                                {editing?.toolbarActions}
+                                {editing?.addItems}
                                 {editing?.onAddColumn ? (
                                     // A disabled button shows no tooltip of its own.
                                     <span title={addColumnDisabled}>
@@ -843,61 +959,65 @@ export function ResearchTable({
                             </button>
                         ) : null}
                         <span className="rt-spacer" />
-                        <label className="rt-search">
-                            <Icon icon={SearchIcon} size={14} />
-                            <input
-                                type="text"
-                                placeholder="Search rows"
-                                aria-label="Search rows"
-                                value={state.quickFilter}
-                                onChange={(event) => state.setQuickFilter(event.target.value)}
-                            />
-                        </label>
-                        {filterItems.length ? (
-                            <MenuButton
-                                menuItems={filterItems}
-                                variant={state.filters.length ? "surface" : "ghost-secondary"}
-                                icon={FilterIcon}
-                                buttonLabel="Filter"
-                                className="rt-toolbar-button"
-                                ariaLabel="Filter rows"
-                                maxHeight="24rem"
-                                width="16rem"
-                            />
+                        {items > 0 ? (
+                            <>
+                                <label className="rt-search">
+                                    <Icon icon={SearchIcon} size={14} />
+                                    <input
+                                        type="text"
+                                        placeholder="Search rows"
+                                        aria-label="Search rows"
+                                        value={state.quickFilter}
+                                        onChange={(event) => state.setQuickFilter(event.target.value)}
+                                    />
+                                </label>
+                                {filterItems.length ? (
+                                    <MenuButton
+                                        menuItems={filterItems}
+                                        variant={state.filters.length ? "surface" : "ghost-secondary"}
+                                        icon={FilterIcon}
+                                        buttonLabel="Filter"
+                                        className="rt-toolbar-button"
+                                        ariaLabel="Filter rows"
+                                        maxHeight="24rem"
+                                        width="16rem"
+                                    />
+                                ) : null}
+                                {sortItems.length ? (
+                                    <MenuButton
+                                        menuItems={sortItems}
+                                        variant={sortColumn ? "surface" : "ghost-secondary"}
+                                        icon={ChevronIcon}
+                                        buttonLabel={
+                                            sortColumn
+                                                ? `Sort: ${sortColumn.header} ${state.sort!.direction === "asc" ? "↑" : "↓"}`
+                                                : "Sort"
+                                        }
+                                        className="rt-toolbar-button"
+                                        ariaLabel="Sort rows"
+                                        maxHeight="24rem"
+                                        width="16rem"
+                                    />
+                                ) : null}
+                                <div className="rt-density" role="group" aria-label="Row height">
+                                    {DENSITY_OPTIONS.map((option) => (
+                                        <button
+                                            key={option.density}
+                                            type="button"
+                                            aria-label={option.label}
+                                            title={option.label}
+                                            aria-pressed={state.density === option.density}
+                                            className={state.density === option.density ? "rt-active" : ""}
+                                            onClick={() => state.setDensity(option.density)}
+                                        >
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+                                                <path d={option.lines.map((y) => `M4 ${y}h16`).join("")} />
+                                            </svg>
+                                        </button>
+                                    ))}
+                                </div>
+                            </>
                         ) : null}
-                        {sortItems.length ? (
-                            <MenuButton
-                                menuItems={sortItems}
-                                variant={sortColumn ? "surface" : "ghost-secondary"}
-                                icon={ChevronIcon}
-                                buttonLabel={
-                                    sortColumn
-                                        ? `Sort: ${sortColumn.header} ${state.sort!.direction === "asc" ? "↑" : "↓"}`
-                                        : "Sort"
-                                }
-                                className="rt-toolbar-button"
-                                ariaLabel="Sort rows"
-                                maxHeight="24rem"
-                                width="16rem"
-                            />
-                        ) : null}
-                        <div className="rt-density" role="group" aria-label="Row height">
-                            {DENSITY_OPTIONS.map((option) => (
-                                <button
-                                    key={option.density}
-                                    type="button"
-                                    aria-label={option.label}
-                                    title={option.label}
-                                    aria-pressed={state.density === option.density}
-                                    className={state.density === option.density ? "rt-active" : ""}
-                                    onClick={() => state.setDensity(option.density)}
-                                >
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
-                                        <path d={option.lines.map((y) => `M4 ${y}h16`).join("")} />
-                                    </svg>
-                                </button>
-                            ))}
-                        </div>
                     </div>
 
                     <div className="rt-body">
@@ -957,6 +1077,8 @@ export function ResearchTable({
                                     virtualize={virtualize}
                                     emptyText="No items yet"
                                     filteredEmptyText="No rows match the search or filters"
+                                    emptyContent={items === 0 ? startGuide : null}
+                                    columnsGuide={items > 0 ? startGuide : null}
                                 />
                             </div>
                         </div>

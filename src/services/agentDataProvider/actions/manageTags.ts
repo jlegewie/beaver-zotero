@@ -24,10 +24,12 @@ import {
     WSAgentActionExecuteResponse,
     WSAgentActionValidateResponse
 } from '@beaver/agent-core/protocol/agentProtocol';
+import type { ManageTagsProposedData, ManageTagsResultData } from '@beaver/agent-core/types/agentActions/base';
 import { libraryRefForLibraryID, modelObjectId, resolveWriteTargetLibrary, writeTargetLibraryError } from '../../../utils/libraryIdentity';
 import { removeTagFromLibrary } from '../../../utils/zoteroTags';
-import { checkAborted, TimeoutContext, TimeoutError } from '../timeout';
-import { checkLibraryExcluded, getDeferredToolPreference, validateLibraryAccess } from '../utils';
+import { checkAborted, TimeoutContext } from '../timeout';
+import { getDeferredToolPreference, validateLibraryAccess } from '../utils';
+import { actionError, resolveActionWriteLibrary, toExecuteResponse } from './actionExecution';
 
 // Safety cap: if a tag is on more than this many items, refuse to snapshot the
 // set so we don't balloon proposed_data. The agent can still perform the op
@@ -419,7 +421,9 @@ export async function validateManageTagsAction(
             name: resolvedName,
             new_name: newName,
             is_merge: isMerge,
-            item_count: itemCount,
+            // Omitted when the lookup failed: it is also the drift baseline,
+            // and a guessed 0 would read as a change on a later apply.
+            ...(itemCountKnown ? { item_count: itemCount } : {}),
         },
         // Only resolved scalars go into normalized_action_data. Snapshots are
         // captured at execute time. `name` carries the auto-resolved tag name
@@ -434,159 +438,111 @@ export async function validateManageTagsAction(
 }
 
 
+/**
+ * Called with the resolved tag (null when it is not in the library) right
+ * before the write; throws to refuse it.
+ */
+export interface ManageTagsApplyHooks {
+    assertUnchanged?: (libraryID: number, tagID: number | null) => Promise<void>;
+}
+
+/**
+ * Rename or delete a tag across a library and return its `result_data`, with
+ * the items that had the tag, its color and whether a rename merges captured
+ * right before the write for undo.
+ */
+export async function applyManageTags(
+    data: ManageTagsProposedData,
+    ctx: TimeoutContext,
+    hooks: ManageTagsApplyHooks = {},
+): Promise<ManageTagsResultData> {
+    const { action, name, new_name } = data;
+    const resolvedLibraryId = resolveActionWriteLibrary(data);
+
+    // Re-snapshot the authoritative pre-apply state at execute time.
+    // This ensures a re-apply after manual library edits produces a fresh
+    // snapshot that the next undo can correctly reverse.
+    const resolution = await resolveTagByName(name, resolvedLibraryId);
+    const tagID = resolution.tagID;
+    const resolvedName = resolution.tagID !== null ? resolution.resolvedName : name;
+    if (resolution.tagID !== null && resolution.source === 'cache_rebuilt') {
+        logger(`applyManageTags: cache desync repaired for '${name}' in library ${resolvedLibraryId} (Zotero.Tags.init rebuilt, tagID=${tagID})`, 1);
+    } else if (resolution.tagID !== null && resolution.source === 'normalized') {
+        logger(`applyManageTags: auto-resolved tag '${name}' → '${resolvedName}' in library ${resolvedLibraryId} (tagID=${tagID})`, 1);
+    }
+    await hooks.assertUnchanged?.(resolvedLibraryId, tagID);
+
+    let affectedItemIds: string[] = [];
+    if (tagID !== null) {
+        // A failed lookup leaves the snapshot empty rather than blocking the
+        // change; the cap below is a refusal, never swallowed.
+        let ids: number[] | null = null;
+        try {
+            ids = await Zotero.Tags.getTagItems(resolvedLibraryId, tagID);
+        } catch (e) {
+            logger(`applyManageTags: getTagItems snapshot failed: ${e}`, 1);
+        }
+        if (ids && ids.length > MAX_SNAPSHOT_ITEMS) {
+            throw actionError('too_many_items', `Tag '${name}' is used on ${ids.length} items (over the ${MAX_SNAPSHOT_ITEMS} safety cap).`);
+        }
+        if (ids) {
+            try {
+                affectedItemIds = await itemIdsToKeys(resolvedLibraryId, ids);
+            } catch (e) {
+                logger(`applyManageTags: snapshot key lookup failed: ${e}`, 1);
+            }
+        }
+    }
+    const rawColor = Zotero.Tags.getColor(resolvedLibraryId, resolvedName);
+    const oldColor = rawColor && typeof rawColor === 'object'
+        ? { color: (rawColor as any).color, position: (rawColor as any).position }
+        : null;
+
+    let isMerge: boolean | null = null;
+
+    if (action === 'rename') {
+        const target = (new_name ?? '').trim();
+        if (!target) throw actionError('invalid_new_name', 'new_name required for rename');
+        // Re-check merge status at execute time (the tag state may have
+        // shifted since validation if the user edited tags manually).
+        const existingTarget = Zotero.Tags.getID(target);
+        isMerge = existingTarget !== false && existingTarget != null;
+
+        checkAborted(ctx, 'manage_tags:before_rename');
+        await Zotero.Tags.rename(resolvedLibraryId, resolvedName, target);
+        logger(`applyManageTags: Renamed tag '${resolvedName}' → '${target}' in library ${resolvedLibraryId}`, 1);
+    } else if (action === 'delete') {
+        if (tagID === null) {
+            // Already gone — treat as success with 0 affected items
+            logger(`applyManageTags: Tag '${name}' not found in library ${resolvedLibraryId}; treating as already deleted`, 1);
+        } else {
+            checkAborted(ctx, 'manage_tags:before_delete');
+            const removed = await removeTagFromLibrary(resolvedLibraryId, tagID, resolvedName);
+            logger(removed
+                ? `applyManageTags: Deleted tag '${resolvedName}' from library ${resolvedLibraryId}`
+                : `applyManageTags: Tag '${resolvedName}' has no items in library ${resolvedLibraryId}; nothing to delete`, 1);
+        }
+    } else {
+        throw actionError('invalid_action', `Unsupported action: '${action}'`);
+    }
+
+    return {
+        library_id: resolvedLibraryId,
+        library_ref: libraryRefForLibraryID(resolvedLibraryId) ?? undefined,
+        action,
+        name: resolvedName,
+        new_name: new_name ?? null,
+        items_affected: affectedItemIds.length,
+        affected_item_ids: affectedItemIds,
+        old_color: oldColor,
+        is_merge: isMerge,
+    };
+}
+
 export async function executeManageTagsAction(
     request: ActionExecuteRequest,
     ctx: TimeoutContext,
 ): Promise<WSAgentActionExecuteResponse> {
-    const { action, name, new_name, library_id, library_ref } = request.action_data as {
-        action: 'rename' | 'delete';
-        name: string;
-        new_name?: string | null;
-        library_id: number;
-        library_ref?: string | null;
-    };
-
-    // A device-portable library_ref is a valid target on its own, so only
-    // reject when neither a usable library_id nor a library_ref is present.
-    if ((!library_id || typeof library_id !== 'number') && !library_ref) {
-        return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: false,
-            error: 'library_id missing or invalid in action_data',
-            error_code: 'invalid_library_id',
-        };
-    }
-
-    const targetResolution = resolveWriteTargetLibrary({ library_id, library_ref });
-    if (!targetResolution.ok) {
-        return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: false,
-            ...writeTargetLibraryError(targetResolution),
-        };
-    }
-    const resolvedLibraryId = targetResolution.libraryID;
-
-    // TOCTOU guard: never rename/delete tags in a library the user excluded from
-    // Beaver, even if validation passed earlier or the execute request skipped it.
-    const excluded = checkLibraryExcluded(resolvedLibraryId);
-    if (excluded) {
-        return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: false,
-            error: excluded.message,
-            error_code: 'library_not_searchable',
-        };
-    }
-
-    try {
-        // Re-snapshot the authoritative pre-apply state at execute time.
-        // This ensures a re-apply after manual library edits produces a fresh
-        // snapshot that the next undo can correctly reverse.
-        const resolution = await resolveTagByName(name, resolvedLibraryId);
-        const tagID = resolution.tagID;
-        const resolvedName = resolution.tagID !== null ? resolution.resolvedName : name;
-        if (resolution.tagID !== null && resolution.source === 'cache_rebuilt') {
-            logger(`executeManageTagsAction: cache desync repaired for '${name}' in library ${resolvedLibraryId} (Zotero.Tags.init rebuilt, tagID=${tagID})`, 1);
-        } else if (resolution.tagID !== null && resolution.source === 'normalized') {
-            logger(`executeManageTagsAction: auto-resolved tag '${name}' → '${resolvedName}' in library ${resolvedLibraryId} (tagID=${tagID})`, 1);
-        }
-
-        let affectedItemIds: string[] = [];
-        if (tagID !== null) {
-            try {
-                const ids = await Zotero.Tags.getTagItems(resolvedLibraryId, tagID);
-                if (ids.length > MAX_SNAPSHOT_ITEMS) {
-                    return {
-                        type: 'agent_action_execute_response',
-                        request_id: request.request_id,
-                        success: false,
-                        error: `Tag '${name}' is used on ${ids.length} items (over the ${MAX_SNAPSHOT_ITEMS} safety cap).`,
-                        error_code: 'too_many_items',
-                    };
-                }
-                affectedItemIds = await itemIdsToKeys(resolvedLibraryId, ids);
-            } catch (e) {
-                logger(`executeManageTagsAction: getTagItems snapshot failed: ${e}`, 1);
-            }
-        }
-        const rawColor = Zotero.Tags.getColor(resolvedLibraryId, resolvedName);
-        const oldColor = rawColor && typeof rawColor === 'object'
-            ? { color: (rawColor as any).color, position: (rawColor as any).position }
-            : null;
-
-        let isMerge: boolean | null = null;
-
-        if (action === 'rename') {
-            const target = (new_name ?? '').trim();
-            if (!target) {
-                return {
-                    type: 'agent_action_execute_response',
-                    request_id: request.request_id,
-                    success: false,
-                    error: "new_name required for rename",
-                    error_code: 'invalid_new_name',
-                };
-            }
-            // Re-check merge status at execute time (the tag state may have
-            // shifted since validation if the user edited tags manually).
-            const existingTarget = Zotero.Tags.getID(target);
-            isMerge = existingTarget !== false && existingTarget != null;
-
-            checkAborted(ctx, 'manage_tags:before_rename');
-            await Zotero.Tags.rename(resolvedLibraryId, resolvedName, target);
-            logger(`executeManageTagsAction: Renamed tag '${resolvedName}' → '${target}' in library ${resolvedLibraryId}`, 1);
-        } else if (action === 'delete') {
-            if (tagID === null) {
-                // Already gone — treat as success with 0 affected items
-                logger(`executeManageTagsAction: Tag '${name}' not found in library ${resolvedLibraryId}; treating as already deleted`, 1);
-            } else {
-                checkAborted(ctx, 'manage_tags:before_delete');
-                const removed = await removeTagFromLibrary(resolvedLibraryId, tagID, resolvedName);
-                logger(removed
-                    ? `executeManageTagsAction: Deleted tag '${resolvedName}' from library ${resolvedLibraryId}`
-                    : `executeManageTagsAction: Tag '${resolvedName}' has no items in library ${resolvedLibraryId}; nothing to delete`, 1);
-            }
-        } else {
-            return {
-                type: 'agent_action_execute_response',
-                request_id: request.request_id,
-                success: false,
-                error: `Unsupported action: '${action}'`,
-                error_code: 'invalid_action',
-            };
-        }
-
-        return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: true,
-            result_data: {
-                library_id: resolvedLibraryId,
-                library_ref: libraryRefForLibraryID(resolvedLibraryId) ?? undefined,
-                action,
-                name: resolvedName,
-                new_name: new_name ?? null,
-                items_affected: affectedItemIds.length,
-                affected_item_ids: affectedItemIds,
-                old_color: oldColor,
-                is_merge: isMerge,
-            },
-        };
-    } catch (error) {
-        if (error instanceof TimeoutError) {
-            throw error;
-        }
-        logger(`executeManageTagsAction: Failed: ${error}`, 1);
-        return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: false,
-            error: String(error),
-            error_code: 'execution_failed',
-        };
-    }
+    return toExecuteResponse(request.request_id, 'executeManageTagsAction',
+        () => applyManageTags(request.action_data as ManageTagsProposedData, ctx));
 }

@@ -11,8 +11,10 @@ import { libraryRefForLibraryID, resolveWriteTargetLibrary, writeTargetLibraryEr
 import { TimingAccumulator } from '../../../utils/timing';
 import { applyCreateItemData } from '../../itemImport/legacy';
 import type { ActionExecuteRequest, ActionValidateRequest } from '../operationContext';
+import type { AttachmentResolvedPayload } from '../../attachmentResolved';
 import { checkAborted, TimeoutContext, TimeoutError } from '../timeout';
-import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
+import { excludedLibraryMessage, getDeferredToolPreference } from '../utils';
+import { ActionExecutionError, actionError, assertLibraryNotExcluded, toExecuteResponse } from './actionExecution';
 
 
 /**
@@ -177,10 +179,80 @@ async function validateCreateItemAction(
 }
 
 
+export interface CreateItemApplyOptions {
+    actionId?: string;
+    runId?: string;
+    threadId?: string;
+    /** Called when the background PDF fetch for the new item settles. */
+    onAttachmentResolved?: (payload: AttachmentResolvedPayload) => void;
+    timing?: TimingAccumulator;
+}
+
 /**
- * Execute a create_item action.
- * Creates the item in Zotero from the proposed data.
- * 
+ * Create the item of one create_item action and return its `result_data`.
+ *
+ * Importing from the item's URL can take tens of seconds, so an apply with a
+ * deadline (the socket path) skips it and relies on identifier translation
+ * and the metadata the action carries; an apply without one tries it.
+ */
+export async function applyCreateItem(
+    proposedData: CreateItemProposedData,
+    ctx: TimeoutContext,
+    options: CreateItemApplyOptions = {},
+): Promise<CreateItemResultData> {
+    const ta = options.timing ?? new TimingAccumulator();
+    if (!proposedData || !proposedData.item) {
+        throw actionError('missing_item_data', 'No item data provided');
+    }
+
+    // Resolve target library: use provided ID, resolve name, or default to user's main library
+    const libResolveStart = Date.now();
+    const targetResolution = resolveWriteTargetLibrary(proposedData);
+    ta.record('resolve_library_ms', Date.now() - libResolveStart);
+    if (!targetResolution.ok) {
+        const { error, error_code } = writeTargetLibraryError(targetResolution);
+        throw actionError(error_code, error);
+    }
+    const library_id = targetResolution.libraryID;
+
+    // TOCTOU guard: never create in a library the user excluded from Beaver,
+    // even if validation passed earlier or the action waited for approval.
+    assertLibraryNotExcluded(library_id);
+
+    try {
+        logger(`applyCreateItem: Creating item "${proposedData.item.title}" in library ${library_id}`, 1);
+
+        // Checkpoint: abort before starting item creation
+        checkAborted(ctx, 'create_item:before_apply');
+
+        // Forward action/run/thread IDs so the background PDF fetch task can
+        // emit `attachment_resolved` back to the right thread on completion.
+        const result: CreateItemResultData = await ta.track('apply_ms', () =>
+            applyCreateItemData(proposedData, {
+                libraryId: library_id,
+                skipUrlTranslation: Number.isFinite(ctx.timeoutSeconds),
+                timing: ta,
+                actionId: options.actionId,
+                runId: options.runId,
+                onAttachmentResolved: options.onAttachmentResolved,
+                threadId: options.threadId,
+            })
+        );
+
+        logger(`applyCreateItem: Successfully created item ${result.library_id}-${result.zotero_key}`, 1);
+        return result;
+    } catch (error: any) {
+        if (error instanceof TimeoutError || error instanceof ActionExecutionError) throw error;
+        const errorMsg = error?.message || String(error) || 'Failed to create item';
+        logger(`applyCreateItem: Failed to create item: ${errorMsg}`, 1);
+        if (error?.stack) logger(`applyCreateItem: Stack: ${error.stack}`, 1);
+        throw actionError(error?.code ?? 'create_failed', errorMsg);
+    }
+}
+
+/**
+ * Create one item for the backend during a run.
+ *
  * Note: This handler is called once PER ITEM from the backend.
  * The action_data contains a single item's proposed_data.
  */
@@ -190,104 +262,19 @@ async function executeCreateItemAction(
 ): Promise<WSAgentActionExecuteResponse> {
     const startTime = Date.now();
     const ta = new TimingAccumulator();
-
     const buildTiming = (): FrontendTimingMetadata => ({
         total_ms: Date.now() - startTime,
         ...ta.getAll(),
     });
-
-    // The action_data is the proposed_data for a single create_item action
-    const proposedData = request.action_data as CreateItemProposedData;
-
-    // Validate we have item data
-    if (!proposedData || !proposedData.item) {
-        return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: false,
-            error: 'No item data provided',
-            error_code: 'missing_item_data',
-            timing: buildTiming(),
-        };
-    }
-
-    // Resolve target library: use provided ID, resolve name, or default to user's main library
-    const libResolveStart = Date.now();
-    const targetResolution = resolveWriteTargetLibrary(proposedData);
-    ta.record('resolve_library_ms', Date.now() - libResolveStart);
-    if (!targetResolution.ok) {
-        return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: false,
-            ...writeTargetLibraryError(targetResolution),
-            timing: buildTiming(),
-        };
-    }
-    const library_id = targetResolution.libraryID;
-
-    // TOCTOU guard: never create in a library the user excluded from Beaver,
-    // even if validation passed earlier or the execute request skipped it.
-    const excluded = checkLibraryExcluded(library_id);
-    if (excluded) {
-        return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: false,
-            error: excluded.message,
-            error_code: 'library_not_searchable',
-            timing: buildTiming(),
-        };
-    }
-
-    try {
-        logger(`executeCreateItemAction: Creating item "${proposedData.item.title}" in library ${library_id}`, 1);
-
-        // Checkpoint: abort before starting item creation
-        checkAborted(ctx, 'create_item:before_apply');
-
-        // Create the item using the existing utility function.
-        // Forward action/run/thread IDs so the background PDF fetch task can
-        // emit `attachment_resolved` back to the right thread on completion.
-        const result: CreateItemResultData = await ta.track('apply_ms', () =>
-            applyCreateItemData(proposedData, {
-                libraryId: library_id,
-                skipUrlTranslation: true,
-                timing: ta,
-                actionId: request.action_id,
-                runId: request.run_id,
-                onAttachmentResolved: request.operation?.onAttachmentResolved,
-                threadId: request.thread_id,
-            })
-        );
-
-        logger(`executeCreateItemAction: Successfully created item ${result.library_id}-${result.zotero_key}`, 1);
-
-        return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: true,
-            result_data: result,
-            timing: buildTiming(),
-        };
-    } catch (error: any) {
-        // Re-throw TimeoutError so it propagates to the main handler
-        if (error instanceof TimeoutError) throw error;
-        const errorMsg = error?.message || String(error) || 'Failed to create item';
-        const errorStack = error?.stack || '';
-        logger(`executeCreateItemAction: Failed to create item: ${errorMsg}`, 1);
-        if (errorStack) {
-            logger(`executeCreateItemAction: Stack: ${errorStack}`, 1);
-        }
-        return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: false,
-            error: errorMsg,
-            error_code: error?.code ?? 'create_failed',
-            timing: buildTiming(),
-        };
-    }
+    return toExecuteResponse(request.request_id, 'executeCreateItemAction', () => applyCreateItem(
+        request.action_data as CreateItemProposedData, ctx, {
+            actionId: request.action_id,
+            runId: request.run_id,
+            threadId: request.thread_id,
+            onAttachmentResolved: request.operation?.onAttachmentResolved,
+            timing: ta,
+        },
+    ), buildTiming);
 }
 
 export { executeCreateItemAction, validateCreateItemAction };

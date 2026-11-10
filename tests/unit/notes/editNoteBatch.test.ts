@@ -140,6 +140,7 @@ vi.mock('../../../src/utils/noteCitationExpand', () => ({
     preloadStructuralLocatorPages: vi.fn().mockResolvedValue({ pages: {}, unresolved: [] }),
     buildUnresolvedLocatorWarning: vi.fn(() => null),
     isCitationRefNotFoundError: vi.fn(() => false),
+    ensureCitedLibrariesLoaded: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('../../../src/utils/editNoteStrippers', () => ({
@@ -275,6 +276,7 @@ import type {
 } from '@beaver/agent-core/protocol/agentProtocol';
 import type { EditNoteBatchEditItem } from '@beaver/agent-core/types/agentActions/editNoteBatch';
 import { MAX_BATCH_EDITS } from '../../../src/services/agentDataProvider/actions/editNoteBatch';
+import { sha256Hex } from '../../../src/utils/hash';
 
 
 // =============================================================================
@@ -629,6 +631,7 @@ describe('validateEditNoteBatchAction — success', () => {
             note_title: 'My Note',
             total_lines: 1,
             old_content: NOTE_HTML,
+            content_hash: await sha256Hex(NOTE_HTML),
         });
     });
 
@@ -1114,6 +1117,30 @@ describe('executeEditNoteBatchAction — atomicity and failures', () => {
         expect(item.saveTx).toHaveBeenCalledTimes(1);
     });
 
+    it('applies a stored rewrite the user approved with Apply, even after the note grew', async () => {
+        // The user's click on the stored card is the approval the re-check
+        // above stands in for; drift on the stored card is caught by its
+        // content-hash baseline instead.
+        const paragraphs = Array.from(
+            { length: 40 },
+            (_, i) => `<p>Paragraph ${i} of a long research note about corrugator activity.</p>`,
+        );
+        const item = useNote(`<div data-schema-version="9">${paragraphs.join('')}</div>`);
+
+        await executeLocalEditNoteBatchAction({
+            id: 'local-rewrite',
+            action_type: 'edit_note_batch',
+            proposed_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                edits: [{ index: 0, operation: 'rewrite', new_string: paragraphs[3] }],
+            },
+        } as any);
+
+        expect(item.setNote).toHaveBeenCalledTimes(1);
+        expect(item.saveTx).toHaveBeenCalledTimes(1);
+    });
+
     it('rolls back with setNote(oldHtml) and reports save_failed when saveTx throws', async () => {
         const item = makeMockItem({
             saveTx: vi.fn().mockRejectedValue(new Error('DB write failed')),
@@ -1279,6 +1306,24 @@ describe('local apply against a note the editor would re-serialize', () => {
         expect(item.setNote).toHaveBeenCalledTimes(1);
         expect(item.setNote.mock.calls[0][0]).toContain('<p>Progress so far</p>');
     });
+
+    it('applies a single edit whose old_string spans a re-serialized citation', async () => {
+        const item = useRawNote();
+        await executeLocalEditNoteAction({
+            id: 'local-normalized-single',
+            action_type: 'edit_note',
+            proposed_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                operation: 'str_replace',
+                old_string: OLD_STRING,
+                new_string: 'Progress so far',
+            },
+        } as any);
+
+        expect(item.setNote).toHaveBeenCalledTimes(1);
+        expect(item.setNote.mock.calls[0][0]).toContain('<p>Progress so far</p>');
+    });
 });
 
 
@@ -1317,6 +1362,63 @@ describe('local batch apply failure codes', () => {
     });
 });
 
+
+describe('local batch apply of a proposal the note has moved away from', () => {
+    function storedBatch(edits: EditNoteBatchEditItem[], contentHash: string | null) {
+        return {
+            id: 'stored-batch',
+            action_type: 'edit_note_batch',
+            proposed_data: { library_id: 1, zotero_key: 'NOTE0001', edits, baseline: { content_hash: contentHash } },
+        } as any;
+    }
+    const append: EditNoteBatchEditItem[] = [{ index: 0, operation: 'append', new_string: '<p>Appended.</p>' }];
+
+    it('applies an append when the note still hashes to the validated baseline', async () => {
+        const item = useNote(NOTE_HTML);
+        const validation = await handleAgentActionValidateRequest(makeValidateRequest(append));
+        const contentHash = (validation.current_value as any).content_hash;
+
+        await executeLocalEditNoteBatchAction(storedBatch(append, contentHash));
+
+        expect(item.setNote.mock.calls[0][0]).toContain('<p>Appended.</p>');
+    });
+
+    it('refuses an append without writing when the note changed since the proposal', async () => {
+        const proposedHash = await sha256Hex(NOTE_HTML);
+        const item = useNote(NOTE_HTML.replace('Alpha', 'Edited'));
+
+        const error = await executeLocalEditNoteBatchAction(storedBatch(append, proposedHash)).catch((err: unknown) => err);
+
+        expect(error).toMatchObject({ code: 'stale_proposal', message: 'The note changed after this edit was proposed.' });
+        expect(item.setNote).not.toHaveBeenCalled();
+    });
+
+    it('applies anyway when the user skips the check', async () => {
+        const item = useNote(NOTE_HTML.replace('Alpha', 'Edited'));
+
+        await executeLocalEditNoteBatchAction(storedBatch(append, await sha256Hex(NOTE_HTML)), { skipStaleCheck: true });
+
+        expect(item.setNote.mock.calls[0][0]).toContain('<p>Appended.</p>');
+    });
+
+    it('leaves anchored edits to their own text matching', async () => {
+        const item = useNote(NOTE_HTML.replace('Charlie', 'Edited'));
+
+        await executeLocalEditNoteBatchAction(storedBatch([
+            { index: 0, operation: 'str_replace', old_string: 'Alpha sentence one.', new_string: 'X.' },
+        ], await sha256Hex(NOTE_HTML)));
+
+        expect(item.setNote.mock.calls[0][0]).toContain('X.');
+    });
+
+    it('does not check a proposal stored without a hash', async () => {
+        const item = useNote(NOTE_HTML.replace('Alpha', 'Edited'));
+
+        await executeLocalEditNoteBatchAction(storedBatch(append, null));
+
+        expect(item.setNote.mock.calls[0][0]).toContain('<p>Appended.</p>');
+    });
+});
 
 describe('empty note batch edits', () => {
     it.each(['', '   ', '<div data-schema-version="9"></div>', '<div data-schema-version="9"><p><br></p></div>'])(

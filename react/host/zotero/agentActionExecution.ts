@@ -10,9 +10,11 @@ import {
     setAgentActionsToErrorAtom,
     undoAgentActionAtom,
     updateAgentActionsAtom,
+    withoutActionsAppliedElsewhereAtom,
 } from '../../agents/agentActions';
 import { markExternalReferenceImportedAtom, markExternalReferenceDeletedAtom } from '../../atoms/externalReferences';
-import { currentThreadIdAtom } from '../../atoms/threads';
+import { activeRunAtom, currentThreadIdAtom, threadRunsAtom } from '@beaver/agent-core/run-state/atoms';
+import type { ManualApplyOptions } from '../../../src/services/manualActions/staleProposal';
 import { executeEditMetadataAction, undoEditMetadataAction, UndoResult } from '../../utils/editMetadataActions';
 import { executeCreateCollectionAction, undoCreateCollectionAction } from '../../utils/createCollectionActions';
 import { executeOrganizeItemsAction, undoOrganizeItemsAction } from '../../utils/organizeItemsActions';
@@ -27,11 +29,8 @@ import {
     undoCreateAnnotationsAction,
 } from '../../utils/createAnnotationsActions';
 import { executeEditAnnotationsAction, undoEditAnnotationsAction } from '../../utils/editAnnotationsActions';
-import {
-    executeEditNoteOrBatchAction,
-    getUserFacingErrorMessage,
-    undoEditNoteOrBatchAction,
-} from '../../utils/editNoteActions';
+import { executeEditNoteOrBatchAction, undoEditNoteOrBatchAction } from '../../utils/editNoteActions';
+import { getUserFacingErrorMessage } from '../../../src/utils/userFacingError';
 import { confirmOverwriteManualChanges } from './components/agentActionViewHelpers';
 import { isUnconfirmedAction } from './components/reviewChangeRows';
 import { isStaleMergeProposal } from './components/mergeItemsErrors';
@@ -75,20 +74,42 @@ function normalizeActionType(actionType: string): string {
     return actionType;
 }
 
+/**
+ * The thread that owns `runId`, from this window's run records. Import paths,
+ * attachment routing and provenance are scoped to it, so it must be the
+ * action's own thread rather than whichever thread is in view when the write
+ * starts. A run without a thread id yet belongs to the thread open here.
+ * Undefined when this window does not hold the run.
+ */
+export function getThreadIdForRun(get: Getter, runId: string): string | undefined {
+    const activeRun = get(activeRunAtom);
+    const run = activeRun?.id === runId
+        ? activeRun
+        : get(threadRunsAtom).find((candidate) => candidate.id === runId);
+    if (!run) return undefined;
+    return run.thread_id ?? get(currentThreadIdAtom) ?? undefined;
+}
+
+/**
+ * Options for one apply: the user's "Apply anyway", and the thread that owns
+ * the action's run (resolved at the click).
+ */
+type ApplyOptions = ManualApplyOptions & { threadId?: string };
+
 /** Action types applied by one call whose result is acked as-is. */
-const APPLY_EXECUTORS = new Map<string, (action: AgentAction, runId: string) => Promise<any>>([
-    ['edit_metadata', (action) => executeEditMetadataAction(action)],
-    ['edit_note', (action) => executeEditNoteOrBatchAction(action)],
-    ['edit_note_batch', (action) => executeEditNoteOrBatchAction(action)],
+const APPLY_EXECUTORS = new Map<string, (action: AgentAction, runId: string, options: ApplyOptions) => Promise<any>>([
+    ['edit_metadata', (action, _runId, { skipStaleCheck }) => executeEditMetadataAction(action, { skipStaleCheck })],
+    ['edit_note', (action, _runId, options) => executeEditNoteOrBatchAction(action, options)],
+    ['edit_note_batch', (action, _runId, options) => executeEditNoteOrBatchAction(action, options)],
     ['create_collection', (action) => executeCreateCollectionAction(action)],
     ['organize_items', (action) => executeOrganizeItemsAction(action)],
     ['merge_items', (action) => executeMergeItemsAction(action)],
-    ['manage_tags', (action) => executeManageTagsAction(action)],
-    ['manage_collections', (action) => executeManageCollectionsAction(action)],
-    ['create_note', (action, runId) => executeCreateNoteAction(action, runId)],
+    ['manage_tags', (action, _runId, { skipStaleCheck }) => executeManageTagsAction(action, { skipStaleCheck })],
+    ['manage_collections', (action, _runId, { skipStaleCheck }) => executeManageCollectionsAction(action, { skipStaleCheck })],
+    ['create_note', (action, runId, { threadId }) => executeCreateNoteAction(action, runId, threadId)],
     ['create_highlight_annotations', (action) => executeCreateHighlightAnnotationsAction(action)],
     ['create_note_annotations', (action) => executeCreateNoteAnnotationsAction(action)],
-    ['edit_annotations', (action) => executeEditAnnotationsAction(action)],
+    ['edit_annotations', (action, _runId, { skipStaleCheck }) => executeEditAnnotationsAction(action, { skipStaleCheck })],
 ]);
 
 /** Action types undone by one call with no confirmation step. */
@@ -208,10 +229,20 @@ function unsupportedActionTypeFailures(
  * Apply a tool call's actions. Single-action types apply `actions[0]`; only
  * create_item and import_item are batches. An action type this executor does not handle comes
  * back as a per-action failure, never as an empty success.
+ *
+ * An action already applied elsewhere (another window or device) is not
+ * written again: it is left out before the write and shown as the server has
+ * it, and the acknowledgement never replaces a result the server already
+ * holds. `skipStaleCheck` is the user's "Apply anyway" for a proposal the
+ * library has moved away from.
  */
 export const applyAgentActionsAtom = atom(
     null,
-    async (get, set, { actions, runId }: { actions: AgentAction[]; runId: string }): Promise<ApplyAgentActionsResult> => {
+    async (
+        get,
+        set,
+        { actions, runId, skipStaleCheck = false }: { actions: AgentAction[]; runId: string; skipStaleCheck?: boolean },
+    ): Promise<ApplyAgentActionsResult> => {
         if (actions.length === 0) return { applied: [], failed: [] };
 
         const claimed = claimActions(get, set, actions);
@@ -219,19 +250,30 @@ export const applyAgentActionsAtom = atom(
             logger('agentActionExecution: apply skipped, another surface is already writing these actions', 1);
             return { applied: [], failed: [] };
         }
+        // Resolved at the click, before any await can let the view move on.
+        const threadId = getThreadIdForRun(get, runId);
         try {
-            return await applyClaimedActions(get, set, claimed, runId);
+            const current = await set(withoutActionsAppliedElsewhereAtom, runId, claimed);
+            if (current.length === 0) return { applied: [], failed: [] };
+            return await applyClaimedActions(get, set, current, runId, { threadId, skipStaleCheck });
         } finally {
             releaseActions(get, set, claimed);
         }
     }
 );
 
+/** The ids an acknowledgement recorded, leaving out the ones the server already had a result for. */
+function recordedIds(actionIds: string[], response: { skipped?: Array<{ action_id: string }> } | undefined): string[] {
+    const skipped = new Set((response?.skipped ?? []).map((entry) => entry.action_id));
+    return actionIds.filter((id) => !skipped.has(id));
+}
+
 async function applyClaimedActions(
     get: Getter,
     set: Setter,
     claimed: AgentAction[],
     runId: string,
+    { threadId, skipStaleCheck }: { threadId: string | undefined; skipStaleCheck: boolean },
 ): Promise<ApplyAgentActionsResult> {
     const applied: string[] = [];
     const failed: AgentActionFailure[] = [];
@@ -259,18 +301,20 @@ async function applyClaimedActions(
             if (actionsToApply.length === 0) return { applied, failed };
             attempted = actionsToApply;
 
-            const options = { runId, threadId: get(currentThreadIdAtom) ?? undefined };
+            const options = { runId, threadId };
             const batchResult = actionType === 'import_item'
                 ? await executeImportItemActions(actionsToApply, options)
                 : await executeCreateItemActions(actionsToApply, options);
             if (batchResult.successes.length > 0) {
-                await set(ackAgentActionsAtom, runId, batchResult.successes.map((success) => ({
+                const response = await set(ackAgentActionsAtom, runId, batchResult.successes.map((success) => ({
                     action_id: success.action.id,
                     result_data: success.result,
                 })));
                 logger(`agentActionExecution: Applied ${batchResult.successes.length} ${actionType} actions`, 1);
 
+                const recorded = new Set(recordedIds(batchResult.successes.map((success) => success.action.id), response));
                 for (const success of batchResult.successes) {
+                    if (!recorded.has(success.action.id)) continue;
                     applied.push(success.action.id);
                     const externalId = itemActionExternalId(success.action);
                     if (externalId) {
@@ -296,13 +340,13 @@ async function applyClaimedActions(
                 return { applied, failed: unsupportedActionTypeFailures(actions, actionType, 'apply') };
             }
 
-            const result = await executeAction(action, runId);
-            await set(ackAgentActionsAtom, runId, [{ action_id: action.id, result_data: result }]);
-            applied.push(action.id);
+            const result = await executeAction(action, runId, { skipStaleCheck, threadId });
+            const response = await set(ackAgentActionsAtom, runId, [{ action_id: action.id, result_data: result }]);
+            applied.push(...recordedIds([action.id], response));
             logger(`agentActionExecution: Applied ${actionType} action ${action.id}`, 1);
         }
     } catch (error: any) {
-        const errorMessage = error?.message || 'Failed to apply action';
+        const errorMessage = getUserFacingErrorMessage(error, 'Failed to apply action');
         const stackTrace = error?.stack || '';
         logger(`agentActionExecution: Failed to apply actions: ${errorMessage}\nStack trace:\n${stackTrace}`, 1);
         const errorDetails = {
@@ -402,9 +446,10 @@ async function undoClaimedActions(set: Setter, actions: AgentAction[], window?: 
             logger(`agentActionExecution: Undone ${actionType} action ${action.id}`, 1);
         }
     } catch (error: any) {
-        const errorMessage = actionType === 'edit_note' || actionType === 'edit_note_batch'
-            ? getUserFacingErrorMessage(error, 'Failed to undo note edit')
-            : error?.message || 'Failed to undo action';
+        const errorMessage = getUserFacingErrorMessage(
+            error,
+            actionType === 'edit_note' || actionType === 'edit_note_batch' ? 'Failed to undo note edit' : 'Failed to undo action',
+        );
         const stackTrace = error?.stack || '';
         logger(`agentActionExecution: Failed to undo actions: ${errorMessage}\nStack trace:\n${stackTrace}`, 1);
 

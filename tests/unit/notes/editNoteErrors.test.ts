@@ -9,6 +9,13 @@ const failed = (overrides: Record<string, unknown>): any => ({
 });
 
 describe('isStaleNoteEdit', () => {
+    it('leaves an edit refused by the drift check to Apply anyway', () => {
+        expect(isStaleNoteEdit(failed({
+            error_message: 'The note changed after this edit was proposed.',
+            error_details: { error_code: 'stale_proposal' },
+        }))).toBe(false);
+    });
+
     it.each(['old_string_not_found', 'ambiguous_match', 'overlapping_edits', 'note_changed'])(
         'offers no retry for an apply refused with %s',
         (code) => {

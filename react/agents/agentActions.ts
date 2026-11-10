@@ -33,6 +33,7 @@ import {
 import { activeRunAtom, threadRunsAtom } from '@beaver/agent-core/run-state/atoms';
 import { getPendingApprovalIdsCoveredByFullAccess } from '../atoms/runApprovalPolicy';
 import { findPendingApprovalForToolcall } from '../components/agentRuns/editNoteShared';
+import { markExternalReferenceImportedAtom } from '../atoms/externalReferences';
 
 export * from '@beaver/agent-core/agents/agentActionTypes';
 
@@ -412,8 +413,46 @@ export const updateAgentActionsAtom = atom(
 );
 
 /**
- * Acknowledge agent actions as applied with result data.
- * Updates both UI state and backend.
+ * Whether the server's record of an action holds a change of its own in the
+ * library, which a new apply must not replace: an applied action, or a failed
+ * undo (an error that kept its result). Mirrors the server's `only_unapplied`
+ * guard, which also lets an unconfirmed action through.
+ */
+export function hasLiveResult(action: Pick<AgentAction, 'status' | 'result_data' | 'error_details'>): boolean {
+    if (action.status === 'applied') return true;
+    return action.status === 'error'
+        && action.result_data != null
+        && !isUnconfirmedAction(action as AgentAction);
+}
+
+/** Show actions the way the server has them. */
+function showServerStates(
+    set: Setter,
+    states: Array<{
+        action_id: string;
+        status: ActionStatus;
+        result_data?: Record<string, any> | null;
+        error_message?: string | null;
+        error_details?: Record<string, any> | null;
+    }>,
+): void {
+    if (states.length === 0) return;
+    set(updateAgentActionsAtom, states.map((state) => ({
+        id: state.action_id,
+        status: state.status,
+        result_data: state.result_data ?? undefined,
+        error_message: state.error_message ?? undefined,
+        error_details: state.error_details ?? undefined,
+    })));
+}
+
+/**
+ * Acknowledge a user's apply with its result data, in UI state and on the
+ * backend.
+ *
+ * Sent with `onlyUnapplied`, so the server keeps the result of an action
+ * already applied elsewhere (another window or device) instead of replacing
+ * it. Each action it left alone is then shown the way the server has it.
  */
 export const ackAgentActionsAtom = atom(
     null,
@@ -438,13 +477,78 @@ export const ackAgentActionsAtom = atom(
         // Backend: Acknowledge actions
         const response = await agentActionsService.acknowledgeActions(
             runId,
-            actionResultData
+            actionResultData,
+            { onlyUnapplied: true },
         );
         if (!response.success) {
             logger(`ackAgentActionsAtom: failed to acknowledge actions for run ${runId}: ${response.errors.map((error) => error.detail).join(', ')}`, 1);
             return;
         }
+        const skipped = response.skipped ?? [];
+        if (skipped.length > 0) {
+            // The write in Zotero went through, but the server already had a
+            // result for these actions: its record is the one undo reads.
+            for (const entry of skipped) {
+                logger(`ackAgentActionsAtom: action ${entry.action_id} was not recorded; the server has it as ${entry.status ?? 'missing'}`, 1);
+            }
+            showServerStates(set, skipped.flatMap((entry) => entry.status ? [{ ...entry, status: entry.status }] : []));
+        }
         return response;
+    }
+);
+
+/**
+ * The actions still free to apply, by the server's current record. One that
+ * was applied elsewhere since this window loaded it (another window or
+ * device) is left out and shown the way the server has it, so applying from a
+ * stale view does not write the change a second time.
+ *
+ * A failed read keeps every action: the acknowledgement's own guard still
+ * keeps the server's record intact.
+ */
+export const withoutActionsAppliedElsewhereAtom = atom(
+    null,
+    async (_, set, runId: string, actions: AgentAction[]): Promise<AgentAction[]> => {
+        if (actions.length === 0) return actions;
+        let serverActions: Awaited<ReturnType<typeof agentActionsService.getActionsForRun>>;
+        try {
+            serverActions = await agentActionsService.getActionsForRun(runId);
+        } catch (error) {
+            logger(`withoutActionsAppliedElsewhereAtom: could not read run ${runId}: ${error}`, 1);
+            return actions;
+        }
+        const byId = new Map(serverActions.map((serverAction) => [String(serverAction.id), serverAction]));
+        const appliedElsewhere = actions.flatMap((action) => {
+            const serverAction = byId.get(action.id);
+            if (!serverAction || !hasLiveResult(serverAction as Pick<AgentAction, 'status' | 'result_data' | 'error_details'>)) return [];
+            return [{ action, serverAction }];
+        });
+        if (appliedElsewhere.length === 0) return actions;
+        for (const { action, serverAction } of appliedElsewhere) {
+            logger(`withoutActionsAppliedElsewhereAtom: action ${action.id} is already ${serverAction.status} on the server; not applying it again`, 1);
+        }
+        showServerStates(set, appliedElsewhere.map(({ action, serverAction }) => ({
+            action_id: action.id,
+            status: serverAction.status as ActionStatus,
+            result_data: serverAction.result_data,
+            error_message: serverAction.error_message,
+            error_details: serverAction.error_details,
+        })));
+        // An imported reference also shows as in the library wherever it is
+        // listed, so no other button offers to import it again.
+        for (const { action, serverAction } of appliedElsewhere) {
+            const externalId = itemActionExternalId(action);
+            const result = serverAction.result_data;
+            if (externalId && typeof result?.zotero_key === 'string') {
+                set(markExternalReferenceImportedAtom, externalId, {
+                    library_id: result.library_id,
+                    zotero_key: result.zotero_key,
+                    library_ref: result.library_ref,
+                });
+            }
+        }
+        const skippedIds = new Set(appliedElsewhere.map(({ action }) => action.id));
+        return actions.filter((action) => !skippedIds.has(action.id));
     }
 );
 

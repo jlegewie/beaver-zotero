@@ -1049,6 +1049,7 @@ describe('executeEditNoteAction + undoEditNoteAction', () => {
             key: 'NOTE0001',
             libraryID: 1,
             id: 42,
+            isNote: vi.fn(() => true),
             loadDataType: vi.fn().mockResolvedValue(undefined),
             getNote: vi.fn(() => currentHtml),
             setNote: vi.fn((html: string) => { currentHtml = html; return true; }),
@@ -1150,6 +1151,50 @@ describe('executeEditNoteAction + undoEditNoteAction', () => {
         // Result should not contain full-note HTML snapshots
         expect(result).not.toHaveProperty('old_html');
         expect(result).not.toHaveProperty('new_html');
+    });
+
+    it('refuses a rewrite without writing when the note changed since the proposal', async () => {
+        const proposedHtml = wrap('<p>Hello world</p>');
+        const item = makeMockItem(wrap('<p>Hello world, edited by the user</p>'));
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(item);
+        (globalThis as any).Zotero.Notes._editorInstances = [];
+        const { sha256Hex } = await import('../../../src/utils/hash');
+        const rewrite = makeAction({
+            proposed_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                operation: 'rewrite',
+                new_string: '<p>Replaced</p>',
+                baseline: { content_hash: await sha256Hex(proposedHtml) },
+            },
+        });
+
+        const { executeEditNoteAction } = await importEditNoteActions();
+        await expect(executeEditNoteAction(rewrite)).rejects.toMatchObject({ code: 'stale_proposal' });
+        expect(item.setNote).not.toHaveBeenCalled();
+
+        await executeEditNoteAction(rewrite, { skipStaleCheck: true });
+        expect(item.setNote.mock.calls[0][0]).toContain('Replaced');
+    });
+
+    it('applies a rewrite when the note is as proposed', async () => {
+        const noteHtml = wrap('<p>Hello world</p>');
+        const item = makeMockItem(noteHtml);
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(item);
+        (globalThis as any).Zotero.Notes._editorInstances = [];
+        const { sha256Hex } = await import('../../../src/utils/hash');
+
+        const { executeEditNoteAction } = await importEditNoteActions();
+        await executeEditNoteAction(makeAction({
+            proposed_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                operation: 'rewrite',
+                new_string: '<p>Replaced</p>',
+                baseline: { content_hash: await sha256Hex(noteHtml) },
+            },
+        }));
+        expect(item.setNote.mock.calls[0][0]).toContain('Replaced');
     });
 
     it('undo via reverse str-replace restores note', async () => {
@@ -1551,7 +1596,8 @@ describe('executeEditNoteAction + undoEditNoteAction', () => {
     });
 
     it('undo succeeds when saved note strips inline itemData from new citations', async () => {
-        const noteHtml = wrap('<p>Hello world</p>');
+        // PM-normalize so the edit pipeline produces canonical HTML
+        const noteHtml = normalizeNoteHtml(wrap('<p>Hello world</p>'));
         const item = makeMockItem(noteHtml);
         (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(item);
         (globalThis as any).Zotero.Notes._editorInstances = [];

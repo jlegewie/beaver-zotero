@@ -1,6 +1,13 @@
 export {};
 
 declare global {
+    namespace _ZoteroTypes {
+        interface Searches {
+            /** A library's saved searches, trashed ones included, sorted by name. */
+            getAll(libraryID: number): Promise<Zotero.Search[]>;
+        }
+    }
+
     type ZoteroAnnotationItem = Omit<Zotero.Item, "annotationSortIndex"> & {
         annotationSortIndex: string;
     };

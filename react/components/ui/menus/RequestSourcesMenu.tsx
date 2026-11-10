@@ -18,6 +18,7 @@ import { libraryRefForLibraryID } from '../../../../src/utils/libraryIdentity';
 import { serializeCollection, serializeZoteroLibrary } from '../../../../src/utils/zoteroSerializers';
 import { loadFullItemData } from '../../../../src/utils/zoteroUtils';
 import { addPopupMessageAtom } from '../../../utils/popupMessageUtils';
+import { savedSearchAttachment } from '../../../utils/zoteroReferences';
 
 /**
  * "+" picker on a user message being edited: the composer's Add Sources menu,
@@ -127,6 +128,24 @@ export function RequestSourcesMenu({
             messageAttachmentIdentityKeys(candidate).includes(key));
         if (attachment) onRemoveAttachment(messageAttachmentIdentity(attachment));
     }, [attachments, attachedKeys, itemLookupKeys, onRemoveAttachment]);
+
+    // A saved search is a scope attachment of the message, like a dropped one:
+    // picking it again detaches it.
+    const isSavedSearchPicked = useCallback((search: Zotero.Search) => {
+        const view = savedSearchAttachment(search);
+        return !!view && messageAttachmentIdentityKeys(view).some((key) => attachedKeys.has(key));
+    }, [attachedKeys]);
+
+    const pickSavedSearch = useCallback((search: Zotero.Search) => {
+        if (!searchableLibraryIds.includes(search.libraryID)) return;
+        const view = savedSearchAttachment(search);
+        if (!view) return;
+        if (isSavedSearchPicked(search)) {
+            onRemoveAttachment(messageAttachmentIdentity(view));
+            return;
+        }
+        onAddAttachments([view], editSessionId);
+    }, [editSessionId, isSavedSearchPicked, onAddAttachments, onRemoveAttachment, searchableLibraryIds]);
 
     const attachFiles = useCallback((paths: string[]) => {
         const session = editSessionId;
@@ -243,7 +262,9 @@ export function RequestSourcesMenu({
         filters: filterState,
         setFilters: setFilterState,
         attachFiles,
-    }), [isAttached, addItem, removeItem, filterState, setFilterState, attachFiles]);
+        pickSavedSearch,
+        isSavedSearchPicked,
+    }), [isAttached, addItem, removeItem, filterState, setFilterState, attachFiles, pickSavedSearch, isSavedSearchPicked]);
 
     return (
         <AddSourcesMenu

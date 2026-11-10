@@ -24,8 +24,13 @@ import {
     buildPreviewData,
     getAgentActionToolIcon,
     getStatusConfig,
+    isStaleProposal,
+    STALE_APPLY_ANYWAY_TOOLTIP,
+    staleProposalDetail,
+    wasRefusedAsStale,
     unconfirmedCaption,
 } from '../agentActionViewHelpers';
+import { StaleProposalNote } from '../StaleProposalNote';
 import { ActionPreview } from '../ActionPreview';
 import type { ReviewRow } from '../reviewChangeRows';
 import {
@@ -74,7 +79,7 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
     const runId = row.runId;
     const [isProcessing, setIsProcessing] = useState(false);
     const [isUndoError, setIsUndoError] = useState(false);
-    const [clickedButton, setClickedButton] = useState<'approve' | 'reject' | 'undo' | 'refresh' | null>(null);
+    const [clickedButton, setClickedButton] = useState<'approve' | 'applyAnyway' | 'reject' | 'undo' | 'refresh' | null>(null);
     const [isHovered, setIsHovered] = useState(false);
 
     const applyAgentActions = useSetAtom(applyAgentActionsAtom);
@@ -143,26 +148,35 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
         .filter((className) => className !== 'scale-11')
         .join(' ');
 
-    const handleApply = useCallback(async () => {
+    // `skipStaleCheck` is "Apply anyway" for a proposal the library has
+    // moved away from.
+    const applyRow = useCallback(async (skipStaleCheck: boolean) => {
         if (isDisabled) return;
 
         setIsUndoError(false);
         setIsProcessing(true);
-        setClickedButton('approve');
+        setClickedButton(skipStaleCheck ? 'applyAnyway' : 'approve');
         try {
-            await applyAgentActions({ actions: row.actions, runId });
+            const result = await applyAgentActions({ actions: row.actions, runId, skipStaleCheck });
+            // Refused because the library changed: open the row on what changed.
+            if (wasRefusedAsStale(result)) {
+                setExpanded({ key: expansionKey, expanded: true });
+            }
         } finally {
             setIsProcessing(false);
             setClickedButton(null);
         }
-    }, [isDisabled, row, runId, applyAgentActions]);
+    }, [isDisabled, row, runId, applyAgentActions, setExpanded, expansionKey]);
+    const handleApply = useCallback(() => applyRow(false), [applyRow]);
+    const handleApplyAnyway = useCallback(() => applyRow(true), [applyRow]);
 
     const handleReject = useCallback(() => {
         if (isDisabled) return;
 
         // A row can mix settled and undecided actions. Reject only the ones
-        // that still await a decision.
-        const pendingActions = row.actions.filter((action) => action.status === 'pending');
+        // that still await a decision, including an apply refused because the
+        // library changed since the proposal.
+        const pendingActions = row.actions.filter((action) => action.status === 'pending' || isStaleProposal(action));
         if (pendingActions.length === 0) return;
 
         setClickedButton('reject');
@@ -252,6 +266,7 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
     const previewData = buildPreviewData(row.actionType, null, firstAction);
     // An unconfirmed change offers nothing to click; this says what to do.
     const unconfirmedNote = isBusy ? null : unconfirmedCaption(row.actions);
+    const staleDetail = isBusy ? null : staleProposalDetail(row.actions);
 
     const containerClassName = inGroup
         ? 'display-flex flex-col min-w-0'
@@ -361,6 +376,21 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
                         </Tooltip>
                     )}
 
+                    {/* A refused stale proposal: its ✓ applies it anyway. */}
+                    {((config.showApplyAnyway && !isBusy) || (isBusy && activeButton === 'applyAnyway')) && (
+                        <Tooltip content={STALE_APPLY_ANYWAY_TOOLTIP} showArrow singleLine>
+                            <IconButton
+                                icon={TickIcon}
+                                variant="ghost-secondary"
+                                iconClassName={`${isBusy ? 'font-color-secondary' : 'font-color-green'} scale-14`}
+                                onClick={handleApplyAnyway}
+                                disabled={isDisabled}
+                                loading={isBusy && activeButton === 'applyAnyway'}
+                                ariaLabel="Apply anyway"
+                            />
+                        </Tooltip>
+                    )}
+
                     {config.showApply && (!isBusy || activeButton === 'approve') && (
                         <Tooltip content="Apply" showArrow singleLine>
                             <IconButton
@@ -391,6 +421,7 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
                 </div>
             </div>
 
+            {isExpanded && staleDetail && <StaleProposalNote detail={staleDetail} />}
             {isExpanded && previewData && (
                 <ActionPreview
                     toolName={row.actionType}

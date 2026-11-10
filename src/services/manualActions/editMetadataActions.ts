@@ -5,9 +5,12 @@
 
 import { AgentAction } from '@beaver/agent-core/agents/agentActionTypes';
 import { logger } from '@beaver/agent-core/platform/logger';
-import { AppliedMetadataEdit, CreatorJSON, EditMetadataResultData, FailedMetadataEdit, MetadataEdit } from '@beaver/agent-core/types/agentActions/base';
-import { libraryRefForLibraryID, resolveItemReference } from '../../utils/libraryIdentity';
+import { AppliedMetadataEdit, CreatorJSON, EditMetadataProposedData, EditMetadataResultData, MetadataEdit } from '@beaver/agent-core/types/agentActions/base';
+import { resolveItemReference } from '../../utils/libraryIdentity';
 import { resolveFieldForItemType, sanitizeCreators } from '../../utils/zoteroUtils';
+import { unboundedExecutionContext } from '../agentDataProvider/actions/actionExecution';
+import { applyEditMetadata } from '../agentDataProvider/actions/editMetadata';
+import { joinList, ManualApplyOptions, staleProposalError } from './staleProposal';
 
 /**
  * Result of an undo operation
@@ -54,115 +57,77 @@ function creatorsEqual(a: CreatorJSON[], b: CreatorJSON[]): boolean {
     });
 }
 
+function readField(item: Zotero.Item, field: string): any {
+    try {
+        return item.getField(field, false, true) ?? null;
+    } catch {
+        // Field might not exist, treat as null
+        return null;
+    }
+}
+
+function fieldLabel(field: string): string {
+    try {
+        return Zotero.ItemFields.getLocalizedString(field) || field;
+    } catch {
+        return field;
+    }
+}
+
 /**
- * Execute an edit_metadata agent action by applying edits to the Zotero item.
- * Captures current values BEFORE applying so undo can reliably restore them.
- * @param action The agent action to execute
- * @returns Result data including applied edits with old values for undo
+ * Throw `stale_proposal` when a field or the creators changed in Zotero since
+ * the edit was proposed: the current value matches neither the value the user
+ * saw (`old_value`, `old_creators`) nor the one the edit writes. Edits stored
+ * without those baselines are not checked.
+ */
+function assertMetadataUnchanged(
+    item: Zotero.Item,
+    edits: MetadataEdit[],
+    creators: CreatorJSON[] | null | undefined,
+    oldCreators: CreatorJSON[] | null | undefined,
+): void {
+    const changed: string[] = [];
+    for (const edit of edits) {
+        if (edit.old_value === undefined) continue;
+        const field = resolveFieldForItemType(item.itemTypeID, edit.field) ?? edit.field;
+        const current = readField(item, field);
+        if (!valuesEqual(current, edit.old_value) && !valuesEqual(current, edit.new_value)) {
+            changed.push(fieldLabel(field));
+        }
+    }
+    if (creators && creators.length > 0 && Array.isArray(oldCreators)) {
+        const current = item.getCreatorsJSON() as CreatorJSON[];
+        if (!creatorsEqual(current, oldCreators) && !creatorsEqual(current, sanitizeCreators(creators))) {
+            changed.push('Creators');
+        }
+    }
+    if (changed.length > 0) {
+        throw staleProposalError(
+            `${joinList(changed)} changed in Zotero after this edit was proposed.`,
+        );
+    }
+}
+
+/**
+ * Apply a stored edit_metadata action through the shared executor
+ * (`applyEditMetadata`), which records each field's value before the edit for
+ * undo.
+ *
+ * Refuses with `stale_proposal` when an edited field changed since the
+ * proposal, unless `options.skipStaleCheck`. When some edits fail but others
+ * are saved, the result lists the failures in `failed_edits`, so the saved
+ * ones stay undoable; it throws only when nothing was saved.
  */
 export async function executeEditMetadataAction(
-    action: AgentAction
+    action: AgentAction,
+    options: ManualApplyOptions = {},
 ): Promise<EditMetadataResultData> {
-    const { library_id, zotero_key, edits, creators } = action.proposed_data as {
-        library_id: number;
-        library_ref?: string;
-        zotero_key: string;
-        edits: MetadataEdit[];
-        creators?: CreatorJSON[] | null;
-    };
-
-    const resolved = await resolveItemReference(action.proposed_data as any);
-    if (resolved.status === 'library_unavailable') {
-        throw new Error(`Library unavailable for item: ${library_id}-${zotero_key}`);
-    }
-    if (resolved.status === 'not_found') {
-        throw new Error(`Item not found: ${library_id}-${zotero_key}`);
-    }
-    const item = resolved.item;
-
-    const appliedEdits: AppliedMetadataEdit[] = [];
-    const failedEdits: FailedMetadataEdit[] = [];
-    let oldCreatorsJSON: CreatorJSON[] | null = null;
-    let newCreatorsJSON: CreatorJSON[] | null = null;
-    let creatorsApplied = false;
-
-    // Apply each field edit, capturing current value BEFORE applying for reliable undo
-    for (const edit of edits) {
-        try {
-            // The agent may supply a label belonging to another item type
-            // (e.g. 'institution' on a document). Validation accepts it via the
-            // shared base field, but setField() rejects wrong-type labels, so
-            // read and write the type-resolved field.
-            const field = resolveFieldForItemType(item.itemTypeID, edit.field) ?? edit.field;
-
-            // Capture current value before applying (for undo)
-            let oldValue: any = null;
-            try {
-                const currentValue = item.getField(field, false, true);
-                oldValue = currentValue ?? null;
-            } catch {
-                // Field might not exist, treat as null
-                oldValue = null;
-            }
-
-            // Apply the new value
-            item.setField(field, edit.new_value);
-            appliedEdits.push({
-                // Keep the field the agent supplied so results match its request.
-                field: edit.field,
-                applied_value: edit.new_value,
-                old_value: oldValue, // Store for undo
-            });
-        } catch (error) {
-            failedEdits.push({
-                field: edit.field,
-                error: String(error),
-            });
-        }
-    }
-
-    // Apply creators if provided (non-empty array)
-    if (creators && creators.length > 0) {
-        try {
-            oldCreatorsJSON = item.getCreatorsJSON();
-            item.setCreators(sanitizeCreators(creators) as any[]);
-            creatorsApplied = true;
-        } catch (error) {
-            failedEdits.push({
-                field: 'creators',
-                error: String(error),
-            });
-        }
-    }
-
-    // Save the item if any changes were applied
-    if (appliedEdits.length > 0 || creatorsApplied) {
-        try {
-            await item.saveTx();
-            logger(`executeEditMetadataAction: Saved ${appliedEdits.length} edits${creatorsApplied ? ' + creators' : ''} to ${item.libraryID}-${zotero_key}`, 1);
-        } catch (error) {
-            throw new Error(`Failed to save item: ${error}`);
-        }
-    }
-
-    if (creatorsApplied) {
-        newCreatorsJSON = item.getCreatorsJSON();
-    }
-
-    if (failedEdits.length > 0) {
-        throw new Error(`Some edits failed: ${failedEdits.map(e => e.field).join(', ')}`);
-    }
-
-    return {
-        library_id: item.libraryID,
-        zotero_key,
-        library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
-        applied_edits: appliedEdits,
-        rejected_edits: [],
-        failed_edits: failedEdits,
-        old_creators: oldCreatorsJSON,
-        new_creators: newCreatorsJSON,
-    };
+    const data = action.proposed_data as EditMetadataProposedData;
+    return applyEditMetadata(data, unboundedExecutionContext(), {
+        assertUnchanged: options.skipStaleCheck
+            ? undefined
+            : (item) => assertMetadataUnchanged(item, data.edits, data.creators, data.old_creators),
+    });
 }
 
 /**
