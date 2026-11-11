@@ -6577,7 +6577,7 @@
 .beaver-root .feature-credits-text {
     margin: 0;
     padding-right: 4px;
-    color: var(--fill-secondary);
+    color: var(--fill-primary);
     line-height: 1.45;
 }
 .beaver-root .feature-credits-list {
@@ -6624,7 +6624,7 @@
 }
 .beaver-root .feature-credits-row-subtitle {
     font-size: 0.9em;
-    color: var(--fill-tertiary);
+    color: var(--fill-secondary);
 }
 .beaver-root .feature-credits-steps {
     list-style: none;
@@ -6633,7 +6633,7 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
-    color: var(--fill-secondary);
+    color: var(--fill-primary);
     line-height: 1.45;
 }
 .beaver-root .feature-credits-step {
@@ -6644,7 +6644,29 @@
 .beaver-root .feature-credits-step-marker {
     flex: none;
     min-width: 1.1em;
-    color: var(--fill-tertiary);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+.beaver-root .feature-credits-step-body {
+    flex: 1;
+    min-width: 0;
+}
+/* A done step or status line. Declared after the marker so it wins. */
+.beaver-root .feature-credits-check {
+    font-weight: 600;
+    color: var(--tag-green);
+}
+/* One-click examples: inline links in the text color, blue on hover. */
+.beaver-root .feature-credits-example {
+    color: var(--fill-primary);
+    text-decoration: underline;
+    text-decoration-color: var(--fill-secondary);
+    text-underline-offset: 2px;
+    cursor: pointer;
+}
+.beaver-root .feature-credits-example:hover {
+    color: var(--accent-blue);
+    text-decoration-color: var(--accent-blue);
 }
 .beaver-root .feature-credits-command {
     font-family: var(--beaver-font-mono, monospace);
