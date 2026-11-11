@@ -141,11 +141,6 @@ export interface TableCardProps {
     disabled?: boolean;
     heldCaption?: string;
     onStop?: () => void;
-    /**
-     * Set the card aside and write a message instead, for a run that has
-     * already ended waiting on the answer: a message moves on without it.
-     */
-    onWriteInstead?: () => void;
 }
 
 function libraryIdOf(ref: string): number | null {
@@ -216,7 +211,7 @@ function resolutionKey(source: DraftSource): string {
  * the last step (the run checkbox and its receipt), and the controls (ways out
  * on the left, the one way forward on the right).
  */
-export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disabled = false, heldCaption, onStop, onWriteInstead }) => {
+export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disabled = false, heldCaption, onStop }) => {
     // The draft lives in the renderer's store, keyed by card, so a remount
     // (switching sidebars, closing Beaver) keeps the user's edits.
     const cardId = request.card_id;
@@ -948,19 +943,6 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
         </div>
     ) : null;
 
-    const writeInsteadButton = onWriteInstead && (
-        <Tooltip content="Write a message instead" showArrow singleLine>
-            <Button
-                variant="ghost"
-                ariaLabel="Write a message instead"
-                onClick={onWriteInstead}
-                className="flex-none whitespace-nowrap"
-            >
-                Write instead
-            </Button>
-        </Tooltip>
-    );
-
     const stopButton = disabled && onStop && (
         <Tooltip content="Stop the agent run" showArrow singleLine>
             <Button
@@ -1113,7 +1095,6 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
                     >
                         Cancel
                     </Button>
-                    {writeInsteadButton}
                     {/* "Add screening" joins this row when screening exists (P4). */}
                     <div className="flex-1" />
                     {/* While the answer is held, Stop takes the way forward's place. */}

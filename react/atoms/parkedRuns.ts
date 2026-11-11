@@ -69,9 +69,10 @@ export const releaseCardAnswerAtom = atom(null, (get, set, toolCallId: string) =
 export const resumeLiveCardsAtom = atom<ReadonlySet<string>>(new Set<string>());
 
 /**
- * Tool calls whose takeover card (question, batch, table) the user set aside
- * to write a message instead. The composer shows in its place until the user
- * goes back to the card.
+ * Tool calls whose takeover card (question, batch, table) of the parked run
+ * is set aside, so the composer shows in its place (see `Sidebar`). No
+ * control sets it at present: hiding a parked card to write a message
+ * instead would add its tool call here, and a way back would clear it.
  */
 export const setAsideParkedCardsAtom = atom<ReadonlySet<string>>(new Set<string>());
 

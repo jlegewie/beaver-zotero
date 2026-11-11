@@ -4,7 +4,7 @@ import type { PendingBatchApproval } from '@beaver/agent-core/run-state/pendingB
 import type { BatchApprovalDecision } from '@beaver/agent-core/run-state/batchApprovalAnswers';
 import { isRunReconnectingAtom, sendBatchApprovalResponseAtom } from '../../atoms/agentRunAtoms';
 import { useStopRun } from '../../hooks/useStopRun';
-import { useWriteInsteadOfParkedCard } from '../../hooks/useWriteInsteadOfParkedCard';
+import { useIsOpenParkedCard } from '../../hooks/useIsOpenParkedCard';
 import BatchApprovalCard from '@beaver/agent-ui/chat/BatchApprovalCard';
 import { RECONNECT_HELD_CAPTION } from '@beaver/agent-core/transport/connectionFailure';
 import { useRunReconnectShown } from '../../hooks/useVisibleReconnect';
@@ -58,7 +58,7 @@ export const BatchApprovalPanel: React.FC<BatchApprovalPanelProps> = ({ approval
     const isReconnecting = useAtomValue(isRunReconnectingAtom);
     const reconnectShown = useRunReconnectShown();
     const handleStop = useStopRun('BatchApprovalPanel');
-    const writeInstead = useWriteInsteadOfParkedCard(approval.toolcallId);
+    const isParkedCard = useIsOpenParkedCard(approval.toolcallId);
 
     return (
         <BatchApprovalCard
@@ -66,8 +66,7 @@ export const BatchApprovalPanel: React.FC<BatchApprovalPanelProps> = ({ approval
             onSubmit={handleSubmit}
             disabled={isReconnecting}
             heldCaption={reconnectShown ? RECONNECT_HELD_CAPTION : undefined}
-            onStop={writeInstead ? undefined : handleStop}
-            onWriteInstead={writeInstead}
+            onStop={isParkedCard ? undefined : handleStop}
         />
     );
 };

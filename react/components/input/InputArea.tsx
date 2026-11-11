@@ -33,7 +33,7 @@ import BackToSuggestions, { FirstRunBackTarget } from '../pages/firstRun/BackToS
 import { continuationOfferAtom, hasWhereToStartRunAtom, lastRunSummaryAtom, threadRunIdsAtom } from '@beaver/agent-core/run-state/atoms';
 import { waitsOnFillAtom } from '@beaver/agent-core/run-state/tableChatFills';
 import { PromptOrigin, isRunFinished } from '@beaver/agent-core/agents/types';
-import { isThreadParkedAtom, setAsideParkedCardsAtom } from '../../atoms/parkedRuns';
+import { isThreadParkedAtom } from '../../atoms/parkedRuns';
 import { firstRunNextStepsDismissedAtom } from '../../atoms/firstRun';
 import { dismissHighTokenWarningForThreadAtom, dismissedHighTokenWarningByThreadAtom, backendHighTokenUsageRunsAtom } from '../../atoms/messageUIState';
 import { getLastRequestInputTokens } from '../../utils/runUsage';
@@ -159,10 +159,6 @@ const InputArea: React.FC<InputAreaProps> = ({
     const clearComposer = useSetAtom(clearComposerAtom);
     const hasPendingApprovals = pendingApprovalsMap.size > 0;
     const isAwaitingApproval = hasPendingApprovals && !isParked;
-    // Takeover cards of the parked run the user set aside to write instead.
-    const setAsideParkedCards = useAtomValue(setAsideParkedCardsAtom);
-    const setSetAsideParkedCards = useSetAtom(setAsideParkedCardsAtom);
-    const hasSetAsideParkedCards = isParked && setAsideParkedCards.size > 0;
     // The run holding a full-access grant, if one does. The policy is cleared at
     // every run boundary, so holding it means the grant is live right now — and
     // once it is, no further card is raised, so this bar is the only place left
@@ -299,13 +295,11 @@ const InputArea: React.FC<InputAreaProps> = ({
     // One ordered list (not a suppression clause in each predicate) so a new
     // band takes a place here instead of stacking. Laid out lowest-priority
     // first so the winner sits nearest the composer.
-    const composerBand: 'high-token' | 'next-steps' | 'back-to-suggestions' | 'continue' | 'approvals' | 'parked-cards' | 'full-access' | 'thread-presence' | null =
+    const composerBand: 'high-token' | 'next-steps' | 'back-to-suggestions' | 'continue' | 'approvals' | 'full-access' | 'thread-presence' | null =
         threadReadOnly || stoppingPreviousRun
             ? 'thread-presence'
             : hasPendingApprovals
                 ? 'approvals'
-                : hasSetAsideParkedCards
-                    ? 'parked-cards'
                 : fullAccessRunId
                     ? 'full-access'
                     : continuation
@@ -723,25 +717,6 @@ const InputArea: React.FC<InputAreaProps> = ({
                     disabled={isVerdictInFlight}
                     heldCaption={reconnectShown ? RECONNECT_HELD_CAPTION : undefined}
                 />
-            )}
-
-            {/* A card of the parked run was set aside to write a message
-                instead; sending one moves on without it. */}
-            {composerBand === 'parked-cards' && (
-                <div className="composer-docked-bar pending-actions-bar display-flex flex-row items-center px-3 py-2 border-bottom-quinary gap-2">
-                    <span className="font-color-secondary text-sm truncate flex-1">
-                        Beaver is waiting for your answer
-                    </span>
-                    <Button
-                        type="button"
-                        variant="outline"
-                        className="flex-none"
-                        ariaLabel="Answer the waiting card"
-                        onClick={() => setSetAsideParkedCards(new Set<string>())}
-                    >
-                        Answer
-                    </Button>
-                </div>
             )}
 
             {/* The chat is closed to this window. Outranks every other band:
