@@ -5,6 +5,7 @@ import { isCreateCard, isFillCard, type WSTableCardResponse } from '@beaver/agen
 import { RECONNECT_HELD_CAPTION } from '@beaver/agent-core/transport/connectionFailure';
 import { isRunReconnectingAtom, sendTableCardResponseAtom } from '../../../atoms/agentRunAtoms';
 import { useStopRun } from '../../../hooks/useStopRun';
+import { useIsOpenParkedCard } from '../../../hooks/useIsOpenParkedCard';
 import { useRunReconnectShown } from '../../../hooks/useVisibleReconnect';
 import TableCard from './TableCard';
 import TableFillCard from './TableFillCard';
@@ -27,6 +28,7 @@ export const TableCardPanel: React.FC<TableCardPanelProps> = ({ card }) => {
     const isReconnecting = useAtomValue(isRunReconnectingAtom);
     const reconnectShown = useRunReconnectShown();
     const handleStop = useStopRun('TableCardPanel');
+    const isParkedCard = useIsOpenParkedCard(card.toolcall_id);
     const handleSubmit = useCallback((response: WSTableCardResponse) => send(response), [send]);
 
     const held = reconnectShown ? RECONNECT_HELD_CAPTION : undefined;
@@ -37,7 +39,13 @@ export const TableCardPanel: React.FC<TableCardPanelProps> = ({ card }) => {
     // Any other card was declined when it arrived.
     if (!isCreateCard(card)) return null;
     return (
-        <TableCard request={card} onSubmit={handleSubmit} disabled={isReconnecting} heldCaption={held} onStop={handleStop} />
+        <TableCard
+            request={card}
+            onSubmit={handleSubmit}
+            disabled={isReconnecting}
+            heldCaption={held}
+            onStop={isParkedCard ? undefined : handleStop}
+        />
     );
 };
 

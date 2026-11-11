@@ -29,6 +29,7 @@ import { accountGenerationAtom } from "../atoms/profile";
 import { store } from "../store";
 import type { WindowRuntime } from "../../src/runtime/instance";
 import { currentWriter } from "./threadWriter";
+import { syncParkedCardsAtom } from "../atoms/parkedRuns";
 import { viewedHistoryRevisionAtom } from "./threadProjection";
 import {
     REATTACH_RESOLUTION_WINDOW_MS,
@@ -246,6 +247,8 @@ export async function reconcileThread(
             : loaded.runs,
     );
     if (!keepLocal) set(activeRunAtom, null);
+    // The saved history may end on a parked run, or no longer does.
+    set(syncParkedCardsAtom);
     set(
         threadAgentActionsAtom,
         withUnrecordedResults(

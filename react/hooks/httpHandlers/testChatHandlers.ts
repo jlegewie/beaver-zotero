@@ -21,6 +21,8 @@ import { mergeItemsChoicesAtom } from '../../atoms/mergeItemsChoices';
  *   /beaver/test/approve-action approve or reject a pending write approval
  *   /beaver/test/confirm-credits continue or skip a pending credit confirmation
  *   /beaver/test/table-card     answer a pending table card (create, with edits, or decline)
+ *   /beaver/test/answer-question answer (or skip) a pending ask_user_question card
+ *   /beaver/test/batch-approval approve or decline a pending batch approval
  *   /beaver/test/undo-action    undo an applied action
  *   /beaver/test/chat-drop-connection  lose the chat socket mid-run, to exercise run reattach
  *   /beaver/test/run-snapshot   the open chat's runs and the transport's reattach events
@@ -75,6 +77,8 @@ import {
     isWSChatPendingAtom,
     resumeFromRunAtom,
     sendApprovalResponseAtom,
+    sendAskUserQuestionResponseAtom,
+    sendBatchApprovalResponseAtom,
     sendCreditConfirmationResponseAtom,
     sendTableCardResponseAtom,
     stoppingPreviousRunAtom,
@@ -92,6 +96,10 @@ import {
 } from '../../agents/agentActions';
 import type { PendingApproval } from '@beaver/agent-ui/host';
 import { pendingQuestionsAtom } from '@beaver/agent-core/run-state/pendingQuestions';
+import { pendingBatchApprovalsAtom } from '@beaver/agent-core/run-state/pendingBatchApprovals';
+import { openParkedRunAtom } from '@beaver/agent-core/run-state/parkedRun';
+import type { AskUserQuestionAnswer } from '@beaver/agent-core/protocol/agentProtocol';
+import { isResumeWaitingAtom, isThreadParkedAtom, pendingParkedAnswerIdsAtom, resumeLiveCardsAtom } from '../../atoms/parkedRuns';
 import {
     currentMessageItemsAtom,
     currentMessageCollectionsAtom,
@@ -212,7 +220,27 @@ function currentIds() {
         lastRunId: runs.length ? runs[runs.length - 1].id : null,
         pendingApprovals: Array.from(approvals.values()).map(serializeApproval),
         pendingQuestionIds: Array.from(questions.keys()),
+        pendingBatchApprovals: Array.from(store.get(pendingBatchApprovalsAtom).values()).map((approval) => ({
+            approvalId: approval.approvalId,
+            toolcallId: approval.toolcallId,
+            batchId: approval.batchId,
+            title: approval.title,
+        })),
         pendingTableCards: Array.from(store.get(pendingTableCardsAtom).values()),
+        // The run the open thread rests on while it waits for answers, and the
+        // answers on their way to the run that resumes it.
+        parked: (() => {
+            const open = store.get(openParkedRunAtom);
+            return open ? {
+                runId: open.runId,
+                toolCallIds: [...open.toolCallIds],
+                kinds: open.deferrals.map((deferral) => deferral.kind),
+                isThreadParked: store.get(isThreadParkedAtom),
+                resumeLiveCards: [...store.get(resumeLiveCardsAtom)],
+                isResumeWaiting: store.get(isResumeWaitingAtom),
+            } : null;
+        })(),
+        pendingParkedAnswers: [...store.get(pendingParkedAnswerIdsAtom)],
         pendingCreditConfirmations: Array.from(creditConfirmations.values()).map((c) => ({
             confirmationId: c.confirmationId,
             title: c.title,
@@ -224,22 +252,32 @@ function currentIds() {
     };
 }
 
-type SettleReason = 'done' | 'approval' | 'question' | 'credit-confirmation' | 'table-card' | 'timeout';
+type SettleReason = 'done' | 'parked' | 'resume-waiting' | 'approval' | 'question' | 'credit-confirmation' | 'table-card' | 'batch-approval' | 'timeout';
 
 /**
- * Poll until the run settles: it finished streaming (`done`), paused for a write
- * approval (`approval`), paused for an ask_user_question (`question`), paused for
- * a run-level credit confirmation (`credit-confirmation`), or the timeout
+ * Poll until the run settles: it finished streaming (`done`), ended waiting
+ * on cards that stay answerable (`parked`), resumed with some answers and
+ * now waits live for the other cards (`resume-waiting`), paused for a write approval
+ * (`approval`), paused for an ask_user_question (`question`), paused for a
+ * run-level credit confirmation (`credit-confirmation`), or the timeout
  * elapsed. A paused run keeps `isWSChatPendingAtom` true, so we must break on
- * every blocking state or we would block until timeout.
+ * every blocking state or we would block until timeout. An answer to a parked
+ * card still on its way to its resume is waited for.
  */
 async function waitForRunSettle(timeoutMs: number, pollMs = 300): Promise<SettleReason> {
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
+        if (store.get(isResumeWaitingAtom)) return 'resume-waiting';
+        if (store.get(pendingParkedAnswerIdsAtom).size > 0) {
+            await sleep(pollMs);
+            continue;
+        }
+        if (store.get(isThreadParkedAtom) && !store.get(isWSChatPendingAtom)) return 'parked';
         if (store.get(pendingApprovalsAtom).size > 0) return 'approval';
         if (store.get(pendingQuestionsAtom).size > 0) return 'question';
         if (store.get(pendingCreditConfirmationsAtom).size > 0) return 'credit-confirmation';
         if (store.get(pendingTableCardsAtom).size > 0) return 'table-card';
+        if (store.get(pendingBatchApprovalsAtom).size > 0) return 'batch-approval';
         if (!store.get(isWSChatPendingAtom)) return 'done';
         await sleep(pollMs);
     }
@@ -658,6 +696,59 @@ export async function handleTestTableCardHttpRequest(request: any) {
     const response = decline ? tableCardDecline(draft, card) : tableCardResponse(draft, card, choice, cost.cost);
     store.set(sendTableCardResponseAtom, response);
     return { ok: true, cardId, scope: card.scope, cost, response, settle: await settleIfAsked(request), ...currentIds() };
+}
+
+/**
+ * Answer a pending ask_user_question card, live or parked, as its panel does.
+ *
+ * Body: { toolcallId?, answers?: [{item_id, selected_option_ids, custom_text?}],
+ *         cancelled?, waitForDone?, timeoutMs? }
+ * Without `answers`, every question takes its first option.
+ */
+export async function handleTestAnswerQuestionHttpRequest(request: any) {
+    const pending = store.get(pendingQuestionsAtom);
+    if (pending.size === 0) return { ok: false, error: 'No pending question', ...currentIds() };
+    const toolcallId: string = request?.toolcallId ?? Array.from(pending.keys())[0];
+    const question = pending.get(toolcallId);
+    if (!question) return { ok: false, error: `Unknown toolcallId: ${toolcallId}`, ...currentIds() };
+    const cancelled = request?.cancelled === true;
+    const answers: AskUserQuestionAnswer[] = cancelled
+        ? []
+        : Array.isArray(request?.answers)
+            ? request.answers
+            : question.questions.map((item) => ({
+                item_id: item.id,
+                selected_option_ids: item.options?.length ? [item.options[0].id] : [],
+                custom_text: null,
+            }));
+    store.set(sendAskUserQuestionResponseAtom, {
+        questionId: question.questionId,
+        toolcallId,
+        answers,
+        cancelled,
+    });
+    return { ok: true, toolcallId, answers, cancelled, settle: await settleIfAsked(request), ...currentIds() };
+}
+
+/**
+ * Approve or decline a pending batch approval, live or parked, as its card does.
+ *
+ * Body: { approvalId?, approved (default true), mode?, userInstructions?, waitForDone?, timeoutMs? }
+ */
+export async function handleTestBatchApprovalHttpRequest(request: any) {
+    const pending = store.get(pendingBatchApprovalsAtom);
+    if (pending.size === 0) return { ok: false, error: 'No pending batch approval', ...currentIds() };
+    const approvalId: string = request?.approvalId ?? Array.from(pending.keys())[0];
+    const approval = pending.get(approvalId);
+    if (!approval) return { ok: false, error: `Unknown approvalId: ${approvalId}`, ...currentIds() };
+    const approved = request?.approved !== false;
+    store.set(sendBatchApprovalResponseAtom, {
+        approvalId,
+        approved,
+        mode: request?.mode ?? approval.defaultMode,
+        userInstructions: request?.userInstructions ?? null,
+    });
+    return { ok: true, approvalId, approved, settle: await settleIfAsked(request), ...currentIds() };
 }
 
 async function settleIfAsked(request: any): Promise<SettleReason | null> {

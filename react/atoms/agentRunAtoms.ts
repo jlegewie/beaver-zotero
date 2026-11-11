@@ -62,6 +62,9 @@ import {
     WSCreditConfirmationStale,
     AskUserQuestionAnswer,
     BatchApprovalMode,
+    askUserQuestionResponse,
+    batchApprovalResponse,
+    deferredApprovalResponse,
     WSStreamingDoneEvent,
     WSThreadNameEvent,
     WSReattachingInfo,
@@ -103,7 +106,7 @@ import { isAnnotationAttachment, isViewAttachment, messageAttachmentKey, zoteroR
 import { getApplicationStateProvider } from './applicationState';
 import { uint8ArrayToBase64 } from '../utils/fileUtils';
 import { isAttachmentOnServer } from '../../src/utils/webAPI';
-import { AgentRun, BeaverAgentPrompt, MessageSearchFilters, PromptAction, PromptOrigin, ResumeTrigger, RetryTrigger, ToolRequest, isRunActive } from '@beaver/agent-core/agents/types';
+import { AgentRun, BeaverAgentPrompt, MessageSearchFilters, ParkedCardAnswer, PromptAction, PromptOrigin, ResumeTrigger, RetryTrigger, ToolRequest, isContinuationPrompt, isRunActive, isRunFinished } from '@beaver/agent-core/agents/types';
 import {
     threadRunsAtom,
     activeRunAtom,
@@ -166,10 +169,12 @@ import {
 } from '../agents/agentActions';
 import {
     addPendingQuestionAtom,
+    pendingQuestionsAtom,
     removePendingQuestionAtom,
     clearAllPendingQuestionsAtom,
 } from '@beaver/agent-core/run-state/pendingQuestions';
 import {
+    pendingCreditConfirmationsAtom,
     addPendingCreditConfirmationAtom,
     removePendingCreditConfirmationAtom,
     clearAllPendingCreditConfirmationsAtom,
@@ -183,9 +188,25 @@ import {
 import {
     addPendingTableCardAtom,
     clearAllPendingTableCardsAtom,
+    pendingTableCardsAtom,
     removePendingTableCardAtom,
     removePendingTableCardForToolCallAtom,
 } from '@beaver/agent-core/run-state/pendingTableCards';
+import { openParkedRunAtom, type OpenParkedRun } from '@beaver/agent-core/run-state/parkedRun';
+import {
+    addLiveCardAnswerAtom,
+    carryLiveAnswersIntoParkedRunAtom,
+    clearParkedAnswersAtom,
+    isResumeWaitingAtom,
+    isThreadParkedAtom,
+    liveCardAnswersAtom,
+    markLiveApprovalAnswerParkingAtom,
+    parkedAnswerQueueAtom,
+    parkedAnswersInFlightAtom,
+    releaseCardAnswerAtom,
+    resumeLiveCardsAtom,
+    syncParkedCardsAtom,
+} from './parkedRuns';
 import { isCreateCard, isFillCard } from '@beaver/agent-core/protocol/tableCardProtocol';
 import type { WSTableCardRequest, WSTableCardResponse, WSTableCardStale } from '@beaver/agent-core/protocol/tableCardProtocol';
 import { tableRecordFromMetadata } from '@beaver/agent-core/run-state/tableResults';
@@ -1462,34 +1483,89 @@ export const resetWSStateAtom = atom(null, (_get, set) => {
  * Clear transient frontend state before starting a replacement run.
  * This is separate from transport-level onClose cleanup so reconnect handoffs
  * do not leak per-run approval UI or auto-approve settings into the new run.
+ *
+ * A run that resumes a parked run keeps that run's other open cards
+ * (`keepParkedCards`): they stay answerable while it runs. Any other run
+ * closes them, and drops answers still waiting to be sent.
  */
-export const prepareForNewRunAtom = atom(null, (_get, set) => {
+export const prepareForNewRunAtom = atom(null, (_get, set, options?: { keepParkedCards?: boolean }) => {
     set(resetWSStateAtom);
-    set(clearAllPendingApprovalsAtom);
-    set(clearAllPendingQuestionsAtom);
+    // A resume reconciles the card maps instead, so cards still open keep
+    // their components and drafts.
+    if (!options?.keepParkedCards) {
+        set(clearAllPendingApprovalsAtom);
+        set(clearAllPendingQuestionsAtom);
+        set(clearAllPendingBatchApprovalsAtom);
+        set(clearAllPendingTableCardsAtom);
+    }
     set(clearAllPendingCreditConfirmationsAtom);
-    set(clearAllPendingBatchApprovalsAtom);
-    set(clearAllPendingTableCardsAtom);
     set(clearApprovalResponseIntentsAtom);
     set(clearStaleApprovalsAtom);
     set(clearRunApprovalPolicyAtom);
+    set(liveCardAnswersAtom, new Map());
+    set(resumeLiveCardsAtom, new Set<string>());
+    if (options?.keepParkedCards) set(syncParkedCardsAtom);
+    else set(clearParkedAnswersAtom);
 });
 
 /**
+ * Errors of a parked resume that mean the thread changed under it: no open
+ * parked run any more, a different one, or another device answered first.
+ */
+const PARKED_RESUME_RELOAD_ERRORS = new Set(['parked_run_not_found', 'parked_run_mismatch', 'thread_tail_mismatch']);
+
+/**
+ * Settle the live answers of a run that ended, before they are cleared. An
+ * answer to a card the run parked on is queued to resume the parked run. An
+ * approval whose answer was held for a run that was to park on it but ended
+ * otherwise gets its own controls back: the answer never reached a run, and
+ * the proposal can still be applied locally.
+ */
+function settleLiveCardAnswers(set: Setter, parked: boolean): void {
+    for (const actionId of set(carryLiveAnswersIntoParkedRunAtom, { parked })) {
+        set(markApprovalStaleAtom, actionId);
+        set(removeApprovalResponseIntentAtom, actionId);
+    }
+}
+
+/**
+ * Close the cards of a run that ended. The open parked run's cards stay as
+ * they are, panels and drafts included, and are answerable again: a resume
+ * that carried answers is over, and an answer the run parked before receiving
+ * comes back too. Every other card closes with the run.
+ */
+function settleRunCards(get: Getter, set: Setter): void {
+    set(clearAllPendingCreditConfirmationsAtom);
+    set(clearRunApprovalPolicyAtom);
+    set(parkedAnswersInFlightAtom, new Set<string>());
+    set(liveCardAnswersAtom, new Map());
+    set(resumeLiveCardsAtom, new Set<string>());
+    if (get(openParkedRunAtom)) {
+        set(syncParkedCardsAtom);
+        return;
+    }
+    set(clearAllPendingApprovalsAtom);
+    set(clearAllPendingQuestionsAtom);
+    set(clearAllPendingBatchApprovalsAtom);
+    set(clearAllPendingTableCardsAtom);
+}
+
+/**
  * Find the args of the tool-call part that produced a given tool return, by
- * scanning the run's response messages. Used to derive the annotation-list
+ * scanning the thread's response messages. Used to derive the annotation-list
  * variant when synthesizing a legacy view; null when the call can't be found.
  */
 function findToolCallArgs(
-    run: AgentRun | null,
+    runs: readonly AgentRun[],
     toolCallId: string,
 ): string | Record<string, any> | null {
-    if (!run) return null;
-    for (const message of run.model_messages) {
-        if (message.kind !== 'response') continue;
-        for (const part of message.parts) {
-            if (part.part_kind === 'tool-call' && part.tool_call_id === toolCallId) {
-                return part.args;
+    for (const run of runs) {
+        for (const message of run.model_messages) {
+            if (message.kind !== 'response') continue;
+            for (const part of message.parts) {
+                if (part.part_kind === 'tool-call' && part.tool_call_id === toolCallId) {
+                    return part.args;
+                }
             }
         }
     }
@@ -1713,13 +1789,6 @@ export function createWSCallbacks(
         // Clear streaming-done state (connection lost during post-processing)
         set(streamingDoneRunIdsAtom, new Set<string>());
         streamActivity.reset();
-        // Clear pending approvals and dismiss diff preview (connection lost)
-        set(clearAllPendingApprovalsAtom);
-        set(clearAllPendingQuestionsAtom);
-        set(clearAllPendingCreditConfirmationsAtom);
-        set(clearAllPendingBatchApprovalsAtom);
-        set(clearAllPendingTableCardsAtom);
-            set(clearRunApprovalPolicyAtom);
 
         // A run that reached `completed` (run_complete processed) but whose
         // terminal `done` never arrived — the socket closed while run_complete
@@ -1728,15 +1797,16 @@ export function createWSCallbacks(
         // activeRunAtom. Finalize it the way onDone would, so the next send does
         // not overwrite and drop it from local history. Idempotent: the normal
         // path nulls activeRunAtom in onDone before close, making this a no-op.
+        let finishedParked = false;
         set(activeRunAtom, (prev) => {
             const finalRun = lingeringCompletedRun(prev);
             if (finalRun) {
+                finishedParked = !!finalRun.parked;
                 set(threadRunsAtom, (runs) => appendRunIfMissing(runs, finalRun));
                 return null;
             }
             return prev;
         });
-
         // A post-ready close that carries transport evidence came from the real
         // socket (the client's own close()/cancel() paths notify without
         // evidence). When it lands while the run is still nonterminal the server
@@ -1761,6 +1831,15 @@ export function createWSCallbacks(
                 );
             }
         }
+        // Close the run's cards and dismiss the diff preview (connection
+        // lost), except those of a run that parked, or that a failed resume
+        // left open. A run that parked before its connection was lost
+        // carries its live answers, as `onDone` would.
+        settleLiveCardAnswers(set, finishedParked);
+        settleRunCards(store.get, set);
+        // Answers queued behind a resume that parked again but lost its
+        // connection before `done` go out now, as `onDone` would send them.
+        if (store.get(parkedAnswerQueueAtom).size > 0) scheduleParkedAnswerFlush();
     };
 
     /**
@@ -1901,7 +1980,8 @@ export function createWSCallbacks(
                 // the render-time predicate; `upgradeToolReturn` no-ops on a valid view.
                 if (!isToolResultView(event.part.metadata?.view)) {
                     logger(`WS onToolReturn: No view model available for tool call ${event.part.tool_call_id}`, 1);
-                    const toolCallArgs = findToolCallArgs(store.get(activeRunAtom), event.part.tool_call_id);
+                    // A resumed call was made by an earlier run of the thread.
+                    const toolCallArgs = findToolCallArgs(store.get(allRunsAtom), event.part.tool_call_id);
                     await upgradeToolReturn(event.part, toolCallArgs);
                 }
 
@@ -1948,6 +2028,7 @@ export function createWSCallbacks(
                 // Same for a table card: create_table returns on the backend's
                 // timeout too, and the card must not outlive its call.
                 set(removePendingTableCardForToolCallAtom, toolCallId);
+                set(releaseCardAnswerAtom, toolCallId);
             }
         },
 
@@ -2099,15 +2180,24 @@ export function createWSCallbacks(
                 return null;
             });
 
+            // An answer the run parked before receiving resumes it at once.
+            // Settled before closing, which settles them as a lost connection.
+            settleLiveCardAnswers(set, !!completed?.parked);
             agentService.close();
             set(isWSChatPendingAtom, false);
-            // Clear pending approvals and dismiss diff preview
-            set(clearAllPendingApprovalsAtom);
-            set(clearAllPendingQuestionsAtom);
-            set(clearAllPendingCreditConfirmationsAtom);
-            set(clearAllPendingBatchApprovalsAtom);
-            set(clearAllPendingTableCardsAtom);
-                    set(clearRunApprovalPolicyAtom);
+            // The cards close with the run, unless the run parked on them. A
+            // parked card stays and is answerable again; answering it resumes
+            // the run.
+            const parkedActionIds = (completed?.parked?.requests ?? [])
+                .filter((deferral) => deferral.kind === 'agent_action_approval')
+                .map((deferral) => deferral.correlation_id);
+            for (const actionId of parkedActionIds) {
+                set(removeApprovalResponseIntentAtom, actionId);
+                set(unmarkApprovalStaleAtom, actionId);
+            }
+            settleRunCards(store.get, set);
+            if (completed?.parked) scheduleParkedAnswerFlush();
+            else set(clearParkedAnswersAtom);
         },
 
         onError: (event: WSErrorEvent) => {
@@ -2158,15 +2248,42 @@ export function createWSCallbacks(
             set(isWSChatPendingAtom, false);
             // Clear retry state on error
             set(wsRetryAtom, null);
-            // Clear pending approvals and dismiss diff preview (run failed)
-            set(clearAllPendingApprovalsAtom);
-            set(clearAllPendingQuestionsAtom);
-            set(clearAllPendingCreditConfirmationsAtom);
-            set(clearAllPendingBatchApprovalsAtom);
-            set(clearAllPendingTableCardsAtom);
-                    set(clearRunApprovalPolicyAtom);
+            // Close the run's cards and dismiss the diff preview (run failed).
+            // A resume that failed, or a message that failed before it
+            // superseded anything, leaves the parked run open: its cards stay,
+            // and answering one again resumes it. Answers queued for the
+            // failed resume are dropped with it.
+            set(parkedAnswerQueueAtom, new Map());
+            settleLiveCardAnswers(set, false);
+            settleRunCards(store.get, set);
+
+            const failedPrompt = errorRunId
+                ? findRunForResume(store.get(threadRunsAtom), store.get(activeRunAtom), errorRunId)?.user_prompt
+                : undefined;
+            const isParkedResume = !!failedPrompt?.deferred_results;
+            if (isParkedResume && PARKED_RESUME_RELOAD_ERRORS.has(event.type)) {
+                // The parked run was answered or closed elsewhere (another
+                // device, say): show the thread as the server has it. Cards
+                // still open there stay answerable.
+                const threadId = store.get(currentThreadIdAtom);
+                const userId = store.get(userIdAtom);
+                if (threadId && userId && navigation === store.get(threadNavigationSeqAtom)) {
+                    set(addPopupMessageAtom, {
+                        type: 'warning',
+                        title: 'Answer not sent',
+                        text: 'This chat changed before your answer arrived. It was reloaded; answer again if the question is still open.',
+                        expire: true,
+                    });
+                    // Once this run has released the chat: the reload records
+                    // the history revision it shows, and releasing the chat
+                    // afterwards would leave this window a revision behind.
+                    void Promise.resolve().then(() => store.set(loadThreadAtom, { user_id: userId, threadId, preserveDraft: true }))
+                        .catch((error) => logger(`WS onError: reloading the thread failed: ${error}`, 1));
+                }
+            }
 
             if (
+                !isParkedResume &&
                 !isThreadConflict(event) &&
                 event.try_auto_resume &&
                 errorRunId &&
@@ -2185,7 +2302,7 @@ export function createWSCallbacks(
                     errorRunId,
                 );
                 const retryInsteadOfResume =
-                    !failedRun?.user_prompt.is_resume &&
+                    !(failedRun && isContinuationPrompt(failedRun.user_prompt)) &&
                     hasOnlyThinkingParts(failedRun);
 
                 set(scheduledAutoResumeRunIdsAtom, (prev: Set<string>) => {
@@ -2320,6 +2437,8 @@ export function createWSCallbacks(
                 return;
             }
 
+            if (takeResumedCard(store.get, set, event.toolcall_id, store.get(pendingApprovalsAtom).has(event.action_id))) return;
+
             // Default: add to pending approvals map for UI rendering
             set(addPendingApprovalAtom, event);
         },
@@ -2329,6 +2448,13 @@ export function createWSCallbacks(
                 actionId: event.action_id,
                 reason: event.reason,
             }, 1);
+            // The card parks with its run: the answer is kept and resumes the
+            // parked run once it has parked (see `onDone`), so the card stays
+            // on its spinner rather than offering to apply locally.
+            if (event.reason === 'parking' && set(markLiveApprovalAnswerParkingAtom, event.action_id)) {
+                set(removePendingApprovalAtom, event.action_id);
+                return;
+            }
             // The decision arrived after the backend stopped waiting, so the run
             // never saw it. Retire the approval and let the card fall back to
             // applying the (still valid) proposal locally.
@@ -2374,6 +2500,7 @@ export function createWSCallbacks(
                 defaultMode: event.default_mode,
                 hasDestructiveWarning: Boolean(event.destructive_warning),
             }, 1);
+            if (takeResumedCard(store.get, set, event.toolcall_id, store.get(pendingBatchApprovalsAtom).has(event.approval_id))) return;
             set(addPendingBatchApprovalAtom, event);
 
             // Surface an OS-native notification if the user can't currently see
@@ -2406,6 +2533,7 @@ export function createWSCallbacks(
                 agentService.sendTableCardResponse({ type: 'table_card_response', card_id: event.card_id, approved: false });
                 return;
             }
+            if (takeResumedCard(store.get, set, event.toolcall_id, store.get(pendingTableCardsAtom).has(event.card_id))) return;
             set(addPendingTableCardAtom, event);
         },
 
@@ -2420,6 +2548,7 @@ export function createWSCallbacks(
                 toolcallId: event.toolcall_id,
                 questionCount: event.questions.length,
             }, 1);
+            if (takeResumedCard(store.get, set, event.toolcall_id, store.get(pendingQuestionsAtom).has(event.toolcall_id))) return;
             set(addPendingQuestionAtom, event);
 
             // Surface an OS-native notification if the user can't currently see
@@ -3146,8 +3275,13 @@ const sendWSMessage = async (
         }
     };
 
-export const sendWSMessageAtom = atom(null, (get, set, message: string, options?: SendWSMessageOptions) =>
-    withThreadWriter(get, set, guardedSet => sendWSMessage(get, guardedSet, message, options)));
+export const sendWSMessageAtom = atom(null, (get, set, message: string, options?: SendWSMessageOptions) => {
+    const send = () => withThreadWriter(get, set, guardedSet => sendWSMessage(get, guardedSet, message, options));
+    // Claims the writer in the same tick as the click unless a resume must
+    // be parked first, so a second click finds it taken.
+    if (!messageParksResume(get)) return send();
+    return set(parkResumeForMessageAtom).then((parkedResume) => (parkedResume ? send() : undefined));
+});
 
 /** How a regenerate path replaces the target run. */
 interface RegenerateRunOptions {
@@ -3375,7 +3509,7 @@ async function startRegenerateRunOwned(
                 !editedPrompt &&
                 activeRun?.id !== localTarget.id &&
                 (localTarget.status === 'error' || localTarget.status === 'canceled') &&
-                targetRun.status === 'completed'
+                isRunFinished(targetRun)
             ) {
                 logger(`${logPrefix}: Run ${targetRun.id} completed on the server; not retrying it`, 1);
                 set(addPopupMessageAtom, {
@@ -3783,14 +3917,7 @@ export const abandonActiveRunLocallyAtom = atom(null, (get, set) => {
     // Set pending to false immediately for better UI responsiveness
     set(isWSChatPendingAtom, false);
 
-    // Clear any pending approvals (for parallel tool calls that were awaiting user response)
-    set(clearAllPendingApprovalsAtom);
-    set(clearAllPendingQuestionsAtom);
-    set(clearAllPendingCreditConfirmationsAtom);
-    set(clearAllPendingBatchApprovalsAtom);
-    set(clearAllPendingTableCardsAtom);
     set(clearApprovalResponseIntentsAtom);
-    set(clearRunApprovalPolicyAtom);
 
     // Archive live runs (including deferred-approval). Error runs keep their
     // slot so Retry still works.
@@ -3820,6 +3947,12 @@ export const abandonActiveRunLocallyAtom = atom(null, (get, set) => {
     // A run abandoned while reconnecting is no longer shown as reconnecting;
     // its reattach goes on only to deliver the cancel.
     set(wsReconnectingAtom, null);
+    // Close the run's cards (for parallel tool calls that were awaiting the
+    // user). A resume stopped before it ran its tools leaves the parked run
+    // open, and its cards stay.
+    set(parkedAnswerQueueAtom, new Map());
+    settleLiveCardAnswers(set, false);
+    settleRunCards(get, set);
 });
 
 /**
@@ -3865,8 +3998,16 @@ export const closeWSConnectionForShutdownAtom = atom(
         // Latch first: a send still preparing has nothing to close or abandon.
         clientShutDown = true;
         if (!agentService.isConnected() && connectLoopsInFlight === 0) { releaseWriter(); return; }
+        // A run waiting only on cards parks rather than ending with the
+        // client, so they can be answered next time. Best effort: the server
+        // also parks such a run when its socket closes.
+        const parked = (() => {
+            const parkRunId = parkableRunId(get);
+            return !!parkRunId && agentService.sendPark(parkRunId);
+        })();
         agentService.close(1000, reason);
-        if (options?.rememberInterruptedThread) rememberInterruptedThread(get);
+        // A parked run was not interrupted: its card is waiting in the chat.
+        if (options?.rememberInterruptedThread && !parked) rememberInterruptedThread(get);
         set(abandonActiveRunLocallyAtom);
     },
 );
@@ -3918,6 +4059,7 @@ export const clearThreadAtom = atom(null, (_get, set) => {
     set(clearAllPendingBatchApprovalsAtom);
     set(clearAllPendingTableCardsAtom);
     set(clearRunApprovalPolicyAtom);
+    set(clearParkedAnswersAtom);
 });
 
 /**
@@ -3976,6 +4118,19 @@ export const clearStaleApprovalsAtom = atom(
     },
 );
 
+/** The approval can be answered again: its run parked on it. */
+export const unmarkApprovalStaleAtom = atom(
+    null,
+    (_get, set, actionId: string) => {
+        set(staleApprovalActionIdsAtom, (prev) => {
+            if (!prev.has(actionId)) return prev;
+            const next = new Set(prev);
+            next.delete(actionId);
+            return next;
+        });
+    },
+);
+
 // Note: clearing `pendingApprovalsAtom` when a run ends does not strand the
 // proposals it was carrying. Every deferred tool emits and persists its action
 // before it starts waiting, so each card falls back to the `status === 'pending'`
@@ -3992,18 +4147,28 @@ export const clearStaleApprovalsAtom = atom(
  */
 export const sendApprovalResponseAtom = atom(
     null,
-    (_get, set, { actionId, approved, userInstructions }: { actionId: string; approved: boolean; userInstructions?: string | null }) => {
-        if (!ownsWriter(currentWriter())) return;
-        set(approvalResponseIntentsAtom, (prev) => {
+    (get, set, { actionId, approved, userInstructions }: { actionId: string; approved: boolean; userInstructions?: string | null }) => {
+        const actionChanges = approved ? get(mergeItemsChoicesAtom)[actionId] : undefined;
+        const toolcallId = get(pendingApprovalsAtom).get(actionId)?.toolcallId;
+        const answer = deferredApprovalResponse(actionId, approved, userInstructions, actionChanges);
+        const recordIntent = () => set(approvalResponseIntentsAtom, (prev) => {
             const next = new Map(prev);
             next.set(actionId, approved);
             return next;
         });
+        if (toolcallId && answerParkedCard(get, set, toolcallId, answer)) {
+            recordIntent();
+            return;
+        }
+        if (!ownsWriter(currentWriter())) return;
+        recordIntent();
         logger(`sendApprovalResponseAtom: Sending approval response for ${actionId}: ${approved}${userInstructions ? ' (with instructions)' : ''}`, 1);
-        const delivered = agentService.sendApprovalResponse(actionId, approved, userInstructions, approved ? _get(mergeItemsChoicesAtom)[actionId] : undefined);
+        const delivered = agentService.sendApprovalResponse(actionId, approved, userInstructions, actionChanges);
         if (!delivered) {
             logger(`sendApprovalResponseAtom: Approval response for ${actionId} was not sent; marking stale`, 1);
             set(markApprovalStaleAtom, actionId);
+        } else if (toolcallId) {
+            set(addLiveCardAnswerAtom, { toolCallId: toolcallId, answer });
         }
     }
 );
@@ -4164,15 +4329,22 @@ export const setRunPermissionModeAtom = atom(
  */
 export const sendAskUserQuestionResponseAtom = atom(
     null,
-    (_get, set, { questionId, toolcallId, answers, cancelled }: {
+    (get, set, { questionId, toolcallId, answers, cancelled }: {
         questionId: string;
         toolcallId: string;
         answers: AskUserQuestionAnswer[];
         cancelled?: boolean;
     }) => {
+        const answer = askUserQuestionResponse(questionId, answers, cancelled ?? false);
+        if (answerParkedCard(get, set, toolcallId, answer)) {
+            set(removePendingQuestionAtom, toolcallId);
+            return;
+        }
         if (!ownsWriter(currentWriter())) return;
         logger(`sendAskUserQuestionResponseAtom: Sending question response for ${questionId}: ${cancelled ? 'cancelled' : `${answers.length} answer(s)`}`, 1);
-        agentService.sendAskUserQuestionResponse(questionId, answers, cancelled ?? false);
+        if (agentService.sendAskUserQuestionResponse(questionId, answers, cancelled ?? false)) {
+            set(addLiveCardAnswerAtom, { toolCallId: toolcallId, answer });
+        }
         set(removePendingQuestionAtom, toolcallId);
     }
 );
@@ -4215,12 +4387,18 @@ export const sendCreditConfirmationResponseAtom = atom(
  */
 export const sendBatchApprovalResponseAtom = atom(
     null,
-    (_get, set, { approvalId, approved, mode, userInstructions }: {
+    (get, set, { approvalId, approved, mode, userInstructions }: {
         approvalId: string;
         approved: boolean;
         mode: BatchApprovalMode;
         userInstructions?: string | null;
     }) => {
+        const toolcallId = get(pendingBatchApprovalsAtom).get(approvalId)?.toolcallId;
+        const answer = batchApprovalResponse(approvalId, approved, mode, userInstructions);
+        if (toolcallId && answerParkedCard(get, set, toolcallId, answer)) {
+            set(removePendingBatchApprovalAtom, approvalId);
+            return;
+        }
         if (!ownsWriter(currentWriter())) return;
         logger(`sendBatchApprovalResponseAtom: Sending batch approval response for ${approvalId}: ${approved} (${mode})`, 1);
         const delivered = agentService.sendBatchApprovalResponse(
@@ -4231,6 +4409,8 @@ export const sendBatchApprovalResponseAtom = atom(
         );
         if (!delivered) {
             logger(`sendBatchApprovalResponseAtom: Batch approval response for ${approvalId} was not sent`, 1);
+        } else if (toolcallId) {
+            set(addLiveCardAnswerAtom, { toolCallId: toolcallId, answer });
         }
         set(removePendingBatchApprovalAtom, approvalId);
     }
@@ -4244,13 +4424,30 @@ export const sendBatchApprovalResponseAtom = atom(
  */
 export const sendTableCardResponseAtom = atom(
     null,
-    (_get, set, response: WSTableCardResponse) => {
+    (get, set, response: WSTableCardResponse) => {
+        const toolcallId = get(pendingTableCardsAtom).get(response.card_id)?.toolcall_id;
+        // The card's edits are kept until its call resolves: if the answer
+        // does not reach a run (the run parks first, or the resume fails),
+        // the card comes back with them.
+        const retireCardKeepingEdits = () => set(pendingTableCardsAtom, (prev) => {
+            if (!prev.has(response.card_id)) return prev;
+            const next = new Map(prev);
+            next.delete(response.card_id);
+            return next;
+        });
+        if (toolcallId && answerParkedCard(get, set, toolcallId, response)) {
+            retireCardKeepingEdits();
+            return;
+        }
         if (!ownsWriter(currentWriter())) return;
         const delivered = agentService.sendTableCardResponse(response);
         if (!delivered) {
             logger(`sendTableCardResponseAtom: Table card response for ${response.card_id} was not sent`, 1);
+            set(removePendingTableCardAtom, response.card_id);
+            return;
         }
-        set(removePendingTableCardAtom, response.card_id);
+        if (toolcallId) set(addLiveCardAnswerAtom, { toolCallId: toolcallId, answer: response });
+        retireCardKeepingEdits();
     }
 );
 
@@ -4264,6 +4461,263 @@ export const sendTableCardResponseAtom = atom(
  * its batch paused — as does a batch the stamp itself flags as paused.
  */
 export const batchProgressAtom = atom((get) => selectLiveBatchProgress(get(allRunsAtom)));
+
+// =============================================================================
+// Parked runs: answering a card after its run parked
+// =============================================================================
+
+/**
+ * Route an answer to a card of the open parked run, if the card is one.
+ *
+ * The answer resumes the run: it is queued and sent at once, together with
+ * any other answer given in the same moment (Approve all). While a resume of
+ * the same run is still going, it waits in the queue: it is sent over the
+ * resume's socket once the resume shows its card again, or else goes out with
+ * the next resume. Returns false for a live card, a card the running resume
+ * already shows again included, which the caller answers over the socket as
+ * usual.
+ */
+function answerParkedCard(get: Getter, set: Setter, toolcallId: string, answer: ParkedCardAnswer): boolean {
+    const open = get(openParkedRunAtom);
+    if (!open || !open.toolCallIds.has(toolcallId) || get(resumeLiveCardsAtom).has(toolcallId)) return false;
+    logger(`answerParkedCard: queuing the answer to ${toolcallId} for parked run ${open.runId}`, 1);
+    set(parkedAnswerQueueAtom, (prev) => new Map(prev).set(toolcallId, { threadId: open.threadId, answer }));
+    scheduleParkedAnswerFlush();
+    return true;
+}
+
+/**
+ * Take a card a run shows live that is one of the open parked run's cards,
+ * shown again by the resume that runs now: the card on screen (`onScreen`)
+ * becomes live, and an answer queued for it meanwhile is sent over the socket
+ * now. Returns true when nothing is left to show: the queued answer was sent,
+ * or the card is already on screen. Any other card is shown as usual.
+ */
+function takeResumedCard(get: Getter, set: Setter, toolcallId: string, onScreen: boolean): boolean {
+    const open = get(openParkedRunAtom);
+    const activeRun = get(activeRunAtom);
+    if (!open || !open.toolCallIds.has(toolcallId) || activeRun?.user_prompt?.resumes_run_id !== open.runId) return false;
+    set(resumeLiveCardsAtom, (prev) => new Set(prev).add(toolcallId));
+    const queued = get(parkedAnswerQueueAtom).get(toolcallId);
+    if (!queued) return onScreen;
+    set(parkedAnswerQueueAtom, (prev) => {
+        const next = new Map(prev);
+        next.delete(toolcallId);
+        return next;
+    });
+    // Not sent: the card comes back when the run ends, as for any answer
+    // that did not reach its run.
+    if (agentService.sendCardAnswer(queued.answer)) set(addLiveCardAnswerAtom, { toolCallId: toolcallId, answer: queued.answer });
+    return true;
+}
+
+/** Send queued answers once the current task (and any answer it gives) is done. */
+function scheduleParkedAnswerFlush(): void {
+    void Promise.resolve().then(() => store.set(flushParkedAnswersAtom));
+}
+
+/** Set while a resume is being started, before its run is installed. */
+let parkedResumeStarting = false;
+
+/**
+ * Whether a run of this window is going or still landing, so a resume has to
+ * wait for it: `onDone` sends what was queued meanwhile.
+ */
+function parkedResumeBlocked(get: Getter): boolean {
+    const activeRun = get(activeRunAtom);
+    return parkedResumeStarting
+        || get(isWSChatPendingAtom)
+        || isRunActive(activeRun)
+        || isRunFinished(activeRun)
+        || !!get(retryPendingRunIdAtom)
+        || get(isRunReconnectingAtom);
+}
+
+/**
+ * Send the answers queued for the open parked run in one resume. Answers to
+ * cards that are no longer open (answered elsewhere, superseded) are dropped.
+ */
+export const flushParkedAnswersAtom = atom(null, async (get, set) => {
+    const queue = get(parkedAnswerQueueAtom);
+    if (queue.size === 0 || parkedResumeBlocked(get)) return;
+    const threadId = get(currentThreadIdAtom);
+    const open = get(openParkedRunAtom);
+    const answers: Record<string, ParkedCardAnswer> = {};
+    for (const [toolcallId, queued] of queue) {
+        if (open && queued.threadId === threadId && open.toolCallIds.has(toolcallId)) {
+            answers[toolcallId] = queued.answer;
+        }
+    }
+    set(parkedAnswerQueueAtom, new Map());
+    if (!open || Object.keys(answers).length === 0) {
+        set(syncParkedCardsAtom);
+        return;
+    }
+
+    parkedResumeStarting = true;
+    let started = false;
+    try {
+        started = (await withThreadWriter(get, set, guardedSet =>
+            startParkedResumeOwned(get, guardedSet, open, answers))) ?? false;
+    } finally {
+        parkedResumeStarting = false;
+        if (!started) {
+            // Nothing was sent: the cards are still open, and answerable again.
+            set(parkedAnswersInFlightAtom, new Set<string>());
+            set(syncParkedCardsAtom);
+        }
+        if (get(parkedAnswerQueueAtom).size > 0) scheduleParkedAnswerFlush();
+    }
+});
+
+/**
+ * Start the run that resumes a parked run with the user's answers. Returns
+ * whether the run was started.
+ *
+ * Like a continuation it carries no message: `deferred_results` names the
+ * cards it answers and `resumes_run_id` the run it continues. The cards still
+ * open stay on screen and answerable while it runs.
+ */
+async function startParkedResumeOwned(
+    get: Getter,
+    set: Setter,
+    open: OpenParkedRun,
+    answers: Record<string, ParkedCardAnswer>,
+): Promise<boolean> {
+    const logPrefix = 'resumeParkedRun';
+    if (retryCommitInFlight(get, logPrefix)) return false;
+    if (get(isRunReconnectingAtom)) {
+        logger(`${logPrefix}: Blocked — the active run is reconnecting`, 1);
+        return false;
+    }
+    const model = get(selectedModelAtom);
+    const userId = get(userIdAtom);
+    const threadId = get(currentThreadIdAtom) || open.threadId;
+    if (!model || !userId || !threadId) {
+        logger(`${logPrefix}: No model, user or thread`, 1);
+        return false;
+    }
+    logger(`${logPrefix}: Resuming parked run ${open.runId} with ${Object.keys(answers).length} answer(s)`, 1);
+
+    let newRunId: string | null = null;
+    try {
+        // A failed earlier resume stays in history, as on the server.
+        archiveTerminalActiveRun(get, set);
+        set(parkedAnswersInFlightAtom, new Set(Object.keys(answers)));
+        set(prepareForNewRunAtom, { keepParkedCards: true });
+        prewarmMuPDFWorker();
+        set(isWSChatPendingAtom, true);
+
+        const { run, request } = createAgentRunShell(
+            { content: '', deferred_results: answers, resumes_run_id: open.runId },
+            threadId,
+            userId,
+            model.name,
+            buildModelSelectionOptions(model),
+            model.provider,
+            undefined,
+            model.is_custom ? model.custom_model : undefined,
+        );
+        newRunId = run.id;
+        set(activeRunAtom, run);
+        await executeWSRequest(run, request, get, set);
+        return true;
+    } catch (error) {
+        logger(`${logPrefix}: Unexpected error:`, error, 1);
+        set(wsErrorAtom, {
+            event: 'error',
+            type: 'resume_error',
+            message: error instanceof Error ? error.message : 'Failed to send the answer',
+            is_retryable: true,
+        });
+        set(activeRunAtom, prev => (newRunId && prev?.id === newRunId ? null : prev));
+        set(isWSChatPendingAtom, false);
+        return false;
+    }
+}
+
+/**
+ * The open chat's run, when leaving it can park it rather than stop it: it is
+ * waiting on cards the user can answer later (an approval, a question, a batch
+ * or a table card), on nothing that must be answered live (a credit
+ * confirmation), and no answer the user gave is still on its way. The server
+ * has the last word: it refuses the park when the run also waits on something
+ * else, and the run is then stopped as before.
+ */
+export function parkableRunId(get: Getter): string | null {
+    const activeRun = get(activeRunAtom);
+    if (!activeRun || !isRunActive(activeRun) || !agentService.isConnected()) return null;
+    // A resume parks only while it waits for the cards it shows again: until
+    // then the cards on screen are the parked run's, not cards it waits on,
+    // and the answers it carries may be applying.
+    if (activeRun.user_prompt?.deferred_results && !get(isResumeWaitingAtom)) return null;
+    if (get(isRunReconnectingAtom) || get(pendingCreditConfirmationsAtom).size > 0) return null;
+    if (get(liveCardAnswersAtom).size > 0) return null;
+    const hasCard = get(pendingApprovalsAtom).size > 0
+        || get(pendingQuestionsAtom).size > 0
+        || get(pendingBatchApprovalsAtom).size > 0
+        || get(pendingTableCardsAtom).size > 0;
+    return hasCard ? activeRun.id : null;
+}
+
+/** How long a message waits for the resume it replaces to park. */
+const PARK_FOR_MESSAGE_WAIT_MS = 5000;
+
+/** Set while a message waits for the resume it replaces to park. */
+let parkingResumeForMessage = false;
+
+/**
+ * Whether a message sent now must first park the running resume: it carries
+ * some of a parked run's answers and waits for the rest of the cards.
+ */
+export function messageParksResume(get: Getter): boolean {
+    const activeRun = get(activeRunAtom);
+    return isRunActive(activeRun) && !!activeRun?.user_prompt?.deferred_results && get(isThreadParkedAtom);
+}
+
+/**
+ * Before a message is sent while a resume waits for the cards it shows
+ * again, park the resume: the message then closes the cards still open, as
+ * any message written past a parked run does. Returns whether the message
+ * may be sent.
+ */
+export const parkResumeForMessageAtom = atom(null, async (get, set): Promise<boolean> => {
+    if (!messageParksResume(get)) return true;
+    if (parkingResumeForMessage) return false;
+    const runId = parkableRunId(get);
+    if (!runId) {
+        set(addPopupMessageAtom, {
+            type: 'info',
+            title: 'Applying your answer',
+            text: 'Send your message again once Beaver has applied it.',
+            expire: true,
+        });
+        return false;
+    }
+    parkingResumeForMessage = true;
+    const navigation = get(threadNavigationSeqAtom);
+    try {
+        const outcome = await agentService.parkRun(runId, PARK_FOR_MESSAGE_WAIT_MS);
+        // The message was written for the chat the user has since left.
+        if (navigation !== get(threadNavigationSeqAtom)) return false;
+        if (outcome === 'ended') return true;
+        // The run ended without telling this client how, or was stopped:
+        // show the chat as the server has it.
+        logger(`parkResumeForMessage: Parking run ${runId} ended as "${outcome}"; reloading the chat`, 1);
+        const threadId = get(currentThreadIdAtom);
+        const userId = get(userIdAtom);
+        if (threadId && userId) void Promise.resolve().then(() => store.set(loadThreadAtom, { user_id: userId, threadId, preserveDraft: true }));
+        set(addPopupMessageAtom, {
+            type: 'warning',
+            title: 'Message not sent',
+            text: 'Send it again once the chat has reloaded.',
+            expire: true,
+        });
+        return false;
+    } finally {
+        parkingResumeForMessage = false;
+    }
+});
 
 async function startContinuationRun(get: Getter, set: Setter, failedRunId: string, options: StartContinuationRunOptions): Promise<void> {
     return withThreadWriter(get, set, guardedSet => startContinuationRunOwned(get, guardedSet, failedRunId, options));
