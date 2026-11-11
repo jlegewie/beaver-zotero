@@ -265,17 +265,20 @@ const InputArea: React.FC<InputAreaProps> = ({
 
     // Guided next steps surface after a suggestion-card run or a "Where should
     // we start?" launcher run — both carry the context NextStepsPanel needs.
+    // Not while that run waits on its cards: it has not finished yet.
     const lastRunOriginKind = lastRun?.origin?.kind;
     const canShowNextSteps = Boolean(
         lastRun &&
         (lastRunOriginKind === 'first_run_card' || lastRunOriginKind === 'where_to_start') &&
         isRunFinished(lastRun) &&
+        !isParked &&
         !nextStepsDismissedRunIds.has(lastRun.id)
     );
     const canShowBackToSuggestions = Boolean(
         lastRun &&
         lastRunOriginKind === 'first_run_followup' &&
         isRunFinished(lastRun) &&
+        !isParked &&
         !nextStepsDismissedRunIds.has(lastRun.id)
     );
     // The follow-up run's origin

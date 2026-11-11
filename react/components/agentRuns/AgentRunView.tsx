@@ -188,7 +188,10 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
     const showWarnings = runWarnings.length > 0;
     const showPartialNotice = isPartialResponse && !wasResumed;
     const showErrorArea = hasError && !!run.error && !wasResumed && !autoReplacementPending;
-    const showFooter = showAgentRunFooter && !wasResumed;
+    // A run waiting on its cards has not finished its response: the footer
+    // shows once its last card is answered (on the run that resumes it) or a
+    // new message closes the cards.
+    const showFooter = showAgentRunFooter && !wasResumed && !isOpenParked;
     const showSuggestions = suggestionParts.length > 0 && !suggestionsDismissed;
     // Gives way to the run that continued this one, like its error card.
     const showReplacementNote = !!replacementNote && !wasResumed;
