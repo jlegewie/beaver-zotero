@@ -2513,7 +2513,9 @@ export interface WSDeferredApprovalResponse {
  * processed, and would show the card as "awaiting approval" indefinitely.
  *
  * The proposal itself is unaffected — it is still stored and still applicable —
- * so the client should restore the card's local apply/reject controls.
+ * so the client should restore the card's local apply/reject controls. For
+ * reason `parking` it keeps the answer instead and resumes the parked run with
+ * it once the run has parked.
  */
 export interface WSDeferredApprovalStale extends WSBaseEvent {
     event: 'deferred_approval_stale';
@@ -2521,9 +2523,10 @@ export interface WSDeferredApprovalStale extends WSBaseEvent {
     action_id: string;
     /**
      * `timed_out`: the backend was waiting and gave up.
+     * `parking`: the card parks with its run; the answer resumes the parked run.
      * `unknown`: no record of this action on this connection.
      */
-    reason: 'timed_out' | 'unknown';
+    reason: 'timed_out' | 'parking' | 'unknown';
 }
 
 /**
@@ -2745,9 +2748,10 @@ export interface WSBatchApprovalStale extends WSBaseEvent {
     approval_id: string;
     /**
      * `timed_out`: the backend was waiting and gave up.
+     * `parking`: the card parks with its run; the answer resumes the parked run.
      * `unknown`: no record of this approval on this connection.
      */
-    reason: 'timed_out' | 'unknown';
+    reason: 'timed_out' | 'parking' | 'unknown';
 }
 
 /** One selectable option of an ask_user_question item (ids are server-assigned) */

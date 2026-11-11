@@ -206,5 +206,5 @@ export interface WSTableCardResponse {
 export interface WSTableCardStale extends WSBaseEvent {
     event: 'table_card_stale';
     card_id: string;
-    reason: 'timed_out' | 'unknown';
+    reason: 'timed_out' | 'parking' | 'unknown';
 }

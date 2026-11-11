@@ -76,6 +76,7 @@ import { pendingCreditConfirmationsAtom } from '@beaver/agent-core/run-state/pen
 import { pendingTableCardsAtom, tableCardDraftsAtom } from '@beaver/agent-core/run-state/pendingTableCards';
 import { store } from '../../../react/store';
 import {
+    abandonActiveRunLocallyAtom,
     isWSChatPendingAtom,
     isWSReadyAtom,
     parkableRunId,
@@ -83,6 +84,7 @@ import {
     sendAskUserQuestionResponseAtom,
     sendTableCardResponseAtom,
     sendWSMessageAtom,
+    staleApprovalActionIdsAtom,
     wsErrorAtom,
 } from '../../../react/atoms/agentRunAtoms';
 import { pendingApprovalsAtom, removePendingApprovalAtom } from '../../../react/agents/agentActions';
@@ -439,6 +441,151 @@ describe('answering the cards of a parked run', () => {
     });
 });
 
+describe('an answer given while the run parks', () => {
+    beforeEach(resetChat);
+
+    /** A live run showing an approval and a question. */
+    async function liveRun(): Promise<{ runId: string; callbacks: WSCallbacks }> {
+        const connected = nextConnection();
+        await store.set(sendWSMessageAtom, 'hello');
+        const { callbacks } = await connected;
+        store.set(isWSReadyAtom, true);
+        const runId = store.get(activeRunAtom)!.id;
+        streamToolCalls(callbacks, runId, ['call-1', 'call-3']);
+        callbacks.onDeferredApprovalRequest?.(approval('call-1').request as any);
+        callbacks.onAskUserQuestionRequest?.(question('call-3').request as any);
+        return { runId, callbacks };
+    }
+
+    function approveLive(): void {
+        store.set(sendApprovalResponseAtom, { actionId: 'action-call-1', approved: true });
+        store.set(removePendingApprovalAtom, 'action-call-1');
+    }
+
+    it('keeps an approval the run parks on waiting, and resumes the parked run with it', async () => {
+        const { runId, callbacks } = await liveRun();
+        approveLive();
+        callbacks.onDeferredApprovalStale?.({ event: 'deferred_approval_stale', action_id: 'action-call-1', reason: 'parking' });
+
+        // No fallback to applying locally: the answer is on its way to the parked run.
+        expect(store.get(staleApprovalActionIdsAtom).has('action-call-1')).toBe(false);
+
+        const resumed = nextConnection();
+        await finish(callbacks, runId, parked([approval('call-1'), question('call-3')]));
+        const { request } = await resumed;
+
+        expect(request.user_prompt).toMatchObject({
+            resumes_run_id: runId,
+            deferred_results: {
+                'call-1': { type: 'deferred_approval_response', action_id: 'action-call-1', approved: true },
+            },
+        });
+        expect(Object.keys(request.user_prompt.deferred_results)).toEqual(['call-1']);
+        expect([...store.get(pendingParkedAnswerIdsAtom)]).toEqual(['call-1']);
+        expect([...store.get(pendingApprovalsAtom).keys()]).toEqual([]);
+        expect([...store.get(pendingQuestionsAtom).keys()]).toEqual(['call-3']);
+    });
+
+    it('resumes with an answer that crossed the end of the run unanswered', async () => {
+        const { runId, callbacks } = await liveRun();
+        store.set(sendAskUserQuestionResponseAtom, {
+            questionId: 'question-call-3',
+            toolcallId: 'call-3',
+            answers: [{ item_id: 'q0', selected_option_ids: ['q0-o0'] }],
+        });
+
+        const resumed = nextConnection();
+        await finish(callbacks, runId, parked([approval('call-1'), question('call-3')]));
+        const { request } = await resumed;
+
+        expect(Object.keys(request.user_prompt.deferred_results)).toEqual(['call-3']);
+        expect(request.user_prompt.deferred_results['call-3']).toMatchObject({
+            type: 'ask_user_question_response',
+            question_id: 'question-call-3',
+        });
+        expect([...store.get(pendingApprovalsAtom).keys()]).toEqual(['action-call-1']);
+    });
+
+    it('resumes with the answer when the run parks but loses its connection before done', async () => {
+        const { runId, callbacks } = await liveRun();
+        approveLive();
+        callbacks.onDeferredApprovalStale?.({ event: 'deferred_approval_stale', action_id: 'action-call-1', reason: 'parking' });
+
+        const resumed = nextConnection();
+        await callbacks.onRunComplete({
+            event: 'run_complete', run_id: runId, usage: null, cost: null, citations: null, agent_actions: null,
+            parked: parked([approval('call-1'), question('call-3')]),
+        });
+        callbacks.onClose?.(1006, '', false);
+        const { request } = await resumed;
+
+        expect(request.user_prompt.resumes_run_id).toBe(runId);
+        expect(Object.keys(request.user_prompt.deferred_results)).toEqual(['call-1']);
+    });
+
+    it('does not carry an answer whose call returned', async () => {
+        const { runId, callbacks } = await liveRun();
+        approveLive();
+        await returnTool(callbacks, runId, 'call-1');
+
+        await finish(callbacks, runId, parked([question('call-3')]));
+        await Promise.resolve();
+
+        expect(connectMock).toHaveBeenCalledTimes(1);
+        expect(store.get(parkedAnswerQueueAtom).size).toBe(0);
+    });
+
+    it('restores the local controls when the run ends without parking the card', async () => {
+        const { runId, callbacks } = await liveRun();
+        approveLive();
+        callbacks.onDeferredApprovalStale?.({ event: 'deferred_approval_stale', action_id: 'action-call-1', reason: 'parking' });
+
+        await finish(callbacks, runId);
+        await Promise.resolve();
+
+        expect(connectMock).toHaveBeenCalledTimes(1);
+        expect(store.get(staleApprovalActionIdsAtom).has('action-call-1')).toBe(true);
+    });
+
+    it('restores the local controls when the run fails while parking', async () => {
+        const { callbacks } = await liveRun();
+        approveLive();
+        callbacks.onDeferredApprovalStale?.({ event: 'deferred_approval_stale', action_id: 'action-call-1', reason: 'parking' });
+
+        callbacks.onError({ event: 'error', type: 'internal_error', message: 'boom' } as any);
+
+        expect(store.get(staleApprovalActionIdsAtom).has('action-call-1')).toBe(true);
+    });
+
+    it('restores the local controls when the user stops the run while it parks', async () => {
+        const { callbacks } = await liveRun();
+        approveLive();
+        callbacks.onDeferredApprovalStale?.({ event: 'deferred_approval_stale', action_id: 'action-call-1', reason: 'parking' });
+
+        store.set(abandonActiveRunLocallyAtom);
+
+        expect(store.get(staleApprovalActionIdsAtom).has('action-call-1')).toBe(true);
+    });
+
+    it('restores the local controls when the connection is lost before the run completes', async () => {
+        const { callbacks } = await liveRun();
+        approveLive();
+        callbacks.onDeferredApprovalStale?.({ event: 'deferred_approval_stale', action_id: 'action-call-1', reason: 'parking' });
+
+        callbacks.onClose?.(1006, '', false);
+
+        expect(store.get(staleApprovalActionIdsAtom).has('action-call-1')).toBe(true);
+    });
+
+    it('falls back to applying locally for an answer that simply timed out', async () => {
+        const { callbacks } = await liveRun();
+        approveLive();
+        callbacks.onDeferredApprovalStale?.({ event: 'deferred_approval_stale', action_id: 'action-call-1', reason: 'timed_out' });
+
+        expect(store.get(staleApprovalActionIdsAtom).has('action-call-1')).toBe(true);
+    });
+});
+
 describe('a resume waiting for the cards it shows again', () => {
     beforeEach(resetChat);
 
@@ -637,7 +784,7 @@ describe('parkableRunId', () => {
         store.set(pendingQuestionsAtom, new Map());
         store.set(pendingCreditConfirmationsAtom, new Map());
         store.set(clearParkedAnswersAtom);
-        store.set(liveCardAnswersAtom, new Set());
+        store.set(liveCardAnswersAtom, new Map());
     });
 
     async function liveRunWaitingOnACard(): Promise<string> {

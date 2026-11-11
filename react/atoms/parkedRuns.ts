@@ -38,27 +38,89 @@ export const parkedAnswerQueueAtom = atom<ReadonlyMap<string, QueuedParkedAnswer
 /** Tool calls whose answers the resume now running carries, until each returns. */
 export const parkedAnswersInFlightAtom = atom<ReadonlySet<string>>(new Set<string>());
 
+/** An answer the user gave a card of the live run over the socket. */
+export interface LiveCardAnswer {
+    answer: ParkedCardAnswer;
+    /**
+     * The run told us the answer came too late for the card, which parks with
+     * the run instead: the answer resumes the parked run once it has parked.
+     */
+    parking: boolean;
+}
+
 /**
- * Tool calls of the live run whose card the user answered over the socket
- * and that have not returned yet. A run with such an answer is not left by
+ * Answers to cards of the live run sent over the socket, keyed by tool call
+ * id, until their call returns. A run with such an answer is not left by
  * parking it: the answer may be mid-way through applying.
  */
-export const liveCardAnswersAtom = atom<ReadonlySet<string>>(new Set<string>());
+export const liveCardAnswersAtom = atom<ReadonlyMap<string, LiveCardAnswer>>(new Map());
 
-export const addLiveCardAnswerAtom = atom(null, (get, set, toolCallId: string) => {
+export const addLiveCardAnswerAtom = atom(null, (get, set, { toolCallId, answer }: { toolCallId: string; answer: ParkedCardAnswer }) => {
     if (get(liveCardAnswersAtom).has(toolCallId)) return;
-    set(liveCardAnswersAtom, new Set([...get(liveCardAnswersAtom), toolCallId]));
+    set(liveCardAnswersAtom, new Map(get(liveCardAnswersAtom)).set(toolCallId, { answer, parking: false }));
+});
+
+/** The approval an answer is to, or undefined for any other card. */
+function approvalActionId(answer: ParkedCardAnswer): string | undefined {
+    return (answer as { action_id?: string }).action_id;
+}
+
+/**
+ * Mark the live answer to an approval as parking: the run stopped waiting for
+ * the card and parks with it. Returns false when no live answer is known.
+ */
+export const markLiveApprovalAnswerParkingAtom = atom(null, (get, set, actionId: string): boolean => {
+    const answers = get(liveCardAnswersAtom);
+    for (const [toolCallId, live] of answers) {
+        if (approvalActionId(live.answer) !== actionId) continue;
+        set(liveCardAnswersAtom, new Map(answers).set(toolCallId, { ...live, parking: true }));
+        return true;
+    }
+    return false;
 });
 
 /** A card's call returned: its answer, given live or carried by a resume, has landed. */
 export const releaseCardAnswerAtom = atom(null, (get, set, toolCallId: string) => {
-    for (const answers of [liveCardAnswersAtom, parkedAnswersInFlightAtom]) {
-        const current = get(answers);
-        if (!current.has(toolCallId)) continue;
-        const next = new Set(current);
+    const live = get(liveCardAnswersAtom);
+    if (live.has(toolCallId)) {
+        const next = new Map(live);
         next.delete(toolCallId);
-        set(answers, next);
+        set(liveCardAnswersAtom, next);
     }
+    const inFlight = get(parkedAnswersInFlightAtom);
+    if (inFlight.has(toolCallId)) {
+        const next = new Set(inFlight);
+        next.delete(toolCallId);
+        set(parkedAnswersInFlightAtom, next);
+    }
+});
+
+/**
+ * Settle the live answers when the run ends. An answer to a card the run
+ * parked on never reached it, so it is queued to resume the parked run. An
+ * approval answer the run said would park, on a card that did not park after
+ * all (the run failed or was stopped), returns the approval ids so the caller
+ * can restore the card's own controls.
+ *
+ * Clears the live answers: each is settled once.
+ */
+export const carryLiveAnswersIntoParkedRunAtom = atom(null, (get, set, { parked }: { parked: boolean }): string[] => {
+    const open = parked ? get(openParkedRunAtom) : null;
+    const queued = new Map(get(parkedAnswerQueueAtom));
+    const unparked: string[] = [];
+    let carried = false;
+    for (const [toolCallId, live] of get(liveCardAnswersAtom)) {
+        if (open?.toolCallIds.has(toolCallId)) {
+            queued.set(toolCallId, { threadId: open.threadId, answer: live.answer });
+            carried = true;
+            continue;
+        }
+        const actionId = approvalActionId(live.answer);
+        if (live.parking && actionId) unparked.push(actionId);
+    }
+    if (carried) set(parkedAnswerQueueAtom, queued);
+    set(liveCardAnswersAtom, new Map());
+    return unparked;
 });
 
 /**

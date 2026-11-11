@@ -195,10 +195,12 @@ import {
 import { openParkedRunAtom, type OpenParkedRun } from '@beaver/agent-core/run-state/parkedRun';
 import {
     addLiveCardAnswerAtom,
+    carryLiveAnswersIntoParkedRunAtom,
     clearParkedAnswersAtom,
     isResumeWaitingAtom,
     isThreadParkedAtom,
     liveCardAnswersAtom,
+    markLiveApprovalAnswerParkingAtom,
     parkedAnswerQueueAtom,
     parkedAnswersInFlightAtom,
     releaseCardAnswerAtom,
@@ -1500,7 +1502,7 @@ export const prepareForNewRunAtom = atom(null, (_get, set, options?: { keepParke
     set(clearApprovalResponseIntentsAtom);
     set(clearStaleApprovalsAtom);
     set(clearRunApprovalPolicyAtom);
-    set(liveCardAnswersAtom, new Set<string>());
+    set(liveCardAnswersAtom, new Map());
     set(resumeLiveCardsAtom, new Set<string>());
     if (options?.keepParkedCards) set(syncParkedCardsAtom);
     else set(clearParkedAnswersAtom);
@@ -1513,6 +1515,20 @@ export const prepareForNewRunAtom = atom(null, (_get, set, options?: { keepParke
 const PARKED_RESUME_RELOAD_ERRORS = new Set(['parked_run_not_found', 'parked_run_mismatch', 'thread_tail_mismatch']);
 
 /**
+ * Settle the live answers of a run that ended, before they are cleared. An
+ * answer to a card the run parked on is queued to resume the parked run. An
+ * approval whose answer was held for a run that was to park on it but ended
+ * otherwise gets its own controls back: the answer never reached a run, and
+ * the proposal can still be applied locally.
+ */
+function settleLiveCardAnswers(set: Setter, parked: boolean): void {
+    for (const actionId of set(carryLiveAnswersIntoParkedRunAtom, { parked })) {
+        set(markApprovalStaleAtom, actionId);
+        set(removeApprovalResponseIntentAtom, actionId);
+    }
+}
+
+/**
  * Close the cards of a run that ended. The open parked run's cards stay as
  * they are, panels and drafts included, and are answerable again: a resume
  * that carried answers is over, and an answer the run parked before receiving
@@ -1522,7 +1538,7 @@ function settleRunCards(get: Getter, set: Setter): void {
     set(clearAllPendingCreditConfirmationsAtom);
     set(clearRunApprovalPolicyAtom);
     set(parkedAnswersInFlightAtom, new Set<string>());
-    set(liveCardAnswersAtom, new Set<string>());
+    set(liveCardAnswersAtom, new Map());
     set(resumeLiveCardsAtom, new Set<string>());
     if (get(openParkedRunAtom)) {
         set(syncParkedCardsAtom);
@@ -1781,9 +1797,11 @@ export function createWSCallbacks(
         // activeRunAtom. Finalize it the way onDone would, so the next send does
         // not overwrite and drop it from local history. Idempotent: the normal
         // path nulls activeRunAtom in onDone before close, making this a no-op.
+        let finishedParked = false;
         set(activeRunAtom, (prev) => {
             const finalRun = lingeringCompletedRun(prev);
             if (finalRun) {
+                finishedParked = !!finalRun.parked;
                 set(threadRunsAtom, (runs) => appendRunIfMissing(runs, finalRun));
                 return null;
             }
@@ -1815,7 +1833,9 @@ export function createWSCallbacks(
         }
         // Close the run's cards and dismiss the diff preview (connection
         // lost), except those of a run that parked, or that a failed resume
-        // left open.
+        // left open. A run that parked before its connection was lost
+        // carries its live answers, as `onDone` would.
+        settleLiveCardAnswers(set, finishedParked);
         settleRunCards(store.get, set);
         // Answers queued behind a resume that parked again but lost its
         // connection before `done` go out now, as `onDone` would send them.
@@ -2160,11 +2180,14 @@ export function createWSCallbacks(
                 return null;
             });
 
+            // An answer the run parked before receiving resumes it at once.
+            // Settled before closing, which settles them as a lost connection.
+            settleLiveCardAnswers(set, !!completed?.parked);
             agentService.close();
             set(isWSChatPendingAtom, false);
             // The cards close with the run, unless the run parked on them. A
-            // parked card stays (an answer the run parked before receiving
-            // included) and is answerable again; answering it resumes the run.
+            // parked card stays and is answerable again; answering it resumes
+            // the run.
             const parkedActionIds = (completed?.parked?.requests ?? [])
                 .filter((deferral) => deferral.kind === 'agent_action_approval')
                 .map((deferral) => deferral.correlation_id);
@@ -2231,6 +2254,7 @@ export function createWSCallbacks(
             // and answering one again resumes it. Answers queued for the
             // failed resume are dropped with it.
             set(parkedAnswerQueueAtom, new Map());
+            settleLiveCardAnswers(set, false);
             settleRunCards(store.get, set);
 
             const failedPrompt = errorRunId
@@ -2424,6 +2448,13 @@ export function createWSCallbacks(
                 actionId: event.action_id,
                 reason: event.reason,
             }, 1);
+            // The card parks with its run: the answer is kept and resumes the
+            // parked run once it has parked (see `onDone`), so the card stays
+            // on its spinner rather than offering to apply locally.
+            if (event.reason === 'parking' && set(markLiveApprovalAnswerParkingAtom, event.action_id)) {
+                set(removePendingApprovalAtom, event.action_id);
+                return;
+            }
             // The decision arrived after the backend stopped waiting, so the run
             // never saw it. Retire the approval and let the card fall back to
             // applying the (still valid) proposal locally.
@@ -3920,6 +3951,7 @@ export const abandonActiveRunLocallyAtom = atom(null, (get, set) => {
     // user). A resume stopped before it ran its tools leaves the parked run
     // open, and its cards stay.
     set(parkedAnswerQueueAtom, new Map());
+    settleLiveCardAnswers(set, false);
     settleRunCards(get, set);
 });
 
@@ -4118,13 +4150,13 @@ export const sendApprovalResponseAtom = atom(
     (get, set, { actionId, approved, userInstructions }: { actionId: string; approved: boolean; userInstructions?: string | null }) => {
         const actionChanges = approved ? get(mergeItemsChoicesAtom)[actionId] : undefined;
         const toolcallId = get(pendingApprovalsAtom).get(actionId)?.toolcallId;
+        const answer = deferredApprovalResponse(actionId, approved, userInstructions, actionChanges);
         const recordIntent = () => set(approvalResponseIntentsAtom, (prev) => {
             const next = new Map(prev);
             next.set(actionId, approved);
             return next;
         });
-        if (toolcallId && answerParkedCard(get, set, toolcallId,
-            deferredApprovalResponse(actionId, approved, userInstructions, actionChanges))) {
+        if (toolcallId && answerParkedCard(get, set, toolcallId, answer)) {
             recordIntent();
             return;
         }
@@ -4136,7 +4168,7 @@ export const sendApprovalResponseAtom = atom(
             logger(`sendApprovalResponseAtom: Approval response for ${actionId} was not sent; marking stale`, 1);
             set(markApprovalStaleAtom, actionId);
         } else if (toolcallId) {
-            set(addLiveCardAnswerAtom, toolcallId);
+            set(addLiveCardAnswerAtom, { toolCallId: toolcallId, answer });
         }
     }
 );
@@ -4311,7 +4343,7 @@ export const sendAskUserQuestionResponseAtom = atom(
         if (!ownsWriter(currentWriter())) return;
         logger(`sendAskUserQuestionResponseAtom: Sending question response for ${questionId}: ${cancelled ? 'cancelled' : `${answers.length} answer(s)`}`, 1);
         if (agentService.sendAskUserQuestionResponse(questionId, answers, cancelled ?? false)) {
-            set(addLiveCardAnswerAtom, toolcallId);
+            set(addLiveCardAnswerAtom, { toolCallId: toolcallId, answer });
         }
         set(removePendingQuestionAtom, toolcallId);
     }
@@ -4362,8 +4394,8 @@ export const sendBatchApprovalResponseAtom = atom(
         userInstructions?: string | null;
     }) => {
         const toolcallId = get(pendingBatchApprovalsAtom).get(approvalId)?.toolcallId;
-        if (toolcallId && answerParkedCard(get, set, toolcallId,
-            batchApprovalResponse(approvalId, approved, mode, userInstructions))) {
+        const answer = batchApprovalResponse(approvalId, approved, mode, userInstructions);
+        if (toolcallId && answerParkedCard(get, set, toolcallId, answer)) {
             set(removePendingBatchApprovalAtom, approvalId);
             return;
         }
@@ -4378,7 +4410,7 @@ export const sendBatchApprovalResponseAtom = atom(
         if (!delivered) {
             logger(`sendBatchApprovalResponseAtom: Batch approval response for ${approvalId} was not sent`, 1);
         } else if (toolcallId) {
-            set(addLiveCardAnswerAtom, toolcallId);
+            set(addLiveCardAnswerAtom, { toolCallId: toolcallId, answer });
         }
         set(removePendingBatchApprovalAtom, approvalId);
     }
@@ -4414,7 +4446,7 @@ export const sendTableCardResponseAtom = atom(
             set(removePendingTableCardAtom, response.card_id);
             return;
         }
-        if (toolcallId) set(addLiveCardAnswerAtom, toolcallId);
+        if (toolcallId) set(addLiveCardAnswerAtom, { toolCallId: toolcallId, answer: response });
         retireCardKeepingEdits();
     }
 );
@@ -4475,7 +4507,7 @@ function takeResumedCard(get: Getter, set: Setter, toolcallId: string, onScreen:
     });
     // Not sent: the card comes back when the run ends, as for any answer
     // that did not reach its run.
-    if (agentService.sendCardAnswer(queued.answer)) set(addLiveCardAnswerAtom, toolcallId);
+    if (agentService.sendCardAnswer(queued.answer)) set(addLiveCardAnswerAtom, { toolCallId: toolcallId, answer: queued.answer });
     return true;
 }
 
