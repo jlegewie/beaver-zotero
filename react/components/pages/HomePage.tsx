@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { useAtomValue } from 'jotai';
 import { allLibrariesExcludedAtom } from "../../atoms/profile";
 import RecentChats from "../RecentChats";
@@ -42,6 +42,11 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false, inputRef }) => {
     const activeFeatureTask = useAtomValue(activeFeatureTaskAtom);
     // A setup card stays while its task is open, even if the list is dismissed.
     const showFeatureCredits = !allLibrariesExcluded && (featureCreditsVisible || !!activeFeatureTask);
+    // The card takes the place of recent chats while it is on screen; the
+    // header's history button still lists them.
+    const [featureCreditsShown, setFeatureCreditsShown] = useState(false);
+    const cardOnScreen = showFeatureCredits && featureCreditsShown;
+    const showRecentChats = !isWindow && !cardOnScreen;
 
     // Beta versions use a pre-release tag (e.g. "0.20.0-beta.1")
     const isBeta = /-beta\.\d+$/.test(Zotero.Beaver?.pluginVersion ?? "");
@@ -52,7 +57,7 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false, inputRef }) => {
             className="display-flex flex-col flex-1 min-h-0"
         >
             {/* Scrollable top section */}
-            <div className="display-flex flex-col flex-1 overflow-y-auto scrollbar px-3 pt-4">
+            <div className={`display-flex flex-col flex-1 overflow-y-auto scrollbar px-3 pt-4 ${cardOnScreen ? 'pb-3' : ''}`}>
                 <div className="display-flex flex-col flex-1 gap-4 beaver-content-column">
                     {/* Top spacer. The window has the height to sit the
                         greeting lower, where the eye lands first. */}
@@ -76,8 +81,8 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false, inputRef }) => {
                     {/* Bottom spacer */}
                     <div className="flex-1" />
 
-                    {/* Feature-credit tasks, above recent chats */}
-                    {showFeatureCredits && <FeatureCreditsCard />}
+                    {/* Feature-credit tasks, in place of recent chats */}
+                    {showFeatureCredits && <FeatureCreditsCard onShownChange={setFeatureCreditsShown} />}
                 </div>
             </div>
 
@@ -87,7 +92,7 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false, inputRef }) => {
                 className="flex-none px-25 beaver-content-column"
             >
                 {/* The separate window lists its history in its sidebar. */}
-                {!isWindow && <RecentChats />}
+                {showRecentChats && <RecentChats />}
 
                 <div className="relative -mx-4 px-4 mb-3">
                     <PopupOverlayContainer />

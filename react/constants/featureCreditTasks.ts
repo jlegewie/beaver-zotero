@@ -36,14 +36,6 @@ export interface FeatureTaskExample {
     illustration?: boolean;
 }
 
-export interface FeatureTaskFollowUp {
-    label: string;
-    /** Opens a new chat with this action staged. */
-    actionId?: string;
-    /** Exports the note the task created. */
-    exportNote?: boolean;
-}
-
 export interface FeatureTaskDefinition {
     key: string;
     title: string;
@@ -56,14 +48,14 @@ export interface FeatureTaskDefinition {
     /** The instruction step, completed by "For example:" and the examples. */
     instruction: string;
     examples: FeatureTaskExample[];
-    /** The last step, before the reward. */
+    /** The last step. */
     finalStep: string;
     /** A note under the steps. */
     footnote?: string;
+    /** The card shown once the task is earned. */
     completion: {
-        /** What else the skill can do. */
-        more: string;
-        followUp?: FeatureTaskFollowUp;
+        /** One sentence on what else the skill can do. */
+        tip: string;
         docsUrl: string;
     };
 }
@@ -82,12 +74,10 @@ export const FEATURE_CREDIT_TASKS: FeatureTaskDefinition[] = [
         examples: [
             { text: 'color-code the research question, methods, results and limitations' },
             { text: 'the key passages I need to skim the paper' },
-            { text: 'every definition of social capital' },
         ],
         finalStep: 'Press Send. Accept the highlights if Beaver asks.',
         completion: {
-            more: 'Beaver can annotate a whole collection at once, e.g. "highlight every definition of social capital", with a comment on each highlight.',
-            followUp: { label: 'Annotate a whole collection', actionId: 'builtin-annotate' },
+            tip: 'Beaver can also annotate a whole collection at once, with a comment on each highlight.',
             docsUrl: `${DOCS_BASE_URL}/annotations`,
         },
     },
@@ -105,8 +95,7 @@ export const FEATURE_CREDIT_TASKS: FeatureTaskDefinition[] = [
         ],
         finalStep: 'Press Send. Accept the note if Beaver asks.',
         completion: {
-            more: 'Click a citation in the note to open the page. Beaver can also edit your existing notes, and notes export to Word.',
-            followUp: { label: 'Export to Word', exportNote: true },
+            tip: 'Click a citation in the note to open the page it cites. Beaver can also edit your notes, and notes export to Word.',
             docsUrl: `${DOCS_BASE_URL}/notes`,
         },
     },
@@ -125,8 +114,7 @@ export const FEATURE_CREDIT_TASKS: FeatureTaskDefinition[] = [
         ],
         finalStep: 'Press Send. Accept the changes if Beaver asks.',
         completion: {
-            more: 'Beaver can also merge duplicates, split a big collection into sub-collections, and set up a collection for a new project.',
-            followUp: { label: 'Tidy up my whole library', actionId: 'builtin-tidy-up' },
+            tip: 'Beaver can also merge duplicates, split a big collection into sub-collections, and set up a collection for a new project.',
             docsUrl: `${DOCS_BASE_URL}/library-management`,
         },
     },
@@ -145,7 +133,7 @@ export const FEATURE_CREDIT_TASKS: FeatureTaskDefinition[] = [
         finalStep: 'Press Send, check the papers and questions Beaver proposes, then create the table with "Fill the table now" ticked.',
         footnote: 'Filling a table uses credits per row. You see the cost before anything is filled.',
         completion: {
-            more: "Click a cell to see the quote behind it. Add a column with a new question, sort, and fill the remaining rows when you're happy.",
+            tip: 'Click a cell to see the quote behind it. You can add a column with a new question and fill the remaining rows.',
             docsUrl: `${DOCS_BASE_URL}/research-tables`,
         },
     },

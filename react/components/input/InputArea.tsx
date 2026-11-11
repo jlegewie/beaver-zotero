@@ -100,7 +100,8 @@ const InputArea: React.FC<InputAreaProps> = ({
     const composerResetToken = useAtomValue(composerResetTokenAtom);
     // A /command pill whose action cannot run on this message yet (no text
     // after a command that needs it, nothing attached for an item action):
-    // Send is held and the hint below the input says why.
+    // Send is held and the hint below the input (or the command's own
+    // placeholder) says why.
     const actionRequirementBlock = useAtomValue(actionRequirementBlockAtom);
     const store = useStore();
     const webSearchDescriptionId = useId();
@@ -799,7 +800,7 @@ const InputArea: React.FC<InputAreaProps> = ({
 
                 {/* Why Send is held for the /command in the message. Not while
                     a decision is pending: the verdict buttons do not send it. */}
-                {actionRequirementBlock && !isAwaitingApproval && (
+                {actionRequirementBlock?.hint && !isAwaitingApproval && (
                     <div className="composer-requirement-hint text-sm font-color-tertiary truncate mb-2" role="status">
                         {actionRequirementBlock.hint}
                     </div>

@@ -24,12 +24,11 @@ export interface AttachStep {
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`;
 
 function collectionLabel(collection: AttachmentSummary['collections'][number]): string {
-    return collection.itemCount === null
-        ? collection.name
-        : `${collection.name} (${plural(collection.itemCount, 'paper')})`;
+    const name = `the ${collection.name} collection`;
+    return collection.itemCount === null ? name : `${name} (${plural(collection.itemCount, 'paper')})`;
 }
 
-/** "Smith 2020", "Neighborhood effects (14 papers)", "3 papers", or both joined. */
+/** "Smith 2020", "The Neighborhood effects collection (14 papers)", "3 papers", or both joined. */
 function attachedLabel(summary: AttachmentSummary): { label: string; plural: boolean } {
     const parts: string[] = [];
     let count = 0;
@@ -44,7 +43,8 @@ function attachedLabel(summary: AttachmentSummary): { label: string; plural: boo
         parts.push(plural(summary.papers.length, 'paper'));
         count += summary.papers.length;
     }
-    return { label: parts.join(' and '), plural: count > 1 };
+    const label = parts.join(' and ');
+    return { label: label.charAt(0).toUpperCase() + label.slice(1), plural: count > 1 };
 }
 
 function hasAttachments(summary: AttachmentSummary): boolean {
@@ -162,7 +162,12 @@ export class FeatureCreditCompletionTracker {
             return;
         }
         for (const task of tasks) {
-            if (!task.completed_at || this.recorded.has(task.key)) continue;
+            // A grant can be withdrawn; earning the task again then counts.
+            if (!task.completed_at) {
+                this.recorded.delete(task.key);
+                continue;
+            }
+            if (this.recorded.has(task.key)) continue;
             this.recorded.add(task.key);
             if (!this.isKnownTask(task.key)) continue;
             if (this.wasDoneHere(task.source?.thread_id ?? null)) this.pending.push({ task });

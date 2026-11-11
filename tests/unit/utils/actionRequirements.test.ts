@@ -32,6 +32,23 @@ function check(overrides: Partial<ActionRequirementInput>) {
 
 describe('getActionRequirementBlock', () => {
     describe('required argument', () => {
+        it('blocks without a hint line while the pill shows its own placeholder', () => {
+            const withPlaceholder = { ...pill(annotate.id, 'annotate', 'global'), argumentHint: 'What should I highlight?' };
+            expect(check({ content: '/annotate ', pills: [withPlaceholder] })).toEqual({ hint: null });
+            expect(check({ content: '/annotate the methods', pills: [withPlaceholder] })).toBeNull();
+        });
+
+        it('keeps the hint line when the placeholder is hidden', () => {
+            const withPlaceholder = { ...pill(annotate.id, 'annotate', 'global'), argumentHint: 'What should I highlight?' };
+            const blocked = { hint: 'Describe what to highlight after /annotate' };
+            // A line break or a new paragraph after the pill.
+            expect(check({ content: '/annotate\n', pills: [withPlaceholder] })).toEqual(blocked);
+            expect(check({ content: '/annotate \n\n', pills: [withPlaceholder] })).toEqual(blocked);
+            // Another pill follows: the placeholder belongs to the last pill.
+            const after = pill(summarize.id, 'summarize', 'global');
+            expect(check({ content: '/annotate /summarize', pills: [withPlaceholder, after] })).toEqual(blocked);
+        });
+
         it('blocks a command that needs text when nothing follows it', () => {
             expect(check({ content: '/annotate ', pills: [pill(annotate.id, 'annotate', 'global')] }))
                 .toEqual({ hint: 'Describe what to highlight after /annotate' });

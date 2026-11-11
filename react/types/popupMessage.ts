@@ -2,7 +2,6 @@ import { FeatureStep, VersionAlsoNew, VersionShowcaseId, VersionUpdateAction } f
 import { ButtonVariant } from "@beaver/agent-ui/primitives/Button";
 import type { FeatureTipId } from "../constants/featureTips";
 import type { FileExportFormat } from "@beaver/agent-ui/host/types";
-import type { FeatureCreditSource } from "@beaver/agent-core/types/profile";
 
 export const POPUP_MESSAGE_DURATION = 4000; // 4 seconds
 
@@ -38,7 +37,6 @@ export interface FileExportPopupData {
 export interface FeatureCreditPopupData {
     key: string;
     credits: number;
-    source: FeatureCreditSource | null;
 }
 
 export interface PopupMessage {

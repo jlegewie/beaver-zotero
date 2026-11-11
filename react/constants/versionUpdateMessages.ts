@@ -650,10 +650,6 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
         title: "Research tables, right in Zotero",
         text: "Compare the papers in your library side by side. Beaver reads each one, answers your questions, and links every answer to the exact passage.",
         showcase: 'research-table',
-        alsoNew: {
-            title: "/organize",
-            description: "A new action for collections, tags, metadata and duplicates, following your instructions.",
-        },
         primaryAction: { type: 'open-beaver', label: 'Try it' },
         inPanel: false,
         footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.27.0" target='_blank'>Full changelog</a>`,

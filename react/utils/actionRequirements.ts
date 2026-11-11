@@ -16,9 +16,11 @@
 import type { Action } from '@beaver/agent-core/types/actions';
 import { splitContentByCommandTokens, type SlashCommandDescriptor } from '@beaver/agent-ui/composer/slashCommands';
 
-/** Why Send is blocked, as the one-line hint shown under the input. */
+/** Why Send is blocked. */
 export interface ActionRequirementBlock {
-    hint: string;
+    /** The one-line hint shown under the input, or null when the composer
+     *  already says what is missing (the /command's placeholder). */
+    hint: string | null;
 }
 
 /** Lead-in for an action that requires an argument but names no hint of its own. */
@@ -49,6 +51,27 @@ export function hasTextBesidesPills(content: string, pills: SlashCommandDescript
 }
 
 /**
+ * Whether the composer shows this pill's argument hint as ghost text right
+ * after it. Mirrors the editor's rule: the hint belongs to the last pill and
+ * shows only while nothing but spaces follows it on the last line, so a later
+ * pill, a line break or a new paragraph hides it. Only called when the
+ * message holds no text besides its pills.
+ */
+export function isArgumentHintVisible(content: string, pills: SlashCommandDescriptor[], pill: SlashCommandDescriptor): boolean {
+    if (!pill.argumentHint?.trim()) return false;
+    const segments = splitContentByCommandTokens(content, pills, candidate => candidate.commandName);
+    let last = -1;
+    for (let i = segments.length - 1; i >= 0; i--) {
+        if (segments[i].match) {
+            last = i;
+            break;
+        }
+    }
+    if (last < 0 || segments[last].match?.commandName !== pill.commandName) return false;
+    return segments.slice(last + 1).every(segment => !/[\r\n]/.test(segment.text));
+}
+
+/**
  * The first unmet requirement among the message's pills, in document order, or
  * null when the message can be sent as far as its actions are concerned.
  *
@@ -57,7 +80,9 @@ export function hasTextBesidesPills(content: string, pills: SlashCommandDescript
  *   an item action needs items, a collection or another item scope; a document
  *   action needs a document (or a collection, which a document action may also
  *   be pointed at). `global`, `note` and an unresolved target are not checked.
- * - `argumentRequired`: the message must hold text besides the pills.
+ * - `argumentRequired`: the message must hold text besides the pills. No hint
+ *   while the composer shows the pill's argument hint right after it, which
+ *   already asks for the text (see `isArgumentHintVisible`).
  *
  * Pills whose action no longer exists are skipped, matching the send path,
  * which sends them without a prompt.
@@ -99,6 +124,7 @@ export function getActionRequirementBlock(input: ActionRequirementInput): Action
         if (action.argumentRequired) {
             if (hasText === null) hasText = hasTextBesidesPills(content, pills);
             if (!hasText) {
+                if (isArgumentHintVisible(content, pills, pill)) return { hint: null };
                 const leadIn = action.argumentRequiredHint?.trim() || DEFAULT_ARGUMENT_REQUIRED_HINT;
                 return { hint: `${leadIn} after ${command}` };
             }

@@ -66,7 +66,7 @@ const EarnCreditsSection: React.FC = () => {
                                     style={{ padding: '4px 6px' }}
                                     ariaLabel={`Start ${definition.title} in a chat (+${task.credits} credits)`}
                                 >
-                                    Start in a chat · +{task.credits}
+                                    Start (+{task.credits})
                                 </Button>
                             )
                         }

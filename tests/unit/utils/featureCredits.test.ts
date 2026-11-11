@@ -48,12 +48,14 @@ describe('setup card step 1', () => {
     it('asks for a collection or papers for organizing, and names an attached collection', () => {
         expect(attachStep({ kind: 'collection' }, none)?.lead).toBe('Attach a collection or papers:');
         expect(attachStep({ kind: 'collection' }, collection('Neighborhood effects', 14))?.lead)
-            .toBe('Neighborhood effects (14 papers) is attached.');
+            .toBe('The Neighborhood effects collection (14 papers) is attached.');
     });
 
     it('names a collection and papers attached together', () => {
         expect(attachStep({ kind: 'collection' }, { papers: ['A', 'B'], collections: [{ name: 'X', itemCount: 1 }] })?.lead)
-            .toBe('X (1 paper) and 2 papers are attached.');
+            .toBe('The X collection (1 paper) and 2 papers are attached.');
+        expect(attachStep({ kind: 'collection' }, { papers: [], collections: [{ name: 'A', itemCount: 2 }, { name: 'B', itemCount: null }] })?.lead)
+            .toBe('The A collection (2 papers) and the B collection are attached.');
     });
 
     it('has no attach step for topic tasks', () => {
@@ -153,6 +155,15 @@ describe('completion tracker', () => {
         expect(tracker.takeReady(true)).toEqual([]);
     });
 
+    it('shows a card again for a task earned after its grant was withdrawn', () => {
+        const { tracker } = make();
+        tracker.setOpenThread('t1');
+        tracker.updateTasks([task('annotate', 'old')], 1);
+        tracker.updateTasks([task('annotate', null, false)], 1);
+        tracker.updateTasks([task('annotate', 't1')], 1);
+        expect(tracker.takeReady(true).map((c) => c.task.key)).toEqual(['annotate']);
+    });
+
     it('starts over when the account changes', () => {
         const { tracker } = make();
         tracker.setOpenThread('t1');
@@ -217,5 +228,6 @@ describe('setup card examples', () => {
             .filter((task) => task.key !== 'research_table')
             .flatMap((task) => task.examples.map((example) => example.text));
         expect(linked).not.toContain('what my library says about measurement error');
+        expect(linked).not.toContain('every definition of social capital');
     });
 });

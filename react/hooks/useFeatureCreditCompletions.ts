@@ -35,7 +35,7 @@ export function useFeatureCreditCompletions(): void {
                     id: `feature-credit-${task.key}`,
                     type: 'feature_credit',
                     expire: false,
-                    featureCredit: { key: task.key, credits: task.credits, source: task.source },
+                    featureCredit: { key: task.key, credits: task.credits },
                 });
             }
         };

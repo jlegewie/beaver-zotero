@@ -6657,14 +6657,14 @@
     color: var(--tag-green);
 }
 /* One-click examples: inline links in the text color, blue on hover. */
-.beaver-root .feature-credits-example {
+.beaver-root .feature-credits-link {
     color: var(--fill-primary);
     text-decoration: underline;
     text-decoration-color: var(--fill-secondary);
     text-underline-offset: 2px;
     cursor: pointer;
 }
-.beaver-root .feature-credits-example:hover {
+.beaver-root .feature-credits-link:hover {
     color: var(--accent-blue);
     text-decoration-color: var(--accent-blue);
 }
@@ -6679,17 +6679,24 @@
     gap: 8px;
     width: 100%;
 }
-.beaver-root .feature-credits-progress {
-    flex: none;
-    font-size: 0.9em;
-    color: var(--fill-tertiary);
+.beaver-root .feature-credits-completion-header {
+    align-items: flex-start;
 }
-.beaver-root .feature-credits-result {
+.beaver-root .feature-credits-completion-mark {
+    flex: none;
+    margin-top: 3px;
+    scale: 1.2;
+}
+.beaver-root .feature-credits-completion-heading {
+    flex: 1;
+    min-width: 0;
     display: flex;
-    flex-direction: row;
-    align-items: center;
-    gap: 8px;
-    color: var(--fill-primary);
+    flex-direction: column;
+    gap: 1px;
+}
+.beaver-root .feature-credits-completion-subtitle {
+    /* font-size: 0.9em; */
+    color: var(--fill-secondary);
 }
 .beaver-root .feature-credits-divider {
     height: 1px;
