@@ -142,10 +142,12 @@ function TextEditor({ column, cell, onSave, onCancel, inline }: EditorProps): Re
             onClick={(event) => event.stopPropagation()}
         >
             <label className="rt-cell-editor-field">
-                <span className="rt-cell-editor-label">Answer</span>
+                {/* In the inspector, the section's own heading names the field. */}
+                {inline ? null : <span className="rt-cell-editor-label">Answer</span>}
                 <textarea
                     ref={answerRef}
                     className="rt-cell-editor-input rt-cell-editor-answer"
+                    aria-label={inline ? "Answer" : undefined}
                     rows={4}
                     value={answer}
                     disabled={saving}

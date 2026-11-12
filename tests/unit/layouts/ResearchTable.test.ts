@@ -1124,6 +1124,9 @@ describe('editing cells and filling from rows and columns', () => {
         expect(inspector()!.querySelector('.rt-inspector-reasoning')).not.toBeNull();
         const answer = panelEditor.querySelector('textarea')!;
         expect(answer.value).toBe('Conditional transfers raised enrollment.');
+        // The section's "Answer" heading names the field; no second label under it.
+        expect(Array.from(panelEditor.querySelectorAll('.rt-cell-editor-label')).map((el) => el.textContent)).toEqual(['Note']);
+        expect(answer.getAttribute('aria-label')).toBe('Answer');
         type(answer, 'Enrollment rose 3.4 points.');
         click(Array.from(panelEditor.querySelectorAll('button')).find((b) => b.textContent === 'Save')!);
         await flush();
