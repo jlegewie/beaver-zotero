@@ -187,6 +187,21 @@ export const BUILTIN_ACTIONS: Action[] = [
         sortOrder: 505,
     },
 
+    // Binds to a selected collection or items when there is one, and
+    // otherwise builds the table from a topic.
+    {
+        id: 'builtin-research-table',
+        name: 'table',
+        title: 'Create a research table',
+        description: 'Ask the same questions of every paper in a collection, a selection, or on a topic.',
+        text: 'Create a research table that asks the same questions of every paper.\n\nSteps:\n1. Determine the papers:\n   - If a collection, saved search, or view is attached, the table covers it.\n   - If two or more items are attached, the table covers those items.\n   - Otherwise, the table covers the topic in my message: search my library from several angles and use the papers clearly on that topic, including a single attached paper if it fits. If my message names no topic, ask me what the table should cover, or, when one paper is attached, which papers to compare it with.\n   When the table covers attached papers, my message says what to compare, not which papers to include.\n2. Decide what to compare. If my message says, build the columns around that. Otherwise, skim the titles and abstracts (a representative sample for a large collection) to see what the papers have in common, then pick the 4-6 questions a researcher in this field would most want answered side by side, such as the research question, design, data or sample, setting, and main finding. Adapt them to these papers rather than using a generic template.\n3. Make each column one specific question that a single paper can answer on its own. Leave out questions most papers will not report and questions that only make sense across papers, such as which study is strongest.\n4. Create the table. I can review and edit the papers and columns on the create card, so do not ask me to confirm them in chat first.',
+        argumentHint: 'Topic, or what to compare, e.g. methods or findings',
+        targets: ['items', 'collection', 'global'],
+        category: 'research',
+        locked: true,
+        sortOrder: 506,
+    },
+
     {
         id: 'builtin-whats-new',
         name: 'discover',
