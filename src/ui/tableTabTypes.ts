@@ -89,6 +89,8 @@ export interface TableTabMountOptions {
     onRendered?(report: TableTabRenderReport): void;
     /** Whether the tab is the selected one in its window. */
     isSelected?(): boolean;
+    /** Moves the table to a window of its own, closing the tab; a tab only. */
+    moveToNewWindow?(): void;
 }
 
 /** What the renderer hands back for one mounted tab. */

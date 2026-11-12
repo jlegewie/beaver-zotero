@@ -289,23 +289,8 @@ function installTabHooks(win: Window): boolean {
         }
         return false;
     };
-    // The tab menu's Move Tab → Move to New Window: the kind opens the
-    // content in its own window, then the tab closes. A failed open keeps it.
-    (hooks.moveToNewWindow ??= {})[BEAVER_TAB_CONTENT_TYPE] = async (tab: { id: string; data?: SessionTab['data'] }) => {
-        const target = tabDataOf(tab?.data);
-        const kind = target && active ? kinds.get(target.kind) : undefined;
-        if (!target || !kind?.moveToNewWindow) return;
-        try {
-            const outcome = await kind.moveToNewWindow(target.ref);
-            if ('error' in outcome) {
-                Zotero.alert(win as any, 'Beaver', outcome.error);
-                return;
-            }
-            closeBeaverTab(tab.id);
-        } catch (error) {
-            logger(`beaverTabs: move to a new window failed: ${String(error)}`, 1);
-        }
-    };
+    // The tab menu's Move Tab → Move to New Window.
+    (hooks.moveToNewWindow ??= {})[BEAVER_TAB_CONTENT_TYPE] = (tab: { id: string }) => moveBeaverTabToNewWindow(tab.id);
     // Keyboard selection and dragging move focus into the tab's content
     // through these; without them focus stays on the tab strip.
     (hooks.focusFirst ??= {})[BEAVER_TAB_CONTENT_TYPE] = async (tab: { id: string }) => {
@@ -459,6 +444,27 @@ export function closeBeaverTab(tabID: string): void {
         tabsOf(entry.win)?.close(tabID);
     } catch (error) {
         logger(`beaverTabs: could not close tab ${tabID}: ${String(error)}`, 1);
+    }
+}
+
+/**
+ * Moves an open Beaver tab's content to a window of its own (the tab menu's
+ * "Move to New Window"): the kind opens it there, then the tab closes. A
+ * failed open keeps the tab and says why. Never throws.
+ */
+export async function moveBeaverTabToNewWindow(tabID: string): Promise<void> {
+    const entry = entries.get(tabID);
+    const kind = entry && active ? kinds.get(entry.kind) : undefined;
+    if (!entry || !kind?.moveToNewWindow) return;
+    try {
+        const outcome = await kind.moveToNewWindow(entry.ref);
+        if ('error' in outcome) {
+            if (!entry.win.closed) Zotero.alert(entry.win as any, 'Beaver', outcome.error);
+            return;
+        }
+        closeBeaverTab(tabID);
+    } catch (error) {
+        logger(`beaverTabs: move to a new window failed: ${String(error)}`, 1);
     }
 }
 

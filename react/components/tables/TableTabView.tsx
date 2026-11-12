@@ -547,6 +547,7 @@ export default function TableTabView({
                         );
                     }}
                     onShowInLibrary={onShowInLibrary}
+                    onOpenInWindow={options.moveToNewWindow}
                     renderVersionHistory={() => (
                         <TableVersionHistory
                             tableRef={tableRef}
