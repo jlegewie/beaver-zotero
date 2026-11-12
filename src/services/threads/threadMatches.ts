@@ -4,6 +4,7 @@ import type {
     ZoteroInstanceRef,
 } from "@beaver/agent-core/transport/threadService";
 import type { ThreadData } from "./types";
+import { parseAwaitingInput } from "./awaitingInput";
 
 /** The `ThreadModel` fields the UI mapping needs; some sources select exactly
  * these columns rather than full rows. */
@@ -17,6 +18,7 @@ type ThreadDataSource = Pick<
     | "zotero_local_id"
     | "starred"
     | "agent_name"
+    | "awaiting_input"
 >;
 
 /**
@@ -35,6 +37,7 @@ export function threadModelToThreadData(thread: ThreadDataSource): ThreadData {
         // Wire field is `starred`; the UI calls it "pinned".
         isPinned: thread.starred ?? false,
         agentName: thread.agent_name ?? null,
+        awaitingInput: parseAwaitingInput(thread.awaiting_input),
     };
 }
 

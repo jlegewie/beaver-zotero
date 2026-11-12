@@ -254,6 +254,9 @@ async function cancelActiveRunIfNeeded(
         // refuses.
         const outcome = await agentService.parkRun(parkRunId);
         logger(`cancelActiveRunIfNeeded: Parking run ${parkRunId} before switching threads: ${outcome}`, 1);
+        // Leaving released the chat, which refetched thread lists before the
+        // run parked: refetch them again so they show the chat as waiting.
+        if (outcome === 'ended' || outcome === 'sent') Zotero.Beaver?.threads?.invalidateViews();
         if (!isCurrent()) return;
         set(isWSConnectedAtom, false);
         set(isWSReadyAtom, false);

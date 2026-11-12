@@ -79,6 +79,7 @@ describe('threadModelToThreadData', () => {
             zotero_local_id: 'LOCAL',
             starred: true,
             agent_name: 'beaver',
+            awaiting_input: { ask_user_question: 1 },
         })).toEqual({
             id: 't1',
             name: 'Named',
@@ -88,6 +89,7 @@ describe('threadModelToThreadData', () => {
             zoteroLocalId: 'LOCAL',
             isPinned: true,
             agentName: 'beaver',
+            awaitingInput: { ask_user_question: 1 },
         });
     });
 
@@ -104,6 +106,7 @@ describe('threadModelToThreadData', () => {
         expect(mapped.isPinned).toBe(false);
         // Absent on a backend that predates the field; null, not undefined.
         expect(mapped.agentName).toBeNull();
+        expect(mapped.awaitingInput).toBeNull();
     });
 });
 

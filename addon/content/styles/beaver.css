@@ -3870,6 +3870,18 @@
     background: var(--fill-senary);
 }
 
+/* The title, and the waiting-chat dot right after it. */
+[id^="beaver-pane-"] .thread-list-item-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+[id^="beaver-pane-"] .thread-list-item-title .thread-list-item-name {
+    min-width: 0;
+}
+
 [id^="beaver-pane-"] .thread-list-item-name {
     font-size: 0.95rem;
     color: var(--fill-secondary);
@@ -3985,10 +3997,18 @@
     background: var(--fill-senary);
 }
 
+/* The title, and the waiting-chat dot right after it. */
+[id^="beaver-pane-"] .recent-chats-item-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+    min-width: 0;
+}
+
 [id^="beaver-pane-"] .recent-chats-item-name {
     font-size: 0.9rem;
     color: var(--fill-secondary);
-    flex: 1;
     min-width: 0;
 }
 
@@ -3997,6 +4017,24 @@
     color: var(--fill-secondary);
     flex-shrink: 0;
     margin-left: 8px;
+}
+
+/* A chat whose parked run waits on the user's answers, marked after its
+   title. The wrapper widens the hover target of the dot for its tooltip. */
+[id^="beaver-pane-"] .thread-awaiting-input {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 10px;
+    height: 12px;
+    flex-shrink: 0;
+}
+
+[id^="beaver-pane-"] .thread-awaiting-input-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent-blue);
 }
 
 [id^="beaver-pane-"] .recent-chats {
@@ -4392,6 +4430,17 @@
 #beaver-pane-window .beaver-window-nav-row:focus-within .beaver-window-nav-row-actions {
     opacity: 1;
     pointer-events: auto;
+}
+
+/* The waiting-chat dot ends the row, and moves aside for the actions. */
+#beaver-pane-window .beaver-window-nav-row .thread-awaiting-input {
+    margin-right: 8px;
+}
+
+#beaver-pane-window .beaver-window-nav-row:hover .thread-awaiting-input,
+#beaver-pane-window .beaver-window-nav-row-menu-open .thread-awaiting-input,
+#beaver-pane-window .beaver-window-nav-row:focus-within .thread-awaiting-input {
+    margin-right: 30px;
 }
 
 #beaver-pane-window .beaver-window-nav-row-menu {
