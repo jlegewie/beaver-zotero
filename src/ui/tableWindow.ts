@@ -362,8 +362,8 @@ function menuStateOf(entry: TableWindowEntry | undefined): TableViewMenuState | 
 
 /**
  * Updates the window's table commands as a menu opens: each `<command>` with a
- * `data-table-command` is enabled or disabled, the row-height entries are
- * checked, and entries the build does not offer are hidden.
+ * `data-table-command` is enabled or disabled and the row-height entries are
+ * checked.
  */
 export function onTableWindowMenuShowing(win: Window): void {
     const state = menuStateOf(entries.get(win));
@@ -375,9 +375,6 @@ export function onTableWindowMenuShowing(win: Window): void {
     }
     for (const item of Array.from(doc.querySelectorAll('menuitem[data-density]')) as Element[]) {
         item.toggleAttribute('checked', !!state?.density && item.getAttribute('data-density') === state.density);
-    }
-    for (const item of Array.from(doc.querySelectorAll('[data-table-fill]')) as Element[]) {
-        item.toggleAttribute('hidden', !state?.fillAvailable);
     }
 }
 

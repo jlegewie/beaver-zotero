@@ -3219,6 +3219,12 @@ export const CLIENT_FEATURES = {
      * when it leaves a run that is waiting only on such cards.
      */
     PARKED_RUNS: 'parked_runs',
+    /**
+     * Research tables: the client serves `artifact_request` for table
+     * attachments, runs table fills and renders table tool results. Gates the
+     * `tables` capability.
+     */
+    TABLES: 'tables',
 } as const;
 
 /** Client type identifier for the Zotero plugin. */

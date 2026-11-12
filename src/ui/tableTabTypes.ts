@@ -71,8 +71,6 @@ export interface TableViewMenuState {
     enabled: Record<TableViewCommand, boolean>;
     /** The row height in view; null before the table has rendered. */
     density: 'compact' | 'cozy' | 'tall' | null;
-    /** Fill (and Ask Beaver) are offered in this build. */
-    fillAvailable: boolean;
 }
 
 export interface TableTabMountOptions {

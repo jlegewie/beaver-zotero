@@ -247,10 +247,10 @@ describe('the menu entries', () => {
         }
     });
 
-    it('adds no table entries where tables are not enabled', () => {
+    it('adds the table entries in production builds', () => {
         Z.Beaver.data.env = 'production';
         initContextMenus();
-        expect(registered.some((m) => m.target === 'main/menubar/file')).toBe(false);
-        expect(registered.some((m) => m.menuID === 'beaver-new-table-collection-menu')).toBe(false);
+        expect(registered.some((m) => m.menuID === 'beaver-new-table-file-menu')).toBe(true);
+        expect(registered.some((m) => m.menuID === 'beaver-new-table-collection-menu')).toBe(true);
     });
 });
