@@ -11,6 +11,8 @@ import { currentThreadIdAtom } from '@beaver/agent-core/run-state/atoms';
 import { searchableLibraryIdsAtom } from '../atoms/profile';
 import { convertUTCToLocal } from '../utils/dateUtils';
 import { isThreadInstanceMismatch } from '../../src/services/threads/threadMatches';
+import { awaitingInputLabel } from '../../src/services/threads/awaitingInput';
+import AwaitingInputDot from './AwaitingInputDot';
 import { currentZoteroInstanceRef } from '../../src/utils/zoteroUtils';
 import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
 import { getReaderOrNoteContextItem } from '../utils/zoteroTabContext';
@@ -155,7 +157,7 @@ const RecentChats: React.FC = () => {
                     className="recent-chats-item"
                     role="button"
                     tabIndex={0}
-                    aria-label={`${thread.name || 'Unnamed conversation'}, ${formatCompactTime(thread.updatedAt)}`}
+                    aria-label={`${thread.name || 'Unnamed conversation'}, ${formatCompactTime(thread.updatedAt)}${thread.awaitingInput ? `, ${awaitingInputLabel(thread.awaitingInput).toLowerCase()}` : ''}`}
                     onClick={() => handleSelectThread(thread)}
                     onKeyDown={(e) => {
                         if (e.key === 'Enter' || e.key === ' ') {
@@ -164,8 +166,11 @@ const RecentChats: React.FC = () => {
                         }
                     }}
                 >
-                    <span className="recent-chats-item-name truncate">
-                        {thread.name || 'Unnamed conversation'}
+                    <span className="recent-chats-item-title">
+                        <span className="recent-chats-item-name truncate">
+                            {thread.name || 'Unnamed conversation'}
+                        </span>
+                        {thread.awaitingInput && <AwaitingInputDot awaiting={thread.awaitingInput} />}
                     </span>
                     <span className="recent-chats-item-time">
                         {formatCompactTime(thread.updatedAt)}

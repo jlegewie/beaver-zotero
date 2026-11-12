@@ -450,6 +450,21 @@ describe('interrupt-active-run confirm', () => {
             expect(cancelMock).not.toHaveBeenCalled();
             expect(store.get(currentThreadIdAtom)).toBe('thread-1');
         });
+
+        it('refetches thread lists once the run parks, so they show the chat as waiting', async () => {
+            const invalidateViews = vi.fn();
+            (Zotero as any).Beaver = { ...(Zotero as any).Beaver, threads: { invalidateViews } };
+            store.set(activeRunAtom, run('in_progress'));
+            store.set(isWSChatPendingAtom, true);
+            parkRunMock.mockResolvedValueOnce('refused');
+            await store.set(newThreadAtom, { skipAutoPopulate: true });
+            expect(invalidateViews).not.toHaveBeenCalled();
+
+            store.set(activeRunAtom, run('in_progress'));
+            store.set(isWSChatPendingAtom, true);
+            await store.set(newThreadAtom, { skipAutoPopulate: true });
+            expect(invalidateViews).toHaveBeenCalledTimes(1);
+        });
     });
 
     describe('leaving a run that is reconnecting', () => {

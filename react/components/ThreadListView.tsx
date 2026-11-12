@@ -20,6 +20,8 @@ import { ChipButton } from './agentRuns/requestChips/ChipButton';
 import { CSSIcon, CSSItemTypeIcon } from './icons/zotero';
 import ThreadFilterMenu from './ui/menus/ThreadFilterMenu';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
+import AwaitingInputDot from './AwaitingInputDot';
+import { awaitingInputLabel } from '../../src/services/threads/awaitingInput';
 
 interface ThreadListViewProps {
     isWindow?: boolean;
@@ -229,7 +231,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                 className={`thread-list-item ${isEditing ? 'thread-list-item-editing' : ''} ${isHovered ? 'thread-list-item-hovered' : ''}`}
                 role={isEditing ? undefined : 'button'}
                 tabIndex={isEditing ? undefined : 0}
-                aria-label={isEditing ? undefined : `${threadName}, ${formatTimeAgo(thread.updatedAt)}${isCurrent ? ', current chat' : ''}${thread.isPinned ? ', pinned' : ''}${isForeign ? `, ${FOREIGN_THREAD_TITLE}` : ''}`}
+                aria-label={isEditing ? undefined : `${threadName}, ${formatTimeAgo(thread.updatedAt)}${isCurrent ? ', current chat' : ''}${thread.isPinned ? ', pinned' : ''}${thread.awaitingInput ? `, ${awaitingInputLabel(thread.awaitingInput).toLowerCase()}` : ''}${isForeign ? `, ${FOREIGN_THREAD_TITLE}` : ''}`}
                 onClick={() => {
                     if (!isEditing) {
                         handleSelectThread(thread);
@@ -260,8 +262,11 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                             autoFocus
                         />
                     ) : (
-                        <div className="thread-list-item-name truncate">
-                            {highlightMatch(threadName, activeQuery)}
+                        <div className="thread-list-item-title">
+                            <div className="thread-list-item-name truncate">
+                                {highlightMatch(threadName, activeQuery)}
+                            </div>
+                            {thread.awaitingInput && <AwaitingInputDot awaiting={thread.awaitingInput} />}
                         </div>
                     )}
                     <div className="thread-list-item-time">
