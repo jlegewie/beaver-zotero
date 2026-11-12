@@ -25,24 +25,35 @@ export function editsAsList(column: Column): boolean {
  * its options, "Not reported" and "Clear cell", each saving at once.
  *
  * `onSave` resolves to an error message when the write is refused, and the
- * editor stays open with it.
+ * editor stays open with it. `inline` draws it in the flow of the cell
+ * inspector rather than as a card floating over the grid.
  */
 export function CellEditor({
     column,
     cell,
     onSave,
     onCancel,
+    inline = false,
 }: {
     column: Column;
     cell: Cell | undefined;
     onSave(input: CellEditInput): Promise<string | null>;
     onCancel(): void;
+    inline?: boolean;
 }): React.ReactElement {
     return editsAsList(column) ? (
-        <ChoiceEditor column={column} cell={cell} onSave={onSave} onCancel={onCancel} />
+        <ChoiceEditor column={column} cell={cell} onSave={onSave} onCancel={onCancel} inline={inline} />
     ) : (
-        <TextEditor column={column} cell={cell} onSave={onSave} onCancel={onCancel} />
+        <TextEditor column={column} cell={cell} onSave={onSave} onCancel={onCancel} inline={inline} />
     );
+}
+
+interface EditorProps {
+    column: Column;
+    cell: Cell | undefined;
+    onSave(input: CellEditInput): Promise<string | null>;
+    onCancel(): void;
+    inline: boolean;
 }
 
 /** Calls `onPress` on a press outside the element. */
@@ -67,17 +78,7 @@ function initialText(cell: Cell | undefined): string {
     return value?.kind === "text" ? value.text : "";
 }
 
-function TextEditor({
-    column,
-    cell,
-    onSave,
-    onCancel,
-}: {
-    column: Column;
-    cell: Cell | undefined;
-    onSave(input: CellEditInput): Promise<string | null>;
-    onCancel(): void;
-}): React.ReactElement {
+function TextEditor({ column, cell, onSave, onCancel, inline }: EditorProps): React.ReactElement {
     const rootRef = useRef<HTMLDivElement>(null);
     const answerRef = useRef<HTMLTextAreaElement>(null);
     const initial = initialText(cell);
@@ -134,8 +135,8 @@ function TextEditor({
     return (
         <div
             ref={rootRef}
-            className="rt-cell-editor"
-            role="dialog"
+            className={`rt-cell-editor${inline ? " rt-cell-editor-inline" : ""}`}
+            role={inline ? "group" : "dialog"}
             aria-label={`Edit ${column.header}`}
             onKeyDown={onKeyDown}
             onClick={(event) => event.stopPropagation()}
@@ -235,17 +236,7 @@ function choices(column: Column, cell: Cell | undefined): Choice[][] {
     ];
 }
 
-function ChoiceEditor({
-    column,
-    cell,
-    onSave,
-    onCancel,
-}: {
-    column: Column;
-    cell: Cell | undefined;
-    onSave(input: CellEditInput): Promise<string | null>;
-    onCancel(): void;
-}): React.ReactElement {
+function ChoiceEditor({ column, cell, onSave, onCancel, inline }: EditorProps): React.ReactElement {
     const rootRef = useRef<HTMLDivElement>(null);
     const groups = choices(column, cell);
     const flat = groups.flat();
@@ -295,7 +286,7 @@ function ChoiceEditor({
     return (
         <div
             ref={rootRef}
-            className="rt-cell-editor rt-cell-choices"
+            className={`rt-cell-editor rt-cell-choices${inline ? " rt-cell-editor-inline" : ""}`}
             role="listbox"
             tabIndex={-1}
             aria-label={`Answer for ${column.header}`}

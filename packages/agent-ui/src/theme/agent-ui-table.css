@@ -2660,6 +2660,29 @@
     padding: 0.3rem 0.55rem;
 }
 
+/* The editor in the cell inspector: in the panel's flow, not a floating card. */
+.beaver-root .rt-cell-editor-inline {
+    padding: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
+/* A narrow inspector wraps Save and Cancel under Not reported. */
+.beaver-root .rt-cell-editor-inline .rt-cell-editor-actions {
+    flex-wrap: wrap;
+}
+
+.beaver-root .rt-cell-choices.rt-cell-editor-inline {
+    min-width: 0;
+    max-width: none;
+    max-height: none;
+    overflow-y: visible;
+    padding: 0.3rem;
+    border-radius: 0.5rem;
+    box-shadow: 0 0 0 1px var(--color-border50);
+}
+
 /* The inspector's Edit, Clear, Reset to Beaver's answer and Change. */
 .beaver-root .rt-inspector-action {
     display: inline-flex;

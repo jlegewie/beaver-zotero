@@ -175,6 +175,20 @@ describe('the grid', () => {
         ]);
     });
 
+    it('offers Open in new window only when the host can move the table to one', () => {
+        mount({ onCopy: vi.fn() });
+        click(container!.querySelector<HTMLButtonElement>('button[aria-label="More actions"]')!);
+        expect(menuEntry('Open in new window')).toBeUndefined();
+        act(() => root?.unmount());
+        container!.remove();
+
+        const onOpenInWindow = vi.fn();
+        mount({ onOpenInWindow });
+        click(container!.querySelector<HTMLButtonElement>('button[aria-label="More actions"]')!);
+        click(menuEntry('Open in new window')!);
+        expect(onOpenInWindow).toHaveBeenCalledTimes(1);
+    });
+
     it("expands the Paper cell to the paper's full details, with its actions in the footer", () => {
         const revealInLibrary = vi.fn();
         setHost({ navigation: { activateCitation, revealInLibrary, openSource: vi.fn() } as never });
@@ -1086,6 +1100,86 @@ describe('editing cells and filling from rows and columns', () => {
         click(pencil()!);
         expect(editor()!.querySelector('textarea')!.value).toBe('Gains in consumption.');
         expect(editor()!.querySelector<HTMLInputElement>('input[placeholder="Why you changed it (optional)"]')!.value).toBe('Schooling was not an outcome.');
+        // The editor stands in for the user's answer, its note and Reset.
+        const mine = editor()!.closest('.rt-inspector-answer-section')!;
+        expect(mine.textContent).toContain('Your answer');
+        expect(mine.querySelector('.rt-inspector-answer-row')).toBeNull();
+        expect(mine.textContent).not.toContain('Schooling was not an outcome.');
+        expect(links()).toEqual([]);
+        // Beaver's earlier answer stays below, for reference.
+        expect(inspector()!.textContent).toContain('Transfers raised consumption.');
+    });
+
+    it('edits a text cell in the inspector, in place of the answer, rather than over the grid', async () => {
+        const cellEditing = editing();
+        mount({ cellEditing });
+        click(cell('r1', 'effect'));
+        click(pencil()!);
+        const panelEditor = inspector()!.querySelector<HTMLElement>('.rt-cell-editor')!;
+        expect(panelEditor).not.toBeNull();
+        expect(panelEditor.classList.contains('rt-cell-editor-inline')).toBe(true);
+        expect(container!.querySelector('.rt-cell-editor-layer')).toBeNull();
+        expect(panelEditor.closest('.rt-inspector-answer-section')!.textContent).toContain('Answer');
+        // Beaver's explanation and evidence stay in view while editing.
+        expect(inspector()!.querySelector('.rt-inspector-reasoning')).not.toBeNull();
+        const answer = panelEditor.querySelector('textarea')!;
+        expect(answer.value).toBe('Conditional transfers raised enrollment.');
+        type(answer, 'Enrollment rose 3.4 points.');
+        click(Array.from(panelEditor.querySelectorAll('button')).find((b) => b.textContent === 'Save')!);
+        await flush();
+        expect(cellEditing.onEdit).toHaveBeenCalledWith(
+            expect.objectContaining({ id: 'r1' }),
+            expect.objectContaining({ id: 'effect' }),
+            { op: 'answer', value: { kind: 'text', text: 'Enrollment rose 3.4 points.' }, note: undefined },
+        );
+        expect(editor()).toBeNull();
+        expect(pencil()).not.toBeNull();
+    });
+
+    it('keeps the inspector editor open with a refusal, and Cancel puts the answer back', async () => {
+        const cellEditing = editing(vi.fn(async () => 'This row is no longer in the table.'));
+        mount({ cellEditing });
+        click(cell('r1', 'effect'));
+        click(pencil()!);
+        click(Array.from(editor()!.querySelectorAll('button')).find((b) => b.textContent === 'Save')!);
+        await flush();
+        expect(inspector()!.querySelector('.rt-cell-editor [role="alert"]')?.textContent).toBe('This row is no longer in the table.');
+        click(Array.from(editor()!.querySelectorAll('button')).find((b) => b.textContent === 'Cancel')!);
+        expect(editor()).toBeNull();
+        expect(inspector()!.querySelector('.rt-inspector-answer')?.textContent).toBe('Conditional transfers raised enrollment.');
+    });
+
+    it("lists a Choice cell's options in the inspector, saving at once", async () => {
+        const cellEditing = editing();
+        mount({ cellEditing });
+        click(cell('r1', 'design'));
+        click(pencil()!);
+        const options = Array.from(inspector()!.querySelectorAll('.rt-cell-editor [role="option"]')).map((o) => o.textContent);
+        expect(options).toEqual(['RCT', 'Not reported', 'Clear cell']);
+        click(Array.from(editor()!.querySelectorAll('[role="option"]')).find((o) => o.textContent === 'Not reported')!);
+        await flush();
+        expect(cellEditing.onEdit).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ id: 'design' }), { op: 'not_reported' });
+        expect(editor()).toBeNull();
+    });
+
+    it('closes the inspector editor when the inspector moves to another row', () => {
+        mount({ cellEditing: editing() });
+        click(cell('r1', 'effect'));
+        click(pencil()!);
+        expect(editor()).not.toBeNull();
+        click(inspector()!.querySelector<HTMLButtonElement>('button[aria-label="Next row"]')!);
+        expect(inspector()!.getAttribute('data-row-id')).toBe('r2');
+        expect(editor()).toBeNull();
+    });
+
+    it('keeps one editor open: the grid editor closes the inspector one', () => {
+        mount({ cellEditing: editing() });
+        click(cell('r1', 'effect'));
+        click(pencil()!);
+        click(expand(cell('r1', 'design'))!.querySelector('button[aria-label="Edit Design"]')!);
+        expect(container!.querySelectorAll('.rt-cell-editor')).toHaveLength(1);
+        expect(inspector()?.querySelector('.rt-cell-editor') ?? null).toBeNull();
+        expect(container!.querySelector('.rt-cell-editor-layer .rt-cell-editor')).not.toBeNull();
     });
 
     it("makes Beaver's own choice the user's when it is picked, so fills keep it", async () => {
@@ -1100,7 +1194,7 @@ describe('editing cells and filling from rows and columns', () => {
         });
     });
 
-    it("opens the editor from the inspector on a hidden column, showing the column first", () => {
+    it('edits a hidden column\'s cell in the inspector, leaving the column hidden', () => {
         mount({ cellEditing: editing() });
         click(cell('r1', 'amount'));
         act(() => {
@@ -1109,8 +1203,8 @@ describe('editing cells and filling from rows and columns', () => {
         click(menuItem('Hide column')!);
         expect(container!.querySelector('th[data-column-id="amount"]')).toBeNull();
         click(pencil()!);
-        expect(container!.querySelector('th[data-column-id="amount"]')).not.toBeNull();
-        expect(editor()).not.toBeNull();
+        expect(container!.querySelector('th[data-column-id="amount"]')).toBeNull();
+        expect(inspector()!.querySelector('.rt-cell-editor')).not.toBeNull();
     });
 
     it('shows the cell controls disabled with the reason in a read-only library', () => {
