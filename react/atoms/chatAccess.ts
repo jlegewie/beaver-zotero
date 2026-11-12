@@ -11,9 +11,13 @@ import {
     isMigratingDataAtom,
     isProfileLoadedAtom,
     pendingDowngradeAckAtom,
+    remainingBeaverCreditsAtom,
     updateRequiredAtom,
 } from './profile';
 import { isLoadingThreadAtom } from './threads';
+import { isUsingBeaverCreditsAtom } from './models';
+import { requestPlusToolsAtom } from './ui';
+import { getPlusToolsAccess, type PlusToolsAccess } from '../utils/plusToolsAccess';
 
 /**
  * What stands between the user and a chat, in the order the sidebar resolves
@@ -40,3 +44,11 @@ export const chatAccessGateAtom = atom<ChatAccessGate | null>((get) => {
     if (!get(hasAuthorizedFreeAccessAtom)) return 'onboarding';
     return null;
 });
+
+/** Whether the next message gets Plus Tools, and if not, why (see `getPlusToolsAccess`). */
+export const plusToolsAccessAtom = atom<PlusToolsAccess>((get) => getPlusToolsAccess({
+    gate: get(chatAccessGateAtom),
+    usesBeaverModel: get(isUsingBeaverCreditsAtom),
+    plusToolsPref: get(requestPlusToolsAtom),
+    credits: get(remainingBeaverCreditsAtom),
+}));
