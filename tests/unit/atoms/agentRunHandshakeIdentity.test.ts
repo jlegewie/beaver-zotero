@@ -25,6 +25,7 @@ vi.mock('@beaver/agent-core/transport/clientIdentity', () => ({
     resolveClientIdentity: resolveClientIdentityMock,
 }));
 
+vi.mock('../../../src/services/zoteroFulltext/state', () => ({ getZoteroFulltextState: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../../../src/services/searchIndexState', () => ({
     getSearchIndexState: vi.fn().mockResolvedValue({ version: 1, libraries: [{ library_ref: 'u', total: 100, indexed: 91, unavailable: 0 }] }),
 }));
