@@ -3,7 +3,7 @@
  *
  *   - `findUniqueRawMatchPosition`       map a unique simplified match to raw
  *   - `findTargetRawMatchPosition`       find raw position by before/after ctx
- *   - `captureValidatedEditTargetContext` capture 200-char anchors at validate time
+ *   - `captureValidatedEditTargetContext` capture unique anchors at validate time
  *
  * Split from the orchestrator so tests can stub individual helpers through
  * `vi.mock` without intercepting the position-lookup module itself.
@@ -17,12 +17,11 @@ import { expandToRawHtml } from './noteCitationExpand';
 // Context-Anchored Range Finding
 // =============================================================================
 
-export type ContextRangePolicy = 'first' | 'unique' | 'best-length';
+export type ContextRangePolicy = 'first' | 'best-length';
 
 /**
  * Find the range in currentHtml bracketed by before/after context strings.
- * Used for context-anchored undo, PM normalization refresh, and validator
- * disambiguation of multi-match edits.
+ * Used for context-anchored undo and PM normalization refresh.
  *
  * Policy resolution (when omitted): `best-length` if `expectedLength` is
  * provided, otherwise `first`.
@@ -32,9 +31,6 @@ export type ContextRangePolicy = 'first' | 'unique' | 'best-length';
  *                    closest to `expectedLength`. Disambiguates cases where
  *                    `beforeCtx` matches non-uniquely (e.g., a shared
  *                    citation-span suffix repeated across sibling `<li>`s).
- *   - `unique`       Walk all valid pairs; return null if more than one
- *                    distinct range is found. Used when the validator needs
- *                    to confirm a single matching position.
  */
 export function findRangeByContexts(
     currentHtml: string,
@@ -49,7 +45,6 @@ export function findRangeByContexts(
         policy ?? (expectedLength !== undefined ? 'best-length' : 'first');
 
     if (hasBefore && hasAfter) {
-        let firstFound: { start: number; end: number } | null = null;
         let bestStart = -1;
         let bestEnd = -1;
         let bestScore = Number.POSITIVE_INFINITY;
@@ -64,51 +59,26 @@ export function findRangeByContexts(
                 if (effectivePolicy === 'first') {
                     return { start, end: afterIdx };
                 }
-                if (effectivePolicy === 'unique') {
-                    if (firstFound) {
-                        if (firstFound.start !== start || firstFound.end !== afterIdx) {
-                            return null;
-                        }
-                    } else {
-                        firstFound = { start, end: afterIdx };
-                    }
-                } else {
-                    // best-length
-                    const score = Math.abs((afterIdx - start) - (expectedLength ?? 0));
-                    if (score < bestScore) {
-                        bestScore = score;
-                        bestStart = start;
-                        bestEnd = afterIdx;
-                    }
+                // best-length
+                const score = Math.abs((afterIdx - start) - (expectedLength ?? 0));
+                if (score < bestScore) {
+                    bestScore = score;
+                    bestStart = start;
+                    bestEnd = afterIdx;
                 }
             }
             searchFrom = beforeIdx + 1;
         }
 
-        if (effectivePolicy === 'unique') return firstFound;
         if (bestStart !== -1) return { start: bestStart, end: bestEnd };
     } else if (hasBefore && !hasAfter) {
         // Edit at end of note — beforeCtx anchors the start, end is end-of-string.
-        // 'unique' policy requires beforeCtx to occur exactly once; otherwise
-        // the end-of-note range is ambiguous.
-        if (effectivePolicy === 'unique') {
-            const first = currentHtml.indexOf(beforeCtx!);
-            if (first === -1) return null;
-            if (currentHtml.indexOf(beforeCtx!, first + 1) !== -1) return null;
-            return { start: first + beforeCtx!.length, end: currentHtml.length };
-        }
         const beforeIdx = currentHtml.indexOf(beforeCtx!);
         if (beforeIdx !== -1) {
             return { start: beforeIdx + beforeCtx!.length, end: currentHtml.length };
         }
     } else if (!hasBefore && hasAfter) {
         // Edit at start of note — afterCtx anchors the end, start is 0.
-        if (effectivePolicy === 'unique') {
-            const first = currentHtml.indexOf(afterCtx!);
-            if (first === -1) return null;
-            if (currentHtml.indexOf(afterCtx!, first + 1) !== -1) return null;
-            return { start: 0, end: first };
-        }
         const afterIdx = currentHtml.indexOf(afterCtx!);
         if (afterIdx !== -1) {
             return { start: 0, end: afterIdx };
@@ -125,7 +95,13 @@ function escapeRegex(str: string): string {
     return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function findRefInsensitiveMatchPositions(haystack: string, needle: string): number[] {
+/**
+ * Spans of `needle` in `haystack`, treating every `ref="…"` value in the
+ * needle as a wildcard. Citation refs are occurrence counters that shift when
+ * an edit adds or removes a citation, so this also finds the spans a needle
+ * with stale refs was meant to address.
+ */
+export function findRefInsensitiveMatches(haystack: string, needle: string): { start: number; end: number }[] {
     const refAttrRegex = /\bref="[^"]*"/g;
     let pattern = '';
     let lastIndex = 0;
@@ -139,13 +115,19 @@ function findRefInsensitiveMatchPositions(haystack: string, needle: string): num
     pattern += escapeRegex(needle.substring(lastIndex));
 
     const regex = new RegExp(pattern, 'g');
-    const positions: number[] = [];
+    const spans: { start: number; end: number }[] = [];
     while ((match = regex.exec(haystack)) !== null) {
-        positions.push(match.index);
+        spans.push({ start: match.index, end: match.index + match[0].length });
     }
-    return positions;
+    return spans;
 }
 
+/**
+ * Map an old_string that occurs exactly once in the simplified note to its raw
+ * HTML position, or `null` when it is missing, repeated, or cannot be verified
+ * against the raw HTML. Unlike `findUniqueRawMatchPosition`, citation refs
+ * count: they tell apart citations whose raw HTML is identical.
+ */
 function findExactSimplifiedRawMatchPosition(
     strippedHtml: string,
     simplified: string,
@@ -184,7 +166,18 @@ export interface EditTargetContext {
 }
 
 const EDIT_TARGET_CONTEXT_LENGTH = 200;
+/** Longest anchor captured on either side of a validated edit target. */
+const MAX_EDIT_TARGET_CONTEXT_LENGTH = 4000;
 
+/**
+ * Capture the anchors the executor uses to re-locate a validated target whose
+ * raw HTML occurs more than once. The citation ref in old_string pins the
+ * occurrence now, but refs renumber when the note changes before execution,
+ * so the executor relies on the anchors alone. They start at 200 chars and
+ * double until they bracket only this occurrence: two table rows that differ
+ * in a citation ref can share a long run of identical cells on both sides.
+ * Returns `null` when the occurrence cannot be pinned down within the cap.
+ */
 export function captureValidatedEditTargetContext(
     strippedHtml: string,
     simplified: string,
@@ -197,62 +190,65 @@ export function captureValidatedEditTargetContext(
     );
     if (rawPos === null) return null;
 
-    return {
-        beforeContext: strippedHtml.substring(
-            Math.max(0, rawPos - EDIT_TARGET_CONTEXT_LENGTH),
-            rawPos
-        ),
-        afterContext: strippedHtml.substring(
-            rawPos + expandedOld.length,
-            rawPos + expandedOld.length + EDIT_TARGET_CONTEXT_LENGTH
-        ),
-    };
+    const afterStart = rawPos + expandedOld.length;
+    for (let length = EDIT_TARGET_CONTEXT_LENGTH; ; length = Math.min(length * 2, MAX_EDIT_TARGET_CONTEXT_LENGTH)) {
+        const context = {
+            beforeContext: strippedHtml.substring(Math.max(0, rawPos - length), rawPos),
+            afterContext: strippedHtml.substring(afterStart, afterStart + length),
+        };
+        const reachesBothEnds = rawPos - length <= 0 && afterStart + length >= strippedHtml.length;
+        if (
+            findUniqueRawPositionByContext(strippedHtml, expandedOld, context.beforeContext, context.afterContext) === rawPos
+        ) {
+            return context;
+        }
+        if (reachesBothEnds || length >= MAX_EDIT_TARGET_CONTEXT_LENGTH) return null;
+    }
 }
 
+/**
+ * Locate `expandedOld` by the anchors captured around it. An occurrence that
+ * both anchors bracket wins; single-anchor hits only count when no occurrence
+ * matches both, which tolerates drift on one side. One anchor alone is often
+ * shared: the 200 chars after the first cell of two table rows can be the
+ * same run of identical cells.
+ */
 function findUniqueRawPositionByContext(
     currentHtml: string,
     expandedOld: string,
     beforeCtx?: string,
     afterCtx?: string
 ): number | null {
-    const positions = new Set<number>();
-    const hasBefore = beforeCtx != null && beforeCtx.length > 0;
-    const hasAfter = afterCtx != null && afterCtx.length > 0;
+    const beforeStarts = new Set<number>();
+    const afterStarts = new Set<number>();
 
-    if (hasBefore && hasAfter) {
-        const range = findRangeByContexts(currentHtml, beforeCtx, afterCtx, undefined, 'unique');
-        if (range && currentHtml.substring(range.start, range.end) === expandedOld) {
-            positions.add(range.start);
-        }
-    }
-
-    if (hasBefore) {
+    if (beforeCtx) {
         let searchFrom = 0;
         while (true) {
-            const beforeIdx = currentHtml.indexOf(beforeCtx!, searchFrom);
+            const beforeIdx = currentHtml.indexOf(beforeCtx, searchFrom);
             if (beforeIdx === -1) break;
-            const start = beforeIdx + beforeCtx!.length;
-            if (currentHtml.substring(start, start + expandedOld.length) === expandedOld) {
-                positions.add(start);
-            }
+            const start = beforeIdx + beforeCtx.length;
+            if (currentHtml.startsWith(expandedOld, start)) beforeStarts.add(start);
             searchFrom = beforeIdx + 1;
         }
     }
 
-    if (hasAfter) {
+    if (afterCtx) {
         let searchFrom = 0;
         while (true) {
-            const afterIdx = currentHtml.indexOf(afterCtx!, searchFrom);
+            const afterIdx = currentHtml.indexOf(afterCtx, searchFrom);
             if (afterIdx === -1) break;
             const start = afterIdx - expandedOld.length;
-            if (start >= 0 && currentHtml.substring(start, afterIdx) === expandedOld) {
-                positions.add(start);
-            }
+            if (start >= 0 && currentHtml.startsWith(expandedOld, start)) afterStarts.add(start);
             searchFrom = afterIdx + 1;
         }
     }
 
-    return positions.size === 1 ? Array.from(positions)[0] : null;
+    const bracketed = [...beforeStarts].filter((start) => afterStarts.has(start));
+    if (bracketed.length > 0) return bracketed.length === 1 ? bracketed[0] : null;
+
+    const anchored = new Set([...beforeStarts, ...afterStarts]);
+    return anchored.size === 1 ? [...anchored][0] : null;
 }
 
 export function findTargetRawMatchPosition(
@@ -281,7 +277,7 @@ export function findUniqueRawMatchPosition(
     expandedOld: string,
     metadata: SimplificationMetadata
 ): number | null {
-    const matchPositions = findRefInsensitiveMatchPositions(simplified, oldString);
+    const matchPositions = findRefInsensitiveMatches(simplified, oldString).map((m) => m.start);
     if (matchPositions.length !== 1) {
         return null;
     }

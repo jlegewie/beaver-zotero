@@ -279,7 +279,7 @@ import {
     captureValidatedEditTargetContext,
     findTargetRawMatchPosition,
 } from '../../../src/utils/editNoteRawPosition';
-import { stripPartialSimplifiedElements } from '../../../src/utils/editNoteStrippers';
+import { stripPartialSimplifiedElements, stripSpuriousWrappingTags } from '../../../src/utils/editNoteStrippers';
 import {
     stripDataCitationItems,
     rebuildDataCitationItems,
@@ -1731,6 +1731,62 @@ describe('trailing whitespace normalization in matching', () => {
         expect(response.normalized_action_data!.old_string).toBe('<p>Duplicate</p>');
         expect(response.normalized_action_data!.target_before_context).toBe('before-anchor');
         expect(response.normalized_action_data!.target_after_context).toBe('after-anchor');
+    });
+});
+
+describe('fallback matches are reported in terms of the model\'s old_string', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        installMutationInstance();
+    });
+
+    function useNote(inner: string) {
+        const noteHtml = `<div data-schema-version="9">${inner}</div>`;
+        const item = makeMockItem({ getNote: vi.fn(() => noteHtml) });
+        vi.mocked((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(item);
+        vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
+    }
+
+    function validate(old_string: string, new_string: string) {
+        return handleAgentActionValidateRequest(makeValidateRequest({
+            action_data: { library_id: 1, zotero_key: 'NOTE0001', old_string, new_string, operation: 'str_replace' },
+        }));
+    }
+
+    const LEADING = { strippedOld: 'Shared</p>', strippedNew: 'Changed</p>' };
+    const TRAILING = { strippedOld: '<p>Shared', strippedNew: '<p>Changed' };
+
+    it('skips a strip matching several places, applies one matching once, and warns', async () => {
+        useNote('<p>Shared one</p>\n<p>Two Shared</p>\n<p>Three Shared</p>');
+        vi.mocked(stripSpuriousWrappingTags).mockReturnValueOnce([LEADING, TRAILING]);
+
+        const response = await validate('<p>Shared</p>', '<p>Changed</p>');
+        expect(response.valid).toBe(true);
+        expect(response.normalized_action_data!.old_string).toBe('<p>Shared');
+        expect(response.warnings).toContainEqual(expect.stringContaining(
+            'old_string "<p>Shared</p>" was not found exactly as written; it matched after removing `</p>` from its end',
+        ));
+    });
+
+    it('reports not-found with the refused match and its strategy', async () => {
+        useNote('<p>Two Shared</p>\n<p>Three Shared</p>');
+        vi.mocked(stripSpuriousWrappingTags).mockReturnValueOnce([LEADING]);
+
+        const response = await validate('<p>Shared</p>', '<p>Changed</p>');
+        expect(response.valid).toBe(false);
+        expect(response.error_code).toBe('old_string_not_found');
+        expect(response.error).toContain(
+            'not found in the note as written. After removing `<p>` from its start, it would match 2 places',
+        );
+        expect(response.match_strategy).toBe('spurious_wrap_strip');
+    });
+
+    it('tags an ambiguous exact match with its strategy', async () => {
+        useNote('<p>NA</p>\n<p>NA</p>');
+        const response = await validate('NA', 'Yes');
+        expect(response.error_code).toBe('ambiguous_match');
+        expect(response.error).toMatch(/^The string to replace was found 2 times in the note\./);
+        expect(response.match_strategy).toBe('exact');
     });
 });
 

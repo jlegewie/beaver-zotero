@@ -2391,7 +2391,8 @@ export interface ErrorCandidate {
         | 'word_overlap'
         | 'inline_tag_drift'
         | 'structural_anchor'
-        | 'fuzzy_window';
+        | 'fuzzy_window'
+        | 'ambiguous_occurrence';
     score: number;
 }
 
@@ -2402,6 +2403,8 @@ export interface EditValidationError {
     error: string;
     error_code?: string | null;
     error_candidates?: ErrorCandidate[];
+    /** Diagnostic matcher strategy; see `WSAgentActionValidateResponse.match_strategy`. */
+    match_strategy?: string;
 }
 
 /** Response to agent action validation request */
@@ -2415,10 +2418,18 @@ export interface WSAgentActionValidateResponse {
     errors?: FieldValidationErrorInfo[];
     /**
      * Ranked alternative snippets when an edit_note old_string lookup fails.
-     * Present only with `error_code === 'old_string_not_found'`. Already
-     * truncated — do not re-truncate.
+     * Present with `error_code === 'old_string_not_found'` or
+     * `'ambiguous_match'`. Already truncated — do not re-truncate.
      */
     error_candidates?: ErrorCandidate[];
+    /**
+     * Diagnostic for edit_note match failures, for logging only. With
+     * `ambiguous_match`, the matcher strategy whose needle matched several
+     * times (`exact` when old_string itself did); with `old_string_not_found`,
+     * a fallback that matched but was refused because it could not pick one
+     * target.
+     */
+    match_strategy?: string;
     /**
      * Per-edit validation failures for batch actions (e.g. edit_note_batch).
      * Present only when validating a multi-edit payload and one or more edits
