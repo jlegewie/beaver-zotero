@@ -1,10 +1,10 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import Button from '@beaver/agent-ui/primitives/Button';
 import { SectionLabel, SettingsGroup, SettingsRow } from '../preferences/components/SettingsElements';
 import { CheckmarkCircleSolidIcon, Icon } from '../icons/icons';
 import { featureCreditEntriesAtom, featureCreditTotalsAtom, featureTaskModelAccessAtom, startFeatureTaskAtom } from '../../atoms/featureCredits';
-import { canRunFeatureTasks } from '../../utils/featureCredits';
+import { canRunFeatureTasks, featureTasksIntro } from '../../utils/featureCredits';
 import { newThreadAtom } from '../../atoms/threads';
 import { eventManager } from '../../events/eventManager';
 
@@ -18,8 +18,15 @@ const EarnCreditsSection: React.FC = () => {
     const startTask = useSetAtom(startFeatureTaskAtom);
     const newThread = useSetAtom(newThreadAtom);
     const canRun = canRunFeatureTasks(useAtomValue(featureTaskModelAccessAtom));
+    const shown = !!entries && totals.done < totals.count;
 
-    if (!entries || totals.done === totals.count) return null;
+    // Seeing the tasks here counts as seeing the offer: the server counts
+    // task activity from the first time either list was shown.
+    useEffect(() => {
+        if (shown) Zotero.Beaver?.account?.markFeatureCreditsCardSeen();
+    }, [shown]);
+
+    if (!entries || !shown) return null;
 
     const start = async (key: string) => {
         // Preferences shares the chat window's store: open its chat on a new
@@ -37,8 +44,10 @@ const EarnCreditsSection: React.FC = () => {
                     title={`${totals.earned} of ${totals.total} earned`}
                     description={
                         <span className="font-color-secondary">
-                            Learn {entries.length === 4 ? 'four' : entries.length} skills. Each earns credits once you
-                            accept Beaver's changes, whether you start from here or on your own.
+                            {featureTasksIntro(
+                                entries.length,
+                                "credits, whether you start from here or on your own.",
+                            )}
                             {!canRun && (
                                 <>
                                     {' '}Each task needs a few credits to run, or your own API key, and pays them back.

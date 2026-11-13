@@ -859,7 +859,7 @@ describe("instance account ownership", () => {
     });
 
     describe("feature-credit checks", () => {
-        const withTasks = (done: string[] = []) => {
+        const withTasks = (done: string[] = [], startedAt: string | null = "2026-11-19T10:00:00Z") => {
             const data = profile();
             data.profile.feature_credits = {
                 tasks: ["annotate", "note"].map((key) => ({
@@ -868,6 +868,7 @@ describe("instance account ownership", () => {
                     completed_at: done.includes(key) ? "2026-11-20T10:00:00Z" : null,
                     source: null,
                 })),
+                started_at: startedAt,
             };
             return data;
         };
@@ -955,8 +956,39 @@ describe("instance account ownership", () => {
             expect(mocks.sync).not.toHaveBeenCalled();
         });
 
-        it("reports the card as shown once per account, and again after a failed report", async () => {
+        it("does not check before the card was shown, and checks once it was reported this session", async () => {
+            await loadWith(withTasks([], null));
+            mocks.sync.mockResolvedValue({ granted: [] });
+            mocks.seen.mockResolvedValue(undefined);
+            account.syncFeatureCredits();
+            await vi.advanceTimersByTimeAsync(20_000);
+            expect(mocks.sync).not.toHaveBeenCalled();
+
+            account.markFeatureCreditsCardSeen();
+            account.syncFeatureCredits();
+            await vi.advanceTimersByTimeAsync(3_000);
+            expect(mocks.sync).toHaveBeenCalledTimes(1);
+        });
+
+        it("stops checking when the card report fails", async () => {
+            await loadWith(withTasks([], null));
+            mocks.seen.mockRejectedValue(new Error("offline"));
+            account.markFeatureCreditsCardSeen();
+            await vi.advanceTimersByTimeAsync(0);
+            account.syncFeatureCredits();
+            await vi.advanceTimersByTimeAsync(20_000);
+            expect(mocks.sync).not.toHaveBeenCalled();
+        });
+
+        it("does not report the card again once the server has it", async () => {
             await loadWith(withTasks());
+            account.markFeatureCreditsCardSeen();
+            await vi.advanceTimersByTimeAsync(0);
+            expect(mocks.seen).not.toHaveBeenCalled();
+        });
+
+        it("reports the card as shown once per account, and again after a failed report", async () => {
+            await loadWith(withTasks([], null));
             mocks.seen.mockRejectedValueOnce(new Error("offline")).mockResolvedValue(undefined);
             account.markFeatureCreditsCardSeen();
             await vi.advanceTimersByTimeAsync(0);

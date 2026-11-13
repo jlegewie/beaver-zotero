@@ -100,9 +100,18 @@ export interface FeatureCreditTask {
     source: FeatureCreditSource | null;
 }
 
-/** Feature-credit tasks for the account, in display order. */
+/**
+ * Feature-credit tasks for the account, in display order: the ones it can
+ * still earn and the ones it earned. The server leaves out tasks for skills
+ * the user used before first seeing the card.
+ */
 export interface FeatureCreditsStatus {
     tasks: FeatureCreditTask[];
+    /**
+     * When the account's activity started counting: the first time the card
+     * was shown. Null before; the server grants nothing until then.
+     */
+    started_at?: string | null;
 }
 
 /**

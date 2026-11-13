@@ -7,6 +7,7 @@ import {
     attachStep,
     canRunFeatureTasks,
     featureTaskModelNote,
+    featureTasksIntro,
     topicStatus,
     type AttachmentSummary,
     type ModelAccess,
@@ -238,5 +239,13 @@ describe('setup card examples', () => {
             .flatMap((task) => task.examples.map((example) => example.text));
         expect(linked).not.toContain('what my library says about measurement error');
         expect(linked).not.toContain('every definition of social capital');
+    });
+});
+
+describe('tasks intro', () => {
+    it('counts the tasks the server offers in words', () => {
+        expect(featureTasksIntro(4, '5 credits.')).toBe('Learn four skills. Each earns 5 credits.');
+        expect(featureTasksIntro(2, '5 credits.')).toBe('Learn two skills. Each earns 5 credits.');
+        expect(featureTasksIntro(1, '5 credits.')).toBe('Learn one skill. It earns 5 credits.');
     });
 });

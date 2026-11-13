@@ -17,7 +17,7 @@ import { searchableLibraryIdsAtom } from '../../atoms/profile';
 import { actionsAtom } from '../../atoms/actions';
 import { getActionCommand } from '@beaver/agent-ui/composer/slashCommands';
 import { examplesForLibrary, getFeatureCreditTask, type FeatureTaskDefinition, type LibraryShape } from '../../constants/featureCreditTasks';
-import { attachStep, featureTaskModelNote, topicStatus } from '../../utils/featureCredits';
+import { attachStep, featureTaskModelNote, featureTasksIntro, topicStatus } from '../../utils/featureCredits';
 import { countLibraryItems, readLibraryShape } from '../../utils/libraryShape';
 import { SMALL_LIBRARY_THRESHOLD } from '../../atoms/zoteroContext';
 
@@ -271,9 +271,10 @@ const FeatureCreditsCard: React.FC<{
     }
 
     const perTask = new Set(entries.map(({ task }) => task.credits));
-    const rewardText = perTask.size === 1
-        ? `Each earns ${[...perTask][0]} free credits once you accept Beaver's changes.`
-        : "Each earns free credits once you accept Beaver's changes.";
+    const intro = featureTasksIntro(
+        entries.length,
+        `${perTask.size === 1 ? `${[...perTask][0]} ` : ''}free credits.`,
+    );
 
     return (
         <section className="feature-credits-card" aria-labelledby="feature-credits-title">
@@ -282,7 +283,7 @@ const FeatureCreditsCard: React.FC<{
                 <IconButton icon={CancelIcon} variant="ghost-secondary" ariaLabel="Dismiss" onClick={() => setDismissed(true)} />
             </div>
             <p className="feature-credits-text">
-                Learn {entries.length === 4 ? 'four' : entries.length} skills. {rewardText}
+                {intro}
             </p>
             <ul className="feature-credits-list">
                 {entries.map((entry) => (

@@ -100,6 +100,10 @@ const FEATURE_SYNC_CATCH_UP_MS = 10 * 60_000;
 function hasOpenFeatureCreditTasks(profile: SafeProfileWithPlan | undefined): boolean {
     return !!profile?.feature_credits?.tasks?.some((task) => !task.completed_at);
 }
+/** Whether the server has recorded the feature-credits card as shown. */
+function featureCreditsStarted(profile: SafeProfileWithPlan | undefined): boolean {
+    return !!profile?.feature_credits?.started_at;
+}
 const copy = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 const freeze = <T>(value: T): T => {
     if (value && typeof value === "object") {
@@ -908,11 +912,18 @@ export class InstanceAccount {
      * table fills, the home card) only start a short quiet period, and one
      * check runs when it ends. When the check grants something, the profile
      * is refreshed so every window sees the completed task. Does nothing
-     * while the feature is off for the account or every task is done.
+     * while the feature is off for the account, every task is done, or the
+     * card has not been shown yet (the server counts only activity after it).
      */
     syncFeatureCredits(options?: { catchUp?: boolean }): void {
         if (this.disposed || !this.snapshot.session) return;
-        if (!hasOpenFeatureCreditTasks(this.snapshot.data?.profile)) return;
+        const profile = this.snapshot.data?.profile;
+        if (!hasOpenFeatureCreditTasks(profile)) return;
+        // The profile learns the server recorded the card on its next read;
+        // a report sent this session already counts.
+        const cardShown =
+            featureCreditsStarted(profile) || this.featureCardSeenGeneration === this.snapshot.generation;
+        if (!cardShown) return;
         const now = Date.now();
         // A catch-up (the home card appearing) follows no particular write,
         // so it is skipped while a recent check already covers it.
@@ -935,11 +946,13 @@ export class InstanceAccount {
     }
     /**
      * Report, once per signed-in account, that the feature-credits card was
-     * shown. Fire-and-forget; a failed report is retried the next time the
-     * card shows.
+     * shown; the server counts task activity from then on. Fire-and-forget;
+     * a failed report is retried the next time the card shows. Skipped once
+     * the profile says the server already has it.
      */
     markFeatureCreditsCardSeen(): void {
         if (this.disposed || !this.snapshot.session) return;
+        if (featureCreditsStarted(this.snapshot.data?.profile)) return;
         const generation = this.snapshot.generation;
         if (this.featureCardSeenGeneration === generation) return;
         this.featureCardSeenGeneration = generation;

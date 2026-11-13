@@ -191,6 +191,14 @@ export class FeatureCreditCompletionTracker {
     }
 }
 
+const COUNT_WORDS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'];
+
+/** The tasks' intro line: "Learn four skills. Each earns …" for `count` tasks. */
+export function featureTasksIntro(count: number, reward: string): string {
+    const skills = `${COUNT_WORDS[count] ?? count} ${count === 1 ? 'skill' : 'skills'}`;
+    return `Learn ${skills}. ${count === 1 ? 'It' : 'Each'} earns ${reward}`;
+}
+
 /** Credits a task run needs, roughly: below this the Beaver model can't run one. */
 export const FEATURE_TASK_MIN_CREDITS = 2;
 
