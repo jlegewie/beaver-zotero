@@ -1,3 +1,4 @@
+import { isStoredAction } from '@beaver/agent-core/types/actions';
 import { describe, expect, it } from 'vitest';
 import type { FeatureCreditTask } from '@beaver/agent-core/types/profile';
 import {
@@ -213,6 +214,14 @@ describe('model and credits', () => {
         expect(canRunFeatureTasks(access({}))).toBe(true);
         expect(canRunFeatureTasks(access({ hasBeaverCredits: false, hasOwnModel: true }))).toBe(true);
         expect(canRunFeatureTasks(access({ hasBeaverCredits: false }))).toBe(false);
+    });
+});
+
+describe('completion starter actions', () => {
+    it('offers a starter annotation action that stores as a valid action', () => {
+        const starter = getFeatureCreditTask('annotate')!.completion.customAction!;
+        expect(isStoredAction({ id: 'custom-x', ...starter.template })).toBe(true);
+        expect(starter.template.category).toBe('annotate');
     });
 });
 

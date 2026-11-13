@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import type { FeatureCreditPopupData } from '../../types/popupMessage';
@@ -6,6 +6,8 @@ import { ArrowRightIcon, CancelIcon, CheckmarkCircleSolidIcon, Icon } from '../i
 import { featureCreditEntriesAtom, featureCreditTotalsAtom, startFeatureTaskAtom } from '../../atoms/featureCredits';
 import { newThreadAtom } from '../../atoms/threads';
 import { getFeatureCreditTask } from '../../constants/featureCreditTasks';
+import { actionsAtom, importActionAtom } from '../../atoms/actions';
+import { openPreferencesWindow } from '../../ui/openPreferencesWindow';
 
 interface Props {
     data: FeatureCreditPopupData;
@@ -15,7 +17,8 @@ interface Props {
 /**
  * The card a window shows once a feature-credit task is earned in its chat.
  * Every task has the same three parts: the reward and progress, one tip on
- * what else the skill can do, and the next task (or the total once all are
+ * what else the skill can do (ending in one link: a starter action of the
+ * user's own, or the docs), and the next task (or the total once all are
  * done). What Beaver did is already in the chat above. It stays until closed.
  */
 const FeatureCreditCompletionContent: React.FC<Props> = ({ data, onDismiss }) => {
@@ -24,11 +27,27 @@ const FeatureCreditCompletionContent: React.FC<Props> = ({ data, onDismiss }) =>
     const totals = useAtomValue(featureCreditTotalsAtom);
     const startTask = useSetAtom(startFeatureTaskAtom);
     const newThread = useSetAtom(newThreadAtom);
+    const actions = useAtomValue(actionsAtom);
+    const importAction = useSetAtom(importActionAtom);
+    // The action this card created, so a second click edits it again
+    // instead of adding another copy.
+    const [createdActionId, setCreatedActionId] = useState<string | null>(null);
 
     if (!definition) return null;
 
     const next = entries.find((entry) => !entry.task.completed_at && entry.definition.key !== data.key);
-    const { docsUrl, tip } = definition.completion;
+    const { docsUrl, tip, customAction } = definition.completion;
+
+    const createCustomAction = () => {
+        if (!customAction) return;
+        let actionId = createdActionId && actions.some((action) => action.id === createdActionId) ? createdActionId : null;
+        if (!actionId) {
+            // The import path mints the id and a free /command.
+            actionId = importAction({ id: '', ...customAction.template }).action.id;
+            setCreatedActionId(actionId);
+        }
+        openPreferencesWindow('actions', undefined, actionId);
+    };
 
     const startNext = async (event: React.MouseEvent<HTMLButtonElement>) => {
         if (!next) return;
@@ -56,16 +75,29 @@ const FeatureCreditCompletionContent: React.FC<Props> = ({ data, onDismiss }) =>
 
             <p className="feature-credits-text">
                 {tip}{' '}
-                <a
-                    href={docsUrl}
-                    className="feature-credits-link"
-                    onClick={(event) => {
-                        event.preventDefault();
-                        Zotero.launchURL(docsUrl);
-                    }}
-                >
-                    Learn more
-                </a>
+                {customAction ? (
+                    <a
+                        href="#"
+                        className="feature-credits-link"
+                        onClick={(event) => {
+                            event.preventDefault();
+                            createCustomAction();
+                        }}
+                    >
+                        {customAction.label}
+                    </a>
+                ) : (
+                    <a
+                        href={docsUrl}
+                        className="feature-credits-link"
+                        onClick={(event) => {
+                            event.preventDefault();
+                            Zotero.launchURL(docsUrl);
+                        }}
+                    >
+                        Learn more
+                    </a>
+                )}
             </p>
 
             <div className="feature-credits-divider" />

@@ -6,7 +6,7 @@ import PlusSignIcon from '@beaver/agent-ui/icons/PlusSignIcon';
 import Button from "@beaver/agent-ui/primitives/Button";
 import { useSetAtom } from 'jotai';
 import { Action, ActionCategory, ActionCategoryFilter, ActionTargetType, generateActionId, TARGET_TYPE_LABELS, UNCATEGORIZED_FILTER, categoryLabel } from "@beaver/agent-core/types/actions";
-import { actionsAtom, saveActionsAtom, hideActionAtom, restoreActionAtom, resetActionToDefaultAtom, importActionAtom } from "../../atoms/actions";
+import { actionsAtom, saveActionsAtom, hideActionAtom, restoreActionAtom, resetActionToDefaultAtom, importActionAtom, reloadActionsAtom } from "../../atoms/actions";
 import { pendingActionsCategoryFilterAtom, pendingActionEditRequestAtom } from "../../atoms/ui";
 import { importActionFromFile } from "../../utils/actionShareFile";
 import { addPopupMessageAtom } from "../../utils/popupMessageUtils";
@@ -49,6 +49,7 @@ const ActionsPreferenceSection: React.FC = () => {
     const restoreAction = useSetAtom(restoreActionAtom);
     const resetActionToDefault = useSetAtom(resetActionToDefaultAtom);
     const importAction = useSetAtom(importActionAtom);
+    const reloadActions = useSetAtom(reloadActionsAtom);
     const addPopupMessage = useSetAtom(addPopupMessageAtom);
 
     // --- Filter state (null = show all for that dimension) ---
@@ -80,13 +81,15 @@ const ActionsPreferenceSection: React.FC = () => {
     const [pendingActionEdit, setPendingActionEdit] = useAtom(pendingActionEditRequestAtom);
     useEffect(() => {
         if (!pendingActionEdit) return;
-        // Unknown target (e.g. a deleted or hidden action) — drop the request.
         if (!actions.some(a => a.id === pendingActionEdit.actionId)) {
-            setPendingActionEdit(null);
+            // This window may borrow another renderer's store, which has not
+            // seen an action just saved elsewhere: reload from prefs first.
+            // Still unknown (e.g. a deleted or hidden action) — drop the request.
+            if (!reloadActions().some(a => a.id === pendingActionEdit.actionId)) setPendingActionEdit(null);
             return;
         }
         clearFilters();
-    }, [pendingActionEdit, actions, clearFilters, setPendingActionEdit]);
+    }, [pendingActionEdit, actions, clearFilters, setPendingActionEdit, reloadActions]);
     const handleForceEditHandled = useCallback(() => {
         setPendingActionEdit(null);
     }, [setPendingActionEdit]);

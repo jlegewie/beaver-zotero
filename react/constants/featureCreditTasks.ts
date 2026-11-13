@@ -7,6 +7,8 @@
  * are not shown, so the server can add a task before the client supports it.
  */
 
+import type { Action } from '@beaver/agent-core/types/actions';
+
 /** What step 1 of a setup card asks the user to attach. */
 export type FeatureTaskAttachKind =
     /** One or more papers (`optional`: the task also works without). */
@@ -57,6 +59,14 @@ export interface FeatureTaskDefinition {
         /** One sentence on what else the skill can do. */
         tip: string;
         docsUrl: string;
+        /**
+         * A starter action of the user's own, offered instead of the docs
+         * link: clicking saves it as a custom action and opens it for editing.
+         */
+        customAction?: {
+            label: string;
+            template: Pick<Action, 'title' | 'description' | 'text' | 'argumentHint' | 'targets' | 'category'>;
+        };
     };
 }
 
@@ -77,7 +87,18 @@ export const FEATURE_CREDIT_TASKS: FeatureTaskDefinition[] = [
         ],
         finalStep: 'Press Send. Accept the highlights if Beaver asks.',
         completion: {
-            tip: 'Beaver can also annotate a whole collection at once, with a comment on each highlight.',
+            tip: 'Annotate the same way every time: create a reusable prompt with your colors and what to highlight.',
+            customAction: {
+                label: 'Create my annotation action',
+                template: {
+                    title: 'My annotations',
+                    description: 'Highlight a paper the way I like it.',
+                    text: 'Highlight this document with my color scheme:\n- Yellow: the research question or central argument\n- Green: data and methods\n- Blue: main results\n- Purple: limitations and open questions\n\nHighlight only short, high-signal passages (1-3 sentences each) and add a brief comment to each highlight.\n\nWhen finished, write a short summary organized by color (🟨, 🟩, 🟦, 🟪): state the legend, then 1-2 sentences per color citing its annotations.',
+                    argumentHint: 'Optional: what to focus on',
+                    targets: ['attachment'],
+                    category: 'annotate',
+                },
+            },
             docsUrl: `${DOCS_BASE_URL}/annotations`,
         },
     },

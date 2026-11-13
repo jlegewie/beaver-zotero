@@ -77,7 +77,8 @@ vi.mock('../../../react/atoms/profile', async () => {
 // Imports (after mocks)
 // =============================================================================
 
-import { actionsAtom, hideActionAtom, importActionAtom, resetActionToDefaultAtom, restoreActionAtom, saveActionsAtom } from '../../../react/atoms/actions';
+import { actionsAtom, hideActionAtom, importActionAtom, reloadActionsAtom, resetActionToDefaultAtom, restoreActionAtom, saveActionsAtom } from '../../../react/atoms/actions';
+import { getMergedActions } from '../../../react/types/actionStorage';
 import { getActionCommand } from '@beaver/agent-ui/composer/slashCommands';
 import { BUILTIN_ACTIONS } from '../../../react/types/builtinActions';
 import type { Action } from '@beaver/agent-core/types/actions';
@@ -251,5 +252,20 @@ describe('importActionAtom — conflict handling', () => {
         // JSON.stringify drops undefined; null is what actually survives a save.
         expect(saved.overrides[categorized.id]).toEqual({ category: null });
         expect(JSON.parse(JSON.stringify(saved)).overrides[categorized.id]).toEqual({ category: null });
+    });
+});
+
+describe('reloadActionsAtom', () => {
+    it('picks up an action saved from another window', () => {
+        // Each window's store loads the action list once; another window
+        // then saves a new action to prefs.
+        const preferencesStore = makeStore([existing]);
+        const created: Action = { id: 'custom-new', title: 'My annotations', text: 'Highlight', targets: ['attachment'] };
+        vi.mocked(getMergedActions).mockReturnValueOnce([existing, created]);
+
+        const reloaded = preferencesStore.set(reloadActionsAtom);
+
+        expect(reloaded.map(a => a.id)).toEqual(['custom-existing', 'custom-new']);
+        expect(preferencesStore.get(actionsAtom).map(a => a.id)).toEqual(['custom-existing', 'custom-new']);
     });
 });

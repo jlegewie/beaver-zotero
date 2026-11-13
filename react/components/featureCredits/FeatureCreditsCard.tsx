@@ -29,7 +29,7 @@ const TaskRow: React.FC<{ entry: FeatureCreditEntry; onStart: (key: string, win:
         <>
             <Icon
                 icon={done ? CheckmarkCircleSolidIcon : CircleIcon}
-                className={`feature-credits-row-mark ${done ? 'font-color-green' : 'font-color-secondary'}`}
+                className={`feature-credits-row-mark scale-11 ${done ? 'font-color-green' : 'font-color-secondary'}`}
                 aria-label={done ? 'Done' : undefined}
             />
             <span className="feature-credits-row-text">

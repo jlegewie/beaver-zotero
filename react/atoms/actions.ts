@@ -57,6 +57,17 @@ import { getActionRequirementBlock, type ActionRequirementBlock } from '../utils
 
 export const actionsAtom = atom<Action[]>(getMergedActions());
 
+/**
+ * Re-read the actions from prefs into this store. Each renderer loads its list
+ * once, so an action saved from another window is missing here until then.
+ * Prefs hold every saved change, so nothing of this store's is lost.
+ */
+export const reloadActionsAtom = atom(null, (_get, set): Action[] => {
+    const actions = getMergedActions();
+    set(actionsAtom, actions);
+    return actions;
+});
+
 // ---------------------------------------------------------------------------
 // Write atom — saves actions back to prefs
 //
