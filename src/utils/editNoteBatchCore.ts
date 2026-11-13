@@ -28,11 +28,17 @@ import type { SimplificationMetadata } from './noteHtmlSimplifier';
 import type { PageLabelsByAttachmentId } from '@beaver/agent-core/citations/atoms';
 import type { CandidateSnippet } from './editNoteHints';
 import {
+    buildFallbackMatchWarning,
+    describeMatchRewrite,
+    describeRejectedFallback,
     expandBase,
     findBestMatch,
     findMarkdownRenderMatch,
+    truncateForWarning,
+    type MatchDiagnostics,
     type MatchInput,
     type MatchResult,
+    type MatchStrategyName,
 } from './editNoteMatcher';
 import {
     expandToRawHtml,
@@ -44,6 +50,10 @@ import {
     resolveEditTargetAtRuntime,
     buildZeroMatchHint,
     buildExecutionZeroMatchHint,
+    buildAmbiguousMatchError,
+    buildAmbiguousMatchHint,
+    buildOtherRefsNotFoundHint,
+    oldStringCitesOtherRefs,
 } from './editNotePositionLookup';
 import {
     detectPartialSimplifiedTag,
@@ -155,6 +165,12 @@ export interface BatchEditFailure {
     error: string;
     errorCode: string;
     candidates?: CandidateSnippet[];
+    /**
+     * Diagnostic: for `ambiguous_match`, the matcher strategy whose needle
+     * matched several times; for `old_string_not_found`, a fallback that
+     * matched but was refused as ambiguous.
+     */
+    strategy?: MatchStrategyName;
 }
 
 export interface BatchOverlap {
@@ -216,23 +232,34 @@ export function mergeInsertNewString(
     return newString;
 }
 
-export function buildAmbiguousMatchError(matchCount: number, operation?: EditNoteOperation): string {
-    // str_replace_all is only a valid alternative for replacement edits; for
-    // inserts the anchor itself must be made unique.
-    if (operation === 'insert_after' || operation === 'insert_before') {
-        return `The insertion anchor was found ${matchCount} times in the note. `
-            + 'Include more surrounding context in old_string so the anchor matches exactly once.';
-    }
-    return `The string to replace was found ${matchCount} times in the note. `
-        + 'Use operation str_replace_all to replace all occurrences, or include more context to make the match unique.';
-}
+export { buildAmbiguousMatchError };
 
-/** Head-tail truncate a snippet for a single-line warning string. */
-export function truncateForWarning(s: string, headTail = 30): string {
-    const escaped = s.replace(/\n/g, '\\n');
-    const threshold = headTail * 2 + 5;
-    if (escaped.length <= threshold) return escaped;
-    return `${escaped.slice(0, headTail)}…${escaped.slice(-headTail)}`;
+/**
+ * Error for a matched old_string that does not resolve to one target, in
+ * terms of the model's own `requestedOldString`. Usually `ambiguous_match`
+ * listing each occurrence. When the text only occurs next to citations with
+ * other refs, the raw match is those citations, not the model's text, so it
+ * is reported as `old_string_not_found` with closest-match hints instead.
+ */
+export function buildUnresolvedTargetError(
+    simplified: string,
+    requestedOldString: string,
+    match: MatchResult,
+    operation: EditNoteOperation | undefined,
+): { errorCode: 'ambiguous_match' | 'old_string_not_found'; message: string; candidates: CandidateSnippet[] } {
+    if (oldStringCitesOtherRefs(simplified, requestedOldString)) {
+        return { errorCode: 'old_string_not_found', ...buildOtherRefsNotFoundHint(simplified, requestedOldString, operation) };
+    }
+    const hint = buildAmbiguousMatchHint({
+        simplified,
+        oldString: requestedOldString,
+        matchedOldString: match.oldString,
+        normalize: match.normalizeAnchor,
+        matchCount: match.matchCount,
+        operation,
+        rewrite: describeMatchRewrite(match.strategy, requestedOldString, match.oldString),
+    });
+    return { errorCode: 'ambiguous_match', ...hint };
 }
 
 /**
@@ -281,10 +308,13 @@ function failure(
     error: string,
     errorCode: string,
     candidates?: CandidateSnippet[],
+    strategy?: MatchStrategyName,
 ): BatchEditFailure {
-    return candidates && candidates.length > 0
-        ? { index, error, errorCode, candidates }
-        : { index, error, errorCode };
+    return {
+        index, error, errorCode,
+        ...(candidates && candidates.length > 0 ? { candidates } : {}),
+        ...(strategy ? { strategy } : {}),
+    };
 }
 
 /** Build a MatchInput for one str_replace-family edit. */
@@ -314,11 +344,12 @@ function matchEdit(
     spec: BatchEditSpec,
 ): MatchResult | BatchEditFailure {
     const matchInput = buildMatchInput(ctx, spec);
+    const diagnostics: MatchDiagnostics = { rejected: [] };
 
     let match: MatchResult | null = null;
     try {
         const base = expandBase(matchInput);
-        match = findBestMatch(matchInput, base);
+        match = findBestMatch(matchInput, base, diagnostics);
     } catch (e: any) {
         if (e?.code === 'ambiguous_match') {
             return failure(spec.index, e.message, 'ambiguous_match');
@@ -340,10 +371,14 @@ function matchEdit(
         if (partial) {
             return failure(spec.index, buildPartialSimplifiedTagMessage(partial, spec.operation), 'partial_simplified_tag');
         }
+        const options = { rejectedFallback: describeRejectedFallback(spec.oldString ?? '', diagnostics) };
         const hint = ctx.mode === 'validate'
-            ? buildZeroMatchHint(ctx.simplified, spec.oldString ?? '')
-            : buildExecutionZeroMatchHint(ctx.simplified, spec.oldString ?? '');
-        return failure(spec.index, hint.message, 'old_string_not_found', hint.candidates);
+            ? buildZeroMatchHint(ctx.simplified, spec.oldString ?? '', options)
+            : buildExecutionZeroMatchHint(ctx.simplified, spec.oldString ?? '', options);
+        return failure(
+            spec.index, hint.message, 'old_string_not_found', hint.candidates,
+            diagnostics.rejected[0]?.strategy,
+        );
     }
     return match;
 }
@@ -541,6 +576,8 @@ function resolveOne(
     const warnings: string[] = [];
 
     const isInsert = operation === 'insert_after' || operation === 'insert_before';
+    const fallbackWarning = buildFallbackMatchWarning(spec.oldString ?? '', match);
+    if (fallbackWarning) warnings.push(fallbackWarning);
 
     if (operation === 'str_replace_all') {
         const positions = findAllOccurrences(ctx.strippedHtml, expandedOld);
@@ -576,7 +613,8 @@ function resolveOne(
     // Single-target ops.
     const location = resolveSingleTarget(ctx, spec, match);
     if (location === null) {
-        return failure(index, buildAmbiguousMatchError(matchCount, operation), 'ambiguous_match');
+        const unresolved = buildUnresolvedTargetError(ctx.simplified, spec.oldString ?? '', match, operation);
+        return failure(index, unresolved.message, unresolved.errorCode, unresolved.candidates, match.strategy);
     }
     const pos = location.pos;
     if (pos === -1) {

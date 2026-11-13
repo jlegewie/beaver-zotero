@@ -702,6 +702,7 @@ async function handleAgentActionValidateHttpRequest(request: any) {
         collection_names: response.collection_names,
         preference: response.preference,
         warnings: response.warnings,
+        match_strategy: response.match_strategy,
     };
 }
 

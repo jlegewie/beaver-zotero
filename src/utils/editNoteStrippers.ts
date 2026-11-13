@@ -127,6 +127,13 @@ export function stripPartialSimplifiedElements(
 // Spurious Wrapping-Tag Stripping
 // =============================================================================
 
+/**
+ * Self-closing simplified tokens that stand for note content (a citation, an
+ * image, a link). They wrap nothing, and stripping one drops the part of
+ * old_string that identifies the target.
+ */
+const CONTENT_TOKENS = new Set(['citation', 'image', 'annotation-image', 'link']);
+
 export interface WrappingTagStrip {
     strippedOld: string;
     strippedNew: string;
@@ -158,10 +165,17 @@ export function stripSpuriousWrappingTags(
     oldString: string,
     newString: string,
 ): WrappingTagStrip[] {
-    // Detect shared leading opening tag
+    // Detect shared leading opening tag. A leading content token is never a
+    // wrapper: stripping `<citation … ref="c_X_2"/>` from
+    // `<citation … ref="c_X_2"/></p>` would leave a bare `</p>` that matches
+    // every paragraph end.
     let leadingTag: string | null = null;
-    const leadingMatch = oldString.match(/^<([a-zA-Z][a-zA-Z0-9]*)\b[^>]*>/);
-    if (leadingMatch && newString.startsWith(leadingMatch[0])) {
+    const leadingMatch = oldString.match(/^<([a-zA-Z][a-zA-Z0-9-]*)\b[^>]*>/);
+    if (
+        leadingMatch
+        && !CONTENT_TOKENS.has(leadingMatch[1].toLowerCase())
+        && newString.startsWith(leadingMatch[0])
+    ) {
         leadingTag = leadingMatch[0];
     }
 
