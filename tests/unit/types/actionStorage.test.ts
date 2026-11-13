@@ -428,24 +428,31 @@ describe('actionStorage', () => {
 describe('built-in action catalog', () => {
     const byId = (id: string) => BUILTIN_ACTIONS.find(a => a.id === id);
 
-    it('ships /organize and /research-table as global actions that need an argument', () => {
-        const organize = byId('builtin-organize')!;
-        const table = byId('builtin-research-table')!;
-        expect(getActionCommand(organize)).toBe('organize');
-        expect(organize).toMatchObject({ targets: ['global'], category: 'organize', argumentRequired: true });
-        expect(getActionCommand(table)).toBe('research-table');
-        expect(table).toMatchObject({ targets: ['global'], category: 'research', argumentRequired: true });
-        expect(organize.locked).toBeUndefined();
-        expect(table.locked).toBeUndefined();
+    it('gives every built-in action its own id', () => {
+        const ids = BUILTIN_ACTIONS.map(a => a.id);
+        expect(new Set(ids).size).toBe(ids.length);
     });
 
-    it('requires an argument for /annotate, /create-note, /organize and /research-table only', () => {
+    it('ships /organize as an unlocked global action that needs an argument', () => {
+        const organize = byId('builtin-organize')!;
+        expect(getActionCommand(organize)).toBe('organize');
+        expect(organize).toMatchObject({ targets: ['global'], category: 'organize', argumentRequired: true });
+        expect(organize.locked).toBeUndefined();
+    });
+
+    it('keeps /table optional-argument so it can run on an attached collection or items', () => {
+        const table = byId('builtin-research-table')!;
+        expect(getActionCommand(table)).toBe('table');
+        expect(table.targets).toEqual(expect.arrayContaining(['collection', 'items', 'global']));
+        expect(table.argumentRequired).toBeUndefined();
+    });
+
+    it('requires an argument for /annotate, /create-note and /organize only', () => {
         const required = BUILTIN_ACTIONS.filter(a => a.argumentRequired).map(a => a.id).sort();
         expect(required).toEqual([
             'builtin-annotate',
             'builtin-create-note',
             'builtin-organize',
-            'builtin-research-table',
         ]);
         for (const id of required) {
             expect(byId(id)!.argumentRequiredHint, id).toBeTruthy();
@@ -453,11 +460,10 @@ describe('built-in action catalog', () => {
         }
     });
 
-    it('lists the new actions next to /annotate and /create-note', () => {
+    it('lists /organize after /annotate and /create-note', () => {
         const order = (id: string) => byId(id)!.sortOrder!;
         expect(order('builtin-annotate')).toBeLessThan(order('builtin-create-note'));
-        expect(order('builtin-create-note')).toBeLessThan(order('builtin-research-table'));
-        expect(order('builtin-research-table')).toBeLessThan(order('builtin-organize'));
+        expect(order('builtin-create-note')).toBeLessThan(order('builtin-organize'));
         expect(order('builtin-organize')).toBeLessThan(order('builtin-tidy-up'));
     });
 

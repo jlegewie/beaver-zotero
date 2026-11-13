@@ -10,9 +10,6 @@ import { Action } from '@beaver/agent-core/types/actions';
 import { ARCHIVED_ACTIONS } from './archivedActions';
 
 
-/** `/research-table`: build a research table on a topic or from attached papers. */
-const RESEARCH_TABLE_PROMPT = 'Build a research table that compares papers, using my message as the topic and as what to compare.\n\nSteps:\n1. Choose the papers. Aim for 10-20 papers unless I ask for a different number or for all papers:\n   - Nothing attached: search my library from several angles and take the 10-20 papers most relevant to the topic.\n   - 10-20 papers attached, or a collection of that size: use them all.\n   - More than 20 papers attached, or a larger collection: pick the 20 or so most relevant to what I want to compare (search within them rather than reading every item), and tell me that the rest can be added, on the card or later.\n   - Fewer than 10 papers attached: add related papers from my library up to about 10 in total, and say that you did. If nothing in my library is related, use only what is attached.\n2. Turn what I want to compare into the table\'s questions: one column per question, usually 3-6, each worded as the question asked of every paper. If my message does not say what to compare, propose 3-4 questions that suit the topic and say so.\n3. Propose the table with `create_table`: a `library` source for a collection used whole, otherwise one `items` source with the chosen papers. I review the papers and questions on the card, and choose whether to fill it, before anything is created.\n4. Then tell me briefly what the table holds and what stands out in the filled rows. If I created it without filling, say it is ready and that I can fill it from the table.';
-
 /** `/organize`: organize attached papers, a collection, or recent additions. */
 const ORGANIZE_PROMPT = 'Organize part of my library following my instructions.\n\nSteps:\n1. Determine the scope: the papers or collection I attached; otherwise a collection my request names; otherwise my recent additions (`list_items` sorted by date added, newest first; the 20 most recent unless I say otherwise). Do not widen the scope beyond that.\n2. Work out what my request asks for: filing into collections, tags, metadata, duplicates, or several of these. Before changing anything, look at how I organize today with `list_collections` and `list_tags`. If my request is open-ended (for example "organize these"), pick what the scope needs most, say so in one line, and proceed.\n3. Do the work over the whole scope, deciding from metadata. Open an attachment only for a handful of genuinely ambiguous items.\n   - Collections: add each item to the existing collection or collections where it clearly belongs, the best one or two. Create a new collection only when I ask for one or when a cluster of items shares a clear theme that nothing existing fits. Never remove an item from a collection it is already in.\n   - Tags: reuse my existing tags wherever they fit, matching my style and level of granularity; if my request states a naming convention, follow it exactly. Assign 2-5 subject tags per item, consistently, so items on the same subtopic share the same tags. Create a new tag only when nothing existing fits, and keep new tags lowercase and 1-3 words.\n   - Metadata: fill only fields that are genuinely missing or clearly wrong (abstract, DOI, authors, year, publication), with values from `lookup_work` rather than guesses. Leave a field empty when you cannot verify it, and skip fields that are legitimately absent for the item type, such as a DOI for a book.\n   - Duplicates: merge only items that are clearly the same work; list uncertain pairs instead of merging them.\n   For more than about 35 items, run the work as one batch job; at or below that, do it directly.\n4. Report what changed: the counts for each kind of change plus a short sample of items so I can spot-check, then anything you left alone and why (no fitting collection, unverifiable metadata, uncertain duplicates). If the scope was larger than one batch could hold, say how many items remain.';
 
@@ -246,20 +243,6 @@ export const BUILTIN_ACTIONS: Action[] = [
         targets: ['global'],
         category: 'write',
         sortOrder: 520,
-    },
-
-    {
-        id: 'builtin-research-table',
-        name: 'research-table',
-        title: 'Research table',
-        description: 'Compare papers in a table: one row per paper, one column per question, every answer linked to its passage.',
-        text: RESEARCH_TABLE_PROMPT,
-        argumentHint: 'Name a topic and what to compare, e.g. "social capital: definition and measure"',
-        argumentRequired: true,
-        argumentRequiredHint: 'Name a topic and what to compare',
-        targets: ['global'],
-        category: 'research',
-        sortOrder: 522,
     },
 
     {
