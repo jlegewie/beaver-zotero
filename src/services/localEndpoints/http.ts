@@ -702,6 +702,7 @@ async function handleAgentActionValidateHttpRequest(request: any) {
         collection_names: response.collection_names,
         preference: response.preference,
         warnings: response.warnings,
+        match_strategy: response.match_strategy,
     };
 }
 
@@ -1145,6 +1146,8 @@ export function registerEndpoints(): (() => void) | undefined {
         endpoints['/beaver/test/approve-action'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/approve-action', request));
         endpoints['/beaver/test/confirm-credits'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/confirm-credits', request));
         endpoints['/beaver/test/table-card'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/table-card', request));
+        endpoints['/beaver/test/answer-question'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/answer-question', request));
+        endpoints['/beaver/test/batch-approval'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/batch-approval', request));
         endpoints['/beaver/test/table-fill-progress'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/table-fill-progress', request));
         endpoints['/beaver/test/undo-action'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/undo-action', request));
         endpoints['/beaver/test/chat-drop-connection'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/chat-drop-connection', request));

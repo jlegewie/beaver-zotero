@@ -26,6 +26,11 @@ export interface ThreadModel {
     // (see `setThreadAgentName`). Absent on responses from a backend that
     // predates the field.
     agent_name?: string | null;
+    // Open cards of the thread's parked run by card kind (`ask_user_question`,
+    // `agent_action_approval`, `batch_approval`, `table_card`), each count
+    // at least 1. Null when no parked run waits on the user; absent on
+    // responses from a backend that predates the field.
+    awaiting_input?: Record<string, number> | null;
 }
 
 

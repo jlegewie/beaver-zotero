@@ -21,6 +21,7 @@ import {
     LibraryIcon,
     ListBulletIcon,
     MoreHorizontalIcon,
+    PictureInPictureIcon,
     PlayIcon,
     PlusSignIcon,
     RepeatIcon,
@@ -211,6 +212,8 @@ export interface ResearchTableProps {
      */
     onExport?: (format: "xlsx" | "csv", sort: TableSort | undefined) => void;
     onShowInLibrary?: () => void;
+    /** Moves the table from its tab to a window of its own. */
+    onOpenInWindow?: () => void;
     /** The version history view; offered under More actions when given. */
     renderVersionHistory?: () => React.ReactNode;
     /** Bulk verbs while rows are selected, after the count. */
@@ -247,6 +250,9 @@ const NO_ROWS: ReadonlySet<string> = new Set();
 /** How long rows and columns the user just added stay highlighted. */
 const ADDED_HIGHLIGHT_MS = 2000;
 
+/** The cell being edited, and where its editor is: over the grid cell or in the inspector. */
+type EditingCell = CellAddress & { surface: "grid" | "inspector" };
+
 /** The side panel: a selected cell (a question, or the Paper cell) or the version history. */
 type Panel = { kind: "cell"; address: CellAddress } | { kind: "history" };
 
@@ -277,6 +283,7 @@ export function ResearchTable({
     onCopy,
     onExport,
     onShowInLibrary,
+    onOpenInWindow,
     renderVersionHistory,
     selectionActions,
     rowMenuItems,
@@ -314,7 +321,7 @@ export function ResearchTable({
     );
     const [panel, setPanel] = useState<Panel | null>(null);
     const [sourcesOpen, setSourcesOpen] = useState(false);
-    const [editingCell, setEditingCell] = useState<CellAddress | null>(null);
+    const [editingCell, setEditingCell] = useState<EditingCell | null>(null);
     const editDisabled = editing?.disabledReason;
     // Both Add column controls: the edit's own reason, else the table's limits.
     const addColumnDisabled = editDisabled ?? addColumnBlockedReason(table);
@@ -397,23 +404,45 @@ export function ResearchTable({
         if (covered > 0) scroller.scrollLeft -= covered;
     }, [selected?.rowId, selected?.columnId]);
 
-    // The editor follows its cell the same way, and closes when editing ends.
+    // One cell editor at a time: floated over its grid cell, or in the
+    // inspector in place of the answer. It follows its cell the same way, and
+    // closes when editing ends; in the inspector, also when the inspector
+    // shows another cell or closes.
     const editingRow = editingCell ? table.rows.find((row) => row.id === editingCell.rowId) : undefined;
     const editingColumn = editingCell ? columns.questions.find((column) => column.id === editingCell.columnId) : undefined;
+    const editingInInspector = editingCell?.surface === "inspector";
+    const inspectorShowsEditingCell =
+        selected?.rowId === editingCell?.rowId && selected?.columnId === editingCell?.columnId;
     useEffect(() => {
-        if (editingCell && (!editingRow || !editingColumn || !cellEditing || cellEditing.disabledReason)) setEditingCell(null);
-    }, [editingCell, editingRow, editingColumn, cellEditing]);
-    // The editor floats over its grid cell: a hidden column is shown and
-    // filters hiding the row are cleared first (the inspector reaches both).
-    const openEditor = useCallback(
-        (address: CellAddress) => {
-            if (state.hiddenColumns.has(address.columnId)) state.toggleColumn(address.columnId);
-            if (!state.rows.some((row) => row.id === address.rowId)) state.clearFilters();
-            setEditingCell(address);
-            activityRef.current?.();
-        },
-        [state],
-    );
+        if (
+            editingCell &&
+            (!editingRow ||
+                !editingColumn ||
+                !cellEditing ||
+                cellEditing.disabledReason ||
+                (editingInInspector && !inspectorShowsEditingCell))
+        )
+            setEditingCell(null);
+    }, [editingCell, editingRow, editingColumn, cellEditing, editingInInspector, inspectorShowsEditingCell]);
+    const openEditor = useCallback((address: CellAddress, surface: EditingCell["surface"] = "grid") => {
+        setEditingCell({ ...address, surface });
+        activityRef.current?.();
+    }, []);
+    const cellEditor =
+        editingCell && editingRow && editingColumn && cellEditing ? (
+            <CellEditor
+                key={`${editingCell.surface}/${editingCell.rowId}/${editingCell.columnId}`}
+                inline={editingInInspector}
+                column={editingColumn}
+                cell={editingRow.cells[editingColumn.id]}
+                onCancel={() => setEditingCell(null)}
+                onSave={async (input) => {
+                    const refused = await cellEditing.onEdit(editingRow, editingColumn, input);
+                    if (!refused) setEditingCell(null);
+                    return refused;
+                }}
+            />
+        ) : null;
     // Scrolled to a frame after the editor opens, once the view with the row
     // in it (and a windowed grid's spacers) has rendered.
     const viewRows = useRef(state.rows);
@@ -421,7 +450,7 @@ export function ResearchTable({
     useEffect(() => {
         const scroller = scrollRef.current;
         const win = scroller?.ownerDocument.defaultView;
-        if (!editingCell || !scroller || !win) return;
+        if (!editingCell || editingCell.surface !== "grid" || !scroller || !win) return;
         const frame = win.requestAnimationFrame(() => {
             const index = viewRows.current.findIndex((row) => row.id === editingCell.rowId);
             scrollRowIntoView(scroller, editingCell.rowId, index >= 0 ? index : undefined);
@@ -648,6 +677,8 @@ export function ResearchTable({
               const title = cellEditing.disabledReason;
               const cell = row.cells[column.id];
               const mine = cell?.provenance === "user";
+              if (editingCell?.surface === "inspector" && editingCell.rowId === row.id && editingCell.columnId === column.id && cellEditor)
+                  return { editor: cellEditor };
               return {
                   edit: (
                       <button
@@ -656,7 +687,7 @@ export function ResearchTable({
                           aria-label="Edit answer"
                           disabled={disabled}
                           title={title ?? "Edit answer"}
-                          onClick={() => openEditor({ rowId: row.id, columnId: column.id })}
+                          onClick={() => openEditor({ rowId: row.id, columnId: column.id }, "inspector")}
                       >
                           <Icon icon={EditIcon} size={13} />
                       </button>
@@ -709,6 +740,8 @@ export function ResearchTable({
             { label: "Export CSV", icon: DownloadIcon, onClick: () => onExport("csv", state.sort) },
         );
     if (onShowInLibrary) moreItems.push({ label: "Show in library", icon: LibraryIcon, onClick: onShowInLibrary });
+    if (onOpenInWindow)
+        moreItems.push({ label: "Open in new window", icon: PictureInPictureIcon, onClick: onOpenInWindow });
     if (renderVersionHistory)
         moreItems.push({ label: "Version history", icon: ClockIcon, onClick: () => setPanel({ kind: "history" }) });
 
@@ -1051,24 +1084,8 @@ export function ResearchTable({
                                     cellEditDisabledReason={cellEditing?.disabledReason}
                                     onCopyCell={onCopy}
                                     cellEditor={
-                                        editingCell && editingRow && editingColumn && cellEditing
-                                            ? {
-                                                  address: editingCell,
-                                                  list: editsAsList(editingColumn),
-                                                  content: (
-                                                      <CellEditor
-                                                          key={`${editingCell.rowId}/${editingCell.columnId}`}
-                                                          column={editingColumn}
-                                                          cell={editingRow.cells[editingColumn.id]}
-                                                          onCancel={() => setEditingCell(null)}
-                                                          onSave={async (input) => {
-                                                              const refused = await cellEditing.onEdit(editingRow, editingColumn, input);
-                                                              if (!refused) setEditingCell(null);
-                                                              return refused;
-                                                          }}
-                                                      />
-                                                  ),
-                                              }
+                                        cellEditor && editingCell && editingColumn && !editingInInspector
+                                            ? { address: editingCell, list: editsAsList(editingColumn), content: cellEditor }
                                             : null
                                     }
                                     fills={fills}

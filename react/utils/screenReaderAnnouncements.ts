@@ -1,4 +1,4 @@
-import { AgentRun, TextPart } from '@beaver/agent-core/agents/types';
+import { AgentRun, TextPart, isRunFinished } from '@beaver/agent-core/agents/types';
 import { isRenderableMessage } from '@beaver/agent-core/agents/messageVisibility';
 
 const MAX_RESPONSE_ANNOUNCEMENT_CHARS = 4000;
@@ -67,7 +67,7 @@ function countWords(text: string): number {
  * Build the final announcement for a run when it leaves the active state.
  */
 export function buildRunCompletionAnnouncement(run: AgentRun): string | null {
-    if (run.status === 'completed') {
+    if (isRunFinished(run)) {
         const responseText = extractAssistantResponseText(run);
         if (!responseText) {
             return 'Response complete.';

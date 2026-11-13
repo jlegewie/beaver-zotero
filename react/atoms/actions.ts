@@ -24,7 +24,7 @@ import {
     EMPTY_VARIABLE_HINTS,
     type TargetTypeContext,
 } from '../utils/promptVariables';
-import { sendWSMessageAtom, withThreadWriter } from './agentRunAtoms';
+import { messageParksResume, parkResumeForMessageAtom, sendWSMessageAtom, withThreadWriter } from './agentRunAtoms';
 import {
     currentMessageItemsAtom,
     currentMessageCollectionsAtom,
@@ -771,6 +771,7 @@ export const sendComposedMessageAtom = atom(
             pills: SlashCommandDescriptor[];
         },
     ): Promise<boolean> => {
+        if (messageParksResume(get) && !(await set(parkResumeForMessageAtom))) return false;
         return (await withThreadWriter(get, set, async set => {
         const { baseText, pills } = payload;
 

@@ -147,6 +147,15 @@ vi.mock('../../../react/atoms/agentRunAtoms', async () => {
         isWSChatPendingAtom: atom(false),
         isWSConnectedAtom: atom(false),
         isWSReadyAtom: atom(false),
+        parkableRunId: () => null,
+    };
+});
+
+vi.mock('../../../react/atoms/parkedRuns', async () => {
+    const { atom } = await import('jotai');
+    return {
+        clearParkedAnswersAtom: atom(null, () => {}),
+        syncParkedCardsAtom: atom(null, () => {}),
     };
 });
 

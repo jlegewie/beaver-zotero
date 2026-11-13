@@ -10,7 +10,7 @@
 import { credentials, getCredentialGeneration, assertCredentialGeneration } from './credentials';
 import { getApiBaseUrl } from './config';
 import { logger } from '../platform/logger';
-import { AgentRun } from '../agents/types';
+import { AgentRun, type ParkedCardAnswer } from '../agents/types';
 import type { AgentAction } from '../agents/agentActionTypes';
 import { toAgentAction } from '../agents/agentActionTypes';
 import { ApiService } from './apiService';
@@ -26,7 +26,14 @@ import {
     type AgentDataRequestContext,
     type RequestKeepalive,
 } from './agentDataDispatch';
-import { AgentRunRequest, ExtractSchemaVersionsWire, ZoteroInstanceWire } from '../protocol/agentProtocol';
+import {
+    AgentRunRequest,
+    ExtractSchemaVersionsWire,
+    ZoteroInstanceWire,
+    askUserQuestionResponse,
+    batchApprovalResponse,
+    deferredApprovalResponse,
+} from '../protocol/agentProtocol';
 import {
     WSEvent,
     WSErrorEvent,
@@ -172,6 +179,16 @@ export const HEARTBEAT_TIMEOUT_CLOSE_CODE = 4000;
  */
 const LEFT_RUN_CLOSE_CODE = HEARTBEAT_TIMEOUT_CLOSE_CODE;
 
+/** How long `parkRun` waits for the server to settle a parked run. */
+const PARK_SETTLE_WAIT_MS = 1500;
+
+/**
+ * How a `parkRun` ended: the run ended on the server (`ended`), the frame
+ * went out without an answer in time (`sent`), the server refused and the run
+ * was stopped (`refused`), or there was no live run to park (`unavailable`).
+ */
+export type ParkOutcome = 'ended' | 'sent' | 'refused' | 'unavailable';
+
 interface ConnectionAttemptState {
     stage: ConnectionFailureStage;
     socketOpened: boolean;
@@ -247,6 +264,8 @@ export class AgentService {
     private actionExecutionQueue: Promise<void> = Promise.resolve();
     /** Monotonic counter incremented on close to invalidate stale queued messages */
     private connectionId: number = 0;
+    /** Resolves the `parkRun` waiting on the server's answer, if one is. */
+    private pendingPark: ((outcome: ParkOutcome) => void) | null = null;
     /** Whether the connected backend understands `request_received` acks (from the ready event) */
     private serverSupportsRequestAcks: boolean = false;
     /** Whether the connected backend understands `request_keepalive` messages (from the ready event) */
@@ -1116,6 +1135,62 @@ export class AgentService {
     }
 
     /**
+     * Ask the server to park `runId`, which is waiting only on cards the user
+     * can answer later, instead of stopping it. Waits briefly for the server
+     * to settle the run; a refusal (the run also waits on something that
+     * cannot park) stops it as `cancel()` would. Either way the socket is
+     * closed without notifying the run's callbacks.
+     *
+     * Once the server has the frame it keeps the park even if the socket
+     * closes before the run has ended, so the wait only bounds how long a
+     * refusal can take to arrive.
+     */
+    async parkRun(runId: string, waitMs: number = PARK_SETTLE_WAIT_MS): Promise<ParkOutcome> {
+        const run = this.run;
+        if (!run || run.runId !== runId || run.terminal || run.cancelRequested || run.state !== 'live') {
+            return 'unavailable';
+        }
+        const connectionId = this.connectionId;
+        const settled = new Promise<ParkOutcome>((resolve) => {
+            this.pendingPark?.('ended');
+            this.pendingPark = resolve;
+        });
+        if (!this.sendPark(runId)) {
+            this.settlePark('unavailable');
+            return 'unavailable';
+        }
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const outcome = await Promise.race([
+            settled,
+            new Promise<ParkOutcome>((resolve) => { timer = setTimeout(() => resolve('sent'), waitMs); }),
+        ]).finally(() => clearTimeout(timer));
+        if (this.pendingPark) this.settlePark(outcome);
+        if (outcome === 'refused') {
+            if (connectionId === this.connectionId) await this.cancel();
+            return outcome;
+        }
+        this.closeSocket(1000, 'Run parked', { notifyClose: false, onlyIfConnectionId: connectionId });
+        return outcome;
+    }
+
+    /**
+     * Send the `park` frame for `runId` without waiting for an answer, for a
+     * client that is going away. Returns false when it could not be sent.
+     */
+    sendPark(runId: string): boolean {
+        const run = this.run;
+        if (!run || run.runId !== runId || run.terminal || run.state !== 'live') return false;
+        logger(`AgentService: Parking run ${runId}`, 1);
+        return this.send({ type: 'park', run_id: runId });
+    }
+
+    private settlePark(outcome: ParkOutcome): void {
+        const resolve = this.pendingPark;
+        this.pendingPark = null;
+        resolve?.(outcome);
+    }
+
+    /**
      * While a run stopped during a reconnect is still being reached to deliver
      * its cancel, a new run waits for it. Resolves once that run has ended or
      * `CANCEL_HANDOFF_WAIT_MS` has passed; null when nothing is waited for.
@@ -1624,6 +1699,7 @@ export class AgentService {
 
                 case 'done':
                     if (this.run) this.run.terminal = true;
+                    this.settlePark('ended');
                     this.callbacks.onDone();
                     break;
 
@@ -1786,6 +1862,11 @@ export class AgentService {
                 case 'table_card_stale':
                     logger("AgentService: Received table_card_stale", event, 1);
                     this.callbacks?.onTableCardStale?.(event);
+                    break;
+
+                case 'park_refused':
+                    logger(`AgentService: Park of run ${event.run_id ?? '(unknown)'} refused (${event.reason})`, 1);
+                    this.settlePark('refused');
                     break;
 
                 case 'ask_user_question_request':
@@ -2054,13 +2135,7 @@ export class AgentService {
      */
     sendApprovalResponse(actionId: string, approved: boolean, userInstructions?: string | null, actionChanges?: import('../protocol/duplicates').MergeItemsChoices): boolean {
         logger(`AgentService: Sending approval response for ${actionId}: ${approved}${userInstructions ? ' (with instructions)' : ''}`, 1);
-        return this.sendDecision({
-            type: 'deferred_approval_response',
-            action_changes: actionChanges,
-            action_id: actionId,
-            approved,
-            user_instructions: userInstructions,
-        });
+        return this.sendDecision(deferredApprovalResponse(actionId, approved, userInstructions, actionChanges));
     }
 
     /**
@@ -2107,13 +2182,7 @@ export class AgentService {
         userInstructions?: string | null,
     ): boolean {
         logger(`AgentService: Sending batch approval response for ${approvalId}: ${approved} (${mode})${userInstructions ? ' (with instructions)' : ''}`, 1);
-        return this.sendDecision({
-            type: 'batch_approval_response',
-            approval_id: approvalId,
-            approved,
-            mode,
-            user_instructions: userInstructions,
-        });
+        return this.sendDecision(batchApprovalResponse(approvalId, approved, mode, userInstructions));
     }
 
     /**
@@ -2125,6 +2194,15 @@ export class AgentService {
     sendTableCardResponse(response: WSTableCardResponse): boolean {
         logger(`AgentService: Sending table card response for ${response.card_id}: ${response.approved ? response.choice ?? 'create' : 'declined'}`, 1);
         return this.sendDecision(response);
+    }
+
+    /**
+     * Send an answer built for a parked card as the live response it is:
+     * the card was shown again by the run on this socket.
+     */
+    sendCardAnswer(answer: ParkedCardAnswer): boolean {
+        logger(`AgentService: Sending "${answer.type}" to a card shown again`, 1);
+        return this.sendDecision(answer as unknown as Record<string, any>);
     }
 
     /**
@@ -2145,12 +2223,7 @@ export class AgentService {
         cancelled: boolean = false,
     ): boolean {
         logger(`AgentService: Sending ask_user_question response for ${questionId}: ${cancelled ? 'cancelled' : `${answers.length} answer(s)`}`, 1);
-        return this.sendDecision({
-            type: 'ask_user_question_response',
-            question_id: questionId,
-            answers,
-            cancelled,
-        });
+        return this.sendDecision(askUserQuestionResponse(questionId, answers, cancelled));
     }
 
 }

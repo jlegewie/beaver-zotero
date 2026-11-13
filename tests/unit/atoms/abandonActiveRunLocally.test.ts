@@ -11,6 +11,7 @@ const {
     isConnectedMock,
     reportConnectionFailureMock,
     saveInterruptedThreadMock,
+    sendParkMock,
 } = vi.hoisted(() => ({
     cancelMock: vi.fn().mockResolvedValue(undefined),
     closeMock: vi.fn(),
@@ -18,6 +19,7 @@ const {
     isConnectedMock: vi.fn(() => true),
     reportConnectionFailureMock: vi.fn().mockResolvedValue(undefined),
     saveInterruptedThreadMock: vi.fn(),
+    sendParkMock: vi.fn(() => true),
 }));
 
 vi.mock('@beaver/agent-core/transport/agentService', () => ({
@@ -30,6 +32,7 @@ vi.mock('@beaver/agent-core/transport/agentService', () => ({
         canLeaveRun: () => false,
         leaveRun: () => false,
         isReattaching: () => false,
+        sendPark: sendParkMock,
     },
     AgentConnectionError: class AgentConnectionError extends Error {
         evidence: any;
@@ -414,6 +417,20 @@ describe('remembering the chat a shutdown interrupted', () => {
             threadName: 'Protein folding',
             runId: 'run-1',
         });
+    });
+
+    it('does not record a run it parked: its card is waiting in the chat', () => {
+        store.set(activeRunAtom, makeRun());
+        store.set(currentThreadIdAtom, 'thread-1');
+        store.set(pendingApprovalsAtom, new Map([['action-1', {
+            actionId: 'action-1', toolcallId: 'call-1', actionType: 'edit_metadata', actionData: {},
+        } as any]]));
+
+        store.set(closeWSConnectionForShutdownAtom, 'Zotero quitting', REMEMBER);
+
+        expect(sendParkMock).toHaveBeenCalledWith('run-1');
+        expect(saveInterruptedThreadMock).not.toHaveBeenCalled();
+        store.set(pendingApprovalsAtom, new Map());
     });
 
     it('falls back to the run\'s thread when the store has no current thread', () => {

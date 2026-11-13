@@ -1,7 +1,14 @@
 import React from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { chatAccessGateAtom } from '../../../atoms/chatAccess';
+import { plusToolsAccessAtom } from '../../../atoms/chatAccess';
 import { openQuickPromptAtom } from '../../../atoms/quickPrompt';
+import { actionsAtom } from '../../../atoms/actions';
+import { requestPlusToolsAtom } from '../../../atoms/ui';
+import { useActionRunner } from '../../../hooks/useActionRunner';
+import { useSurfaceWindow } from '../../../runtime/SurfaceWindowContext';
+import { openPreferencesWindow } from '../../../ui/openPreferencesWindow';
+import { setPref } from '../../../../src/utils/prefs';
+import { resolveVersionUpdateAction } from '../../../utils/versionUpdateAction';
 import { TickIcon, CancelIcon } from '../../icons/icons';
 import Icon from '@beaver/agent-ui/icons/Icon';
 import { PopupMessage, PopupMessageFeature } from '../../../types/popupMessage';
@@ -142,20 +149,43 @@ const FloatingVersionCard: React.FC<{
     primaryAction?: PopupMessage['primaryAction'];
     onDismiss: () => void;
 }> = ({ version, title, text, subtitle, features, footer, learnMoreUrl, learnMoreLabel, Showcase, alsoNew, primaryAction, onDismiss }) => {
-    const gate = useAtomValue(chatAccessGateAtom);
+    const access = useAtomValue(plusToolsAccessAtom);
+    const action = resolveVersionUpdateAction(primaryAction, access);
     const openQuickPrompt = useSetAtom(openQuickPromptAtom);
-    const action = primaryAction ?? { type: 'open-beaver', label: 'Open Beaver' };
-    const buttonLabel = action.type === 'quick-prompt' && gate
-        ? (gate === 'signed-out' ? 'Sign in to try' : 'Open Beaver')
-        : action.label;
+    const actions = useAtomValue(actionsAtom);
+    const setRequestPlusTools = useSetAtom(requestPlusToolsAtom);
+    const { runAction } = useActionRunner();
+    const surfaceWindow = useSurfaceWindow();
+
     const handlePrimaryAction = () => {
         onDismiss();
-        if (action.type === 'open-url') {
-            Zotero.launchURL(action.url);
-        } else if (action.type === 'quick-prompt' && !gate) {
-            void openQuickPrompt();
-        } else {
-            eventManager.dispatch('toggleChat', { forceOpen: true });
+        switch (action.type) {
+            case 'open-url':
+                Zotero.launchURL(action.url);
+                return;
+            case 'quick-prompt':
+                void openQuickPrompt();
+                return;
+            case 'get-credits':
+                openPreferencesWindow('billing');
+                return;
+            case 'stage-action': {
+                if (action.enablePlusTools) {
+                    setPref('requestPlusTools', true);
+                    setRequestPlusTools(true);
+                }
+                // The staged pill attaches what the action binds to (the
+                // selected collection or items), so skip the open-time
+                // auto-populate of the selection.
+                eventManager.dispatch('toggleChat', { forceOpen: true, skipAutoPopulate: true });
+                // No-op while a response is running in this window: Beaver
+                // just opens.
+                const definition = actions.find((a) => a.id === action.actionId);
+                if (definition) runAction(definition, surfaceWindow);
+                return;
+            }
+            default:
+                eventManager.dispatch('toggleChat', { forceOpen: true });
         }
     };
 
@@ -218,6 +248,13 @@ const FloatingVersionCard: React.FC<{
 
             {alsoNew && <AlsoNewRow item={alsoNew} />}
 
+            {/* What the button needs first (Plus Tools, credits) */}
+            {'note' in action && action.note && (
+                <div className="font-color-secondary text-sm">
+                    {action.note}
+                </div>
+            )}
+
             {/* Feature list */}
             {features.length > 0 && (
                 <div className="display-flex flex-col gap-3">
@@ -263,7 +300,7 @@ const FloatingVersionCard: React.FC<{
                 )}
                 {!footer && !learnMoreUrl && <div />}
                 <Button onClick={handlePrimaryAction} variant="solid">
-                    {buttonLabel}
+                    {action.label}
                 </Button>
             </div>
         </div>

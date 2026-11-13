@@ -1,3 +1,4 @@
+import { isRunFinished } from '../agents/types';
 import type { AgentRun, RunUsage } from '../agents/types';
 import type { ContinuationOffer } from '../protocol/agentProtocol';
 import type { WSErrorEvent } from '../protocol/agentProtocol';
@@ -7,13 +8,13 @@ export function appendRunIfMissing(runs: AgentRun[], run: AgentRun): AgentRun[] 
 }
 
 /**
- * A run that reached `completed` but never received its terminal `done`
- * event (the socket closed while run_complete post-processing was still
- * draining the message queue) lingers as the active run. Returns the run
- * to archive into thread history, or null when nothing needs finalizing.
+ * A run that finished (completed or parked) but never received its terminal
+ * `done` event (the socket closed while run_complete post-processing was
+ * still draining the message queue) lingers as the active run. Returns the
+ * run to archive into thread history, or null when nothing needs finalizing.
  */
 export function lingeringCompletedRun(activeRun: AgentRun | null): AgentRun | null {
-    if (!activeRun || activeRun.status !== 'completed') return null;
+    if (!activeRun || !isRunFinished(activeRun)) return null;
     return {
         ...activeRun,
         completed_at: activeRun.completed_at || new Date().toISOString(),
@@ -101,16 +102,16 @@ function legacyInterruptionText(reasonCode?: string): string {
  * footer and continue offer all give way to the continuation's — a run that
  * was picked up is not one the reader acts on.
  *
- * Only a run that could be continued qualifies: a failed one, or one carrying
- * an offer. Any other run sharing its id with a `resumes_run_id` is a data
- * error, not a continuation.
+ * Only a run that could be continued qualifies: a failed one, a parked one,
+ * or one carrying an offer. Any other run sharing its id with a
+ * `resumes_run_id` is a data error, not a continuation.
  */
 export function wasRunContinued(
     run: AgentRun,
     resumedRunIds: ReadonlySet<string>,
 ): boolean {
     if (!resumedRunIds.has(run.id)) return false;
-    return run.status === 'error' || continuationOfferFor(run) !== null;
+    return run.status === 'error' || run.status === 'parked' || continuationOfferFor(run) !== null;
 }
 
 /**
@@ -155,11 +156,12 @@ export function resolveErrorRunId(
  * The runs that make up one answer, oldest first: the run that started it, the
  * run that continued it, and so on up to `run`.
  *
- * Resume runs carry `is_resume: true` and `resumes_run_id` pointing at the run
- * they continued, and their own `user_prompt.content` is empty. On screen the
- * whole chain reads as a single response, so anything describing that response
- * — its text, its citations, its cost, the question that produced it — has to
- * be gathered across the chain rather than taken from its last run.
+ * A continuing run carries `resumes_run_id` pointing at the run it continued:
+ * a resume after a failure (`is_resume`), or the answer to a parked run's
+ * cards (`deferred_results`). On screen the whole chain reads as a single
+ * response, so anything describing that response — its text, its citations,
+ * its cost, the question that produced it — has to be gathered across the
+ * chain rather than taken from its last run.
  *
  * A run that continued nothing yields just itself. Guards against cycles by
  * tracking visited run IDs.
@@ -168,7 +170,7 @@ export function collectResumeChain(run: AgentRun, allRuns: AgentRun[]): AgentRun
     const chain: AgentRun[] = [run];
     const visited = new Set<string>([run.id]);
     let current = run;
-    while (current.user_prompt.is_resume && current.user_prompt.resumes_run_id) {
+    while (current.user_prompt.resumes_run_id) {
         const parent = allRuns.find(r => r.id === current.user_prompt.resumes_run_id);
         if (!parent || visited.has(parent.id)) break;
         visited.add(parent.id);

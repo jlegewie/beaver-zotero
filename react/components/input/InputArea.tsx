@@ -32,7 +32,8 @@ import RunContinueDisplay from '../agentRuns/RunContinueDisplay';
 import BackToSuggestions, { FirstRunBackTarget } from '../pages/firstRun/BackToSuggestions';
 import { continuationOfferAtom, hasWhereToStartRunAtom, lastRunSummaryAtom, threadRunIdsAtom } from '@beaver/agent-core/run-state/atoms';
 import { waitsOnFillAtom } from '@beaver/agent-core/run-state/tableChatFills';
-import { PromptOrigin } from '@beaver/agent-core/agents/types';
+import { PromptOrigin, isRunFinished } from '@beaver/agent-core/agents/types';
+import { isThreadParkedAtom } from '../../atoms/parkedRuns';
 import { firstRunNextStepsDismissedAtom } from '../../atoms/firstRun';
 import { dismissHighTokenWarningForThreadAtom, dismissedHighTokenWarningByThreadAtom, backendHighTokenUsageRunsAtom } from '../../atoms/messageUIState';
 import { getLastRequestInputTokens } from '../../utils/runUsage';
@@ -142,7 +143,12 @@ const InputArea: React.FC<InputAreaProps> = ({
     const sendWSMessage = useSetAtom(sendWSMessageAtom);
     const sendComposedMessage = useSetAtom(sendComposedMessageAtom);
     const stopRun = useStopRun('InputArea');
-    const isPending = useAtomValue(isWSChatPendingAtom);
+    // Cards of a parked run do not block the composer: a message instead of
+    // an answer moves on without them. The approvals bar still offers to
+    // answer them. A resume that waits for the rest of the cards looks the
+    // same: sending a message parks it first.
+    const isParked = useAtomValue(isThreadParkedAtom);
+    const isPending = useAtomValue(isWSChatPendingAtom) && !isParked;
 
     // A file staged for THIS composition is still being attached, so sending is
     // held until it lands. Work left over from a composition the user has since
@@ -156,7 +162,8 @@ const InputArea: React.FC<InputAreaProps> = ({
     const pendingApprovalsMap = useAtomValue(pendingApprovalsAtom);
     const answerPendingApprovals = useSetAtom(answerPendingApprovalsAtom);
     const clearComposer = useSetAtom(clearComposerAtom);
-    const isAwaitingApproval = pendingApprovalsMap.size > 0;
+    const hasPendingApprovals = pendingApprovalsMap.size > 0;
+    const isAwaitingApproval = hasPendingApprovals && !isParked;
     // The run holding a full-access grant, if one does. The policy is cleared at
     // every run boundary, so holding it means the grant is live right now — and
     // once it is, no further card is raised, so this bar is the only place left
@@ -259,17 +266,20 @@ const InputArea: React.FC<InputAreaProps> = ({
 
     // Guided next steps surface after a suggestion-card run or a "Where should
     // we start?" launcher run — both carry the context NextStepsPanel needs.
+    // Not while that run waits on its cards: it has not finished yet.
     const lastRunOriginKind = lastRun?.origin?.kind;
     const canShowNextSteps = Boolean(
         lastRun &&
         (lastRunOriginKind === 'first_run_card' || lastRunOriginKind === 'where_to_start') &&
-        lastRun.status === 'completed' &&
+        isRunFinished(lastRun) &&
+        !isParked &&
         !nextStepsDismissedRunIds.has(lastRun.id)
     );
     const canShowBackToSuggestions = Boolean(
         lastRun &&
         lastRunOriginKind === 'first_run_followup' &&
-        lastRun.status === 'completed' &&
+        isRunFinished(lastRun) &&
+        !isParked &&
         !nextStepsDismissedRunIds.has(lastRun.id)
     );
     // The follow-up run's origin
@@ -293,7 +303,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     const composerBand: 'high-token' | 'next-steps' | 'back-to-suggestions' | 'continue' | 'approvals' | 'full-access' | 'thread-presence' | null =
         threadReadOnly || stoppingPreviousRun
             ? 'thread-presence'
-            : isAwaitingApproval
+            : hasPendingApprovals
                 ? 'approvals'
                 : fullAccessRunId
                     ? 'full-access'

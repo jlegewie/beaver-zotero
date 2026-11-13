@@ -102,8 +102,9 @@ export interface Action {
     description?: string;          // Short human-facing summary, shown in the /command chip hover card
     name?: string;                 // Slash-command name (no whitespace); unset or "" → derived from title ("" marks an explicitly cleared name so it survives JSON overrides)
     id_model?: string;
-    /** Target kinds this action accepts (non-empty). `global` should be the
-     *  sole entry when present — "works anywhere" doesn't combine. */
+    /** Target kinds this action accepts (non-empty). `global` alongside other
+     *  kinds means the action binds to a matching selection when there is one
+     *  and otherwise runs with no context. */
     targets: ActionTargetType[];
     /** Clients this action supports. Absent → runs in any client. */
     client?: ActionClient[];

@@ -110,12 +110,13 @@ describe("submitted table attachments", () => {
             "provider unavailable",
         );
     });
-    it("does not activate table attachments in production", async () => {
+    it("submits table attachments in production builds", async () => {
         (Zotero as any).Beaver.data.env = "production";
-        await expect(toValidatedMessageAttachment(item as any)).rejects.toThrow(
-            "not enabled",
-        );
-        expect(provider).not.toHaveBeenCalled();
+        expect(await toValidatedMessageAttachment(item as any)).toMatchObject({
+            type: "table",
+            reference: { kind: "table", key: "u-ABCDEFGH" },
+        });
+        expect(provider).toHaveBeenCalledOnce();
     });
 });
 

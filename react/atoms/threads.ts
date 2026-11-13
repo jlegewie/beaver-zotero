@@ -32,7 +32,8 @@ import { importActionReference } from "../utils/importItemDisplay";
 import { ExternalReference } from "@beaver/agent-core/types/externalReferences";
 import { threadRunsAtom, activeRunAtom, currentThreadIdAtom, currentThreadNameAtom, isLoadingThreadAtom, resetRunSelectorCaches } from "@beaver/agent-core/run-state/atoms";
 import { loadThreadRuns } from "@beaver/agent-core/run-state/loadThreadRuns";
-import { abandonActiveRunLocallyAtom, canLeaveReconnectingRun, isWSChatPendingAtom, isWSConnectedAtom, isWSReadyAtom } from "./agentRunAtoms";
+import { abandonActiveRunLocallyAtom, canLeaveReconnectingRun, isWSChatPendingAtom, isWSConnectedAtom, isWSReadyAtom, parkableRunId } from "./agentRunAtoms";
+import { clearParkedAnswersAtom, syncParkedCardsAtom } from "./parkedRuns";
 import { AgentRun, isRunActive } from "@beaver/agent-core/agents/types";
 import { 
     threadAgentActionsAtom,
@@ -233,12 +234,34 @@ function leavableRunId(get: (atom: any) => any): string | null {
  * (see `agentService.leaveRun`) and the chat shows how it ended when the user
  * returns.
  */
-async function cancelActiveRunIfNeeded(get: (atom: any) => any, set: (atom: any, value?: any) => void, isCurrent = () => true, leaveRunId: string | null = null): Promise<void> {
+async function cancelActiveRunIfNeeded(
+    get: (atom: any) => any,
+    set: (atom: any, value?: any) => void,
+    isCurrent = () => true,
+    leaveRunId: string | null = null,
+    parkRunId: string | null = null,
+): Promise<void> {
     const hadActiveWork = get(isWSChatPendingAtom) || get(activeRunAtom);
     // Navigation revokes socket callbacks, so cleanup must be synchronous and
     // complete even when the connection's close notification is ignored.
     set(abandonActiveRunLocallyAtom);
     set(activeRunAtom, null);
+    set(clearParkedAnswersAtom);
+
+    if (parkRunId) {
+        // The run is waiting only on cards: it parks, and they stay
+        // answerable when the user comes back. Stopped instead if the server
+        // refuses.
+        const outcome = await agentService.parkRun(parkRunId);
+        logger(`cancelActiveRunIfNeeded: Parking run ${parkRunId} before switching threads: ${outcome}`, 1);
+        // Leaving released the chat, which refetched thread lists before the
+        // run parked: refetch them again so they show the chat as waiting.
+        if (outcome === 'ended' || outcome === 'sent') Zotero.Beaver?.threads?.invalidateViews();
+        if (!isCurrent()) return;
+        set(isWSConnectedAtom, false);
+        set(isWSReadyAtom, false);
+        return;
+    }
 
     if (leaveRunId && agentService.leaveRun(leaveRunId)) {
         logger(`cancelActiveRunIfNeeded: Leaving run ${leaveRunId} to the server after it lost its connection`, 1);
@@ -284,10 +307,12 @@ export const newThreadAtom = atom(
         // Gated on run status, not presence: a run that failed keeps sitting in
         // activeRunAtom, and prompting over it claims Beaver is still working.
         const hasActiveWork = get(isWSChatPendingAtom) || isRunActive(get(activeRunAtom));
-        // A reconnecting run is left, not stopped, so there is nothing to confirm.
+        // A reconnecting run is left, and a run waiting only on cards is
+        // parked, not stopped, so there is nothing to confirm.
         const leaveRunId = leavableRunId(get);
+        const parkRunId = leaveRunId ? null : parkableRunId(get);
         if (hasActiveWork) {
-            if (!options?.skipActiveRunConfirm && !leaveRunId && !confirmInterruptActiveRun(
+            if (!options?.skipActiveRunConfirm && !leaveRunId && !parkRunId && !confirmInterruptActiveRun(
                 'Start new chat?',
                 'Beaver is still generating a response in this chat. Starting a new chat will stop it.',
                 'Start New Chat',
@@ -304,7 +329,7 @@ export const newThreadAtom = atom(
 
         try {
             // Cancel any active run before switching threads
-            await cancelActiveRunIfNeeded(get, set, isCurrent, leaveRunId);
+            await cancelActiveRunIfNeeded(get, set, isCurrent, leaveRunId, parkRunId);
             if (!isCurrent()) return;
 
             // Clean up any temporary annotations from previous thread
@@ -326,6 +351,7 @@ export const newThreadAtom = atom(
             set(clearAllPendingCreditConfirmationsAtom);
             set(clearAllPendingBatchApprovalsAtom);
             set(clearAllPendingTableCardsAtom);
+            set(clearParkedAnswersAtom);
 
             set(isWebSearchEnabledAtom, false);
 
@@ -400,9 +426,11 @@ export const loadThreadAtom = atom(
         // current thread. Status, not presence — see newThreadAtom.
         const hasActiveWork = get(isWSChatPendingAtom) || isRunActive(get(activeRunAtom));
         if (canCommit && (hasActiveWork || !canCommit())) return false;
-        // A reconnecting run is left, not stopped, so there is nothing to confirm.
+        // A reconnecting run is left, and a run waiting only on cards is
+        // parked, not stopped, so there is nothing to confirm.
         const leaveRunId = leavableRunId(get);
-        if (hasActiveWork && !leaveRunId && !confirmInterruptActiveRun(
+        const parkRunId = leaveRunId ? null : parkableRunId(get);
+        if (hasActiveWork && !leaveRunId && !parkRunId && !confirmInterruptActiveRun(
             'Switch chat?',
             'Beaver is still generating a response in this chat. Switching chats will stop it.',
             'Switch Chat',
@@ -506,7 +534,7 @@ export const loadThreadAtom = atom(
         let loaded = false;
         try {
             // Cancel any active run before loading a different thread
-            if (!canCommit) await cancelActiveRunIfNeeded(get, set, isCurrent, leaveRunId);
+            if (!canCommit) await cancelActiveRunIfNeeded(get, set, isCurrent, leaveRunId, parkRunId);
             if (!isCurrent()) return false;
             // Clean up any temporary annotations from previous thread
             if (!canCommit) await BeaverTemporaryAnnotations.cleanupAll().catch(error => {
@@ -534,6 +562,7 @@ export const loadThreadAtom = atom(
             set(clearAllPendingCreditConfirmationsAtom);
             set(clearAllPendingBatchApprovalsAtom);
             set(clearAllPendingTableCardsAtom);
+            set(clearParkedAnswersAtom);
             // Legacy non-stateful path: fetch the name from the local DB when
             // not provided (the stateful path already resolved it above).
             const threadNamePromise = !resolvedName && !statefulChat
@@ -651,6 +680,8 @@ export const loadThreadAtom = atom(
                 if (canCommit) staged.push(resetThreadSelectorCaches);
                 else resetThreadSelectorCaches();
                 set(threadRunsAtom, processedRuns);
+                // The cards of a run that parked waiting on the user.
+                set(syncParkedCardsAtom);
 
                 // Reconcile toolcall_id mismatches between REST API and model messages
                 if (agent_actions && agent_actions.length > 0) {

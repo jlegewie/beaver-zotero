@@ -14,6 +14,7 @@ import {
     removeApprovalResponseIntentAtom,
     sendApprovalResponseAtom,
 } from '../../../atoms/agentRunAtoms';
+import { pendingParkedAnswerIdsAtom } from '../../../atoms/parkedRuns';
 import { getToolCallStatusFromResult, toolResultAtom, type ToolCallStatus } from '@beaver/agent-core/run-state/atoms';
 import { openNoteAndSearchEdit, openNoteByKey } from '../../../utils/sourceUtils';
 import {
@@ -249,6 +250,15 @@ export function useEditNoteActions({
         const wasAwaiting = previousPendingApproval !== null;
         const isNoLongerAwaiting = pendingApproval === null;
 
+        // Waiting on a decision again: a parked card whose answer did not
+        // reach a run (the resume failed) is answerable once more.
+        if (!wasAwaiting && !isNoLongerAwaiting && (isProcessingApproval || isExternallyProcessing)) {
+            setIsProcessingApproval(false);
+            setIsExternallyProcessing(false);
+            setProcessingApproval(null);
+            setClickedButton(null);
+        }
+
         if (wasAwaiting && isNoLongerAwaiting) {
             const previousActionId = previousPendingApproval.actionId;
             const previousIntent = approvalResponseIntents.get(previousActionId);
@@ -274,6 +284,7 @@ export function useEditNoteActions({
     }, [
         pendingApproval,
         isProcessingApproval,
+        isExternallyProcessing,
         isRunPending,
         hasToolReturn,
         approvalResponseIntents,
@@ -296,7 +307,9 @@ export function useEditNoteActions({
     }, [isProcessingApproval, isExternallyProcessing, action?.status, hasToolReturn, isRunPending, action, setProcessingApproval]);
 
     const isWriting = actions.some((candidate) => inFlightActionIds.has(candidate.id));
-    const isProcessing = isProcessingApproval || isProcessingAction || isExternallyProcessing || isWriting;
+    // An answer to this parked card is on its way to the run that resumes it.
+    const isParkedAnswerPending = useAtomValue(pendingParkedAnswerIdsAtom).has(toolcallId);
+    const isProcessing = isProcessingApproval || isProcessingAction || isExternallyProcessing || isWriting || isParkedAnswerPending;
     const effectiveStatus: EditNoteDisplayStatus = getEditNoteDisplayStatus({
         action,
         pendingApproval,

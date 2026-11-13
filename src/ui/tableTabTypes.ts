@@ -71,8 +71,6 @@ export interface TableViewMenuState {
     enabled: Record<TableViewCommand, boolean>;
     /** The row height in view; null before the table has rendered. */
     density: 'compact' | 'cozy' | 'tall' | null;
-    /** Fill (and Ask Beaver) are offered in this build. */
-    fillAvailable: boolean;
 }
 
 export interface TableTabMountOptions {
@@ -89,6 +87,8 @@ export interface TableTabMountOptions {
     onRendered?(report: TableTabRenderReport): void;
     /** Whether the tab is the selected one in its window. */
     isSelected?(): boolean;
+    /** Moves the table to a window of its own, closing the tab; a tab only. */
+    moveToNewWindow?(): void;
 }
 
 /** What the renderer hands back for one mounted tab. */

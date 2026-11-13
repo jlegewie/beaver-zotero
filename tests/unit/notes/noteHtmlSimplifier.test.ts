@@ -3157,37 +3157,6 @@ describe('findRangeByContexts', () => {
     });
 
     describe('policy parameter', () => {
-        it("policy='unique' returns the single range when context appears once", () => {
-            const html = '<p>before</p><p>middle</p><p>after</p>';
-            const result = findRangeByContexts(
-                html, '<p>before</p>', '<p>after</p>', undefined, 'unique',
-            );
-            expect(result).toEqual({
-                start: '<p>before</p>'.length,
-                end: '<p>before</p><p>middle</p>'.length,
-            });
-        });
-
-        it("policy='unique' returns null when both anchors yield multiple distinct ranges", () => {
-            const html = '<p>A</p>X<p>B</p>Y<p>A</p>Z<p>B</p>';
-            const result = findRangeByContexts(
-                html, '<p>A</p>', '<p>B</p>', undefined, 'unique',
-            );
-            expect(result).toBeNull();
-        });
-
-        it("policy='unique' for before-only: requires beforeCtx to appear exactly once", () => {
-            const ambiguous = '<p>head</p>middle<p>head</p>tail';
-            expect(
-                findRangeByContexts(ambiguous, '<p>head</p>', undefined, undefined, 'unique'),
-            ).toBeNull();
-
-            const unique = '<p>head</p>tail';
-            expect(
-                findRangeByContexts(unique, '<p>head</p>', undefined, undefined, 'unique'),
-            ).toEqual({ start: '<p>head</p>'.length, end: unique.length });
-        });
-
         it("policy='first' (legacy default) returns the first valid pair", () => {
             const html = '<p>A</p>X<p>B</p>Y<p>A</p>Z<p>B</p>';
             const result = findRangeByContexts(

@@ -134,8 +134,11 @@ export const OrganizeItemsPreview: React.FC<OrganizeItemsPreviewProps> = ({
         <div className={`organize-items-preview overflow-hidden ${isRejectedOrUndone ? 'opacity-60' : ''}`}>
             <div className="display-flex flex-col px-3 py-1 gap-5">
                 
-                {/* Item display - always shown regardless of status */}
-                <div className="display-flex flex-wrap gap-col-3 gap-row-2 mt-1">
+                {/* Item display - always shown regardless of status. Holds
+                    the height of an item chip while the items load, so the
+                    card does not grow, and a thread pinned to its bottom
+                    jump, when they arrive. */}
+                <div className="display-flex flex-wrap items-center gap-col-3 gap-row-2 mt-1" style={{ minHeight: '22px' }}>
                     {displayedItems.map((item) => (
                         <MessageItemButton
                             key={item.key}

@@ -934,9 +934,9 @@ export const updateTableTabContextAtom = atom(
             set(currentReaderAttachmentAtom, null);
             return;
         }
-        // Only a table that can be submitted becomes the context: table chat
-        // may be disabled in this build, and the provider refuses a table that
-        // is corrupt, pending a write, or cites an excluded library.
+        // Only a table that can be submitted becomes the context: the provider
+        // refuses a table that is corrupt, pending a write, or cites an
+        // excluded library.
         let sendable = false;
         try {
             sendable = (await toValidatedMessageAttachment(item)) !== null;

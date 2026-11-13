@@ -1,4 +1,5 @@
 import { atom } from 'jotai/vanilla';
+import { isRunFinished } from '../agents/types';
 import type { AgentRun } from '../agents/types';
 import { isInterruptedRun } from './runResumeHelpers';
 import {
@@ -80,8 +81,8 @@ export const runReplacementNotesAtom = atom<ReadonlyMap<string, string>>(new Map
 /**
  * Notes for runs whose saved copy differs from what this window showed:
  *
- * - shown as failed or stopped, saved as completed: the local copy said the
- *   answer was lost, the saved one has it;
+ * - shown as failed or stopped, saved as completed (or parked on a card):
+ *   the local copy said the answer was lost, the saved one has it;
  * - stopped, and saved as stopped with more text: a stop held while the run
  *   reconnected reached the server only after it had written further.
  */
@@ -90,7 +91,7 @@ export function replacementNotes(local: readonly AgentRun[], saved: readonly Age
     const notes = new Map<string, string>();
     for (const run of saved) {
         const before = localById.get(run.id);
-        if (run.status === 'completed') {
+        if (isRunFinished(run)) {
             if (before?.status === 'canceled') {
                 notes.set(run.id, RUN_FINISHED_BEFORE_STOP_NOTE);
             } else if (before?.status === 'error' && before.error?.type === 'connection_error') {

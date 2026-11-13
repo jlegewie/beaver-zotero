@@ -42,7 +42,6 @@ function enabled(...on: TableViewCommand[]): Record<TableViewCommand, boolean> {
 const STATE: TableViewMenuState = {
     enabled: enabled('export-csv', 'fill-pending'),
     density: 'cozy',
-    fillAvailable: true,
 };
 
 function item(id = 42, key = REF.key) {
@@ -71,9 +70,6 @@ function fakeTableWindow(): FakeTableWindow {
         entry.setAttribute('data-density', density);
         doc.body.appendChild(entry);
     }
-    const fillEntry = doc.createElement('menuitem');
-    fillEntry.setAttribute('data-table-fill', '');
-    doc.body.appendChild(fillEntry);
 
     const fake: FakeTableWindow = { win: null, handle: null, state: { ...STATE } };
     fake.handle = {
@@ -302,11 +298,11 @@ describe('closing', () => {
 });
 
 describe('native menus', () => {
-    it('updates the commands, the row height and the fill entries as a menu opens', () => {
+    it('updates the commands and the row height as a menu opens', () => {
         const { win } = openTableWindow(item(), REF);
         const fake = opened[0];
         load(fake);
-        fake.state = { enabled: enabled('undo', 'export-csv'), density: 'tall', fillAvailable: false };
+        fake.state = { enabled: enabled('undo', 'export-csv'), density: 'tall' };
         onTableWindowMenuShowing(win);
 
         const doc = win.document;
@@ -318,7 +314,6 @@ describe('native menus', () => {
 
         expect(doc.querySelector('[data-density="tall"]')!.hasAttribute('checked')).toBe(true);
         expect(doc.querySelector('[data-density="cozy"]')!.hasAttribute('checked')).toBe(false);
-        expect(doc.querySelector('[data-table-fill]')!.hasAttribute('hidden')).toBe(true);
 
         // Enabled again the next time the menu opens with the state allowing it.
         fake.state = { ...STATE, enabled: enabled('show-hidden-columns') };
