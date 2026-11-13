@@ -15,7 +15,7 @@ export type BackendDocumentPayload =
  *
  * EPUB and snapshot documents drop their `citationIndex`: it is derivable
  * from the sections, and the backend resolves ids from the document itself.
- * PDF and text documents are already in backend form and pass through.
+ * PDF documents drop the local-only `infoTitle`; text documents pass through.
  *
  * Returns a shallow projection; the input (usually the local cache copy) is
  * never mutated.
@@ -25,6 +25,10 @@ export function toBackendDocumentPayload(
 ): BackendDocumentPayload {
     if ('sections' in document) {
         const { citationIndex: _citationIndex, ...rest } = document;
+        return rest;
+    }
+    if ('infoTitle' in document) {
+        const { infoTitle: _infoTitle, ...rest } = document;
         return rest;
     }
     return document;

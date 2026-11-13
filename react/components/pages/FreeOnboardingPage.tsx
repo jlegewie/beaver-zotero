@@ -119,7 +119,7 @@ const FreeOnboardingPage: React.FC = () => {
                         Chat history is saved to your account and is fully deletable. */}
                         <span>
                             Privacy: We do not permanently store your Zotero library or PDF files.
-                            Some metadata and chat content are processed on our servers to power Beaver features.
+                            Some metadata, short excerpts from your files, and chat content are processed on our servers to power Beaver features.
                             <a
                                 className="text-link cursor-pointer ml-1"
                                 href={process.env.WEBAPP_BASE_URL + '/docs/privacy'}

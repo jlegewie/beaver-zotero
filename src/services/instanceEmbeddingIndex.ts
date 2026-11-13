@@ -1,7 +1,6 @@
 import {
     EmbeddingIndexer,
     IndexingError,
-    MIN_CONTENT_LENGTH,
     INDEX_BATCH_SIZE,
     mergeIndexingErrors,
 } from "./embeddingIndexer";
@@ -9,6 +8,7 @@ import { BeaverDB } from "./database";
 import { embeddingsService } from "@beaver/agent-core/transport/clients/embeddingsService";
 import { logger } from "@beaver/agent-core/platform/logger";
 import { getPref, setPref } from "../utils/prefs";
+import { EMBEDDING_TEXT_VERSION } from "./documentExtraction/embeddingText";
 
 export interface EmbeddingIndexState {
     status: "idle" | "indexing" | "updating" | "error";
@@ -28,11 +28,23 @@ export const initialEmbeddingState: EmbeddingIndexState = {
     failedItems: 0,
 };
 const EVENT_DEBOUNCE_MS = 4000;
+/**
+ * Longest a change waits while events keep arriving (e.g. a backlog of
+ * extractions each marking a unit dirty) before a pass runs anyway.
+ */
+const EVENT_MAX_WAIT_MS = 30_000;
 
 /** Pending item changes outlive an indexing generation's observer and timer. */
 export interface PendingEmbeddingEvents {
     modifiedItemIds: Set<number>;
     deletedItemIds: Set<number>;
+}
+
+export interface EmbeddingIndexHandle {
+    /** Cancel the generation; pending ids stay with the owner. */
+    stop(): void;
+    /** Debounce processing of the owner's pending ids. */
+    scheduleEvents(): void;
 }
 
 /** One generation of indexing; the owner serializes generations and event drains. */
@@ -42,7 +54,7 @@ export function startEmbeddingIndex(
     onUpdate: (update: Partial<EmbeddingIndexState>) => void,
     serialize: (work: () => Promise<void>) => Promise<void>,
     pendingEvents: PendingEmbeddingEvents,
-): () => void {
+): EmbeddingIndexHandle {
     let cancelled = false;
     const isCancelled = () => cancelled;
     const publish = (update: Partial<EmbeddingIndexState>) => {
@@ -76,6 +88,10 @@ export function startEmbeddingIndex(
     const events = {
         ...pendingEvents,
         timer: null as ReturnType<typeof setTimeout> | null,
+        /** When the oldest change still waiting for a pass was scheduled. */
+        firstScheduledAt: null as number | null,
+        /** A pass is waiting for its turn and will drain everything pending. */
+        flushQueued: false,
     };
     let currentIndexer: EmbeddingIndexer | null = null;
     let observerId: string | null = null;
@@ -170,8 +186,21 @@ export function startEmbeddingIndex(
                 return;
             }
 
-            // Check for upgrade-triggered full diff (clears stored index state so shouldRunFullDiff returns true)
-            const needsUpgradeDiff = getPref("runEmbeddingFullDiff");
+            // Derived text stored while no generation could apply it (e.g.
+            // before a restart) re-enters through the event path, which runs
+            // once initialization finishes.
+            const pendingTextIds =
+                (await getDB()?.getPendingAttachmentEmbeddingTextIds(libraryIds)) ?? [];
+            for (const id of pendingTextIds) events.modifiedItemIds.add(id);
+
+            // Check for upgrade-triggered full diff (clears stored index state so shouldRunFullDiff returns true).
+            // A new derived-text version also needs one: without a saved scan,
+            // the diff considers every unit for extraction.
+            const textVersionChanged =
+                (await getDB()?.getEmbeddingTextIndexVersion()) !==
+                EMBEDDING_TEXT_VERSION;
+            const needsUpgradeDiff =
+                getPref("runEmbeddingFullDiff") || textVersionChanged;
             if (needsUpgradeDiff) {
                 logger(
                     "EmbeddingIndex: Upgrade-triggered embedding full diff - clearing index state for all libraries",
@@ -188,6 +217,11 @@ export function startEmbeddingIndex(
                     }
                 }
                 setPref("runEmbeddingFullDiff", false);
+                if (textVersionChanged) {
+                    await getDB()?.setEmbeddingTextIndexVersion(
+                        EMBEDDING_TEXT_VERSION,
+                    );
+                }
             }
 
             if (forceFullDiff) {
@@ -289,10 +323,10 @@ export function startEmbeddingIndex(
                     `EmbeddingIndex: Computing diff for library ${libraryId}`,
                     4,
                 );
-                const diff = await indexer.computeIndexingDiff(
-                    libraryId,
-                    MIN_CONTENT_LENGTH,
-                );
+                // A forced rebuild also retries extraction for every unit.
+                const diff = await indexer.computeIndexingDiff(libraryId, {
+                    enqueueAllExtractions: forceFullDiff,
+                });
 
                 // Filter out items that are still in backoff period
                 const filteredToIndex = await indexer.filterItemsNotInBackoff(
@@ -538,12 +572,20 @@ export function startEmbeddingIndex(
 
     /**
      * Process collected events for incremental updates.
-     * Uses indexItemIdsBatch which loads items per-batch for memory efficiency.
+     *
+     * Changed ids map to the units they affect: a regular item itself, an
+     * attachment's current parent (its best attachment may have changed), and
+     * every unit that embedded text derived from a changed or deleted
+     * attachment. Each unit is recomputed from scratch, so the multi-step
+     * sequences Zotero emits (recognition, reparenting) settle in any order.
      */
     const processEvents = async () => {
+        events.firstScheduledAt = null;
+        events.flushQueued = false;
         if (isCancelled()) return;
         const indexer = getIndexer();
-        if (!indexer) return;
+        const db = getDB();
+        if (!indexer || !db) return;
 
         const modifiedIds = Array.from(events.modifiedItemIds);
         const deletedIds = Array.from(events.deletedItemIds);
@@ -551,104 +593,89 @@ export function startEmbeddingIndex(
         // Clear collections immediately
         events.modifiedItemIds.clear();
         events.deletedItemIds.clear();
-        events.timer = null;
 
         if (modifiedIds.length === 0 && deletedIds.length === 0) return;
-
-        let filteredModifiedIds = modifiedIds;
+        const startedAt = Date.now();
 
         try {
             // Re-check current searchable libraries when draining queued events.
             // Pending IDs can have been collected under an earlier scope.
-            if (modifiedIds.length > 0) {
-                const searchableLibrarySet = new Set(searchableLibraryIds);
-                const items = await Zotero.Items.getAsync(modifiedIds);
-                filteredModifiedIds = items
-                    .filter(
-                        (item): item is Zotero.Item =>
-                            Boolean(item) &&
-                            searchableLibrarySet.has(item.libraryID),
-                    )
-                    .map((item) => item.id);
+            const searchableLibrarySet = new Set(searchableLibraryIds);
+            const inScope = (item: Zotero.Item | false | null | undefined): item is Zotero.Item =>
+                Boolean(item) && searchableLibrarySet.has((item as Zotero.Item).libraryID);
+            const modifiedItems = modifiedIds.length > 0
+                ? (await Zotero.Items.getAsync(modifiedIds)).filter(inScope)
+                : [];
+
+            const candidateUnitIds = new Set<number>();
+            const attachmentIds: number[] = [];
+            for (const item of modifiedItems) {
+                if (item.isRegularItem()) {
+                    candidateUnitIds.add(item.id);
+                } else if (item.isAttachment()) {
+                    attachmentIds.push(item.id);
+                    if (item.parentID) candidateUnitIds.add(item.parentID);
+                }
             }
+            for (const unitId of await db.getUnitIdsBySourceAttachment([...attachmentIds, ...deletedIds])) {
+                candidateUnitIds.add(unitId);
+            }
+            for (const id of deletedIds) candidateUnitIds.delete(id);
+            const unitIds = candidateUnitIds.size > 0
+                ? (await Zotero.Items.getAsync([...candidateUnitIds])).filter(inScope).map((item) => item.id)
+                : [];
 
             logger(
-                `EmbeddingIndex: Processing events: ${filteredModifiedIds.length} modified, ${deletedIds.length} deleted`,
+                `EmbeddingIndex: Processing events: ${modifiedItems.length} modified, ${deletedIds.length} deleted, ${unitIds.length} units affected`,
                 3,
             );
-            setIndexStatus({ status: "updating", phase: "incremental" });
-
-            const db = getDB();
+            // Most passes only confirm unchanged units; show "updating" only
+            // once one re-embeds, so background extraction does not flicker it.
+            let announced = false;
+            const announceUpdating = () => {
+                if (announced) return;
+                announced = true;
+                setIndexStatus({ status: "updating", phase: "incremental" });
+            };
 
             // Handle deletions first
-            if (deletedIds.length > 0 && db) {
+            if (deletedIds.length > 0) {
                 await db.deleteEmbeddingsBatch(deletedIds);
+                await db.deleteAttachmentEmbeddingTextsByItemIds(deletedIds);
                 logger(
                     `EmbeddingIndex: Deleted ${deletedIds.length} embeddings`,
                     3,
                 );
             }
 
-            // Handle modifications - indexItemIdsBatch handles per-batch loading
-            // skipUnchanged: compare content hashes to avoid unnecessary API calls
-            if (filteredModifiedIds.length > 0) {
-                const result = await indexer.indexItemIdsBatch(
-                    filteredModifiedIds,
-                    {
-                        batchSize: INDEX_BATCH_SIZE,
-                        skipUnchanged: true,
-                        isCancelled,
-                    },
-                );
+            // Recompute affected units. skipUnchanged compares content hashes
+            // to avoid unnecessary API calls. Changed attachments have their
+            // files re-checked against stored derived text.
+            let incomplete = false;
+            if (unitIds.length > 0) {
+                const result = await indexer.indexItemIdsBatch(unitIds, {
+                    batchSize: INDEX_BATCH_SIZE,
+                    skipUnchanged: true,
+                    isCancelled,
+                    onEmbed: announceUpdating,
+                    extractions: { checkFileIdentity: new Set(attachmentIds) },
+                });
+                incomplete = result.incomplete;
                 logger(
                     `EmbeddingIndex: Updated ${result.indexed} embeddings (${result.skipped} skipped, ${result.failed} failed)`,
                     3,
                 );
 
-                // Items that were skipped might need their embeddings removed
-                // (e.g., if title/abstract were cleared below min length, or item was trashed)
-                // Only delete embeddings for items that exist but don't meet criteria anymore
-                if (result.skipped > 0 && db) {
-                    // Get existing embeddings for these items
-                    const existingEmbeddings =
-                        await db.getContentHashes(filteredModifiedIds);
-                    const idsWithEmbeddings = filteredModifiedIds.filter((id) =>
-                        existingEmbeddings.has(id),
-                    );
-
-                    // Check which of these no longer meet criteria
-                    if (idsWithEmbeddings.length > 0) {
-                        const items =
-                            await Zotero.Items.getAsync(idsWithEmbeddings);
-                        const stillValidIds = new Set<number>();
-
-                        for (const item of items) {
-                            // Item must exist, be a regular item, not be trashed, and meet content requirements
-                            if (
-                                item &&
-                                item.isRegularItem() &&
-                                !item.deleted &&
-                                indexer.isItemIndexable(
-                                    item,
-                                    MIN_CONTENT_LENGTH,
-                                )
-                            ) {
-                                stillValidIds.add(item.id);
-                            }
-                        }
-
-                        const toRemove = idsWithEmbeddings.filter(
-                            (id) => !stillValidIds.has(id),
-                        );
-                        if (toRemove.length > 0) {
-                            await db.deleteEmbeddingsBatch(toRemove);
-                            logger(
-                                `EmbeddingIndex: Removed ${toRemove.length} embeddings for items no longer meeting criteria`,
-                                3,
-                            );
-                        }
-                    }
+                // Units that are no longer indexable (trashed, content cleared
+                // below the minimum length) lose their embeddings.
+                if (result.unindexable.length > 0) {
+                    await db.deleteEmbeddingsBatch(result.unindexable);
                 }
+            }
+
+            // Derived text of these attachments has now been applied.
+            if (attachmentIds.length > 0 && !incomplete && !isCancelled()) {
+                await db.clearAttachmentEmbeddingTextPending(attachmentIds, startedAt);
             }
 
             // Update failed items count after incremental processing
@@ -671,16 +698,26 @@ export function startEmbeddingIndex(
     };
 
     /**
-     * Schedule event processing with debounce
+     * Schedule event processing with debounce, bounded by EVENT_MAX_WAIT_MS.
      */
     const scheduleEventProcessing = () => {
+        // A queued pass reads the pending sets when it starts, so it covers this change.
+        if (events.flushQueued) return;
+        const now = Date.now();
+        events.firstScheduledAt ??= now;
         if (events.timer !== null) {
             clearTimeout(events.timer);
         }
 
+        const delay = Math.min(
+            EVENT_DEBOUNCE_MS,
+            Math.max(0, events.firstScheduledAt + EVENT_MAX_WAIT_MS - now),
+        );
         events.timer = setTimeout(() => {
+            events.timer = null;
+            events.flushQueued = true;
             void serialize(processEvents);
-        }, EVENT_DEBOUNCE_MS);
+        }, delay);
     };
 
     logger("EmbeddingIndex: Setting up embedding index", 3);
@@ -702,13 +739,17 @@ export function startEmbeddingIndex(
                 // Skip all processing if shutdown has started
                 if (isCancelled() || Zotero.__beaverShuttingDown) return;
 
-                // Only handle item events
-                if (type !== "item") return;
+                // Item changes, and file downloads that may replace an attachment's file
+                if (type !== "item" && type !== "file") return;
 
                 let shouldSchedule = false;
 
                 // Handle add/modify events - filter to synced libraries
-                if (event === "add" || event === "modify") {
+                if (
+                    event === "add" ||
+                    event === "modify" ||
+                    (type === "file" && event === "download")
+                ) {
                     // Load items to check their library
                     const items = await Zotero.Items.getAsync(ids);
                     if (isCancelled()) return;
@@ -723,7 +764,7 @@ export function startEmbeddingIndex(
                 }
 
                 // Handle delete events - use extraData to get libraryID
-                if (event === "delete") {
+                if (type === "item" && event === "delete") {
                     for (const id of ids) {
                         // For delete events, item no longer exists - check extraData for libraryID
                         if (extraData && extraData[id]) {
@@ -750,7 +791,7 @@ export function startEmbeddingIndex(
 
         observerId = Zotero.Notifier.registerObserver(
             observer,
-            ["item"],
+            ["item", "file"],
             "beaver-embedding-index",
         );
     };
@@ -793,8 +834,12 @@ export function startEmbeddingIndex(
     setupObserver();
     void serialize(initialize);
 
+    const scheduleEvents = () => {
+        if (!cancelled) scheduleEventProcessing();
+    };
+
     // Cleanup
-    return () => {
+    const stop = () => {
         // Cancel in-flight work before a replacement generation can start.
         cancelled = true;
         logger("EmbeddingIndex: Cleaning up embedding index", 3);
@@ -817,4 +862,5 @@ export function startEmbeddingIndex(
         // Clear indexer reference
         currentIndexer = null;
     };
+    return { stop, scheduleEvents };
 }

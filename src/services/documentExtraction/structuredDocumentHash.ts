@@ -3,7 +3,8 @@ import type { ExtractContentKind } from '@beaver/agent-core/extract/document/sha
 
 type IndexableContentKind = Extract<ExtractContentKind, 'pdf' | 'epub' | 'snapshot'>;
 
-const OMIT_KEYS = new Set(['createdAt', 'debug']);
+// `infoTitle` is file metadata, not content; omitting it keeps existing hashes stable.
+const OMIT_KEYS = new Set(['createdAt', 'debug', 'infoTitle']);
 const OMIT_DIAGNOSTIC_KEYS = new Set(['timings', 'settings']);
 const GEOMETRY_KEYS = new Set(['bbox', 'bboxes', 'viewBox', 'width', 'height']);
 
