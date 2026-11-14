@@ -147,18 +147,6 @@ export const BUILTIN_ACTIONS: Action[] = [
     },
 
     {
-        id: 'builtin-collection-literature-review',
-        name: 'literature-review',
-        title: 'Literature review outline',
-        description: 'Draft a thematic literature-review outline from the papers in this collection.',
-        text: 'Create a literature review outline from the papers in this collection.\n\nSteps:\n1. Review every paper in the collection: abstracts for all of them, and — if the extract tool is available — use it across the collection to pull each paper\'s core argument, approach, and findings. Read closely only the few papers central to the debates you identify.\n2. Group the papers thematically, never chronologically or paper-by-paper. Identify the key debates, the points of consensus, and the open questions.\n3. Save the outline as a Zotero note in this collection.\n\nThe note should contain: a working title; a one-paragraph framing of the field; one section per theme with a heading, 3-5 sentences in prose on the state of that theme (who argues what and where the disagreement lies), and citations to the collection papers that belong there; and a closing section on the open questions the review should end on. Write in prose — no bullet points or numbered lists. Every paper in the collection should appear somewhere; if some genuinely fit no theme, list them at the end with a brief note on why.\n\nIf my message says what the review is for (a dissertation chapter, a paper introduction, a grant application), shape the outline to that purpose.',
-        argumentHint: 'Optional: what the review is for, e.g. a paper intro or dissertation chapter',
-        targets: ['collection'],
-        category: 'write',
-        sortOrder: 410,
-    },
-
-    {
         id: 'builtin-collection-organize-sub-collections',
         name: 'organize-sub-collections',
         title: 'Organize into thematic sub-collections',
@@ -173,6 +161,24 @@ export const BUILTIN_ACTIONS: Action[] = [
     // ═══════════════════════════════════════════════════════════════════
     // TARGET TYPE: global (no specific context, library-wide)
     // ═══════════════════════════════════════════════════════════════════
+
+    // Binds to a selected collection or items when there is one, and
+    // otherwise reviews a topic. Keep the id and name stable: customizations
+    // in `beaver.actions` key off the id, and users type `/literature-review`.
+    // The method (scoping, size tiers, structure, delivery) comes from the
+    // backend's literature-review guidance; the text carries only the
+    // user-facing choices plus a minimal fallback for backends without it.
+    {
+        id: 'builtin-collection-literature-review',
+        name: 'literature-review',
+        title: 'Write a literature review',
+        description: 'Write a thematic, cited literature review as a Zotero note from a collection, selected papers, or a topic.',
+        text: 'Write a literature review from my sources. Use the literature-review guidance if it is available.\n\nSteps:\n1. Determine the papers:\n   - If a collection, saved search, or view is attached, the review covers it.\n   - If two or more items are attached, the review covers those items.\n   - Otherwise, the review covers the topic in my message: search my library from several angles, including a single attached paper if it fits. If my library holds little on the topic, also search beyond it and offer to import the most important works; if external search is not available, say so and tell me I can switch to the Beaver model or enable Plus Tools in settings. If my message names no topic, ask me what the review should cover.\n2. Shape the review to what my message says about its purpose (such as a dissertation chapter, a paper introduction, or a grant background), its length, and whether I want a full draft or only an outline. If it says none of these, write a full draft.\n3. Work from the papers\' full text, not their abstracts. If there are too many papers to read one by one, propose a research table with a screening column and columns for the review\'s key questions, and write the review from the filled table.\n4. Write thematically, never paper by paper, and cite specific passages for every claim drawn from a source. Do not add a reference list.\n5. Save the review as a Zotero note, in the collection when the review covers one.',
+        argumentHint: 'Topic, purpose, and length, e.g. "grant background, 2,000 words" or "outline"',
+        targets: ['items', 'collection', 'global'],
+        category: 'write',
+        sortOrder: 502,
+    },
 
     {
         id: 'builtin-start-project',
