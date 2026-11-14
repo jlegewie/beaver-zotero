@@ -379,6 +379,26 @@ describe('actionStorage', () => {
         expect(getMergedActions().some(a => a.id === archived.id)).toBe(false);
     });
 
+    it('/literature-review keeps its id and is offered for a collection, items, or no selection', () => {
+        saveActionCustomizations({ version: 1, overrides: {}, custom: [] });
+        const review = getMergedActions().find(a => getActionCommand(a) === 'literature-review')!;
+        expect(review.id).toBe('builtin-collection-literature-review');
+        expect(review.targets).toEqual(expect.arrayContaining(['collection', 'items', 'global']));
+        expect(review.category).toBe('write');
+    });
+
+    it('applies an existing /literature-review text override to the review action', () => {
+        const c: ActionCustomizations = {
+            version: 1,
+            overrides: { 'builtin-collection-literature-review': { text: 'My own review prompt' } },
+            custom: [],
+        };
+        saveActionCustomizations(c);
+        const review = getMergedActions().find(a => a.id === 'builtin-collection-literature-review')!;
+        expect(review.text).toBe('My own review prompt');
+        expect(getActionCommand(review)).toBe('literature-review');
+    });
+
     // ── Required arguments (built-in-only, like `locked`) ───────────────
 
     it('keeps argumentRequired on a built-in through field overrides', () => {
