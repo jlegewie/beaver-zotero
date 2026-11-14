@@ -6672,7 +6672,7 @@
     line-height: 1.3;
 }
 .beaver-root .feature-credits-row-subtitle {
-    font-size: 0.9em;
+    /* font-size: 0.9em; */
     color: var(--fill-secondary);
 }
 .beaver-root .feature-credits-steps {

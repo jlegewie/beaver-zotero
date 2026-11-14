@@ -116,16 +116,16 @@ export const FEATURE_CREDIT_TASKS: FeatureTaskDefinition[] = [
         ],
         finalStep: 'Press Send. Accept the note if Beaver asks.',
         completion: {
-            tip: 'Click a citation in the note to open the page it cites. Beaver can also edit your notes, and notes export to Word.',
+            tip: 'Click a citation in the note to open the page it cites. Beaver can also edit your notes, and export notes to Word, PDF and LaTeX.',
             docsUrl: `${DOCS_BASE_URL}/notes`,
         },
     },
     {
         key: 'organize',
         title: 'Organize your library',
-        subtitle: 'Collections, tags and metadata, filed for you',
+        subtitle: 'Collections, tags, metadata, merging duplicates and more',
         actionId: 'builtin-organize',
-        explanation: 'Beaver does the tedious library work: collections, tags, metadata and duplicates. You review every change, and you can undo it.',
+        explanation: 'Beaver can organize your library: sort into collections, assign tags, edit metadata and remove duplicates. You review every change, and you can undo it.',
         attach: { kind: 'collection' },
         instruction: 'say what to do',
         examples: [
@@ -142,7 +142,7 @@ export const FEATURE_CREDIT_TASKS: FeatureTaskDefinition[] = [
     {
         key: 'research_table',
         title: 'Compare papers in a table',
-        subtitle: 'One row per paper, one column per question',
+        subtitle: 'Systematic comparison of research papers',
         actionId: 'builtin-research-table',
         explanation: 'Beaver finds papers on a topic in your library and answers your questions about each one in a table. Every cell links to the quote behind it.',
         attach: { kind: 'topic' },
@@ -151,8 +151,8 @@ export const FEATURE_CREDIT_TASKS: FeatureTaskDefinition[] = [
             { text: 'neighborhood effects on school outcomes: method, sample and main finding', illustration: true },
             { text: 'social capital: definition used and how it is measured', illustration: true },
         ],
-        finalStep: 'Press Send, check the papers and questions Beaver proposes, then create the table with "Fill the table now" ticked.',
-        footnote: 'Filling a table uses credits per row. You see the cost before anything is filled.',
+        finalStep: 'Press Send.',
+        // footnote: 'Filling a table uses credits per row. You see the cost before anything is filled.',
         completion: {
             tip: 'Click a cell to see the quote behind it. You can add a column with a new question and fill the remaining rows.',
             docsUrl: `${DOCS_BASE_URL}/research-tables`,
