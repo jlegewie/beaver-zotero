@@ -165,15 +165,18 @@ export const BUILTIN_ACTIONS: Action[] = [
     // Binds to a selected collection or items when there is one, and
     // otherwise reviews a topic. Keep the id and name stable: customizations
     // in `beaver.actions` key off the id, and users type `/literature-review`.
-    // The method (scoping, size tiers, structure, delivery) comes from the
-    // backend's literature-review guidance; the text carries only the
-    // user-facing choices plus a minimal fallback for backends without it.
+    // The method (scoping, search, size tiers, structure, delivery) comes
+    // from the backend's `research_reports` capability; keep it out of this
+    // text, which the model reads as the user's own instructions and would
+    // follow over the capability where they disagree. The text carries only
+    // what the attached context means, the user-facing defaults, and a
+    // minimal fallback for backends without the capability.
     {
         id: 'builtin-collection-literature-review',
         name: 'literature-review',
         title: 'Write a literature review',
         description: 'Write a thematic, cited literature review as a Zotero note from a collection, selected papers, or a topic.',
-        text: 'Write a literature review from my sources. Use the literature-review guidance if it is available.\n\nSteps:\n1. Determine the papers:\n   - If a collection, saved search, or view is attached, the review covers it.\n   - If two or more items are attached, the review covers those items.\n   - Otherwise, the review covers the topic in my message: search my library from several angles, including a single attached paper if it fits. If my library holds little on the topic, also search beyond it and offer to import the most important works; if external search is not available, say so and tell me I can switch to the Beaver model or enable Plus Tools in settings. If my message names no topic, ask me what the review should cover.\n2. Shape the review to what my message says about its purpose (such as a dissertation chapter, a paper introduction, or a grant background), its length, and whether I want a full draft or only an outline. If it says none of these, write a full draft.\n3. Work from the papers\' full text, not their abstracts. If there are too many papers to read one by one, propose a research table with a screening column and columns for the review\'s key questions, and write the review from the filled table.\n4. Write thematically, never paper by paper, and cite specific passages for every claim drawn from a source. Do not add a reference list.\n5. Save the review as a Zotero note, in the collection when the review covers one.',
+        text: 'Write a literature review. Load the `research_reports` capability and follow its process.\n\nWhat to review:\n- If a collection, saved search, or view is attached, review it.\n- If two or more items are attached, review those items.\n- Otherwise, review the topic in my message. If I named no topic, ask me what to cover.\n\nWrite a full draft unless my message asks for an outline or a single section, and follow what my message says about purpose and length.\n\nIf that capability is not available: organize by theme rather than paper by paper, cite specific passages for each claim, and save the review as a Zotero note.',
         argumentHint: 'Topic, purpose, and length, e.g. "grant background, 2,000 words" or "outline"',
         targets: ['items', 'collection', 'global'],
         category: 'write',
