@@ -1,4 +1,5 @@
 import { selectedTabIfAccepted } from '../../src/runtime/navigation';
+import { countLibraryItems } from '../utils/libraryShape';
 import { getContextWindow } from '../runtime/windowRuntime';
 import { useEffect } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
@@ -38,33 +39,6 @@ let moduleTabNotifierId: string | null = null;
  */
 function isNoteTabType(type: string): boolean {
     return type === 'note' || type === 'note-unloaded' || type === 'note-loading';
-}
-
-/**
- * Cheap regular-item count probe across non-feed libraries. Used by the
- * first-run gate to route truly empty AND small libraries to the discovery
- * flow (suggestion cards on a 3-paper library produce overblown "Synthesize
- * what your library says about X" framing).
- *
- * Returns the count clamped to `cap` — the SQL `LIMIT cap` stops the scan
- * early, so the query stays cheap on a 50k-item library while still letting
- * the caller distinguish 0/1/.../cap.
- */
-async function queryLibraryItemCount(cap: number): Promise<number> {
-    const sql = `SELECT 1 FROM items i
-        JOIN libraries l ON l.libraryID = i.libraryID
-        WHERE l.type != 'feed'
-          AND i.itemTypeID NOT IN (
-              SELECT itemTypeID FROM itemTypes
-              WHERE typeName IN ('note', 'attachment', 'annotation')
-          )
-          AND i.itemID NOT IN (SELECT itemID FROM deletedItems)
-        LIMIT ?`;
-    let count = 0;
-    await Zotero.DB.queryAsync(sql, [cap], {
-        onRow: () => { count++; },
-    });
-    return count;
 }
 
 /**
@@ -294,10 +268,13 @@ export function useZoteroContext() {
         // once we already know the library is at-or-above the threshold.
         let libraryItemCountLocal = 0;
         const refreshLibraryItemCount = async () => {
-            libraryItemCountLocal = await queryLibraryItemCount(
-                SMALL_LIBRARY_THRESHOLD,
-            );
-            setLibraryItemCount(libraryItemCountLocal);
+            // Every library but feeds, clamped to the threshold: first run
+            // only needs to tell empty and small libraries from the rest. A
+            // failed count leaves the last one in place.
+            const count = await countLibraryItems(SMALL_LIBRARY_THRESHOLD);
+            if (count === null) return;
+            libraryItemCountLocal = count;
+            setLibraryItemCount(count);
         };
 
         const itemObserver: { notify: _ZoteroTypes.Notifier.Notify } = {

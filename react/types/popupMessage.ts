@@ -5,7 +5,7 @@ import type { FileExportFormat } from "@beaver/agent-ui/host/types";
 
 export const POPUP_MESSAGE_DURATION = 4000; // 4 seconds
 
-export type PopupMessageType = 'info' | 'warning' | 'error' | 'version_update' | 'items_summary' | 'welcome_onboarding' | 'reader_tip' | 'note_tip' | 'citation_tip' | 'feature_tip' | 'cloud_consent' | 'file_export';
+export type PopupMessageType = 'info' | 'warning' | 'error' | 'version_update' | 'items_summary' | 'welcome_onboarding' | 'reader_tip' | 'note_tip' | 'citation_tip' | 'feature_tip' | 'cloud_consent' | 'file_export' | 'feature_credit';
 
 export interface PopupMessageFeature {
     title: string;
@@ -33,6 +33,12 @@ export interface FileExportPopupData {
     onOpen?: () => Promise<void>;
 }
 
+/** An earned feature-credit task, shown by `feature_credit` messages. */
+export interface FeatureCreditPopupData {
+    key: string;
+    credits: number;
+}
+
 export interface PopupMessage {
     id: string;
     /** Which tip a `feature_tip` message shows — see `react/constants/featureTips.tsx`. */
@@ -51,6 +57,8 @@ export interface PopupMessage {
     buttonOnClick?: () => void
     /** The exported file a `file_export` message reports. */
     fileExport?: FileExportPopupData;
+    /** The earned task a `feature_credit` message reports. */
+    featureCredit?: FeatureCreditPopupData;
     count?: number;   // Count message occurrences
     duration?: number; // Duration in milliseconds, defaults to POPUP_MESSAGE_DURATION
     /** Optional action button displayed at the bottom of the message */

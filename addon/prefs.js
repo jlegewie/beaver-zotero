@@ -68,6 +68,8 @@ pref("enableResponseCompleteNotifications", true);
 pref("enableRunStatusPopup", true);
 // Separate Beaver window: whether the chat history sidebar is collapsed.
 pref("windowSidebarCollapsed", false);
+// Whether the "Get more out of Beaver" feature-credits card on the home screen was dismissed.
+pref("featureCreditsCardDismissed", false);
 
 // Deferred tool preferences: maps tool group to preference (always_ask, always_apply, continue_without_applying)
 // Defaults are defined in react/atoms/deferredToolPreferences.ts and merged at load time.

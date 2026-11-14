@@ -119,6 +119,30 @@ export interface Action {
      *  stripped from custom actions on save. Duplicating a locked action yields
      *  an unlocked, editable copy. Defaults to unlocked when absent. */
     locked?: boolean;
+    /** Built-in-only, code-defined: the action needs the user to say what they
+     *  want after its /command, so Send stays disabled while the message holds
+     *  no text besides the command pills. Not part of the override model or the
+     *  share schema, and stripped from custom actions like `locked`. */
+    argumentRequired?: boolean;
+    /** Built-in-only lead-in for the hint shown while a required argument is
+     *  missing, completed with " after /<command>" (e.g. "Describe what to
+     *  highlight"). Absent → a generic lead-in. */
+    argumentRequiredHint?: string;
+}
+
+/** Fields only the code-defined built-ins may carry (see `locked`,
+ *  `argumentRequired`). */
+export type BuiltinOnlyActionField = "locked" | "argumentRequired" | "argumentRequiredHint";
+
+/**
+ * Drop the built-in-only fields from an action. Custom, duplicated and
+ * imported actions go through this: those fields are never user-settable, and
+ * a user-owned action must not carry behavior its editor cannot show or change.
+ */
+export function stripBuiltinOnlyFields<T extends object>(action: T): Omit<T, BuiltinOnlyActionField> {
+    const { locked: _locked, argumentRequired: _required, argumentRequiredHint: _hint, ...rest } =
+        action as T & Partial<Record<BuiltinOnlyActionField, unknown>>;
+    return rest as Omit<T, BuiltinOnlyActionField>;
 }
 
 /**
@@ -291,12 +315,11 @@ export const isStoredAction = (obj: unknown): boolean => {
 /** Normalize a stored action (either shape) to the current `targets` shape.
  *  Call only after `isStoredAction` has validated the value. */
 export const normalizeStoredAction = (raw: Record<string, unknown>): Action => {
-    const { targetType, minItems: _minItems, targets, locked: _locked, ...rest } = raw as Record<string, unknown> & {
+    const { targetType, minItems: _minItems, targets, ...rest } = stripBuiltinOnlyFields(raw as Record<string, unknown> & {
         targetType?: ActionTargetType;
         minItems?: number;
         targets?: ActionTargetType[];
-        locked?: unknown;
-    };
+    });
     return {
         ...(rest as unknown as Omit<Action, 'targets'>),
         // Blank is not a category — don't copy rest.category through.

@@ -2108,6 +2108,9 @@ export function createWSCallbacks(
             // Surface an OS-native notification if the user can't currently see
             // the completed response (e.g. working in another app).
             notifyRunComplete();
+
+            // Changes the run applied itself can complete a feature-credit task.
+            Zotero.Beaver?.account?.syncFeatureCredits();
         },
 
         onRunCitations: (event: WSRunCitationsEvent) => {

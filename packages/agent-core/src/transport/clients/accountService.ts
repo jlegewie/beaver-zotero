@@ -286,6 +286,25 @@ export class AccountService extends ApiService {
     }
 
     /**
+     * Asks the server to check for newly completed feature-credit tasks and
+     * grant their rewards. Safe to call any number of times.
+     *
+     * @returns The task keys granted by this call
+     */
+    async syncFeatureCredits(options?: RequestOptions): Promise<{ granted: string[] }> {
+        return this.post<{ granted: string[] }>('/api/v1/account/feature-credits/sync', {}, options);
+    }
+
+    /**
+     * Records that the account was shown the feature-credits card. The server
+     * keeps the first time only, so analysis can tell users who saw the card
+     * from those who did not.
+     */
+    async markFeatureCreditsCardSeen(options?: RequestOptions): Promise<void> {
+        await this.post<unknown>('/api/v1/account/feature-credits/card-seen', {}, options);
+    }
+
+    /**
      * Idempotently stamps `first_run_completed_at` on the user's profile.
      * Called when a Free user clicks a first-run suggestion card or "Skip"
      * on the FirstRunPage. Backend treats already-stamped as a no-op.

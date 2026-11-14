@@ -214,6 +214,9 @@ export interface PendingPillInsert {
      *  InputAreas are mounted (main-window sidebar + separate Beaver window)
      *  the pill deterministically lands in the right editor. */
     targetWindow?: Window;
+    /** Text to set right after the pill, replacing anything already after it
+     *  (see `stageActionPillAtom`). Absent → the pill is inserted as is. */
+    argumentText?: string;
 }
 
 /**

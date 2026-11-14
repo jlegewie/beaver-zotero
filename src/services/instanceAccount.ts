@@ -6,6 +6,8 @@ import type { Session, SupabaseClient } from "@supabase/supabase-js";
 import type { SafeProfileWithPlan } from "@beaver/agent-core/types/profile";
 import type { ZoteroLibrary } from "@beaver/agent-core/types/zotero";
 import { accountService } from "@beaver/agent-core/transport/clients/accountService";
+import { agentActionsService } from "@beaver/agent-core/transport/clients/agentActionsService";
+import { logger } from "@beaver/agent-core/platform/logger";
 import {
     supabase,
     disposeSupabaseClient,
@@ -87,6 +89,21 @@ const restoreRetryDelay = (attempt: number): number =>
 const VISIBLE_REFRESH_MS = 15 * 60 * 1000;
 /** Profile refresh cadence while Beaver is hidden everywhere; plan changes still land. */
 const HIDDEN_REFRESH_MS = 4 * 60 * 60 * 1000;
+/** Quiet period before a feature-credit check, so related writes share one. */
+const FEATURE_SYNC_DEBOUNCE_MS = 3_000;
+/** Longest a feature-credit check waits while triggers keep arriving. */
+const FEATURE_SYNC_MAX_WAIT_MS = 15_000;
+/** Catch-up checks are skipped within this long of the last check. */
+const FEATURE_SYNC_CATCH_UP_MS = 10 * 60_000;
+
+/** Whether the profile has feature-credit tasks still open. */
+function hasOpenFeatureCreditTasks(profile: SafeProfileWithPlan | undefined): boolean {
+    return !!profile?.feature_credits?.tasks?.some((task) => !task.completed_at);
+}
+/** Whether the server has recorded the feature-credits card as shown. */
+function featureCreditsStarted(profile: SafeProfileWithPlan | undefined): boolean {
+    return !!profile?.feature_credits?.started_at;
+}
 const copy = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 const freeze = <T>(value: T): T => {
     if (value && typeof value === "object") {
@@ -134,6 +151,15 @@ export class InstanceAccount {
     private tokenRefresh?: Promise<any>;
     private restoreTimer?: ReturnType<typeof setTimeout>;
     private slowRestoreTimer?: ReturnType<typeof setTimeout>;
+    private featureSyncTimer?: ReturnType<typeof setTimeout>;
+    private disposeCallbacks: Array<() => void> = [];
+    /** When the first trigger of the pending feature-credit check arrived. */
+    private featureSyncFirstTriggerAt = 0;
+    private featureSyncInFlight = false;
+    private featureSyncLastRunAt = 0;
+    /** The account generation the feature-credits card was reported seen for. */
+    private featureCardSeenGeneration = -1;
+    private featureSyncAgain = false;
     private restoring?: Promise<void>;
     /** Bumped when restoring ends, so a late attempt result cannot apply. */
     private restoreRun = 0;
@@ -521,6 +547,7 @@ export class InstanceAccount {
         this.realtime.clear();
         if (this.timer) clearTimeout(this.timer);
         this.timer = undefined;
+        this.cancelFeatureCreditsSync();
         this.periodic = false;
         this.lastSuccessAt = 0;
         this.snapshot = {
@@ -879,6 +906,103 @@ export class InstanceAccount {
             this.snapshot.generation,
         );
     }
+    /**
+     * Ask the server to grant any feature-credit rewards the account has
+     * earned. Fire-and-forget: triggers (finished runs, accepted changes,
+     * table fills, the home card) only start a short quiet period, and one
+     * check runs when it ends. When the check grants something, the profile
+     * is refreshed so every window sees the completed task. Does nothing
+     * while the feature is off for the account, every task is done, or the
+     * card has not been shown yet (the server counts only activity after it).
+     */
+    syncFeatureCredits(options?: { catchUp?: boolean }): void {
+        if (this.disposed || !this.snapshot.session) return;
+        const profile = this.snapshot.data?.profile;
+        if (!hasOpenFeatureCreditTasks(profile)) return;
+        // The profile learns the server recorded the card on its next read;
+        // a report sent this session already counts.
+        const cardShown =
+            featureCreditsStarted(profile) || this.featureCardSeenGeneration === this.snapshot.generation;
+        if (!cardShown) return;
+        const now = Date.now();
+        // A catch-up (the home card appearing) follows no particular write,
+        // so it is skipped while a recent check already covers it.
+        if (options?.catchUp && now - this.featureSyncLastRunAt < FEATURE_SYNC_CATCH_UP_MS) return;
+        if (!this.featureSyncFirstTriggerAt) this.featureSyncFirstTriggerAt = now;
+        const delay = Math.max(
+            0,
+            Math.min(
+                FEATURE_SYNC_DEBOUNCE_MS,
+                this.featureSyncFirstTriggerAt + FEATURE_SYNC_MAX_WAIT_MS - now,
+            ),
+        );
+        if (this.featureSyncTimer) clearTimeout(this.featureSyncTimer);
+        const generation = this.snapshot.generation;
+        this.featureSyncTimer = setTimeout(() => {
+            this.featureSyncTimer = undefined;
+            this.featureSyncFirstTriggerAt = 0;
+            void this.runFeatureCreditsSync(generation);
+        }, delay);
+    }
+    /**
+     * Report, once per signed-in account, that the feature-credits card was
+     * shown; the server counts task activity from then on. Fire-and-forget;
+     * a failed report is retried the next time the card shows. Skipped once
+     * the profile says the server already has it.
+     */
+    markFeatureCreditsCardSeen(): void {
+        if (this.disposed || !this.snapshot.session) return;
+        if (featureCreditsStarted(this.snapshot.data?.profile)) return;
+        const generation = this.snapshot.generation;
+        if (this.featureCardSeenGeneration === generation) return;
+        this.featureCardSeenGeneration = generation;
+        accountService.markFeatureCreditsCardSeen({ timeoutMs: 15_000 }).catch((error) => {
+            if (this.featureCardSeenGeneration === generation) this.featureCardSeenGeneration = -1;
+            logger(
+                `instanceAccount: feature-credits card report failed: ${error instanceof Error ? error.message : String(error)}`,
+                2,
+            );
+        });
+    }
+    private cancelFeatureCreditsSync(): void {
+        if (this.featureSyncTimer) clearTimeout(this.featureSyncTimer);
+        this.featureSyncTimer = undefined;
+        this.featureSyncFirstTriggerAt = 0;
+        this.featureSyncAgain = false;
+        this.featureSyncLastRunAt = 0;
+    }
+    private async runFeatureCreditsSync(generation: number): Promise<void> {
+        const current = () =>
+            !this.disposed && generation === this.snapshot.generation && !!this.snapshot.session;
+        if (!current()) return;
+        // One check at a time; a trigger during it gets a check of its own
+        // afterwards, since the running one may predate the write behind it.
+        if (this.featureSyncInFlight) {
+            this.featureSyncAgain = true;
+            return;
+        }
+        this.featureSyncInFlight = true;
+        this.featureSyncLastRunAt = Date.now();
+        try {
+            const { granted } = await accountService.syncFeatureCredits({ timeoutMs: 15_000 });
+            if (!current()) return;
+            if (Array.isArray(granted) && granted.length > 0) {
+                logger(`instanceAccount: feature credits granted for ${granted.join(", ")}`);
+                await this.refresh(true);
+            }
+        } catch (error) {
+            logger(
+                `instanceAccount: feature-credit check failed: ${error instanceof Error ? error.message : String(error)}`,
+                2,
+            );
+        } finally {
+            this.featureSyncInFlight = false;
+            if (this.featureSyncAgain && current()) {
+                this.featureSyncAgain = false;
+                this.syncFeatureCredits();
+            }
+        }
+    }
     /** Invalidate any older read after a successful account mutation. */
     async invalidateProfile(): Promise<void> {
         const generation = this.getGeneration();
@@ -925,10 +1049,16 @@ export class InstanceAccount {
         this.snapshot.data.profile = copy(profile);
         this.publish();
     }
+    /** Run `cleanup` when the account service is disposed. */
+    onDispose(cleanup: () => void): void {
+        if (this.disposed) cleanup();
+        else this.disposeCallbacks.push(cleanup);
+    }
     async dispose(): Promise<void> {
         if (this.disposed) return;
         this.revoke();
         this.disposed = true;
+        for (const cleanup of this.disposeCallbacks.splice(0)) cleanup();
         if (this.observingNetwork) {
             Services.obs.removeObserver(
                 this.networkObserver,
@@ -960,6 +1090,9 @@ export function createInstanceAccount(): InstanceAccount {
         fetch(input, { ...init, signal: init?.signal ?? lifetime.signal }),
     );
     const service = new InstanceAccount(supabase, () => lifetime.abort());
+    // Accepted changes written from this bundle's copy of the client; each
+    // renderer registers on its own copy.
+    service.onDispose(agentActionsService.onAppliedWrite(() => service.syncFeatureCredits()));
     setCredentialAdapter({
         auth: service.auth,
         getGeneration: () => service.getGeneration(),

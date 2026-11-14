@@ -68,6 +68,7 @@ import { useReaderTabSelection } from './hooks/useReaderTabSelection';
 import { useReaderVisualizerActionHandler } from './hooks/useReaderVisualizerActionHandler';
 import { useRunStatusTip } from './hooks/useRunStatusTip';
 import { useNoteExportTip } from './hooks/useNoteExportTip';
+import { useFeatureCreditCompletions } from './hooks/useFeatureCreditCompletions';
 import { useSyncSuppression } from './hooks/useSyncSuppression';
 import { useThreadProtocolHandler } from './hooks/useThreadProtocolHandler';
 import { useToggleSidebar } from './hooks/useToggleSidebar';
@@ -205,6 +206,9 @@ const GlobalContextInitializer = () => {
 
     // One-time tip about exporting, once Beaver has created a note
     useNoteExportTip();
+
+    // Completion cards for earned feature credits
+    useFeatureCreditCompletions();
 
     // Mirror background extraction activity into the shared Jotai store
     useBackgroundWorkerStatus();

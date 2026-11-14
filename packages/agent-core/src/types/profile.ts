@@ -77,6 +77,44 @@ export enum ProcessingMode {
 }
 
 /**
+ * Where an earned feature-credit task was done, from the grant that paid it.
+ * Action tasks carry the accepted action; the table task carries the fill.
+ * Thread and run are null for work that had no chat (a fill started from the
+ * table itself).
+ */
+export interface FeatureCreditSource {
+    thread_id?: string | null;
+    run_id?: string | null;
+    action_id?: string | null;
+    job_id?: string | null;
+    table_title?: string | null;
+}
+
+/** One feature-credit task as the server reports it. */
+export interface FeatureCreditTask {
+    /** Task key, e.g. `annotate`. Keys this client does not know are ignored. */
+    key: string;
+    credits: number;
+    /** When the reward was granted; null while the task is open. */
+    completed_at: string | null;
+    source: FeatureCreditSource | null;
+}
+
+/**
+ * Feature-credit tasks for the account, in display order: the ones it can
+ * still earn and the ones it earned. The server leaves out tasks for skills
+ * the user used before first seeing the card.
+ */
+export interface FeatureCreditsStatus {
+    tasks: FeatureCreditTask[];
+    /**
+     * When the account's activity started counting: the first time the card
+     * was shown. Null before; the server grants nothing until then.
+     */
+    started_at?: string | null;
+}
+
+/**
  * Profile interface representing user profile data (based on SafeProfileModel)
  */
 export interface SafeProfileModel {
@@ -125,6 +163,10 @@ export interface SafeProfileModel {
     // First-run state (migration 20260430000001)
     first_run_completed_at: string | null;
     first_run_completion_kind: string | null;
+
+    // Feature-credit tasks. Null (or absent from older servers) when the
+    // feature is off for this account.
+    feature_credits?: FeatureCreditsStatus | null;
     
     // Balances
     standard_page_balance: number;

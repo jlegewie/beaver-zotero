@@ -120,6 +120,8 @@ export interface TableFillDeps {
         balance(): number | null;
         subscribe(listener: () => void): () => void;
         refreshProfile(): void;
+        /** Ask the server to check for earned feature credits (a filled row can complete a task). */
+        syncFeatureCredits(): void;
     };
     publish(snapshot: TableFillJobSnapshot): void;
     newId(): string;
@@ -871,7 +873,10 @@ class FillJob {
         this.publish();
         // A chat run's tool call keeps the result, whether or not a request still waits on it.
         this.owner.agent.noteEnded(this.snapshot);
-        if (this.charged > 0 && !this.abandoned) this.deps.account.refreshProfile();
+        if (this.charged > 0 && !this.abandoned) {
+            this.deps.account.refreshProfile();
+            this.deps.account.syncFeatureCredits();
+        }
     }
 
     private async renderSnapshot(): Promise<void> {

@@ -32,6 +32,11 @@ vi.mock('../../../react/atoms/messageComposition', async () => {
         currentMessageCollectionsAtom: atom<unknown[]>([]),
         currentMessageViewsAtom,
         pendingPillInsertsAtom: atom<unknown[]>([]),
+        currentMessageContentAtom: atom(''),
+        currentMessagePillsAtom: atom<any[]>([]),
+        currentMessageExternalFilesAtom: atom<any[]>([]),
+        currentMessageFiltersAtom: atom({ libraryIds: [], collectionIds: [], tagSelections: [] }),
+        currentReaderAttachmentAtom: atom<any>(null),
         addViewsToCurrentMessageAtom: atom(null, (get, set, views: any[]) => {
             set(currentMessageViewsAtom, [...get(currentMessageViewsAtom), ...views]);
         }),
@@ -45,7 +50,7 @@ vi.mock('../../../react/atoms/messageComposition', async () => {
 
 vi.mock('../../../react/atoms/zoteroContext', async () => {
     const { atom } = await import('jotai');
-    return { zoteroContextAtom: atom({}) };
+    return { zoteroContextAtom: atom({}), currentNoteItemAtom: atom<any>(null) };
 });
 
 vi.mock('../../../react/utils/popupMessageUtils', async () => {
@@ -125,6 +130,7 @@ vi.mock('../../../src/utils/libraryIdentity', () => ({
 // =============================================================================
 
 import {
+    actionRequirementBlockAtom,
     actionsAtom,
     buildEditedPromptActionsAtom,
     resolveActionForStagingAtom,
@@ -134,10 +140,16 @@ import {
 } from '../../../react/atoms/actions';
 import {
     currentMessageCollectionsAtom,
+    currentMessageContentAtom,
+    currentMessageExternalFilesAtom,
+    currentMessageFiltersAtom,
     currentMessageItemsAtom,
+    currentMessagePillsAtom,
     currentMessageViewsAtom,
+    currentReaderAttachmentAtom,
     pendingPillInsertsAtom,
 } from '../../../react/atoms/messageComposition';
+import { currentNoteItemAtom } from '../../../react/atoms/zoteroContext';
 import { resolvePromptVariables, resolveTargetContext } from '../../../react/utils/promptVariables';
 import { toValidatedMessageAttachment } from '../../../react/types/attachments/converters';
 import type { Action } from '@beaver/agent-core/types/actions';
@@ -690,5 +702,92 @@ describe('stageActionPillAtom', () => {
         const store = makeStore();
         expect(store.set(stageActionPillAtom, { actionId: 'custom-1', targetType: 'items' })).toBe(false);
         expect(store.get(pendingPillInsertsAtom)).toEqual([]);
+    });
+
+    it('carries the text to put after the pill', () => {
+        const store = makeStore();
+        store.set(stageActionPillAtom, { actionId: 'custom-1', argumentText: 'the methods' });
+        const pending = store.get(pendingPillInsertsAtom) as any[];
+        expect(pending[0].argumentText).toBe('the methods');
+    });
+
+    it('binds and attaches nothing when staged without a target type', () => {
+        const store = makeStore([{ ...summarizeAction, targets: ['global'] }]);
+        expect(store.set(stageActionPillAtom, { actionId: 'custom-1' })).toBe(true);
+        expect(resolveTargetContext).toHaveBeenCalledWith(undefined, undefined);
+        expect((store.get(pendingPillInsertsAtom) as any[])[0].descriptor.targetType).toBeUndefined();
+        expect(store.get(currentMessageItemsAtom)).toEqual([]);
+        expect(store.get(currentMessageCollectionsAtom)).toEqual([]);
+        expect(store.get(currentMessageViewsAtom)).toEqual([]);
+    });
+});
+
+describe('actionRequirementBlockAtom', () => {
+    const annotate: Action = {
+        id: 'builtin-annotate',
+        name: 'annotate',
+        title: 'Annotate',
+        text: 'Annotate.',
+        targets: ['global'],
+        argumentRequired: true,
+        argumentRequiredHint: 'Describe what to highlight',
+    };
+    const sortAction: Action = { id: 'custom-sort', name: 'sort', title: 'Sort', text: 'Sort.', targets: ['items', 'collection'] };
+    const pill = (action: Action, targetType?: Action['targets'][number]) =>
+        ({ commandName: action.name!, actionId: action.id, targetType, title: action.title });
+
+    function compose(actions: Action[], content: string, pills: any[]) {
+        const store = makeStore(actions);
+        store.set(currentMessageContentAtom, content);
+        store.set(currentMessagePillsAtom, pills);
+        return store;
+    }
+
+    it('blocks a command that needs text until text follows it', () => {
+        const store = compose([annotate], '/annotate ', [pill(annotate)]);
+        expect(store.get(actionRequirementBlockAtom)).toEqual({ hint: 'Describe what to highlight after /annotate' });
+        store.set(currentMessageContentAtom, '/annotate the methods');
+        expect(store.get(actionRequirementBlockAtom)).toBeNull();
+    });
+
+    it('blocks an item action with nothing to act on, and lets each kind of context through', () => {
+        const store = compose([sortAction], '/sort ', [pill(sortAction, 'items')]);
+        expect(store.get(actionRequirementBlockAtom)).toEqual({ hint: 'Attach papers or a collection to run /sort' });
+
+        store.set(currentMessageItemsAtom, [{ key: 'A', libraryID: 1 }]);
+        expect(store.get(actionRequirementBlockAtom)).toBeNull();
+        store.set(currentMessageItemsAtom, []);
+
+        store.set(currentReaderAttachmentAtom, { key: 'R', libraryID: 1 });
+        expect(store.get(actionRequirementBlockAtom)).toBeNull();
+        store.set(currentReaderAttachmentAtom, null);
+
+        store.set(currentMessageExternalFilesAtom, [{ extKey: 'ext-1' }]);
+        expect(store.get(actionRequirementBlockAtom)).toBeNull();
+        store.set(currentMessageExternalFilesAtom, []);
+
+        store.set(currentNoteItemAtom, { key: 'N', libraryID: 1 });
+        expect(store.get(actionRequirementBlockAtom)).toBeNull();
+        store.set(currentNoteItemAtom, null);
+
+        store.set(currentMessageFiltersAtom, { libraryIds: [], collectionIds: [7], tagSelections: [] });
+        expect(store.get(actionRequirementBlockAtom)).toBeNull();
+        store.set(currentMessageFiltersAtom, { libraryIds: [], collectionIds: [], tagSelections: [] });
+
+        store.set(currentMessageCollectionsAtom, [{ library_id: 1, library_ref: 'u', zotero_key: 'C', name: 'C' }]);
+        expect(store.get(actionRequirementBlockAtom)).toBeNull();
+    });
+
+    it('counts a collection target only in a searchable library, like the send path', () => {
+        const store = compose([sortAction], '/sort ', [pill(sortAction, 'collection')]);
+        store.set(currentMessageCollectionsAtom, [{ library_id: 2, library_ref: 'g42', zotero_key: 'C', name: 'C' }]);
+        expect(store.get(actionRequirementBlockAtom)).toEqual({ hint: 'Attach a collection to run /sort' });
+        store.set(currentMessageViewsAtom, [{ type: 'view', library_ref: 'u', library_id: 1 }]);
+        expect(store.get(actionRequirementBlockAtom)).toBeNull();
+    });
+
+    it('does not block without pills', () => {
+        const store = compose([annotate], '', []);
+        expect(store.get(actionRequirementBlockAtom)).toBeNull();
     });
 });

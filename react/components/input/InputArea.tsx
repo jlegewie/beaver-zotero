@@ -45,7 +45,7 @@ import { useAddSourcesMenu, AddSourcesMenuHandle } from '@beaver/agent-ui/compos
 import { useComposerPasteHandlers } from '../../hooks/useComposerPasteHandlers';
 import { useActionPopupResolver } from '../../hooks/useActionPopupResolver';
 import { useStopRun } from '../../hooks/useStopRun';
-import { sendComposedMessageAtom } from '../../atoms/actions';
+import { actionRequirementBlockAtom, sendComposedMessageAtom } from '../../atoms/actions';
 import { dismissActiveEditNotePreview } from '../../host/zotero/editNotePreviewLifecycle';
 
 const HIGH_INPUT_TOKEN_WARNING_THRESHOLD = 100_000;
@@ -99,6 +99,11 @@ const InputArea: React.FC<InputAreaProps> = ({
     // dequeued (see the claim effect below).
     const pendingPillInsert = useAtomValue(pendingPillInsertsAtom)[0] ?? null;
     const composerResetToken = useAtomValue(composerResetTokenAtom);
+    // A /command pill whose action cannot run on this message yet (no text
+    // after a command that needs it, nothing attached for an item action):
+    // Send is held and the hint below the input (or the command's own
+    // placeholder) says why.
+    const actionRequirementBlock = useAtomValue(actionRequirementBlockAtom);
     const store = useStore();
     const webSearchDescriptionId = useId();
 
@@ -403,7 +408,18 @@ const InputArea: React.FC<InputAreaProps> = ({
             // Another editor may have claimed this pill already.
             if (queue[0] !== pendingPillInsert) return;
             store.set(pendingPillInsertsAtom, queue.slice(1));
-            editorHandleRef.current?.insertSlashCommand(descriptor, null);
+            const editor = editorHandleRef.current;
+            if (!editor) return;
+            const { argumentText } = pendingPillInsert;
+            // Staged with text for after the command (an example the user
+            // picked): reuse a pill of the same action rather than adding a
+            // second one, and replace whatever follows it.
+            if (argumentText !== undefined && editor.setCommandArgument(descriptor.actionId, argumentText)) return;
+            editor.insertSlashCommand(descriptor, null);
+            if (argumentText !== undefined) {
+                editor.setCommandArgument(descriptor.actionId, argumentText);
+                return;
+            }
             focusEditor();
         };
         const ownWindow = inputRef.current?.ownerDocument.defaultView ?? null;
@@ -516,6 +532,9 @@ const InputArea: React.FC<InputAreaProps> = ({
         // state before it (see flushPendingText).
         const message = editorHandleRef.current?.flushPendingText() ?? composedMessage;
         if (isPending || message.length === 0) return;
+        // Read from the store, not the render: the flush above may have just
+        // published the text that satisfies the requirement.
+        if (store.get(actionRequirementBlockAtom)) return;
         // If the message contains /command pills, resolve each back to its
         // action's prompt (and attach its items/collection) before sending.
         const pills = editorHandleRef.current?.getSlashCommands() ?? [];
@@ -789,6 +808,14 @@ const InputArea: React.FC<InputAreaProps> = ({
                     />
                 </div>
 
+                {/* Why Send is held for the /command in the message. Not while
+                    a decision is pending: the verdict buttons do not send it. */}
+                {actionRequirementBlock?.hint && !isAwaitingApproval && (
+                    <div className="composer-requirement-hint text-sm font-color-tertiary truncate mb-2" role="status">
+                        {actionRequirementBlock.hint}
+                    </div>
+                )}
+
                 {/* Control row: add sources and the model on the left, web
                     search and send after the flexible gap. */}
                 <div className="composer-controls">
@@ -904,7 +931,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                             className="composer-send"
                             ariaLabel="Send message"
                             onClick={handleSubmit}
-                            disabled={threadReadOnly || messageContent.length === 0 || !selectedModel || isSlashMenuOpen || isAttachingFiles}
+                            disabled={threadReadOnly || messageContent.length === 0 || !selectedModel || isSlashMenuOpen || isAttachingFiles || actionRequirementBlock !== null}
                         />
                     )}
                 </div>

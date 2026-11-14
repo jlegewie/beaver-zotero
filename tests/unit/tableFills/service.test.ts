@@ -157,6 +157,7 @@ function harness(
                 return () => listeners.delete(listener);
             },
             refreshProfile: vi.fn(),
+            syncFeatureCredits: vi.fn(),
         },
         publish: (snapshot) => state.snapshots.push(snapshot),
         newId: () => `id-${++id}`,
@@ -285,6 +286,7 @@ describe("a fill", () => {
         expect(state.commits).toHaveLength(2);
         expect(state.requests[0]).toMatchObject({ job_id: job.job_id, row_id: "a", price: 0.2, table: { title: "Trials" }, document: { id: "u-PDFa", kind: "pdf", content: { doc: "u-PDFa" } } });
         expect(deps.account.refreshProfile).toHaveBeenCalledTimes(1);
+        expect(deps.account.syncFeatureCredits).toHaveBeenCalledTimes(1);
         // The lease is released.
         expect(fills.jobForTable(TARGET)?.state).toBe("done");
     });
