@@ -1,11 +1,10 @@
 import React, { useEffect } from 'react';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { useAtomValue } from 'jotai';
 import Button from '@beaver/agent-ui/primitives/Button';
 import { SectionLabel, SettingsGroup, SettingsRow } from '../preferences/components/SettingsElements';
 import { CheckmarkCircleSolidIcon, Icon } from '../icons/icons';
-import { featureCreditEntriesAtom, featureCreditTotalsAtom, startFeatureTaskAtom } from '../../atoms/featureCredits';
-import { newThreadAtom } from '../../atoms/threads';
-import { eventManager } from '../../events/eventManager';
+import { featureCreditEntriesAtom, featureCreditTotalsAtom } from '../../atoms/featureCredits';
+import { useStartFeatureTaskInNewChat } from '../../hooks/useStartFeatureTaskInNewChat';
 
 /**
  * "Earn credits" in Plan & Usage: the feature-credit tasks, with what each
@@ -14,8 +13,8 @@ import { eventManager } from '../../events/eventManager';
 const EarnCreditsSection: React.FC = () => {
     const entries = useAtomValue(featureCreditEntriesAtom);
     const totals = useAtomValue(featureCreditTotalsAtom);
-    const startTask = useSetAtom(startFeatureTaskAtom);
-    const newThread = useSetAtom(newThreadAtom);
+    // Preferences shares the chat window's store: the task starts in its chat.
+    const start = useStartFeatureTaskInNewChat();
     const shown = !!entries && totals.done < totals.count;
 
     // Seeing the tasks here counts as seeing the offer.
@@ -24,14 +23,6 @@ const EarnCreditsSection: React.FC = () => {
     }, [shown]);
 
     if (!entries || !shown) return null;
-
-    const start = async (key: string) => {
-        // Preferences shares the chat window's store: open its chat on a new
-        // thread and stage the task there.
-        eventManager.dispatch('toggleChat', { forceOpen: true });
-        if ((await newThread({})) === undefined) return;
-        startTask({ key });
-    };
 
     return (
         <>
