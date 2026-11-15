@@ -60,10 +60,11 @@ export interface FeatureTaskDefinition {
         tip: string;
         docsUrl: string;
         /**
-         * Offered instead of the docs link when the run wrote a note: exports
-         * that note to Word when clicked.
+         * Shown instead of the tip and the docs link once the note the run
+         * wrote is in the library, followed by the export icon of the note's
+         * card above.
          */
-        exportNote?: { label: string };
+        noteTip?: string;
         /**
          * A starter action of the user's own, offered instead of the docs
          * link: clicking saves it as a custom action and opens it for editing.
@@ -158,8 +159,8 @@ export const FEATURE_CREDIT_TASKS: FeatureTaskDefinition[] = [
         ],
         footnote: 'A long review can use more credits than you get for it. Beaver asks before going past your credit limit.',
         completion: {
-            tip: 'The review is a note in Zotero: click a citation to open the passage it cites.',
-            exportNote: { label: 'Export to Word' },
+            tip: 'Beaver writes a review as a note in Zotero: click a citation to open the passage it cites.',
+            noteTip: 'Your literature review is stored as a note in Zotero. Export it as Word, PDF or LaTeX using',
             docsUrl: `${DOCS_BASE_URL}/notes`,
         },
     },

@@ -6597,7 +6597,7 @@
 }
 
 /* Feature credits: the home card ("Get more out of Beaver") and the
-   completion card shown in a chat once a task is earned. */
+   reward card shown under a run that earned a task. */
 .beaver-root .feature-credits-card {
     display: flex;
     flex-direction: column;
@@ -6728,33 +6728,30 @@
     color: var(--fill-primary);
 }
 .beaver-root .feature-credits-completion {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    width: 100%;
+    gap: 4px;
+    padding: 6px 6px 8px 10px;
 }
-.beaver-root .feature-credits-completion-header {
-    align-items: flex-start;
-}
-.beaver-root .feature-credits-completion-mark {
-    flex: none;
-    margin-top: 3px;
-    scale: 1.2;
-}
-.beaver-root .feature-credits-completion-heading {
+.beaver-root .feature-credits-completion-title {
     flex: 1;
     min-width: 0;
+    margin: 0;
+    font-size: 1em;
+    font-weight: 600;
+    color: var(--fill-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+/* The note card's export icon, named in the text. */
+.beaver-root .feature-credits-inline-icon {
+    vertical-align: -0.15em;
+}
+/* Lined up with the title, after the mark. */
+.beaver-root .feature-credits-completion-body {
     display: flex;
     flex-direction: column;
-    gap: 1px;
-}
-.beaver-root .feature-credits-completion-subtitle {
-    /* font-size: 0.9em; */
-    color: var(--fill-secondary);
-}
-.beaver-root .feature-credits-divider {
-    height: 1px;
-    background-color: var(--fill-quinary);
+    gap: 6px;
+    padding-left: 20px;
 }
 .beaver-root .feature-credits-next {
     display: flex;

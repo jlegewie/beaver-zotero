@@ -3,9 +3,8 @@ import { useStore } from 'jotai';
 import { watchFeatureCreditGrants } from '../atoms/featureCreditRuns';
 
 /**
- * Shows a feature-credit completion card in this window when a run that
- * earned a task's credits ends (see `watchFeatureCreditGrants`). Mount once
- * per renderer.
+ * Shows a feature-credit reward card under a run that earned a task's credits
+ * once it ends (see `watchFeatureCreditGrants`). Mount once per renderer.
  */
 export function useFeatureCreditCompletions(): void {
     const store = useStore();

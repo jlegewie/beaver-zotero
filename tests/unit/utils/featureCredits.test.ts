@@ -100,9 +100,9 @@ describe('task registry', () => {
         for (const task of FEATURE_CREDIT_TASKS) expect(builtinIds.has(task.actionId)).toBe(true);
     });
 
-    it('offers to export the literature review to Word, with the notes docs as fallback', () => {
+    it('points to the export of the literature review note, with the notes docs as fallback', () => {
         const review = getFeatureCreditTask('literature_review')!;
-        expect(review.completion.exportNote).toEqual({ label: 'Export to Word' });
+        expect(review.completion.noteTip).toContain('Word, PDF or LaTeX');
         expect(review.completion.docsUrl).toBe('https://www.beaverapp.ai/docs/notes');
         expect(review.footnote).toContain('credit limit');
     });
