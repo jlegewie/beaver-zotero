@@ -21,6 +21,7 @@ import {
     $isLineBreakNode,
     $isRangeSelection,
     $isRootOrShadowRoot,
+    $isTextNode,
     BEFORE_INPUT_COMMAND,
     COMMAND_PRIORITY_HIGH,
     COMMAND_PRIORITY_LOW,
@@ -134,34 +135,90 @@ function $deleteTrailingQuery(length: number): void {
     }
 }
 
-/** Replace everything after the first pill of `actionId` with a space and
- *  `text` (whitespace collapsed to single spaces), caret at the end. Returns
- *  false when no such pill exists. Must be called inside an update context. */
-function $setCommandArgument(actionId: string, text: string): boolean {
-    let pill: SlashCommandNode | null = null;
+/** The first pill of `actionId` in document order, or null. Must be called
+ *  inside a read or update context. */
+function $findSlashCommand(actionId: string): SlashCommandNode | null {
     const pending: LexicalNode[] = [...$getRoot().getChildren()].reverse();
-    while (pending.length > 0 && !pill) {
+    while (pending.length > 0) {
         const node = pending.pop()!;
-        if ($isSlashCommandNode(node) && node.getActionId() === actionId) pill = node;
-        else if ($isElementNode(node)) pending.push(...[...node.getChildren()].reverse());
+        if ($isSlashCommandNode(node) && node.getActionId() === actionId) return node;
+        if ($isElementNode(node)) pending.push(...[...node.getChildren()].reverse());
     }
-    if (!pill) return false;
+    return null;
+}
 
-    // Drop what follows the pill at every level up to the root: the rest of
-    // its line, then every block after that line.
-    let node: LexicalNode = pill;
+/** Remove `node` unless it is or holds a pill; inside an element that holds
+ *  one, remove only what precedes that pill. Returns the pill it stopped at,
+ *  or null when the whole node was removed. */
+function $removeUpToSlashCommand(node: LexicalNode): SlashCommandNode | null {
+    if ($isSlashCommandNode(node)) return node;
+    if ($isElementNode(node)) {
+        for (const child of node.getChildren()) {
+            const pill = $removeUpToSlashCommand(child);
+            if (pill) return pill;
+        }
+    }
+    node.remove();
+    return null;
+}
+
+/**
+ * Remove a pill's argument: everything after `pill` in document order up to
+ * the next pill (the rest of its line and the lines below, when no other
+ * command follows). Later commands and their text stay. Returns the next pill,
+ * or null when the argument ran to the end.
+ */
+function $removeArgumentAfter(pill: SlashCommandNode): SlashCommandNode | null {
+    let current: LexicalNode = pill;
     for (;;) {
-        node.getNextSiblings().forEach(sibling => sibling.remove());
-        const parent: LexicalNode | null = node.getParent();
-        if (!parent || $isRootOrShadowRoot(parent)) break;
-        node = parent;
+        for (const sibling of current.getNextSiblings()) {
+            const next = $removeUpToSlashCommand(sibling);
+            if (next) return next;
+        }
+        const parent: LexicalNode | null = current.getParent();
+        if (!parent || $isRootOrShadowRoot(parent)) return null;
+        current = parent;
     }
+}
 
+/** Replace the argument of the first pill of `actionId` (see
+ *  `$removeArgumentAfter`) with a space and `text` (whitespace collapsed to
+ *  single spaces), caret after it. Returns null when no such pill exists,
+ *  else whether the new text ends the content. Must be called inside an
+ *  update context. */
+function $setCommandArgument(actionId: string, text: string): { atEnd: boolean } | null {
+    const pill = $findSlashCommand(actionId);
+    if (!pill) return null;
+    const next = $removeArgumentAfter(pill);
     const argument = text.replace(/\s+/g, ' ').trim();
     const tail = $createTextNode(argument ? ` ${argument}` : ' ');
     pill.insertAfter(tail);
     tail.selectEnd();
-    return true;
+    // A command right after on the same line keeps a space before it.
+    if (next && next.is(tail.getNextSibling())) next.insertBefore($createTextNode(' '));
+    return { atEnd: next === null };
+}
+
+/** Remove every pill of `actionId` together with its argument (see
+ *  `$removeArgumentAfter`); caret at the end. Returns how many were removed.
+ *  Must be called inside an update context. */
+function $removeCommandsWithArguments(actionId: string): number {
+    let removed = 0;
+    for (let pill = $findSlashCommand(actionId); pill; pill = $findSlashCommand(actionId)) {
+        const next = $removeArgumentAfter(pill);
+        const previous = pill.getPreviousSibling();
+        pill.remove();
+        removed++;
+        // Trailing spaces before a removed command at the end of its line are
+        // dropped; before a command that follows, one separates the two.
+        if ($isTextNode(previous) && !(next && next.is(previous.getNextSibling()))) {
+            const kept = previous.getTextContent().replace(/\s+$/, '');
+            if (kept) previous.setTextContent(kept);
+            else previous.remove();
+        }
+    }
+    if (removed > 0) $getRoot().selectEnd();
+    return removed;
 }
 
 /** Build editor nodes for `text`, materializing known `/command` tokens as
@@ -334,12 +391,19 @@ export type LexicalEditorInputHandle = {
      *  appended after the existing content (programmatic staging flow). */
     insertSlashCommand: (descriptor: SlashCommandDescriptor, queryLength: number | null, keepAfter?: number) => void;
     /**
-     * Sets the text after the first pill of `actionId`: everything after that
-     * pill (the rest of its line and every line below) is replaced by a space
-     * and `text`, and the caret is left at the end. Returns false, changing
-     * nothing, when the editor holds no pill for that action.
+     * Sets the text after the first pill of `actionId`: its argument (what
+     * follows it up to the next pill, or to the end) is replaced by a space
+     * and `text`, and the caret is left after it. Later commands and their
+     * text stay. Returns false, changing nothing, when the editor holds no
+     * pill for that action.
      */
     setCommandArgument: (actionId: string, text: string) => boolean;
+    /**
+     * Removes every pill of `actionId`, each with its argument (what follows
+     * it up to the next pill, or to the end). Other commands and their text
+     * stay. Returns how many pills were removed; with none, nothing changes.
+     */
+    removeCommandsWithArguments: (actionId: string) => number;
     /** Returns the command pills currently in the editor, in document order. */
     getSlashCommands: () => SlashCommandDescriptor[];
     /**
@@ -645,22 +709,35 @@ const EditorApi = forwardRef<LexicalEditorInputHandle, {
                     pinnedEndCaretRef.current = true;
                 },
                 setCommandArgument: (actionId, text) => {
-                    let found = false;
+                    // Null when the editor holds no pill for the action.
+                    let atEnd: boolean | null = null;
                     // Discrete, so the edit is committed (and published to the
                     // parent's value and pills) before this returns.
                     editor.update(() => {
-                        found = $setCommandArgument(actionId, text);
+                        atEnd = $setCommandArgument(actionId, text)?.atEnd ?? null;
                     }, { discrete: true });
-                    if (!found) return false;
+                    if (atEnd === null) return false;
                     selectionRepairGenerationRef.current++;
                     blurSelectionRef.current = null;
                     editor.focus(() => { /* noop */ }, { defaultSelection: 'rootEnd' });
                     // The same end-of-content pin as a staged pill insert: the
                     // caret belongs after the new text, and the UI churn around
                     // a programmatic edit can drop it elsewhere (see
-                    // PinnedEndCaretPlugin).
-                    pinnedEndCaretRef.current = true;
+                    // PinnedEndCaretPlugin). When a later command follows the
+                    // text, the end of the content is not after it: clear any
+                    // pin an earlier insert left, or it would move the caret
+                    // past that command.
+                    pinnedEndCaretRef.current = atEnd;
                     return true;
+                },
+                removeCommandsWithArguments: (actionId) => {
+                    let removed = 0;
+                    // Discrete, so the pills are gone (and the parent's pills
+                    // updated) before a pill inserted next is placed.
+                    editor.update(() => {
+                        removed = $removeCommandsWithArguments(actionId);
+                    }, { discrete: true });
+                    return removed;
                 },
                 getSlashCommands: () => {
                     let result: SlashCommandDescriptor[] = [];

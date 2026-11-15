@@ -10,8 +10,6 @@ import { Action } from '@beaver/agent-core/types/actions';
 import { ARCHIVED_ACTIONS } from './archivedActions';
 
 
-/** `/organize`: organize attached papers, a collection, or recent additions. */
-const ORGANIZE_PROMPT = 'Organize part of my library following my instructions.\n\nSteps:\n1. Determine the scope: the papers or collection I attached; otherwise a collection my request names; otherwise my recent additions (`list_items` sorted by date added, newest first; the 20 most recent unless I say otherwise). Do not widen the scope beyond that.\n2. Work out what my request asks for: filing into collections, tags, metadata, duplicates, or several of these. Before changing anything, look at how I organize today with `list_collections` and `list_tags`. If my request is open-ended (for example "organize these"), pick what the scope needs most, say so in one line, and proceed.\n3. Do the work over the whole scope, deciding from metadata. Open an attachment only for a handful of genuinely ambiguous items.\n   - Collections: add each item to the existing collection or collections where it clearly belongs, the best one or two. Create a new collection only when I ask for one or when a cluster of items shares a clear theme that nothing existing fits. Never remove an item from a collection it is already in.\n   - Tags: reuse my existing tags wherever they fit, matching my style and level of granularity; if my request states a naming convention, follow it exactly. Assign 2-5 subject tags per item, consistently, so items on the same subtopic share the same tags. Create a new tag only when nothing existing fits, and keep new tags lowercase and 1-3 words.\n   - Metadata: fill only fields that are genuinely missing or clearly wrong (abstract, DOI, authors, year, publication), with values from `lookup_work` rather than guesses. Leave a field empty when you cannot verify it, and skip fields that are legitimately absent for the item type, such as a DOI for a book.\n   - Duplicates: merge only items that are clearly the same work; list uncertain pairs instead of merging them.\n   For more than about 35 items, run the work as one batch job; at or below that, do it directly.\n4. Report what changed: the counts for each kind of change plus a short sample of items so I can spot-check, then anything you left alone and why (no fitting collection, unverifiable metadata, uncertain duplicates). If the scope was larger than one batch could hold, say how many items remain.';
 
 /** Default built-in actions for Beaver. */
 export const BUILTIN_ACTIONS: Action[] = [
@@ -244,28 +242,12 @@ export const BUILTIN_ACTIONS: Action[] = [
         id: 'builtin-create-note',
         name: 'create-note',
         title: 'Create a Zotero note',
-        description: 'Write a Zotero note on a topic or on attached papers, synthesized and cited from your library.',
-        text: 'Write a Zotero note on the topic I describe, grounded in my library.\n\nSteps:\n1. If the topic is clear from my message, proceed. If it is unclear, restate your best interpretation in one line and continue unless it is genuinely ambiguous or missing — in which case ask one brief clarifying question first.\n2. Gather the sources. If I attached papers or a collection, base the note on those: work through them, and search the rest of my library only to fill a clear gap that my request asks you to fill. Otherwise, search my library from several angles. Either way, use the extract tool (if available) to pull what each relevant paper says about the topic; otherwise read the most relevant passages. Do not write from titles and metadata alone.\n3. Write a clear, well-structured note that synthesizes what my library says about the topic: a short title, a brief opening that states the takeaway, then sections in prose. Cite specific papers and specific passages where possible for every substantive claim.\n4. Where my library\'s evidence is thin, conflicting, or missing, say so explicitly in the note instead of papering over it. Do not assert anything you cannot support from my library.\n5. Save the result as a new Zotero note.',
+        description: 'Write a Zotero note on a topic, synthesized and cited from your library.',
+        text: 'Write a Zotero note on the topic I describe, grounded in my library.\n\nSteps:\n1. If the topic is clear from my message, proceed. If it is unclear, restate your best interpretation in one line and continue unless it is genuinely ambiguous or missing — in which case ask one brief clarifying question first.\n2. Search my library from several angles. Use the extract tool (if available) to pull what each relevant paper says about the topic; otherwise read the most relevant passages. Do not write from titles and metadata alone.\n3. Write a clear, well-structured note that synthesizes what my library says about the topic: a short title, a brief opening that states the takeaway, then sections in prose. Cite specific papers and specific passages where possible for every substantive claim.\n4. Where my library\'s evidence is thin, conflicting, or missing, say so explicitly in the note instead of papering over it. Do not assert anything you cannot support from my library.\n5. Save the result as a new Zotero note.',
         argumentHint: 'What should the note be about?',
-        argumentRequired: true,
-        argumentRequiredHint: 'Describe the note',
         targets: ['global'],
         category: 'write',
         sortOrder: 520,
-    },
-
-    {
-        id: 'builtin-organize',
-        name: 'organize',
-        title: 'Organize',
-        description: 'Organize papers or a collection the way you ask: collections, tags, metadata, and duplicates.',
-        text: ORGANIZE_PROMPT,
-        argumentHint: 'What should I organize? E.g. file my recent papers into collections',
-        argumentRequired: true,
-        argumentRequiredHint: 'Say what to organize',
-        targets: ['global'],
-        category: 'organize',
-        sortOrder: 525,
     },
 
     {

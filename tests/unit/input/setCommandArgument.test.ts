@@ -111,15 +111,31 @@ describe('LexicalEditorInputHandle.setCommandArgument', () => {
         expect(published.value).toBe('/annotate the methods');
     });
 
-    it('keeps the text before the pill and drops other pills after it', async () => {
+    it('keeps the text before the pill, and later commands with their text', async () => {
         const { handle } = await mount();
         await act(async () => handle.current!.setText('please'));
         await act(async () => handle.current!.insertSlashCommand(annotate, null));
         await act(async () => handle.current!.insertSlashCommand(summarize, null));
         await act(async () => { handle.current!.setCommandArgument('builtin-annotate', 'the results'); });
 
-        expect(published.value).toBe('please /annotate the results');
-        expect(published.pills.map(p => p.actionId)).toEqual(['builtin-annotate']);
+        expect(published.value.trimEnd()).toBe('please /annotate the results /summarize');
+        expect(published.pills.map(p => p.actionId)).toEqual(['builtin-annotate', 'builtin-summarize']);
+
+        // Replacing it again replaces only its own text.
+        await act(async () => { handle.current!.setCommandArgument('builtin-annotate', 'the methods'); });
+        expect(published.value.trimEnd()).toBe('please /annotate the methods /summarize');
+    });
+
+    it('leaves the caret after an argument a later command follows', async () => {
+        const { handle, editable } = await mount();
+        // Each staged insert pins the caret to the end of the content.
+        await act(async () => handle.current!.insertSlashCommand(annotate, null));
+        await act(async () => handle.current!.insertSlashCommand(summarize, null));
+        await act(async () => { handle.current!.setCommandArgument('builtin-annotate', 'the methods'); });
+        editable.focus();
+        await act(async () => { document.dispatchEvent(new Event('selectionchange')); });
+
+        expect(handle.current!.getSelectionOffset()).toBe('/annotate the methods'.length);
     });
 
     it('collapses line breaks in the text to spaces', async () => {
@@ -136,5 +152,78 @@ describe('LexicalEditorInputHandle.setCommandArgument', () => {
         await act(async () => { found = handle.current!.setCommandArgument('builtin-annotate', 'x'); });
         expect(found).toBe(false);
         expect(published.value).toBe('hello');
+    });
+
+    describe('removeCommandsWithArguments', () => {
+        it('removes the pill and the text after it, keeping what comes before', async () => {
+            const { handle } = await mount();
+            await act(async () => handle.current!.setText('please'));
+            await act(async () => handle.current!.insertSlashCommand(annotate, null));
+            await act(async () => { handle.current!.setCommandArgument('builtin-annotate', 'the methods'); });
+            let removed = 0;
+            await act(async () => { removed = handle.current!.removeCommandsWithArguments('builtin-annotate'); });
+
+            expect(removed).toBe(1);
+            expect(published.value).toBe('please');
+            expect(published.pills).toEqual([]);
+        });
+
+        it('keeps later commands and their text', async () => {
+            const { handle } = await mount();
+            await act(async () => handle.current!.insertSlashCommand(annotate, null));
+            await act(async () => handle.current!.insertSlashCommand(summarize, null));
+            await act(async () => { handle.current!.setCommandArgument('builtin-summarize', 'focus on methods'); });
+            await act(async () => { handle.current!.setCommandArgument('builtin-annotate', 'the methods'); });
+            expect(published.value).toBe('/annotate the methods /summarize focus on methods');
+
+            await act(async () => { handle.current!.removeCommandsWithArguments('builtin-annotate'); });
+            expect(published.value.trim()).toBe('/summarize focus on methods');
+            expect(published.pills.map(p => p.actionId)).toEqual(['builtin-summarize']);
+        });
+
+        it('keeps a space between the text before it and a command after it', async () => {
+            const { handle } = await mount();
+            await act(async () => handle.current!.setText('please'));
+            await act(async () => handle.current!.insertSlashCommand(annotate, null));
+            await act(async () => handle.current!.insertSlashCommand(summarize, null));
+            await act(async () => { handle.current!.setCommandArgument('builtin-annotate', 'the methods'); });
+            await act(async () => { handle.current!.removeCommandsWithArguments('builtin-annotate'); });
+            expect(published.value.trimEnd()).toBe('please /summarize');
+        });
+
+        it('makes room for the pill that replaces it', async () => {
+            const { handle } = await mount();
+            await act(async () => handle.current!.insertSlashCommand(annotate, null));
+            await act(async () => { handle.current!.setCommandArgument('builtin-annotate', 'old words'); });
+            await act(async () => {
+                handle.current!.removeCommandsWithArguments('builtin-annotate');
+                handle.current!.insertSlashCommand(summarize, null);
+            });
+
+            expect(published.value.trim()).toBe('/summarize');
+            expect(published.pills.map(p => p.actionId)).toEqual(['builtin-summarize']);
+        });
+
+        it('removes every pill of the action, keeping other commands', async () => {
+            const { handle } = await mount();
+            await act(async () => handle.current!.insertSlashCommand(annotate, null));
+            await act(async () => handle.current!.insertSlashCommand(summarize, null));
+            await act(async () => handle.current!.insertSlashCommand(annotate, null));
+            let removed = 0;
+            await act(async () => { removed = handle.current!.removeCommandsWithArguments('builtin-annotate'); });
+
+            expect(removed).toBe(2);
+            expect(published.value.trim()).toBe('/summarize');
+            expect(published.pills.map(p => p.actionId)).toEqual(['builtin-summarize']);
+        });
+
+        it('changes nothing and returns 0 when the action has no pill', async () => {
+            const { handle } = await mount();
+            await act(async () => handle.current!.setText('hello'));
+            let removed = -1;
+            await act(async () => { removed = handle.current!.removeCommandsWithArguments('builtin-annotate'); });
+            expect(removed).toBe(0);
+            expect(published.value).toBe('hello');
+        });
     });
 });

@@ -34,9 +34,6 @@ vi.mock('../../../react/atoms/messageComposition', async () => {
         pendingPillInsertsAtom: atom<unknown[]>([]),
         currentMessageContentAtom: atom(''),
         currentMessagePillsAtom: atom<any[]>([]),
-        currentMessageExternalFilesAtom: atom<any[]>([]),
-        currentMessageFiltersAtom: atom({ libraryIds: [], collectionIds: [], tagSelections: [] }),
-        currentReaderAttachmentAtom: atom<any>(null),
         composerResetTokenAtom: atom(0),
         addViewsToCurrentMessageAtom: atom(null, (get, set, views: any[]) => {
             set(currentMessageViewsAtom, [...get(currentMessageViewsAtom), ...views]);
@@ -51,7 +48,7 @@ vi.mock('../../../react/atoms/messageComposition', async () => {
 
 vi.mock('../../../react/atoms/zoteroContext', async () => {
     const { atom } = await import('jotai');
-    return { zoteroContextAtom: atom({}), currentNoteItemAtom: atom<any>(null) };
+    return { zoteroContextAtom: atom({}) };
 });
 
 vi.mock('../../../react/utils/popupMessageUtils', async () => {
@@ -142,16 +139,12 @@ import {
 import {
     currentMessageCollectionsAtom,
     currentMessageContentAtom,
-    currentMessageExternalFilesAtom,
-    currentMessageFiltersAtom,
     currentMessageItemsAtom,
     currentMessagePillsAtom,
     currentMessageViewsAtom,
-    currentReaderAttachmentAtom,
     composerResetTokenAtom,
     pendingPillInsertsAtom,
 } from '../../../react/atoms/messageComposition';
-import { currentNoteItemAtom } from '../../../react/atoms/zoteroContext';
 import { activeFeatureTaskAtom } from '../../../react/atoms/featureCreditRuns';
 import { resolvePromptVariables, resolveTargetContext } from '../../../react/utils/promptVariables';
 import { toValidatedMessageAttachment } from '../../../react/types/attachments/converters';
@@ -769,7 +762,6 @@ describe('actionRequirementBlockAtom', () => {
         argumentRequired: true,
         argumentRequiredHint: 'Describe what to highlight',
     };
-    const sortAction: Action = { id: 'custom-sort', name: 'sort', title: 'Sort', text: 'Sort.', targets: ['items', 'collection'] };
     const pill = (action: Action, targetType?: Action['targets'][number]) =>
         ({ commandName: action.name!, actionId: action.id, targetType, title: action.title });
 
@@ -787,39 +779,9 @@ describe('actionRequirementBlockAtom', () => {
         expect(store.get(actionRequirementBlockAtom)).toBeNull();
     });
 
-    it('blocks an item action with nothing to act on, and lets each kind of context through', () => {
+    it('does not block an action with nothing attached', () => {
+        const sortAction: Action = { id: 'custom-sort', name: 'sort', title: 'Sort', text: 'Sort.', targets: ['items', 'collection'] };
         const store = compose([sortAction], '/sort ', [pill(sortAction, 'items')]);
-        expect(store.get(actionRequirementBlockAtom)).toEqual({ hint: 'Attach papers or a collection to run /sort' });
-
-        store.set(currentMessageItemsAtom, [{ key: 'A', libraryID: 1 }]);
-        expect(store.get(actionRequirementBlockAtom)).toBeNull();
-        store.set(currentMessageItemsAtom, []);
-
-        store.set(currentReaderAttachmentAtom, { key: 'R', libraryID: 1 });
-        expect(store.get(actionRequirementBlockAtom)).toBeNull();
-        store.set(currentReaderAttachmentAtom, null);
-
-        store.set(currentMessageExternalFilesAtom, [{ extKey: 'ext-1' }]);
-        expect(store.get(actionRequirementBlockAtom)).toBeNull();
-        store.set(currentMessageExternalFilesAtom, []);
-
-        store.set(currentNoteItemAtom, { key: 'N', libraryID: 1 });
-        expect(store.get(actionRequirementBlockAtom)).toBeNull();
-        store.set(currentNoteItemAtom, null);
-
-        store.set(currentMessageFiltersAtom, { libraryIds: [], collectionIds: [7], tagSelections: [] });
-        expect(store.get(actionRequirementBlockAtom)).toBeNull();
-        store.set(currentMessageFiltersAtom, { libraryIds: [], collectionIds: [], tagSelections: [] });
-
-        store.set(currentMessageCollectionsAtom, [{ library_id: 1, library_ref: 'u', zotero_key: 'C', name: 'C' }]);
-        expect(store.get(actionRequirementBlockAtom)).toBeNull();
-    });
-
-    it('counts a collection target only in a searchable library, like the send path', () => {
-        const store = compose([sortAction], '/sort ', [pill(sortAction, 'collection')]);
-        store.set(currentMessageCollectionsAtom, [{ library_id: 2, library_ref: 'g42', zotero_key: 'C', name: 'C' }]);
-        expect(store.get(actionRequirementBlockAtom)).toEqual({ hint: 'Attach a collection to run /sort' });
-        store.set(currentMessageViewsAtom, [{ type: 'view', library_ref: 'u', library_id: 1 }]);
         expect(store.get(actionRequirementBlockAtom)).toBeNull();
     });
 

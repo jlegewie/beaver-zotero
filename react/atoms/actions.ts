@@ -16,7 +16,7 @@ import {
     isBuiltinAction,
     isLockedBuiltinAction,
 } from '../types/actionStorage';
-import { zoteroContextAtom, currentNoteItemAtom } from './zoteroContext';
+import { zoteroContextAtom } from './zoteroContext';
 import { isActionVisible, ActionContext } from '../utils/actionVisibility';
 import {
     resolvePromptVariables,
@@ -35,9 +35,6 @@ import {
     addViewsToCurrentMessageAtom,
     currentMessageContentAtom,
     currentMessagePillsAtom,
-    currentMessageExternalFilesAtom,
-    currentMessageFiltersAtom,
-    currentReaderAttachmentAtom,
 } from './messageComposition';
 import { CollectionReference, collectionReferenceKey } from '@beaver/agent-core/types/zotero';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
@@ -473,6 +470,8 @@ export const stageActionPillAtom = atom(
          *  When the editor already holds a pill for this action, no second pill
          *  is inserted: only the text after the existing one is replaced. */
         argumentText?: string;
+        /** Actions whose pills this one replaces (see `PendingPillInsert`). */
+        replaceActionIds?: string[];
     }): boolean => {
         const descriptor = set(resolveActionForStagingAtom, {
             actionId: payload.actionId,
@@ -486,43 +485,32 @@ export const stageActionPillAtom = atom(
         // action the user launched whose targets are already attached.
         set(pendingPillInsertsAtom, [
             ...get(pendingPillInsertsAtom),
-            { descriptor, targetWindow: payload.targetWindow, argumentText: payload.argumentText },
+            {
+                descriptor,
+                targetWindow: payload.targetWindow,
+                argumentText: payload.argumentText,
+                replaceActionIds: payload.replaceActionIds,
+            },
         ]);
         return true;
     },
 );
 
 // ---------------------------------------------------------------------------
-// Requirement check for the composer's /command pills.
+// Required input for the composer's /command pills.
 //
-// While a pill's action cannot run on what the message holds (no text after a
-// command that needs it, no document for a document action, nothing to act on
-// for an item or collection action), the composer disables Send and shows the
-// hint. The send path below keeps its own checks as a backstop. See
-// `getActionRequirementBlock` for the rules.
+// While a pill's action requires text after its /command and the message
+// holds none, the composer disables Send and its tooltip shows the hint. See
+// `getActionRequirementBlock`.
 // ---------------------------------------------------------------------------
 
 export const actionRequirementBlockAtom = atom<ActionRequirementBlock | null>((get) => {
     const pills = get(currentMessagePillsAtom);
     if (pills.length === 0) return null;
-    const searchableLibraryIds = get(searchableLibraryIdsAtom);
-    const filters = get(currentMessageFiltersAtom);
     return getActionRequirementBlock({
         content: get(currentMessageContentAtom),
         pills,
         actions: get(actionsAtom),
-        // The same condition the send path applies to a collection action.
-        hasCollectionTarget: [...get(currentMessageCollectionsAtom), ...get(currentMessageViewsAtom)]
-            .some(target => isTargetInLibraries(target, searchableLibraryIds)),
-        // The open reader attachment is sent with every message, like an
-        // attached item.
-        hasDocumentContext: get(currentMessageItemsAtom).length > 0
-            || get(currentMessageExternalFilesAtom).length > 0
-            || get(currentReaderAttachmentAtom) !== null,
-        hasOtherItemContext: get(currentNoteItemAtom) !== null
-            || filters.libraryIds.length > 0
-            || filters.collectionIds.length > 0
-            || filters.tagSelections.length > 0,
     });
 });
 

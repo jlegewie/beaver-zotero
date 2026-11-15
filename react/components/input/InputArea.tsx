@@ -99,13 +99,12 @@ const InputArea: React.FC<InputAreaProps> = ({
     // dequeued (see the claim effect below).
     const pendingPillInsert = useAtomValue(pendingPillInsertsAtom)[0] ?? null;
     const composerResetToken = useAtomValue(composerResetTokenAtom);
-    // A /command pill whose action cannot run on this message yet (no text
-    // after a command that needs it, nothing attached for an item action):
-    // Send is held and the hint below the input (or the command's own
-    // placeholder) says why.
+    // A /command pill whose action needs text after it, in a message that has
+    // none: Send is held, and its tooltip says what is missing.
     const actionRequirementBlock = useAtomValue(actionRequirementBlockAtom);
     const store = useStore();
     const webSearchDescriptionId = useId();
+    const requirementHintId = useId();
 
     // Turns a paste carrying files or image bytes into message attachments.
     const pasteHandlers = useComposerPasteHandlers();
@@ -410,7 +409,10 @@ const InputArea: React.FC<InputAreaProps> = ({
             store.set(pendingPillInsertsAtom, queue.slice(1));
             const editor = editorHandleRef.current;
             if (!editor) return;
-            const { argumentText } = pendingPillInsert;
+            const { argumentText, replaceActionIds } = pendingPillInsert;
+            // Pills this one takes the place of go first, every one of them,
+            // with their text.
+            for (const actionId of replaceActionIds ?? []) editor.removeCommandsWithArguments(actionId);
             // Staged with text for after the command (an example the user
             // picked): reuse a pill of the same action rather than adding a
             // second one, and replace whatever follows it.
@@ -808,14 +810,6 @@ const InputArea: React.FC<InputAreaProps> = ({
                     />
                 </div>
 
-                {/* Why Send is held for the /command in the message. Not while
-                    a decision is pending: the verdict buttons do not send it. */}
-                {actionRequirementBlock?.hint && !isAwaitingApproval && (
-                    <div className="composer-requirement-hint text-sm font-color-tertiary truncate mb-2" role="status">
-                        {actionRequirementBlock.hint}
-                    </div>
-                )}
-
                 {/* Control row: add sources and the model on the left, web
                     search and send after the flexible gap. */}
                 <div className="composer-controls">
@@ -843,6 +837,11 @@ const InputArea: React.FC<InputAreaProps> = ({
                     <span id={webSearchDescriptionId} className="sr-only">
                         {webSearchDescription}
                     </span>
+                    {actionRequirementBlock && (
+                        <span id={requirementHintId} className="sr-only">
+                            {actionRequirementBlock.hint}
+                        </span>
+                    )}
                     {!showVerdictButtons && (
                     <Tooltip
                         key={String(isWebSearchAllowed)}
@@ -925,14 +924,22 @@ const InputArea: React.FC<InputAreaProps> = ({
                             />
                         </Tooltip>
                     ) : (
-                        <IconButton
-                            icon={ArrowUpLineIcon}
-                            variant="solid"
-                            className="composer-send"
-                            ariaLabel="Send message"
-                            onClick={handleSubmit}
-                            disabled={threadReadOnly || messageContent.length === 0 || !selectedModel || isSlashMenuOpen || isAttachingFiles || actionRequirementBlock !== null}
-                        />
+                        <Tooltip
+                            content={actionRequirementBlock?.hint ?? ''}
+                            disabled={!actionRequirementBlock}
+                            showArrow
+                            singleLine
+                        >
+                            <IconButton
+                                icon={ArrowUpLineIcon}
+                                variant="solid"
+                                className="composer-send"
+                                ariaLabel="Send message"
+                                ariaDescribedBy={actionRequirementBlock ? requirementHintId : undefined}
+                                onClick={handleSubmit}
+                                disabled={threadReadOnly || messageContent.length === 0 || !selectedModel || isSlashMenuOpen || isAttachingFiles || actionRequirementBlock !== null}
+                            />
+                        </Tooltip>
                     )}
                 </div>
 

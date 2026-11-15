@@ -87,7 +87,7 @@ describe('task registry', () => {
     it('has the four tasks, each with the action the server checks for', () => {
         expect(Object.fromEntries(FEATURE_CREDIT_TASKS.map((task) => [task.key, task.actionId]))).toEqual({
             annotate: 'builtin-annotate',
-            organize: 'builtin-organize',
+            organize: 'builtin-tidy-up',
             research_table: 'builtin-research-table',
             literature_review: 'builtin-collection-literature-review',
         });
@@ -113,6 +113,12 @@ describe('task registry', () => {
         expect(texts({ collectionCount: 0, usesTags: false })).toEqual(['fill in missing abstracts and DOIs']);
         expect(texts({ collectionCount: 3, usesTags: true })).toHaveLength(3);
         expect(texts(null)).toEqual(['fill in missing abstracts and DOIs']);
+    });
+
+    it('has no attach step for organizing: /tidy-up finds what to work on', () => {
+        const organize = getFeatureCreditTask('organize')!;
+        expect(organize.attach).toEqual({ kind: 'none' });
+        expect(attachStep(organize.attach, { papers: ['Smith 2020'], collections: [] })).toBeNull();
     });
 });
 

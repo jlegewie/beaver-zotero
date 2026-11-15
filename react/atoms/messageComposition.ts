@@ -217,6 +217,9 @@ export interface PendingPillInsert {
     /** Text to set right after the pill, replacing anything already after it
      *  (see `stageActionPillAtom`). Absent → the pill is inserted as is. */
     argumentText?: string;
+    /** Actions whose pills this one replaces: every pill of each is removed,
+     *  with its text, before this pill is placed. */
+    replaceActionIds?: string[];
 }
 
 /**

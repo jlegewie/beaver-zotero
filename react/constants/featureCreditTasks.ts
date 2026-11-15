@@ -16,7 +16,9 @@ export type FeatureTaskAttachKind =
     /** A collection or papers; `ifNone` says what the action does without either. */
     | { kind: 'collection'; ifNone: string }
     /** A topic in the instruction; attachments only adjust what Beaver picks. */
-    | { kind: 'topic' };
+    | { kind: 'topic' }
+    /** Nothing to attach: the action finds what to work on itself. */
+    | { kind: 'none' };
 
 /** How the user organizes the library, used to pick fitting examples. */
 export interface LibraryShape {
@@ -107,16 +109,17 @@ export const FEATURE_CREDIT_TASKS: FeatureTaskDefinition[] = [
     {
         key: 'organize',
         title: 'Organize your library',
-        subtitle: 'Collections, tags, metadata, merging duplicates and more',
-        actionId: 'builtin-organize',
-        explanation: 'Beaver can organize your library: sort into collections, assign tags, edit metadata and remove duplicates. You review every change, and you can undo it.',
-        attach: { kind: 'collection', ifNone: 'If you attach nothing, Beaver works on your recent additions.' },
-        instruction: 'say what to do',
+        subtitle: 'Collections, tags, metadata and more',
+        actionId: 'builtin-tidy-up',
+        explanation: 'Beaver looks through your library for what needs attention (unfiled papers, missing tags, abstracts or DOIs) and cleans it up. You review every change, and you can undo it.',
+        attach: { kind: 'none' },
+        instruction: 'say what to focus on, or leave it to Beaver',
         examples: [
-            { text: 'file my 20 most recent papers into my collections', when: (shape) => shape.collectionCount >= 2 },
-            { text: 'tag the papers in this collection', when: (shape) => shape.usesTags },
+            { text: 'file my unfiled papers into my collections', when: (shape) => shape.collectionCount >= 2 },
+            { text: 'tag my untagged papers', when: (shape) => shape.usesTags },
             { text: 'fill in missing abstracts and DOIs' },
         ],
+        footnote: 'Beaver asks for your approval before a large clean-up.',
         completion: {
             tip: 'Beaver can also merge duplicates, split a big collection into sub-collections, and set up a collection for a new project.',
             docsUrl: `${DOCS_BASE_URL}/library-management`,

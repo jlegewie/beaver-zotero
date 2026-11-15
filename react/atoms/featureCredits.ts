@@ -20,7 +20,7 @@ import {
     currentReaderAttachmentAtom,
     messageItemDataRevisionAtom,
 } from './messageComposition';
-import { FeatureTaskDefinition, getFeatureCreditTask } from '../constants/featureCreditTasks';
+import { FEATURE_CREDIT_TASKS, FeatureTaskDefinition, getFeatureCreditTask } from '../constants/featureCreditTasks';
 import type { AttachmentSummary } from '../utils/featureCredits';
 import { activeFeatureTaskAtom } from './featureCreditRuns';
 import { getDisplayNameFromItem } from '../utils/sourceUtils';
@@ -93,7 +93,8 @@ export const selectBeaverModelAtom = atom(null, (get, set): boolean => {
 
 /**
  * Start a task: show its setup card and stage its action in the chat input.
- * Attaches nothing; what the chat input already carries stays.
+ * Attaches nothing; what the chat input already carries stays, except another
+ * task's /command, which this one replaces.
  */
 export const startFeatureTaskAtom = atom(
     null,
@@ -101,14 +102,23 @@ export const startFeatureTaskAtom = atom(
         const definition = getFeatureCreditTask(payload.key);
         if (!definition) return false;
         set(activeFeatureTaskAtom, definition.key);
+        const pills = get(currentMessagePillsAtom);
         // The chat input already has this /command: keep it, and only replace
         // its text when an example was picked.
-        const staged = get(currentMessagePillsAtom).some((pill) => pill.actionId === definition.actionId);
+        const staged = pills.some((pill) => pill.actionId === definition.actionId);
         if (staged && payload.argumentText === undefined) return true;
+        // Another task's /command, left from a setup the user went back from:
+        // removed with its text, so one message does not run both.
+        const otherTaskActionIds = new Set(
+            FEATURE_CREDIT_TASKS.map((task) => task.actionId).filter((actionId) => actionId !== definition.actionId),
+        );
+        const replaceActionIds = [...new Set(pills.map((pill) => pill.actionId))]
+            .filter((actionId) => otherTaskActionIds.has(actionId));
         return set(stageActionPillAtom, {
             actionId: definition.actionId,
             targetWindow: payload.targetWindow,
             argumentText: payload.argumentText,
+            ...(replaceActionIds.length > 0 ? { replaceActionIds } : {}),
         });
     },
 );

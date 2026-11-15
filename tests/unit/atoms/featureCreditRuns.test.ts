@@ -58,7 +58,7 @@ describe('the feature task a message starts', () => {
 
     it('is none without the task action, without a setup card, or for an unknown task', () => {
         expect(featureTaskForMessage('annotate', [])).toBeUndefined();
-        expect(featureTaskForMessage('annotate', [action('builtin-organize')])).toBeUndefined();
+        expect(featureTaskForMessage('annotate', [action('builtin-tidy-up')])).toBeUndefined();
         expect(featureTaskForMessage(null, [action('builtin-annotate')])).toBeUndefined();
         expect(featureTaskForMessage('note', [action('builtin-create-note')])).toBeUndefined();
     });

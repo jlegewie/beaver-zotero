@@ -52,10 +52,11 @@ function hasAttachments(summary: AttachmentSummary): boolean {
 
 /**
  * Step 1 of a setup card for tasks that work on papers or a collection.
- * Null for topic tasks, whose attachments get a status line instead.
+ * Null for topic tasks, whose attachments get a status line instead, and for
+ * tasks that take no attachments.
  */
 export function attachStep(attach: FeatureTaskAttachKind, summary: AttachmentSummary): AttachStep | null {
-    if (attach.kind === 'topic') return null;
+    if (attach.kind === 'topic' || attach.kind === 'none') return null;
     if (hasAttachments(summary)) {
         const { label, plural: many } = attachedLabel(summary);
         const onePaper = summary.papers.length === 1 && summary.collections.length === 0;

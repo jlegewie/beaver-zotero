@@ -453,13 +453,6 @@ describe('built-in action catalog', () => {
         expect(new Set(ids).size).toBe(ids.length);
     });
 
-    it('ships /organize as an unlocked global action that needs an argument', () => {
-        const organize = byId('builtin-organize')!;
-        expect(getActionCommand(organize)).toBe('organize');
-        expect(organize).toMatchObject({ targets: ['global'], category: 'organize', argumentRequired: true });
-        expect(organize.locked).toBeUndefined();
-    });
-
     it('keeps /table optional-argument so it can run on an attached collection or items', () => {
         const table = byId('builtin-research-table')!;
         expect(getActionCommand(table)).toBe('table');
@@ -467,27 +460,10 @@ describe('built-in action catalog', () => {
         expect(table.argumentRequired).toBeUndefined();
     });
 
-    it('requires an argument for /annotate, /create-note and /organize only', () => {
-        const required = BUILTIN_ACTIONS.filter(a => a.argumentRequired).map(a => a.id).sort();
-        expect(required).toEqual([
-            'builtin-annotate',
-            'builtin-create-note',
-            'builtin-organize',
-        ]);
-        for (const id of required) {
-            expect(byId(id)!.argumentRequiredHint, id).toBeTruthy();
-            expect(byId(id)!.argumentHint, id).toBeTruthy();
-        }
-    });
-
-    it('lists /organize after /annotate and /create-note', () => {
-        const order = (id: string) => byId(id)!.sortOrder!;
-        expect(order('builtin-annotate')).toBeLessThan(order('builtin-create-note'));
-        expect(order('builtin-create-note')).toBeLessThan(order('builtin-organize'));
-        expect(order('builtin-organize')).toBeLessThan(order('builtin-tidy-up'));
-    });
-
-    it('bases /create-note on attached papers or a collection when present', () => {
-        expect(byId('builtin-create-note')!.text).toContain('If I attached papers or a collection, base the note on those');
+    it('requires an argument for /annotate only', () => {
+        const required = BUILTIN_ACTIONS.filter(a => a.argumentRequired).map(a => a.id);
+        expect(required).toEqual(['builtin-annotate']);
+        expect(byId('builtin-annotate')!.argumentRequiredHint).toBeTruthy();
+        expect(byId('builtin-annotate')!.argumentHint).toBeTruthy();
     });
 });
