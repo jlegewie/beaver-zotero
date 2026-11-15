@@ -14,6 +14,7 @@ import { getPref, setPref } from '../../src/utils/prefs';
 import { stageActionPillAtom } from './actions';
 import {
     currentMessageCollectionsAtom,
+    currentMessageFiltersAtom,
     currentMessageItemsAtom,
     currentMessagePillsAtom,
     currentReaderAttachmentAtom,
@@ -143,14 +144,29 @@ export const featureTaskAttachmentSummaryAtom = atom<AttachmentSummary>((get) =>
     for (const item of items) add(item);
     if (reader) add(reader);
 
-    return {
-        papers,
-        collections: collections.map((collection) => {
-            const libraryID = resolveLibraryRef(collection);
-            return {
-                name: collection.name,
-                itemCount: libraryID ? collectionItemCount(libraryID, collection.zotero_key) : null,
-            };
-        }),
+    const summaries: AttachmentSummary['collections'] = [];
+    const seenCollections = new Set<string>();
+    const addCollection = (name: string, libraryID: number | null, key: string) => {
+        if (libraryID) {
+            const id = `${libraryID}-${key}`;
+            if (seenCollections.has(id)) return;
+            seenCollections.add(id);
+        }
+        summaries.push({ name, itemCount: libraryID ? collectionItemCount(libraryID, key) : null });
     };
+    for (const collection of collections) {
+        addCollection(collection.name, resolveLibraryRef(collection) ?? null, collection.zotero_key);
+    }
+    // A collection dragged into the chat input, or picked under "Filter by
+    // Collections", is kept as a filter; it scopes the message the same way.
+    for (const collectionID of get(currentMessageFiltersAtom).collectionIds) {
+        try {
+            const collection = Zotero.Collections.get(collectionID);
+            if (collection) addCollection(collection.name, collection.libraryID, collection.key);
+        } catch {
+            // A filter for a collection deleted since: nothing to show.
+        }
+    }
+
+    return { papers, collections: summaries };
 });
