@@ -161,6 +161,18 @@ export interface WSRequestAckEvent extends WSBaseEvent {
      * losing its socket. Only for runs the backend lets outlive their socket.
      */
     reattach_token?: string;
+    /**
+     * Feature credits this request granted (see `AgentRunRequest.feature_task`).
+     * Present only on the request that earned them.
+     */
+    feature_credit?: FeatureCreditGrant;
+}
+
+/** Credits granted for starting a feature-credit task. */
+export interface FeatureCreditGrant {
+    /** The task key, e.g. `annotate`. */
+    key: string;
+    credits: number;
 }
 
 /** Part event for streaming content (text, thinking, tool calls) */
@@ -3568,6 +3580,12 @@ export interface AgentRunRequest {
     retry_trigger?: RetryTrigger;
     /** Pre-generated assistant message ID (optional) */
     assistant_message_id?: string;
+    /**
+     * The feature-credit task this message was started for, from the task's
+     * setup card. The server grants the task's credits once, and only when the
+     * prompt's actions include the task's own action.
+     */
+    feature_task?: string;
 }
 
 // =============================================================================
@@ -3588,6 +3606,8 @@ export interface WSRequestAckData {
     modelId: string | null;
     modelName: string | null;
     chargeType: ChargeType;
+    /** Feature credits this request granted; absent otherwise. */
+    featureCredit?: FeatureCreditGrant;
 }
 
 /** A run lost its socket and is waiting on the server to be reattached. */

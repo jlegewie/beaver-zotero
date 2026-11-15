@@ -76,18 +76,10 @@ export enum ProcessingMode {
     BACKEND = "backend"
 }
 
-/**
- * Where an earned feature-credit task was done, from the grant that paid it.
- * Action tasks carry the accepted action; the table task carries the fill.
- * Thread and run are null for work that had no chat (a fill started from the
- * table itself).
- */
+/** The request that earned a feature-credit task. */
 export interface FeatureCreditSource {
-    thread_id?: string | null;
-    run_id?: string | null;
-    action_id?: string | null;
-    job_id?: string | null;
-    table_title?: string | null;
+    thread_id: string | null;
+    run_id: string | null;
 }
 
 /** One feature-credit task as the server reports it. */
@@ -102,16 +94,11 @@ export interface FeatureCreditTask {
 
 /**
  * Feature-credit tasks for the account, in display order: the ones it can
- * still earn and the ones it earned. The server leaves out tasks for skills
- * the user used before first seeing the card.
+ * still earn and the ones it earned. A task is earned by sending its action
+ * from the task's setup card.
  */
 export interface FeatureCreditsStatus {
     tasks: FeatureCreditTask[];
-    /**
-     * When the account's activity started counting: the first time the card
-     * was shown. Null before; the server grants nothing until then.
-     */
-    started_at?: string | null;
 }
 
 /**

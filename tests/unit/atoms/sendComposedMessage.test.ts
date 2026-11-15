@@ -37,6 +37,7 @@ vi.mock('../../../react/atoms/messageComposition', async () => {
         currentMessageExternalFilesAtom: atom<any[]>([]),
         currentMessageFiltersAtom: atom({ libraryIds: [], collectionIds: [], tagSelections: [] }),
         currentReaderAttachmentAtom: atom<any>(null),
+        composerResetTokenAtom: atom(0),
         addViewsToCurrentMessageAtom: atom(null, (get, set, views: any[]) => {
             set(currentMessageViewsAtom, [...get(currentMessageViewsAtom), ...views]);
         }),
@@ -147,9 +148,11 @@ import {
     currentMessagePillsAtom,
     currentMessageViewsAtom,
     currentReaderAttachmentAtom,
+    composerResetTokenAtom,
     pendingPillInsertsAtom,
 } from '../../../react/atoms/messageComposition';
 import { currentNoteItemAtom } from '../../../react/atoms/zoteroContext';
+import { activeFeatureTaskAtom } from '../../../react/atoms/featureCreditRuns';
 import { resolvePromptVariables, resolveTargetContext } from '../../../react/utils/promptVariables';
 import { toValidatedMessageAttachment } from '../../../react/types/attachments/converters';
 import type { Action } from '@beaver/agent-core/types/actions';
@@ -414,6 +417,40 @@ describe('sendComposedMessageAtom', () => {
         });
         expect(sendWSMessageMock.mock.calls[0][1].actions).toHaveLength(1);
         expect(resolvePromptVariables).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe('sending from a feature-credit setup card', () => {
+    const annotate: Action = { id: 'builtin-annotate', name: 'annotate', title: 'Annotate', text: 'Annotate.', targets: ['global'] };
+    const pill = (action: Action) => ({ commandName: action.name!, actionId: action.id, title: action.title });
+
+    it('names the task when the message runs the task action', async () => {
+        const store = makeStore([annotate, summarizeAction]);
+        store.set(activeFeatureTaskAtom, 'annotate');
+        await store.set(sendComposedMessageAtom, { baseText: '/annotate the methods', pills: [pill(annotate)] });
+        expect(sendWSMessageMock.mock.calls[0][1].featureTask).toBe('annotate');
+    });
+
+    it('names no task for another action, or without a setup card', async () => {
+        const store = makeStore([annotate, summarizeAction]);
+        store.set(activeFeatureTaskAtom, 'annotate');
+        await store.set(sendComposedMessageAtom, { baseText: '/summarize', pills: [pill({ ...summarizeAction, name: 'summarize' })] });
+        expect(sendWSMessageMock.mock.calls[0][1]).not.toHaveProperty('featureTask');
+
+        store.set(activeFeatureTaskAtom, null);
+        await store.set(sendComposedMessageAtom, { baseText: '/annotate the methods', pills: [pill(annotate)] });
+        expect(sendWSMessageMock.mock.calls[1][1]).not.toHaveProperty('featureTask');
+    });
+
+    it('names no task on a later message, once the chat input was reset', async () => {
+        const store = makeStore([annotate]);
+        store.set(activeFeatureTaskAtom, 'annotate');
+        await store.set(sendComposedMessageAtom, { baseText: '/annotate the methods', pills: [pill(annotate)] });
+        // Sending clears the chat input.
+        store.set(composerResetTokenAtom, store.get(composerResetTokenAtom) + 1);
+        await store.set(sendComposedMessageAtom, { baseText: '/annotate the results', pills: [pill(annotate)] });
+        expect(sendWSMessageMock.mock.calls[0][1].featureTask).toBe('annotate');
+        expect(sendWSMessageMock.mock.calls[1][1]).not.toHaveProperty('featureTask');
     });
 });
 

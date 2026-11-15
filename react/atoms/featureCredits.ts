@@ -1,27 +1,18 @@
 /**
- * Feature credits: the window's view of the account's tasks, the home card's
- * setup state, and starting a task in the chat input.
+ * Feature credits: the window's view of the account's tasks and starting a
+ * task in the chat input.
  *
- * Whether a task is done comes only from the profile; the server decides and
- * grants (see `addon.account.syncFeatureCredits`).
+ * Whether a task is done comes only from the profile. The server grants a
+ * task when a message is sent from its setup card (see `featureCreditRuns`).
  */
 import { atom } from 'jotai';
 import type { FeatureCreditTask } from '@beaver/agent-core/types/profile';
-import { profileBalanceAtom, profileWithPlanAtom } from './profile';
-import {
-    anthropicApiKeyAtom,
-    availableModelsAtom,
-    beaverDefaultModelAtom,
-    googleApiKeyAtom,
-    isUsingBeaverCreditsAtom,
-    openAiApiKeyAtom,
-    updateSelectedModelAtom,
-} from './models';
+import { profileWithPlanAtom } from './profile';
+import { beaverDefaultModelAtom, updateSelectedModelAtom } from './models';
 import { preferencesRevisionAtom } from './preferences';
 import { getPref, setPref } from '../../src/utils/prefs';
 import { stageActionPillAtom } from './actions';
 import {
-    composerResetTokenAtom,
     currentMessageCollectionsAtom,
     currentMessageItemsAtom,
     currentMessagePillsAtom,
@@ -29,7 +20,8 @@ import {
     messageItemDataRevisionAtom,
 } from './messageComposition';
 import { FeatureTaskDefinition, getFeatureCreditTask } from '../constants/featureCreditTasks';
-import { canRunFeatureTasks, FEATURE_TASK_MIN_CREDITS, type AttachmentSummary, type ModelAccess } from '../utils/featureCredits';
+import type { AttachmentSummary } from '../utils/featureCredits';
+import { activeFeatureTaskAtom } from './featureCreditRuns';
 import { getDisplayNameFromItem } from '../utils/sourceUtils';
 import { resolveLibraryRef } from '../../src/utils/libraryIdentity';
 import { logger } from '@beaver/agent-core/platform/logger';
@@ -77,32 +69,15 @@ export const featureCreditsCardDismissedAtom = atom(
     (_get, _set, dismissed: boolean) => setPref('featureCreditsCardDismissed', dismissed),
 );
 
-/** What the user can run a task with: Beaver credits, a model of their own, or neither. */
-export const featureTaskModelAccessAtom = atom<ModelAccess>((get) => {
-    const apiKeys: Record<string, boolean> = {
-        google: !!get(googleApiKeyAtom),
-        openai: !!get(openAiApiKeyAtom),
-        anthropic: !!get(anthropicApiKeyAtom),
-    };
-    return {
-        onBeaverModel: get(isUsingBeaverCreditsAtom),
-        hasBeaverCredits: get(profileBalanceAtom).chatCreditsRemaining >= FEATURE_TASK_MIN_CREDITS,
-        hasOwnModel: get(availableModelsAtom).some(
-            (model) => model.is_custom || (model.allow_byok && apiKeys[model.provider]),
-        ),
-    };
-});
-
 /**
  * Whether the home card shows: after first run, while a task is open, unless
- * dismissed, and only while the user can run a task at all. The card also
- * waits for a library of a useful size (see `FeatureCreditsCard`).
+ * dismissed. The card also waits for a library of a useful size (see
+ * `FeatureCreditsCard`).
  */
 export const featureCreditsCardVisibleAtom = atom((get) => {
     const profile = get(profileWithPlanAtom);
     if (!profile?.first_run_completed_at) return false;
     if (get(featureCreditsCardDismissedAtom)) return false;
-    if (!canRunFeatureTasks(get(featureTaskModelAccessAtom))) return false;
     const entries = get(featureCreditEntriesAtom);
     return !!entries?.some(({ task }) => !task.completed_at);
 });
@@ -114,23 +89,6 @@ export const selectBeaverModelAtom = atom(null, (get, set): boolean => {
     set(updateSelectedModelAtom, { ...model, access_mode: 'app_key' });
     return true;
 });
-
-const activeFeatureTaskStateAtom = atom<{ key: string; composerResetToken: number } | null>(null);
-
-/**
- * The task whose setup card the home card shows in this window, or null for
- * the list. A setup belongs to the chat input it was started in: sending or
- * starting a new chat resets the input, which ends it.
- */
-export const activeFeatureTaskAtom = atom(
-    (get) => {
-        const state = get(activeFeatureTaskStateAtom);
-        return state && state.composerResetToken === get(composerResetTokenAtom) ? state.key : null;
-    },
-    (get, set, key: string | null) => {
-        set(activeFeatureTaskStateAtom, key ? { key, composerResetToken: get(composerResetTokenAtom) } : null);
-    },
-);
 
 /**
  * Start a task: show its setup card and stage its action in the chat input.

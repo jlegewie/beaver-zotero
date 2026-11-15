@@ -3,8 +3,7 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import Button from '@beaver/agent-ui/primitives/Button';
 import { SectionLabel, SettingsGroup, SettingsRow } from '../preferences/components/SettingsElements';
 import { CheckmarkCircleSolidIcon, Icon } from '../icons/icons';
-import { featureCreditEntriesAtom, featureCreditTotalsAtom, featureTaskModelAccessAtom, startFeatureTaskAtom } from '../../atoms/featureCredits';
-import { canRunFeatureTasks, featureTasksIntro } from '../../utils/featureCredits';
+import { featureCreditEntriesAtom, featureCreditTotalsAtom, startFeatureTaskAtom } from '../../atoms/featureCredits';
 import { newThreadAtom } from '../../atoms/threads';
 import { eventManager } from '../../events/eventManager';
 
@@ -17,11 +16,9 @@ const EarnCreditsSection: React.FC = () => {
     const totals = useAtomValue(featureCreditTotalsAtom);
     const startTask = useSetAtom(startFeatureTaskAtom);
     const newThread = useSetAtom(newThreadAtom);
-    const canRun = canRunFeatureTasks(useAtomValue(featureTaskModelAccessAtom));
     const shown = !!entries && totals.done < totals.count;
 
-    // Seeing the tasks here counts as seeing the offer: the server counts
-    // task activity from the first time either list was shown.
+    // Seeing the tasks here counts as seeing the offer.
     useEffect(() => {
         if (shown) Zotero.Beaver?.account?.markFeatureCreditsCardSeen();
     }, [shown]);
@@ -44,15 +41,7 @@ const EarnCreditsSection: React.FC = () => {
                     title={`${totals.earned} of ${totals.total} earned`}
                     description={
                         <span className="font-color-secondary">
-                            {featureTasksIntro(
-                                entries.length,
-                                "credits, whether you start from here or on your own.",
-                            )}
-                            {!canRun && (
-                                <>
-                                    {' '}Each task needs a few credits to run, or your own API key, and pays them back.
-                                </>
-                            )}
+                            Start a skill here or from the home screen card. Its credits are added as soon as you send it.
                         </span>
                     }
                 />

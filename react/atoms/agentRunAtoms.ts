@@ -89,6 +89,7 @@ import {
     syncWithZoteroAtom,
 } from './profile';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
+import { recordFeatureCreditGrantAtom } from './featureCreditRuns';
 import {
     readComposerDraft,
     restoreMissingComposerDraft,
@@ -626,9 +627,11 @@ function createAgentRunShell(
          * here, so nothing else in the request identifies it as one.
          */
         retryTrigger?: RetryTrigger;
+        /** The feature-credit task this message starts (see `AgentRunRequest.feature_task`). */
+        featureTask?: string;
     },
 ): { run: AgentRun; request: AgentRunRequest } {
-    const { runIdOverride, permissionsOverride, retryTrigger } = options ?? {};
+    const { runIdOverride, permissionsOverride, retryTrigger, featureTask } = options ?? {};
     const runId = runIdOverride ?? uuidv4();
 
     // Get user preferences for charging permissions, then apply any partial override.
@@ -665,6 +668,7 @@ function createAgentRunShell(
         ...(modelSelectionOptions.api_key ? { api_key: modelSelectionOptions.api_key } : {}),
         ...(customModel ? { custom_model: customModel } : {}),
         ...(retryTrigger ? { retry_trigger: retryTrigger } : {}),
+        ...(featureTask ? { feature_task: featureTask } : {}),
     };
 
     // Create the shell AgentRun for immediate UI rendering
@@ -1917,6 +1921,10 @@ export function createWSCallbacks(
         onRequestAck: (data: WSRequestAckData) => {
             logger('WS onRequestAck:', data, 1);
             set(wsRequestAckDataAtom, data);
+            // The completion card shows when this run ends.
+            if (data.featureCredit) {
+                set(recordFeatureCreditGrantAtom, { runId: data.runId, ...data.featureCredit });
+            }
         },
 
         onPart: async (event: WSPartEvent) => {
@@ -2108,9 +2116,6 @@ export function createWSCallbacks(
             // Surface an OS-native notification if the user can't currently see
             // the completed response (e.g. working in another app).
             notifyRunComplete();
-
-            // Changes the run applied itself can complete a feature-credit task.
-            Zotero.Beaver?.account?.syncFeatureCredits();
         },
 
         onRunCitations: (event: WSRunCitationsEvent) => {
@@ -2907,6 +2912,11 @@ export interface SendWSMessageOptions {
     origin?: PromptOrigin;
     /** Saved actions invoked as /command tokens in the message content */
     actions?: PromptAction[];
+    /**
+     * The feature-credit task this message was started for from its setup
+     * card. Sent on this request only, never on its retries or resumes.
+     */
+    featureTask?: string;
 }
 
 const sendWSMessage = async (
@@ -2921,7 +2931,7 @@ const sendWSMessage = async (
             assertCredentialGeneration(accountGeneration);
             return originalSet(...args);
         }) as Setter;
-        const { runIdOverride, permissionsOverride, origin, actions } = options ?? {};
+        const { runIdOverride, permissionsOverride, origin, actions, featureTask } = options ?? {};
         const isPending = get(isWSChatPendingAtom);
         logger('sendWSMessageAtom: Called at ' + Date.now() + ' with message: ' + message.substring(0, 50) + ' (isPending: ' + isPending + ')', 1);
 
@@ -3244,7 +3254,7 @@ const sendWSMessage = async (
                 model?.provider,
                 customInstructions,
                 model?.is_custom ? model.custom_model : undefined,
-                { runIdOverride, permissionsOverride },
+                { runIdOverride, permissionsOverride, featureTask },
             );
 
             // Set active run - UI now shows user message + spinner

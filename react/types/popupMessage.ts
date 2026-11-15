@@ -37,6 +37,8 @@ export interface FileExportPopupData {
 export interface FeatureCreditPopupData {
     key: string;
     credits: number;
+    /** The run the task was started in. */
+    runId: string;
 }
 
 export interface PopupMessage {

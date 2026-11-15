@@ -281,7 +281,6 @@ class AgentActionUpdateBatcher {
 
 export class AgentActionsService extends ApiService {
     private readonly updateBatcher: AgentActionUpdateBatcher;
-    private readonly appliedWriteListeners = new Set<() => void>();
 
     constructor(backendUrl?: string) {
         super(backendUrl);
@@ -312,33 +311,7 @@ export class AgentActionsService extends ApiService {
             ...(options?.onlyUnapplied ? { only_unapplied: true } : {}),
         };
 
-        const response = await this.post<AckActionsResponse>('/api/v1/agent-actions/ack', request, options);
-        this.notifyAppliedWrite();
-        return response;
-    }
-
-    /**
-     * Registers a callback that runs after the server accepted a write marking
-     * actions `applied`: an acknowledgement, or a batched update that sets that
-     * status. Other status writes (rejected, undone, error) do not call it.
-     *
-     * @returns A function that unregisters the callback
-     */
-    onAppliedWrite(listener: () => void): () => void {
-        this.appliedWriteListeners.add(listener);
-        return () => {
-            this.appliedWriteListeners.delete(listener);
-        };
-    }
-
-    private notifyAppliedWrite(): void {
-        for (const listener of [...this.appliedWriteListeners]) {
-            try {
-                listener();
-            } catch (error) {
-                logger(`AgentActionsService: applied-write listener failed: ${error instanceof Error ? error.message : error}`, 1);
-            }
-        }
+        return this.post<AckActionsResponse>('/api/v1/agent-actions/ack', request, options);
     }
 
     /**
@@ -414,14 +387,10 @@ export class AgentActionsService extends ApiService {
             })),
         };
 
-        const response = await super.patch<BatchUpdateActionsResponse>(
+        return super.patch<BatchUpdateActionsResponse>(
             '/api/v1/agent-actions/batch',
             request
         );
-        if (entries.some(({ updates }) => updates.status === 'applied')) {
-            this.notifyAppliedWrite();
-        }
-        return response;
     }
 }
 

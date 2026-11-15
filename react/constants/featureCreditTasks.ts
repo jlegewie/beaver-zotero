@@ -11,10 +11,10 @@ import type { Action } from '@beaver/agent-core/types/actions';
 
 /** What step 1 of a setup card asks the user to attach. */
 export type FeatureTaskAttachKind =
-    /** One or more papers (`optional`: the task also works without). */
-    | { kind: 'paper'; optional?: boolean }
-    /** A collection or papers; without either the action works on recent additions. */
-    | { kind: 'collection' }
+    /** One or more papers. */
+    | { kind: 'paper' }
+    /** A collection or papers; `ifNone` says what the action does without either. */
+    | { kind: 'collection'; ifNone: string }
     /** A topic in the instruction; attachments only adjust what Beaver picks. */
     | { kind: 'topic' };
 
@@ -50,8 +50,6 @@ export interface FeatureTaskDefinition {
     /** The instruction step, completed by "For example:" and the examples. */
     instruction: string;
     examples: FeatureTaskExample[];
-    /** The last step. */
-    finalStep: string;
     /** A note under the steps. */
     footnote?: string;
     /** The card shown once the task is earned. */
@@ -59,6 +57,11 @@ export interface FeatureTaskDefinition {
         /** One sentence on what else the skill can do. */
         tip: string;
         docsUrl: string;
+        /**
+         * Offered instead of the docs link when the run wrote a note: exports
+         * that note to Word when clicked.
+         */
+        exportNote?: { label: string };
         /**
          * A starter action of the user's own, offered instead of the docs
          * link: clicking saves it as a custom action and opens it for editing.
@@ -85,7 +88,6 @@ export const FEATURE_CREDIT_TASKS: FeatureTaskDefinition[] = [
             { text: 'color-code the research question, methods, results and limitations' },
             { text: 'the key passages I need to skim the paper' },
         ],
-        finalStep: 'Press Send. Accept the highlights if Beaver asks.',
         completion: {
             tip: 'Annotate the same way every time: create a reusable prompt with your colors and what to highlight.',
             customAction: {
@@ -103,37 +105,18 @@ export const FEATURE_CREDIT_TASKS: FeatureTaskDefinition[] = [
         },
     },
     {
-        key: 'note',
-        title: 'Write a note in Zotero',
-        subtitle: 'Summaries, reviews and topic notes, cited to page',
-        actionId: 'builtin-create-note',
-        explanation: 'Beaver writes notes that live in Zotero. Every citation jumps to the exact passage.',
-        attach: { kind: 'paper', optional: true },
-        instruction: 'say what the note should be',
-        examples: [
-            { text: 'a summary of this paper' },
-            { text: 'a literature review of the papers in this collection' },
-        ],
-        finalStep: 'Press Send. Accept the note if Beaver asks.',
-        completion: {
-            tip: 'Click a citation in the note to open the page it cites. Beaver can also edit your notes, and export notes to Word, PDF and LaTeX.',
-            docsUrl: `${DOCS_BASE_URL}/notes`,
-        },
-    },
-    {
         key: 'organize',
         title: 'Organize your library',
         subtitle: 'Collections, tags, metadata, merging duplicates and more',
         actionId: 'builtin-organize',
         explanation: 'Beaver can organize your library: sort into collections, assign tags, edit metadata and remove duplicates. You review every change, and you can undo it.',
-        attach: { kind: 'collection' },
+        attach: { kind: 'collection', ifNone: 'If you attach nothing, Beaver works on your recent additions.' },
         instruction: 'say what to do',
         examples: [
             { text: 'file my 20 most recent papers into my collections', when: (shape) => shape.collectionCount >= 2 },
             { text: 'tag the papers in this collection', when: (shape) => shape.usesTags },
             { text: 'fill in missing abstracts and DOIs' },
         ],
-        finalStep: 'Press Send. Accept the changes if Beaver asks.',
         completion: {
             tip: 'Beaver can also merge duplicates, split a big collection into sub-collections, and set up a collection for a new project.',
             docsUrl: `${DOCS_BASE_URL}/library-management`,
@@ -151,11 +134,30 @@ export const FEATURE_CREDIT_TASKS: FeatureTaskDefinition[] = [
             { text: 'neighborhood effects on school outcomes: method, sample and main finding', illustration: true },
             { text: 'social capital: definition used and how it is measured', illustration: true },
         ],
-        finalStep: 'Press Send.',
         // footnote: 'Filling a table uses credits per row. You see the cost before anything is filled.',
         completion: {
             tip: 'Click a cell to see the quote behind it. You can add a column with a new question and fill the remaining rows.',
             docsUrl: `${DOCS_BASE_URL}/research-tables`,
+        },
+    },
+    {
+        key: 'literature_review',
+        title: 'Write a literature review',
+        subtitle: 'A cited review as a Zotero note',
+        actionId: 'builtin-collection-literature-review',
+        explanation: 'Beaver finds the papers (in a collection, among the papers you pick, or on a topic), compares them in an evidence table when there are many, and writes a cited literature review as a Zotero note.',
+        attach: { kind: 'collection', ifNone: 'Or attach nothing and name a topic in the next step.' },
+        instruction: 'say what to write',
+        examples: [
+            { text: 'a 2,000-word review of the papers in this collection' },
+            { text: 'an outline first' },
+            { text: 'neighborhood effects on school outcomes, as background for a grant proposal', illustration: true },
+        ],
+        footnote: 'A long review can use more credits than you get for it. Beaver asks before going past your credit limit.',
+        completion: {
+            tip: 'The review is a note in Zotero: click a citation to open the passage it cites.',
+            exportNote: { label: 'Export to Word' },
+            docsUrl: `${DOCS_BASE_URL}/notes`,
         },
     },
 ];

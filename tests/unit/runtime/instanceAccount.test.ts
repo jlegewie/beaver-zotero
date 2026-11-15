@@ -5,7 +5,6 @@ const mocks = vi.hoisted(() => ({
     preference: vi.fn(),
     claim: vi.fn(),
     dispose: vi.fn(),
-    sync: vi.fn(),
     seen: vi.fn(),
 }));
 vi.mock("@beaver/agent-core/transport/clients/accountService", () => ({
@@ -13,7 +12,6 @@ vi.mock("@beaver/agent-core/transport/clients/accountService", () => ({
         getProfileWithPlan: mocks.profile,
         updateExcludedLibraries: mocks.exclusion,
         updatePreference: mocks.preference,
-        syncFeatureCredits: mocks.sync,
         markFeatureCreditsCardSeen: mocks.seen,
     },
 }));
@@ -858,137 +856,10 @@ describe("instance account ownership", () => {
         });
     });
 
-    describe("feature-credit checks", () => {
-        const withTasks = (done: string[] = [], startedAt: string | null = "2026-11-19T10:00:00Z") => {
-            const data = profile();
-            data.profile.feature_credits = {
-                tasks: ["annotate", "note"].map((key) => ({
-                    key,
-                    credits: 5,
-                    completed_at: done.includes(key) ? "2026-11-20T10:00:00Z" : null,
-                    source: null,
-                })),
-                started_at: startedAt,
-            };
-            return data;
-        };
-        const loadWith = async (data: any) => {
-            mocks.profile.mockResolvedValue(data);
-            await load();
-            mocks.profile.mockClear();
-        };
-
-        it("checks once after triggers go quiet, and refreshes the profile when something was granted", async () => {
-            await loadWith(withTasks());
-            mocks.sync.mockResolvedValue({ granted: ["annotate"] });
-            account.syncFeatureCredits();
-            await vi.advanceTimersByTimeAsync(2_000);
-            account.syncFeatureCredits();
-            await vi.advanceTimersByTimeAsync(2_999);
-            expect(mocks.sync).not.toHaveBeenCalled();
-            await vi.advanceTimersByTimeAsync(1);
-            expect(mocks.sync).toHaveBeenCalledTimes(1);
-            expect(mocks.profile).toHaveBeenCalledTimes(1);
-        });
-
-        it("does not refresh the profile when nothing was granted", async () => {
-            await loadWith(withTasks());
-            mocks.sync.mockResolvedValue({ granted: [] });
-            account.syncFeatureCredits();
-            await vi.advanceTimersByTimeAsync(3_000);
-            expect(mocks.sync).toHaveBeenCalledTimes(1);
-            expect(mocks.profile).not.toHaveBeenCalled();
-        });
-
-        it("checks within the maximum wait while triggers keep arriving", async () => {
-            await loadWith(withTasks());
-            mocks.sync.mockResolvedValue({ granted: [] });
-            for (let elapsed = 0; elapsed < 15_000; elapsed += 1_000) {
-                account.syncFeatureCredits();
-                await vi.advanceTimersByTimeAsync(1_000);
-            }
-            expect(mocks.sync).toHaveBeenCalledTimes(1);
-        });
-
-        it.each([
-            ["the feature is off", () => profile()],
-            ["every task is done", () => withTasks(["annotate", "note"])],
-        ])("does nothing when %s", async (_label, data) => {
-            await loadWith(data());
-            account.syncFeatureCredits();
-            await vi.advanceTimersByTimeAsync(20_000);
-            expect(mocks.sync).not.toHaveBeenCalled();
-        });
-
-        it("skips a catch-up shortly after a check, but not a write trigger", async () => {
-            await loadWith(withTasks());
-            mocks.sync.mockResolvedValue({ granted: [] });
-            account.syncFeatureCredits();
-            await vi.advanceTimersByTimeAsync(3_000);
-            account.syncFeatureCredits({ catchUp: true });
-            await vi.advanceTimersByTimeAsync(3_000);
-            expect(mocks.sync).toHaveBeenCalledTimes(1);
-            account.syncFeatureCredits();
-            await vi.advanceTimersByTimeAsync(3_000);
-            expect(mocks.sync).toHaveBeenCalledTimes(2);
-        });
-
-        it("runs a trigger that arrives during a check as a check of its own", async () => {
-            await loadWith(withTasks());
-            const pending = deferred<any>();
-            mocks.sync.mockReturnValueOnce(pending.promise).mockResolvedValue({ granted: [] });
-            account.syncFeatureCredits();
-            await vi.advanceTimersByTimeAsync(3_000);
-            account.syncFeatureCredits();
-            await vi.advanceTimersByTimeAsync(3_000);
-            expect(mocks.sync).toHaveBeenCalledTimes(1);
-            pending.resolve({ granted: [] });
-            await vi.advanceTimersByTimeAsync(3_000);
-            expect(mocks.sync).toHaveBeenCalledTimes(2);
-        });
-
-        it("cancels a pending check when the account signs out", async () => {
-            await loadWith(withTasks());
-            account.syncFeatureCredits();
-            sdk.auth.getSession.mockResolvedValue({ data: { session: null }, error: null });
-            await account.auth.signOut();
-            await vi.advanceTimersByTimeAsync(20_000);
-            expect(mocks.sync).not.toHaveBeenCalled();
-        });
-
-        it("does not check before the card was shown, and checks once it was reported this session", async () => {
-            await loadWith(withTasks([], null));
-            mocks.sync.mockResolvedValue({ granted: [] });
-            mocks.seen.mockResolvedValue(undefined);
-            account.syncFeatureCredits();
-            await vi.advanceTimersByTimeAsync(20_000);
-            expect(mocks.sync).not.toHaveBeenCalled();
-
-            account.markFeatureCreditsCardSeen();
-            account.syncFeatureCredits();
-            await vi.advanceTimersByTimeAsync(3_000);
-            expect(mocks.sync).toHaveBeenCalledTimes(1);
-        });
-
-        it("stops checking when the card report fails", async () => {
-            await loadWith(withTasks([], null));
-            mocks.seen.mockRejectedValue(new Error("offline"));
-            account.markFeatureCreditsCardSeen();
-            await vi.advanceTimersByTimeAsync(0);
-            account.syncFeatureCredits();
-            await vi.advanceTimersByTimeAsync(20_000);
-            expect(mocks.sync).not.toHaveBeenCalled();
-        });
-
-        it("does not report the card again once the server has it", async () => {
-            await loadWith(withTasks());
-            account.markFeatureCreditsCardSeen();
-            await vi.advanceTimersByTimeAsync(0);
-            expect(mocks.seen).not.toHaveBeenCalled();
-        });
-
+    describe("feature-credits card report", () => {
         it("reports the card as shown once per account, and again after a failed report", async () => {
-            await loadWith(withTasks([], null));
+            mocks.profile.mockResolvedValue(profile());
+            await load();
             mocks.seen.mockRejectedValueOnce(new Error("offline")).mockResolvedValue(undefined);
             account.markFeatureCreditsCardSeen();
             await vi.advanceTimersByTimeAsync(0);
@@ -1000,20 +871,6 @@ describe("instance account ownership", () => {
             await vi.advanceTimersByTimeAsync(0);
             account.markFeatureCreditsCardSeen();
             expect(mocks.seen).toHaveBeenCalledTimes(3);
-        });
-
-        it("ignores a grant that returns after the account changed", async () => {
-            await loadWith(withTasks());
-            const pending = deferred<any>();
-            mocks.sync.mockReturnValueOnce(pending.promise);
-            account.syncFeatureCredits();
-            await vi.advanceTimersByTimeAsync(3_000);
-            event("SIGNED_IN", session("b"));
-            await vi.advanceTimersByTimeAsync(0);
-            mocks.profile.mockClear();
-            pending.resolve({ granted: ["annotate"] });
-            await vi.advanceTimersByTimeAsync(0);
-            expect(mocks.profile).not.toHaveBeenCalled();
         });
     });
 });

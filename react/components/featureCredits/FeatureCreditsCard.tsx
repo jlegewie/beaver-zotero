@@ -3,21 +3,21 @@ import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import { ArrowLeftIcon, ArrowRightIcon, CancelIcon, CheckmarkCircleSolidIcon, CircleIcon, Icon } from '../icons/icons';
 import {
-    activeFeatureTaskAtom,
     featureCreditEntriesAtom,
     featureCreditsCardDismissedAtom,
     featureTaskAttachmentSummaryAtom,
-    featureTaskModelAccessAtom,
     selectBeaverModelAtom,
     startFeatureTaskAtom,
     type FeatureCreditEntry,
 } from '../../atoms/featureCredits';
+import { activeFeatureTaskAtom } from '../../atoms/featureCreditRuns';
+import { isUsingBeaverCreditsAtom } from '../../atoms/models';
 import { currentMessagePillsAtom, pendingPillInsertsAtom } from '../../atoms/messageComposition';
 import { searchableLibraryIdsAtom } from '../../atoms/profile';
 import { actionsAtom } from '../../atoms/actions';
 import { getActionCommand } from '@beaver/agent-ui/composer/slashCommands';
 import { examplesForLibrary, getFeatureCreditTask, type FeatureTaskDefinition, type LibraryShape } from '../../constants/featureCreditTasks';
-import { attachStep, featureTaskModelNote, featureTasksIntro, topicStatus } from '../../utils/featureCredits';
+import { attachStep, featureTaskModelNote, topicStatus } from '../../utils/featureCredits';
 import { countLibraryItems, readLibraryShape } from '../../utils/libraryShape';
 import { SMALL_LIBRARY_THRESHOLD } from '../../atoms/zoteroContext';
 
@@ -36,6 +36,7 @@ const TaskRow: React.FC<{ entry: FeatureCreditEntry; onStart: (key: string, win:
                 <span className={done ? 'font-color-secondary' : 'font-color-primary'}>{definition.title}</span>
                 <span className="feature-credits-row-subtitle">{definition.subtitle}</span>
             </span>
+            {!done && <span className="feature-credits-row-credits">+{task.credits}</span>}
             {!done && <Icon icon={ArrowRightIcon} className="feature-credits-row-arrow font-color-secondary" />}
         </>
     );
@@ -54,11 +55,11 @@ const TaskRow: React.FC<{ entry: FeatureCreditEntry; onStart: (key: string, win:
 };
 
 /** The setup card: what the skill does and how to start it in the chat input. */
-const SetupView: React.FC<{ definition: FeatureTaskDefinition; onBack: () => void }> = ({ definition, onBack }) => {
+const SetupView: React.FC<{ definition: FeatureTaskDefinition; credits: number; onBack: () => void }> = ({ definition, credits, onBack }) => {
     const summary = useAtomValue(featureTaskAttachmentSummaryAtom);
     const startTask = useSetAtom(startFeatureTaskAtom);
     const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
-    const modelAccess = useAtomValue(featureTaskModelAccessAtom);
+    const onBeaverModel = useAtomValue(isUsingBeaverCreditsAtom);
     const selectBeaverModel = useSetAtom(selectBeaverModelAtom);
     const [shape, setShape] = useState<LibraryShape | null>(null);
     const needsShape = definition.examples.some((example) => example.when);
@@ -80,11 +81,11 @@ const SetupView: React.FC<{ definition: FeatureTaskDefinition; onBack: () => voi
     const attach = attachStep(definition.attach, summary);
     const status = definition.attach.kind === 'topic' ? topicStatus(summary) : null;
     const examples = examplesForLibrary(definition, shape);
-    // One-click examples fill the chat input; illustrations only show the
-    // form of an instruction.
+    // One-click examples fill the chat input; illustrations name a topic and
+    // only show the form of an instruction.
     const illustrations = examples.filter((example) => example.illustration);
     const clickable = examples.filter((example) => !example.illustration);
-    const modelNote = featureTaskModelNote(definition.key, modelAccess);
+    const modelNote = featureTaskModelNote(definition.key, onBeaverModel);
     const beaverModelLink = (
         <a href="#" className="text-link" onClick={(event) => { event.preventDefault(); selectBeaverModel(); }}>
             Use the Beaver model
@@ -94,14 +95,7 @@ const SetupView: React.FC<{ definition: FeatureTaskDefinition; onBack: () => voi
     // Numbered in order; a done step shows ✓ and keeps its place.
     const steps: { done?: boolean; content: React.ReactNode }[] = [];
     if (modelNote?.required) {
-        steps.push({
-            content: (
-                <>
-                    {modelNote.text}
-                    {modelNote.offerBeaverModel && <> {beaverModelLink}</>}
-                </>
-            ),
-        });
+        steps.push({ content: <>{modelNote.text} {beaverModelLink}</> });
     }
     if (attach) {
         steps.push({ done: attach.done, content: <><strong className="font-medium">{attach.lead}</strong> {attach.text}</> });
@@ -110,13 +104,6 @@ const SetupView: React.FC<{ definition: FeatureTaskDefinition; onBack: () => voi
         content: (
             <>
                 After <span className="feature-credits-command">{command}</span>, {definition.instruction}.
-                {illustrations.length > 0 && <> For example:{' '}</>}
-                {illustrations.map((example, index) => (
-                    <React.Fragment key={example.text}>
-                        {index > 0 && ' or '}
-                        <span className="feature-credits-illustration">“{example.text}”</span>
-                    </React.Fragment>
-                ))}
                 {clickable.length > 0 && <> For example:{' '}</>}
                 {clickable.map((example, index) => (
                     <React.Fragment key={example.text}>
@@ -126,10 +113,17 @@ const SetupView: React.FC<{ definition: FeatureTaskDefinition; onBack: () => voi
                         </a>
                     </React.Fragment>
                 ))}
+                {illustrations.length > 0 && <>{clickable.length > 0 ? '. Or a topic: ' : ' For example: '}</>}
+                {illustrations.map((example, index) => (
+                    <React.Fragment key={example.text}>
+                        {index > 0 && ' or '}
+                        <span className="feature-credits-illustration">“{example.text}”</span>
+                    </React.Fragment>
+                ))}
             </>
         ),
     });
-    steps.push({ content: definition.finalStep });
+    steps.push({ content: `Press Send. Your ${credits} credits are added right away.` });
 
     const applyExample = (text: string, event: React.MouseEvent<HTMLAnchorElement>) => {
         event.preventDefault();
@@ -151,8 +145,7 @@ const SetupView: React.FC<{ definition: FeatureTaskDefinition; onBack: () => voi
             )}
             {modelNote && !modelNote.required && (
                 <p className="feature-credits-text">
-                    {modelNote.text}
-                    {modelNote.offerBeaverModel && <> {beaverModelLink}</>}
+                    {modelNote.text} {beaverModelLink}
                 </p>
             )}
             <ol className="feature-credits-steps">
@@ -211,11 +204,6 @@ const FeatureCreditsCard: React.FC<{
         };
     }, [searchableLibraryIds]);
 
-    // Ask the server to catch up on anything earned since the last check.
-    useEffect(() => {
-        Zotero.Beaver?.account?.syncFeatureCredits({ catchUp: true });
-    }, []);
-
     const activeEntry = activeKey ? entries?.find((entry) => entry.definition.key === activeKey) : undefined;
     const activeDefinition = activeKey ? getFeatureCreditTask(activeKey) : undefined;
 
@@ -265,16 +253,10 @@ const FeatureCreditsCard: React.FC<{
     if (showSetup && activeEntry && activeDefinition) {
         return (
             <section className="feature-credits-card" aria-label={`${activeDefinition.title}: how to start`}>
-                <SetupView definition={activeDefinition} onBack={() => setActiveKey(null)} />
+                <SetupView definition={activeDefinition} credits={activeEntry.task.credits} onBack={() => setActiveKey(null)} />
             </section>
         );
     }
-
-    const perTask = new Set(entries.map(({ task }) => task.credits));
-    const intro = featureTasksIntro(
-        entries.length,
-        `${perTask.size === 1 ? `${[...perTask][0]} ` : ''}free credits.`,
-    );
 
     return (
         <section className="feature-credits-card" aria-labelledby="feature-credits-title">
@@ -283,7 +265,7 @@ const FeatureCreditsCard: React.FC<{
                 <IconButton icon={CancelIcon} variant="ghost-secondary" ariaLabel="Dismiss" onClick={() => setDismissed(true)} />
             </div>
             <p className="feature-credits-text">
-                {intro}
+                Try Beaver&apos;s skills. Each one gives you free credits when you start it here.
             </p>
             <ul className="feature-credits-list">
                 {entries.map((entry) => (

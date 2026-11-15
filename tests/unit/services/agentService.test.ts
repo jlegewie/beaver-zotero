@@ -1290,3 +1290,54 @@ describe('AgentService connection heartbeat', () => {
         expect(vi.mocked(callbacks.onClose!).mock.calls[0][0]).toBe(1000);
     });
 });
+
+describe('AgentService request acknowledgement', () => {
+    beforeEach(() => {
+        vi.useFakeTimers();
+        MockWebSocket.instances = [];
+        vi.stubGlobal('WebSocket', MockWebSocket);
+        mockSupabase.auth.getSession.mockReset();
+        mockSupabase.auth.getSession.mockResolvedValue({
+            data: { session: { access_token: 'token', expires_at: Math.floor(Date.now() / 1000) + 3600 } },
+            error: null,
+        });
+    });
+
+    afterEach(() => {
+        vi.unstubAllGlobals();
+        vi.useRealTimers();
+    });
+
+    const ack = (extra: Record<string, unknown> = {}) => ({
+        event: 'request_ack',
+        run_id: 'run-1',
+        model_id: null,
+        model_name: null,
+        charge_type: 'credits',
+        ...extra,
+    });
+
+    it('passes on the feature credits the request granted', async () => {
+        const service = new AgentService('http://localhost:8000');
+        const callbacks = createCallbacks();
+        const socket = await completeConnect(service, callbacks, { type: 'chat' } as AgentRunRequest);
+        socket.emitMessage(ack({ feature_credit: { key: 'annotate', credits: 5 } }));
+        await vi.advanceTimersByTimeAsync(0);
+        expect(callbacks.onRequestAck).toHaveBeenCalledWith(expect.objectContaining({
+            runId: 'run-1',
+            featureCredit: { key: 'annotate', credits: 5 },
+        }));
+        service.close();
+    });
+
+    it('has no feature credits when the request granted none', async () => {
+        const service = new AgentService('http://localhost:8000');
+        const callbacks = createCallbacks();
+        const socket = await completeConnect(service, callbacks, { type: 'chat' } as AgentRunRequest);
+        socket.emitMessage(ack());
+        await vi.advanceTimersByTimeAsync(0);
+        expect(callbacks.onRequestAck).toHaveBeenCalledTimes(1);
+        expect(vi.mocked(callbacks.onRequestAck!).mock.calls[0][0]).not.toHaveProperty('featureCredit');
+        service.close();
+    });
+});

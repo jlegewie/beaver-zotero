@@ -1,18 +1,13 @@
 import { isStoredAction } from '@beaver/agent-core/types/actions';
 import { describe, expect, it } from 'vitest';
-import type { FeatureCreditTask } from '@beaver/agent-core/types/profile';
 import {
-    COMPLETION_GRACE_MS,
-    FeatureCreditCompletionTracker,
     attachStep,
-    canRunFeatureTasks,
     featureTaskModelNote,
-    featureTasksIntro,
     topicStatus,
     type AttachmentSummary,
-    type ModelAccess,
 } from '../../../react/utils/featureCredits';
 import { FEATURE_CREDIT_TASKS, examplesForLibrary, getFeatureCreditTask } from '../../../react/constants/featureCreditTasks';
+import { ALL_BUILTIN_ACTIONS } from '../../../react/types/builtinActions';
 
 const none: AttachmentSummary = { papers: [], collections: [] };
 const papers = (...names: string[]): AttachmentSummary => ({ papers: names, collections: [] });
@@ -25,10 +20,6 @@ describe('setup card step 1', () => {
             lead: 'Attach a paper:',
             text: 'type @ to search your library, drag it in from Zotero, or open its PDF.',
         });
-    });
-
-    it('marks the step optional for notes', () => {
-        expect(attachStep({ kind: 'paper', optional: true }, none)?.lead).toBe('Optional: attach a paper to write about:');
     });
 
     it('names a single attached paper', () => {
@@ -47,16 +38,27 @@ describe('setup card step 1', () => {
         });
     });
 
-    it('asks for a collection or papers for organizing, and names an attached collection', () => {
-        expect(attachStep({ kind: 'collection' }, none)?.lead).toBe('Attach a collection or papers:');
-        expect(attachStep({ kind: 'collection' }, collection('Neighborhood effects', 14))?.lead)
+    it('asks for a collection or papers, says what happens without, and names an attached collection', () => {
+        const attach = { kind: 'collection', ifNone: 'If you attach nothing, Beaver works on your recent additions.' } as const;
+        expect(attachStep(attach, none)).toEqual({
+            done: false,
+            lead: 'Attach a collection or papers:',
+            text: 'type @ to search, or drag them in from Zotero. If you attach nothing, Beaver works on your recent additions.',
+        });
+        expect(attachStep(attach, collection('Neighborhood effects', 14))?.lead)
             .toBe('The Neighborhood effects collection (14 papers) is attached.');
     });
 
+    it('lets a literature review go without attachments, on a topic', () => {
+        const review = getFeatureCreditTask('literature_review')!;
+        expect(attachStep(review.attach, none)?.text).toContain('Or attach nothing and name a topic in the next step.');
+    });
+
     it('names a collection and papers attached together', () => {
-        expect(attachStep({ kind: 'collection' }, { papers: ['A', 'B'], collections: [{ name: 'X', itemCount: 1 }] })?.lead)
+        const attach = { kind: 'collection', ifNone: '' } as const;
+        expect(attachStep(attach, { papers: ['A', 'B'], collections: [{ name: 'X', itemCount: 1 }] })?.lead)
             .toBe('The X collection (1 paper) and 2 papers are attached.');
-        expect(attachStep({ kind: 'collection' }, { papers: [], collections: [{ name: 'A', itemCount: 2 }, { name: 'B', itemCount: null }] })?.lead)
+        expect(attachStep(attach, { papers: [], collections: [{ name: 'A', itemCount: 2 }, { name: 'B', itemCount: null }] })?.lead)
             .toBe('The A collection (2 papers) and the B collection are attached.');
     });
 
@@ -82,10 +84,27 @@ describe('research table status line', () => {
 });
 
 describe('task registry', () => {
-    it('has the four v1 tasks with unique keys and actions', () => {
-        expect(FEATURE_CREDIT_TASKS.map((task) => task.key)).toEqual(['annotate', 'note', 'organize', 'research_table']);
-        expect(new Set(FEATURE_CREDIT_TASKS.map((task) => task.actionId)).size).toBe(4);
+    it('has the four tasks, each with the action the server checks for', () => {
+        expect(Object.fromEntries(FEATURE_CREDIT_TASKS.map((task) => [task.key, task.actionId]))).toEqual({
+            annotate: 'builtin-annotate',
+            organize: 'builtin-organize',
+            research_table: 'builtin-research-table',
+            literature_review: 'builtin-collection-literature-review',
+        });
+        expect(getFeatureCreditTask('note')).toBeUndefined();
         expect(getFeatureCreditTask('unknown')).toBeUndefined();
+    });
+
+    it('teaches each task with a built-in action that exists', () => {
+        const builtinIds = new Set(ALL_BUILTIN_ACTIONS.map((action) => action.id));
+        for (const task of FEATURE_CREDIT_TASKS) expect(builtinIds.has(task.actionId)).toBe(true);
+    });
+
+    it('offers to export the literature review to Word, with the notes docs as fallback', () => {
+        const review = getFeatureCreditTask('literature_review')!;
+        expect(review.completion.exportNote).toEqual({ label: 'Export to Word' });
+        expect(review.completion.docsUrl).toBe('https://www.beaverapp.ai/docs/notes');
+        expect(review.footnote).toContain('credit limit');
     });
 
     it('fits the organize examples to how the library is organized', () => {
@@ -97,124 +116,24 @@ describe('task registry', () => {
     });
 });
 
-describe('completion tracker', () => {
-    const task = (key: string, threadId: string | null, done = true): FeatureCreditTask => ({
-        key,
-        credits: 5,
-        completed_at: done ? '2026-11-20T10:00:00Z' : null,
-        source: done ? { thread_id: threadId, run_id: 'r' } : null,
-    });
-    const make = () => {
-        let now = 0;
-        const tracker = new FeatureCreditCompletionTracker((key) => key !== 'unknown', () => now);
-        return { tracker, advance: (ms: number) => { now += ms; } };
-    };
-
-    it('never shows a card for tasks already done when the window starts', () => {
-        const { tracker } = make();
-        tracker.setOpenThread('t1');
-        tracker.updateTasks([task('annotate', 't1')], 1);
-        expect(tracker.takeReady(true)).toEqual([]);
-    });
-
-    it('shows a card for a task earned in the open chat, once, when idle', () => {
-        const { tracker } = make();
-        tracker.setOpenThread('t1');
-        tracker.updateTasks([task('annotate', null, false)], 1);
-        tracker.updateTasks([task('annotate', 't1')], 1);
-        expect(tracker.takeReady(false)).toEqual([]);
-        expect(tracker.takeReady(true).map((c) => c.task.key)).toEqual(['annotate']);
-        tracker.updateTasks([task('annotate', 't1')], 1);
-        expect(tracker.takeReady(true)).toEqual([]);
-    });
-
-    it('shows no card for a task earned in another chat', () => {
-        const { tracker } = make();
-        tracker.setOpenThread('t2');
-        tracker.updateTasks([task('note', null, false)], 1);
-        tracker.updateTasks([task('note', 't1')], 1);
-        expect(tracker.takeReady(true)).toEqual([]);
-    });
-
-    it('shows the card for a chat left within the grace period, not after', () => {
-        const { tracker, advance } = make();
-        tracker.setOpenThread('t1');
-        tracker.updateTasks([task('annotate', null, false), task('note', null, false)], 1);
-        tracker.setOpenThread(null);
-        advance(COMPLETION_GRACE_MS - 1);
-        tracker.updateTasks([task('annotate', 't1'), task('note', null, false)], 1);
-        expect(tracker.takeReady(true).map((c) => c.task.key)).toEqual(['annotate']);
-        advance(1);
-        tracker.updateTasks([task('annotate', 't1'), task('note', 't1')], 1);
-        expect(tracker.takeReady(true)).toEqual([]);
-    });
-
-    it('ignores unknown task keys and tasks without a chat', () => {
-        const { tracker } = make();
-        tracker.setOpenThread('t1');
-        tracker.updateTasks([task('unknown', null, false), task('research_table', null, false)], 1);
-        tracker.updateTasks([task('unknown', 't1'), task('research_table', null)], 1);
-        expect(tracker.takeReady(true)).toEqual([]);
-    });
-
-    it('shows a card again for a task earned after its grant was withdrawn', () => {
-        const { tracker } = make();
-        tracker.setOpenThread('t1');
-        tracker.updateTasks([task('annotate', 'old')], 1);
-        tracker.updateTasks([task('annotate', null, false)], 1);
-        tracker.updateTasks([task('annotate', 't1')], 1);
-        expect(tracker.takeReady(true).map((c) => c.task.key)).toEqual(['annotate']);
-    });
-
-    it('starts over when the account changes', () => {
-        const { tracker } = make();
-        tracker.setOpenThread('t1');
-        tracker.updateTasks([task('annotate', null, false)], 1);
-        tracker.updateTasks(null, 2);
-        tracker.updateTasks([task('annotate', 't1')], 2);
-        expect(tracker.takeReady(true)).toEqual([]);
-    });
-});
-
-describe('model and credits', () => {
-    const access = (overrides: Partial<ModelAccess>): ModelAccess => ({
-        onBeaverModel: true,
-        hasBeaverCredits: true,
-        hasOwnModel: false,
-        ...overrides,
-    });
-
-    it('says nothing when the Beaver model can run the task', () => {
-        for (const key of ['annotate', 'note', 'organize', 'research_table']) {
-            expect(featureTaskModelNote(key, access({}))).toBeNull();
+describe('model note', () => {
+    it('says nothing on the Beaver model', () => {
+        for (const task of FEATURE_CREDIT_TASKS) {
+            expect(featureTaskModelNote(task.key, true)).toBeNull();
         }
     });
 
-    it('recommends the Beaver model to someone on their own model, and requires it for tables', () => {
-        const own = access({ onBeaverModel: false, hasOwnModel: true });
-        expect(featureTaskModelNote('annotate', own)).toEqual({
-            text: 'These tasks work best with the Beaver model.',
-            offerBeaverModel: true,
-            required: false,
+    it('recommends the Beaver model for most tasks, and requires it for tables', () => {
+        for (const key of ['annotate', 'organize', 'literature_review']) {
+            expect(featureTaskModelNote(key, false)).toEqual({
+                text: 'These tasks work best with the Beaver model.',
+                required: false,
+            });
+        }
+        expect(featureTaskModelNote('research_table', false)).toEqual({
+            text: 'Tables run on Beaver credits.',
+            required: true,
         });
-        expect(featureTaskModelNote('research_table', own)).toMatchObject({ offerBeaverModel: true, required: true });
-    });
-
-    it('without Beaver credits, points to the own model and says tables cannot run', () => {
-        const ownSelected = access({ onBeaverModel: false, hasBeaverCredits: false, hasOwnModel: true });
-        expect(featureTaskModelNote('note', ownSelected)).toBeNull();
-        expect(featureTaskModelNote('research_table', ownSelected)).toMatchObject({ offerBeaverModel: false, required: true });
-        const beaverSelected = access({ hasBeaverCredits: false, hasOwnModel: true });
-        expect(featureTaskModelNote('organize', beaverSelected)?.text).toContain('Choose your own model');
-        // Reached from Plan & Usage with no way to run a task at all.
-        const neither = access({ hasBeaverCredits: false, hasOwnModel: false });
-        expect(featureTaskModelNote('organize', neither)?.text).toBe("You don't have enough Beaver credits left. Add credits or your own API key to try this.");
-    });
-
-    it('can run tasks with Beaver credits or a model of their own, not with neither', () => {
-        expect(canRunFeatureTasks(access({}))).toBe(true);
-        expect(canRunFeatureTasks(access({ hasBeaverCredits: false, hasOwnModel: true }))).toBe(true);
-        expect(canRunFeatureTasks(access({ hasBeaverCredits: false }))).toBe(false);
     });
 });
 
@@ -233,19 +152,18 @@ describe('setup card examples', () => {
         expect(table.examples.every((example) => example.illustration)).toBe(true);
     });
 
+    it('offers a literature review in any library as links, and its topic only as text', () => {
+        const review = getFeatureCreditTask('literature_review')!;
+        expect(review.examples.filter((example) => !example.illustration).map((example) => example.text))
+            .toEqual(['a 2,000-word review of the papers in this collection', 'an outline first']);
+        expect(review.examples.filter((example) => example.illustration)).toHaveLength(1);
+    });
+
     it('keeps one-click examples only where they fit any library', () => {
         const linked = FEATURE_CREDIT_TASKS
             .filter((task) => task.key !== 'research_table')
             .flatMap((task) => task.examples.map((example) => example.text));
         expect(linked).not.toContain('what my library says about measurement error');
         expect(linked).not.toContain('every definition of social capital');
-    });
-});
-
-describe('tasks intro', () => {
-    it('counts the tasks the server offers in words', () => {
-        expect(featureTasksIntro(4, '5 credits.')).toBe('Learn four skills. Each earns 5 credits.');
-        expect(featureTasksIntro(2, '5 credits.')).toBe('Learn two skills. Each earns 5 credits.');
-        expect(featureTasksIntro(1, '5 credits.')).toBe('Learn one skill. It earns 5 credits.');
     });
 });

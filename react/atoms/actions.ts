@@ -50,6 +50,7 @@ import { toValidatedMessageAttachment } from '../types/attachments/converters';
 import { resolveLibraryRef } from '../../src/utils/libraryIdentity';
 import { isTargetInLibraries } from '../utils/zoteroReferences';
 import { getActionRequirementBlock, type ActionRequirementBlock } from '../utils/actionRequirements';
+import { activeFeatureTaskAtom, featureTaskForMessage } from './featureCreditRuns';
 
 // ---------------------------------------------------------------------------
 // Base atom — initialised once from prefs + built-ins
@@ -771,6 +772,9 @@ export const sendComposedMessageAtom = atom(
             pills: SlashCommandDescriptor[];
         },
     ): Promise<boolean> => {
+        // Read while the feature task's setup card is still open: sending
+        // resets the chat input, which ends it.
+        const setupTask = get(activeFeatureTaskAtom);
         if (messageParksResume(get) && !(await set(parkResumeForMessageAtom))) return false;
         return (await withThreadWriter(get, set, async set => {
         const { baseText, pills } = payload;
@@ -806,7 +810,11 @@ export const sendComposedMessageAtom = atom(
             }
         }
 
-        await set(sendWSMessageAtom, baseText.trim(), { actions: promptActions });
+        const featureTask = featureTaskForMessage(setupTask, promptActions);
+        await set(sendWSMessageAtom, baseText.trim(), {
+            actions: promptActions,
+            ...(featureTask ? { featureTask } : {}),
+        });
         return true;
         })) ?? false;
     },

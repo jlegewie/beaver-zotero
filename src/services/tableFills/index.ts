@@ -113,7 +113,6 @@ const deps: TableFillDeps = {
         balance: balanceOf,
         subscribe: (listener) => Zotero.Beaver.account?.subscribe(() => listener()) ?? (() => {}),
         refreshProfile: () => void Zotero.Beaver.account?.refresh(true).catch(() => {}),
-        syncFeatureCredits: () => Zotero.Beaver.account?.syncFeatureCredits(),
     },
     publish: (snapshot) => Zotero.Beaver.runtime.publish(TABLE_FILL_CHANGED_EVENT, snapshot),
     newId: () => crypto.randomUUID(),

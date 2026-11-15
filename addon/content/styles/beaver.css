@@ -6664,6 +6664,11 @@
     flex: none;
     margin-top: 2px;
 }
+.beaver-root .feature-credits-row-credits {
+    flex: none;
+    color: var(--fill-secondary);
+    font-variant-numeric: tabular-nums;
+}
 .beaver-root .feature-credits-row-text {
     flex: 1;
     min-width: 0;
