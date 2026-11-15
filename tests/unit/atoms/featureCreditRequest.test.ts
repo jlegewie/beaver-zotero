@@ -72,14 +72,15 @@ describe('feature credits on the chat request', () => {
         store.set(pendingFeatureCreditsAtom, new Map());
     });
 
-    it('names the feature task on the request it was sent for', async () => {
+    it('names the feature task on the message it was sent for, and keeps it with the run', async () => {
         await store.set(sendWSMessageAtom, '/annotate the methods', { featureTask: 'annotate' });
-        expect(connectMock.mock.calls[0][0].feature_task).toBe('annotate');
+        expect(connectMock.mock.calls[0][0].user_prompt.feature_task).toBe('annotate');
+        expect(store.get(activeRunAtom)!.user_prompt.feature_task).toBe('annotate');
     });
 
     it('names no feature task on an ordinary message', async () => {
         await store.set(sendWSMessageAtom, 'hello');
-        expect(connectMock.mock.calls[0][0]).not.toHaveProperty('feature_task');
+        expect(connectMock.mock.calls[0][0].user_prompt).not.toHaveProperty('feature_task');
     });
 
     it('remembers the credits an acknowledgement reports for its run', async () => {

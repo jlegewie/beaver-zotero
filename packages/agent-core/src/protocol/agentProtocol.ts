@@ -162,7 +162,7 @@ export interface WSRequestAckEvent extends WSBaseEvent {
      */
     reattach_token?: string;
     /**
-     * Feature credits this request granted (see `AgentRunRequest.feature_task`).
+     * Feature credits this request granted (see `BeaverAgentPrompt.feature_task`).
      * Present only on the request that earned them.
      */
     feature_credit?: FeatureCreditGrant;
@@ -3580,12 +3580,6 @@ export interface AgentRunRequest {
     retry_trigger?: RetryTrigger;
     /** Pre-generated assistant message ID (optional) */
     assistant_message_id?: string;
-    /**
-     * The feature-credit task this message was started for, from the task's
-     * setup card. The server grants the task's credits once, and only when the
-     * prompt's actions include the task's own action.
-     */
-    feature_task?: string;
 }
 
 // =============================================================================

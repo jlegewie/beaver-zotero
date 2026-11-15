@@ -153,7 +153,7 @@ export const FEATURE_CREDIT_TASKS: FeatureTaskDefinition[] = [
         attach: { kind: 'collection', ifNone: 'Or attach nothing and name a topic in the next step.' },
         instruction: 'say what to write',
         examples: [
-            { text: 'a 2,000-word review of the papers in this collection' },
+            { text: 'a short review of the papers in this collection' },
             { text: 'an outline first' },
             { text: 'neighborhood effects on school outcomes, as background for a grant proposal', illustration: true },
         ],

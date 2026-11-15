@@ -627,11 +627,9 @@ function createAgentRunShell(
          * here, so nothing else in the request identifies it as one.
          */
         retryTrigger?: RetryTrigger;
-        /** The feature-credit task this message starts (see `AgentRunRequest.feature_task`). */
-        featureTask?: string;
     },
 ): { run: AgentRun; request: AgentRunRequest } {
-    const { runIdOverride, permissionsOverride, retryTrigger, featureTask } = options ?? {};
+    const { runIdOverride, permissionsOverride, retryTrigger } = options ?? {};
     const runId = runIdOverride ?? uuidv4();
 
     // Get user preferences for charging permissions, then apply any partial override.
@@ -668,7 +666,6 @@ function createAgentRunShell(
         ...(modelSelectionOptions.api_key ? { api_key: modelSelectionOptions.api_key } : {}),
         ...(customModel ? { custom_model: customModel } : {}),
         ...(retryTrigger ? { retry_trigger: retryTrigger } : {}),
-        ...(featureTask ? { feature_task: featureTask } : {}),
     };
 
     // Create the shell AgentRun for immediate UI rendering
@@ -2912,10 +2909,7 @@ export interface SendWSMessageOptions {
     origin?: PromptOrigin;
     /** Saved actions invoked as /command tokens in the message content */
     actions?: PromptAction[];
-    /**
-     * The feature-credit task this message was started for from its setup
-     * card. Sent on this request only, never on its retries or resumes.
-     */
+    /** The feature-credit task this message was started for, from its setup card. */
     featureTask?: string;
 }
 
@@ -3219,6 +3213,7 @@ const sendWSMessage = async (
             ...(toolRequests ? { tool_requests: toolRequests } : {}),
             ...(origin ? { origin } : {}),
             ...(actions?.length ? { actions } : {}),
+            ...(featureTask ? { feature_task: featureTask } : {}),
         };
 
         // Get current thread ID (null for new thread)
@@ -3254,7 +3249,7 @@ const sendWSMessage = async (
                 model?.provider,
                 customInstructions,
                 model?.is_custom ? model.custom_model : undefined,
-                { runIdOverride, permissionsOverride, featureTask },
+                { runIdOverride, permissionsOverride },
             );
 
             // Set active run - UI now shows user message + spinner

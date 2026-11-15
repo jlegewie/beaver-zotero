@@ -161,7 +161,7 @@ describe('setup card examples', () => {
     it('offers a literature review in any library as links, and its topic only as text', () => {
         const review = getFeatureCreditTask('literature_review')!;
         expect(review.examples.filter((example) => !example.illustration).map((example) => example.text))
-            .toEqual(['a 2,000-word review of the papers in this collection', 'an outline first']);
+            .toEqual(['a short review of the papers in this collection', 'an outline first']);
         expect(review.examples.filter((example) => example.illustration)).toHaveLength(1);
     });
 

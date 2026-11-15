@@ -179,6 +179,13 @@ export interface BeaverAgentPrompt {
     /** Saved actions invoked as /command tokens in `content` */
     actions?: PromptAction[];
     /**
+     * The feature-credit task this message was started for, from the task's
+     * setup card. Stored with the run, so a retry sends it again; the server
+     * grants the task's credits once, and only when `actions` include the
+     * task's own action.
+     */
+    feature_task?: string;
+    /**
      * Answers to cards of the thread's open parked run, keyed by tool call id.
      * Each value is the response the card sends live, `type` included. Its
      * presence makes the request a resume of the run named in

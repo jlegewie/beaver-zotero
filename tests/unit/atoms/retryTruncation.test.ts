@@ -336,6 +336,17 @@ describe('retry via synchronous truncation', () => {
             expect(sentRequest().expected_tail_run_id).toBe("a");
             expect(threadRunIds()).toEqual(["a"]);
         });
+        it("auto-retry resends the feature task the failed run was sent for", async () => {
+            store.set(threadRunsAtom, [makeRun("a")]);
+            store.set(activeRunAtom, makeRun("local", {
+                status: "error",
+                user_prompt: { content: "/review", feature_task: "literature_review" },
+            }));
+            store.set(threadAdmissionAtom, { threadId: "thread-1", tailRunId: "a", activity: { state: "idle", run_id: null } });
+            historyMock.mockResolvedValue({ runs: [makeRun("a")], tail_run_id: "a", activity: { state: "idle", run_id: null } });
+            await store.set(autoRetryErroredRunAtom, "local");
+            expect(sentRequest().user_prompt.feature_task).toBe("literature_review");
+        });
         it.each(["busy", "unseen", "removed", "offline"])("preserves local history when auto-retry history is %s", async (state) => {
             store.set(threadRunsAtom, [makeRun("a"), makeRun("local", { status: "error" })]);
             store.set(activeRunAtom, makeRun("live", { status: "error" }));
@@ -1077,6 +1088,25 @@ describe('retry via synchronous truncation', () => {
             editedPrompt: { content: 'rewritten' },
         });
         expect(sentRequest().retry_trigger).toBeUndefined();
+    });
+
+    it('keeps the feature task a message was sent for across successive retries', async () => {
+        // The task travels on the stored prompt, so every retry that rebuilds
+        // from it, including a retry of a retry, sends it again.
+        const prompt = { content: '/table neighborhood effects', feature_task: 'research_table' };
+        store.set(threadRunsAtom, [makeRun('a'), makeRun('b', { user_prompt: prompt })]);
+        truncateMock.mockResolvedValue(okReport(['b']));
+        await store.set(regenerateFromRunAtom, { runId: 'b' });
+        expect(sentRequest().user_prompt.feature_task).toBe('research_table');
+
+        const replacement = store.get(activeRunAtom)!;
+        expect(replacement.user_prompt.feature_task).toBe('research_table');
+        store.set(activeRunAtom, null);
+        store.set(threadRunsAtom, [makeRun('a'), { ...replacement, status: 'error' }]);
+        store.set(isWSChatPendingAtom, false);
+        truncateMock.mockResolvedValue(okReport([replacement.id]));
+        await store.set(regenerateFromRunAtom, { runId: replacement.id });
+        expect(sentRequest().user_prompt.feature_task).toBe('research_table');
     });
 
     it('folds a terminal active run into the dialog and the POSTed removal', async () => {
