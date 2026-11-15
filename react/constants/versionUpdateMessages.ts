@@ -656,8 +656,8 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
     },
     {
         version: "0.27.0",
-        title: "Research tables, right in Zotero",
-        text: "Compare the papers in your library side by side. Beaver reads each one, answers your questions, and links every answer to the exact passage.",
+        title: "Extract data from every paper. Compare them side by side",
+        text: "Introducing research tables in Zotero. Beaver reads each paper, fills in every answer and links it to the page it came from. Export the table to Excel or CSV.",
         showcase: 'research-table',
         primaryAction: { type: 'stage-action', label: 'Try it', actionId: 'builtin-research-table', requiresPlusTools: true },
         inPanel: false,
