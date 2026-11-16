@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
-import { ArrowLeftIcon, ArrowRightIcon, CancelIcon, CheckmarkCircleSolidIcon, CircleIcon, Icon } from '../icons/icons';
+import { ArrowLeftIcon, ArrowRightIcon, CancelIcon, CheckmarkCircleSolidIcon, CircleIcon, HighlighterIcon, Icon, LayersIcon, QuillWriteIcon, TableIcon } from '../icons/icons';
 import {
     featureCreditEntriesAtom,
     featureCreditsCardDismissedAtom,
@@ -21,6 +21,13 @@ import { attachStep, featureTaskModelNote, topicStatus } from '../../utils/featu
 import { countLibraryItems, readLibraryShape } from '../../utils/libraryShape';
 import { SMALL_LIBRARY_THRESHOLD } from '../../atoms/zoteroContext';
 
+const TASK_ICONS: Record<string, React.ComponentType<React.SVGProps<SVGSVGElement>>> = {
+    literature_review: QuillWriteIcon,
+    annotate: HighlighterIcon,
+    organize: LayersIcon,
+    research_table: TableIcon,
+};
+
 /** One task in the list: done, or a button that opens its setup card. */
 const TaskRow: React.FC<{ entry: FeatureCreditEntry; onStart: (key: string, win: Window | null) => void }> = ({ entry, onStart }) => {
     const { task, definition } = entry;
@@ -28,15 +35,15 @@ const TaskRow: React.FC<{ entry: FeatureCreditEntry; onStart: (key: string, win:
     const body = (
         <>
             <Icon
-                icon={done ? CheckmarkCircleSolidIcon : CircleIcon}
+                icon={done ? CheckmarkCircleSolidIcon : (TASK_ICONS[definition.key] ?? CircleIcon)}
                 className={`feature-credits-row-mark scale-11 ${done ? 'font-color-green' : 'font-color-secondary'}`}
                 aria-label={done ? 'Done' : undefined}
             />
             <span className="feature-credits-row-text">
-                <span className={done ? 'font-color-secondary' : 'font-color-primary'}>{definition.title}</span>
+                <span className={done ? 'font-color-secondary' : 'font-color-primary font-medium'}>{definition.title}</span>
                 <span className="feature-credits-row-subtitle">{definition.subtitle}</span>
             </span>
-            {!done && <span className="feature-credits-row-credits">+{task.credits}</span>}
+            {/* {!done && <span className="feature-credits-row-credits">+{task.credits}</span>} */}
             {!done && <Icon icon={ArrowRightIcon} className="feature-credits-row-arrow font-color-secondary" />}
         </>
     );
@@ -167,7 +174,7 @@ const SetupView: React.FC<{ definition: FeatureTaskDefinition; credits: number; 
 let lastLibraryCheck: { libraries: string; ready: boolean } | null = null;
 
 /**
- * "Get more out of Beaver": the feature-credit tasks on the home screen.
+ * "Try Beaver and earn free credits": the feature-credit tasks on the home screen.
  *
  * The list shows each skill; clicking an open one stages its action in the
  * chat input and swaps the list for that task's setup card. The setup ends
@@ -261,11 +268,11 @@ const FeatureCreditsCard: React.FC<{
     return (
         <section className="feature-credits-card" aria-labelledby="feature-credits-title">
             <div className="feature-credits-header">
-                <h2 id="feature-credits-title" className="feature-credits-title">Get more out of Beaver</h2>
+                <h2 id="feature-credits-title" className="feature-credits-title">Try Beaver and earn free credits</h2>
                 <IconButton icon={CancelIcon} variant="ghost-secondary" ariaLabel="Dismiss" onClick={() => setDismissed(true)} />
             </div>
             <p className="feature-credits-text">
-                Try Beaver&apos;s skills. Each one gives you free credits when you start it here.
+                Choose a task below. You'll earn credits the first time you send it.
             </p>
             <ul className="feature-credits-list">
                 {entries.map((entry) => (

@@ -80,9 +80,29 @@ const DOCS_BASE_URL = 'https://www.beaverapp.ai/docs';
 
 export const FEATURE_CREDIT_TASKS: FeatureTaskDefinition[] = [
     {
+        key: 'literature_review',
+        title: 'Write a literature review',
+        subtitle: 'A cited review as a Zotero note',
+        actionId: 'builtin-collection-literature-review',
+        explanation: 'Beaver finds the papers (in a collection, among the papers you pick, or on a topic), compares them in an evidence table when there are many, and writes a cited literature review as a Zotero note.',
+        attach: { kind: 'collection', ifNone: 'Or attach nothing and name a topic in the next step.' },
+        instruction: 'say what to write',
+        examples: [
+            { text: 'a short review of the papers in this collection' },
+            { text: 'an outline first' },
+            { text: 'neighborhood effects on school outcomes, as background for a grant proposal', illustration: true },
+        ],
+        footnote: 'A long review can use more credits than you get for it. Beaver asks before going past your credit limit.',
+        completion: {
+            tip: 'Beaver writes a review as a note in Zotero: click a citation to open the passage it cites.',
+            noteTip: 'Your literature review is stored as a note in Zotero. Export it as Word, PDF or LaTeX using',
+            docsUrl: `${DOCS_BASE_URL}/notes`,
+        },
+    },
+    {
         key: 'annotate',
-        title: 'Annotate a document',
-        subtitle: 'Highlights and comments, added to your PDF',
+        title: 'Annotate a PDF',
+        subtitle: 'Add highlights and comments directly to your PDFs.',
         actionId: 'builtin-annotate',
         explanation: "Beaver reads a paper and adds highlights and comments in Zotero's reader.",
         attach: { kind: 'paper' },
@@ -142,26 +162,6 @@ export const FEATURE_CREDIT_TASKS: FeatureTaskDefinition[] = [
         completion: {
             tip: 'Click a cell to see the quote behind it. You can add a column with a new question and fill the remaining rows.',
             docsUrl: `${DOCS_BASE_URL}/research-tables`,
-        },
-    },
-    {
-        key: 'literature_review',
-        title: 'Write a literature review',
-        subtitle: 'A cited review as a Zotero note',
-        actionId: 'builtin-collection-literature-review',
-        explanation: 'Beaver finds the papers (in a collection, among the papers you pick, or on a topic), compares them in an evidence table when there are many, and writes a cited literature review as a Zotero note.',
-        attach: { kind: 'collection', ifNone: 'Or attach nothing and name a topic in the next step.' },
-        instruction: 'say what to write',
-        examples: [
-            { text: 'a short review of the papers in this collection' },
-            { text: 'an outline first' },
-            { text: 'neighborhood effects on school outcomes, as background for a grant proposal', illustration: true },
-        ],
-        footnote: 'A long review can use more credits than you get for it. Beaver asks before going past your credit limit.',
-        completion: {
-            tip: 'Beaver writes a review as a note in Zotero: click a citation to open the passage it cites.',
-            noteTip: 'Your literature review is stored as a note in Zotero. Export it as Word, PDF or LaTeX using',
-            docsUrl: `${DOCS_BASE_URL}/notes`,
         },
     },
 ];
