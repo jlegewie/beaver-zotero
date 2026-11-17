@@ -1,8 +1,9 @@
 import { useRef, useCallback, useEffect, useState, ForwardedRef, RefObject } from 'react';
 import { store } from '../store';
 import { AT_BOTTOM_EPSILON, BOTTOM_THRESHOLD, scrollAtoms, publishDistanceFromBottom, resumeFollowing, wasProgrammaticScroll } from '../utils/scrollPosition';
+import { captureScrollAnchor } from '../utils/scrollAnchor';
 
-const SCROLL_POSITION_UPDATE_THRESHOLD = 10; // pixels - minimum change to update scroll position atom
+const SCROLL_POSITION_UPDATE_THRESHOLD = 10; // pixels - minimum movement before the remembered place is re-recorded
 
 /**
  * Smallest backwards movement between two scroll events that counts as one.
@@ -45,8 +46,9 @@ interface UseAutoScrollReturn {
  * - the measured position (`isAtBottom`), published on every scroll event
  * - the reader's intent (`userScrolled`), latched by the gestures below
  * - the reader's place in the thread (`position`), remembered for the next
- *   time the thread is opened: the offset they scrolled back to, or "the
- *   bottom" when they are following the response
+ *   time the thread is shown: what they scrolled back to (an anchor, see
+ *   react/utils/scrollAnchor.ts), or "the bottom" when they are following
+ *   the response
  *
  * @param forwardedRef Optional ref to forward (for forwardRef components)
  * @param options Configuration options
@@ -310,9 +312,9 @@ export function useAutoScroll(
         }
 
         // Remember where the reader is in this thread, for when it is next
-        // opened.
+        // shown — possibly in the other sidebar, at another width.
         if (store.get(scrolledAtom)) {
-            // The offset only matters while it changes by something visible;
+            // The place only matters while it changes by something visible;
             // below that the writes are jitter from an animation. The first
             // one after leaving the bottom is written regardless, since until
             // then nothing has been remembered at all.
@@ -321,8 +323,13 @@ export function useAutoScroll(
                 scrollPositionDelta > SCROLL_POSITION_UPDATE_THRESHOLD ||
                 store.get(scrollPositionAtom) === undefined
             ) {
-                store.set(scrollPositionAtom, scrollTop);
-                lastStoredScrollTopRef.current = scrollTop;
+                // Layout is settled in a scroll handler, so reading the boxes
+                // the anchor is taken from costs no reflow here.
+                const anchor = captureScrollAnchor(container);
+                if (anchor) {
+                    store.set(scrollPositionAtom, anchor);
+                    lastStoredScrollTopRef.current = scrollTop;
+                }
             }
         }
     }, [threshold, scrollAtoms, scrolledAtom, scrollPositionAtom, detachFromBottom]);
