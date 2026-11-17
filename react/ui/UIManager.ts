@@ -2,6 +2,7 @@ import { getHostWindow, getWindowRuntime, tryGetWindowRuntime } from '../runtime
 import { collapseTableTabContextPane, isTableTabSelected, openTableTabContextPane } from '../../src/ui/tableTabContextPane';
 import { DOMElements, SidebarLocation, UIState, CollapseState } from './types';
 import { applyReaderPaneVisibility, isStackedLayout } from '../utils/zoteroLayout';
+import { activeItemPane } from '../../src/ui/libraryPane';
 
 class UIManager {
     private elements: DOMElements;
@@ -115,7 +116,8 @@ class UIManager {
                 return emptyElements;
             }
 
-            const itemPane = win.document.querySelector("#zotero-item-pane") as HTMLElement | null;
+            // The active library view's pane: Zotero 11 has one per library tab.
+            const itemPane = activeItemPane(win);
             const readerPane = win.document.querySelector("#zotero-context-pane") as HTMLElement | null;
 
             return {
@@ -233,24 +235,26 @@ class UIManager {
             if (!win || win.closed || !win.ZoteroPane) {
                 return;
             }
-            const itemPane = win.ZoteroPane.itemPane;
-            
-            if (show && itemPane) {
+            const itemPane = activeItemPane(win) as (HTMLElement & { collapsed?: boolean }) | null;
+            const sidebar = this.elements.librarySidebar as HTMLElement | null;
+
+            // Never hide the item pane's own content without the sidebar to
+            // replace it, which would leave the pane blank.
+            if (show && itemPane && sidebar) {
                 this.collapseState.library = itemPane?.collapsed || null;
                 if (this.collapseState.library) {
                     itemPane.collapsed = false;
                 }
                 this.elements.libraryContent?.forEach(el => (el as HTMLElement).style.display = 'none');
-                if (this.elements.librarySidebar) {
-                    (this.elements.librarySidebar as HTMLElement).style.removeProperty('display');
-                    this.applyLibrarySidebarWidth(this.elements.librarySidebar as HTMLElement);
-                }
+                sidebar.style.removeProperty('display');
+                this.applyLibrarySidebarWidth(sidebar);
             } else {
+                // Hide the sidebar even when restoring a collapsed pane: in
+                // Zotero 11 the mount can move on to another library view's pane.
+                this.handleLibraryCleanup();
                 if (this.collapseState.library && itemPane) {
                     itemPane.collapsed = true;
-                    return;
                 }
-                this.handleLibraryCleanup();
             }
         } catch (e) {
             // Silently handle errors

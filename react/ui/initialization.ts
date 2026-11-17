@@ -1,8 +1,9 @@
 import { uiManager } from './UIManager';
+import { isLibraryTabSelected } from '../../src/ui/libraryPane';
 
 export function initializeReactUI(win: Window) {
     // Set initial UI state
-    const isLibraryTab = win.Zotero_Tabs.selectedType === 'library';
+    const isLibraryTab = isLibraryTabSelected(win);
     uiManager.updateUI({
         isVisible: false,
         isLibraryTab,

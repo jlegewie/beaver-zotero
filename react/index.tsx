@@ -16,9 +16,7 @@ import { setSupabaseClientProvider } from '@beaver/agent-core/transport/supabase
 import { setThreadAgentName } from '@beaver/agent-core/transport/threadService';
 import type { ActionCategoryFilter } from '@beaver/agent-core/types/actions';
 import { setActionClient } from '@beaver/agent-core/types/actions';
-import { Provider } from 'jotai';
 import React from 'react';
-import { createRoot } from 'react-dom/client';
 import type { WindowRuntime } from '../src/runtime/instance';
 import { registerTableLocalCommands } from '../src/services/artifacts/tableStore';
 import { activateStoredCitation } from './host/zotero/citationActivation';
@@ -75,7 +73,6 @@ import { useUpgradeHandler } from './hooks/useUpgradeHandler';
 import { useZoteroContext } from './hooks/useZoteroContext';
 import { useZoteroTabSelection } from './hooks/useZoteroTabSelection';
 import { registerZoteroHost } from './host/zotero';
-import { SurfaceWindowContext } from './runtime/SurfaceWindowContext';
 import { attachAccountProjection } from './runtime/accountProjection';
 import { openNote, openReader } from './runtime/navigation';
 import { captureOperationContext } from './runtime/operationContext';
@@ -83,6 +80,7 @@ import { getContextWindow, getWindowRuntime, initializeWindowRuntime } from './r
 import { store } from './store';
 import { uiManager } from './ui/UIManager';
 import { initializeReactUI } from './ui/initialization';
+import { mountedSurfaceCount, mountSurface, unmountAllSurfaces, unmountFromElement } from './ui/surfaceRoots';
 import { BeaverTemporaryAnnotations } from './utils/annotationUtils';
 import { undoEditNoteOrBatchAction } from './utils/editNoteActions';
 import { addPopupMessageAtom } from './utils/popupMessageUtils';
@@ -235,31 +233,6 @@ function ZoteroContextInitializer() {
     return null;
 }
 
-// Store root references for proper cleanup
-const rootsMap = new Map<HTMLElement, any>();
-
-function mountSurface(domElement: HTMLElement, children: React.ReactNode) {
-    unmountFromElement(domElement);
-    const root = createRoot(domElement);
-    rootsMap.set(domElement, root);
-    root.render(
-        <Provider store={store}>
-            <SurfaceWindowContext.Provider value={domElement.ownerDocument.defaultView}>
-                {getTransportConfigurationError() ? (
-                    <div role="alert" style={{ padding: 20 }}>
-                        <strong>Beaver couldn’t start</strong>
-                        <p>{getTransportConfigurationError()}</p>
-                        <p>
-                            Restart Zotero. If this continues, reinstall Beaver.
-                        </p>
-                    </div>
-                ) : children}
-            </SurfaceWindowContext.Provider>
-        </Provider>,
-    );
-    return root;
-}
-
 /**
  * Renders the GlobalContextInitializer into a dedicated DOM element.
  * This should be called once per window.
@@ -379,18 +352,7 @@ export function renderPreferencesWindow(domElement: HTMLElement, initialTab?: Pr
     ));
 }
 
-/**
- * Unmount a React root from a DOM element
- */
-export function unmountFromElement(domElement: HTMLElement) {
-    const root = rootsMap.get(domElement);
-    if (root) {
-        root.unmount();
-        rootsMap.delete(domElement);
-        return true;
-    }
-    return false;
-}
+export { unmountFromElement };
 
 /**
  * Dev-only cleanup hook called by the esbuild bundle before React unmounts.
@@ -435,10 +397,7 @@ export function initializeRuntime(runtime: WindowRuntime) {
 
 export function disposeRuntime() {
     eventManager.dispose();
-    for (const root of rootsMap.values()) {
-        try { root.unmount(); } catch (error) { Zotero.logError(error as Error); }
-    }
-    rootsMap.clear();
+    unmountAllSurfaces();
     uiManager.cleanup();
 }
 
@@ -540,6 +499,6 @@ export function inspectRuntime(request?: { runId?: string; command?: string; thr
         hasReaderAttachment: !!store.get(currentReaderAttachmentAtom),
         noteItemId: store.get(currentNoteItemAtom)?.id ?? null,
         backgroundRunning: store.get(isBackgroundWorkerRunningAtom),
-        roots: rootsMap.size,
+        roots: mountedSurfaceCount(),
     };
 }

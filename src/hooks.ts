@@ -539,8 +539,21 @@ function onStandaloneWindowUnload(win: Window): void {
 }
 
 async function onMainWindowLoad(win: Window): Promise<void> {
+    // Zotero 11 calls this again for a window Beaver attached at startup
+    // without a library view, once its first one loads. The renderer adds the
+    // library sidebar itself when that view's tab is selected.
     if (win.closed || addon.runtime.getWindow(win)) return;
     const runtime = addon.runtime.attachWindow(win);
+
+    // Zotero 11 reports main windows to plugins by their library views: a
+    // window without a loaded one never reports its unload. Follow the
+    // window's own unload as well; the second call is a no-op. Earlier
+    // versions report every main window's close themselves.
+    if (Array.isArray((win as any).ZoteroPane?.libraryViews)) {
+        const onWindowUnload = () => { void onMainWindowUnload(win, { windowUnloading: true }); };
+        win.addEventListener("unload", onWindowUnload);
+        addon.runtime.addWindowCleanup(runtime, () => win.removeEventListener("unload", onWindowUnload));
+    }
 
     // Create ztoolkit for every window
     addon.data.ztoolkit = createZToolkit();
@@ -591,6 +604,18 @@ async function onMainWindowLoad(win: Window): Promise<void> {
 }
 
 /**
+ * Whether Zotero reported a window unloaded only because its last library
+ * view closed. Zotero 11 does that while the window and its reader tabs stay
+ * open; Beaver keeps serving them and cleans up on the window's own unload.
+ * When the window itself closes, its library views are still registered.
+ */
+function onlyLibraryViewsClosed(win: Window): boolean {
+    if (win.closed || isAppQuitting || (Services?.startup?.shuttingDown ?? false)) return false;
+    const views = (win as any).ZoteroPane?.libraryViews;
+    return Array.isArray(views) && views.length === 0;
+}
+
+/**
  * Cleanup handler for main window unload.
  *
  * IMPORTANT: This is where ALL cleanup must happen because:
@@ -605,7 +630,14 @@ async function onMainWindowLoad(win: Window): Promise<void> {
  * 4. Unmount React components
  * 5. Unload stylesheets
  */
-async function onMainWindowUnload(win: Window): Promise<void> {
+async function onMainWindowUnload(
+    win: Window,
+    { windowUnloading = false }: { windowUnloading?: boolean } = {},
+): Promise<void> {
+    if (!windowUnloading && onlyLibraryViewsClosed(win)) {
+        ztoolkit.log("onMainWindowUnload: last library view closed, keeping the open window");
+        return;
+    }
     const runtime = addon.runtime.getWindow(win);
     if (!addon.runtime.markClosing(win)) return;
     if (runtime) {

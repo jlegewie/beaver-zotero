@@ -4,6 +4,8 @@ import { store } from '../store';
 import { isSidebarVisibleAtom } from '../atoms/ui';
 import { useEventSubscription } from './useEventSubscription';
 import { uiManager } from '../ui/UIManager';
+import { isLibraryTabSelected } from '../../src/ui/libraryPane';
+import { syncLibrarySidebar } from '../ui/librarySidebar';
 import { getPref } from '../../src/utils/prefs';
 import { removePopupMessagesByTypeAtom } from '../atoms/ui';
 import { currentMessageItemsAtom, updateMessageItemsFromZoteroSelectionAtom } from '../atoms/messageComposition';
@@ -29,7 +31,7 @@ export function useToggleSidebar() {
 
             // Already in the desired state — no-op
             if (newIsVisible === currentlyOpen) return prev;
-            const isLibraryTab = getContextWindow().Zotero_Tabs.selectedType === 'library';
+            const isLibraryTab = isLibraryTabSelected(getContextWindow());
 
             logger(`useToggleSidebar: toggleChat event received - currently open: ${currentlyOpen}, will be: ${newIsVisible}, location: ${isLibraryTab ? 'library' : 'reader'}`);
 
@@ -52,7 +54,9 @@ export function useToggleSidebar() {
                 }
             }
             
-            // Update UI through UIManager
+            // Update UI through UIManager, with the library sidebar in the
+            // active library view first
+            if (newIsVisible && isLibraryTab) syncLibrarySidebar();
             uiManager.updateUI({
                 isVisible: newIsVisible,
                 isLibraryTab,

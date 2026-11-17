@@ -55,6 +55,28 @@ it('updates and cleans only the owning window even when another window has focus
     instance.disposeInstance();
 });
 
+it('hides the library sidebar when closing restores a collapsed item pane', async () => {
+    vi.resetModules();
+    const instance = new BeaverInstance();
+    (Zotero as any).Beaver = { runtime: instance };
+    const win = makeWindow();
+    const { initializeWindowRuntime } = await import('../../../react/runtime/windowRuntime');
+    const { uiManager } = await import('../../../react/ui/UIManager');
+    initializeWindowRuntime(instance.attachWindow(win));
+    const pane = win.document.getElementById('zotero-item-pane') as any;
+    pane.collapsed = true;
+    const collapseState = { library: null, reader: null };
+    uiManager.updateUI({ isVisible: true, isLibraryTab: true, collapseState });
+    expect(pane.collapsed).toBe(false);
+    uiManager.updateUI({ isVisible: false, isLibraryTab: true, collapseState });
+    expect(pane.collapsed).toBe(true);
+    expect(win.document.getElementById('beaver-pane-library')!.style.display).toBe('none');
+    expect(win.document.getElementById('original-library')!.style.display).toBe('');
+    instance.markClosing(win);
+    uiManager.cleanup();
+    instance.disposeInstance();
+});
+
 it('ignores toggles before initialization and after closing without touching DOM or timers', async () => {
     vi.resetModules();
     const { initializeWindowRuntime } = await import('../../../react/runtime/windowRuntime');

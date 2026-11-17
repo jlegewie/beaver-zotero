@@ -215,6 +215,36 @@ describe('closing the agent connection on window unload', () => {
         });
     });
 
+    it("keeps a window open after its last Zotero 11 library view closes", async () => {
+        setupGlobals({ appShuttingDown: false });
+        const hooks = await loadHooks();
+        const close = vi.fn();
+        const win = makeWindow(close);
+        // Zotero 11 reports the unload while the window's readers stay open.
+        win.ZoteroPane = { libraryViews: [] };
+        vi.mocked(Zotero.getMainWindows).mockReturnValue([win]);
+
+        await hooks.onMainWindowUnload(win);
+
+        expect(close).not.toHaveBeenCalled();
+        expect((globalThis as any).addon.runtime.getWindow(win)).toBeDefined();
+    });
+
+    it("cleans up when a window without library views itself unloads", async () => {
+        setupGlobals({ appShuttingDown: false });
+        const hooks = await loadHooks();
+        const close = vi.fn();
+        const win = makeWindow(close);
+        win.ZoteroPane = { libraryViews: [] };
+        vi.mocked(Zotero.getMainWindows).mockReturnValue([win]);
+
+        await hooks.onMainWindowUnload(win, { windowUnloading: true });
+
+        expect(close).toHaveBeenCalledExactlyOnceWith('Main window closed', {
+            rememberInterruptedThread: true,
+        });
+    });
+
     it('ignores a window that is already closed when counting what remains', async () => {
         setupGlobals({ appShuttingDown: false });
         const hooks = await loadHooks();

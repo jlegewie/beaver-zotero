@@ -10,6 +10,7 @@ import { ActionCategoryFilter } from "@beaver/agent-core/types/actions";
 import { contextMainWindow, resolveChatWindow } from "../runtime/navigation";
 import { attachViewRowDrag, detachViewRowDrag } from "../modules/viewRowDrag";
 import { loadRendererBundle } from "./rendererBundle";
+import { activeItemPane, createSidebarMount } from "./libraryPane";
 
 let keyboardManager: KeyboardManager | null = null;
 
@@ -66,44 +67,23 @@ export class BeaverUIFactory {
         const standalone = win.__beaverRuntime?.kind === "standalone";
         ztoolkit.log("registerChatPanel: previous panel removed");
 
-        /**
-         * Create mounting points for React components
-         */
-        function createMountingElement(id: string, location: 'library' | 'reader') {
-            const mountPoint = win.document.createXULElement("vbox");
-            mountPoint.setAttribute("id", id);
-            // `beaver-root` is the scoping root for @beaver/agent-ui's shared
-            // sheets: they select `.beaver-root .foo`, so the class has to sit
-            // on exactly the elements that carry a `beaver-pane-*` id or the
-            // utility layer stops matching inside this pane.
-            mountPoint.setAttribute("class", "beaver-root display-flex flex-1 h-full min-w-0");
-            mountPoint.setAttribute("style", "min-width: 0px; display: none;");
-
-            // Create a div inside the vbox as mount point for the React component
-            const reactContainer = win.document.createElement("div");
-            reactContainer.setAttribute("id", `beaver-react-root-${location}`);
-            reactContainer.setAttribute("data-location", location);
-            reactContainer.setAttribute("class", "display-flex flex-1 flex-col h-full min-w-0");
-            mountPoint.appendChild(reactContainer);
-
-            return { mountPoint, reactContainer };
-        }
-
-        // Create and append mounting points
-        const itemPane = win.document.getElementById("zotero-item-pane");
+        // Create and append mounting points. A Zotero 11 window that has not
+        // shown its library tab yet has no item pane: the renderer adds the
+        // library sidebar once one exists (`react/ui/librarySidebar.tsx`).
+        const itemPane = activeItemPane(win);
         const contextPane = win.document.getElementById("zotero-context-pane");
         ztoolkit.log(`registerChatPanel: itemPane=${Boolean(itemPane)} contextPane=${Boolean(contextPane)} (${windowHref})`);
 
         if (itemPane) {
             ztoolkit.log("registerChatPanel: creating library mount point");
-            const { mountPoint: libraryMount } = createMountingElement("beaver-pane-library", "library");
+            const { mountPoint: libraryMount } = createSidebarMount(win.document, "library");
             itemPane.appendChild(libraryMount);
             ztoolkit.log("registerChatPanel: appended library mount point");
         }
 
         if (contextPane) {
             ztoolkit.log("registerChatPanel: creating reader mount point");
-            const { mountPoint: readerMount } = createMountingElement("beaver-pane-reader", "reader");
+            const { mountPoint: readerMount } = createSidebarMount(win.document, "reader");
             contextPane.appendChild(readerMount);
             ztoolkit.log("registerChatPanel: appended reader mount point");
         }

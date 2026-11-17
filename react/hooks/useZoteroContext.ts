@@ -1,9 +1,10 @@
 import { selectedTabIfAccepted } from '../../src/runtime/navigation';
 import { getContextWindow } from '../runtime/windowRuntime';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { logger } from '@beaver/agent-core/platform/logger';
-import { isLibraryTabAtom } from '../atoms/ui';
+import { isLibraryTabAtom, selectedZoteroTabIdAtom } from '../atoms/ui';
+import { isLibraryTabType } from '../../src/ui/libraryPane';
 import {
     selectedZoteroItemsAtom,
     selectedZoteroItemCountAtom,
@@ -190,6 +191,13 @@ export function useZoteroContext() {
     const searchableLibraryIdsKey = searchableLibraryIds.join(',');
     const setRecentlyAddedTodayCount = useSetAtom(recentlyAddedTodayCountAtom);
     const setLibraryItemCount = useSetAtom(libraryItemCountAtom);
+    // `ZoteroPane.itemsView` / `collectionsView` belong to the active library
+    // view. Zotero 11 has one per library tab and builds its trees after the
+    // tab is first selected: attach again when another library tab becomes
+    // active, and when the selected one finishes loading.
+    const selectedTabId = useAtomValue(selectedZoteroTabIdAtom);
+    const libraryTabKey = isLibraryTab ? selectedTabId : null;
+    const [libraryViewRevision, setLibraryViewRevision] = useState(0);
 
     // A note tab may be discovered before profile exclusions and the local
     // library list finish loading. updateNoteItemAtom safely defers that first
@@ -385,6 +393,13 @@ export function useZoteroContext() {
                     // if it's the currently selected tab and update the atom.
                     const loadedTab = selectedTabIfAccepted(mainWindow, ids, extraData);
                     if (!loadedTab) return;
+                    if (isLibraryTabType(loadedTab.type)) {
+                        // The selected library view has built its trees.
+                        if ((ids as (string | number)[]).includes(loadedTab.id)) {
+                            setLibraryViewRevision((revision) => revision + 1);
+                        }
+                        return;
+                    }
                     await setNoteItemFromTab(loadedTab);
                 }
             },
@@ -430,9 +445,15 @@ export function useZoteroContext() {
             disposed = true;
             ++noteGeneration;
             logger('useZoteroContext: cleaning up');
-            cv?.onSelect?.removeListener(handleCollectionSelect);
-            iv?.onSelect?.removeListener(handleItemSelect);
-            iv?.onRefresh?.removeListener(handleItemsRefresh);
+            // A closed Zotero 11 library view has already torn down its trees,
+            // and their event dispatchers throw on removal. A throw here would
+            // unmount every hook of this renderer's context initializer.
+            const detach = (remove: () => void) => {
+                try { remove(); } catch { /* the view is gone */ }
+            };
+            detach(() => cv?.onSelect?.removeListener(handleCollectionSelect));
+            detach(() => iv?.onSelect?.removeListener(handleItemSelect));
+            detach(() => iv?.onRefresh?.removeListener(handleItemsRefresh));
             if (moduleItemNotifierId === itemObserverId) {
                 Zotero.Notifier.unregisterObserver(itemObserverId);
                 moduleItemNotifierId = null;
@@ -444,6 +465,8 @@ export function useZoteroContext() {
         };
     }, [
         isLibraryTab,
+        libraryTabKey,
+        libraryViewRevision,
         setSelectedItems,
         setSelectedItemCount,
         setLibraryView,

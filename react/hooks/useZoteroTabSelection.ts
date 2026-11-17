@@ -5,6 +5,8 @@ import { useSetAtom } from "jotai";
 import { logger } from "@beaver/agent-core/platform/logger";
 import { isLibraryTabAtom, selectedZoteroTabIdAtom } from "../atoms/ui";
 import { uiManager } from '../ui/UIManager';
+import { syncLibrarySidebar } from '../ui/librarySidebar';
+import { isLibraryTabSelected, isLibraryTabType } from '../../src/ui/libraryPane';
 
 /**
  * Module-level variable to track the Zotero notifier observer ID.
@@ -32,43 +34,62 @@ export function useZoteroTabSelection() {
             setSelectedTabId("zotero-pane");
             return;
         }
-        // Set initial state
-        const initialIsLibrary = window.Zotero_Tabs.selectedType === 'library';
+        // Set initial state. The window may have gained a library view since
+        // the plugin registered its panes (Zotero 11 builds them lazily).
+        syncLibrarySidebar();
+        const initialIsLibrary = isLibraryTabSelected(window);
         setIsLibraryTab(initialIsLibrary);
         setSelectedTabId(window.Zotero_Tabs.selectedID);
 
         let lastSelectedID = window.Zotero_Tabs.selectedID;
-        let lastSelectedType = window.Zotero_Tabs.selectedType;
+        let lastIsLibrary = initialIsLibrary;
+
+        const refreshVisibleSidebar = (isLibrary: boolean) => {
+            // Update UI through UIManager if sidebar is visible
+            const isVisible = window.document.querySelector("#zotero-beaver-tb-chat-toggle")?.hasAttribute("selected");
+            if (isVisible) {
+                logger("useZoteroTabSelection: updating sidebar UI via UIManager");
+                uiManager.updateUI({
+                    isVisible: true,
+                    isLibraryTab: isLibrary,
+                    collapseState: { // Reset collapse state on tab change? Or fetch current? Assuming reset for now.
+                        library: null,
+                        reader: null
+                    }
+                });
+            }
+        };
 
         // Handler for tab selection changes
         const tabObserver: { notify: _ZoteroTypes.Notifier.Notify } = {
             notify: async function(event: _ZoteroTypes.Notifier.Event, type: _ZoteroTypes.Notifier.Type, ids: string[] | number[], extraData: any) {
-                if (type === 'tab' && event === 'select') {
+                if (type !== 'tab') return;
+                if (event === 'select') {
                     const selectedTab = selectedTabIfAccepted(window, ids, extraData);
                     if (!selectedTab) return;
-                    if (lastSelectedID === selectedTab.id && lastSelectedType === selectedTab.type) return;
+                    // Zotero 11 reports a library tab whose view is still being
+                    // built as `library-loading`; its item pane already exists.
+                    const isLibrary = isLibraryTabType(selectedTab.type);
+                    // Another library tab may have become the active view.
+                    if (isLibrary) syncLibrarySidebar();
+                    if (lastSelectedID === selectedTab.id && lastIsLibrary === isLibrary) return;
                     lastSelectedID = selectedTab.id;
-                    lastSelectedType = selectedTab.type;
+                    lastIsLibrary = isLibrary;
 
-                    // Update isLibraryTab atom
-                    const isLibrary = selectedTab.type === 'library';
                     logger(`useZoteroTabSelection: tab changed to ${selectedTab.type}`);
                     setIsLibraryTab(isLibrary);
                     setSelectedTabId(selectedTab.id);
-
-                    // Update UI through UIManager if sidebar is visible
-                    const isVisible = window.document.querySelector("#zotero-beaver-tb-chat-toggle")?.hasAttribute("selected");
-                    if (isVisible) {
-                        logger("useZoteroTabSelection: updating sidebar UI via UIManager");
-                        uiManager.updateUI({
-                            isVisible: true,
-                            isLibraryTab: isLibrary,
-                            collapseState: { // Reset collapse state on tab change? Or fetch current? Assuming reset for now.
-                                library: null,
-                                reader: null
-                            }
-                        });
-                    }
+                    refreshVisibleSidebar(isLibrary);
+                }
+                // Zotero's typings predate the tab `load` event.
+                else if ((event as string) === 'load') {
+                    // A Zotero 11 library view finished loading, which restores
+                    // its pane layout: show the sidebar in it again.
+                    const selectedTab = selectedTabIfAccepted(window, ids, extraData);
+                    if (!selectedTab || !isLibraryTabType(selectedTab.type)) return;
+                    if (!(ids as (string | number)[]).includes(selectedTab.id)) return;
+                    syncLibrarySidebar();
+                    refreshVisibleSidebar(true);
                 }
             }
         };
