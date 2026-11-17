@@ -26,10 +26,10 @@ vi.mock('../../../react/atoms/ui', async () => {
 vi.mock('../../../react/atoms/threads', async () => {
     const { atom } = await import('jotai');
     const rememberedPosition = () => {
-        const base = atom<number | undefined>(undefined);
+        const base = atom<unknown>(undefined);
         return atom(
             (get) => get(base),
-            (_get, set, scrollTop: number | null) => set(base, scrollTop === null ? undefined : scrollTop),
+            (_get, set, anchor: unknown) => set(base, anchor === null ? undefined : anchor),
         );
     };
     return {
@@ -65,6 +65,11 @@ function setGeometry(el: HTMLElement, { scrollTop, scrollHeight, clientHeight }:
     Object.defineProperty(el, 'scrollHeight', { value: scrollHeight, configurable: true });
     Object.defineProperty(el, 'clientHeight', { value: clientHeight, configurable: true });
     Object.defineProperty(el, 'scrollTop', { value: scrollTop, writable: true, configurable: true });
+}
+
+/** The raw offset of the remembered place, or undefined when none is. */
+function rememberedOffset(): number | undefined {
+    return store.get(atoms.position)?.scrollTop;
 }
 
 /** A scroll event reporting the container at `scrollTop` with content `scrollHeight` tall. */
@@ -118,7 +123,7 @@ describe('useAutoScroll remembers the reader\'s place in the thread', () => {
         scrollEvent(700, 2000);
 
         expect(store.get(atoms.userScrolled)).toBe(true);
-        expect(store.get(atoms.position)).toBe(700);
+        expect(rememberedOffset()).toBe(700);
     });
 
     it('keeps a scrolled-back reader\'s offset as the response keeps growing under them', () => {
@@ -128,13 +133,13 @@ describe('useAutoScroll remembers the reader\'s place in the thread', () => {
         scrollEvent(700, 2600);
         scrollEvent(700, 3200);
 
-        expect(store.get(atoms.position)).toBe(700);
+        expect(rememberedOffset()).toBe(700);
     });
 
     it('forgets the offset again once the reader returns to the bottom', () => {
         scrollEvent(1500, 2000);
         scrollEvent(700, 2000);
-        expect(store.get(atoms.position)).toBe(700);
+        expect(rememberedOffset()).toBe(700);
 
         scrollEvent(1500, 2000);
 
@@ -148,11 +153,11 @@ describe('useAutoScroll remembers the reader\'s place in the thread', () => {
 
         // Jitter below the update threshold is not worth a write ...
         scrollEvent(694, 2000);
-        expect(store.get(atoms.position)).toBe(700);
+        expect(rememberedOffset()).toBe(700);
 
         // ... a real movement is.
         scrollEvent(600, 2000);
-        expect(store.get(atoms.position)).toBe(600);
+        expect(rememberedOffset()).toBe(600);
     });
 });
 
@@ -164,7 +169,7 @@ describe('resuming without a scroll event', () => {
     it('resumeFollowing forgets the remembered offset along with the intent', () => {
         scrollEvent(1500, 2000);
         scrollEvent(700, 2000);
-        expect(store.get(atoms.position)).toBe(700);
+        expect(rememberedOffset()).toBe(700);
 
         resumeFollowing(atoms);
 
@@ -178,7 +183,7 @@ describe('resuming without a scroll event', () => {
 
         latchIntentFromDistance(400, atoms);
         expect(store.get(atoms.userScrolled)).toBe(true);
-        expect(store.get(atoms.position)).toBe(700);
+        expect(rememberedOffset()).toBe(700);
 
         latchIntentFromDistance(40, atoms);
         expect(store.get(atoms.userScrolled)).toBe(false);

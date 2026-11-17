@@ -145,6 +145,7 @@ function reconcileToolcallIds(runs: AgentRun[], actions: AgentAction[]): void {
 
 // Thread types
 import type { ThreadData } from '../../src/services/threads/types';
+import type { ScrollAnchor } from '../utils/scrollAnchor';
 export type { ThreadData } from '../../src/services/threads/types';
 
 // Thread messages and attachments
@@ -153,15 +154,17 @@ export type { ThreadData } from '../../src/services/threads/types';
 export { currentThreadIdAtom, currentThreadNameAtom, isLoadingThreadAtom };
 
 /**
- * Where the reader is in each thread, by thread id: the offset they scrolled
- * back to. A thread with no entry is reopened at its bottom — the reader was
- * following the response when they left it, or has never opened it — and the
- * bottom is recorded by dropping the entry rather than storing an offset.
+ * Where the reader is in each thread, by thread id: the place they scrolled
+ * back to, recorded as what they were reading (see `scrollAnchor.ts`) so it
+ * survives being shown at another width. A thread with no entry is reopened at
+ * its bottom — the reader was following the response when they left it, or has
+ * never opened it — and the bottom is recorded by dropping the entry rather
+ * than storing a place.
  */
-export const threadScrollPositionsAtom = atom<Record<string, number>>({});
+export const threadScrollPositionsAtom = atom<Record<string, ScrollAnchor>>({});
 
 /**
- * Atom to get the scroll position of the current thread (for library/reader sidebars)
+ * The reader's remembered place in the current thread.
  */
 export const currentThreadScrollPositionAtom = atom(
     (get) => {
@@ -172,17 +175,17 @@ export const currentThreadScrollPositionAtom = atom(
         const positions = get(threadScrollPositionsAtom);
         return positions[threadId];
     },
-    (get, set, scrollTop: number | null) => {
+    (get, set, anchor: ScrollAnchor | null) => {
         const threadId = get(currentThreadIdAtom);
         if (!threadId) {
             return;
         }
         set(threadScrollPositionsAtom, (prevPositions) => {
             const nextPositions = { ...prevPositions };
-            if (scrollTop === null) {
+            if (anchor === null) {
                 delete nextPositions[threadId];
             } else {
-                nextPositions[threadId] = scrollTop;
+                nextPositions[threadId] = anchor;
             }
             return nextPositions;
         });

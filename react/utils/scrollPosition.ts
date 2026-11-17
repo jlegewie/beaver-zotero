@@ -23,6 +23,7 @@ import type { PrimitiveAtom, WritableAtom } from 'jotai';
 import { isAtBottomAtom, userScrolledAtom } from '../atoms/ui';
 import { currentThreadScrollPositionAtom } from '../atoms/threads';
 import { store } from '../store';
+import type { ScrollAnchor } from './scrollAnchor';
 
 /**
  * How close to the bottom still counts as being at it.
@@ -51,7 +52,7 @@ export const BOTTOM_THRESHOLD = 120; // pixels
 export const AT_BOTTOM_EPSILON = 8; // pixels
 
 /** The reader's remembered place in a thread. */
-type ScrollPositionAtom = WritableAtom<number | undefined, [number | null], void>;
+type ScrollPositionAtom = WritableAtom<ScrollAnchor | undefined, [ScrollAnchor | null], void>;
 
 export interface ScrollAtoms {
     /** Measured: whether the container sits at its bottom. */
@@ -73,7 +74,7 @@ export const scrollAtoms: ScrollAtoms = Object.freeze({
 
 /**
  * Resume following the bottom: clear the reader's scroll-back intent, and
- * forget the offset remembered for the thread.
+ * forget the place remembered for the thread.
  */
 export function resumeFollowing(atoms: ScrollAtoms): void {
     store.set(atoms.userScrolled, false);
