@@ -1,4 +1,4 @@
-export type SidebarLocation = 'library' | 'reader';
+export type { SidebarLocation } from '../../src/ui/libraryPane';
 
 export interface DOMElements {
     chatToggleButton: HTMLElement | null;

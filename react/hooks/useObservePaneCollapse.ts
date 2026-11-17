@@ -1,7 +1,8 @@
 import { getContextWindow } from '../runtime/windowRuntime';
 import { useEffect } from 'react';
-import { useSetAtom } from 'jotai';
-import { isSidebarVisibleAtom } from '../atoms/ui';
+import { useAtomValue, useSetAtom } from 'jotai';
+import { isSidebarVisibleAtom, selectedZoteroTabIdAtom } from '../atoms/ui';
+import { activeItemPane, isLibraryTabSelected } from '../../src/ui/libraryPane';
 import { uiManager } from '../ui/UIManager';
 import { SidebarLocation } from '../ui/types';
 import { dismissDiffPreview } from '../utils/noteEditorDiffPreview';
@@ -13,11 +14,16 @@ import { dismissDiffPreview } from '../utils/noteEditorDiffPreview';
 */
 export function useObservePaneCollapse(location: SidebarLocation) {
     const setSidebarVisible = useSetAtom(isSidebarVisibleAtom);
+    // Zotero 11 gives each library tab its own item pane, and the library
+    // sidebar moves to the selected one: observe the pane it is in now.
+    const selectedTabId = useAtomValue(selectedZoteroTabIdAtom);
+    const paneKey = location === 'library' ? selectedTabId : null;
 
     useEffect(() => {
         const win = getContextWindow();
-        const paneId = location === 'library' ? "zotero-item-pane" : "zotero-context-pane";
-        const itemPane = win.document.getElementById(paneId);
+        const itemPane = location === 'library'
+            ? activeItemPane(win)
+            : win.document.getElementById("zotero-context-pane");
         const sidebar = itemPane?.querySelector(`#beaver-pane-${location}`) as HTMLElement;
         
         if (!itemPane || !sidebar) return;
@@ -25,8 +31,7 @@ export function useObservePaneCollapse(location: SidebarLocation) {
         const observer = new win.MutationObserver((mutations: MutationRecord[]) => {
             for (const m of mutations) {
                 if (m.type === "attributes" && m.attributeName === "collapsed") {
-                    const selectedType = win.Zotero_Tabs.selectedType;
-                    const currentLocation = selectedType === 'library' ? 'library' : 'reader';
+                    const currentLocation = isLibraryTabSelected(win) ? 'library' : 'reader';
                     if(currentLocation !== location) return;
                     // Read Zotero's own `collapsed` getter rather than the raw
                     // attribute. Zotero 10 writes `collapsed="true"`/`"false"`,
@@ -51,5 +56,5 @@ export function useObservePaneCollapse(location: SidebarLocation) {
         
         observer.observe(itemPane, { attributes: true });
         return () => observer.disconnect();
-    }, [location, setSidebarVisible]);
+    }, [location, setSidebarVisible, paneKey]);
 } 

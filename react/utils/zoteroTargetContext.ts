@@ -3,6 +3,7 @@ import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
 import { getSelectedCollection, getSelectedLibraryId } from '../../src/utils/zoteroSelection';
 import { getContextWindow } from '../runtime/windowRuntime';
 import { selectedTableTabItemID } from '../../src/ui/tableTabContextPane';
+import { isLibraryTabType } from '../../src/ui/libraryPane';
 
 
 function makeZoteroItemReference(libraryID: number, zoteroKey: string): ZoteroItemReference {
@@ -20,7 +21,7 @@ function makeZoteroItemReference(libraryID: number, zoteroKey: string): ZoteroIt
  */
 export function isLibraryTabSelected(win = getContextWindow()): boolean {
     const type = win?.Zotero_Tabs?.selectedType;
-    return !type || type === 'library';
+    return !type || isLibraryTabType(type);
 }
 
 /**
