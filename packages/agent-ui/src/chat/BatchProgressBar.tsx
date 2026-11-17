@@ -1,11 +1,16 @@
 import React, { useCallback } from 'react';
 import type { BatchProgressEntry } from '@beaver/agent-core/run-state/batchProgress';
-import { ArrowDownIcon, Icon, LayersIcon, TickIcon } from '../icons';
+import { Icon, LayersIcon, TickIcon } from '../icons';
 import {
     BatchBlockHeading,
     BatchFailureChip,
     BatchOutcomeBody,
 } from './BatchOutcomeBlocks';
+import {
+    DockedBarChevron,
+    DockedBarHeaderRow,
+    renderDockedBarHairline,
+} from './DockedBarParts';
 
 const WAITING_HEADING = 'Waiting';
 /** Per-block row cap for the live panel. Hidden rows still count in "+ N more". */
@@ -85,16 +90,12 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
     // A determinate track at zero reads as stalled before the first outcome.
     const isIndeterminate =
         status === 'active' && resolved + noChange + findings + failed === 0;
-    const segments = isIndeterminate ? (
-        <div className="batch-progress-indeterminate" />
-    ) : (
-        <>
-            <div style={{ width: `${share(resolved)}%`, backgroundColor: 'var(--accent-blue)' }} />
-            <div style={{ width: `${share(noChange)}%`, backgroundColor: 'var(--fill-tertiary)' }} />
-            <div style={{ width: `${share(findings)}%`, backgroundColor: 'var(--tag-purple)' }} />
-            <div style={{ width: `${share(failed)}%`, backgroundColor: 'var(--tag-orange)' }} />
-        </>
-    );
+    const segments = [
+        { share: share(resolved), color: 'var(--accent-blue)' },
+        { share: share(noChange), color: 'var(--fill-tertiary)' },
+        { share: share(findings), color: 'var(--tag-purple)' },
+        { share: share(failed), color: 'var(--tag-orange)' },
+    ];
 
     // Older records omit this; fall back to the headline, do not invent a title.
     const title = batch.progress_title?.trim();
@@ -111,29 +112,17 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
             {/* Overlay so it does not stack on the composer's 1px top border.
                 Hidden while expanded: the body draws the full track then, and
                 the hairline would only repeat it along the top edge. */}
-            <div
-                className="display-flex flex-row batch-progress-hairline"
-                style={{
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    height: 2,
-                    opacity: isOver || expanded ? 0 : 1,
-                    overflow: 'hidden',
-                    pointerEvents: 'none',
-                    transition: 'opacity 0.7s ease',
-                }}
-                role="progressbar"
-                aria-valuemin={0}
-                aria-valuemax={total}
-                aria-valuenow={resolved + noChange + findings}
-                aria-valuetext={[title, batch.progress_primary, title ? '' : batch.progress_secondary]
+            {renderDockedBarHairline({
+                segments,
+                indeterminate: isIndeterminate,
+                hidden: isOver || expanded,
+                valueMin: 0,
+                valueMax: total,
+                valueNow: resolved + noChange + findings,
+                valueText: [title, batch.progress_primary, title ? '' : batch.progress_secondary]
                     .filter(Boolean)
-                    .join(' ')}
-            >
-                {segments}
-            </div>
+                    .join(' '),
+            })}
 
             <div
                 className="display-flex flex-col px-3 py-2 cursor-pointer"
@@ -143,7 +132,7 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
                 tabIndex={0}
                 aria-expanded={expanded}
             >
-                <div className="display-flex flex-row items-center gap-2 min-w-0">
+                <DockedBarHeaderRow>
                 <Icon icon={LayersIcon} className="font-color-secondary flex-none" />
                 {/* Title is the only part of the line that may truncate. */}
                 <span
@@ -171,12 +160,8 @@ export const BatchProgressBar: React.FC<BatchProgressBarProps> = ({
                     />
                 )}
                 <div className="flex-1" />
-                <Icon
-                    icon={ArrowDownIcon}
-                    className="font-color-secondary flex-none scale-85 transition"
-                    style={{ transform: expanded ? 'rotate(180deg)' : undefined }}
-                />
-                </div>
+                <DockedBarChevron expanded={expanded} />
+                </DockedBarHeaderRow>
 
                 {queued && (
                     <div

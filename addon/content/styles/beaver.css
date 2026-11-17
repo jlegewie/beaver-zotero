@@ -427,6 +427,32 @@
     padding-top: 2px;
 }
 
+/* A job card's detail may take two lines: "PDF fetch stopped · Stopped after …". */
+.beaver-run-status-popup__detail.beaver-run-status-popup__detail--job {
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+}
+
+/* A job card's progress, under its header: done in blue, failed in orange. */
+.beaver-run-status-popup__job-progress {
+    display: flex;
+    height: 2px;
+    margin: 2px 0 8px 26px;
+    border-radius: 1px;
+    overflow: hidden;
+    background: var(--fill-quinary);
+}
+
+.beaver-run-status-popup__job-progress > span {
+    background: var(--accent-blue);
+}
+
+.beaver-run-status-popup__job-progress > .beaver-run-status-popup__job-progress-failed {
+    background: var(--tag-orange-primary);
+}
+
 .beaver-run-status-popup .beaver-run-status-popup__footer > button {
     flex: 0 0 auto;
     white-space: nowrap;
@@ -4035,6 +4061,10 @@
     height: 6px;
     border-radius: 50%;
     background: var(--accent-blue);
+}
+
+[id^="beaver-pane-"] .thread-awaiting-input-spinner {
+    color: var(--fill-secondary);
 }
 
 [id^="beaver-pane-"] .recent-chats {

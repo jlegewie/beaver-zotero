@@ -58,6 +58,7 @@ const APPROVAL_NOTIFICATION_NAME = "beaver-approval";
 const QUESTION_NOTIFICATION_NAME = "beaver-question";
 const CREDIT_CONFIRMATION_NOTIFICATION_NAME = "beaver-credit-confirmation";
 const BATCH_APPROVAL_NOTIFICATION_NAME = "beaver-batch-approval";
+const JOB_READY_NOTIFICATION_NAME = "beaver-job-ready";
 const RUN_COMPLETE_NOTIFICATION_NAME = "beaver-run-complete";
 
 // Notification bodies are one-liners in the OS shell; longer copy is elided
@@ -206,7 +207,7 @@ function focusBeaver(): void {
  * groups replaceable notifications: a later notification with the same name
  * replaces the earlier one instead of stacking.
  */
-function showNotification(title: string, body: string, name: string): void {
+function showNotification(title: string, body: string, name: string, onClick?: () => void): void {
     try {
         const alertsService = (Components.classes as any)["@mozilla.org/alerts-service;1"]
             .getService(Components.interfaces.nsIAlertsService);
@@ -215,6 +216,11 @@ function showNotification(title: string, body: string, name: string): void {
             observe(_subject: unknown, topic: string) {
                 if (topic === "alertclickcallback") {
                     focusBeaver();
+                    try {
+                        onClick?.();
+                    } catch (error) {
+                        logger(`systemNotifications: notification action failed: ${error}`, 1);
+                    }
                     // Dismiss the notification so it does not linger (e.g. in the
                     // macOS Notification Center) after the user has acted on it.
                     try {
@@ -391,4 +397,15 @@ export function notifyRunComplete(): void {
         "Your response is ready. Click to open Beaver.",
         RUN_COMPLETE_NOTIFICATION_NAME,
     );
+}
+
+/**
+ * Surface a system notification when a job a chat waits on (a table fill,
+ * PDFs) finished while no window shows that chat. Clicking opens Beaver on it.
+ * Only when Zotero is in the background: otherwise the in-window notice says
+ * the same.
+ */
+export function notifyJobReady(title: string, body: string, openChat: () => void): void {
+    if (!shouldNotifySystem()) return;
+    showNotification(title, truncateBody(body), JOB_READY_NOTIFICATION_NAME, openChat);
 }

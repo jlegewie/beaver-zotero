@@ -45,6 +45,20 @@ export type { BatchApprovalCardProps } from './BatchApprovalCard';
 export { default as BatchProgressBar } from './BatchProgressBar';
 export type { BatchProgressBarProps } from './BatchProgressBar';
 
+export {
+    DockedBarChevron,
+    DockedBarDetails,
+    DockedBarHeaderRow,
+    renderDockedBarHairline,
+} from './DockedBarParts';
+export type { DockedBarHairlineProps, HairlineSegment } from './DockedBarParts';
+
+export { default as JobBar } from './JobBar';
+export type { JobBarProps, JobView, JobViewAction, JobViewLink } from './JobBar';
+
+export { default as JobBarStack } from './JobBarStack';
+export type { JobBarStackProps } from './JobBarStack';
+
 export { default as BatchDoneRows } from './BatchDoneRows';
 export type { BatchDoneRowsProps } from './BatchDoneRows';
 

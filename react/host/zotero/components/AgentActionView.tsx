@@ -1,4 +1,5 @@
 import { useSurfaceWindow } from '../../../runtime/SurfaceWindowContext';
+import { openJobCallsAtom } from '@beaver/agent-core/run-state/jobCalls';
 import { getMergedItemReference } from '../../../atoms/mergeItemsChoices';
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
@@ -400,11 +401,18 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     // on the assumption that the call's own card reports the wait, so without a
     // spinner here the pane looks frozen. Excludes `pending`, where the card is
     // waiting on the reader rather than on the backend.
+    // `create_items` parked on its PDF downloads (a job call): the header
+    // says so in one line; counts are in the job bar.
+    const pdfJob = useAtomValue(openJobCallsAtom).find(
+        (call) => call.tool_call_id === toolcallId && call.kind === 'pdf_retrieval',
+    );
+    const fetchingPdfs = !!pdfJob && !pdfJob.result && !hasToolReturn;
     const isAwaitingToolReturn =
-        runStatus === 'in_progress' &&
-        !hasToolReturn &&
-        status !== 'awaiting' &&
-        status !== 'pending';
+        fetchingPdfs ||
+        (runStatus === 'in_progress' &&
+            !hasToolReturn &&
+            status !== 'awaiting' &&
+            status !== 'pending');
 
     // The wait this reports is the backend's, not the user's: an approved edit
     // whose save is taking Zotero a long time. Suppressed while the card waits
@@ -747,7 +755,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                     count-carrying label would otherwise read as
                                     singular while an approval is still pending and
                                     no action row exists yet. */}
-                                <span className="font-color-primary font-medium">{getActionLabel(toolName, previewData?.actionData ?? action?.proposed_data)}</span>
+                                <span className="font-color-primary font-medium">{fetchingPdfs ? 'Fetching PDFs' : getActionLabel(toolName, previewData?.actionData ?? action?.proposed_data)}</span>
                                 {actionTitle && <span className="font-color-secondary ml-15">{actionTitle}</span>}
                             </div>
                             {reconnectCaption ? (

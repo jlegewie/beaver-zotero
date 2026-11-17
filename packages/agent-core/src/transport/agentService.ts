@@ -305,6 +305,8 @@ export class AgentService {
      * hung handler cannot keep sending keepalives on a replacement socket.
      */
     private pendingKeepalives: Map<string, RequestKeepalive> = new Map();
+    /** Unanswered `job_wait_request`s: request id → the run waiting and the tool call. */
+    private liveJobWaits = new Map<string, { runId: string; toolCallId: string }>();
     private activeKeepalives: Set<RequestKeepalive> = new Set();
     /**
      * Map of backend data-request event -> handler. Injectable so a non-Zotero
@@ -1177,6 +1179,16 @@ export class AgentService {
      * Send the `park` frame for `runId` without waiting for an answer, for a
      * client that is going away. Returns false when it could not be sent.
      */
+    /**
+     * The tool calls whose jobs the run waits for live (a `job_wait_request`
+     * is unanswered). The backend parks such a wait like an open card.
+     */
+    liveJobWaitCalls(runId: string): ReadonlySet<string> {
+        const calls = new Set<string>();
+        for (const wait of this.liveJobWaits.values()) if (wait.runId === runId) calls.add(wait.toolCallId);
+        return calls;
+    }
+
     sendPark(runId: string): boolean {
         const run = this.run;
         if (!run || run.runId !== runId || run.terminal || run.state !== 'live') return false;
@@ -1951,8 +1963,15 @@ export class AgentService {
                     const tracked = run && requestId !== null
                         ? run.trackReply(requestId, executedAction(eventName, dataEvent))
                         : null;
+                    // A job the run waits for live: leaving the chat parks the
+                    // run rather than stopping it (see `hasLiveJobWait`).
+                    const jobWait = eventName === 'job_wait_request' && requestId !== null && owner
+                        ? { requestId, runId: owner.runId, toolCallId: String(dataEvent?.tool_call_id ?? '') }
+                        : null;
+                    if (jobWait) this.liveJobWaits.set(jobWait.requestId, { runId: jobWait.runId, toolCallId: jobWait.toolCallId });
                     const respond = (response: Record<string, any> | PreparedJsonMessage) => {
                         keepalive.stop();
+                        if (jobWait) this.liveJobWaits.delete(jobWait.requestId);
                         if (run && tracked) {
                             tracked.settle(response);
                             this.deliverReply(run, tracked.reply);

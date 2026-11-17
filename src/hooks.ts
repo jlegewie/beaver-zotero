@@ -27,6 +27,8 @@ import { BeaverDB } from "./services/database";
 import { DocumentCache } from "./services/documentCache";
 import { createInstanceAccount } from './services/instanceAccount';
 import { createInstanceTableFills } from './services/tableFills';
+import { createInstanceJobCalls } from './services/jobCalls';
+import { createInstancePdfJobs } from './services/itemImport/pdfJobsFactory';
 import { InstancePreferences } from './services/instancePreferences';
 import { registerBeaverProtocolHandler, unregisterBeaverProtocolHandler } from "./services/protocolHandler";
 import { BeaverUIFactory } from "./ui/ui";
@@ -101,9 +103,11 @@ async function disposeTableFills(): Promise<void> {
         addon.tableFills = undefined;
         // `dispose` bounds itself (`shutdownFlushMs`): the last commit
         // renders the snapshot, which a generic shutdown timeout would cut.
-        tableFillsDisposal = fills
+        tableFillsDisposal = (fills
             ? fills.dispose().catch((error) => ztoolkit.log(`disposeTableFills: ${error}`))
-            : Promise.resolve();
+            : Promise.resolve()
+        // The results of jobs cut off by the shutdown are kept for the next start.
+        ).then(() => addon.jobCalls?.flush()).catch((error) => ztoolkit.log(`disposeTableFills: job calls: ${error}`));
     }
     await tableFillsDisposal;
 }
@@ -368,6 +372,7 @@ async function onStartup() {
         tableFillsDisposal = undefined;
         addon.tableFills = createInstanceTableFills();
     }
+    addon.pdfJobs ??= createInstancePdfJobs();
     ztoolkit.log(`Plugin version: ${version}`);
 
     // -------- Initialize database --------
@@ -390,6 +395,12 @@ async function onStartup() {
         await documentCache.runStartupGC();
         addon.documentCache = documentCache;
         ztoolkit.log("DocumentCache initialized successfully");
+
+        // -------- Job calls --------
+        // Reports the results of jobs a quit cut off, and of jobs that ended
+        // while no backend could be reached.
+        addon.jobCalls ??= createInstanceJobCalls();
+        void addon.jobCalls.start();
 
         // -------- Handle plugin upgrade --------
         const lastVersion = getPref('installedVersion');
@@ -973,6 +984,13 @@ async function disposeAppServices(): Promise<void> {
     await addon.mutations.dispose();
     addon.syncPause.resumeSyncNow();
     addon.transactionWatch.stop();
+    // Before the account goes and the fetch tasks are cancelled: a retrieval
+    // cut off by the shutdown is reported as interrupted at the next start,
+    // not as failed.
+    addon.pdfJobs?.dispose();
+    addon.pdfJobs = undefined;
+    await attempt('jobCalls.dispose', () => addon.jobCalls?.dispose());
+    addon.jobCalls = undefined;
     await attempt('disposeAccount', disposeAccountServices);
     await attempt('cancelAllActiveTasks', () => cancelAllActiveTasks());
     await attempt('newItemWatcher.stop', () => addon.newItemWatcher?.stop());
@@ -1011,7 +1029,15 @@ async function disposePlugin(): Promise<void> {
     addon.transactionWatch.stop();
     Zotero.__beaverShuttingDown = true;
     addon.data.alive = false;
+    // Before the fetch tasks are cancelled: a retrieval cut off by the
+    // shutdown is reported as interrupted at the next start, not as failed.
+    addon.pdfJobs?.dispose();
+    addon.pdfJobs = undefined;
     cancelAllActiveTasks();
+    // Results kept by the fill flush above are already written.
+    const jobCalls = addon.jobCalls;
+    addon.jobCalls = undefined;
+    void jobCalls?.dispose().catch((error) => ztoolkit.log(`onShutdown: jobCalls: ${error}`));
     ztoolkit.log("onShutdown: Running fallback cleanup");
 
     try {

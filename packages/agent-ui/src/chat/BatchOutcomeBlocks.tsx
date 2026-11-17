@@ -17,6 +17,7 @@ import {
 } from '@beaver/agent-core/run-state/batchProgress';
 import { ArrowDownIcon, Icon } from '../icons';
 import { getHost } from '../host';
+import { DockedBarDetails } from './DockedBarParts';
 import { BatchItemFilter, BatchItemFindingRow, BatchItemList, ITEM_ROWS_STEP } from './BatchItemRows';
 import type { BatchItemListAction } from './BatchItemRows';
 
@@ -936,23 +937,7 @@ export const BatchOutcomeBody: React.FC<{
     /** Appended inside the same box — what is one caller's alone. */
     children?: React.ReactNode;
 }> = ({ batch, bounded = true, maxRows, revealTargets, items, surface = 'live', population, children }) => (
-    <div
-        className={[
-            'display-flex flex-col gap-5 px-3 pb-3 min-w-0',
-            surface === 'receipt' && 'batch-outcome-receipt',
-        ]
-            .filter(Boolean)
-            .join(' ')}
-        style={
-            bounded
-                ? {
-                      maxHeight: 'max(120px, calc(100vh - 320px))',
-                      overflowY: 'auto',
-                      overflowX: 'hidden',
-                  }
-                : undefined
-        }
-    >
+    <DockedBarDetails bounded={bounded} className={surface === 'receipt' ? 'batch-outcome-receipt' : undefined}>
         {batch.goal && <div className="batch-outcome-goal font-color-secondary text-base">{batch.goal}</div>}
         <BatchProgressTrack batch={batch} legend={surface === 'receipt'} />
         <BatchOutcomeBlocks
@@ -964,5 +949,5 @@ export const BatchOutcomeBody: React.FC<{
             population={population}
         />
         {children}
-    </div>
+    </DockedBarDetails>
 );

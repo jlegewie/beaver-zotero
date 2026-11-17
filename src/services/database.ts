@@ -294,6 +294,23 @@ export interface TableShadowRecord {
     payloadSizeBytes: number;
 }
 
+/**
+ * One job call this device runs for a chat (`job_calls`): a table fill or PDF
+ * retrieval whose tool call may be parked, kept until its result reaches the
+ * backend. `coverage` and `result` are JSON. See `src/services/jobCalls/`.
+ */
+export interface JobCallRecord {
+    threadId: string;
+    toolCallId: string;
+    userId: string;
+    kind: string;
+    jobId: string;
+    coverage: string;
+    /** The job's result once it ended, until it is stored on the parked call. */
+    result: string | null;
+    createdAt: string;
+}
+
 /** Background processing job kinds. */
 export type BackgroundJobType =
     | 'document_extract'
@@ -1104,6 +1121,22 @@ export class BeaverDB {
         await this.queryAsync(`
             CREATE INDEX IF NOT EXISTS idx_table_shadow_table
             ON table_recovery_shadow(library_id, zotero_key, written_at DESC);
+        `);
+
+        // Job calls this device runs, until each result reaches the backend.
+        // One row per tool call; small, and cleared as results are stored.
+        await this.queryAsync(`
+            CREATE TABLE IF NOT EXISTS job_calls (
+                thread_id     TEXT NOT NULL,
+                tool_call_id  TEXT NOT NULL,
+                user_id       TEXT NOT NULL,
+                kind          TEXT NOT NULL,
+                job_id        TEXT NOT NULL,
+                coverage      TEXT NOT NULL,
+                result        TEXT,
+                created_at    TEXT NOT NULL,
+                PRIMARY KEY (thread_id, tool_call_id)
+            );
         `);
 
         // Drop and recreate the ephemeral queue when its schema version changes.
@@ -5358,4 +5391,72 @@ export class BeaverDB {
         });
         return rows;
     }
+
+    // =====================================================================
+    // Job calls
+    // =====================================================================
+
+    public async upsertJobCall(record: JobCallRecord): Promise<void> {
+        await this.queryAsync(
+            `INSERT INTO job_calls (thread_id, tool_call_id, user_id, kind, job_id, coverage, result, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(thread_id, tool_call_id) DO UPDATE SET
+                user_id = excluded.user_id,
+                kind = excluded.kind,
+                job_id = excluded.job_id,
+                coverage = excluded.coverage,
+                result = excluded.result`,
+            [
+                record.threadId,
+                record.toolCallId,
+                record.userId,
+                record.kind,
+                record.jobId,
+                record.coverage,
+                record.result,
+                record.createdAt,
+            ],
+        );
+    }
+
+    /** Keep a job call's result until it is stored on the parked call. */
+    public async setJobCallResult(threadId: string, toolCallId: string, jobId: string, result: string): Promise<void> {
+        await this.queryAsync(
+            `UPDATE job_calls SET result = ? WHERE thread_id = ? AND tool_call_id = ? AND job_id = ?`,
+            [result, threadId, toolCallId, jobId],
+        );
+    }
+
+    public async deleteJobCall(threadId: string, toolCallId: string, jobId: string): Promise<void> {
+        await this.queryAsync(
+            `DELETE FROM job_calls WHERE thread_id = ? AND tool_call_id = ? AND job_id = ?`,
+            [threadId, toolCallId, jobId],
+        );
+    }
+
+    /** Every job call kept on this device, oldest first. */
+    public async listJobCalls(): Promise<JobCallRecord[]> {
+        const rows: JobCallRecord[] = [];
+        await this.queryAsync(
+            `SELECT thread_id, tool_call_id, user_id, kind, job_id, coverage, result, created_at
+             FROM job_calls ORDER BY created_at ASC`,
+            [],
+            {
+                onRow: (row: any) => {
+                    rows.push({
+                        threadId: row.getResultByIndex(0),
+                        toolCallId: row.getResultByIndex(1),
+                        userId: row.getResultByIndex(2),
+                        kind: row.getResultByIndex(3),
+                        jobId: row.getResultByIndex(4),
+                        coverage: row.getResultByIndex(5),
+                        result: row.getResultByIndex(6) ?? null,
+                        createdAt: row.getResultByIndex(7),
+                    });
+                },
+            },
+        );
+        return rows;
+    }
+
 }

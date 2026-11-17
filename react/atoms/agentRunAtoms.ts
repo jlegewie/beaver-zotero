@@ -121,7 +121,9 @@ import {
     wsReconnectingAtom,
     wsRetryAtom,
     resetRunSelectorCaches,
+    toolResultsMapAtom,
 } from '@beaver/agent-core/run-state/atoms';
+import { hasReadyJobCallAtom } from '@beaver/agent-core/run-state/jobCalls';
 import {
     createStreamActivityTracker,
     streamQuietAtom,
@@ -1535,6 +1537,7 @@ function settleLiveCardAnswers(set: Setter, parked: boolean): void {
  * comes back too. Every other card closes with the run.
  */
 function settleRunCards(get: Getter, set: Setter): void {
+    settleJobCalls(get);
     set(clearAllPendingCreditConfirmationsAtom);
     set(clearRunApprovalPolicyAtom);
     set(parkedAnswersInFlightAtom, new Set<string>());
@@ -1548,6 +1551,27 @@ function settleRunCards(get: Getter, set: Setter): void {
     set(clearAllPendingQuestionsAtom);
     set(clearAllPendingBatchApprovalsAtom);
     set(clearAllPendingTableCardsAtom);
+}
+
+/**
+ * Tell the job-call list how a run of the open thread ended. A job call
+ * whose tool call returned reached its run live, so nothing is left to store
+ * for it; a result held back because the run was going (`busy`) is stored
+ * now.
+ */
+function settleJobCalls(get: Getter): void {
+    const jobCalls = Zotero.Beaver?.jobCalls;
+    const threadId = get(currentThreadIdAtom);
+    if (!jobCalls || !threadId) return;
+    try {
+        const results = get(toolResultsMapAtom);
+        for (const entry of jobCalls.list()) {
+            if (entry.threadId === threadId && results.has(entry.toolCallId)) jobCalls.delivered(threadId, entry.toolCallId);
+        }
+        jobCalls.retryThread(threadId);
+    } catch (error) {
+        logger(`settleJobCalls: ${String(error)}`, 1);
+    }
 }
 
 /**
@@ -1839,7 +1863,7 @@ export function createWSCallbacks(
         settleRunCards(store.get, set);
         // Answers queued behind a resume that parked again but lost its
         // connection before `done` go out now, as `onDone` would send them.
-        if (store.get(parkedAnswerQueueAtom).size > 0) scheduleParkedAnswerFlush();
+        if (store.get(parkedAnswerQueueAtom).size > 0 || jobResumeThreadId !== null) scheduleParkedAnswerFlush();
     };
 
     /**
@@ -4520,6 +4544,26 @@ function scheduleParkedAnswerFlush(): void {
 let parkedResumeStarting = false;
 
 /**
+ * The thread whose stored job results should resume its parked run, once
+ * nothing else runs (see `continueParkedJobsAtom`).
+ */
+let jobResumeThreadId: string | null = null;
+
+/**
+ * Continue the open thread's parked run with the job results stored on its
+ * job calls: Continue in the job bar, or a window showing the thread when a
+ * result was stored. The resume carries no answers; it goes out at once, or
+ * once the run going now has ended. Returns false when no result is ready.
+ */
+export const continueParkedJobsAtom = atom(null, (get, _set): boolean => {
+    const threadId = get(currentThreadIdAtom);
+    if (!threadId || !get(hasReadyJobCallAtom)) return false;
+    jobResumeThreadId = threadId;
+    scheduleParkedAnswerFlush();
+    return true;
+});
+
+/**
  * Whether a run of this window is going or still landing, so a resume has to
  * wait for it: `onDone` sends what was queued meanwhile.
  */
@@ -4539,7 +4583,7 @@ function parkedResumeBlocked(get: Getter): boolean {
  */
 export const flushParkedAnswersAtom = atom(null, async (get, set) => {
     const queue = get(parkedAnswerQueueAtom);
-    if (queue.size === 0 || parkedResumeBlocked(get)) return;
+    if ((queue.size === 0 && jobResumeThreadId === null) || parkedResumeBlocked(get)) return;
     const threadId = get(currentThreadIdAtom);
     const open = get(openParkedRunAtom);
     const answers: Record<string, ParkedCardAnswer> = {};
@@ -4548,8 +4592,12 @@ export const flushParkedAnswersAtom = atom(null, async (get, set) => {
             answers[toolcallId] = queued.answer;
         }
     }
+    // A stored job result resumes the run with no answer of its own: the
+    // backend takes the result from the parked call.
+    const jobResume = jobResumeThreadId !== null && jobResumeThreadId === threadId && get(hasReadyJobCallAtom);
+    jobResumeThreadId = null;
     set(parkedAnswerQueueAtom, new Map());
-    if (!open || Object.keys(answers).length === 0) {
+    if (!open || (Object.keys(answers).length === 0 && !jobResume)) {
         set(syncParkedCardsAtom);
         return;
     }
@@ -4647,17 +4695,31 @@ async function startParkedResumeOwned(
 export function parkableRunId(get: Getter): string | null {
     const activeRun = get(activeRunAtom);
     if (!activeRun || !isRunActive(activeRun) || !agentService.isConnected()) return null;
+    // A job the run waits for live (a table fill, PDFs) parks like a card:
+    // leaving keeps the job running instead of stopping it.
+    const jobCalls = agentService.liveJobWaitCalls(activeRun.id);
+    const waitsOnJob = jobCalls.size > 0;
     // A resume parks only while it waits for the cards it shows again: until
     // then the cards on screen are the parked run's, not cards it waits on,
-    // and the answers it carries may be applying.
-    if (activeRun.user_prompt?.deferred_results && !get(isResumeWaitingAtom)) return null;
+    // and the answers it carries may be applying. A job wait starts only once
+    // the answers have been applied.
+    if (activeRun.user_prompt?.deferred_results && !get(isResumeWaitingAtom) && !(waitsOnJob && resumeAnswersLanded(get))) return null;
     if (get(isRunReconnectingAtom) || get(pendingCreditConfirmationsAtom).size > 0) return null;
-    if (get(liveCardAnswersAtom).size > 0) return null;
+    // An answer still on its way may be applying; one whose call now waits on
+    // a job has been applied (the card's call was handed over to the job).
+    if ([...get(liveCardAnswersAtom).keys()].some((toolCallId) => !jobCalls.has(toolCallId))) return null;
     const hasCard = get(pendingApprovalsAtom).size > 0
         || get(pendingQuestionsAtom).size > 0
         || get(pendingBatchApprovalsAtom).size > 0
         || get(pendingTableCardsAtom).size > 0;
-    return hasCard ? activeRun.id : null;
+    return hasCard || waitsOnJob ? activeRun.id : null;
+}
+
+/** Whether every answer the running resume carries has come back as its call's result. */
+function resumeAnswersLanded(get: Getter): boolean {
+    if (get(parkedAnswerQueueAtom).size > 0) return false;
+    const results = get(toolResultsMapAtom);
+    return [...get(parkedAnswersInFlightAtom)].every((toolCallId) => results.has(toolCallId));
 }
 
 /** How long a message waits for the resume it replaces to park. */

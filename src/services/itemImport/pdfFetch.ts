@@ -9,8 +9,10 @@ import { logger } from '@beaver/agent-core/platform/logger';
 import { isPdfDocument } from '../../utils/attachmentFiles';
 import { generateTaskId, scheduleBackgroundTask } from '../../utils/backgroundTasks';
 import { buildPdfResolvers, type PdfFetchOptions } from '../../utils/pdfResolvers';
+import type { AttachmentResolvedPayload } from '../attachmentResolved';
 import { fetchPdfAttachment } from '../pdfAttachmentFetch';
 import { createPdfFetchDiagnostics } from '../pdfFetchDiagnostics';
+import { reportFetchSettled, reportFetchStarted } from './pdfJobReports';
 
 /**
  * Filter attachment IDs to return only PDF attachments.
@@ -27,13 +29,20 @@ export async function filterPdfAttachments(attachmentIds: number[]): Promise<Zot
     );
 }
 
+/** The background task id of an item's PDF fetch; a new id on every call. */
+export function pdfFetchTaskId(libraryId: number, itemKey: string): string {
+    return generateTaskId('pdf_fetch', libraryId, itemKey);
+}
+
 /** Schedule PDF discovery outside the mutation queue and coordinate only its attachment save. */
 export function schedulePdfFetchTask(
     libraryId: number,
     itemKey: string,
     options: PdfFetchOptions
 ): void {
-    const taskId = generateTaskId('pdf_fetch', libraryId, itemKey);
+    const taskId = pdfFetchTaskId(libraryId, itemKey);
+    // An agent-created item's fetch is tracked so `create_items` can wait on it as a job.
+    reportFetchStarted(options, libraryId, itemKey, taskId);
     const generation = Zotero.Beaver.account?.getGeneration();
     const assertAccess = () => {
         const library = Zotero.Libraries.get(libraryId);
@@ -60,6 +69,7 @@ export function schedulePdfFetchTask(
             // Undefined until resolvers are built, so an earlier failure is not `no_sources`.
             let resolverCount: number | undefined;
             let threw = false;
+            let settled = false;
 
             try {
                 assertAccess();
@@ -137,7 +147,7 @@ export function schedulePdfFetchTask(
                     if (!signal.aborted && generation === Zotero.Beaver.account?.getGeneration()
                         && Zotero.Beaver.searchableLibraryIds?.includes(libraryId)) {
                         const attempts = diagnostics.attempts();
-                        options.onAttachmentResolved?.({
+                        const resolved: AttachmentResolvedPayload = {
                             threadId: options.threadId,
                             actionId: options.actionId,
                             libraryId,
@@ -150,8 +160,23 @@ export function schedulePdfFetchTask(
                                 ? undefined
                                 : diagnostics.failureReason({ resolverCount, threw }),
                             attempts: attempts.length ? attempts : undefined,
-                        });
+                        };
+                        settled = true;
+                        reportFetchSettled(options, resolved);
+                        options.onAttachmentResolved?.(resolved);
                     }
+                }
+                // Cancelled, or the account / library scope changed: no result goes to the
+                // backend, but a job waiting on this fetch must not wait for it.
+                if (!settled) {
+                    reportFetchSettled(options, {
+                        actionId: options.actionId,
+                        libraryId,
+                        zoteroKey: itemKey,
+                        attachmentStatus: 'failed',
+                        failureReason: 'cancelled',
+                        elapsedMs: Date.now() - startedAt,
+                    });
                 }
             }
         },

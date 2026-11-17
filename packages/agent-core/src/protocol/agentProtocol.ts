@@ -3231,6 +3231,15 @@ export const CLIENT_FEATURES = {
      */
     PARKED_RUNS: 'parked_runs',
     /**
+     * Long-running Zotero work (a table fill, PDF retrieval) is a job call: a
+     * parked tool call the plugin answers. The client starts jobs on request
+     * (`fill` with `job_call`, `pdf_job_start_request`), answers
+     * `job_wait_request`, stores each parked job's result through the
+     * parked-call mailbox endpoint, and resumes runs without answers. Used
+     * only together with `parked_runs`.
+     */
+    BACKGROUND_JOBS: 'background_jobs',
+    /**
      * Research tables: the client serves `artifact_request` for table
      * attachments, runs table fills and renders table tool results. Gates the
      * `tables` capability.

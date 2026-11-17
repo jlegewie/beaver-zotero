@@ -68,6 +68,8 @@ const EXPECTED_EVENTS = [
     'list_tags_request',
     'list_libraries_request',
     'read_note_request',
+    'job_wait_request',
+    'pdf_job_start_request',
     'agent_action_validate',
     'agent_action_execute',
 ];

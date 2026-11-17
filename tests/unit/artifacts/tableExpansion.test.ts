@@ -8,6 +8,7 @@ vi.mock("@beaver/agent-core/run-state/atoms", () => ({
     toolResultAtom: () => resultAtom,
     getToolCallStatusFromResult: () => "completed",
 }));
+vi.mock("@beaver/agent-core/run-state/jobCalls", () => ({ openJobCallsAtom: atom([]) }));
 vi.mock("../../../react/agents/agentActions", () => ({
     pendingApprovalForToolcallAtom: () => atom(null),
     agentActionsForToolcallAtom: () => atom([]),

@@ -33,6 +33,7 @@ import {
     type DownloadedFile,
 } from '../pdfAttachmentFetch';
 import { PDF_FETCH_CANCELLED_MESSAGE } from '../pdfFetchDiagnostics';
+import { reportFetchSettled, reportFetchStarted } from './pdfJobReports';
 import { fetchRecordSnapshot, saveRecordSnapshot, type RecordSnapshotResponse } from './recordSnapshot';
 
 /** Reported as the access method of a file the record named. */
@@ -198,7 +199,9 @@ export function scheduleAttachInOrderTask(
         }
     };
 
-    scheduleBackgroundTask(generateTaskId('pdf_fetch', libraryId, itemKey), 'pdf_fetch', async (signal: AbortSignal) => {
+    const taskId = generateTaskId('pdf_fetch', libraryId, itemKey);
+    reportFetchStarted(options, libraryId, itemKey, taskId);
+    scheduleBackgroundTask(taskId, 'pdf_fetch', async (signal: AbortSignal) => {
         const startedAt = Date.now();
         let primary: Zotero.Item | null = null;
         try {
@@ -212,7 +215,7 @@ export function scheduleAttachInOrderTask(
             if (!signal.aborted && generation === Zotero.Beaver.account?.getGeneration()
                 && Zotero.Beaver.searchableLibraryIds?.includes(libraryId)) {
                 const attachment = primary as Zotero.Item | null;
-                options.onAttachmentResolved?.({
+                const resolved: AttachmentResolvedPayload = {
                     threadId: options.threadId,
                     actionId: options.actionId,
                     libraryId,
@@ -222,6 +225,18 @@ export function scheduleAttachInOrderTask(
                     accessMethod: attachment ? RECORD_ACCESS_METHOD : undefined,
                     elapsedMs: Date.now() - startedAt,
                     failureReason: attachment ? undefined : 'error',
+                };
+                reportFetchSettled(options, resolved);
+                options.onAttachmentResolved?.(resolved);
+            } else {
+                // No result goes to the backend, but a job waiting on this fetch must not wait for it.
+                reportFetchSettled(options, {
+                    actionId: options.actionId,
+                    libraryId,
+                    zoteroKey: itemKey,
+                    attachmentStatus: 'failed',
+                    failureReason: 'cancelled',
+                    elapsedMs: Date.now() - startedAt,
                 });
             }
         }

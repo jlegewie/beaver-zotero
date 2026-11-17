@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { awaitingInputLabel, parseAwaitingInput } from '../../../src/services/threads/awaitingInput';
+import { awaitingIndicator, awaitingInputLabel, parseAwaitingInput } from '../../../src/services/threads/awaitingInput';
 
 describe('parseAwaitingInput', () => {
     it('keeps positive whole counts by kind', () => {
@@ -42,5 +42,29 @@ describe('awaitingInputLabel', () => {
 
     it('falls back to the generic phrase for a kind it does not know', () => {
         expect(awaitingInputLabel({ ask_user_question: 1, new_card: 1 })).toBe('Waiting for your input');
+    });
+});
+
+describe('job calls in the thread list', () => {
+    it('draws a spinner while only jobs work for the thread', () => {
+        expect(awaitingIndicator({ table_fill: 1 })).toBe('spinner');
+        expect(awaitingIndicator({ table_fill: 1, pdf_retrieval: 1 })).toBe('spinner');
+        expect(awaitingInputLabel({ table_fill: 1 })).toBe('Filling a table');
+        expect(awaitingInputLabel({ table_fill: 1, pdf_retrieval: 1 })).toBe('Filling a table · Finding PDFs');
+    });
+
+    it('draws the dot once a job result is ready, or the user has something to answer', () => {
+        expect(awaitingIndicator({ job_ready: 1 })).toBe('dot');
+        expect(awaitingIndicator({ table_fill: 1, ask_user_question: 1 })).toBe('dot');
+        expect(awaitingInputLabel({ job_ready: 1 })).toBe('Finished · ready to continue');
+        expect(awaitingInputLabel({ job_ready: 2 })).toBe('2 jobs finished · ready to continue');
+    });
+
+    it('describes only what needs the user when a job also works', () => {
+        expect(awaitingInputLabel({ table_fill: 1, ask_user_question: 1 })).toBe('Waiting for your answer to a question');
+    });
+
+    it('reads an unknown key as needing the user', () => {
+        expect(awaitingIndicator({ new_job_kind: 1 })).toBe('dot');
     });
 });

@@ -112,3 +112,77 @@ describe('schedulePdfFetchTask failure telemetry', () => {
         expect(await runTask()).toMatchObject({ failureReason: 'error', attempts: [{ outcome: 'ok' }] });
     });
 });
+
+describe('schedulePdfFetchTask job registry', () => {
+    let pdfJobs: { fetchStarted: ReturnType<typeof vi.fn>; fetchSettled: ReturnType<typeof vi.fn> };
+
+    beforeEach(() => {
+        pdfJobs = { fetchStarted: vi.fn(), fetchSettled: vi.fn() };
+        (Zotero.Beaver as any).pdfJobs = pdfJobs;
+    });
+
+    async function runTracked(signal = new AbortController().signal): Promise<void> {
+        schedulePdfFetchTask(1, 'ITEM0001', { threadId: 't1', actionId: 'act-1', onAttachmentResolved } as any);
+        await mocks.scheduleBackgroundTask.mock.calls[0][2](signal);
+    }
+
+    it('registers the fetch with its task id when it is scheduled', () => {
+        schedulePdfFetchTask(1, 'ITEM0001', { threadId: 't1', actionId: 'act-1' } as any);
+        expect(pdfJobs.fetchStarted).toHaveBeenCalledWith({
+            actionId: 'act-1',
+            threadId: 't1',
+            libraryId: 1,
+            zoteroKey: 'ITEM0001',
+            taskId: mocks.scheduleBackgroundTask.mock.calls[0][0],
+        });
+    });
+
+    it('does not track a fetch without an action id', async () => {
+        await runTask();
+        expect(pdfJobs.fetchStarted).not.toHaveBeenCalled();
+        expect(pdfJobs.fetchSettled).not.toHaveBeenCalled();
+    });
+
+    it('settles the fetch with the same outcome it reports to the backend', async () => {
+        mocks.fetchPdfAttachment.mockResolvedValue({ attachment: { key: 'PDFKEYAA' }, accessMethod: 'doi' });
+        await runTracked();
+        expect(pdfJobs.fetchSettled).toHaveBeenCalledWith(
+            expect.objectContaining({
+                actionId: 'act-1',
+                libraryId: 1,
+                zoteroKey: 'ITEM0001',
+                attachmentStatus: 'available',
+                attachmentKey: '1-PDFKEYAA',
+                accessMethod: 'doi',
+            }),
+        );
+        expect(onAttachmentResolved).toHaveBeenCalledTimes(1);
+    });
+
+    it('settles a failed fetch with the diagnostics reason', async () => {
+        mocks.buildPdfResolvers.mockReturnValue([]);
+        await runTracked();
+        expect(pdfJobs.fetchSettled).toHaveBeenCalledWith(
+            expect.objectContaining({ attachmentStatus: 'failed', failureReason: 'no_sources' }),
+        );
+    });
+
+    it('settles a cancelled fetch as cancelled without reporting to the backend', async () => {
+        const controller = new AbortController();
+        controller.abort();
+        await runTracked(controller.signal);
+        expect(pdfJobs.fetchSettled).toHaveBeenCalledWith(
+            expect.objectContaining({ actionId: 'act-1', attachmentStatus: 'failed', failureReason: 'cancelled' }),
+        );
+        expect(onAttachmentResolved).not.toHaveBeenCalled();
+    });
+
+    it('settles the fetch when the library is no longer searchable', async () => {
+        (Zotero.Beaver as any).searchableLibraryIds = [];
+        await runTracked();
+        expect(pdfJobs.fetchSettled).toHaveBeenCalledWith(
+            expect.objectContaining({ attachmentStatus: 'failed', failureReason: 'cancelled' }),
+        );
+        expect(onAttachmentResolved).not.toHaveBeenCalled();
+    });
+});

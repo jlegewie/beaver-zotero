@@ -48,6 +48,7 @@ vi.mock("@beaver/agent-core/transport/agentService", () => ({
         close: closeMock,
         cancel: cancelMock,
         isConnected: () => true,
+        liveJobWaitCalls: () => new Set(),
         cancelHandoff: () => null,
         canLeaveRun: () => false,
         leaveRun: () => false,

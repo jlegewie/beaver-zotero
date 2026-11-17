@@ -107,6 +107,10 @@ declare namespace Zotero {
         const account: import("../src/services/instanceAccount").InstanceAccount | undefined;
         /** Table fill plans and jobs; plugin realm, reached from renderers through this slot. */
         const tableFills: import("../src/services/tableFills/service").InstanceTableFills | undefined;
+        /** Job calls this device runs (table fills, PDF retrieval), until each result is stored. */
+        const jobCalls: import("../src/services/jobCalls/service").InstanceJobCalls | undefined;
+        /** Groups the PDF fetches of created items into a job call. */
+        const pdfJobs: import("../src/services/itemImport/pdfJobs").InstancePdfJobs | undefined;
         const runtime: import("../src/runtime/instance").BeaverInstance;
         const pluginVersion: string;
 
@@ -545,6 +549,10 @@ declare namespace Zotero {
             configureProcessingProgress: import('../src/services/database').BeaverDB['configureProcessingProgress'];
             getProcessingProgress: import('../src/services/database').BeaverDB['getProcessingProgress'];
             subscribeProcessingChanges: import('../src/services/database').BeaverDB['subscribeProcessingChanges'];
+            upsertJobCall: import('../src/services/database').BeaverDB['upsertJobCall'];
+            setJobCallResult: import('../src/services/database').BeaverDB['setJobCallResult'];
+            deleteJobCall: import('../src/services/database').BeaverDB['deleteJobCall'];
+            listJobCalls: import('../src/services/database').BeaverDB['listJobCalls'];
         }
 
         const backgroundExtractor:

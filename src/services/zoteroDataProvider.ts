@@ -1,6 +1,7 @@
 import { handleDuplicatesRequest } from './duplicates/discovery';
 import { handleArtifactRequest, artifactFailure } from './artifacts/artifactProvider';
 import type { OperationContext } from './agentDataProvider/operationContext';
+import { handleJobWaitRequest, handlePdfJobStartRequest, jobWaitFailure, pdfJobStartFailure } from './jobCalls/handlers';
 /**
  * Zotero implementation of the agent data-provider map.
  *
@@ -64,6 +65,14 @@ export function createZoteroDataProvider(options: ZoteroDataProviderOptions = {}
                 });
             },
             errorResponse: (event) => artifactFailure(event),
+        },
+        job_wait_request: {
+            handle: (event, context) => handleJobWaitRequest(event, context),
+            errorResponse: (event) => jobWaitFailure(event),
+        },
+        pdf_job_start_request: {
+            handle: (event, context) => handlePdfJobStartRequest(event, context),
+            errorResponse: (event) => pdfJobStartFailure(event),
         },
         zotero_document_request: {
             handle: (event) => handleZoteroDocumentRequest(event, { responseMode: 'websocket' }),

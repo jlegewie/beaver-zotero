@@ -40,6 +40,7 @@ import { isPdfDocument } from '../../utils/attachmentFiles';
 import { WEB_CONTENT_ITEM_TYPES } from './duplicates';
 import { ImportItemError } from './errors';
 import { filterPdfAttachments, schedulePdfFetchTask } from './pdfFetch';
+import { reportFetchSettled, reportFetchStarted } from './pdfJobReports';
 import { scheduleAttachInOrderTask } from './attachInOrder';
 import { fetchImportProposal } from './importProposals';
 import type { PdfCandidate } from '@beaver/agent-core/types/agentActions/items';
@@ -257,7 +258,9 @@ function scheduleSnapshotTask(libraryId: number, itemKey: string, url: string, o
         }
     };
 
-    scheduleBackgroundTask(generateTaskId('snapshot', libraryId, itemKey), 'snapshot', async (signal: AbortSignal) => {
+    const taskId = generateTaskId('snapshot', libraryId, itemKey);
+    reportFetchStarted(options, libraryId, itemKey, taskId);
+    scheduleBackgroundTask(taskId, 'snapshot', async (signal: AbortSignal) => {
         const startedAt = Date.now();
         let snapshot: Zotero.Item | null = null;
         let browser: any = null;
@@ -316,7 +319,7 @@ function scheduleSnapshotTask(libraryId: number, itemKey: string, url: string, o
             if (!signal.aborted && generation === Zotero.Beaver.account?.getGeneration()
                 && Zotero.Beaver.searchableLibraryIds?.includes(libraryId)) {
                 const captured = snapshot as Zotero.Item | null;
-                options.onAttachmentResolved?.({
+                const resolved: AttachmentResolvedPayload = {
                     threadId: options.threadId ?? undefined,
                     actionId: options.actionId,
                     libraryId,
@@ -326,6 +329,18 @@ function scheduleSnapshotTask(libraryId: number, itemKey: string, url: string, o
                     accessMethod: captured ? 'snapshot' : undefined,
                     elapsedMs: Date.now() - startedAt,
                     failureReason: captured ? undefined : failureReason,
+                };
+                reportFetchSettled(options, resolved);
+                options.onAttachmentResolved?.(resolved);
+            } else {
+                // No result goes to the backend, but a job waiting on this capture must not wait for it.
+                reportFetchSettled(options, {
+                    actionId: options.actionId,
+                    libraryId,
+                    zoteroKey: itemKey,
+                    attachmentStatus: 'failed',
+                    failureReason: 'cancelled',
+                    elapsedMs: Date.now() - startedAt,
                 });
             }
         }

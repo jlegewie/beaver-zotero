@@ -31,7 +31,15 @@ const StatusLine: React.FC<{ text: string }> = ({ text }) => {
         </span>
     );
 };
-import { useAtomValue } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
+import type { JobView } from '@beaver/agent-ui/chat/JobBar';
+import { currentThreadNameAtom } from '@beaver/agent-core/run-state/atoms';
+import { dismissJobReadyNoticeAtom, jobReadyNoticesAtom, openJobReadyChatAtom } from '../../atoms/jobCalls';
+import { continueParkedJobsAtom } from '../../atoms/agentRunAtoms';
+import { threadEntitiesAtom } from '../../atoms/threadList';
+import { dismissRunStatusPopupCardAtom, runStatusPopupDismissedAtom } from '../../atoms/runStatusPopup';
+import { eventManager } from '../../events/eventManager';
+import { storedResultView, useJobViews } from '../input/JobBarPanel';
 import { isSidebarVisibleAtom } from '../../atoms/ui';
 import { tryGetWindowRuntime } from '../../runtime/windowRuntime';
 import { runStatusPopupForceVisibleAtom } from '../../atoms/runStatusPopup';
@@ -488,7 +496,8 @@ const RunStatusPopup: React.FC = () => {
     // for the run it was opened on, so the next run starts collapsed.
     const [batchExpansion, setBatchExpansion] = useState<{ runId: string; expanded: boolean } | null>(null);
 
-    if (tryGetWindowRuntime()?.kind === 'standalone' || !card || (isSidebarVisible && !forceVisible)) return null;
+    if (tryGetWindowRuntime()?.kind === 'standalone' || (isSidebarVisible && !forceVisible)) return null;
+    if (!card) return <JobPopup />;
 
     // The panel draws nothing without a batch in flight, and the wrapper is
     // hidden with it (see the stylesheet), so a run without a batch does not
@@ -521,6 +530,117 @@ const RunStatusPopup: React.FC = () => {
                 <CardView card={card} batchProgress={batchProgress} />
             </AnimatedCard>
         </div>
+    );
+};
+
+/** A job's card, in the shape of the run cards: mark, chat name, what the job did, ✕, Open Beaver. */
+interface JobCardProps {
+    threadName: string;
+    view: JobView;
+    onOpen: () => void;
+    onDismiss: () => void;
+    onContinue?: () => void;
+}
+
+const JobCard: React.FC<JobCardProps> = ({ threadName, view, onOpen, onDismiss, onContinue }) => {
+    const ready = view.state === 'ready';
+    const leading = !ready ? (
+        <RunPulse />
+    ) : view.tone === 'clean' || !view.tone ? (
+        <Mark icon={CheckmarkCircleIcon} className="font-color-green" />
+    ) : (
+        <Mark icon={AlertIcon} className={view.tone === 'error' ? 'font-color-red' : 'font-color-orange'} />
+    );
+    const progress = typeof view.progress === 'object' && view.progress.total > 0 ? view.progress : null;
+    return (
+        <div className="beaver-run-status-popup" data-stack-depth={0}>
+            <div
+                className="beaver-run-status-popup__card beaver-run-status-popup__card--settled beaver-run-status-popup__card--job"
+                role="group"
+                aria-label={`${threadName}: ${view.verb}`}
+            >
+                <div className="beaver-run-status-popup__content" data-run-status-popup-interactive>
+                    <div className="beaver-run-status-popup__header">
+                        <div className="beaver-run-status-popup__leading">{leading}</div>
+                        <div className="beaver-run-status-popup__text">
+                            <div className="beaver-run-status-popup__title font-color-primary" title={threadName}>
+                                {threadName}
+                            </div>
+                            <div className="beaver-run-status-popup__detail beaver-run-status-popup__detail--job font-color-secondary">
+                                {[view.verb, view.status, view.statusWarning].filter(Boolean).join(' · ')}
+                            </div>
+                        </div>
+                        <div className="beaver-run-status-popup__trailing beaver-run-status-popup__dismiss">
+                            <IconButton icon={CancelIcon} variant="ghost-secondary" onClick={onDismiss} ariaLabel="Close" />
+                        </div>
+                    </div>
+                    {progress ? (
+                        <div className="beaver-run-status-popup__job-progress" aria-hidden="true">
+                            <span style={{ width: `${(progress.done / progress.total) * 100}%` }} />
+                            <span className="beaver-run-status-popup__job-progress-failed" style={{ width: `${(progress.failed / progress.total) * 100}%` }} />
+                        </div>
+                    ) : !ready ? (
+                        <div className="beaver-run-status-popup__job-progress" aria-hidden="true">
+                            <div className="batch-progress-indeterminate" />
+                        </div>
+                    ) : null}
+                    <div className="beaver-run-status-popup__footer">
+                        <div className="flex-1" />
+                        {onContinue && (
+                            <Button variant="outline" style={FOOTER_BUTTON_STYLE} onClick={onContinue}>
+                                Continue
+                            </Button>
+                        )}
+                        <Button variant="solid" style={FOOTER_BUTTON_STYLE} rightIcon={ArrowRightIcon} onClick={onOpen}>
+                            Open Beaver
+                        </Button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+/**
+ * A job card while no run card is up: a job the open chat waits on (running,
+ * or finished and not continued yet), else a job that finished for a chat
+ * no window shows.
+ */
+const JobPopup: React.FC = () => {
+    const jobs = useJobViews();
+    const threadName = useAtomValue(currentThreadNameAtom);
+    const threads = useAtomValue(threadEntitiesAtom);
+    const notices = useAtomValue(jobReadyNoticesAtom);
+    const dismissed = useAtomValue(runStatusPopupDismissedAtom);
+    const dismissCard = useSetAtom(dismissRunStatusPopupCardAtom);
+    const openChat = useSetAtom(openJobReadyChatAtom);
+    const dismissNotice = useSetAtom(dismissJobReadyNoticeAtom);
+    const continueJobs = useSetAtom(continueParkedJobsAtom);
+    const openBeaver = () => eventManager.dispatch('toggleChat', { forceOpen: true });
+
+    // Closing a card hides what it said: the same job in another state gets a card again.
+    const job = jobs.find((view) => !dismissed.has(`job:${view.id}:${view.state}`));
+    if (job) {
+        const canContinue = job.actions.some((action) => action.id === 'continue' && !action.disabled);
+        return (
+            <JobCard
+                threadName={threadName || 'Chat'}
+                view={job}
+                onOpen={openBeaver}
+                onDismiss={() => dismissCard(`job:${job.id}:${job.state}`)}
+                {...(canContinue ? { onContinue: () => void continueJobs() } : {})}
+            />
+        );
+    }
+    const notice = notices[notices.length - 1];
+    if (!notice) return null;
+    return (
+        <JobCard
+            threadName={threads.get(notice.threadId)?.name || 'Chat'}
+            view={storedResultView(notice.toolCallId, notice.result, notice.subject)}
+            onOpen={() => openChat(notice.threadId)}
+            onDismiss={() => dismissNotice(notice.threadId)}
+        />
     );
 };
 

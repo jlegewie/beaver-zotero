@@ -25,7 +25,8 @@ import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import PendingActionsBar from './PendingActionsBar';
 import ThreadPresenceBar from './ThreadPresenceBar';
 import BatchProgressPanel from './BatchProgressPanel';
-import TableFillProgressPanel from './TableFillProgressPanel';
+import JobBarPanel from './JobBarPanel';
+import { openJobCallsAtom } from '@beaver/agent-core/run-state/jobCalls';
 import HighTokenUsageWarningBar from './HighTokenUsageWarningBar';
 import NextStepsPanel from '../pages/firstRun/NextStepsPanel';
 import RunContinueDisplay from '../agentRuns/RunContinueDisplay';
@@ -143,6 +144,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     // answer them. A resume that waits for the rest of the cards looks the
     // same: sending a message parks it first.
     const isParked = useAtomValue(isThreadParkedAtom);
+    const jobCalls = useAtomValue(openJobCallsAtom);
     const isPending = useAtomValue(isWSChatPendingAtom) && !isParked;
 
     // A file staged for THIS composition is still being attached, so sending is
@@ -615,6 +617,14 @@ const InputArea: React.FC<InputAreaProps> = ({
     const getPlaceholderText = () => {
         if (placeholder !== undefined) return placeholder;
         if (isAwaitingApproval) return "Optional instructions, then approve or reject";
+        // A parked job: Beaver continues once it is done; writing moves on
+        // now, and the job keeps running.
+        if (isParked && jobCalls.length) {
+            if (jobCalls.some((call) => call.result)) return "Continue, or reply with new instructions";
+            return jobCalls.some((call) => call.kind === 'table_fill')
+                ? "Beaver waits for the fill — or write to move on"
+                : "Beaver waits for the PDFs — or write to move on";
+        }
         if (isLibraryTab) return "@ to add a source, / for actions";
         if (currentNoteItem) return "@ to add a source, / for actions";
         return "@ to add a source, / for actions, drag to add annotations";
@@ -637,7 +647,7 @@ const InputArea: React.FC<InputAreaProps> = ({
             {/* Live batch progress. Above the band so it stacks as: what the
                 run is doing, then what it wants from the user. */}
             <BatchProgressPanel />
-            <TableFillProgressPanel />
+            <JobBarPanel />
 
             {/* One band, chosen by `composerBand`. Lowest priority first so
                 the winner sits on the composer. */}
