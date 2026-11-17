@@ -128,6 +128,22 @@ async function disposeAccountServices(): Promise<void> {
     catch (error) { ztoolkit.log(`disposeAccount: ${error}`); }
 }
 
+let pluginDatabaseClose: Promise<void> | undefined;
+
+/**
+ * Close beaver.sqlite. Shutdown paths overlap at a quit (each window's unload,
+ * the quit observer, APP_SHUTDOWN), so callers share a close in flight rather
+ * than closing a connection that is already closing. A failed close leaves the
+ * connection on `addon` for a later path to retry.
+ */
+function closePluginDatabase(): Promise<void> {
+    const db = addon.db;
+    if (!db) return Promise.resolve();
+    return pluginDatabaseClose ??= db.closeDatabase()
+        .then(() => { if (addon.db === db) addon.db = undefined; })
+        .finally(() => { pluginDatabaseClose = undefined; });
+}
+
 /**
  * Close the agent connection via the window's React bundle (`agentService` is
  * per-bundle). Synchronous and best-effort — teardown must not wait on the network.
@@ -163,6 +179,8 @@ async function cleanupDevTemporaryAnnotations(
 }
 
 let isAppQuitting = false;
+/** Set once a quit's app-wide cleanup has started in a window's unload. */
+let globalCleanupStarted = false;
 let quitObserverRegistered = false;
 
 /**
@@ -189,11 +207,10 @@ const quitObserver = {
             const teardown = () => {
                 void disposeAccountServices();
                 try {
-                    if (addon?.db) {
-                        addon.db.closeDatabase().catch((error: unknown) => {
+                    if (addon) {
+                        closePluginDatabase().catch((error: unknown) => {
                             Zotero.logError(error as Error);
                         });
-                        addon.db = undefined;
                     }
                 } catch (_) {
                     // Best-effort — process is dying
@@ -500,10 +517,7 @@ async function onStartup() {
             ztoolkit.log(`Failed to stop backgroundExtractor during startup error recovery: ${stopError}`);
         }
         try {
-            if (addon.db) {
-                await addon.db.closeDatabase();
-                addon.db = undefined;
-            }
+            await closePluginDatabase();
         } catch (closeError) {
             ztoolkit.log(`Failed to close database during startup error recovery: ${closeError}`);
         }
@@ -793,6 +807,16 @@ async function onMainWindowUnload(
             return;
         }
 
+        // At a quit every window can read as closed, so each unload can take
+        // itself for the last one. The app-wide cleanup disposes the window
+        // registry, which would cut short the unload of a window still
+        // attached, so it runs once, in the last window to finish its own.
+        if (addon.runtime.getSnapshot().some((other) => other.kind === "main")) {
+            ztoolkit.log("onMainWindowUnload: Other windows still closing, skipping global cleanup");
+            return;
+        }
+        if (globalCleanupStarted) return;
+        globalCleanupStarted = true;
         ztoolkit.log("onMainWindowUnload: Last window closing, running global cleanup");
 
         // Global cleanup - only run when last window closes
@@ -824,10 +848,7 @@ async function onMainWindowUnload(
         addon.documentCache = undefined;
 
         // 4. Close database connection
-        if (addon.db) {
-            await withShutdownTimeout(addon.db.closeDatabase(), "closeDatabase");
-            addon.db = undefined;
-        }
+        await withShutdownTimeout(closePluginDatabase(), "closeDatabase");
 
         // 4. Dispose CitationService
         if (addon.citationService) {
@@ -1058,12 +1079,7 @@ async function disposeAppServices(): Promise<void> {
     await attempt('disposeMuPDFWorker', () => disposeMuPDFWorker(undefined, { force: true }));
     addon.documentCache = undefined;
     // Keep a failed connection available to bootstrap's independent DB fallback.
-    await attempt('closeDatabase', async () => {
-        if (addon.db) {
-            await addon.db.closeDatabase();
-            addon.db = undefined;
-        }
-    });
+    await attempt('closeDatabase', closePluginDatabase);
     await attempt('citationService.dispose', () => addon.citationService?.dispose());
     addon.citationService = undefined;
     await attempt('exporter.dispose', () => addon.exporter.dispose());
@@ -1120,10 +1136,7 @@ async function disposePlugin(): Promise<void> {
         addon.documentCache = undefined;
         await disposeAccountServices();
 
-        if (addon.db) {
-            await addon.db.closeDatabase();
-            addon.db = undefined;
-        }
+        await closePluginDatabase();
 
         if (addon.citationService) {
             addon.citationService.dispose();
