@@ -10,6 +10,7 @@ import {
     fillLabel,
     fillResultLine,
     fillTone,
+    isStoppedJobResult,
     openJobCallsAtom,
     pdfLabel,
     pdfMissingText,
@@ -129,15 +130,14 @@ function liveFillView(fill: ChatFill): JobView {
         ...(!stopping && line.failed ? { statusWarning: line.failed } : {}),
         open: tableKey ? () => openTable(tableKey) : undefined,
         links: [],
-        actions: [
-            {
-                id: 'stop',
-                label: stopping ? 'Stopping…' : 'Stop',
-                disabled: stopping,
-                onClick: () => void Zotero.Beaver.tableFills?.stop(snapshot.job_id),
-            },
-        ],
+        // Stopped from the composer, as any work of the chat is.
+        actions: [],
     };
+}
+
+/** A finished job's actions: Continue, unless the user stopped it (their next message moves on). */
+function continueActions(result: JobResult, continueAction: JobView['actions'][number]): JobView['actions'] {
+    return isStoppedJobResult(result) ? [] : [continueAction];
 }
 
 /** A parked fill job call. */
@@ -153,7 +153,7 @@ function parkedFillView(
     const open = tableKey ? () => openTable(tableKey) : undefined;
     if (call.result?.kind === 'table_fill') {
         const total = call.result.progress.rows_total || state.rows || 0;
-        return readyFillView(call.tool_call_id, call.result.job_id, call.result.result, total, subject, tableKey, [continueAction]);
+        return readyFillView(call.tool_call_id, call.result.job_id, call.result.result, total, subject, tableKey, continueActions(call.result, continueAction));
     }
     if (live) return { ...liveFillView(live), id: call.tool_call_id };
     const elsewhere = !!state.device_key && !!device && state.device_key !== device;
@@ -225,7 +225,8 @@ function livePdfView(id: string, job: PdfJobSnapshot): JobView {
         status: pdfProgressLine(job.found, job.total),
         ...(missing ? { statusWarning: missing } : {}),
         links: [],
-        actions: [{ id: 'stop', label: 'Stop', onClick: () => void Zotero.Beaver.pdfJobs?.stop(job.job_id) }],
+        // Stopped from the composer, as any work of the chat is.
+        actions: [],
     };
 }
 
@@ -237,7 +238,7 @@ function parkedPdfView(
     continueAction: JobView['actions'][number],
 ): JobView {
     const state = (call.state ?? {}) as PdfRetrievalJobState;
-    if (call.result?.kind === 'pdf_retrieval') return readyPdfView(call.tool_call_id, call.result, [continueAction]);
+    if (call.result?.kind === 'pdf_retrieval') return readyPdfView(call.tool_call_id, call.result, continueActions(call.result, continueAction));
     if (live) return livePdfView(call.tool_call_id, live);
     const elsewhere = !!state.device_key && !!device && state.device_key !== device;
     const name = state.device_name || 'another device';
@@ -311,8 +312,8 @@ export function useJobViews(): JobView[] {
 
 /**
  * The job bar above the composer: one bar per job the chat waits on. A
- * running job shows its progress and Stop; a finished one its result and
- * Continue. Replaces the chat fill's progress panel.
+ * running job shows its progress (the composer's Stop stops it); a finished
+ * one its result and Continue. Replaces the chat fill's progress panel.
  */
 const JobBarPanel: React.FC = () => {
     useEffect(() => {

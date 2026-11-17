@@ -1,16 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { createStore } from 'jotai';
-import type { AgentRun, ModelMessage } from '@beaver/agent-core/agents/types';
 import type { TableFillJobSnapshot } from '@beaver/agent-core/protocol/tableFillProtocol';
-import { activeRunAtom, threadRunsAtom } from '@beaver/agent-core/run-state/atoms';
 import {
-    chatFillsAtom,
-    waitsOnFillAtom,
     fillForToolCall,
     fillStatusLine,
     panelFill,
     recordChatFill,
-    waitingFill,
     type ChatFill,
 } from '@beaver/agent-core/run-state/tableChatFills';
 
@@ -81,18 +75,12 @@ describe('chat fills', () => {
         expect(recordChatFill(fills, snapshot({ state: 'done', rows_done: 10, credits_charged: 2 })).get('job-1')?.dismissed).toBe(true);
     });
 
-    it('finds the fill a tool call started, and the one the active run still waits on', () => {
+    it('finds the fill a tool call started', () => {
         const fills = recordChatFill(empty, snapshot());
         expect(fillForToolCall(fills, 'call-1', 'run-1')?.snapshot.job_id).toBe('job-1');
         expect(fillForToolCall(fills, 'call-2', 'run-1')).toBeNull();
         // A model that reuses tool call ids: the same id in another run is another call.
         expect(fillForToolCall(fills, 'call-1', 'run-2')).toBeNull();
-        expect(waitingFill(fills, 'run-1', () => false)?.toolCallId).toBe('call-1');
-        // Its tool call returned (`running`): the response no longer waits on it.
-        expect(waitingFill(fills, 'run-1', () => true)).toBeNull();
-        expect(waitingFill(fills, 'run-2', () => false)).toBeNull();
-        const done = recordChatFill(fills, snapshot({ state: 'done', rows_done: 10 }));
-        expect(waitingFill(done, 'run-1', () => false)).toBeNull();
     });
 
     it('words the tool call status line without live counts', () => {
@@ -102,38 +90,3 @@ describe('chat fills', () => {
         expect(fillStatusLine('started')).toBe('Started filling in the background');
     });
 });
-
-describe('whether the active run waits on a fill', () => {
-    const call = (id: string) =>
-        ({ kind: 'response', run_id: 'r', parts: [{ part_kind: 'tool-call', tool_name: 'fill_table', tool_call_id: id, args: {} }] }) as unknown as ModelMessage;
-    const ret = (id: string) =>
-        ({ kind: 'request', run_id: 'r', instructions: '', parts: [{ part_kind: 'tool-return', tool_name: 'fill_table', tool_call_id: id, content: {} }] }) as unknown as ModelMessage;
-    const text = (content: string) =>
-        ({ kind: 'response', run_id: 'r', parts: [{ part_kind: 'text', content }] }) as unknown as ModelMessage;
-    const run = (id: string, messages: ModelMessage[], status = 'in_progress') =>
-        ({ id, thread_id: 'thread-1', status, model_messages: messages, user_prompt: { content: 'q', is_resume: false } }) as unknown as AgentRun;
-
-    it('counts only the active run\'s own results, when an earlier run reused the tool call id', () => {
-        const store = createStore();
-        // An earlier run's call with the same id returned long ago.
-        store.set(threadRunsAtom, [run('run-0', [call('call-1'), ret('call-1')], 'completed')]);
-        store.set(activeRunAtom, run('run-1', [call('call-1')]));
-        store.set(chatFillsAtom, recordChatFill(empty, snapshot()));
-        expect(store.get(waitsOnFillAtom)).toBe(true);
-        store.set(activeRunAtom, run('run-1', [call('call-1'), ret('call-1')]));
-        expect(store.get(waitsOnFillAtom)).toBe(false);
-    });
-
-    it('notifies nobody while streamed frames leave the answer unchanged', () => {
-        const store = createStore();
-        store.set(activeRunAtom, run('run-1', [call('call-1')]));
-        store.set(chatFillsAtom, recordChatFill(empty, snapshot()));
-        let notified = 0;
-        store.sub(waitsOnFillAtom, () => notified++);
-        store.set(activeRunAtom, run('run-1', [call('call-1'), text('Filling')]));
-        store.set(activeRunAtom, run('run-1', [call('call-1'), text('Filling the table')]));
-        expect(store.get(waitsOnFillAtom)).toBe(true);
-        expect(notified).toBe(0);
-    });
-});
-

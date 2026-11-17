@@ -20,6 +20,7 @@ import { runStatusText } from '@beaver/agent-core/run-state/runStatusCopy';
 import { getRunErrorTitle, stripRunErrorTypePrefix } from '@beaver/agent-core/run-state/runErrorCopy';
 import { pendingBatchApprovalsAtom } from '@beaver/agent-core/run-state/pendingBatchApprovals';
 import { pendingTableCardsAtom } from '@beaver/agent-core/run-state/pendingTableCards';
+import { openJobCallsAtom } from '@beaver/agent-core/run-state/jobCalls';
 import {
     pendingCreditConfirmationsAtom,
     type PendingCreditConfirmation,
@@ -94,11 +95,13 @@ function openBeaver(): void {
 /**
  * Records a run that finished while the sidebar was closed, so the completed
  * card can report it, and forgets it as soon as the sidebar is open or
- * another run has taken the thread over.
+ * another run has taken the thread over. A run that parked on a job has not
+ * finished: the job's card reports it instead.
  */
 function useCompletionTracking(): void {
     const summary = useAtomValue(lastRunSummaryAtom);
     const isSidebarVisible = useAtomValue(isSidebarVisibleAtom);
+    const parkedOnJob = useAtomValue(openJobCallsAtom).length > 0;
     const setCompletion = useSetAtom(runStatusPopupCompletionAtom);
     const previousRef = useRef(summary);
 
@@ -115,10 +118,10 @@ function useCompletionTracking(): void {
             setCompletion(null);
         }
         const wasLive = previous?.id === summary.id && isRunActive(previous);
-        if (wasLive && !isRunActive(summary) && !isSidebarVisible) {
+        if (wasLive && !isRunActive(summary) && !isSidebarVisible && !parkedOnJob) {
             setCompletion({ runId: summary.id, completedAt: Date.now() });
         }
-    }, [summary, isSidebarVisible, setCompletion]);
+    }, [summary, isSidebarVisible, setCompletion, parkedOnJob]);
 
     useEffect(() => {
         if (isSidebarVisible) setCompletion(null);

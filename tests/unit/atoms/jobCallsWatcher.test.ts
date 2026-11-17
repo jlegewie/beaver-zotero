@@ -18,6 +18,7 @@ const h = vi.hoisted(() => ({
     dispatched: [] as unknown[][],
     popupMessages: null as any,
     getThread: vi.fn(async () => ({})),
+    waitsOnly: false,
 }));
 
 vi.mock('../../../react/store', async () => {
@@ -25,7 +26,16 @@ vi.mock('../../../react/store', async () => {
     h.store = createStore();
     return { store: h.store };
 });
-vi.mock('../../../react/atoms/agentRunAtoms', () => ({ continueParkedJobsAtom: atom(null, () => h.continued()) }));
+vi.mock('../../../react/atoms/agentRunAtoms', async () => {
+    const { hasReadyJobCallAtom } = await import('@beaver/agent-core/run-state/jobCalls');
+    // As the real atom: only a result that continues the chat resumes it.
+    return {
+        continueParkedJobsAtom: atom(null, (get) => {
+            if (get(hasReadyJobCallAtom)) h.continued();
+        }),
+        waitsOnlyOnJobs: () => h.waitsOnly,
+    };
+});
 vi.mock('../../../react/atoms/threads', () => ({ loadThreadAtom: atom(null, () => {}) }));
 vi.mock('../../../react/atoms/auth', () => ({ userIdAtom: atom('user-1') }));
 vi.mock('../../../react/atoms/ui', async () => {
@@ -47,9 +57,18 @@ vi.mock('../../../src/services/systemNotifications', () => ({ notifyJobReady: vi
 vi.mock('../../../react/runtime/windowRuntime', () => ({ tryGetWindowRuntime: () => ({ id: 'win-1' }) }));
 vi.mock('@beaver/agent-core/transport/agentService', () => ({ agentRunService: { getThreadRuns: (...args: unknown[]) => h.getThreadRuns(...args) } }));
 
-import { currentThreadIdAtom, threadRunsAtom } from '@beaver/agent-core/run-state/atoms';
+import { activeRunAtom, currentThreadIdAtom, threadRunsAtom } from '@beaver/agent-core/run-state/atoms';
 import { openJobCallsAtom } from '@beaver/agent-core/run-state/jobCalls';
-import { jobReadyNoticesAtom, openJobReadyChatAtom, watchJobCalls } from '../../../react/atoms/jobCalls';
+import { chatFillsAtom } from '@beaver/agent-core/run-state/tableChatFills';
+import {
+    applyStoredJobResultAtom,
+    jobReadyNoticesAtom,
+    jobStopRunIdAtom,
+    openJobReadyChatAtom,
+    runningChatJobsAtom,
+    stopChatJobsAtom,
+    watchJobCalls,
+} from '../../../react/atoms/jobCalls';
 import { userIdAtom } from '../../../react/atoms/auth';
 
 const result = { kind: 'table_fill', job_id: 'job-1', status: 'done', progress: { rows_total: 2 }, result: { rows_answered: 2, failed_row_ids: [] } };
@@ -81,6 +100,7 @@ beforeEach(() => {
         presence: { getSnapshot: () => ({ viewers: h.viewers }) },
         pdfJobs: { listJobs: () => [] },
         threads: { getThread: h.getThread },
+        data: { env: 'test' },
     };
     watchJobCalls();
     h.continued.mockReset();
@@ -148,10 +168,37 @@ describe('a result stored before any window could report it', () => {
 });
 
 describe('a job the user stopped', () => {
-    it('is put on the call but waits for the user to continue', () => {
-        const stopped = { ...result, result: { ...result.result, stopped_by: 'stopped' } };
+    const stopped = { ...result, result: { ...result.result, stopped_by: 'stopped' }, stopped: true };
+
+    it('is put on the call but continues nothing', () => {
         h.subscribers.get('job-call:stored')!({ threadId: 'thread-1', toolCallId: 'call-1', kind: 'table_fill', jobId: 'job-1', userId: 'user-1', result: stopped, viewerWindowIds: ['win-1'] });
         expect(h.store.get(openJobCallsAtom)[0].result).toEqual(stopped);
+        expect(h.continued).not.toHaveBeenCalled();
+    });
+
+    it('of a chat no window shows is reported nowhere', () => {
+        h.store.set(currentThreadIdAtom, 'thread-2');
+        h.subscribers.get('job-call:stored')!({
+            threadId: 'thread-3', toolCallId: 'call-3', kind: 'table_fill', jobId: 'job-3', userId: 'user-1', result: stopped,
+            viewerWindowIds: [], notifyWindowId: 'win-1',
+        });
+        expect(h.store.get(jobReadyNoticesAtom).some((notice: any) => notice.threadId === 'thread-3')).toBe(false);
+        expect(h.messages.some((message: any) => message.id === 'job-ready-thread-3')).toBe(false);
+    });
+
+    it('stored on another device: the window showing the thread reloads it, and continues nothing', async () => {
+        // Let a reload an earlier test's `job_ready` started settle first.
+        h.store.set(h.entities, new Map());
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        h.store.set(threadRunsAtom, [parkedRun(false)]);
+        h.continued.mockReset();
+        const stoppedRun = parkedRun(true);
+        stoppedRun.parked.requests[0] = { ...stoppedRun.parked.requests[0], result: stopped } as any;
+        h.getThreadRuns.mockResolvedValue({ runs: [stoppedRun] });
+        h.store.set(h.entities, new Map([['thread-1', { id: 'thread-1', awaitingInput: { table_fill: 1 } }]]));
+        // A stopped result counts under no key: the job count goes away.
+        h.store.set(h.entities, new Map([['thread-1', { id: 'thread-1', awaitingInput: null }]]));
+        await vi.waitFor(() => expect(h.store.get(openJobCallsAtom)[0].result).toEqual(stopped));
         expect(h.continued).not.toHaveBeenCalled();
     });
 });
@@ -167,5 +214,87 @@ describe('closing the sidebar message', () => {
         h.store.set(h.popupMessages, [{ id: 'job-ready-thread-3' }]);
         h.store.set(h.popupMessages, []);
         expect(h.store.get(jobReadyNoticesAtom).some((notice: any) => notice.threadId === 'thread-3')).toBe(false);
+    });
+});
+
+describe("the composer's Stop for a chat that waits on jobs", () => {
+    const fillStop = vi.fn();
+    const fill = (state: 'running' | 'stopping' | 'done', runId = 'run-1', jobId = 'job-1') => new Map([[jobId, {
+        threadId: 'thread-1', toolCallId: 'call-1', dismissed: false,
+        snapshot: { job_id: jobId, state, origin: { kind: 'agent', run: { thread_id: 'thread-1', run_id: runId, tool_call_id: 'call-1' } } },
+    }]]) as any;
+
+    beforeEach(() => {
+        (globalThis as any).Zotero.Beaver.tableFills = { stop: fillStop };
+        fillStop.mockReset();
+        h.waitsOnly = false;
+        h.store.set(activeRunAtom, null);
+        h.store.set(chatFillsAtom, new Map());
+    });
+
+    it('lists a parked fill this device runs, and stops it', () => {
+        h.store.set(chatFillsAtom, fill('running'));
+        expect(h.store.get(runningChatJobsAtom)).toEqual([{ kind: 'table_fill', jobId: 'job-1', stopping: false }]);
+        expect(h.store.set(stopChatJobsAtom)).toBe(true);
+        expect(fillStop).toHaveBeenCalledWith('job-1');
+        expect(h.store.get(runningChatJobsAtom)).toEqual([{ kind: 'table_fill', jobId: 'job-1', stopping: true }]);
+    });
+
+    it('stays busy after the stopped fill ended, until its result is on the call', () => {
+        h.store.set(chatFillsAtom, fill('running'));
+        h.store.set(stopChatJobsAtom);
+        h.store.set(chatFillsAtom, fill('done'));
+        expect(h.store.get(runningChatJobsAtom)).toEqual([{ kind: 'table_fill', jobId: 'job-1', stopping: true }]);
+        h.store.set(applyStoredJobResultAtom, { threadId: 'thread-1', toolCallId: 'call-1', result: { ...result, stopped: true } as any });
+        expect(h.store.get(runningChatJobsAtom)).toEqual([]);
+    });
+
+    it('does not list a parked job running on another device', () => {
+        expect(h.store.get(runningChatJobsAtom)).toEqual([]);
+        expect(h.store.set(stopChatJobsAtom)).toBe(false);
+    });
+
+    it('lets a live run that waits on more than its jobs be stopped as a run', () => {
+        h.store.set(threadRunsAtom, []);
+        h.store.set(activeRunAtom, { id: 'run-2', status: 'in_progress', model_messages: [] } as any);
+        h.store.set(chatFillsAtom, fill('running', 'run-2'));
+        expect(h.store.get(runningChatJobsAtom)).toHaveLength(1);
+        expect(h.store.set(stopChatJobsAtom)).toBe(false);
+        expect(fillStop).not.toHaveBeenCalled();
+    });
+
+    it("lists a live run's fill only while its tool call has not returned in that run", () => {
+        const call = { kind: 'response', parts: [{ part_kind: 'tool-call', tool_name: 'fill_table', tool_call_id: 'call-1', args: {} }] };
+        const ret = { kind: 'request', parts: [{ part_kind: 'tool-return', tool_name: 'fill_table', tool_call_id: 'call-1', content: {} }] };
+        // An earlier run's call with the same id returned long ago.
+        h.store.set(threadRunsAtom, [{ id: 'run-0', thread_id: 'thread-1', status: 'completed', model_messages: [call, ret] }] as any);
+        h.store.set(activeRunAtom, { id: 'run-2', status: 'in_progress', model_messages: [call] } as any);
+        h.store.set(chatFillsAtom, fill('running', 'run-2', 'job-ids'));
+        expect(h.store.get(runningChatJobsAtom).map((job) => job.jobId)).toEqual(['job-ids']);
+        h.store.set(activeRunAtom, { id: 'run-2', status: 'in_progress', model_messages: [call, ret] } as any);
+        expect(h.store.get(runningChatJobsAtom)).toEqual([]);
+    });
+
+    it('notifies nobody while streamed frames and progress leave the jobs unchanged', () => {
+        h.store.set(threadRunsAtom, []);
+        h.store.set(activeRunAtom, { id: 'run-2', status: 'in_progress', model_messages: [] } as any);
+        h.store.set(chatFillsAtom, fill('running', 'run-2', 'job-quiet'));
+        let notified = 0;
+        const unsubscribe = h.store.sub(runningChatJobsAtom, () => notified++);
+        h.store.set(activeRunAtom, { id: 'run-2', status: 'in_progress', model_messages: [{ kind: 'response', parts: [] }] } as any);
+        h.store.set(chatFillsAtom, fill('running', 'run-2', 'job-quiet'));
+        expect(h.store.get(runningChatJobsAtom)).toHaveLength(1);
+        expect(notified).toBe(0);
+        unsubscribe();
+    });
+
+    it('stops the jobs of a live run that waits on nothing else, and leaves the run to park', () => {
+        h.waitsOnly = true;
+        h.store.set(threadRunsAtom, []);
+        h.store.set(activeRunAtom, { id: 'run-2', status: 'in_progress', model_messages: [] } as any);
+        h.store.set(chatFillsAtom, fill('running', 'run-2', 'job-live'));
+        expect(h.store.set(stopChatJobsAtom)).toBe(true);
+        expect(fillStop).toHaveBeenCalledWith('job-live');
+        expect(h.store.get(jobStopRunIdAtom)).toBe('run-2');
     });
 });

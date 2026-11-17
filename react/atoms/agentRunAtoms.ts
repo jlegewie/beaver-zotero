@@ -122,6 +122,7 @@ import {
     wsRetryAtom,
     resetRunSelectorCaches,
     toolResultsMapAtom,
+    getRunToolResults,
 } from '@beaver/agent-core/run-state/atoms';
 import { hasReadyJobCallAtom } from '@beaver/agent-core/run-state/jobCalls';
 import {
@@ -2130,8 +2131,10 @@ export function createWSCallbacks(
             }
 
             // Surface an OS-native notification if the user can't currently see
-            // the completed response (e.g. working in another app).
-            notifyRunComplete();
+            // the completed response (e.g. working in another app). A run that
+            // parked has not finished: it waits on a card (whose own
+            // notification asked for it) or on a job (notified when it ends).
+            if (!event.parked) notifyRunComplete();
         },
 
         onRunCitations: (event: WSRunCitationsEvent) => {
@@ -4708,11 +4711,34 @@ export function parkableRunId(get: Getter): string | null {
     // An answer still on its way may be applying; one whose call now waits on
     // a job has been applied (the card's call was handed over to the job).
     if ([...get(liveCardAnswersAtom).keys()].some((toolCallId) => !jobCalls.has(toolCallId))) return null;
-    const hasCard = get(pendingApprovalsAtom).size > 0
+    return hasOpenCard(get) || waitsOnJob ? activeRun.id : null;
+}
+
+/** Whether a card the user can answer later is up: an approval, a question, a batch or a table card. */
+function hasOpenCard(get: Getter): boolean {
+    return get(pendingApprovalsAtom).size > 0
         || get(pendingQuestionsAtom).size > 0
         || get(pendingBatchApprovalsAtom).size > 0
         || get(pendingTableCardsAtom).size > 0;
-    return hasCard || waitsOnJob ? activeRun.id : null;
+}
+
+/**
+ * Whether the open chat's run waits on nothing but jobs it waits for live (a
+ * table fill, PDFs): no card is up, and every tool call still running is a job
+ * wait. Stop then stops the jobs rather than the run: the run parks with
+ * their stopped results, so the next message tells the model how far they got.
+ */
+export function waitsOnlyOnJobs(get: Getter): boolean {
+    const runId = parkableRunId(get);
+    const run = get(activeRunAtom);
+    if (!runId || !run || hasOpenCard(get)) return false;
+    const jobWaits = agentService.liveJobWaitCalls(runId);
+    if (jobWaits.size === 0) return false;
+    // A tool running beside the job (a search) is stopped with the run instead.
+    const returned = getRunToolResults(run);
+    return run.model_messages.every((message) => message.kind !== 'response' || message.parts.every(
+        (part) => part.part_kind !== 'tool-call' || returned.has(part.tool_call_id) || jobWaits.has(part.tool_call_id),
+    ));
 }
 
 /** Whether every answer the running resume carries has come back as its call's result. */

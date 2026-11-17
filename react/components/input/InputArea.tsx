@@ -26,13 +26,14 @@ import PendingActionsBar from './PendingActionsBar';
 import ThreadPresenceBar from './ThreadPresenceBar';
 import BatchProgressPanel from './BatchProgressPanel';
 import JobBarPanel from './JobBarPanel';
-import { openJobCallsAtom } from '@beaver/agent-core/run-state/jobCalls';
+import { hasReadyJobCallAtom, openJobCallsAtom } from '@beaver/agent-core/run-state/jobCalls';
+import { activeRunIdAtom } from '@beaver/agent-core/run-state/tableChatFills';
+import { jobStopRunIdAtom, runningChatJobsAtom, stopChatJobsAtom } from '../../atoms/jobCalls';
 import HighTokenUsageWarningBar from './HighTokenUsageWarningBar';
 import NextStepsPanel from '../pages/firstRun/NextStepsPanel';
 import RunContinueDisplay from '../agentRuns/RunContinueDisplay';
 import BackToSuggestions, { FirstRunBackTarget } from '../pages/firstRun/BackToSuggestions';
 import { continuationOfferAtom, hasWhereToStartRunAtom, lastRunSummaryAtom, threadRunIdsAtom } from '@beaver/agent-core/run-state/atoms';
-import { waitsOnFillAtom } from '@beaver/agent-core/run-state/tableChatFills';
 import { PromptOrigin, isRunFinished } from '@beaver/agent-core/agents/types';
 import { isThreadParkedAtom } from '../../atoms/parkedRuns';
 import { firstRunNextStepsDismissedAtom } from '../../atoms/firstRun';
@@ -89,8 +90,6 @@ const InputArea: React.FC<InputAreaProps> = ({
     const runIds = useAtomValue(threadRunIdsAtom);
     const hasWhereToStartRun = useAtomValue(hasWhereToStartRunAtom);
     const currentThreadId = useAtomValue(currentThreadIdAtom);
-    // While the response waits on a table fill, stopping it stops the fill too.
-    const waitsOnFill = useAtomValue(waitsOnFillAtom);
     const dismissedHighTokenByThread = useAtomValue(dismissedHighTokenWarningByThreadAtom);
     const dismissHighTokenWarning = useSetAtom(dismissHighTokenWarningForThreadAtom);
     const backendHighTokenUsageRuns = useAtomValue(backendHighTokenUsageRunsAtom);
@@ -145,7 +144,21 @@ const InputArea: React.FC<InputAreaProps> = ({
     // same: sending a message parks it first.
     const isParked = useAtomValue(isThreadParkedAtom);
     const jobCalls = useAtomValue(openJobCallsAtom);
-    const isPending = useAtomValue(isWSChatPendingAtom) && !isParked;
+    const hasReadyJob = useAtomValue(hasReadyJobCallAtom);
+    // Jobs this device runs for the chat (a table fill, PDFs). While one
+    // goes, the chat is busy as during any other tool call, parked or not:
+    // the composer shows Stop, which stops the jobs.
+    const chatJobs = useAtomValue(runningChatJobsAtom);
+    const stopChatJobs = useSetAtom(stopChatJobsAtom);
+    const jobStopRunId = useAtomValue(jobStopRunIdAtom);
+    const activeRunId = useAtomValue(activeRunIdAtom);
+    const jobsBusy = isParked && chatJobs.length > 0;
+    const isPending = (useAtomValue(isWSChatPendingAtom) && !isParked) || jobsBusy;
+    // Stop was pressed on the jobs: they wind down, and a run that waited on
+    // them parks by itself.
+    const isStoppingJobs = jobsBusy
+        ? chatJobs.every((job) => job.stopping)
+        : !!activeRunId && jobStopRunId === activeRunId;
 
     // A file staged for THIS composition is still being attached, so sending is
     // held until it lands. Work left over from a composition the user has since
@@ -535,6 +548,9 @@ const InputArea: React.FC<InputAreaProps> = ({
             e.preventDefault();
             e.stopPropagation();
         }
+        if (isStoppingJobs) return;
+        // A chat that waits only on jobs stops them; anything else stops the run.
+        if (stopChatJobs() || jobsBusy) return;
         stopRun();
     };
 
@@ -614,16 +630,35 @@ const InputArea: React.FC<InputAreaProps> = ({
         setIsWebSearchEnabled(!isWebSearchEnabled);
     };
 
+    // What Stop stops: the jobs alone while the chat is parked on them,
+    // otherwise the response and anything it waits on.
+    const jobsNoun = chatJobs.some((job) => job.kind === 'table_fill')
+        ? chatJobs.some((job) => job.kind === 'pdf_retrieval') ? 'the table fill and PDF fetch' : 'the table fill'
+        : chatJobs.length ? 'the PDF fetch' : null;
+    const stopLabel = isStoppingJobs
+        ? 'Stopping…'
+        : jobsBusy
+            ? `Stop ${jobsNoun}`
+            : jobsNoun ? `Stop response (also stops ${jobsNoun})` : 'Stop response';
+
     const getPlaceholderText = () => {
         if (placeholder !== undefined) return placeholder;
         if (isAwaitingApproval) return "Optional instructions, then approve or reject";
-        // A parked job: Beaver continues once it is done; writing moves on
-        // now, and the job keeps running.
+        // A job this device runs: Beaver continues once it is done.
+        if (isPending && chatJobs.length) {
+            const fill = chatJobs.some((job) => job.kind === 'table_fill');
+            if (isStoppingJobs) return fill ? "Stopping the table fill…" : "Stopping the PDF fetch…";
+            return fill ? "Beaver continues once the table is filled" : "Beaver continues once the PDFs are fetched";
+        }
         if (isParked && jobCalls.length) {
-            if (jobCalls.some((call) => call.result)) return "Continue, or reply with new instructions";
-            return jobCalls.some((call) => call.kind === 'table_fill')
-                ? "Beaver waits for the fill — or write to move on"
-                : "Beaver waits for the PDFs — or write to move on";
+            if (hasReadyJob) return "Continue, or reply with new instructions";
+            // A job running on another device (or not reported yet): writing
+            // moves on now, and the job keeps running there.
+            if (jobCalls.some((call) => !call.result)) {
+                return jobCalls.some((call) => !call.result && call.kind === 'table_fill')
+                    ? "Beaver waits for the fill — or write to move on"
+                    : "Beaver waits for the PDFs — or write to move on";
+            }
         }
         if (isLibraryTab) return "@ to add a source, / for actions";
         if (currentNoteItem) return "@ to add a source, / for actions";
@@ -894,16 +929,13 @@ const InputArea: React.FC<InputAreaProps> = ({
                             </Button>
                         </>
                     ) : isPending ? (
-                        <Tooltip
-                            content={waitsOnFill ? 'Stop response (also stops the table fill)' : 'Stop response'}
-                            showArrow
-                            singleLine
-                        >
+                        <Tooltip content={stopLabel} showArrow singleLine>
                             <IconButton
                                 icon={StopIcon}
                                 variant="surface"
                                 className="composer-send composer-send-stop"
-                                ariaLabel={waitsOnFill ? 'Stop response (also stops the table fill)' : 'Stop generating'}
+                                ariaLabel={stopLabel === 'Stop response' ? 'Stop generating' : stopLabel}
+                                disabled={isStoppingJobs}
                                 onClick={handleStop}
                             />
                         </Tooltip>

@@ -115,6 +115,8 @@ interface PdfJob {
     /** Whether the job-call list holds an entry to report its end to. */
     registered: boolean;
     ended: boolean;
+    /** The user stopped the job: its result says so. */
+    stopped?: boolean;
     endedAt?: number;
     result?: PdfRetrievalJobResult;
     capTimer?: unknown;
@@ -425,6 +427,8 @@ export class InstancePdfJobs {
 
     /** Cancel the fetches still running and end the job with them as cancelled. */
     private cancelJob(job: PdfJob): void {
+        // Set first: settling the last fetch below ends the job.
+        job.stopped = true;
         for (const record of job.records) {
             if (record.status !== 'pending') continue;
             try {
@@ -437,6 +441,7 @@ export class InstancePdfJobs {
         this.endJob(job, false);
     }
 
+    /** End a job: `capped` by its time cap; a job the user stopped says so. */
     private endJob(job: PdfJob, capped: boolean): void {
         if (job.ended) return;
         job.ended = true;
@@ -450,6 +455,7 @@ export class InstancePdfJobs {
             status: 'done',
             items: this.itemsOf(job),
             ...(capped ? { timed_out: true } : {}),
+            ...(job.stopped ? { stopped: true } : {}),
         };
         job.result = result;
         for (const release of [...job.waiters]) release('ended');

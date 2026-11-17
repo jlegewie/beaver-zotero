@@ -77,6 +77,13 @@ describe('job calls of the open thread', () => {
         expect(store.get(openJobCallsAtom)[0].result).toEqual(fill);
     });
 
+    it('do not continue the chat with a result the user stopped', () => {
+        const store = createStore();
+        store.set(threadRunsAtom, withStoredJobResult([parkedRun([jobCall, question])], 'call-1', { ...fill, stopped: true })!);
+        expect(store.get(openJobCallsAtom)[0].result).toBeTruthy();
+        expect(store.get(hasReadyJobCallAtom)).toBe(false);
+    });
+
     it('patch nothing for a call no run parks, or a card', () => {
         const runs = [parkedRun([jobCall, question])];
         expect(withStoredJobResult(runs, 'nope', fill)).toBeNull();
@@ -109,14 +116,16 @@ describe('job results as the bar reads them', () => {
         expect(pdfResultSummary(pdf(['available']))).toBe('Found 1 PDF');
         expect(pdfResultSummary(pdf(['available', 'failed', 'pending']))).toBe('Found 1 of 3 PDFs');
         expect(pdfResultSummary(pdf(['failed'], { interrupted: true }))).toBe('Zotero closed after 0 of 1 PDF');
-        expect(pdfResultSummary(pdf(['available', 'failed'], {}, 'cancelled'))).toBe('Stopped after 1 of 2 PDFs');
-        expect(pdfLabel(pdf(['available', 'failed'], {}, 'cancelled'))).toBe('PDF fetch stopped');
+        expect(pdfResultSummary(pdf(['available', 'failed'], { stopped: true }, 'cancelled'))).toBe('Stopped after 1 of 2 PDFs');
+        expect(pdfLabel(pdf(['available', 'failed'], { stopped: true }, 'cancelled'))).toBe('PDF fetch stopped');
         expect(pdfLabel(pdf(['available']))).toBe('PDFs fetched');
         expect(pdfLabel()).toBe('Fetching PDFs');
         expect(pdfResultTone(pdf(['available']))).toBe('clean');
         expect(pdfResultTone(pdf(['available', 'failed']))).toBe('warning');
         expect(pdfResultTone(pdf(['failed']))).toBe('error');
-        expect(isStoppedJobResult(pdf(['failed'], {}, 'cancelled'))).toBe(true);
+        expect(isStoppedJobResult(pdf(['failed'], { stopped: true }, 'cancelled'))).toBe(true);
+        // Only the user's Stop counts: a cancelled fetch alone does not.
+        expect(isStoppedJobResult(pdf(['failed'], {}, 'cancelled'))).toBe(false);
     });
 
     it('reads a fill result as the bar says it, counting filled items', () => {
@@ -132,7 +141,7 @@ describe('job results as the bar reads them', () => {
         expect(fillLabel(result({ stopped_by: 'stopped' }))).toBe('Fill stopped');
         expect(fillTone(fill.result)).toBe('clean');
         expect(fillTone(result({ failed_row_ids: ['r1'] }))).toBe('warning');
-        expect(isStoppedJobResult({ ...fill, result: result({ stopped_by: 'stopped' }) })).toBe(true);
+        expect(isStoppedJobResult({ ...fill, result: result({ stopped_by: 'stopped' }), stopped: true })).toBe(true);
         expect(isStoppedJobResult({ ...fill, result: result({ stopped_by: 'shutdown' }) })).toBe(false);
     });
 });

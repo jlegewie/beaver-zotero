@@ -127,7 +127,7 @@ afterEach(() => {
 });
 
 describe('the job bar adapter', () => {
-    it('shows the fill the active run waits on, with progress and Stop', () => {
+    it('shows the fill the active run waits on, with progress and no Stop of its own', () => {
         store.set(activeRunAtom, { id: 'run-1', status: 'in_progress', model_messages: [] } as never);
         store.set(recordChatFillAtom, snapshot());
         render();
@@ -141,8 +141,8 @@ describe('the job bar adapter', () => {
             status: 'Reading 11 of 46 items · about 3 minutes left',
             statusWarning: '1 failed',
         });
-        act(() => views[0].actions.find((action) => action.id === 'stop')!.onClick());
-        expect(stop).toHaveBeenCalledWith('job-1');
+        // The composer's Stop stops it, as any work of the chat.
+        expect(views[0].actions).toEqual([]);
     });
 
     it('shows a parked fill this device runs from its live snapshot', () => {
@@ -186,7 +186,7 @@ describe('the job bar adapter for PDFs', () => {
         (globalThis as any).Zotero.Beaver = { tableFills: { stop }, pdfJobs: { stop: pdfStop } };
     });
 
-    it('shows the PDFs the active run waits on, with progress and Stop', () => {
+    it('shows the PDFs the active run waits on, with progress and no Stop of its own', () => {
         store.set(activeRunAtom, { id: 'run-1', status: 'in_progress', model_messages: [] } as never);
         store.set(pdfJobsAtom.current, new Map([['pdf-1', job()]]));
         render();
@@ -199,11 +199,10 @@ describe('the job bar adapter for PDFs', () => {
             status: 'Fetching 1 of 4 PDFs',
             statusWarning: '1 not found',
         });
-        act(() => views[0].actions.find((action) => action.id === 'stop')!.onClick());
-        expect(pdfStop).toHaveBeenCalledWith('pdf-1');
+        expect(views[0].actions).toEqual([]);
     });
 
-    it('follows a parked retrieval this device runs, and offers Stop', () => {
+    it('follows a parked retrieval this device runs', () => {
         store.set(threadRunsAtom, [{
             ...parked({}),
             parked: {
@@ -219,14 +218,15 @@ describe('the job bar adapter for PDFs', () => {
         render();
         expect(views).toHaveLength(1);
         expect(views[0]).toMatchObject({ id: 'call-1', state: 'running', verb: 'Fetching PDFs' });
-        expect(views[0].actions.map((action) => action.id)).toEqual(['stop']);
+        expect(views[0].actions).toEqual([]);
     });
 });
 
 describe('how a stopped fill reads', () => {
-    it('says how far it got, counting filled items, and offers Continue', () => {
+    it('says how far it got, counting filled items, and offers no Continue', () => {
         const stopped = {
             ...doneResult,
+            stopped: true,
             progress: { ...doneResult.progress, rows_done: 7, rows_failed: 1 },
             result: { ...doneResult.result, rows_answered: 6, failed_row_ids: ['r9'], stopped_by: 'stopped', not_started: { stopped: 39 } },
         };
@@ -234,6 +234,18 @@ describe('how a stopped fill reads', () => {
         render();
         expect(views[0]).toMatchObject({ verb: 'Fill stopped', status: 'Stopped after 6 of 46 items', tone: 'warning' });
         expect(views[0].links.map((link) => link.label)).toEqual(['Show 1 failed']);
+        // The user stopped it: their next message moves on.
+        expect(views[0].actions).toEqual([]);
+    });
+
+    it('offers Continue when the fill stopped by itself (out of credits)', () => {
+        const ranOut = {
+            ...doneResult,
+            result: { ...doneResult.result, rows_answered: 6, stopped_by: 'insufficient_credits' },
+        };
+        store.set(threadRunsAtom, [parked({ device_key: 'here' }, ranOut)] as never);
+        render();
+        expect(views[0]).toMatchObject({ verb: 'Fill stopped', status: 'Out of credits after 6 of 46 items' });
         expect(views[0].actions.map((action) => action.id)).toEqual(['continue']);
     });
 });

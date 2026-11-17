@@ -66,6 +66,11 @@ export interface TableFillJobResult {
     result: TableFillResult;
     /** Derived from local state at startup: Zotero closed during the fill. */
     interrupted?: boolean;
+    /**
+     * The user stopped the job. Its call never continues the run by itself:
+     * a live wait parks with this result, and only a message closes it.
+     */
+    stopped?: boolean;
 }
 
 export type PdfAttachmentStatus = 'available' | 'failed' | 'pending';
@@ -91,6 +96,8 @@ export interface PdfRetrievalJobResult {
     timed_out?: boolean;
     /** Derived from local state at startup: Zotero closed during the job. */
     interrupted?: boolean;
+    /** The user stopped the job (see {@link TableFillJobResult.stopped}). */
+    stopped?: boolean;
 }
 
 export type JobResult = TableFillJobResult | PdfRetrievalJobResult;
@@ -129,7 +136,11 @@ export interface WSJobWaitResponse {
     type: 'job_wait_response';
     request_id: string;
     job_id: string;
-    /** `done` once the job ended, `running` at the deadline, `not_found` for an unknown job. */
+    /**
+     * `done` once the job ended (a job the user stopped carries `stopped` on
+     * its result, and the backend parks the call), `running` at the deadline,
+     * `not_found` for an unknown job.
+     */
     status: 'done' | 'running' | 'not_found';
     result?: JobResult;
 }

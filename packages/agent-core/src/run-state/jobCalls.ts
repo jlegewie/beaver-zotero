@@ -29,8 +29,13 @@ export const openJobCallsAtom = atom<readonly JobDeferral[]>((get) => {
 });
 const EMPTY: readonly JobDeferral[] = [];
 
-/** Whether a job call of the open parked run has its result stored: Continue can resume. */
-export const hasReadyJobCallAtom = atom((get) => get(openJobCallsAtom).some((call) => !!call.result));
+/**
+ * Whether a job call of the open parked run has a result stored that
+ * continues the chat: Continue can resume. A stopped job's result does not.
+ */
+export const hasReadyJobCallAtom = atom((get) =>
+    get(openJobCallsAtom).some((call) => !!call.result && !isStoppedJobResult(call.result)),
+);
 
 /**
  * The runs with `result` stored on the parked job call `toolCallId`, or null
@@ -97,14 +102,12 @@ function items(n: number, noun = 'item'): string {
 }
 
 /**
- * Whether a job ended because the user stopped it (the bar's Stop, or Stop in
- * the table). Such a result does not continue the chat by itself: the user
- * continues it, or writes.
+ * Whether a job ended because the user stopped it (Stop in the composer, or
+ * in the table). Such a result never continues the chat: the thread waits on
+ * nothing, and the next message closes the call with it.
  */
 export function isStoppedJobResult(result: JobResult | null | undefined): boolean {
-    if (!result) return false;
-    if (result.kind === 'table_fill') return result.result.stopped_by === 'stopped';
-    return result.items.some((item) => item.failure_reason === 'cancelled');
+    return result?.stopped === true;
 }
 
 /** Line one of a fill's bar. */

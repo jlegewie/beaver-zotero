@@ -88,6 +88,7 @@ import {
     sendTableCardResponseAtom,
     sendWSMessageAtom,
     staleApprovalActionIdsAtom,
+    waitsOnlyOnJobs,
     wsErrorAtom,
 } from '../../../react/atoms/agentRunAtoms';
 import { pendingApprovalsAtom, removePendingApprovalAtom } from '../../../react/agents/agentActions';
@@ -819,6 +820,31 @@ describe('parkableRunId', () => {
         // Any other answer on its way may still be applying.
         store.set(liveCardAnswersAtom, new Map([['call-other', { answer: { type: 'table_card_response' }, parking: false }]]));
         expect(parkableRunId(store.get)).toBeNull();
+        liveJobWaitCallsMock.mockReset();
+        liveJobWaitCallsMock.mockReturnValue(new Set());
+    });
+
+    it('lets Stop stop the jobs only while every running tool call is a job wait', async () => {
+        const connected = nextConnection();
+        await store.set(sendWSMessageAtom, 'add these papers');
+        await connected;
+        const run = store.get(activeRunAtom)!;
+        const call = (id: string, tool: string) => ({ part_kind: 'tool-call', tool_name: tool, tool_call_id: id, args: {} });
+        const withMessages = (...messages: unknown[]) => store.set(activeRunAtom, { ...store.get(activeRunAtom)!, model_messages: messages as any });
+        liveJobWaitCallsMock.mockImplementation((id: string) => new Set(id === run.id ? ['call-items'] : []));
+        // create_items waits on its PDFs while a search runs beside it.
+        withMessages({ kind: 'response', parts: [call('call-items', 'create_items'), call('call-search', 'external_search')] });
+        expect(parkableRunId(store.get)).toBe(run.id);
+        expect(waitsOnlyOnJobs(store.get)).toBe(false);
+        // The search returned: only the job wait is left.
+        withMessages(
+            { kind: 'response', parts: [call('call-items', 'create_items'), call('call-search', 'external_search')] },
+            { kind: 'request', parts: [{ part_kind: 'tool-return', tool_name: 'external_search', tool_call_id: 'call-search', content: {} }] },
+        );
+        expect(waitsOnlyOnJobs(store.get)).toBe(true);
+        // A card up beside the job: Stop stops the run.
+        store.set(pendingQuestionsAtom, new Map([['q-1', {} as any]]));
+        expect(waitsOnlyOnJobs(store.get)).toBe(false);
         liveJobWaitCallsMock.mockReset();
         liveJobWaitCallsMock.mockReturnValue(new Set());
     });

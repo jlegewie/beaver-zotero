@@ -139,8 +139,9 @@ function announceStored(stored: JobCallStored): void {
 
 /**
  * The thread lists' copy of the thread: its job call now waits on the user
- * (`job_ready`), not on the job. The backend's own `awaiting_input` says the
- * same; this device has no realtime feed of it.
+ * (`job_ready`), not on the job; a job the user stopped waits on nothing. The
+ * backend's own `awaiting_input` says the same; this device has no realtime
+ * feed of it.
  */
 function markReady(stored: JobCallStored): void {
     try {
@@ -150,8 +151,10 @@ function markReady(stored: JobCallStored): void {
         const left = (awaiting[stored.kind] ?? 0) - 1;
         if (left > 0) awaiting[stored.kind] = left;
         else delete awaiting[stored.kind];
-        awaiting[JOB_READY_KEY] = (awaiting[JOB_READY_KEY] ?? 0) + 1;
-        Zotero.Beaver.threads.patchThread(stored.threadId, { awaitingInput: awaiting });
+        if (!stored.result.stopped) awaiting[JOB_READY_KEY] = (awaiting[JOB_READY_KEY] ?? 0) + 1;
+        Zotero.Beaver.threads.patchThread(stored.threadId, {
+            awaitingInput: Object.keys(awaiting).length ? awaiting : null,
+        });
     } catch (error) {
         logger(`jobCalls: could not mark ${stored.threadId} ready: ${String(error)}`, 1);
     }

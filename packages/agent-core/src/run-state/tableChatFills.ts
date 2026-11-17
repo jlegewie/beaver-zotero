@@ -15,7 +15,7 @@
 import { atom } from 'jotai/vanilla';
 import type { TableFillJobSnapshot } from '../protocol/tableFillProtocol';
 import { isRunActive } from '../agents/types';
-import { activeRunAtom, getRunToolResults } from './atoms';
+import { activeRunAtom } from './atoms';
 
 export interface ChatFill {
     /** The job's latest snapshot. */
@@ -106,39 +106,6 @@ export function panelFill(
 export const activeRunIdAtom = atom((get) => {
     const run = get(activeRunAtom);
     return isRunActive(run) ? run!.id : null;
-});
-
-/**
- * The running fill the active run waits on: one whose tool call has not
- * returned yet. Stop response stops it too (the plugin does that itself).
- */
-export function waitingFill(
-    fills: Map<string, ChatFill>,
-    runId: string | null,
-    returned: (toolCallId: string) => boolean,
-): ChatFill | null {
-    if (!runId) return null;
-    for (const fill of fills.values()) {
-        if (fill.snapshot.state === 'done') continue;
-        if (fill.snapshot.origin.run?.run_id !== runId) continue;
-        if (!returned(fill.toolCallId)) return fill;
-    }
-    return null;
-}
-
-/**
- * Whether the active run waits on a table fill, for the composer's stop. A
- * boolean, so a streamed frame that changes the run but not the answer
- * re-renders nothing; only the active run's own results count, since some
- * models reuse tool call ids across runs.
- */
-export const waitsOnFillAtom = atom((get) => {
-    const fills = get(chatFillsAtom);
-    if (!fills.size) return false;
-    const run = get(activeRunAtom);
-    if (!run) return false;
-    const returned = getRunToolResults(run);
-    return waitingFill(fills, run.id, (id) => returned.has(id)) !== null;
 });
 
 /**

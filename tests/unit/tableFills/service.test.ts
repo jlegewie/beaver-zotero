@@ -1560,7 +1560,21 @@ describe("job calls", () => {
         stopped.abort();
         held.resolve();
         const answered = await waiting;
-        expect(answered).toMatchObject({ status: "done", result: { result: { stopped_by: "stopped", rows_answered: 1 } } });
+        expect(answered).toMatchObject({ status: "done", result: { stopped: true, result: { stopped_by: "stopped", rows_answered: 1 } } });
+    });
+
+    it("marks only a fill the user stopped as stopped", () => {
+        const h = harness([itemRow("a")]);
+        const ended = (stopped_by?: string) =>
+            ({
+                job_id: "job-1", plan_id: "p", table: { libraryID: 1, key: "TABLE001", title: "T" }, origin: { kind: "agent" },
+                state: "done", rows_total: 1, rows_done: 1, rows_failed: 0, in_flight: 0, credits_charged: 0, credits_planned: 0,
+                balance: null, started_at: 0, seconds_left: null,
+                result: { rows_answered: 1, answered: 1, failed_row_ids: [], pending: null, ...(stopped_by ? { stopped_by } : {}) },
+            }) as any;
+        expect(h.fills.agent.jobResult(ended("stopped")).stopped).toBe(true);
+        expect(h.fills.agent.jobResult(ended("shutdown")).stopped).toBeUndefined();
+        expect(h.fills.agent.jobResult(ended()).stopped).toBeUndefined();
     });
 
     it("keeps an excluded library's row ids out of the job-call result", async () => {

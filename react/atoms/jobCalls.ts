@@ -11,20 +11,29 @@
  *   run; the other sees the run continue.
  * - A thread opened later already carries the stored result: the job bar
  *   offers Continue, and nothing resumes by itself.
+ * - A job the user stopped continues nothing and is reported nowhere: the
+ *   next message closes its call with the stopped result.
+ *
+ * While a job this device runs is going, the chat is busy as during any other
+ * tool call: the composer's Stop stops the job (`stopChatJobsAtom`).
  */
 
 import { atom } from 'jotai';
+import { selectAtom } from 'jotai/utils';
 import { logger } from '@beaver/agent-core/platform/logger';
 import {
     JOB_CALL_STORED_EVENT,
     JOB_READY_KEY,
     PDF_JOB_CHANGED_EVENT,
     isJobDeferral,
+    isJobKind,
+    jobIdOf,
     type JobCallStoredNotification,
+    type JobKind,
     type JobResult,
     type PdfJobSnapshot,
 } from '@beaver/agent-core/protocol/jobCallProtocol';
-import { activeRunAtom, currentThreadIdAtom, threadRunsAtom } from '@beaver/agent-core/run-state/atoms';
+import { activeRunAtom, currentThreadIdAtom, getRunToolResults, threadRunsAtom } from '@beaver/agent-core/run-state/atoms';
 import {
     fillLabel,
     isStoppedJobResult,
@@ -33,13 +42,15 @@ import {
     runWithStoredJobResult,
     withStoredJobResult,
 } from '@beaver/agent-core/run-state/jobCalls';
+import { chatFillsAtom } from '@beaver/agent-core/run-state/tableChatFills';
 import { isRunActive } from '@beaver/agent-core/agents/types';
 import { agentRunService } from '@beaver/agent-core/transport/agentService';
 import { notifyJobReady } from '../../src/services/systemNotifications';
 import { tryGetWindowRuntime } from '../runtime/windowRuntime';
 import { store } from '../store';
 import { userIdAtom } from './auth';
-import { continueParkedJobsAtom } from './agentRunAtoms';
+import { continueParkedJobsAtom, waitsOnlyOnJobs } from './agentRunAtoms';
+import { isThreadParkedAtom } from './parkedRuns';
 import { loadThreadAtom } from './threads';
 import { threadEntitiesAtom } from './threadList';
 import { addPopupMessageAtom, removePopupMessageAtom } from '../utils/popupMessageUtils';
@@ -57,6 +68,110 @@ function recordPdfJob(snapshot: PdfJobSnapshot): void {
     if (held?.ended && !snapshot.ended) return;
     store.set(chatPdfJobsAtom, new Map(jobs).set(snapshot.job_id, snapshot));
 }
+
+// ---------------------------------------------------------------------------
+// The composer's Stop
+// ---------------------------------------------------------------------------
+
+/** A job of the open chat that this device runs, as the composer's Stop sees it. */
+export interface ChatJob {
+    kind: JobKind;
+    jobId: string;
+    /** Stop was pressed: it is winding down, or its stopped result is on its way. */
+    stopping: boolean;
+}
+
+/**
+ * Jobs the user stopped from the composer, until their stopped results reach
+ * the open chat (or `STOP_SETTLE_MS` passes). Until then the composer stays
+ * busy, so a message cannot close the call before its result is stored.
+ */
+const stopRequestsAtom = atom<ReadonlySet<string>>(new Set<string>());
+const STOP_SETTLE_MS = 15_000;
+
+/** The run whose live job waits Stop ended: it parks by itself, and is not stopped again. */
+export const jobStopRunIdAtom = atom<string | null>(null);
+
+/**
+ * The jobs the open chat waits on that this device runs: those the run going
+ * now waits for (its tool call has not returned), and those of the open
+ * parked run's job calls. Recomputed on every job snapshot and streamed frame;
+ * read {@link runningChatJobsAtom}, which changes only when the list does.
+ */
+const chatJobsAtom = atom((get): readonly ChatJob[] => {
+    const threadId = get(currentThreadIdAtom);
+    if (!threadId) return NO_JOBS;
+    const fills = get(chatFillsAtom);
+    const pdfJobs = get(chatPdfJobsAtom);
+    const requested = get(stopRequestsAtom);
+    const jobs = new Map<string, ChatJob>();
+    const add = (kind: JobKind, jobId: string, winding: boolean) =>
+        jobs.set(jobId, { kind, jobId, stopping: winding || requested.has(jobId) });
+    for (const call of get(openJobCallsAtom)) {
+        if (call.result) continue;
+        const jobId = jobIdOf(call);
+        const fill = call.kind === 'table_fill' ? fills.get(jobId) : undefined;
+        const pdf = call.kind === 'pdf_retrieval' ? pdfJobs.get(jobId) : undefined;
+        const running = fill ? fill.snapshot.state !== 'done' : !!pdf && !pdf.ended;
+        // Ended after Stop: busy until its stopped result is on the call.
+        if (running || ((fill || pdf) && requested.has(jobId))) add(call.kind, jobId, fill?.snapshot.state === 'stopping');
+    }
+    const run = get(activeRunAtom);
+    if (isRunActive(run)) {
+        // Only this run's own results: some models reuse tool call ids across runs.
+        const returned = getRunToolResults(run!);
+        const waits = (runId: string | null | undefined, toolCallId: string) => runId === run!.id && !returned.has(toolCallId);
+        for (const fill of fills.values()) {
+            if (fill.threadId !== threadId || fill.snapshot.state === 'done') continue;
+            if (waits(fill.snapshot.origin.run?.run_id, fill.toolCallId)) add('table_fill', fill.snapshot.job_id, fill.snapshot.state === 'stopping');
+        }
+        for (const job of pdfJobs.values()) {
+            if (job.thread_id !== threadId || job.ended) continue;
+            if (waits(job.run_id, job.tool_call_id)) add('pdf_retrieval', job.job_id, false);
+        }
+    }
+    return jobs.size ? [...jobs.values()] : NO_JOBS;
+});
+const NO_JOBS: readonly ChatJob[] = [];
+
+function sameJobs(a: readonly ChatJob[], b: readonly ChatJob[]): boolean {
+    return a.length === b.length && a.every((job, i) => job.jobId === b[i].jobId && job.kind === b[i].kind && job.stopping === b[i].stopping);
+}
+
+/**
+ * The jobs the open chat waits on that this device runs (see `chatJobsAtom`).
+ * While any is going, the chat is busy as during any other tool call: the
+ * composer shows Stop, which stops them.
+ */
+export const runningChatJobsAtom = selectAtom(chatJobsAtom, (jobs) => jobs, sameJobs);
+
+/**
+ * The composer's Stop, for a chat that waits on jobs: stop the jobs this
+ * device runs for it. A parked chat stops its jobs; a run that waits on
+ * nothing but its jobs is left to park with their stopped results. Returns
+ * false when Stop should stop the run instead.
+ */
+export const stopChatJobsAtom = atom(null, (get, set): boolean => {
+    const parked = get(isThreadParkedAtom);
+    if (!parked && !waitsOnlyOnJobs(get)) return false;
+    const jobs = get(runningChatJobsAtom);
+    if (!jobs.length) return false;
+    const stopping = jobs.filter((job) => !job.stopping);
+    for (const job of stopping) {
+        logger(`jobCalls: stopping ${job.kind} job ${job.jobId} from the composer`, 1);
+        if (job.kind === 'table_fill') Zotero.Beaver.tableFills?.stop(job.jobId);
+        else Zotero.Beaver.pdfJobs?.stop(job.jobId);
+    }
+    if (!parked) set(jobStopRunIdAtom, get(activeRunAtom)?.id ?? null);
+    if (stopping.length) {
+        const ids = stopping.map((job) => job.jobId);
+        set(stopRequestsAtom, (held) => new Set([...held, ...ids]));
+        setTimeout(() => {
+            store.set(stopRequestsAtom, (held) => new Set([...held].filter((id) => !ids.includes(id))));
+        }, STOP_SETTLE_MS);
+    }
+    return true;
+});
 
 /**
  * Finished jobs of chats this window does not show, for the closed-sidebar
@@ -137,19 +252,13 @@ async function reloadStoredJobResults(threadId: string): Promise<void> {
         }
         // A window showing the thread continues it, as on the device that
         // stored the result; thread admission lets one device's resume run.
-        // A job the user stopped waits for them to continue.
-        if (applied && showsFirst(threadId) && !stoppedOnly()) store.set(continueParkedJobsAtom);
+        // A stopped job's result continues nothing (`continueParkedJobsAtom`).
+        if (applied && showsFirst(threadId)) store.set(continueParkedJobsAtom);
     } catch (error) {
         logger(`jobCalls: could not reload the parked calls of ${threadId}: ${String(error)}`, 1);
     } finally {
         reloading.delete(threadId);
     }
-}
-
-/** Whether every ready job call of the open thread ended because the user stopped it. */
-function stoppedOnly(): boolean {
-    const ready = store.get(openJobCallsAtom).filter((call) => call.result);
-    return ready.length > 0 && ready.every((call) => isStoppedJobResult(call.result));
 }
 
 /** Whether this window is the first on this device that shows the thread. */
@@ -160,10 +269,19 @@ function showsFirst(threadId: string): boolean {
     return viewer?.windowId === runtime.id;
 }
 
+/** The open thread's last `awaiting_input` reading: whether it counted a running job. */
+let lastAwaiting: { threadId: string | null; jobRunning: boolean } = { threadId: null, jobRunning: false };
+
 function onAwaitingChanged(): void {
     const awaiting = store.get(currentAwaitingAtom);
     const threadId = store.get(currentThreadIdAtom);
-    if (!threadId || !awaiting?.[JOB_READY_KEY]) return;
+    const jobRunning = Object.keys(awaiting ?? {}).some(isJobKind);
+    const previous = lastAwaiting;
+    lastAwaiting = { threadId, jobRunning };
+    // A result stored elsewhere: `job_ready`, or, for a job the user stopped
+    // (which counts under no key), the thread's running job count went away.
+    const stoppedElsewhere = previous.threadId === threadId && previous.jobRunning && !jobRunning;
+    if (!threadId || !(awaiting?.[JOB_READY_KEY] || stoppedElsewhere)) return;
     if (isRunActive(store.get(activeRunAtom))) return;
     if (!store.get(openJobCallsAtom).some((call) => !call.result)) return;
     void reloadStoredJobResults(threadId);
@@ -217,12 +335,13 @@ function onStored(notification: JobCallStoredNotification): void {
     if (!runtime || notification.userId !== store.get(userIdAtom)) return;
     if (store.get(currentThreadIdAtom) === notification.threadId) {
         store.set(applyStoredJobResultAtom, notification);
-        // One window resumes: the first that shows the thread. A job the
-        // user stopped waits for them to continue (or write).
-        if (notification.viewerWindowIds[0] === runtime.id && !isStoppedJobResult(notification.result))
-            store.set(continueParkedJobsAtom);
+        // One window resumes: the first that shows the thread. A stopped
+        // job's result continues nothing (`continueParkedJobsAtom`).
+        if (notification.viewerWindowIds[0] === runtime.id) store.set(continueParkedJobsAtom);
         return;
     }
+    // The user stopped the job: there is nothing to tell them.
+    if (isStoppedJobResult(notification.result)) return;
     if (notification.notifyWindowId === runtime.id) reportJobReady(notification);
 }
 

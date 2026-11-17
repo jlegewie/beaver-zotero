@@ -390,6 +390,8 @@ describe('InstancePdfJobs.waitJob', () => {
         expect(items[1].failure_reason).toBe('cancelled');
         expect(items[0].failure_reason).toBeUndefined();
         expect((response.result as any).timed_out).toBeUndefined();
+        // Stopping the run is the user's Stop: the result says so.
+        expect((response.result as any).stopped).toBe(true);
 
         await vi.advanceTimersByTimeAsync(0);
         expect(seam.jobEnded).toHaveBeenCalledTimes(1);
@@ -516,6 +518,16 @@ describe('following and stopping a job', () => {
         expect(deps.cancelFetch).toHaveBeenCalledWith(1, 'AAAA0001', 'task-1');
         expect(jobs.isLive('job-1')).toBe(false);
         expect(jobs.stop('job-1')).toBe(false);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(seam.jobEnded.mock.calls[0][2]).toMatchObject({ stopped: true });
+    });
+
+    it('marks a job that ends by itself as not stopped', async () => {
+        started('a1', 'AAAA0001', 1, 'task-1');
+        await jobs.start(startRequest(['a1']));
+        settled('a1', 'AAAA0001', 'failed');
+        await vi.advanceTimersByTimeAsync(0);
+        expect(seam.jobEnded.mock.calls[0][2].stopped).toBeUndefined();
     });
 
     it('filters a kept result again for libraries excluded since', async () => {

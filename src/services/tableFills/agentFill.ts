@@ -238,6 +238,8 @@ export class AgentTableFills {
             progress: fillProgress(snapshot),
             // A table whose library was excluded since the fill started sends only its counts.
             result: this.outbound(snapshot.result!, !!this.fills.tableRefusal(snapshot.table)),
+            // The user stopped it (Stop in the composer, in the table, or of the run).
+            ...(snapshot.result?.stopped_by === 'stopped' ? { stopped: true } : {}),
         };
     }
 
