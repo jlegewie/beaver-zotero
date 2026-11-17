@@ -474,6 +474,7 @@ async function onStartup() {
         });
 
         // -------- Load UI for all windows --------
+        watchMainWindows();
         const mainWindows = Zotero.getMainWindows();
         if (mainWindows.length > 0) {
             await Promise.all(
@@ -601,6 +602,46 @@ async function onMainWindowLoad(win: Window): Promise<void> {
     loadStylesheet();
     loadKatexStylesheet(win);
     ztoolkit.log("Styles loaded for window");
+}
+
+const MAIN_WINDOW_URL = "chrome://zotero/content/zoteroPane.xhtml";
+type WindowMediatorListener = { onOpenWindow(xulWindow: any): void; onCloseWindow(xulWindow: any): void };
+let mainWindowListener: WindowMediatorListener | null = null;
+
+/**
+ * Attach to main windows as they open. Zotero 11 reports a main window to
+ * plugins only once a library view in it has loaded, so a window opened on a
+ * reader (a tab moved to a new window) would otherwise have no Beaver until
+ * its library tab is shown. Zotero 7–10 report every main window themselves.
+ */
+function watchMainWindows(): void {
+    if (mainWindowListener) return;
+    const listener: WindowMediatorListener = {
+        onOpenWindow(xulWindow: any) {
+            const win = xulWindow?.docShell?.domWindow as Window | undefined;
+            win?.addEventListener("load", () => {
+                const pane = (win as any).ZoteroPane;
+                if (win.location?.href !== MAIN_WINDOW_URL || !Array.isArray(pane?.libraryViews)) return;
+                // Resolves once the window has its tabs, context pane and the
+                // tab it was opened for.
+                Promise.resolve(pane.loadedPromise)
+                    .then(() => {
+                        if (mainWindowListener !== listener || win.closed || !addon.data.alive) return;
+                        return onMainWindowLoad(win);
+                    })
+                    .catch((error: unknown) => Zotero.logError(error as Error));
+            }, { once: true });
+        },
+        onCloseWindow() {},
+    };
+    mainWindowListener = listener;
+    Services.wm.addListener(listener as any);
+}
+
+function unwatchMainWindows(): void {
+    if (!mainWindowListener) return;
+    Services.wm.removeListener(mainWindowListener as any);
+    mainWindowListener = null;
 }
 
 /**
@@ -813,8 +854,9 @@ async function onMainWindowUnload(
         BeaverUIFactory.closeBeaverWindow();
         BeaverUIFactory.closePreferencesWindow();
 
-        // 10. Unregister quit observer
+        // 10. Unregister quit observer and the main window watcher
         unregisterQuitObserver();
+        unwatchMainWindows();
 
         // 11. Unregister context menus
         cleanupContextMenus();
@@ -1036,6 +1078,7 @@ function onShutdown(): Promise<void> {
 
 async function disposePlugin(): Promise<void> {
     stopLocalIngress();
+    unwatchMainWindows();
     addon.itemImport.dispose();
     if (tableFillsPending()) await disposeTableFills();
     await addon.mutations.dispose();
