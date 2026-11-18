@@ -1,34 +1,118 @@
-import { getHostWindow, getWindowRuntime, tryGetWindowRuntime } from '../runtime/windowRuntime';
+import { getHostWindow, tryGetWindowRuntime } from '../runtime/windowRuntime';
 import { collapseTableTabContextPane, isTableTabSelected, openTableTabContextPane } from '../../src/ui/tableTabContextPane';
-import { DOMElements, SidebarLocation, UIState, CollapseState } from './types';
-import { applyReaderPaneVisibility, isStackedLayout } from '../utils/zoteroLayout';
+import { SidebarLocation, UIState } from './types';
+import { isStackedLayout, readerMountParent, restoreReaderSiblings } from '../utils/zoteroLayout';
 import { activeItemPane } from '../../src/ui/libraryPane';
+import { getPref, setPref } from '../../src/utils/prefs';
+import { store } from '../store';
+import { preferencesRevisionAtom } from '../atoms/preferences';
 
+/** How long a resize settles before the sidebar width is saved. */
+const WIDTH_SAVE_DELAY_MS = 250;
+
+/** The Zotero pane the sidebar occupies while it is shown. */
+interface Host {
+    location: SidebarLocation;
+    /** The pane the sidebar sizes: the item pane, or `#zotero-context-pane`. */
+    pane: HTMLElement;
+    /** The sidebar opened the pane from collapsed, so hiding it collapses the pane again. */
+    openedCollapsed: boolean;
+    /**
+     * The pane's inline width before the sidebar set its own, or null while the
+     * sidebar is not sizing the pane.
+     */
+    nativeStyleWidth: string | null;
+    /** The pane's `width` attribute, which Zotero persists as the pane's own width. */
+    nativeWidthAttr: string | null;
+    /**
+     * The element on the other side of the pane's splitter, which a drag
+     * resizes too, with its inline width and `width` attribute from before.
+     */
+    neighbour: { element: HTMLElement; styleWidth: string; widthAttr: string | null } | null;
+    /** The user dragged the pane's splitter while the sidebar was in the pane. */
+    dragged: boolean;
+    widthObserver: MutationObserver | null;
+}
+
+/** Scroll offsets of the scrolled elements in a subtree. */
+type ScrollSnapshot = Array<[HTMLElement, number, number]>;
+
+/**
+ * Moving an element to another parent resets the scroll offset of everything
+ * inside it, so the offsets are read before a move and written back after.
+ */
+function captureScroll(root: HTMLElement): ScrollSnapshot {
+    const snapshot: ScrollSnapshot = [];
+    for (const element of Array.from(root.querySelectorAll('*')) as HTMLElement[]) {
+        if (element.scrollTop || element.scrollLeft) {
+            snapshot.push([element, element.scrollTop, element.scrollLeft]);
+        }
+    }
+    return snapshot;
+}
+
+function restoreScroll(snapshot: ScrollSnapshot): void {
+    for (const [element, top, left] of snapshot) {
+        // The same offsets as before the move, so a scroll handler reading
+        // them finds the reader where they were.
+        element.scrollTop = top;
+        element.scrollLeft = left;
+    }
+}
+
+/** Whether `element` is laid out at a size. A collapsed XUL pane keeps zero-size boxes. */
+function hasSize(element: HTMLElement): boolean {
+    const rect = element.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+}
+
+function readStoredWidth(): number {
+    const width = Number(getPref('sidebarWidth'));
+    return Number.isFinite(width) && width > 0 ? Math.round(width) : 0;
+}
+
+/**
+ * Shows and hides a main window's sidebar and keeps it in the pane of the
+ * selected tab: the active library view's item pane on a library tab, the
+ * context pane on any other.
+ *
+ * The window has one sidebar element, rendered once. A tab switch moves it to
+ * the other pane rather than rendering a second copy, so nothing re-renders and
+ * component state survives the switch.
+ *
+ * In the standard layout the sidebar also has one width wherever it is shown:
+ * the pane it occupies takes the `sidebarWidth` preference, and dragging that
+ * pane's splitter changes the preference. Zotero's own widths for its panes,
+ * which it persists from their `width` attribute, are left as they were and
+ * come back when the sidebar leaves the pane. The stacked layout sizes the
+ * panes by height, and Zotero keeps sizing them there.
+ */
 class UIManager {
-    private elements: DOMElements;
-    private collapseState: CollapseState;
-    private sidebarWidth: number = 350;
-    private unsubscribeWidth?: () => void;
+    private mount: HTMLElement | null = null;
+    private host: Host | null = null;
+    private state: UIState | null = null;
+    /** The sidebar width in CSS pixels; 0 until it is known. */
+    private width = 0;
+    private saveTimer: number | null = null;
     private timers = new Set<number>();
     private hostWindow?: Window;
     private restoreContextPaneTabHandler?: () => void;
-
-    constructor() {
-        this.collapseState = { library: null, reader: null };
-        this.elements = this.emptyElements();
-    }
+    private layoutObserver?: symbol | number;
+    /** Scroll offsets waiting for the sidebar to be laid out in its new pane. */
+    private pendingScroll: ScrollSnapshot = [];
+    private scrollObserver: ResizeObserver | null = null;
+    private unsubscribePreferences?: () => void;
+    /** Between a mousedown on a splitter and the end of its mouseup. */
+    private splitterDrag = false;
+    private removeSplitterListeners?: () => void;
 
     private getWindow(): Window {
         return this.hostWindow ??= getHostWindow();
     }
 
-    private scheduleWidth(): void {
-        const win = this.getWindow();
-        const timer = win.setTimeout(() => {
-            this.timers.delete(timer);
-            if (win.__beaverRuntime?.status !== 'closing') this.enforceConsistentWidth();
-        }, 50);
-        this.timers.add(timer);
+    /** The window's sidebar element. The UI manager places it from now on. */
+    public setSidebarMount(mount: HTMLElement): void {
+        this.mount = mount;
     }
 
     /** Native context panes also receive tab events from other main windows. */
@@ -51,95 +135,68 @@ class UIManager {
         };
     }
 
-    private initSidebarWidthTracking(): void {
-        this.sidebarWidth = Zotero.Reader.getSidebarWidth?.() || this.sidebarWidth;
-        this.unsubscribeWidth ??= Zotero.Beaver.runtime.subscribeReaderWidth(
-            getWindowRuntime(), () => this.scheduleWidth(),
-        );
-    }
-
-    private emptyElements(): DOMElements {
-        return { chatToggleButton: null, libraryPane: null, libraryContent: null,
-            librarySidebar: null, readerPane: null, readerContent: null, readerSidebar: null };
-    }
-
-    private applyLibrarySidebarWidth(sidebar: HTMLElement): void {
-        // In stacked layout, #zotero-item-pane is flex-direction:column, so an
-        // explicit pixel width clamps the cross-axis instead of being overridden
-        // by flex-grow as it is in the standard (row) layout.
-        if (isStackedLayout()) {
-            sidebar.style.removeProperty('width');
-        } else {
-            sidebar.style.width = `${this.sidebarWidth}px`;
+    /**
+     * Follow the layout preference and the stored sidebar width, which another
+     * window may change.
+     */
+    private watchSettings(win: Window): void {
+        if (this.layoutObserver === undefined) {
+            this.layoutObserver = Zotero.Prefs.registerObserver?.('layout', () => {
+                // After Zotero has laid its panes out for the new layout.
+                const timer = win.setTimeout(() => {
+                    this.timers.delete(timer);
+                    if (this.state && win.__beaverRuntime?.status !== 'closing') this.updateUI(this.state);
+                }, 0);
+                this.timers.add(timer);
+            });
         }
-    }
-
-    private applyReaderSidebarWidth(sidebar: HTMLElement): void {
-        // In stacked layout the reader mount is parented inside the inner
-        // vbox (column flex), so an explicit pixel width clamps it. In
-        // standard layout flex-grow makes the pixel value harmless but
-        // keeps width-tracking from the reader sidebar slider working.
-        if (isStackedLayout()) {
-            sidebar.style.removeProperty('width');
-        } else {
-            sidebar.style.width = `${this.sidebarWidth}px`;
-        }
-    }
-
-    private enforceConsistentWidth(): void {
-        try {
-            if (this.elements.librarySidebar) {
-                this.applyLibrarySidebarWidth(this.elements.librarySidebar as HTMLElement);
-            }
-            if (this.elements.readerSidebar) {
-                this.applyReaderSidebarWidth(this.elements.readerSidebar as HTMLElement);
-            }
-        } catch (e) {
-            // Silently handle errors
-        }
-    }
-
-    private initializeElements(): DOMElements {
-        const emptyElements: DOMElements = {
-            chatToggleButton: null,
-            libraryPane: null,
-            libraryContent: null,
-            librarySidebar: null,
-            readerPane: null,
-            readerContent: null,
-            readerSidebar: null
-        };
-
-        try {
-            const win = this.getWindow();
-            if (!win || win.closed || !win.document) {
-                return emptyElements;
-            }
-
-            // The active library view's pane: Zotero 11 has one per library tab.
-            const itemPane = activeItemPane(win);
-            const readerPane = win.document.querySelector("#zotero-context-pane") as HTMLElement | null;
-
-            return {
-                chatToggleButton: win.document.querySelector("#zotero-beaver-tb-chat-toggle"),
-                libraryPane: itemPane,
-                libraryContent: itemPane ? itemPane.querySelectorAll(":scope > *:not(#beaver-pane-library)") : null,
-                librarySidebar: itemPane ? itemPane.querySelector("#beaver-pane-library") as HTMLElement | null : null,
-                readerPane: readerPane,
-                readerContent: readerPane ? readerPane.querySelectorAll(":scope > *:not(#beaver-pane-reader)") : null,
-                readerSidebar: readerPane ? readerPane.querySelector("#beaver-pane-reader") as HTMLElement | null : null
+        if (!this.removeSplitterListeners) {
+            // Only a drag the user makes on a splitter changes the sidebar
+            // width; Zotero writes its panes' widths the same way when it
+            // restores them. The splitter's last write lands while its mouseup
+            // is still being handled, so the drag ends a task later.
+            // Any other mousedown ends a drag whose mouseup never arrived.
+            const onMouseDown = (event: MouseEvent) => {
+                this.splitterDrag = !!(event.target as Element | null)?.closest?.('splitter');
             };
-        } catch (e) {
-            return emptyElements;
+            const onMouseUp = () => {
+                if (!this.splitterDrag) return;
+                const timer = win.setTimeout(() => {
+                    this.timers.delete(timer);
+                    this.splitterDrag = false;
+                }, 0);
+                this.timers.add(timer);
+            };
+            win.addEventListener('mousedown', onMouseDown, true);
+            win.addEventListener('mouseup', onMouseUp, true);
+            this.removeSplitterListeners = () => {
+                win.removeEventListener('mousedown', onMouseDown, true);
+                win.removeEventListener('mouseup', onMouseUp, true);
+            };
         }
+        this.unsubscribePreferences ??= store.sub(preferencesRevisionAtom, () => {
+            if (this.saveTimer !== null) return;
+            const stored = readStoredWidth();
+            if (stored && stored !== this.width) {
+                this.width = stored;
+                this.applyWidth();
+            }
+        });
+    }
+
+    private toggleButton(): HTMLElement | null {
+        const win = this.getWindow();
+        if (!win || win.closed || !win.document) return null;
+        return win.document.querySelector("#zotero-beaver-tb-chat-toggle");
     }
 
     public updateToolbarButton(isVisible: boolean): void {
+        const button = this.toggleButton();
         // `selected` is a boolean XUL attribute as of Zotero 11 (Firefox 153):
         // presence alone selects, so toggle it rather than writing "true".
-        this.elements.chatToggleButton?.toggleAttribute("selected", isVisible);
+        button?.toggleAttribute("selected", isVisible);
         // Expose the open/closed state to screen readers as a toggle button.
-        this.elements.chatToggleButton?.setAttribute("aria-pressed", isVisible ? "true" : "false");
+        button?.setAttribute("aria-pressed", isVisible ? "true" : "false");
     }
 
     /**
@@ -177,12 +234,7 @@ class UIManager {
      */
     public focusToggleButton(): void {
         try {
-            const win = this.getWindow();
-            if (!win || win.closed || !win.document) {
-                return;
-            }
-            const btn = win.document.querySelector("#zotero-beaver-tb-chat-toggle") as HTMLElement | null;
-            btn?.focus();
+            this.toggleButton()?.focus();
         } catch (e) {
             // Silently handle errors
         }
@@ -207,174 +259,316 @@ class UIManager {
         }
     }
 
-    public handleCleanup(location: SidebarLocation): void {
-        if (location === 'library') {
-            this.handleLibraryCleanup();
-        } else {
-            this.handleReaderCleanup();
-        }
+    /** Whether the sidebar is shown in `pane`. */
+    public isShownIn(pane: Element): boolean {
+        return this.host?.pane === pane && !!this.mount && this.mount.style.display !== 'none';
     }
 
-    private handleLibraryCleanup(): void {
-        this.elements.libraryContent?.forEach(el => (el as HTMLElement).style.removeProperty('display'));
-        if (this.elements.librarySidebar) {
-            (this.elements.librarySidebar as HTMLElement).style.display = 'none';
-        }
-    }
-
-    private handleReaderCleanup(): void {
-        const win = this.getWindow();
-        if (win && !win.closed) {
-            applyReaderPaneVisibility(win, false);
-        }
-    }
-
-    private handleLibraryPane(show: boolean): void {
-        try {
-            const win = this.getWindow() as unknown as CustomZoteroWindow;
-            if (!win || win.closed || !win.ZoteroPane) {
-                return;
-            }
-            const itemPane = activeItemPane(win) as (HTMLElement & { collapsed?: boolean }) | null;
-            const sidebar = this.elements.librarySidebar as HTMLElement | null;
-
-            // Never hide the item pane's own content without the sidebar to
-            // replace it, which would leave the pane blank.
-            if (show && itemPane && sidebar) {
-                this.collapseState.library = itemPane?.collapsed || null;
-                if (this.collapseState.library) {
-                    itemPane.collapsed = false;
-                }
-                this.elements.libraryContent?.forEach(el => (el as HTMLElement).style.display = 'none');
-                sidebar.style.removeProperty('display');
-                this.applyLibrarySidebarWidth(sidebar);
-            } else {
-                // Hide the sidebar even when restoring a collapsed pane: in
-                // Zotero 11 the mount can move on to another library view's pane.
-                this.handleLibraryCleanup();
-                if (this.collapseState.library && itemPane) {
-                    itemPane.collapsed = true;
-                }
-            }
-        } catch (e) {
-            // Silently handle errors
-        }
-    }
-
-    private handleReaderPane(show: boolean): void {
-        try {
-            const win = this.getWindow();
-            if (!win || win.closed || !win.ZoteroContextPane) {
-                return;
-            }
-            const readerPane = win.ZoteroContextPane;
-            // On a Beaver table tab the context pane holds only Beaver's chat.
-            const onTableTab = isTableTabSelected(win);
-
-            if (show) {
-                // @ts-ignore: collapsed is not typed
-                this.collapseState.reader = readerPane.collapsed || null;
-                if (this.collapseState.reader) {
-                    readerPane.togglePane();
-                }
-                if (onTableTab) openTableTabContextPane(win);
-                applyReaderPaneVisibility(win, true);
-                // Refresh cached element ref because applyReaderPaneVisibility
-                // may have moved the mount under a different parent in stacked
-                // layout.
-                this.elements.readerSidebar = win.document.querySelector("#beaver-pane-reader") as HTMLElement | null;
-                if (this.elements.readerSidebar) {
-                    this.applyReaderSidebarWidth(this.elements.readerSidebar as HTMLElement);
-                }
-            } else {
-                // @ts-ignore: collapsed is not typed
-                if (this.collapseState.reader && !readerPane.collapsed) {
-                    readerPane.togglePane();
-                    if (onTableTab) collapseTableTabContextPane(win);
-                    return;
-                }
-                this.handleReaderCleanup();
-                // Closing the chat must not uncover the last reader's item.
-                if (onTableTab) collapseTableTabContextPane(win);
-            }
-        } catch (e) {
-            // Silently handle errors
-        }
-    }
-
+    /**
+     * Show or hide the sidebar, in the pane of the selected tab. Safe to call
+     * repeatedly: it only changes what differs from `state`.
+     */
     public updateUI(state: UIState): void {
         if (!tryGetWindowRuntime()) return;
+        const win = this.getWindow();
+        if (!win || win.closed || !win.document) return;
         this.scopeContextPaneTabEvents();
-        this.elements = this.initializeElements();
+        this.watchSettings(win);
+        this.state = state;
         this.updateToolbarButton(state.isVisible);
-        
-        if (state.isVisible) {
-            this.initSidebarWidthTracking();
-            this.scheduleWidth();
-            if (state.isLibraryTab) {
-                this.handleLibraryPane(true);
-                this.handleReaderPane(false);
-            } else {
-                this.handleLibraryPane(false);
-                this.handleReaderPane(true);
-            }
-        } else {
-            this.handleLibraryPane(false);
-            this.handleReaderPane(false);
+
+        const location: SidebarLocation = state.isLibraryTab ? 'library' : 'reader';
+        // A Zotero 11 library tab has no item pane while its view is loading.
+        const parent = location === 'library' ? activeItemPane(win) : readerMountParent(win);
+        const pane = location === 'library'
+            ? parent
+            : win.document.getElementById('zotero-context-pane');
+        const mount = this.mount;
+        const show = state.isVisible && !!mount && !!parent && !!pane;
+        const moving = !!mount && !!parent && mount.parentElement !== parent;
+
+        // Read the scroll offsets before anything changes the sidebar's size:
+        // the browser re-anchors them as the content re-wraps. Offsets still
+        // waiting from the previous move are the latest ones.
+        let scroll: ScrollSnapshot = [];
+        if (moving && show && mount!.style.display !== 'none') {
+            scroll = this.pendingScroll.length ? this.pendingScroll : captureScroll(mount!);
         }
+
+        if (this.host && (!show || this.host.location !== location || this.host.pane !== pane)) {
+            this.releaseHost();
+        }
+        if (!mount) return;
+        // Open the pane before moving in: a collapsed pane gives the sidebar no
+        // size, which resets its scroll offsets and reads to the thread as a
+        // reader who has reached the bottom.
+        if (show) this.openHost(location, pane!);
+        if (moving) parent!.appendChild(mount);
+        if (!show) {
+            this.scrollObserver?.disconnect();
+            this.scrollObserver = null;
+            this.pendingScroll = [];
+            mount.style.display = 'none';
+            return;
+        }
+        this.coverHost(parent!, moving);
+        mount.style.removeProperty('display');
+        if (scroll.length) this.restoreScrollWhenLaidOut(mount, scroll);
     }
 
-    public handleCollapse(location: SidebarLocation): void {
+    /**
+     * Write scroll offsets back once the sidebar has a size. A pane can still
+     * be collapsed when the sidebar moves in — Zotero opens the context pane
+     * for a reader tab after Beaver has moved the sidebar there — and opening
+     * it lays the sidebar out again, dropping any offsets given before.
+     */
+    private restoreScrollWhenLaidOut(mount: HTMLElement, scroll: ScrollSnapshot): void {
+        this.scrollObserver?.disconnect();
+        this.scrollObserver = null;
+        this.pendingScroll = [];
+        const win = this.getWindow();
+        if (hasSize(mount) || typeof win.ResizeObserver !== 'function') {
+            restoreScroll(scroll);
+            return;
+        }
+        this.pendingScroll = scroll;
+        const observer = new win.ResizeObserver(() => {
+            if (!hasSize(mount)) return;
+            observer.disconnect();
+            if (this.scrollObserver === observer) this.scrollObserver = null;
+            restoreScroll(this.pendingScroll);
+            this.pendingScroll = [];
+        });
+        this.scrollObserver = observer;
+        observer.observe(mount);
+    }
+
+    /** Take over `pane` for the sidebar, and open it if it is collapsed. */
+    private openHost(location: SidebarLocation, pane: HTMLElement): void {
+        const win = this.getWindow();
+        const host = this.host ??= {
+            location, pane, openedCollapsed: false,
+            nativeStyleWidth: null, nativeWidthAttr: null, neighbour: null, dragged: false, widthObserver: null,
+        };
         if (location === 'library') {
-            this.handleLibraryPane(false);
+            const itemPane = pane as HTMLElement & { collapsed?: boolean };
+            if (itemPane.collapsed) {
+                itemPane.collapsed = false;
+                host.openedCollapsed = true;
+            }
+            return;
+        }
+        const contextPane = win.ZoteroContextPane;
+        // @ts-ignore: collapsed is not typed
+        if (contextPane?.collapsed) {
+            contextPane.togglePane();
+            host.openedCollapsed = true;
+        }
+        if (isTableTabSelected(win)) {
+            // On a Beaver table tab the context pane holds only Beaver's chat.
+            openTableTabContextPane(win);
         } else {
-            this.handleReaderPane(false);
+            // A library tab collapses the pane, and Zotero opens it for the
+            // selected tab only after Beaver has seen the selection.
+            pane.removeAttribute('collapsed');
+            win.document.getElementById('zotero-context-pane-inner')?.removeAttribute('collapsed');
         }
     }
 
-    /** Remove this renderer's subscription, timers and DOM references. */
+    /** Hide the occupied pane's own content behind the sidebar, and size the pane. */
+    private coverHost(parent: HTMLElement, moved: boolean): void {
+        if (moved && this.host?.location === 'reader') {
+            // A layout change moves the sidebar to the other reader parent:
+            // show the content it hid in the one it left.
+            restoreReaderSiblings(this.getWindow());
+        }
+        for (const child of Array.from(parent.children)) {
+            if (child !== this.mount) (child as HTMLElement).style.display = 'none';
+        }
+        this.applyWidth();
+    }
+
+    /** Give the pane back to Zotero: its own content, width and collapsed state. */
+    private releaseHost(): void {
+        const host = this.host;
+        if (!host) return;
+        this.restorePaneWidth(host);
+        this.host = null;
+        const win = this.getWindow();
+        if (host.location === 'library') {
+            for (const child of Array.from(host.pane.children)) {
+                if (child !== this.mount) (child as HTMLElement).style.removeProperty('display');
+            }
+            if (host.openedCollapsed) (host.pane as HTMLElement & { collapsed?: boolean }).collapsed = true;
+            return;
+        }
+        restoreReaderSiblings(win);
+        const contextPane = win.ZoteroContextPane;
+        // @ts-ignore: collapsed is not typed
+        if (host.openedCollapsed && contextPane && !contextPane.collapsed) contextPane.togglePane();
+        // Closing the chat must not uncover the last reader's item.
+        if (isTableTabSelected(win)) collapseTableTabContextPane(win);
+    }
+
+    /** Give the occupied pane the sidebar width, in the standard layout. */
+    private applyWidth(): void {
+        const host = this.host;
+        if (!host) return;
+        if (isStackedLayout()) {
+            this.restorePaneWidth(host);
+            return;
+        }
+        this.width ||= readStoredWidth();
+        if (!this.width) {
+            // The first time the sidebar is shown it keeps the width it opens at.
+            const measured = Math.round(host.pane.getBoundingClientRect().width);
+            if (measured <= 0) return;
+            this.width = measured;
+            this.scheduleWidthSave();
+        }
+        if (host.nativeStyleWidth === null) {
+            host.nativeStyleWidth = host.pane.style.width;
+            host.nativeWidthAttr = host.pane.getAttribute('width');
+            const splitter = host.pane.previousElementSibling;
+            const neighbour = splitter?.localName === 'splitter'
+                ? splitter.previousElementSibling as HTMLElement | null
+                : null;
+            host.neighbour = neighbour
+                ? { element: neighbour, styleWidth: neighbour.style.width, widthAttr: neighbour.getAttribute('width') }
+                : null;
+            host.dragged = false;
+        }
+        const css = `${this.width}px`;
+        if (host.pane.style.width !== css) host.pane.style.width = css;
+        if (!host.widthObserver) {
+            const observer = new (this.getWindow().MutationObserver)((records: MutationRecord[]) => this.onPaneWidthChange(host, records));
+            observer.observe(host.pane, { attributes: true, attributeFilter: ['width', 'style'] });
+            host.widthObserver = observer;
+        }
+    }
+
+    /**
+     * Keep the sidebar width on the pane it occupies.
+     *
+     * A splitter drag writes the dragged size to the pane's `width` attribute
+     * and its inline width: that is the user resizing the sidebar, and becomes
+     * the sidebar width. The attribute is then put back, because Zotero
+     * persists it as its own width for the pane. A width written outside a
+     * drag is Zotero sizing its own pane, and is kept as the pane's width for
+     * when the sidebar leaves it. Any inline width other than the sidebar's is
+     * then replaced by the sidebar width.
+     */
+    private onPaneWidthChange(host: Host, records: MutationRecord[]): void {
+        if (this.host !== host || host.nativeStyleWidth === null || isStackedLayout()) return;
+        const pane = host.pane;
+        const attr = pane.getAttribute('width');
+        // A drag can end on Zotero's own width, so a write is looked for even
+        // when the value is unchanged.
+        const attrWritten = attr !== host.nativeWidthAttr
+            || records.some(record => record.attributeName === 'width');
+        if (attrWritten && this.splitterDrag) {
+            // A splitter writes the inline width too; the attribute this code
+            // puts back does not, and is no new size.
+            const dragged = pane.style.width === `${attr}px` ? Number(attr) : 0;
+            if (dragged > 0) {
+                this.width = Math.round(dragged);
+                this.scheduleWidthSave();
+                host.dragged = true;
+            }
+            if (attr !== host.nativeWidthAttr) {
+                if (host.nativeWidthAttr === null) pane.removeAttribute('width');
+                else pane.setAttribute('width', host.nativeWidthAttr);
+            }
+        } else if (attrWritten) {
+            // Zotero sizing its own pane: restoring the width it saved, or
+            // raising it to its minimum. That is the pane's width from now on.
+            host.nativeWidthAttr = attr;
+            if (pane.style.width !== `${this.width}px`) host.nativeStyleWidth = pane.style.width;
+        }
+        const css = `${this.width}px`;
+        if (this.width && pane.style.width !== css) pane.style.width = css;
+    }
+
+    /** Put back the pane's own width, unless Zotero has since set another. */
+    private restorePaneWidth(host: Host): void {
+        const observer = host.widthObserver;
+        if (observer) {
+            // A splitter's last write may not have been seen yet.
+            const records = observer.takeRecords();
+            if (records.length) this.onPaneWidthChange(host, records);
+            observer.disconnect();
+            host.widthObserver = null;
+        }
+        if (host.nativeStyleWidth === null) return;
+        if (host.pane.style.width === `${this.width}px`) {
+            if (host.nativeStyleWidth) host.pane.style.width = host.nativeStyleWidth;
+            else host.pane.style.removeProperty('width');
+        }
+        // A drag sized the other side of the splitter for the sidebar width;
+        // left as it is, it would squeeze the pane now back at its own width.
+        const neighbour = host.neighbour;
+        if (host.dragged && neighbour) {
+            if (neighbour.styleWidth) neighbour.element.style.width = neighbour.styleWidth;
+            else neighbour.element.style.removeProperty('width');
+            if (neighbour.widthAttr === null) neighbour.element.removeAttribute('width');
+            else neighbour.element.setAttribute('width', neighbour.widthAttr);
+        }
+        host.nativeStyleWidth = null;
+        host.nativeWidthAttr = null;
+        host.neighbour = null;
+        host.dragged = false;
+    }
+
+    private scheduleWidthSave(): void {
+        const win = this.getWindow();
+        if (this.saveTimer !== null) win.clearTimeout(this.saveTimer);
+        this.saveTimer = win.setTimeout(() => this.saveWidth(), WIDTH_SAVE_DELAY_MS);
+    }
+
+    private saveWidth(): void {
+        this.saveTimer = null;
+        if (this.width && this.width !== readStoredWidth()) setPref('sidebarWidth', this.width);
+    }
+
+    /** Remove this renderer's subscriptions, timers and DOM references. */
     public cleanup(): void {
         this.restoreContextPaneTabHandler?.();
         this.restoreContextPaneTabHandler = undefined;
-        this.unsubscribeWidth?.();
-        this.unsubscribeWidth = undefined;
+        if (this.layoutObserver !== undefined) {
+            Zotero.Prefs.unregisterObserver?.(this.layoutObserver as any);
+            this.layoutObserver = undefined;
+        }
+        this.unsubscribePreferences?.();
+        this.unsubscribePreferences = undefined;
+        this.removeSplitterListeners?.();
+        this.removeSplitterListeners = undefined;
+        this.splitterDrag = false;
         for (const timer of this.timers) this.hostWindow?.clearTimeout(timer);
         this.timers.clear();
+        this.scrollObserver?.disconnect();
+        this.scrollObserver = null;
+        this.pendingScroll = [];
+        if (this.saveTimer !== null) {
+            this.hostWindow?.clearTimeout(this.saveTimer);
+            this.saveWidth();
+        }
         if (!this.hostWindow) return;
 
         // Only do UI cleanup if window is still valid
         const win = this.getWindow();
         if (win && !win.closed) {
             try {
-                this.elements = this.initializeElements();
-                this.handleLibraryPane(false);
-                this.handleReaderPane(false);
-                this.updateToolbarButton(false);
-                
-                const chatToggleButton = win.document.querySelector("#zotero-beaver-tb-chat-toggle") as HTMLElement | null;
-                if (chatToggleButton) {
-                    chatToggleButton.remove();
-                }
-
-                const liveRegion = win.document.getElementById("beaver-a11y-live-region");
-                if (liveRegion) {
-                    liveRegion.remove();
-                }
+                this.releaseHost();
+                if (this.mount) this.mount.style.display = 'none';
+                this.toggleButton()?.remove();
+                win.document.getElementById("beaver-a11y-live-region")?.remove();
             } catch (e) {
                 // Ignore UI cleanup errors during shutdown
             }
         }
-
-        // Clear stored element references to prevent stale access
-        this.elements = {
-            chatToggleButton: null,
-            libraryPane: null,
-            libraryContent: null,
-            librarySidebar: null,
-            readerPane: null,
-            readerContent: null,
-            readerSidebar: null
-        };
+        this.host = null;
+        this.mount = null;
+        this.state = null;
     }
 }
 

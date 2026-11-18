@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
-import { activeItemPane, isLibraryTabSelected, isLibraryTabType, placeLibraryMount } from '../../../src/ui/libraryPane';
+import { activeItemPane, isLibraryTabSelected, isLibraryTabType } from '../../../src/ui/libraryPane';
 
 function windowWith(itemPane: HTMLElement | null, tabs: any = {}) {
     return { closed: false, document, ZoteroPane: { itemPane }, Zotero_Tabs: tabs } as unknown as Window;
@@ -34,37 +34,16 @@ describe('library tab types', () => {
     });
 });
 
-describe('placeLibraryMount', () => {
+describe('activeItemPane', () => {
     it('reports no pane while the window has no library view', () => {
         document.body.innerHTML = '';
-        const mount = document.createElement('div');
         expect(activeItemPane(windowWith(null))).toBeNull();
-        expect(placeLibraryMount(windowWith(null), mount)).toBeNull();
-        expect(mount.parentElement).toBeNull();
     });
 
-    it("moves into the active view's pane and uncovers what it hid in the previous one", () => {
+    it("returns the active view's pane", () => {
         document.body.innerHTML = '';
-        const first = pane('zotero-item-pane');
+        pane('zotero-item-pane');
         const second = pane('zotero-item-pane-tab-b');
-        const mount = document.createElement('div');
-        first.appendChild(mount);
-        (first.querySelector('.content') as HTMLElement).style.display = 'none';
-
-        expect(placeLibraryMount(windowWith(second), mount)).toBe(second);
-        expect(mount.parentElement).toBe(second);
-        expect((first.querySelector('.content') as HTMLElement).style.display).toBe('');
-    });
-
-    it('reattaches a mount left behind by a closed view', () => {
-        document.body.innerHTML = '';
-        const closed = pane('zotero-item-pane');
-        const mount = document.createElement('div');
-        closed.appendChild(mount);
-        closed.remove();
-        const next = pane('zotero-item-pane-tab-c');
-
-        expect(placeLibraryMount(windowWith(next), mount)).toBe(next);
-        expect(mount.isConnected).toBe(true);
+        expect(activeItemPane(windowWith(second))).toBe(second);
     });
 });
