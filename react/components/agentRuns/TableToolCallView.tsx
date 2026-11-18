@@ -5,6 +5,7 @@ import { getToolCallStatusFromResult, type ToolResult } from '@beaver/agent-core
 import { tableRecordFromMetadata } from '@beaver/agent-core/run-state/tableResults';
 import { chatFillsAtom, fillForToolCall } from '@beaver/agent-core/run-state/tableChatFills';
 import { openJobCallsAtom } from '@beaver/agent-core/run-state/jobCalls';
+import { readsAsStopped, shownStop } from '@beaver/agent-core/run-state/tableFillCopy';
 import { TOOL_BASE_LABELS } from '@beaver/agent-core/run-state/toolCallRequest';
 import { tableMessages } from './ToolResultView';
 import { TableResultView } from './toolResultViews/TableResultView';
@@ -99,12 +100,12 @@ export const TableToolCallView: React.FC<TableToolCallViewProps> = ({
     // the chat on, or an older backend): its live job says how it is going.
     const backgroundState = fillRunning
         ? fill?.snapshot.state === 'done'
-            ? fill.snapshot.result?.stopped_by ? 'stopped' : 'finished'
+            ? fill.snapshot.result && shownStop(fill.snapshot.result) ? 'stopped' : 'finished'
             : fill ? 'running' : null
         : null;
     const fillState: 'running' | 'finished' | 'stopped' | null = jobCall && !hasResult
         ? jobCall.result
-            ? jobCall.result.kind === 'table_fill' && jobCall.result.result.stopped_by ? 'stopped' : 'finished'
+            ? jobCall.result.kind === 'table_fill' && shownStop(jobCall.result.result) ? 'stopped' : 'finished'
             : 'running'
         : waitingOnFill ? 'running' : backgroundState;
     const isShimmering = isInProgress && !hasResult && runStatus === 'in_progress';
@@ -122,7 +123,7 @@ export const TableToolCallView: React.FC<TableToolCallViewProps> = ({
     const iconClassName = isFailed && !(isHovered && canExpand) && !isExpanded ? 'color-error' : undefined;
 
     const label = (fillState && FILL_STATE_LABELS[fillState])
-        ?? (record && doneLabel(part.tool_name, fillRunning, !!record.fill?.stopped_by))
+        ?? (record && doneLabel(part.tool_name, fillRunning, readsAsStopped(record.fill?.stopped_by, record.fill?.rows_not_started)))
         ?? TOOL_BASE_LABELS[part.tool_name]
         ?? 'Table';
     // The line renders the call as recorded, title included; only a call

@@ -60,6 +60,7 @@ vi.mock('../../../../react/atoms/agentRunAtoms', async () => {
         sendBatchApprovalResponseAtom: atom(null, (_get, _set, args: unknown) => mocks.sendBatchApproval(args)),
         isRunReconnectingAtom: atom(false),
         closeWSConnectionAtom: atom(null, () => mocks.stopRun()),
+        staleApprovalActionIdsAtom: atom(new Set<string>()),
     };
 });
 vi.mock('../../../../react/host/zotero/editNotePreviewLifecycle', () => ({
@@ -93,7 +94,7 @@ import { REATTACH_CHECKING_SHORT } from '@beaver/agent-core/transport/connection
 import { pendingCreditConfirmationsAtom } from '@beaver/agent-core/run-state/pendingCreditConfirmations';
 import { pendingQuestionsAtom } from '@beaver/agent-core/run-state/pendingQuestions';
 import { pendingApprovalsAtom } from '../../../../react/agents/agentActions';
-import { autoReplacementPendingRunIdsAtom, isRunReconnectingAtom } from '../../../../react/atoms/agentRunAtoms';
+import { autoReplacementPendingRunIdsAtom, isRunReconnectingAtom, staleApprovalActionIdsAtom } from '../../../../react/atoms/agentRunAtoms';
 import { isSidebarVisibleAtom } from '../../../../react/atoms/ui';
 import { annotationPanelStateAtom } from '../../../../react/atoms/messageUIState';
 import { runStatusPopupCompletionAtom, runStatusPopupPreviewAtom } from '../../../../react/atoms/runStatusPopup';
@@ -509,5 +510,99 @@ describe('the dev preview', () => {
         act(() => { (latest as any).onDecide(true); });
         expect(store.get(runStatusPopupPreviewAtom)).toBeNull();
         expect(latest?.kind).toBe('running');
+    });
+});
+
+describe('when a run parks', () => {
+    const question = { questionId: 'q', toolcallId: 'tc-q', title: 'Which years?', questions: [] };
+    const approval = { actionId: 'a', toolcallId: 'tc-a', actionType: 'edit_metadata', actionData: {} };
+    /** The run as it ended, parked on its calls. */
+    const parked = (calls: { kind: string; id: string; correlation: string }[]) => run({
+        status: 'completed',
+        model_messages: [{
+            kind: 'response',
+            run_id: 'run-1',
+            parts: calls.map((call) => ({ part_kind: 'tool-call', tool_name: 'tool', tool_call_id: call.id, args: {} })),
+        }] as any,
+        parked: {
+            version: 1, parked_at: '2026-11-17T10:00:00Z', reason: 'timeout',
+            requests: calls.map((call) => ({
+                kind: call.kind, tool_call_id: call.id, tool_name: 'tool', correlation_id: call.correlation, request: {},
+            })),
+        } as any,
+    });
+    /** The live run ends parked, as `onDone` leaves it: in the thread's runs, none active. */
+    const park = (ended: AgentRun) => act(() => {
+        store.set(threadRunsAtom, [ended]);
+        store.set(activeRunAtom, null);
+    });
+
+    it('keeps the question it waits on up, answerable, instead of a completed card', () => {
+        store.set(activeRunAtom, run({ status: 'awaiting_deferred' }));
+        store.set(pendingQuestionsAtom, new Map([['tc-q', question]]));
+        mount();
+        expect(latest?.kind).toBe('question');
+
+        park(parked([{ kind: 'ask_user_question', id: 'tc-q', correlation: 'q' }]));
+        expect(store.get(runStatusPopupCompletionAtom)).toBeNull();
+        expect(latest).toMatchObject({ kind: 'question', runId: 'run-1', question: { questionId: 'q' } });
+        (latest as any).onSubmit([{ item_id: 'q0', selected_option_ids: ['q0-o1'] }]);
+        expect(mocks.sendQuestionResponse).toHaveBeenCalledOnce();
+    });
+
+    it('keeps the card up while the parked run is still the active one, before its done', () => {
+        store.set(activeRunAtom, run({ status: 'awaiting_deferred' }));
+        store.set(pendingQuestionsAtom, new Map([['tc-q', question]]));
+        mount();
+        // `run_complete` has landed (the run ended parked); `done` has not moved it yet.
+        set(activeRunAtom, parked([{ kind: 'ask_user_question', id: 'tc-q', correlation: 'q' }]));
+        expect(latest).toMatchObject({ kind: 'question', question: { questionId: 'q' } });
+    });
+
+    it('keeps a card the user closed while the run was live closed once it parks', () => {
+        store.set(activeRunAtom, run({ status: 'awaiting_deferred' }));
+        store.set(pendingQuestionsAtom, new Map([['tc-q', question]]));
+        mount();
+        act(() => { (latest as any).onDismiss(); });
+        expect(latest).toBeNull();
+
+        park(parked([{ kind: 'ask_user_question', id: 'tc-q', correlation: 'q' }]));
+        expect(latest).toBeNull();
+    });
+
+    it('keeps an approval it waits on up, without the run\'s full-access grant', async () => {
+        store.set(activeRunAtom, run({ status: 'awaiting_deferred' }));
+        store.set(pendingApprovalsAtom as any, new Map([['a', approval]]));
+        mount();
+
+        park(parked([{ kind: 'agent_action_approval', id: 'tc-a', correlation: 'a' }]));
+        expect(latest).toMatchObject({ kind: 'approval', approveLabel: 'Approve', permission: null });
+        await act(async () => { (latest as any).onDecide(true); });
+        expect(mocks.answerPendingApprovals).toHaveBeenCalledExactlyOnceWith({ actionIds: ['a'], approved: true });
+    });
+
+    it('points to Beaver for an approval that can no longer be answered here', () => {
+        store.set(staleApprovalActionIdsAtom as any, new Set(['a']));
+        store.set(pendingApprovalsAtom as any, new Map([['a', approval]]));
+        store.set(threadRunsAtom, [parked([{ kind: 'agent_action_approval', id: 'tc-a', correlation: 'a' }])]);
+        mount();
+        expect(latest).toMatchObject({ kind: 'running', statusLine: 'Review the changes in Beaver' });
+    });
+
+    it('shows a parked card when the sidebar closes after the run parked', () => {
+        store.set(isSidebarVisibleAtom, true);
+        store.set(threadRunsAtom, [parked([{ kind: 'ask_user_question', id: 'tc-q', correlation: 'q' }])]);
+        store.set(pendingQuestionsAtom, new Map([['tc-q', question]]));
+        mount();
+        set(isSidebarVisibleAtom, false);
+        expect(latest).toMatchObject({ kind: 'question', question: { questionId: 'q' } });
+    });
+
+    it('reports no completed card for a run parked on a job, which the job card reports', () => {
+        store.set(activeRunAtom, run());
+        mount();
+        park(parked([{ kind: 'table_fill', id: 'tc-f', correlation: 'job-1' }]));
+        expect(store.get(runStatusPopupCompletionAtom)).toBeNull();
+        expect(latest).toBeNull();
     });
 });

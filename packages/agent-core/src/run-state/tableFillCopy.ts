@@ -7,6 +7,7 @@
 import type { PendingWork } from "../layouts/tableFill";
 import type {
     TableFillJobSnapshot,
+    TableFillNotStartedReason,
     TableFillPlanSummary,
     TableFillPricing,
     TableFillResult,
@@ -26,6 +27,28 @@ export function creditsText(credits: number): string {
 
 function count(n: number, one: string, many = `${one}s`): string {
     return `${n.toLocaleString("en-US")} ${n === 1 ? one : many}`;
+}
+
+/**
+ * Whether a fill reads as stopped early. A Stop that came once every item had
+ * started left nothing undone, so the fill reads as finished.
+ * `notStarted` is the result's `not_started` (a record's `rows_not_started`).
+ */
+export function readsAsStopped(
+    stoppedBy: string | null | undefined,
+    notStarted: Partial<Record<string, number>> | null | undefined,
+): boolean {
+    return !!stoppedBy && !(stoppedBy === "stopped" && !notStarted?.stopped);
+}
+
+/** What stopped a fill, as its result reads (see {@link readsAsStopped}). */
+export function shownStop(result: TableFillResult): TableFillNotStartedReason | undefined {
+    return readsAsStopped(result.stopped_by, result.not_started) ? result.stopped_by : undefined;
+}
+
+/** The items a fill wrote answers for: "Filled 12 items", "Filled 11 of 12 items". */
+export function filledText(answered: number, total: number): string {
+    return answered === total ? `Filled ${count(total, "item")}` : `Filled ${answered.toLocaleString("en-US")} of ${count(total, "item")}`;
 }
 
 /** The pricing sentence, the same everywhere a fill is priced. */
@@ -258,8 +281,9 @@ export function resultTone(job: TableFillJobSnapshot): "clean" | "stopped" | "wa
     const result = job.result;
     if (!result) return "warning";
     if (result.failed_row_ids.length || result.not_written) return "warning";
-    if (result.stopped_by === "stopped") return "stopped";
-    return result.stopped_by ? "warning" : "clean";
+    const stop = shownStop(result);
+    if (stop === "stopped") return "stopped";
+    return stop ? "warning" : "clean";
 }
 
 /** The link to a finished fill's failed rows: "Show 2 failed". */
@@ -283,21 +307,23 @@ export function runningLabel(job: TableFillJobSnapshot): string {
 function stoppedText(job: TableFillJobSnapshot, result: TableFillResult): string | null {
     const failed = result.failed_row_ids.length;
     const unread = failed ? `${failed.toLocaleString("en-US")} couldn't be read` : null;
-    const after = afterText(job);
-    if (result.stopped_by === "insufficient_credits")
+    const after = afterText(job, result);
+    const stop = shownStop(result);
+    if (stop === "insufficient_credits")
         return unread ? `Out of credits ${after} · ${unread}` : `Out of credits ${after}`;
-    if (result.stopped_by === "stopped") return unread ? `Stopped ${after} · ${unread}` : `Stopped ${after}`;
-    const sentence = stopSentence(result, after);
+    if (stop === "stopped") return unread ? `Stopped ${after} · ${unread}` : `Stopped ${after}`;
+    const sentence = stopSentence(stop, after);
     return sentence && unread ? `${sentence}; ${unread}` : sentence;
 }
 
-function afterText(job: TableFillJobSnapshot): string {
-    return `after ${job.rows_done} of ${count(job.rows_total, "item")}`;
+/** How far a stopped fill got, counting the items it filled: "after 6 of 12 items". */
+function afterText(job: TableFillJobSnapshot, result: TableFillResult): string {
+    return `after ${result.rows_answered.toLocaleString("en-US")} of ${count(job.rows_total, "item")}`;
 }
 
 /** A stop that neither the user nor the balance caused, as a sentence. */
-function stopSentence(result: TableFillResult, after: string): string | null {
-    switch (result.stopped_by) {
+function stopSentence(stop: TableFillNotStartedReason | undefined, after: string): string | null {
+    switch (stop) {
         case "price_changed":
             return "Prices changed; fill again to see the new cost";
         case "account_changed":
@@ -319,19 +345,20 @@ function stopSentence(result: TableFillResult, after: string): string | null {
 /**
  * A finished fill's result in a few words, for a surface that links to the
  * failed rows itself and leaves the cost to the tool call and the table:
- * "Filled 12 rows", "Stopped after 7 of 12 papers", "Out of credits after 7
- * of 12 papers".
+ * "Filled 12 items", "Stopped after 7 of 12 items", "Out of credits after 7
+ * of 12 items".
  */
 export function resultSummary(job: TableFillJobSnapshot): string {
     const result = job.result;
     if (!result) return runningLabel(job);
-    const after = afterText(job);
+    const after = afterText(job, result);
+    const stop = shownStop(result);
     const line =
-        result.stopped_by === "insufficient_credits"
+        stop === "insufficient_credits"
             ? `Out of credits ${after}`
-            : result.stopped_by === "stopped"
+            : stop === "stopped"
               ? `Stopped ${after}`
-              : (stopSentence(result, after) ?? `Filled ${count(result.rows_answered, "row")}`);
+              : (stopSentence(stop, after) ?? filledText(result.rows_answered, job.rows_total));
     return result.not_written ? `${line} · ${count(result.not_written, "item")} not saved` : line;
 }
 
@@ -344,7 +371,7 @@ function skippedAnswers(result: TableFillResult): number {
  * Whether a finished fill's result asks something of the user: it stopped
  * early, rows could not be read or saved, or answers were left for the next
  * fill. False only for a clean result, which {@link resultText} reduces to
- * the rows filled.
+ * the items filled.
  */
 export function resultNeedsAttention(job: TableFillJobSnapshot): boolean {
     const result = job.result;
@@ -368,7 +395,7 @@ export function resultText(job: TableFillJobSnapshot): string {
             ? `${stopped}; ${count(result.not_written, "item")} could not be saved`
             : stopped;
     const failed = result.failed_row_ids.length;
-    const parts = [`Filled ${count(result.rows_answered, "row")}`];
+    const parts = [filledText(result.rows_answered, job.rows_total)];
     if (failed) parts.push(`${failed.toLocaleString("en-US")} couldn't be read`);
     if (result.not_written)
         parts.push(`${count(result.not_written, "item")} could not be saved`);

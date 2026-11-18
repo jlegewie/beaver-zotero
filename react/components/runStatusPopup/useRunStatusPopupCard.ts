@@ -20,7 +20,7 @@ import { runStatusText } from '@beaver/agent-core/run-state/runStatusCopy';
 import { getRunErrorTitle, stripRunErrorTypePrefix } from '@beaver/agent-core/run-state/runErrorCopy';
 import { pendingBatchApprovalsAtom } from '@beaver/agent-core/run-state/pendingBatchApprovals';
 import { pendingTableCardsAtom } from '@beaver/agent-core/run-state/pendingTableCards';
-import { openJobCallsAtom } from '@beaver/agent-core/run-state/jobCalls';
+import { openParkedRunAtom } from '@beaver/agent-core/run-state/parkedRun';
 import {
     pendingCreditConfirmationsAtom,
     type PendingCreditConfirmation,
@@ -43,7 +43,9 @@ import {
     sendAskUserQuestionResponseAtom,
     sendCreditConfirmationResponseAtom,
     setRunPermissionModeAtom,
+    staleApprovalActionIdsAtom,
 } from '../../atoms/agentRunAtoms';
+import { isThreadParkedAtom } from '../../atoms/parkedRuns';
 import {
     getPendingApprovalIdsCoveredByFullAccess,
     isFullAccessGrantedForRun,
@@ -95,13 +97,13 @@ function openBeaver(): void {
 /**
  * Records a run that finished while the sidebar was closed, so the completed
  * card can report it, and forgets it as soon as the sidebar is open or
- * another run has taken the thread over. A run that parked on a job has not
- * finished: the job's card reports it instead.
+ * another run has taken the thread over. A run that parked has not finished:
+ * the card it waits on, or its job's card, reports it instead.
  */
 function useCompletionTracking(): void {
     const summary = useAtomValue(lastRunSummaryAtom);
     const isSidebarVisible = useAtomValue(isSidebarVisibleAtom);
-    const parkedOnJob = useAtomValue(openJobCallsAtom).length > 0;
+    const parkedRunId = useAtomValue(openParkedRunAtom)?.runId ?? null;
     const setCompletion = useSetAtom(runStatusPopupCompletionAtom);
     const previousRef = useRef(summary);
 
@@ -118,10 +120,10 @@ function useCompletionTracking(): void {
             setCompletion(null);
         }
         const wasLive = previous?.id === summary.id && isRunActive(previous);
-        if (wasLive && !isRunActive(summary) && !isSidebarVisible && !parkedOnJob) {
+        if (wasLive && !isRunActive(summary) && !isSidebarVisible && parkedRunId !== summary.id) {
             setCompletion({ runId: summary.id, completedAt: Date.now() });
         }
-    }, [summary, isSidebarVisible, setCompletion, parkedOnJob]);
+    }, [summary, isSidebarVisible, setCompletion, parkedRunId]);
 
     useEffect(() => {
         if (isSidebarVisible) setCompletion(null);
@@ -381,6 +383,19 @@ function useDismissalReset(activeRunId: string | null): void {
     }, [activeRunId, setDismissed]);
 }
 
+/**
+ * The open chat's parked run while it waits on cards (`waitsOnCards`) and no
+ * run is going: the popup keeps its cards up, as the sidebar does. Read from
+ * every run: one that just parked stays the active run until its `done`.
+ */
+function useParkedCardRun(waitsOnCards: boolean): AgentRun | null {
+    const isParked = useAtomValue(isThreadParkedAtom);
+    const parkedRunId = useAtomValue(openParkedRunAtom)?.runId ?? null;
+    const runs = useAtomValue(allRunsAtom);
+    if (!waitsOnCards || !isParked || !parkedRunId) return null;
+    return runs.find((run) => run.id === parkedRunId) ?? null;
+}
+
 function useLiveCard(): RunStatusPopupCard | null {
     useCompletionTracking();
 
@@ -389,7 +404,6 @@ function useLiveCard(): RunStatusPopupCard | null {
     const dismiss = useSetAtom(dismissRunStatusPopupCardAtom);
     const autoReplacementPendingRunIds = useAtomValue(autoReplacementPendingRunIdsAtom);
     const activeRun = useAtomValue(activeRunAtom);
-    useDismissalReset(activeRun?.id ?? null);
     const threadName = useAtomValue(currentThreadNameAtom);
     const pendingApprovals = useAtomValue(pendingApprovalsAtom);
     const batchApprovals = useAtomValue(pendingBatchApprovalsAtom);
@@ -410,6 +424,15 @@ function useLiveCard(): RunStatusPopupCard | null {
     const tableCard = tableCards.values().next().value ?? null;
     const credit = creditConfirmations.values().next().value ?? null;
     const question = questions.values().next().value ?? null;
+    // A run parked on cards keeps them up, answerable: answering resumes it.
+    // The card shows as it did while the run was live.
+    const parkedRun = useParkedCardRun(!liveRun && (approvals.length > 0 || !!batch || !!tableCard || !!question));
+    const cardRun = liveRun ?? parkedRun;
+    // A run that parks on its cards is the same run: a card closed while it
+    // was live stays closed.
+    useDismissalReset(cardRun?.id ?? activeRun?.id ?? null);
+    const staleApprovalIds = useAtomValue(staleApprovalActionIdsAtom);
+    const approvalsStale = approvals.some((approval) => staleApprovalIds.has(approval.actionId));
 
     const statusLine = useRunStatusLine(liveRun);
     // Decision cards stay up while the run's connection is recovered, held
@@ -451,24 +474,28 @@ function useLiveCard(): RunStatusPopupCard | null {
     // closing it keeps the completion record, so the outcome still gets a card.
     const resolving = !liveRun && completion !== null
         && completed.run?.status === 'error' && resolutionView !== null;
-    const signature = liveRun
+    const signature = cardRun
         ? approvals.length > 0
             ? `approval:${approvals.map((approval) => approval.actionId).sort().join(',')}`
             : batch ? `batch:${batch.approvalId}`
                 : tableCard ? `table:${tableCard.card_id}`
                 : credit ? `credit:${credit.confirmationId}`
                     : question ? `question:${question.questionId}`
-                        : `running:${liveRun.id}`
+                        : `running:${cardRun.id}`
         : resolving ? `resolving:${completion.runId}`
             : completion ? `completed:${completion.runId}` : null;
     if (signature && dismissed.has(signature)) return null;
     const onDismiss = () => {
         if (signature) dismiss(signature);
-        if (!liveRun && !resolving) setCompletion(null);
+        if (!cardRun && !resolving) setCompletion(null);
     };
 
-    if (liveRun) {
-        const base = { runId: liveRun.id, threadName: threadDisplayName(threadName, liveRun), stackDepth: 0, onOpen: openBeaver, onDismiss };
+    if (cardRun) {
+        const base = { runId: cardRun.id, threadName: threadDisplayName(threadName, cardRun), stackDepth: 0, onOpen: openBeaver, onDismiss };
+        // An approval that can no longer be answered here is reviewed in Beaver.
+        if (approvals.length > 0 && approvalsStale) {
+            return { ...base, kind: 'running', statusLine: 'Review the changes in Beaver' };
+        }
         if (approvals.length > 0) {
             const summary = describePendingApprovals(approvals, singleTitle);
             const plural = summary.count > 1;
@@ -478,7 +505,8 @@ function useLiveCard(): RunStatusPopupCard | null {
                 label: summary.label,
                 count: summary.count,
                 actionType: approvals.length === 1 ? approvals[0].actionType : null,
-                permission: summary.confirmOnly
+                // A full-access grant belongs to a live run: a parked one has none to give.
+                permission: summary.confirmOnly || !liveRun
                     ? null
                     : {
                         mode: approvalControls.mode,
@@ -493,7 +521,7 @@ function useLiveCard(): RunStatusPopupCard | null {
             };
         }
         if (batch) {
-            return { ...base, kind: 'batch', approval: batch, onSubmit: onSubmitBatch, disabled: isReconnecting, onStop };
+            return { ...base, kind: 'batch', approval: batch, onSubmit: onSubmitBatch, disabled: isReconnecting, ...(liveRun ? { onStop } : {}) };
         }
         if (tableCard) {
             // The card is edited in the sidebar; the popup only points there.
@@ -519,7 +547,7 @@ function useLiveCard(): RunStatusPopupCard | null {
         if (question) {
             return { ...base, kind: 'question', question, onSubmit: onSubmitQuestion, disabled: isReconnecting };
         }
-        return { ...base, kind: 'running', statusLine: isAutoRetrying ? 'Retrying' : statusLine };
+        if (liveRun) return { ...base, kind: 'running', statusLine: isAutoRetrying ? 'Retrying' : statusLine };
     }
 
     if (completion && completed.run) {

@@ -135,10 +135,13 @@ describe('job results as the bar reads them', () => {
         expect(fillLabel(fill.result)).toBe('Table filled');
         expect(fillResultLine(fill.result, 12)).toBe('Filled 12 items');
         expect(fillResultLine(result({ rows_answered: 11 }), 12)).toBe('Filled 11 of 12 items');
-        expect(fillResultLine(result({ rows_answered: 6, stopped_by: 'stopped' }), 12)).toBe('Stopped after 6 of 12 items');
+        expect(fillResultLine(result({ rows_answered: 6, stopped_by: 'stopped', not_started: { stopped: 4 } }), 12)).toBe('Stopped after 6 of 12 items');
+        // A Stop that came once every item had started left nothing undone.
+        expect(fillResultLine(result({ rows_answered: 10, stopped_by: 'stopped', not_started: {} }), 12)).toBe('Filled 10 of 12 items');
+        expect(fillLabel(result({ stopped_by: 'stopped', not_started: {} }))).toBe('Table filled');
         expect(fillResultLine(result({ rows_answered: 6, stopped_by: 'insufficient_credits' }), 12)).toBe('Out of credits after 6 of 12 items');
         expect(fillResultLine(result({ rows_answered: 6, stopped_by: 'shutdown' }), 12)).toBe('Zotero closed after 6 of 12 items');
-        expect(fillLabel(result({ stopped_by: 'stopped' }))).toBe('Fill stopped');
+        expect(fillLabel(result({ stopped_by: 'stopped', not_started: { stopped: 4 } }))).toBe('Fill stopped');
         expect(fillTone(fill.result)).toBe('clean');
         expect(fillTone(result({ failed_row_ids: ['r1'] }))).toBe('warning');
         expect(isStoppedJobResult({ ...fill, result: result({ stopped_by: 'stopped' }), stopped: true })).toBe(true);

@@ -19,6 +19,7 @@ import {
 } from '../protocol/jobCallProtocol';
 import type { TableFillJobSnapshot, TableFillResult } from '../protocol/tableFillProtocol';
 import { openParkedRunAtom } from './parkedRun';
+import { filledText, shownStop } from './tableFillCopy';
 
 /** The open parked run's job calls, in call order. */
 export const openJobCallsAtom = atom<readonly JobDeferral[]>((get) => {
@@ -113,7 +114,7 @@ export function isStoppedJobResult(result: JobResult | null | undefined): boolea
 /** Line one of a fill's bar. */
 export function fillLabel(result?: TableFillResult | null): string {
     if (!result) return 'Filling table';
-    return result.stopped_by ? 'Fill stopped' : 'Table filled';
+    return shownStop(result) ? 'Fill stopped' : 'Table filled';
 }
 
 /**
@@ -123,9 +124,9 @@ export function fillLabel(result?: TableFillResult | null): string {
  */
 export function fillResultLine(result: TableFillResult, total: number): string {
     const after = `after ${result.rows_answered.toLocaleString('en-US')} of ${items(total)}`;
-    switch (result.stopped_by) {
+    switch (shownStop(result)) {
         case undefined:
-            return result.rows_answered === total ? `Filled ${items(total)}` : `Filled ${result.rows_answered.toLocaleString('en-US')} of ${items(total)}`;
+            return filledText(result.rows_answered, total);
         case 'insufficient_credits':
             return `Out of credits ${after}`;
         case 'shutdown':
@@ -143,7 +144,7 @@ export function fillResultLine(result: TableFillResult, total: number): string {
 
 /** How a finished fill reads in its glyph. */
 export function fillTone(result: TableFillResult): 'clean' | 'warning' {
-    return !result.stopped_by && result.failed_row_ids.length === 0 && !result.not_written ? 'clean' : 'warning';
+    return !shownStop(result) && result.failed_row_ids.length === 0 && !result.not_written ? 'clean' : 'warning';
 }
 
 /** PDF retrieval counts. */
