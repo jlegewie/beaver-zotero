@@ -375,6 +375,21 @@ describe('one sidebar for library and reader tabs', () => {
         done();
     });
 
+    it('lets the other side of the splitter give way before the sidebar shrinks, and gives the pane its flex back', async () => {
+        prefs.values.sidebarWidth = 420;
+        const { uiManager, itemPane, contextPane, done } = await setup();
+        itemPane.style.flexShrink = '2';
+
+        uiManager.updateUI({ isVisible: true, isLibraryTab: true });
+        expect(itemPane.style.flexShrink).toBe('0.001');
+        uiManager.updateUI({ isVisible: true, isLibraryTab: false });
+        expect(itemPane.style.flexShrink).toBe('2');
+        expect(contextPane.style.flexShrink).toBe('0.001');
+        uiManager.updateUI({ isVisible: false, isLibraryTab: false });
+        expect(contextPane.style.flexShrink).toBe('');
+        done();
+    });
+
     it('takes a splitter drag as the new sidebar width without changing the width Zotero persists', async () => {
         prefs.values.sidebarWidth = 420;
         const { win, uiManager, itemPane, contextPane, done } = await setup();

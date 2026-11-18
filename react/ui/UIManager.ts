@@ -10,6 +10,15 @@ import { preferencesRevisionAtom } from '../atoms/preferences';
 /** How long a resize settles before the sidebar width is saved. */
 const WIDTH_SAVE_DELAY_MS = 250;
 
+/**
+ * The occupied pane's flex-shrink. When the window is too narrow for the pane
+ * and its neighbour together, the browser shrinks both in proportion to their
+ * width, so a neighbour holding a width from an earlier drag would squeeze the
+ * sidebar below its width. Near zero, the neighbour gives way first, down to its
+ * minimum, and the sidebar only narrows once nothing else can.
+ */
+const PANE_FLEX_SHRINK = '0.001';
+
 /** The Zotero pane the sidebar occupies while it is shown. */
 interface Host {
     location: SidebarLocation;
@@ -24,6 +33,8 @@ interface Host {
     nativeStyleWidth: string | null;
     /** The pane's `width` attribute, which Zotero persists as the pane's own width. */
     nativeWidthAttr: string | null;
+    /** The pane's inline flex-shrink before the sidebar set its own. */
+    nativeFlexShrink: string;
     /**
      * The element on the other side of the pane's splitter, which a drag
      * resizes too, with its inline width and `width` attribute from before.
@@ -348,7 +359,8 @@ class UIManager {
         const win = this.getWindow();
         const host = this.host ??= {
             location, pane, openedCollapsed: false,
-            nativeStyleWidth: null, nativeWidthAttr: null, neighbour: null, dragged: false, widthObserver: null,
+            nativeStyleWidth: null, nativeWidthAttr: null, nativeFlexShrink: '',
+            neighbour: null, dragged: false, widthObserver: null,
         };
         if (location === 'library') {
             const itemPane = pane as HTMLElement & { collapsed?: boolean };
@@ -429,6 +441,7 @@ class UIManager {
         if (host.nativeStyleWidth === null) {
             host.nativeStyleWidth = host.pane.style.width;
             host.nativeWidthAttr = host.pane.getAttribute('width');
+            host.nativeFlexShrink = host.pane.style.flexShrink;
             const splitter = host.pane.previousElementSibling;
             const neighbour = splitter?.localName === 'splitter'
                 ? splitter.previousElementSibling as HTMLElement | null
@@ -440,6 +453,7 @@ class UIManager {
         }
         const css = `${this.width}px`;
         if (host.pane.style.width !== css) host.pane.style.width = css;
+        if (host.pane.style.flexShrink !== PANE_FLEX_SHRINK) host.pane.style.flexShrink = PANE_FLEX_SHRINK;
         if (!host.widthObserver) {
             const observer = new (this.getWindow().MutationObserver)((records: MutationRecord[]) => this.onPaneWidthChange(host, records));
             observer.observe(host.pane, { attributes: true, attributeFilter: ['width', 'style'] });
@@ -487,6 +501,7 @@ class UIManager {
         }
         const css = `${this.width}px`;
         if (this.width && pane.style.width !== css) pane.style.width = css;
+        if (pane.style.flexShrink !== PANE_FLEX_SHRINK) pane.style.flexShrink = PANE_FLEX_SHRINK;
     }
 
     /** Put back the pane's own width, unless Zotero has since set another. */
@@ -503,6 +518,10 @@ class UIManager {
         if (host.pane.style.width === `${this.width}px`) {
             if (host.nativeStyleWidth) host.pane.style.width = host.nativeStyleWidth;
             else host.pane.style.removeProperty('width');
+        }
+        if (host.pane.style.flexShrink === PANE_FLEX_SHRINK) {
+            if (host.nativeFlexShrink) host.pane.style.flexShrink = host.nativeFlexShrink;
+            else host.pane.style.removeProperty('flex-shrink');
         }
         // A drag sized the other side of the splitter for the sidebar width;
         // left as it is, it would squeeze the pane now back at its own width.
