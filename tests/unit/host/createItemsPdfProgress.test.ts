@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import {
     actionCardProgressMessage,
-    createItemsPdfSummary,
+    createdItemsFullText,
+    createItemsFullTextSummary,
+    fullTextRowLabel,
 } from '../../../react/host/zotero/components/agentActionViewHelpers';
 
 describe('actionCardProgressMessage', () => {
@@ -42,38 +44,90 @@ describe('actionCardProgressMessage', () => {
     });
 });
 
-describe('createItemsPdfSummary', () => {
-    describe('several items', () => {
-        it('counts the items that got a PDF', () => {
-            expect(createItemsPdfSummary(['available', 'available', 'failed'], false)).toBe('2 with PDF');
-            expect(createItemsPdfSummary(['available', 'available', 'available'], false)).toBe('3 with PDF');
-        });
+const pdf = { attachment_id: 'u-PDF1', content_kind: 'pdf', status: 'readable', is_primary: true };
+const snapshot = { attachment_id: 'u-SNAP1', content_kind: 'snapshot', status: 'readable', is_primary: true };
 
-        it('says when no PDF was found', () => {
-            expect(createItemsPdfSummary(['failed', 'failed', 'none'], false)).toBe('no PDFs found');
-        });
+function created(key: string, attachments?: unknown[]) {
+    return { outcome: 'created', item_id: `u-${key}`, title: key, ...(attachments ? { attachments } : {}) };
+}
 
-        it('names fetches still running', () => {
-            expect(createItemsPdfSummary(['available', 'fetching', 'fetching'], false)).toBe('1 with PDF · 2 fetching');
-            expect(createItemsPdfSummary(['fetching', 'failed'], false)).toBe('fetching 1 PDF');
-            expect(createItemsPdfSummary(['fetching', 'fetching'], false)).toBe('fetching 2 PDFs');
-        });
+function toolReturn(items: unknown[], extra: Record<string, unknown> = {}) {
+    return { part_kind: 'tool-return', tool_name: 'create_items', tool_call_id: 'call-1', content: { items }, ...extra } as any;
+}
 
-        it('stays quiet when no item had a PDF or a fetch', () => {
-            expect(createItemsPdfSummary(['none', 'none'], false)).toBeNull();
-            expect(createItemsPdfSummary([], false)).toBeNull();
-        });
+describe('createdItemsFullText', () => {
+    it('reads the full text of each created item from the return', () => {
+        const result = toolReturn([
+            created('AAAA1111', [pdf]),
+            created('BBBB2222', []),
+            created('CCCC3333', [{ ...snapshot, is_primary: false }, snapshot]),
+            { outcome: 'already_in_library', item_id: 'u-DDDD4444', attachments: [pdf] },
+            { outcome: 'failed', input: '10.1/x' },
+        ]);
+        expect(createdItemsFullText(result)).toEqual([
+            { zoteroKey: 'AAAA1111', kind: 'pdf' },
+            { zoteroKey: 'BBBB2222', kind: null },
+            { zoteroKey: 'CCCC3333', kind: 'snapshot' },
+        ]);
     });
 
-    describe('one item', () => {
-        it('says whether it got a PDF', () => {
-            expect(createItemsPdfSummary(['available'], true)).toBe('with PDF');
-            expect(createItemsPdfSummary(['failed'], true)).toBe('no PDF found');
-            expect(createItemsPdfSummary(['fetching'], true)).toBe('fetching PDF');
-        });
+    it('takes the key from a group or numeric item id', () => {
+        const result = toolReturn([
+            { outcome: 'created', item_id: 'g12-GROUPKEY', attachments: [] },
+            { outcome: 'created', item_id: '1-LOCALKEY', attachments: [] },
+        ]);
+        expect(createdItemsFullText(result)?.map((item) => item.zoteroKey)).toEqual(['GROUPKEY', 'LOCALKEY']);
+    });
 
-        it('stays quiet without a fetch', () => {
-            expect(createItemsPdfSummary(['none'], true)).toBeNull();
-        });
+    it('marks an item whose attachments the return does not report', () => {
+        expect(createdItemsFullText(toolReturn([created('AAAA1111')]))).toEqual([{ zoteroKey: 'AAAA1111', kind: undefined }]);
+    });
+
+    it('has nothing to read without a successful return in the v2 shape', () => {
+        expect(createdItemsFullText(undefined)).toBeNull();
+        expect(createdItemsFullText({ part_kind: 'retry-prompt', tool_call_id: 'call-1', content: 'x' } as any)).toBeNull();
+        expect(createdItemsFullText({ part_kind: 'tool-return', tool_call_id: 'call-1', content: { items_created: {} } } as any)).toBeNull();
+    });
+});
+
+describe('createItemsFullTextSummary', () => {
+    const summary = (items: unknown[], single = false) =>
+        createItemsFullTextSummary(createdItemsFullText(toolReturn(items)), single);
+
+    it('counts the created items with full text', () => {
+        expect(summary([created('A', [pdf]), created('B', [snapshot]), created('C', [])])).toBe('2 with full text');
+        expect(summary([created('A', [pdf]), created('B', [pdf])])).toBe('2 with full text');
+    });
+
+    it('says when no created item got full text', () => {
+        expect(summary([created('A', []), created('B', [])])).toBe('no full text');
+    });
+
+    it('words it for a card titled by its one item', () => {
+        expect(summary([created('A', [pdf])], true)).toBe('with full text');
+        expect(summary([created('A', [])], true)).toBe('no full text');
+    });
+
+    it('says nothing when no item was created', () => {
+        expect(summary([{ outcome: 'already_in_library', item_id: 'u-A', attachments: [pdf] }])).toBeNull();
+        expect(summary([])).toBeNull();
+    });
+
+    it('says nothing when a created item lacks its attachments', () => {
+        expect(summary([created('A', [pdf]), created('B')])).toBeNull();
+    });
+
+    it('says nothing without a return', () => {
+        expect(createItemsFullTextSummary(null, false)).toBeNull();
+    });
+});
+
+describe('fullTextRowLabel', () => {
+    it('names the kind of full text a row got', () => {
+        expect(fullTextRowLabel('pdf')).toBe('PDF attached');
+        expect(fullTextRowLabel('snapshot')).toBe('Snapshot saved');
+        expect(fullTextRowLabel('epub')).toBe('EPUB attached');
+        expect(fullTextRowLabel('docx')).toBe('File attached');
+        expect(fullTextRowLabel(null)).toBe('No full text');
     });
 });

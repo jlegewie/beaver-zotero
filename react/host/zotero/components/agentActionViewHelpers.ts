@@ -26,6 +26,9 @@ import { truncateText } from '@beaver/agent-ui/utils/stringUtils';
 import { countEditAnnotationTargets, isUnconfirmedAction } from './reviewChangeRows';
 import { textAnnotationStyle } from '@beaver/agent-core/types/agentActions/createAnnotations';
 import { isStaleProposal, STALE_PROPOSAL_CODE } from '../../../../src/services/manualActions/staleProposal';
+import { isUnsuccessfulToolReturn } from '@beaver/agent-core/agents/types';
+import type { ToolResult } from '@beaver/agent-core/run-state/atoms';
+import { parseItemReference } from '@beaver/agent-core/identity/libraryRef';
 
 export { isStaleProposal };
 
@@ -95,30 +98,59 @@ export function actionCardProgressMessage(
     );
 }
 
-/** Where a created item's PDF stands, as the card reports it. */
-export type ItemPdfOutcome = 'none' | 'fetching' | 'available' | 'failed';
+/**
+ * The full text a created item ended up with, as the `create_items` return
+ * reports it: the content kind of its attachment ("pdf", "snapshot", …), null
+ * when it has none, or undefined when the return does not say.
+ */
+export interface CreatedItemFullText {
+    /** Zotero key of the created item. */
+    zoteroKey: string | null;
+    kind: string | null | undefined;
+}
 
 /**
- * A short note on how many created items got a PDF, appended to the
- * `create_items` header title ("3 Items · 2 with PDF"). Null when no item
- * had a PDF or a fetch, so imports without PDFs stay quiet. `single` words
- * it for a card titled by its one item.
+ * The created items of a `create_items` (v2) return and their full text. Null
+ * without a successful return, or for a return in another shape. Read once the
+ * call has returned: Beaver does not follow fetches that finish later.
  */
-export function createItemsPdfSummary(outcomes: ItemPdfOutcome[], single: boolean): string | null {
-    const available = outcomes.filter((outcome) => outcome === 'available').length;
-    const fetching = outcomes.filter((outcome) => outcome === 'fetching').length;
-    const failed = outcomes.filter((outcome) => outcome === 'failed').length;
-    if (available + fetching + failed === 0) return null;
-    if (single) {
-        if (available > 0) return 'with PDF';
-        return fetching > 0 ? 'fetching PDF' : 'no PDF found';
+export function createdItemsFullText(result: ToolResult | null | undefined): CreatedItemFullText[] | null {
+    if (result?.part_kind !== 'tool-return' || isUnsuccessfulToolReturn(result)) return null;
+    const items = result.content && typeof result.content === 'object' ? result.content.items : null;
+    if (!Array.isArray(items)) return null;
+    return items
+        .filter((entry: any) => entry?.outcome === 'created')
+        .map((entry: any): CreatedItemFullText => {
+            const zoteroKey = typeof entry.item_id === 'string' ? parseItemReference(entry.item_id)?.zotero_key ?? null : null;
+            if (!Array.isArray(entry.attachments)) return { zoteroKey, kind: undefined };
+            if (entry.attachments.length === 0) return { zoteroKey, kind: null };
+            const primary = entry.attachments.find((attachment: any) => attachment?.is_primary) ?? entry.attachments[0];
+            return { zoteroKey, kind: typeof primary?.content_kind === 'string' ? primary.content_kind : 'file' };
+        });
+}
+
+/**
+ * How many created items got full text, appended to the `create_items` header
+ * title ("3 Items · 2 with full text"). `single` words it for a card titled by
+ * its one item. Null when no item was created or the return does not report
+ * every created item's attachments.
+ */
+export function createItemsFullTextSummary(created: CreatedItemFullText[] | null, single: boolean): string | null {
+    if (!created || created.length === 0 || created.some((item) => item.kind === undefined)) return null;
+    const withFullText = created.filter((item) => item.kind !== null).length;
+    if (withFullText === 0) return 'no full text';
+    return single ? 'with full text' : `${withFullText} with full text`;
+}
+
+/** What an expanded row says about a created item's full text. */
+export function fullTextRowLabel(kind: string | null): string {
+    switch (kind) {
+        case null: return 'No full text';
+        case 'pdf': return 'PDF attached';
+        case 'epub': return 'EPUB attached';
+        case 'snapshot': return 'Snapshot saved';
+        default: return 'File attached';
     }
-    if (fetching > 0) {
-        return available > 0
-            ? `${available} with PDF · ${fetching} fetching`
-            : `fetching ${fetching} PDF${fetching === 1 ? '' : 's'}`;
-    }
-    return available > 0 ? `${available} with PDF` : 'no PDFs found';
 }
 
 /**

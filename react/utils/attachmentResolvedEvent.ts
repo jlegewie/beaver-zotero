@@ -3,14 +3,12 @@ export type { AttachmentResolvedPayload } from '../../src/services/attachmentRes
 /**
  * Helper to emit an `attachment_resolved` ws event to the backend when a
  * background PDF fetch (scheduled by `applyCreateItemData` or `createZoteroItem`)
- * finishes. The backend uses this to:
- *   1) update `agent_actions.result_data.attachment_status` to terminal,
- *   2) queue an `<system-reminder>` injection for the next model request
- *      via the unified history processor.
+ * finishes. While the `create_items` call that created the item is still
+ * open, the backend folds the outcome into that call's result; later outcomes
+ * are not reported to the model.
  *
  * Dropped silently when the ws is not connected or when no `threadId` is
- * available; the backend safety-net lookup at the next user message handles
- * those cases via `lookup_zotero_data`.
+ * available.
  */
 
 import { logger } from '@beaver/agent-core/platform/logger';
@@ -23,7 +21,7 @@ export function emitAttachmentResolved(payload: AttachmentResolvedPayload): void
     if (!payload.threadId) return;
     if (!agentService.isConnected()) {
         logger(
-            `emitAttachmentResolved: ws not connected; dropping event for ${payload.libraryId}-${payload.zoteroKey} (safety-net lookup will catch this)`,
+            `emitAttachmentResolved: ws not connected; dropping event for ${payload.libraryId}-${payload.zoteroKey}`,
             2,
         );
         return;

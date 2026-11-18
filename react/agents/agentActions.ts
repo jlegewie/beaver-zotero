@@ -369,7 +369,6 @@ export const upsertAgentActionsAtom = atom(
                         (!update.result_data || Object.keys(update.result_data).length === 0)) {
                         merged.result_data = existing.result_data;
                     }
-                    merged.result_data = keepResolvedAttachment(existing.result_data, merged.result_data);
                     return merged;
                 }
                 return existing;
@@ -380,58 +379,6 @@ export const upsertAgentActionsAtom = atom(
             return [...updated, ...additions];
         });
     }
-);
-
-const isResolvedAttachment = (status: unknown) => status === 'available' || status === 'failed';
-
-/**
- * An update that still reports the created item's attachment as pending does
- * not undo an outcome already recorded here: the fetch may resolve before the
- * backend's copy of the action catches up.
- */
-function keepResolvedAttachment(
-    existing: Record<string, any> | undefined,
-    next: Record<string, any> | undefined,
-): Record<string, any> | undefined {
-    if (!existing || !next || next.attachment_status !== 'pending') return next;
-    if (!isResolvedAttachment(existing.attachment_status) || existing.zotero_key !== next.zotero_key) return next;
-    return {
-        ...next,
-        attachment_status: existing.attachment_status,
-        attachment_key: existing.attachment_key,
-        attachment_resolved_at: existing.attachment_resolved_at,
-    };
-}
-
-/**
- * Record a background attachment fetch's outcome on the item-creating action
- * it belongs to, as the backend does when the `attachment_resolved` event
- * reaches it. Does nothing for an action outside the open thread, or one
- * whose outcome is already recorded.
- */
-export const recordAttachmentResolutionAtom = atom(
-    null,
-    (_, set, resolution: { actionId?: string; attachmentStatus: 'available' | 'failed'; attachmentKey?: string }) => {
-        const { actionId } = resolution;
-        if (!actionId) return;
-        set(threadAgentActionsAtom, (prev: AgentAction[]) => {
-            const index = prev.findIndex((action) => action.id === actionId);
-            const action = index >= 0 ? prev[index] : null;
-            if (!action || !isItemCreatingAgentAction(action) || action.status !== 'applied') return prev;
-            if (!action.result_data || action.result_data.attachment_status !== 'pending') return prev;
-            const next = [...prev];
-            next[index] = {
-                ...action,
-                result_data: {
-                    ...action.result_data,
-                    attachment_status: resolution.attachmentStatus,
-                    attachment_key: resolution.attachmentKey,
-                    attachment_resolved_at: new Date().toISOString(),
-                },
-            } as AgentAction;
-            return next;
-        });
-    },
 );
 
 /**

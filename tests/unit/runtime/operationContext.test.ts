@@ -42,10 +42,6 @@ describe('explicit data operation context', () => {
         if (change === 'different thread') state.values.set(currentThreadIdAtom, 'thread-B');
         context.onAttachmentResolved!(completion);
         expect(emitAttachmentResolved).toHaveBeenCalledExactlyOnceWith(completion);
-        // Recorded on this renderer's action row, which the backend does not echo.
-        expect(state.writes).toHaveBeenCalledOnce();
-        expect(state.writes.mock.calls[0][1]).toBe(completion);
-        state.writes.mockClear();
         context.grantCreatedNote!(1, 'NEWNOTE1');
         expect(state.writes).not.toHaveBeenCalled();
     });
@@ -56,7 +52,6 @@ describe('explicit data operation context', () => {
         else (Zotero as any).Beaver.account.getGeneration = () => 5;
         context.onAttachmentResolved!(completion);
         expect(emitAttachmentResolved).not.toHaveBeenCalled();
-        expect(state.writes).not.toHaveBeenCalled();
     });
 
     it('keeps captured citations and identity when the local chat changes during async work', async () => {
