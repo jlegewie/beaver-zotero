@@ -1,7 +1,7 @@
 import { assertLibraryWritable, recheckCollection, recheckCollectionForUndo, recheckExistingCollections } from '../../../src/services/collections/collectionMutations';
 import { collectionToReference } from '../../../react/utils/zoteroReferences';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { resolveCollection, resolveCollectionList, serializeCollectionIdentity, serializeCollectionReadIdentity, CollectionResolutionError, collectionLibrariesMismatchError } from '../../../src/services/collections/collectionIdentity';
+import { resolveCollection, resolveCollectionList, serializeCollectionAncestors, serializeCollectionIdentity, serializeCollectionReadIdentity, CollectionResolutionError, collectionLibrariesMismatchError } from '../../../src/services/collections/collectionIdentity';
 
 const personal = { id: 10, key: 'ABCD2345', libraryID: 1, name: 'Research' };
 const group = { id: 20, key: 'ABCD2345', libraryID: 7, name: 'Research' };
@@ -109,6 +109,64 @@ describe('collection identity', () => {
         });
         zotero.Groups.getGroupIDFromLibraryID = () => false;
         expectCode(() => resolveCollection('7-ABCD2345'), 'library_unavailable');
+    });
+});
+
+describe('collection ancestor chains', () => {
+    const chain = (libraryID = 1) => {
+        collections = [
+            { id: 1, key: 'TOPLEVEL', libraryID, name: 'PhD' },
+            { id: 2, key: 'MIDDLE23', libraryID, name: 'Papers', parentKey: 'TOPLEVEL' },
+            { id: 3, key: 'PARENT23', libraryID, name: 'Imaging', parentKey: 'MIDDLE23' },
+            { id: 4, key: 'LEAFEEG2', libraryID, name: 'EEG', parentKey: 'PARENT23' },
+        ];
+        return collections[3];
+    };
+    it('lists ancestors top-level first and excludes the collection itself', () => {
+        expect(serializeCollectionAncestors(chain())).toEqual([
+            { collection_key: 'TOPLEVEL', collection_id: 'u-TOPLEVEL', name: 'PhD' },
+            { collection_key: 'MIDDLE23', collection_id: 'u-MIDDLE23', name: 'Papers' },
+            { collection_key: 'PARENT23', collection_id: 'u-PARENT23', name: 'Imaging' },
+        ]);
+        expect(serializeCollectionAncestors(chain(7))?.map(a => a.collection_id))
+            .toEqual(['g12345-TOPLEVEL', 'g12345-MIDDLE23', 'g12345-PARENT23']);
+    });
+    it('returns nothing for a top-level collection', () => {
+        chain();
+        expect(serializeCollectionAncestors(collections[0])).toBeUndefined();
+    });
+    it('returns nothing when an ancestor is missing', () => {
+        const leaf = chain();
+        collections.splice(1, 1);
+        expect(serializeCollectionAncestors(leaf)).toBeUndefined();
+    });
+    it('returns nothing when an ancestor is in the trash', () => {
+        const leaf = chain();
+        collections[0].deleted = true;
+        expect(serializeCollectionAncestors(leaf)).toBeUndefined();
+    });
+    it('returns nothing for a parent cycle', () => {
+        const leaf = chain();
+        collections[0].parentKey = 'PARENT23';
+        expect(serializeCollectionAncestors(leaf)).toBeUndefined();
+        collections[0].parentKey = 'LEAFEEG2';
+        expect(serializeCollectionAncestors(leaf)).toBeUndefined();
+    });
+    it('returns nothing beyond the depth cap', () => {
+        collections = Array.from({ length: 70 }, (_, i) => ({
+            id: i + 1, key: `DEEP${String(i).padStart(4, '0')}`, libraryID: 1, name: `Level ${i}`,
+            ...(i ? { parentKey: `DEEP${String(i - 1).padStart(4, '0')}` } : {}),
+        }));
+        expect(serializeCollectionAncestors(collections[69])).toBeUndefined();
+        expect(serializeCollectionAncestors(collections[64])).toHaveLength(64);
+    });
+    it('omits portable IDs for an unmapped group library without inventing one', () => {
+        zotero.Groups.getGroupIDFromLibraryID = () => false;
+        expect(serializeCollectionAncestors(chain(7))).toEqual([
+            { collection_key: 'TOPLEVEL', name: 'PhD' },
+            { collection_key: 'MIDDLE23', name: 'Papers' },
+            { collection_key: 'PARENT23', name: 'Imaging' },
+        ]);
     });
 });
 
