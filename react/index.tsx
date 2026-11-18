@@ -42,9 +42,7 @@ import { runStatusPopupEnabledAtom } from './atoms/runStatusPopup';
 import { isLibraryTabAtom, isSidebarVisibleAtom, PreferencePageTab, selectedZoteroTabIdAtom } from './atoms/ui';
 import { currentNoteItemAtom } from './atoms/zoteroContext';
 import FloatingPopupRoot from './components/FloatingPopupRoot';
-import LibrarySidebar from './components/LibrarySidebar';
 import PreferencesWindow from './components/PreferencesWindow';
-import ReaderSidebar from './components/ReaderSidebar';
 import WindowSidebar from './components/WindowSidebar';
 import TableTabView, { type TableViewCommands } from './components/tables/TableTabView';
 import type { TableRef } from '../src/services/artifacts/tableItemIdentity';
@@ -78,8 +76,8 @@ import { openNote, openReader } from './runtime/navigation';
 import { captureOperationContext } from './runtime/operationContext';
 import { getContextWindow, getWindowRuntime, initializeWindowRuntime } from './runtime/windowRuntime';
 import { store } from './store';
+import { renderSidebar } from './ui/sidebarMount';
 import { uiManager } from './ui/UIManager';
-import { initializeReactUI } from './ui/initialization';
 import { mountedSurfaceCount, mountSurface, unmountAllSurfaces, unmountFromElement } from './ui/surfaceRoots';
 import { BeaverTemporaryAnnotations } from './utils/annotationUtils';
 import { undoEditNoteOrBatchAction } from './utils/editNoteActions';
@@ -241,16 +239,11 @@ export function renderGlobalInitializer(domElement: HTMLElement) {
     return mountSurface(domElement, <GlobalContextInitializer />);
 }
 
-const App = ({ location }: { location: 'library' | 'reader' }) => {
-    // Return the sidebar based on location
-    return (
-        location === 'library' ? <LibrarySidebar /> : <ReaderSidebar />
-    );
-};
-
-export function renderAiSidebar(domElement: HTMLElement, location: 'library' | 'reader') {
-    return mountSurface(domElement, <App location={location} />);
-}
+/**
+ * Creates and renders a main window's sidebar, once. It serves library and
+ * reader tabs alike (see `react/ui/sidebarMount.tsx`).
+ */
+export { renderSidebar };
 
 /**
  * Renders the WindowSidebar into the separate Beaver window.
@@ -392,7 +385,6 @@ export function initializeRuntime(runtime: WindowRuntime) {
     if (runtime.kind === "table") return;
     attachThreadProjection(runtime);
     attachThreadAdmission(runtime);
-    if (runtime.kind === "main") initializeReactUI(runtime.hostWindow);
 }
 
 export function disposeRuntime() {

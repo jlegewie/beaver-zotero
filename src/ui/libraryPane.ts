@@ -1,23 +1,29 @@
 /**
- * Where Beaver's sidebars live in a Zotero main window.
+ * Where Beaver's sidebar lives in a Zotero main window.
+ *
+ * A main window renders one sidebar, and moves it to the pane of the selected
+ * tab: the item pane on a library tab, the context pane on any other. Moving
+ * the element rather than rendering a second sidebar keeps the React tree,
+ * and everything only a component holds, across tab switches.
  *
  * Zotero 7–10 build one library view per window at startup, so its item pane
  * (`#zotero-item-pane`) exists for the window's whole life. Zotero 11 builds a
  * library view per library tab, lazily: a window restored on a reader tab has
  * no item pane until its library tab is first selected, a window can show
  * several library tabs, each with its own item pane, and a view is destroyed
- * when its tab closes or unloads. The library sidebar therefore lives in the
- * active view's item pane and moves with it.
+ * when its tab closes or unloads. On a library tab the sidebar therefore lives
+ * in the active view's item pane.
  *
  * React-free and `addon`-free: both bundles import this module.
  */
 
 export type SidebarLocation = 'library' | 'reader';
 
-/** The element that holds a sidebar's React root, inside the Zotero pane. */
-export function sidebarMountId(location: SidebarLocation): string {
-    return `beaver-pane-${location}`;
-}
+/** The element that holds the sidebar's React root, inside a Zotero pane. */
+export const SIDEBAR_MOUNT_ID = 'beaver-pane-sidebar';
+
+/** The container the sidebar's React root renders into. */
+export const SIDEBAR_ROOT_ID = 'beaver-react-root-sidebar';
 
 /**
  * Whether a Zotero tab type is a library tab. Zotero 11 suffixes a lazily
@@ -49,12 +55,13 @@ export function activeItemPane(win: Window | null | undefined): HTMLElement | nu
 }
 
 /**
- * Create a sidebar's mount point and the container its React root renders
- * into. The caller appends `mountPoint` to its pane.
+ * Create the sidebar's mount point and the container its React root renders
+ * into. The caller places `mountPoint` in a pane.
  */
-export function createSidebarMount(doc: Document, location: SidebarLocation) {
-    const mountPoint = doc.createXULElement('vbox');
-    mountPoint.setAttribute('id', sidebarMountId(location));
+export function createSidebarMount(doc: Document) {
+    // A XUL box: it styles and lays out like an HTML element.
+    const mountPoint = doc.createXULElement('vbox') as unknown as HTMLElement;
+    mountPoint.setAttribute('id', SIDEBAR_MOUNT_ID);
     // `beaver-root` is the scoping root for @beaver/agent-ui's shared
     // sheets: they select `.beaver-root .foo`, so the class has to sit
     // on exactly the elements that carry a `beaver-pane-*` id or the
@@ -63,34 +70,9 @@ export function createSidebarMount(doc: Document, location: SidebarLocation) {
     mountPoint.setAttribute('style', 'min-width: 0px; display: none;');
 
     const reactContainer = doc.createElement('div');
-    reactContainer.setAttribute('id', `beaver-react-root-${location}`);
-    reactContainer.setAttribute('data-location', location);
+    reactContainer.setAttribute('id', SIDEBAR_ROOT_ID);
     reactContainer.setAttribute('class', 'display-flex flex-1 flex-col h-full min-w-0');
     mountPoint.appendChild(reactContainer);
 
     return { mountPoint, reactContainer };
-}
-
-/**
- * Move the library sidebar's mount point into the active library view's item
- * pane. The pane it leaves gets back the content Beaver hid there; showing
- * the sidebar in the new pane is the caller's job.
- *
- * @returns The pane now holding the mount, or null when the window has no
- *     library view. The mount then stays where it is, which may be detached
- *     along with a closed view, until a library view appears again.
- */
-export function placeLibraryMount(win: Window, mount: Element): HTMLElement | null {
-    const pane = activeItemPane(win);
-    if (!pane) return null;
-    const previous = mount.parentElement;
-    if (previous !== pane) {
-        if (previous) {
-            for (const child of Array.from(previous.children)) {
-                if (child !== mount) (child as HTMLElement).style?.removeProperty('display');
-            }
-        }
-        pane.appendChild(mount);
-    }
-    return pane;
 }

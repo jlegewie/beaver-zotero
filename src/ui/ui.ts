@@ -10,7 +10,7 @@ import { ActionCategoryFilter } from "@beaver/agent-core/types/actions";
 import { contextMainWindow, resolveChatWindow } from "../runtime/navigation";
 import { attachViewRowDrag, detachViewRowDrag } from "../modules/viewRowDrag";
 import { loadRendererBundle } from "./rendererBundle";
-import { activeItemPane, createSidebarMount } from "./libraryPane";
+import { SIDEBAR_MOUNT_ID, SIDEBAR_ROOT_ID } from "./libraryPane";
 
 let keyboardManager: KeyboardManager | null = null;
 
@@ -38,7 +38,7 @@ interface BeaverWindow extends Window {
     BeaverReact?: {
         initializeRuntime: (runtime: import("../runtime/instance").WindowRuntime) => void;
         disposeRuntime: () => void;
-        renderAiSidebar: (container: Element, location: string) => any;
+        renderSidebar: () => any;
         renderGlobalInitializer: (container: Element) => any;
         renderWindowSidebar: (container: Element) => any;
         renderTableTab?: import("./tableTabTypes").RenderTableTab;
@@ -67,27 +67,6 @@ export class BeaverUIFactory {
         const standalone = win.__beaverRuntime?.kind === "standalone";
         ztoolkit.log("registerChatPanel: previous panel removed");
 
-        // Create and append mounting points. A Zotero 11 window that has not
-        // shown its library tab yet has no item pane: the renderer adds the
-        // library sidebar once one exists (`react/ui/librarySidebar.tsx`).
-        const itemPane = activeItemPane(win);
-        const contextPane = win.document.getElementById("zotero-context-pane");
-        ztoolkit.log(`registerChatPanel: itemPane=${Boolean(itemPane)} contextPane=${Boolean(contextPane)} (${windowHref})`);
-
-        if (itemPane) {
-            ztoolkit.log("registerChatPanel: creating library mount point");
-            const { mountPoint: libraryMount } = createSidebarMount(win.document, "library");
-            itemPane.appendChild(libraryMount);
-            ztoolkit.log("registerChatPanel: appended library mount point");
-        }
-
-        if (contextPane) {
-            ztoolkit.log("registerChatPanel: creating reader mount point");
-            const { mountPoint: readerMount } = createSidebarMount(win.document, "reader");
-            contextPane.appendChild(readerMount);
-            ztoolkit.log("registerChatPanel: appended reader mount point");
-        }
-
         // Add toggle button to toolbar
         if (!standalone) {
             this.addToolbarButton(win);
@@ -100,7 +79,7 @@ export class BeaverUIFactory {
         loadRendererBundle(win, runtime, () => {
             ztoolkit.log("registerChatPanel: reactBundle.js loaded");
             if (win.BeaverReact &&
-                typeof win.BeaverReact.renderAiSidebar === 'function' &&
+                typeof win.BeaverReact.renderSidebar === 'function' &&
                 typeof win.BeaverReact.renderGlobalInitializer === 'function' &&
                 typeof win.BeaverReact.unmountFromElement === 'function') {
 
@@ -166,19 +145,13 @@ export class BeaverUIFactory {
                     );
             }
 
-            // Render React components for actual sidebars
-            const libraryRootEl = win.document.getElementById("beaver-react-root-library");
-            const readerRootEl = win.document.getElementById("beaver-react-root-reader");
-
-            if (libraryRootEl && typeof win.BeaverReact?.renderAiSidebar === 'function') {
-                const root = win.BeaverReact.renderAiSidebar(libraryRootEl, "library");
+            // The main window's sidebar: one React tree that the renderer
+            // moves between the item pane and the context pane with the
+            // selected tab (`react/ui/sidebarMount.tsx`).
+            if (!standalone) {
+                const root = win.BeaverReact.renderSidebar();
                 if (root) roots.add(root);
-                ztoolkit.log("registerChatPanel: renderAiSidebar mounted for library");
-            }
-            if (readerRootEl && typeof win.BeaverReact?.renderAiSidebar === 'function') {
-                const root = win.BeaverReact.renderAiSidebar(readerRootEl, "reader");
-                if (root) roots.add(root);
-                ztoolkit.log("registerChatPanel: renderAiSidebar mounted for reader");
+                ztoolkit.log("registerChatPanel: sidebar mounted");
             }
             // The renderer marks readiness after its command subscriptions mount.
         }, (error) => {
@@ -407,7 +380,7 @@ export class BeaverUIFactory {
 
             // Unmount React components - CRITICAL for triggering cleanup effects
             if (win.BeaverReact && typeof win.BeaverReact.unmountFromElement === 'function') {
-                const elementIds = ["beaver-react-root-library", "beaver-react-root-reader", "beaver-global-initializer-root", "beaver-pane-floating-popup"];
+                const elementIds = [SIDEBAR_ROOT_ID, "beaver-global-initializer-root", "beaver-pane-floating-popup"];
                 elementIds.forEach(id => {
                     try {
                         const element = win.document?.getElementById?.(id);
@@ -451,8 +424,7 @@ export class BeaverUIFactory {
                     detachViewRowDrag(win);
 
                     const elementIds = [
-                        "beaver-pane-library",
-                        "beaver-pane-reader",
+                        SIDEBAR_MOUNT_ID,
                         "zotero-beaver-tb-chat-toggle",
                         "beaver-tb-separator",
                         "beaver-global-initializer-root",
