@@ -4,6 +4,7 @@ import { store } from '../store';
 import { isSidebarVisibleAtom } from '../atoms/ui';
 import { useEventSubscription } from './useEventSubscription';
 import { uiManager } from '../ui/UIManager';
+import { isLibraryTabSelected } from '../../src/ui/libraryPane';
 import { getPref } from '../../src/utils/prefs';
 import { removePopupMessagesByTypeAtom } from '../atoms/ui';
 import { currentMessageItemsAtom, updateMessageItemsFromZoteroSelectionAtom } from '../atoms/messageComposition';
@@ -29,7 +30,7 @@ export function useToggleSidebar() {
 
             // Already in the desired state — no-op
             if (newIsVisible === currentlyOpen) return prev;
-            const isLibraryTab = getContextWindow().Zotero_Tabs.selectedType === 'library';
+            const isLibraryTab = isLibraryTabSelected(getContextWindow());
 
             logger(`useToggleSidebar: toggleChat event received - currently open: ${currentlyOpen}, will be: ${newIsVisible}, location: ${isLibraryTab ? 'library' : 'reader'}`);
 
@@ -52,15 +53,8 @@ export function useToggleSidebar() {
                 }
             }
             
-            // Update UI through UIManager
-            uiManager.updateUI({
-                isVisible: newIsVisible,
-                isLibraryTab,
-                collapseState: {
-                    library: null,
-                    reader: null
-                }
-            });
+            // Show or hide the sidebar in the selected tab's pane
+            uiManager.updateUI({ isVisible: newIsVisible, isLibraryTab });
 
             // Announce the state change to screen readers, and when closing
             // move focus to the toolbar button so it isn't lost on the now

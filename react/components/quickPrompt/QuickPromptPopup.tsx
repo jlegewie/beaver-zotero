@@ -41,7 +41,7 @@ function openBeaver(): void {
  * an element inside one stays connected while being invisible — focus must not
  * be handed back to it when the popup goes away.
  */
-const SIDEBAR_ROOTS = '#beaver-react-root-library, #beaver-react-root-reader';
+const SIDEBAR_ROOTS = '#beaver-react-root-sidebar';
 
 /**
  * The close control, in the card's top-right corner. Shown only while the

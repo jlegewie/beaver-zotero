@@ -196,21 +196,26 @@ originless user commands resolve a destination once with `resolveChatWindow()`. 
 
 | Mount point | Location | Component |
 |-------------|----------|-----------|
-| `#beaver-react-root-library` | `#zotero-item-pane` (main window) | `<LibrarySidebar />` |
-| `#beaver-react-root-reader` | `#zotero-context-pane` (main window) | `<ReaderSidebar />` |
+| `#beaver-react-root-sidebar` | active `#zotero-item-pane` on a library tab, `#zotero-context-pane` on any other (main window) | `<MainSidebar />` |
 | `#beaver-pane-window` | separate Beaver window | `<WindowSidebar />` (`isWindow={true}`) |
+
+A main window renders **one** sidebar. On a tab switch `react/ui/UIManager.ts` moves its
+element (`#beaver-pane-sidebar`) to the other pane instead of rendering a second copy, so the
+switch re-renders nothing and component state survives. Moving an element resets the scroll
+offsets inside it; the UI manager saves and restores them. In the standard layout the pane it
+occupies takes the `sidebarWidth` pref as its inline width; a splitter drag updates the pref,
+and the pane's `width` attribute (which Zotero persists as its own width) is put back.
 
 A hidden `#beaver-global-initializer-root` mounts `<GlobalContextInitializer />` for global
 hooks (auth, tab tracking, …).
 
 - **Each main-window renderer owns its Jotai store and atom identities** (`react/store.ts`).
-  Its library/reader sidebars and borrowed preferences surface share that store. The
+  Its sidebar and borrowed preferences surface share that store. The
   standalone owns another store and may also host preferences.
   `win.__beaverJotaiStore` is a lifetime-bounded diagnostic handle, never a cross-window API.
-  **Scroll state belongs to the renderer**: library/reader sidebars share it; the
-  standalone store isolates its scroll state. `isWindow` selects presentation.
-- `addon.runtime` owns stable runtime ids, the window registry, instance notifications and
-  one reader-width dispatcher. Attach installs a targeted UI bus on each chat window;
+  **Scroll state belongs to the renderer**: the standalone store isolates its scroll state. `isWindow` selects presentation.
+- `addon.runtime` owns stable runtime ids, the window registry and instance notifications.
+  Attach installs a targeted UI bus on each chat window;
   `BeaverReact.initializeRuntime` binds the renderer before any React roots mount. Renderer
   code uses `getHostWindow()` / `getContextWindow()` from `react/runtime/windowRuntime.ts`.
 - UI events target the owning renderer's bus (`react/events/eventManager.ts`). Background
@@ -272,8 +277,8 @@ quitting (full global cleanup behind the `isAppQuitting || isAppShuttingDown` gu
 `onStartup()` just ran.
 
 During cleanup, unmount React roots **before** removing DOM (stale `Zotero.Notifier` observers
-otherwise cause SIGSEGV), and unsubscribe its UI manager from reader-width updates. The plugin-owned dispatcher
-restores `Zotero.Reader.onChangeSidebarWidth` on instance disposal.
+otherwise cause SIGSEGV). The UI manager's cleanup gives the occupied pane back its own
+content, width and collapsed state, and unregisters its `layout` pref observer.
 
 ### Cross-window state: `Zotero` global vs `window`
 
@@ -298,7 +303,7 @@ scheduled from a closed window never fires — and the reference pins the dead w
   status reads and notification claims. Renderers only subscribe or issue commands.
   See [document and background runtime](docs/document-runtime.md).
 - Same rule for callbacks handed to app-lifetime Zotero registries (`Zotero.Notifier` observers,
-  `Zotero.Reader.onChangeSidebarWidth`): unregister them on their window's unload.
+  `Zotero.Prefs` observers): unregister them on their window's unload.
 
 ## Zotero API conventions
 

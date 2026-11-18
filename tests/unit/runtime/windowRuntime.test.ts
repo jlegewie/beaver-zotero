@@ -122,31 +122,13 @@ describe('window runtime lifetimes', () => {
         expect(instance.resolveWindowFrom(readerFrame)).toBeUndefined();
     });
 
-    it('keeps one reader wrapper when either window closes and restores the original on disposal', () => {
+    it('releases a reader-width wrapper an earlier plugin version left behind', () => {
         const original = vi.fn();
-        Zotero.Reader.onChangeSidebarWidth = original;
+        const stale = Object.assign(vi.fn(), { __beaverOriginalSidebarWidthHandler: original });
+        Zotero.Reader.onChangeSidebarWidth = stale;
         const instance = new BeaverInstance();
-        const a = instance.attachWindow(makeWindow());
-        const b = instance.attachWindow(makeWindow());
-        const first = vi.fn(), second = vi.fn();
-        instance.subscribeReaderWidth(a, first);
-        const wrapper = Zotero.Reader.onChangeSidebarWidth;
-        instance.subscribeReaderWidth(b, second);
-        expect(Zotero.Reader.onChangeSidebarWidth).toBe(wrapper);
-        wrapper(300);
-        expect(original).toHaveBeenCalledWith(300);
-        expect(first).toHaveBeenCalledTimes(1);
-        expect(second).toHaveBeenCalledTimes(1);
-        instance.detachWindow(a.hostWindow);
-        wrapper(301);
-        expect(first).toHaveBeenCalledTimes(1);
-        expect(second).toHaveBeenCalledTimes(2);
-        instance.detachWindow(b.hostWindow);
-        expect(Zotero.Reader.onChangeSidebarWidth).toBe(wrapper);
-        instance.disposeInstance();
         expect(Zotero.Reader.onChangeSidebarWidth).toBe(original);
-        wrapper(302);
-        expect(second).toHaveBeenCalledTimes(2);
+        instance.disposeInstance();
     });
 });
 

@@ -1,9 +1,10 @@
 import { selectedTabIfAccepted } from '../../src/runtime/navigation';
 import { getContextWindow } from '../runtime/windowRuntime';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { logger } from '@beaver/agent-core/platform/logger';
-import { isLibraryTabAtom } from '../atoms/ui';
+import { isLibraryTabAtom, selectedZoteroTabIdAtom } from '../atoms/ui';
+import { isLibraryTabType } from '../../src/ui/libraryPane';
 import {
     selectedZoteroItemsAtom,
     selectedZoteroItemCountAtom,
@@ -190,6 +191,13 @@ export function useZoteroContext() {
     const searchableLibraryIdsKey = searchableLibraryIds.join(',');
     const setRecentlyAddedTodayCount = useSetAtom(recentlyAddedTodayCountAtom);
     const setLibraryItemCount = useSetAtom(libraryItemCountAtom);
+    // `ZoteroPane.itemsView` / `collectionsView` belong to the active library
+    // view. Zotero 11 has one per library tab and builds its trees after the
+    // tab is first selected: attach again when another library tab becomes
+    // active, and when the selected one finishes loading.
+    const selectedTabId = useAtomValue(selectedZoteroTabIdAtom);
+    const libraryTabKey = isLibraryTab ? selectedTabId : null;
+    const [libraryViewRevision, setLibraryViewRevision] = useState(0);
 
     // A note tab may be discovered before profile exclusions and the local
     // library list finish loading. updateNoteItemAtom safely defers that first
@@ -278,6 +286,133 @@ export function useZoteroContext() {
             iv.onRefresh.addListener(handleItemsRefresh);
         }
 
+        // --- Zotero.Notifier for note tab tracking ---
+        // Needed because isLibraryTab is false for both reader and note tabs,
+        // so switching between them won't re-trigger this effect.
+        if (moduleTabNotifierId) {
+            try {
+                Zotero.Notifier.unregisterObserver(moduleTabNotifierId);
+            } catch {
+                // ignore
+            }
+            moduleTabNotifierId = null;
+        }
+
+        const setNoteItemFromTab = async (tab: any) => {
+            const generation = ++noteGeneration;
+            const isCurrent = () => !disposed && !mainWindow.closed
+                && generation === noteGeneration && mainWindow.Zotero_Tabs.selectedID === tab.id;
+            setNoteItem(null);
+            if (isNoteTabType(tab.type) && tab.data?.itemID) {
+                const item = await Zotero.Items.getAsync(tab.data.itemID);
+                if (item) {
+                    await item.loadDataType('itemData');
+                    logger(`useZoteroContext: note tab active, type=${tab.type}, itemID=${tab.data.itemID}`);
+                    if (isCurrent()) setNoteItem(item);
+                    return;
+                }
+            }
+            if (isCurrent()) setNoteItem(null);
+        };
+
+        const tabObserver = {
+            notify: async function (
+                event: string,
+                type: string,
+                ids: string[] | number[],
+                extraData: any,
+            ) {
+                if (type !== 'tab') return;
+
+                if (event === 'select') {
+                    const selectedTab = selectedTabIfAccepted(mainWindow, ids, extraData);
+                    if (!selectedTab) return;
+                    await setNoteItemFromTab(selectedTab);
+                } else if (event === 'load') {
+                    // When an unloaded note tab finishes loading, re-check
+                    // if it's the currently selected tab and update the atom.
+                    const loadedTab = selectedTabIfAccepted(mainWindow, ids, extraData);
+                    if (!loadedTab) return;
+                    if (isLibraryTabType(loadedTab.type)) {
+                        // The selected library view has built its trees.
+                        if ((ids as (string | number)[]).includes(loadedTab.id)) {
+                            setLibraryViewRevision((revision) => revision + 1);
+                        }
+                        return;
+                    }
+                    await setNoteItemFromTab(loadedTab);
+                }
+            },
+        };
+
+        const tabObserverId = Zotero.Notifier.registerObserver(
+            tabObserver,
+            ['tab'],
+            'beaver-zoteroContextTabObserver',
+        );
+        moduleTabNotifierId = tabObserverId;
+
+        // --- Set initial state ---
+        const viewInfo = readLibraryView(zp);
+        if (viewInfo) setLibraryView(viewInfo);
+
+        if (isLibraryTab) {
+            const items: Zotero.Item[] = zp.getSelectedItems?.() || [];
+            setSelectedItemCount(items.length);
+            setSelectedItems(items.slice(0, MAX_SELECTED_ITEMS));
+            setSelectedTags(readTagSelection(zp));
+            setNoteItem(null);
+        } else {
+            setSelectedItemCount(0);
+            setSelectedItems([]);
+            setSelectedTags([]);
+            // Check if current tab is a note tab (including unloaded/loading)
+            const currentTab = mainWindow.Zotero_Tabs._tabs.find(
+                (tab: any) => tab.id === mainWindow.Zotero_Tabs.selectedID,
+            );
+            if (currentTab && isNoteTabType(currentTab.type) && currentTab.data?.itemID) {
+                void setNoteItemFromTab(currentTab);
+            } else {
+                setNoteItem(null);
+            }
+        }
+
+        // --- Cleanup ---
+        return () => {
+            disposed = true;
+            ++noteGeneration;
+            logger('useZoteroContext: cleaning up');
+            // A closed Zotero 11 library view has already torn down its trees,
+            // and their event dispatchers throw on removal. A throw here would
+            // unmount every hook of this renderer's context initializer.
+            const detach = (remove: () => void) => {
+                try { remove(); } catch { /* the view is gone */ }
+            };
+            detach(() => cv?.onSelect?.removeListener(handleCollectionSelect));
+            detach(() => iv?.onSelect?.removeListener(handleItemSelect));
+            detach(() => iv?.onRefresh?.removeListener(handleItemsRefresh));
+            if (moduleTabNotifierId === tabObserverId) {
+                Zotero.Notifier.unregisterObserver(tabObserverId);
+                moduleTabNotifierId = null;
+            }
+        };
+    }, [
+        isLibraryTab,
+        libraryTabKey,
+        libraryViewRevision,
+        setSelectedItems,
+        setSelectedItemCount,
+        setLibraryView,
+        setSelectedTags,
+        setNoteItem,
+    ]);
+
+    // Library-wide counts for the first-run views. They don't depend on the
+    // selected tab or library view, so they stay out of the effect above,
+    // which re-runs on every tab switch.
+    useEffect(() => {
+        if (!getContextWindow()?.ZoteroPane) return;
+
         // --- Zotero.Notifier for recently added items ---
         if (moduleItemNotifierId) {
             try {
@@ -338,118 +473,14 @@ export function useZoteroContext() {
         );
         moduleItemNotifierId = itemObserverId;
 
-        // --- Zotero.Notifier for note tab tracking ---
-        // Needed because isLibraryTab is false for both reader and note tabs,
-        // so switching between them won't re-trigger this effect.
-        if (moduleTabNotifierId) {
-            try {
-                Zotero.Notifier.unregisterObserver(moduleTabNotifierId);
-            } catch {
-                // ignore
-            }
-            moduleTabNotifierId = null;
-        }
-
-        const setNoteItemFromTab = async (tab: any) => {
-            const generation = ++noteGeneration;
-            const isCurrent = () => !disposed && !mainWindow.closed
-                && generation === noteGeneration && mainWindow.Zotero_Tabs.selectedID === tab.id;
-            setNoteItem(null);
-            if (isNoteTabType(tab.type) && tab.data?.itemID) {
-                const item = await Zotero.Items.getAsync(tab.data.itemID);
-                if (item) {
-                    await item.loadDataType('itemData');
-                    logger(`useZoteroContext: note tab active, type=${tab.type}, itemID=${tab.data.itemID}`);
-                    if (isCurrent()) setNoteItem(item);
-                    return;
-                }
-            }
-            if (isCurrent()) setNoteItem(null);
-        };
-
-        const tabObserver = {
-            notify: async function (
-                event: string,
-                type: string,
-                ids: string[] | number[],
-                extraData: any,
-            ) {
-                if (type !== 'tab') return;
-
-                if (event === 'select') {
-                    const selectedTab = selectedTabIfAccepted(mainWindow, ids, extraData);
-                    if (!selectedTab) return;
-                    await setNoteItemFromTab(selectedTab);
-                } else if (event === 'load') {
-                    // When an unloaded note tab finishes loading, re-check
-                    // if it's the currently selected tab and update the atom.
-                    const loadedTab = selectedTabIfAccepted(mainWindow, ids, extraData);
-                    if (!loadedTab) return;
-                    await setNoteItemFromTab(loadedTab);
-                }
-            },
-        };
-
-        const tabObserverId = Zotero.Notifier.registerObserver(
-            tabObserver,
-            ['tab'],
-            'beaver-zoteroContextTabObserver',
-        );
-        moduleTabNotifierId = tabObserverId;
-
-        // --- Set initial state ---
-        const viewInfo = readLibraryView(zp);
-        if (viewInfo) setLibraryView(viewInfo);
-
-        if (isLibraryTab) {
-            const items: Zotero.Item[] = zp.getSelectedItems?.() || [];
-            setSelectedItemCount(items.length);
-            setSelectedItems(items.slice(0, MAX_SELECTED_ITEMS));
-            setSelectedTags(readTagSelection(zp));
-            setNoteItem(null);
-        } else {
-            setSelectedItemCount(0);
-            setSelectedItems([]);
-            setSelectedTags([]);
-            // Check if current tab is a note tab (including unloaded/loading)
-            const currentTab = mainWindow.Zotero_Tabs._tabs.find(
-                (tab: any) => tab.id === mainWindow.Zotero_Tabs.selectedID,
-            );
-            if (currentTab && isNoteTabType(currentTab.type) && currentTab.data?.itemID) {
-                void setNoteItemFromTab(currentTab);
-            } else {
-                setNoteItem(null);
-            }
-        }
-
         queryRecentlyAddedTodayCount().then(setRecentlyAddedTodayCount);
         refreshLibraryItemCount();
 
-        // --- Cleanup ---
         return () => {
-            disposed = true;
-            ++noteGeneration;
-            logger('useZoteroContext: cleaning up');
-            cv?.onSelect?.removeListener(handleCollectionSelect);
-            iv?.onSelect?.removeListener(handleItemSelect);
-            iv?.onRefresh?.removeListener(handleItemsRefresh);
             if (moduleItemNotifierId === itemObserverId) {
                 Zotero.Notifier.unregisterObserver(itemObserverId);
                 moduleItemNotifierId = null;
             }
-            if (moduleTabNotifierId === tabObserverId) {
-                Zotero.Notifier.unregisterObserver(tabObserverId);
-                moduleTabNotifierId = null;
-            }
         };
-    }, [
-        isLibraryTab,
-        setSelectedItems,
-        setSelectedItemCount,
-        setLibraryView,
-        setSelectedTags,
-        setNoteItem,
-        setRecentlyAddedTodayCount,
-        setLibraryItemCount,
-    ]);
+    }, [setRecentlyAddedTodayCount, setLibraryItemCount]);
 }

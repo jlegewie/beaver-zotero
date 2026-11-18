@@ -1,5 +1,5 @@
 import { resolveChatWindow } from './navigation';
-import { ReaderWidthDispatcher } from './readerWidth';
+import { restoreReaderSidebarWidthHandler } from './readerWidth';
 /** Window handles are registered only for the lifetime of their renderer. */
 export interface WindowRuntime {
     readonly id: string;
@@ -37,10 +37,13 @@ export class BeaverInstance {
     private nextId = 0;
     private readonly idPrefix = `main-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     private disposed = false;
-    private widthListeners = new Map<WindowRuntime, () => void>();
-    readonly readerWidth = new ReaderWidthDispatcher();
     private subscriptions = new Map<WindowRuntime, Set<() => void>>();
     private notifications = new Map<string, Set<(detail: any) => void>>();
+
+    constructor() {
+        // Release a reader-width wrapper an earlier plugin version left behind.
+        restoreReaderSidebarWidthHandler();
+    }
 
     attachWindow(
         win: Window,
@@ -161,8 +164,6 @@ export class BeaverInstance {
         runtime.status = 'closing';
         this.refreshContext();
         Zotero.Beaver?.presence?.detach(runtime.id);
-        this.widthListeners.get(runtime)?.();
-        this.widthListeners.delete(runtime);
         for (const unsubscribe of this.subscriptions.get(runtime) ?? []) unsubscribe();
         this.subscriptions.delete(runtime);
         return true;
@@ -248,25 +249,11 @@ export class BeaverInstance {
         }
     }
 
-    subscribeReaderWidth(runtime: WindowRuntime, callback: () => void): () => void {
-        if (runtime.status === 'closing' || this.disposed) return () => {};
-        this.widthListeners.get(runtime)?.();
-        const unsubscribe = this.readerWidth.subscribe(() => {
-            if (runtime.status !== 'closing') callback();
-        });
-        this.widthListeners.set(runtime, unsubscribe);
-        return () => {
-            unsubscribe();
-            if (this.widthListeners.get(runtime) === unsubscribe) this.widthListeners.delete(runtime);
-        };
-    }
-
     disposeInstance(): void {
         if (this.disposed) return;
         this.disposed = true;
         for (const win of this.windows.keys()) this.detachWindow(win);
         this.notifications.clear();
-        this.widthListeners.clear();
-        this.readerWidth.dispose();
+        restoreReaderSidebarWidthHandler();
     }
 }

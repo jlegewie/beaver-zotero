@@ -132,6 +132,22 @@ async function disposeAccountServices(): Promise<void> {
     catch (error) { ztoolkit.log(`disposeAccount: ${error}`); }
 }
 
+let pluginDatabaseClose: Promise<void> | undefined;
+
+/**
+ * Close beaver.sqlite. Shutdown paths overlap at a quit (each window's unload,
+ * the quit observer, APP_SHUTDOWN), so callers share a close in flight rather
+ * than closing a connection that is already closing. A failed close leaves the
+ * connection on `addon` for a later path to retry.
+ */
+function closePluginDatabase(): Promise<void> {
+    const db = addon.db;
+    if (!db) return Promise.resolve();
+    return pluginDatabaseClose ??= db.closeDatabase()
+        .then(() => { if (addon.db === db) addon.db = undefined; })
+        .finally(() => { pluginDatabaseClose = undefined; });
+}
+
 /**
  * Close the agent connection via the window's React bundle (`agentService` is
  * per-bundle). Synchronous and best-effort — teardown must not wait on the network.
@@ -167,6 +183,8 @@ async function cleanupDevTemporaryAnnotations(
 }
 
 let isAppQuitting = false;
+/** Set once a quit's app-wide cleanup has started in a window's unload. */
+let globalCleanupStarted = false;
 let quitObserverRegistered = false;
 
 /**
@@ -193,11 +211,10 @@ const quitObserver = {
             const teardown = () => {
                 void disposeAccountServices();
                 try {
-                    if (addon?.db) {
-                        addon.db.closeDatabase().catch((error: unknown) => {
+                    if (addon) {
+                        closePluginDatabase().catch((error: unknown) => {
                             Zotero.logError(error as Error);
                         });
-                        addon.db = undefined;
                     }
                 } catch (_) {
                     // Best-effort — process is dying
@@ -485,6 +502,7 @@ async function onStartup() {
         });
 
         // -------- Load UI for all windows --------
+        watchMainWindows();
         const mainWindows = Zotero.getMainWindows();
         if (mainWindows.length > 0) {
             await Promise.all(
@@ -510,10 +528,7 @@ async function onStartup() {
             ztoolkit.log(`Failed to stop backgroundExtractor during startup error recovery: ${stopError}`);
         }
         try {
-            if (addon.db) {
-                await addon.db.closeDatabase();
-                addon.db = undefined;
-            }
+            await closePluginDatabase();
         } catch (closeError) {
             ztoolkit.log(`Failed to close database during startup error recovery: ${closeError}`);
         }
@@ -550,8 +565,21 @@ function onStandaloneWindowUnload(win: Window): void {
 }
 
 async function onMainWindowLoad(win: Window): Promise<void> {
+    // Zotero 11 calls this again for a window Beaver attached at startup
+    // without a library view, once its first one loads. The renderer adds the
+    // library sidebar itself when that view's tab is selected.
     if (win.closed || addon.runtime.getWindow(win)) return;
     const runtime = addon.runtime.attachWindow(win);
+
+    // Zotero 11 reports main windows to plugins by their library views: a
+    // window without a loaded one never reports its unload. Follow the
+    // window's own unload as well; the second call is a no-op. Earlier
+    // versions report every main window's close themselves.
+    if (Array.isArray((win as any).ZoteroPane?.libraryViews)) {
+        const onWindowUnload = () => { void onMainWindowUnload(win, { windowUnloading: true }); };
+        win.addEventListener("unload", onWindowUnload);
+        addon.runtime.addWindowCleanup(runtime, () => win.removeEventListener("unload", onWindowUnload));
+    }
 
     // Create ztoolkit for every window
     addon.data.ztoolkit = createZToolkit();
@@ -601,6 +629,58 @@ async function onMainWindowLoad(win: Window): Promise<void> {
     ztoolkit.log("Styles loaded for window");
 }
 
+const MAIN_WINDOW_URL = "chrome://zotero/content/zoteroPane.xhtml";
+type WindowMediatorListener = { onOpenWindow(xulWindow: any): void; onCloseWindow(xulWindow: any): void };
+let mainWindowListener: WindowMediatorListener | null = null;
+
+/**
+ * Attach to main windows as they open. Zotero 11 reports a main window to
+ * plugins only once a library view in it has loaded, so a window opened on a
+ * reader (a tab moved to a new window) would otherwise have no Beaver until
+ * its library tab is shown. Zotero 7–10 report every main window themselves.
+ */
+function watchMainWindows(): void {
+    if (mainWindowListener) return;
+    const listener: WindowMediatorListener = {
+        onOpenWindow(xulWindow: any) {
+            const win = xulWindow?.docShell?.domWindow as Window | undefined;
+            win?.addEventListener("load", () => {
+                const pane = (win as any).ZoteroPane;
+                if (win.location?.href !== MAIN_WINDOW_URL || !Array.isArray(pane?.libraryViews)) return;
+                // Resolves once the window has its tabs, context pane and the
+                // tab it was opened for.
+                Promise.resolve(pane.loadedPromise)
+                    .then(() => {
+                        if (mainWindowListener !== listener || win.closed || !addon.data.alive) return;
+                        return onMainWindowLoad(win);
+                    })
+                    .catch((error: unknown) => Zotero.logError(error as Error));
+            }, { once: true });
+        },
+        onCloseWindow() {},
+    };
+    mainWindowListener = listener;
+    Services.wm.addListener(listener as any);
+}
+
+function unwatchMainWindows(): void {
+    if (!mainWindowListener) return;
+    Services.wm.removeListener(mainWindowListener as any);
+    mainWindowListener = null;
+}
+
+/**
+ * Whether Zotero reported a window unloaded only because its last library
+ * view closed. Zotero 11 does that while the window and its reader tabs stay
+ * open; Beaver keeps serving them and cleans up on the window's own unload.
+ * When the window itself closes, its library views are still registered.
+ */
+function onlyLibraryViewsClosed(win: Window): boolean {
+    if (win.closed || isAppQuitting || (Services?.startup?.shuttingDown ?? false)) return false;
+    const views = (win as any).ZoteroPane?.libraryViews;
+    return Array.isArray(views) && views.length === 0;
+}
+
 /**
  * Cleanup handler for main window unload.
  *
@@ -616,7 +696,14 @@ async function onMainWindowLoad(win: Window): Promise<void> {
  * 4. Unmount React components
  * 5. Unload stylesheets
  */
-async function onMainWindowUnload(win: Window): Promise<void> {
+async function onMainWindowUnload(
+    win: Window,
+    { windowUnloading = false }: { windowUnloading?: boolean } = {},
+): Promise<void> {
+    if (!windowUnloading && onlyLibraryViewsClosed(win)) {
+        ztoolkit.log("onMainWindowUnload: last library view closed, keeping the open window");
+        return;
+    }
     const runtime = addon.runtime.getWindow(win);
     if (!addon.runtime.markClosing(win)) return;
     if (runtime) {
@@ -731,6 +818,16 @@ async function onMainWindowUnload(win: Window): Promise<void> {
             return;
         }
 
+        // At a quit every window can read as closed, so each unload can take
+        // itself for the last one. The app-wide cleanup disposes the window
+        // registry, which would cut short the unload of a window still
+        // attached, so it runs once, in the last window to finish its own.
+        if (addon.runtime.getSnapshot().some((other) => other.kind === "main")) {
+            ztoolkit.log("onMainWindowUnload: Other windows still closing, skipping global cleanup");
+            return;
+        }
+        if (globalCleanupStarted) return;
+        globalCleanupStarted = true;
         ztoolkit.log("onMainWindowUnload: Last window closing, running global cleanup");
 
         // Global cleanup - only run when last window closes
@@ -762,10 +859,7 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         addon.documentCache = undefined;
 
         // 4. Close database connection
-        if (addon.db) {
-            await withShutdownTimeout(addon.db.closeDatabase(), "closeDatabase");
-            addon.db = undefined;
-        }
+        await withShutdownTimeout(closePluginDatabase(), "closeDatabase");
 
         // 4. Dispose CitationService
         if (addon.citationService) {
@@ -792,8 +886,9 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         BeaverUIFactory.closeBeaverWindow();
         BeaverUIFactory.closePreferencesWindow();
 
-        // 10. Unregister quit observer
+        // 10. Unregister quit observer and the main window watcher
         unregisterQuitObserver();
+        unwatchMainWindows();
 
         // 11. Unregister context menus
         cleanupContextMenus();
@@ -1002,12 +1097,7 @@ async function disposeAppServices(): Promise<void> {
     await attempt('disposeMuPDFWorker', () => disposeMuPDFWorker(undefined, { force: true }));
     addon.documentCache = undefined;
     // Keep a failed connection available to bootstrap's independent DB fallback.
-    await attempt('closeDatabase', async () => {
-        if (addon.db) {
-            await addon.db.closeDatabase();
-            addon.db = undefined;
-        }
-    });
+    await attempt('closeDatabase', closePluginDatabase);
     await attempt('citationService.dispose', () => addon.citationService?.dispose());
     addon.citationService = undefined;
     await attempt('exporter.dispose', () => addon.exporter.dispose());
@@ -1022,6 +1112,7 @@ function onShutdown(): Promise<void> {
 
 async function disposePlugin(): Promise<void> {
     stopLocalIngress();
+    unwatchMainWindows();
     addon.itemImport.dispose();
     if (tableFillsPending()) await disposeTableFills();
     await addon.mutations.dispose();
@@ -1071,10 +1162,7 @@ async function disposePlugin(): Promise<void> {
         addon.documentCache = undefined;
         await disposeAccountServices();
 
-        if (addon.db) {
-            await addon.db.closeDatabase();
-            addon.db = undefined;
-        }
+        await closePluginDatabase();
 
         if (addon.citationService) {
             addon.citationService.dispose();

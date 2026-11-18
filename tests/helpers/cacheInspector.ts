@@ -1291,14 +1291,9 @@ export async function resolveItemReferenceViaHttp(
 
 export type SidebarWidthScenario =
     | 'inspect'
-    | 'install-over-plain-original'
-    | 'replace-stale-tagged'
-    | 'replace-legacy'
     | 'restore-unwinds-own'
     | 'restore-clears-bare-legacy'
     | 'restore-leaves-foreign'
-    | 'own-wrapper-skip'
-    | 'reinstall-after-displacement'
     | 'unwrap-direct';
 
 export interface SidebarWidthScenarioResponse {
