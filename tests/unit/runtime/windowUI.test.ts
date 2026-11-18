@@ -407,6 +407,39 @@ describe('one sidebar for library and reader tabs', () => {
         done();
     });
 
+    it('takes a drag the splitter reports as dragging even without a mousedown on it', async () => {
+        prefs.values.sidebarWidth = 420;
+        const { win, uiManager, contextPane, done } = await setup();
+        const splitter = win.document.createElement('splitter');
+        contextPane.before(splitter);
+        uiManager.updateUI({ isVisible: true, isLibraryTab: false });
+
+        // A splitter left pressed by a lost mouseup drags on the next mouse move.
+        splitter.setAttribute('state', 'dragging');
+        contextPane.setAttribute('width', '460');
+        contextPane.style.width = '460px';
+        await settle();
+        expect(contextPane.style.width).toBe('460px');
+        expect(contextPane.getAttribute('width')).toBe('600');
+        done();
+    });
+
+    it('does not create a width attribute on a pane that had none when a drag ends', async () => {
+        prefs.values.sidebarWidth = 420;
+        const { win, uiManager, contextPane, done } = await setup();
+        contextPane.removeAttribute('width');
+        // Zotero 7's Gecko reads a missing XUL attribute as "".
+        const getAttribute = contextPane.getAttribute.bind(contextPane);
+        contextPane.getAttribute = ((name: string) => getAttribute(name) ?? '') as any;
+        uiManager.updateUI({ isVisible: true, isLibraryTab: false });
+
+        await drag(win, contextPane, 460);
+        expect(contextPane.hasAttribute('width')).toBe(false);
+        uiManager.updateUI({ isVisible: false, isLibraryTab: false });
+        expect(contextPane.hasAttribute('width')).toBe(false);
+        done();
+    });
+
     it('gives the other side of the splitter its width back when a dragged pane is released', async () => {
         prefs.values.sidebarWidth = 420;
         const { win, uiManager, contextPane, done } = await setup();

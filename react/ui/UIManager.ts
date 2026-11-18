@@ -77,6 +77,15 @@ function hasSize(element: HTMLElement): boolean {
     return rect.width > 0 && rect.height > 0;
 }
 
+/**
+ * An element's `width` attribute, or null when it has none. Zotero 7's Gecko
+ * returns "" from `getAttribute` for a missing XUL attribute, and putting that
+ * "" back would create an attribute Zotero then persists.
+ */
+function widthAttribute(element: Element): string | null {
+    return element.hasAttribute('width') ? element.getAttribute('width') : null;
+}
+
 function readStoredWidth(): number {
     const width = Number(getPref('sidebarWidth'));
     return Number.isFinite(width) && width > 0 ? Math.round(width) : 0;
@@ -440,14 +449,14 @@ class UIManager {
         }
         if (host.nativeStyleWidth === null) {
             host.nativeStyleWidth = host.pane.style.width;
-            host.nativeWidthAttr = host.pane.getAttribute('width');
+            host.nativeWidthAttr = widthAttribute(host.pane);
             host.nativeFlexShrink = host.pane.style.flexShrink;
             const splitter = host.pane.previousElementSibling;
             const neighbour = splitter?.localName === 'splitter'
                 ? splitter.previousElementSibling as HTMLElement | null
                 : null;
             host.neighbour = neighbour
-                ? { element: neighbour, styleWidth: neighbour.style.width, widthAttr: neighbour.getAttribute('width') }
+                ? { element: neighbour, styleWidth: neighbour.style.width, widthAttr: widthAttribute(neighbour) }
                 : null;
             host.dragged = false;
         }
@@ -475,12 +484,16 @@ class UIManager {
     private onPaneWidthChange(host: Host, records: MutationRecord[]): void {
         if (this.host !== host || host.nativeStyleWidth === null || isStackedLayout()) return;
         const pane = host.pane;
-        const attr = pane.getAttribute('width');
+        const attr = widthAttribute(pane);
         // A drag can end on Zotero's own width, so a write is looked for even
         // when the value is unchanged.
         const attrWritten = attr !== host.nativeWidthAttr
             || records.some(record => record.attributeName === 'width');
-        if (attrWritten && this.splitterDrag) {
+        // A splitter marks itself as dragging while it writes sizes, which also
+        // covers a drag that began without a mousedown this code saw.
+        const dragging = this.splitterDrag
+            || pane.previousElementSibling?.getAttribute('state') === 'dragging';
+        if (attrWritten && dragging) {
             // A splitter writes the inline width too; the attribute this code
             // puts back does not, and is no new size.
             const dragged = pane.style.width === `${attr}px` ? Number(attr) : 0;
