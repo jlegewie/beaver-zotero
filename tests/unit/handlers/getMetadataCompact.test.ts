@@ -148,6 +148,48 @@ describe('metadata identity and field quality', () => {
         }]);
     });
 
+    it('adds complete ancestor chains to nested memberships of items and attachments', async () => {
+        const tree = [
+            { id: 1, libraryID: 1, key: 'TOPLEVEL', name: 'PhD' },
+            { id: 2, libraryID: 1, key: 'PARENT23', name: 'Imaging', parentKey: 'TOPLEVEL' },
+            { id: 3, libraryID: 1, key: 'LEAFEEG2', name: 'EEG', parentKey: 'PARENT23' },
+            { id: 4, libraryID: 1, key: 'ORPHAN23', name: 'EEG', parentKey: 'MISSING1' },
+        ];
+        (globalThis as any).Zotero.Collections = {
+            get: (id: number) => tree.find(c => c.id === id) ?? false,
+            getByLibraryAndKey: (_id: number, key: string) => tree.find(c => c.key === key) ?? false,
+        };
+        const expected = [
+            { collection_key: 'TOPLEVEL', collection_id: 'u-TOPLEVEL', library_ref: 'u', name: 'PhD' },
+            {
+                collection_key: 'LEAFEEG2', collection_id: 'u-LEAFEEG2', library_ref: 'u', name: 'EEG',
+                parent_collection_id: 'u-PARENT23',
+                ancestors: [
+                    { collection_key: 'TOPLEVEL', collection_id: 'u-TOPLEVEL', name: 'PhD' },
+                    { collection_key: 'PARENT23', collection_id: 'u-PARENT23', name: 'Imaging' },
+                ],
+            },
+            {
+                collection_key: 'ORPHAN23', collection_id: 'u-ORPHAN23', library_ref: 'u', name: 'EEG',
+                parent_collection_id: 'u-MISSING1',
+            },
+        ];
+
+        mocks.resolveItemReference.mockResolvedValue({ status: 'found', item: regularItem('AAAAAAAA', {
+            toJSON: () => ({ collections: ['TOPLEVEL', 'LEAFEEG2', 'ORPHAN23'] }),
+        }) });
+        expect((await handleGetMetadataRequest(request())).items[0].collections).toEqual(expected);
+
+        mocks.getAttachmentInfoForItem.mockResolvedValue({});
+        mocks.resolveItemReference.mockResolvedValue({ status: 'found', item: regularItem('ATTACH11', {
+            isAttachment: () => true,
+            isRegularItem: () => false,
+            getCollections: () => [1, 3, 4],
+            getTags: () => [],
+        }) });
+        expect((await handleGetMetadataRequest(request())).items[0].collections).toEqual(expected);
+    });
+
     it('omits trashed and missing memberships from full metadata', async () => {
         mocks.resolveItemReference.mockResolvedValue({ status: 'found', item: regularItem('AAAAAAAA', {
             toJSON: () => ({ collections: ['LIVE0001', 'TRASH001', 'MISSING1'] }),
