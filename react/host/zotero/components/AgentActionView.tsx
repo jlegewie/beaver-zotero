@@ -75,7 +75,8 @@ import {
     PreviewData,
     getCreateAnnotationsDisplayStatus,
     getAgentActionToolIcon,
-    inFlightProgressMessage,
+    actionCardProgressMessage,
+    createItemsPdfSummary,
     hasFailedUndo,
     getStatusConfig,
     STALE_APPLY_ANYWAY_TOOLTIP,
@@ -86,6 +87,7 @@ import {
 import { StaleProposalNote } from './StaleProposalNote';
 import { isStaleMergeProposal } from './mergeItemsErrors';
 import { ActionPreview } from './ActionPreview';
+import { useCreateItemsPdfOutcomes } from './useCreateItemsPdfOutcomes';
 import { useApprovalRecovery } from './useApprovalRecovery';
 import {
     isCoveredByFullAccess,
@@ -407,16 +409,22 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         status !== 'pending';
 
     // The wait this reports is the backend's, not the user's: an approved edit
-    // whose save is taking Zotero a long time. Suppressed while the card waits
-    // on the user (`isAwaitingApproval`) and once the action has settled, since
-    // the note outlives the request that produced it.
-    const progressMessage = inFlightProgressMessage(
-        progress,
-        runStatus === 'in_progress'
-        && !hasToolReturn
-        && !isAwaitingApproval
-        && (status === 'awaiting' || status === 'pending'),
+    // whose save is taking Zotero a long time, or the items and PDF fetches of
+    // `create_items`. See `actionCardProgressMessage`.
+    const progressMessage = actionCardProgressMessage(toolName, progress, {
+        isCallOpen: runStatus === 'in_progress' && !hasToolReturn,
+        isAwaitingApproval,
+        status,
+    });
+
+    // How many created items got a PDF, once the call no longer reports its
+    // own progress. Follows the action rows, so it stays right after a fetch
+    // resolves later and after a reload.
+    const pdfOutcomes = useCreateItemsPdfOutcomes(
+        actions,
+        toolName === 'create_items' && !isAwaitingToolReturn && !isAwaitingApproval,
     );
+    const pdfSummary = createItemsPdfSummary(pdfOutcomes, actions.length === 1);
 
     // While the run reconnects, a card awaiting a decision says when it can be
     // answered, and one already answered says its answer has yet to be sent.
@@ -748,7 +756,11 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                     singular while an approval is still pending and
                                     no action row exists yet. */}
                                 <span className="font-color-primary font-medium">{getActionLabel(toolName, previewData?.actionData ?? action?.proposed_data)}</span>
-                                {actionTitle && <span className="font-color-secondary ml-15">{actionTitle}</span>}
+                                {actionTitle && (
+                                    <span className="font-color-secondary ml-15">
+                                        {pdfSummary ? `${actionTitle} · ${pdfSummary}` : actionTitle}
+                                    </span>
+                                )}
                             </div>
                             {reconnectCaption ? (
                                 <span className="font-color-secondary text-sm" role="status">{reconnectCaption}</span>

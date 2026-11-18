@@ -15,6 +15,12 @@ import {
 } from '../runtime/backgroundTasks';
 import type { BackgroundTaskState, BackgroundTaskType } from '../../src/utils/backgroundTasks';
 
+/** A PDF fetch or snapshot that is still queued or running. */
+export function isActiveAttachmentTask(task: BackgroundTaskState): boolean {
+    return (task.type === 'pdf_fetch' || task.type === 'snapshot')
+        && (task.status === 'pending' || task.status === 'running');
+}
+
 /**
  * Subscribe to all background tasks and get updates when any task changes.
  * @returns Array of all active and recent tasks
@@ -108,9 +114,7 @@ export function usePdfFetchStatus(
         }
 
         // Prefer active tasks (pending/running) over completed/failed
-        const activeTask = attachmentTasks.find(
-            t => t.status === 'pending' || t.status === 'running'
-        );
+        const activeTask = attachmentTasks.find(isActiveAttachmentTask);
         if (activeTask) {
             return { isLoading: true, kind: activeTask.type as 'pdf_fetch' | 'snapshot' };
         }

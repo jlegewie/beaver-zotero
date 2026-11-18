@@ -80,6 +80,7 @@ import {
     isWSChatPendingAtom,
     isWSReadyAtom,
     parkableRunId,
+    pdfFetchWaitRunId,
     sendApprovalResponseAtom,
     sendAskUserQuestionResponseAtom,
     sendTableCardResponseAtom,
@@ -87,8 +88,9 @@ import {
     staleApprovalActionIdsAtom,
     wsErrorAtom,
 } from '../../../react/atoms/agentRunAtoms';
-import { pendingApprovalsAtom, removePendingApprovalAtom } from '../../../react/agents/agentActions';
+import { pendingApprovalsAtom, removePendingApprovalAtom, threadAgentActionsAtom } from '../../../react/agents/agentActions';
 import {
+    addLiveCardAnswerAtom,
     clearParkedAnswersAtom,
     isResumeWaitingAtom,
     isThreadParkedAtom,
@@ -822,5 +824,80 @@ describe('parkableRunId', () => {
         await connected;
 
         expect(parkableRunId(store.get)).toBeNull();
+    });
+});
+
+describe('pdfFetchWaitRunId', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        connectMock.mockReset();
+        isConnectedMock.mockReturnValue(true);
+        store.set(sessionAtom, { user: { id: 'user-1' } } as any);
+        store.set(threadRunsAtom, []);
+        store.set(activeRunAtom, null);
+        store.set(currentThreadIdAtom, THREAD);
+        store.set(threadAdmissionAtom, { threadId: THREAD, tailRunId: null, activity: { state: 'idle', run_id: null } });
+        store.set(isWSChatPendingAtom, false);
+        store.set(pendingApprovalsAtom, new Map());
+        store.set(pendingQuestionsAtom, new Map());
+        store.set(pendingCreditConfirmationsAtom, new Map());
+        store.set(clearParkedAnswersAtom);
+        store.set(liveCardAnswersAtom, new Map());
+        store.set(threadAgentActionsAtom, []);
+    });
+
+    /** A live run whose create_items call has created its item and waits on its PDF fetch. */
+    async function liveRunWaitingOnAFetch(): Promise<string> {
+        const connected = nextConnection();
+        await store.set(sendWSMessageAtom, 'hello');
+        await connected;
+        const run = store.get(activeRunAtom)!;
+        store.set(activeRunAtom, {
+            ...run,
+            model_messages: [{
+                kind: 'response',
+                parts: [{ part_kind: 'tool-call', tool_call_id: 'call-1', tool_name: 'create_items', args: {} }],
+            }],
+        } as any);
+        store.set(threadAgentActionsAtom, [{
+            id: 'action-1',
+            run_id: run.id,
+            toolcall_id: 'call-1',
+            action_type: 'import_item',
+            status: 'applied',
+            proposed_data: { item: { title: 'A' } },
+            result_data: { library_id: 1, zotero_key: 'KEYA', attachment_status: 'pending' },
+        } as any]);
+        return run.id;
+    }
+
+    it('names a live run waiting only on a PDF fetch', async () => {
+        const runId = await liveRunWaitingOnAFetch();
+
+        expect(pdfFetchWaitRunId(store.get)).toBe(runId);
+    });
+
+    it('names a run whose approved create_items call still holds its answer', async () => {
+        const runId = await liveRunWaitingOnAFetch();
+        store.set(addLiveCardAnswerAtom, { toolCallId: 'call-1', answer: { action_id: 'action-1', approved: true } as any });
+
+        expect(pdfFetchWaitRunId(store.get)).toBe(runId);
+    });
+
+    it('does not name a run that also waits on a card', async () => {
+        await liveRunWaitingOnAFetch();
+        store.set(pendingApprovalsAtom, new Map([['action-2', { actionId: 'action-2', toolcallId: 'call-2' } as any]]));
+
+        expect(pdfFetchWaitRunId(store.get)).toBeNull();
+    });
+
+    it('does not name a run once the fetch resolved', async () => {
+        await liveRunWaitingOnAFetch();
+        store.set(threadAgentActionsAtom, (actions) => actions.map((action) => ({
+            ...action,
+            result_data: { ...action.result_data, attachment_status: 'available' },
+        })) as any);
+
+        expect(pdfFetchWaitRunId(store.get)).toBeNull();
     });
 });

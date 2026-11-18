@@ -11,6 +11,7 @@ const cancelMock = vi.fn();
 const leaveRunMock = vi.fn(() => false);
 const canLeaveReconnectingRunMock = vi.fn(() => false);
 const parkableRunIdMock = vi.fn((): string | null => null);
+const pdfFetchWaitRunIdMock = vi.fn((): string | null => null);
 const parkRunMock = vi.fn(async () => 'ended');
 const getThreadRunsMock = vi.fn();
 const getThreadMock = vi.fn();
@@ -150,6 +151,7 @@ vi.mock('../../../react/atoms/agentRunAtoms', async () => {
         isWSConnectedAtom: atom(false),
         isWSReadyAtom: atom(false),
         parkableRunId: () => parkableRunIdMock(),
+        pdfFetchWaitRunId: () => pdfFetchWaitRunIdMock(),
     };
 });
 
@@ -240,6 +242,7 @@ describe('interrupt-active-run confirm', () => {
         leaveRunMock.mockReturnValue(false);
         canLeaveReconnectingRunMock.mockReturnValue(false);
         parkableRunIdMock.mockReturnValue(null);
+        pdfFetchWaitRunIdMock.mockReturnValue(null);
         getThreadRunsMock.mockResolvedValue({ runs: [], agent_actions: [] });
         getThreadMock.mockResolvedValue({ name: 'Thread', zotero_user_id: '111', zotero_local_id: 'CURKEY' });
     });
@@ -464,6 +467,35 @@ describe('interrupt-active-run confirm', () => {
             store.set(isWSChatPendingAtom, true);
             await store.set(newThreadAtom, { skipAutoPopulate: true });
             expect(invalidateViews).toHaveBeenCalledTimes(1);
+        });
+    });
+
+    describe('leaving a run that waits only on PDF fetches', () => {
+        beforeEach(() => {
+            pdfFetchWaitRunIdMock.mockReturnValue('run-1');
+        });
+
+        it('starts a new chat without asking, stopping the run', async () => {
+            store.set(activeRunAtom, run('in_progress'));
+            store.set(isWSChatPendingAtom, true);
+
+            await store.set(newThreadAtom, { skipAutoPopulate: true });
+
+            expect(confirmMock).not.toHaveBeenCalled();
+            expect(cancelMock).toHaveBeenCalledTimes(1);
+            expect(parkRunMock).not.toHaveBeenCalled();
+            expect(store.get(activeRunAtom)).toBeNull();
+        });
+
+        it('opens another chat without asking, stopping the run', async () => {
+            store.set(activeRunAtom, run('in_progress'));
+            store.set(isWSChatPendingAtom, true);
+
+            await store.set(loadThreadAtom, loadArgs);
+
+            expect(confirmMock).not.toHaveBeenCalled();
+            expect(cancelMock).toHaveBeenCalledTimes(1);
+            expect(store.get(currentThreadIdAtom)).toBe('thread-1');
         });
     });
 

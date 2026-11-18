@@ -75,6 +75,53 @@ export function inFlightProgressMessage(
 }
 
 /**
+ * The progress note an action card shows, if any. Shown while the call is
+ * open and the card is not waiting on the user. For most tools only while
+ * the action itself is still outstanding, since the note outlives the
+ * request that produced it; `create_items` keeps it until the call returns,
+ * because it then reports the PDF fetches the call waits on.
+ */
+export function actionCardProgressMessage(
+    toolName: string,
+    progress: string | undefined,
+    state: { isCallOpen: boolean; isAwaitingApproval: boolean; status: ActionStatus | 'awaiting' },
+): string | null {
+    const isActionOutstanding = state.status === 'awaiting' || state.status === 'pending';
+    return inFlightProgressMessage(
+        progress,
+        state.isCallOpen
+        && !state.isAwaitingApproval
+        && (isActionOutstanding || toolName === 'create_items'),
+    );
+}
+
+/** Where a created item's PDF stands, as the card reports it. */
+export type ItemPdfOutcome = 'none' | 'fetching' | 'available' | 'failed';
+
+/**
+ * A short note on how many created items got a PDF, appended to the
+ * `create_items` header title ("3 Items · 2 with PDF"). Null when no item
+ * had a PDF or a fetch, so imports without PDFs stay quiet. `single` words
+ * it for a card titled by its one item.
+ */
+export function createItemsPdfSummary(outcomes: ItemPdfOutcome[], single: boolean): string | null {
+    const available = outcomes.filter((outcome) => outcome === 'available').length;
+    const fetching = outcomes.filter((outcome) => outcome === 'fetching').length;
+    const failed = outcomes.filter((outcome) => outcome === 'failed').length;
+    if (available + fetching + failed === 0) return null;
+    if (single) {
+        if (available > 0) return 'with PDF';
+        return fetching > 0 ? 'fetching PDF' : 'no PDF found';
+    }
+    if (fetching > 0) {
+        return available > 0
+            ? `${available} with PDF · ${fetching} fetching`
+            : `fetching ${fetching} PDF${fetching === 1 ? '' : 's'}`;
+    }
+    return available > 0 ? `${available} with PDF` : 'no PDFs found';
+}
+
+/**
  * Shorten a backend error_message for inline display in action previews.
  *
  * Backend messages include agent-facing detail (multi-line lists, Zotero keys,

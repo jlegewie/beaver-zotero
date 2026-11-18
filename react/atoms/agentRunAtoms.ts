@@ -127,6 +127,7 @@ import {
     streamQuietAtom,
 } from '@beaver/agent-core/run-state/streamActivity';
 import { userIdAtom } from './auth';
+import { isRunWaitingOnlyOnPdfFetches } from './pdfFetchWait';
 import { citationsAtom, processCitationsAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from '@beaver/agent-core/citations/atoms';
 import { maybeShowCitationTipAtom } from './citationTip';
 import type { Citation } from '@beaver/agent-core/types/citations';
@@ -4636,6 +4637,14 @@ async function startParkedResumeOwned(
     }
 }
 
+/** Whether the open chat shows a card waiting on the user. */
+function hasPendingCard(get: Getter): boolean {
+    return get(pendingApprovalsAtom).size > 0
+        || get(pendingQuestionsAtom).size > 0
+        || get(pendingBatchApprovalsAtom).size > 0
+        || get(pendingTableCardsAtom).size > 0;
+}
+
 /**
  * The open chat's run, when leaving it can park it rather than stop it: it is
  * waiting on cards the user can answer later (an approval, a question, a batch
@@ -4653,11 +4662,24 @@ export function parkableRunId(get: Getter): string | null {
     if (activeRun.user_prompt?.deferred_results && !get(isResumeWaitingAtom)) return null;
     if (get(isRunReconnectingAtom) || get(pendingCreditConfirmationsAtom).size > 0) return null;
     if (get(liveCardAnswersAtom).size > 0) return null;
-    const hasCard = get(pendingApprovalsAtom).size > 0
-        || get(pendingQuestionsAtom).size > 0
-        || get(pendingBatchApprovalsAtom).size > 0
-        || get(pendingTableCardsAtom).size > 0;
-    return hasCard ? activeRun.id : null;
+    return hasPendingCard(get) ? activeRun.id : null;
+}
+
+/**
+ * The open chat's run, when it is only waiting for PDF fetches to finish (see
+ * `isRunWaitingOnlyOnPdfFetches`) and on no card. Leaving the chat
+ * stops it without asking: the answer ends there and the fetches finish in
+ * Zotero.
+ */
+export function pdfFetchWaitRunId(get: Getter): string | null {
+    const activeRun = get(activeRunAtom);
+    if (!activeRun || !isRunActive(activeRun) || get(isRunReconnectingAtom)) return null;
+    if (get(pendingCreditConfirmationsAtom).size > 0 || hasPendingCard(get)) return null;
+    const liveAnswers = get(liveCardAnswersAtom);
+    if ([...liveAnswers.values()].some((live) => live.parking)) return null;
+    return isRunWaitingOnlyOnPdfFetches(activeRun, get(threadAgentActionsAtom), liveAnswers.keys())
+        ? activeRun.id
+        : null;
 }
 
 /** How long a message waits for the resume it replaces to park. */
