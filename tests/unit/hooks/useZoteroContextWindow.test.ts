@@ -102,3 +102,21 @@ it('attaches to the trees of a library view that finishes loading', async () => 
     expect(loaded.onSelect.addListener).toHaveBeenCalledTimes(2);
     expect(loaded.onRefresh.addListener).toHaveBeenCalledTimes(1);
 });
+
+it('keeps the library counts and item observer across tab and library view changes', async () => {
+    mocks.win.ZoteroPane = { itemsView: libraryTree(), collectionsView: libraryTree(), getSelectedItems: () => [] };
+    mocks.win.Zotero_Tabs = { selectedID: 'lib-a', _tabs: [{ id: 'lib-a', type: 'library' }, { id: 'lib-b', type: 'library' }] };
+    await act(async () => { store.set(isLibraryTabAtom, true); store.set(selectedZoteroTabIdAtom, 'lib-a'); });
+    const queries = vi.mocked((Zotero as any).DB.queryAsync).mock.calls.length;
+    const itemObservers = () => vi.mocked(Zotero.Notifier.registerObserver).mock.calls
+        .filter(([, types]: any[]) => types.includes('item')).length;
+    const observersBefore = itemObservers();
+
+    mocks.win.Zotero_Tabs.selectedID = 'lib-b';
+    await act(async () => { store.set(selectedZoteroTabIdAtom, 'lib-b'); });
+    await act(async () => { store.set(isLibraryTabAtom, false); store.set(selectedZoteroTabIdAtom, 'old'); });
+    await act(async () => { store.set(isLibraryTabAtom, true); store.set(selectedZoteroTabIdAtom, 'lib-a'); });
+
+    expect(vi.mocked((Zotero as any).DB.queryAsync).mock.calls.length).toBe(queries);
+    expect(itemObservers()).toBe(observersBefore);
+});
