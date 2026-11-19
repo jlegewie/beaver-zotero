@@ -25,9 +25,9 @@ vi.mock('../../../src/services/agentDataProvider/utils', async () => {
     };
 });
 
-vi.mock('../../../src/services/agentDataProvider/imageProcessing', async () => {
-    const actual = await vi.importActual<typeof import('../../../src/services/agentDataProvider/imageProcessing')>(
-        '../../../src/services/agentDataProvider/imageProcessing',
+vi.mock('../../../src/services/images/imageProcessing', async () => {
+    const actual = await vi.importActual<typeof import('../../../src/services/images/imageProcessing')>(
+        '../../../src/services/images/imageProcessing',
     );
     return {
         ...actual,
@@ -50,7 +50,7 @@ import {
     UnsupportedImageFormatError,
     processImageBytes,
     type ProcessedImage,
-} from '../../../src/services/agentDataProvider/imageProcessing';
+} from '../../../src/services/images/imageProcessing';
 
 function makeProcessedImage(overrides: Partial<ProcessedImage> = {}): ProcessedImage {
     return {

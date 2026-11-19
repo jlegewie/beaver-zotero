@@ -49,18 +49,7 @@ import {
     createTimeoutController,
 } from './timeout';
 import { effectiveMaxFileSizeMB, effectiveMaxPageCount } from '@beaver/agent-core/transport/attachmentLimits';
-import { MAX_PAGE_IMAGE_DIMENSION } from './imageProcessing';
-
-// Convert raw bytes to base64 in 32 KB chunks
-function uint8ToBase64(bytes: Uint8Array): string {
-    const CHUNK_SIZE = 0x8000;
-    let binary = '';
-    for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
-        const chunk = bytes.subarray(i, i + CHUNK_SIZE);
-        binary += String.fromCharCode.apply(null, chunk as unknown as number[]);
-    }
-    return btoa(binary);
-}
+import { MAX_PAGE_IMAGE_DIMENSION, uint8ToBase64 } from '../images/imageProcessing';
 
 /**
  * Handle zotero_attachment_page_images_request event.

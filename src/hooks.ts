@@ -1083,6 +1083,7 @@ async function disposeAppServices(): Promise<void> {
     await attempt('citationService.dispose', () => addon.citationService?.dispose());
     addon.citationService = undefined;
     await attempt('exporter.dispose', () => addon.exporter.dispose());
+    await attempt('images.dispose', () => addon.images.dispose());
 }
 
 let instanceDisposal: Promise<void> | undefined;
@@ -1096,6 +1097,7 @@ async function disposePlugin(): Promise<void> {
     stopLocalIngress();
     unwatchMainWindows();
     addon.itemImport.dispose();
+    addon.images.dispose();
     if (tableFillsPending()) await disposeTableFills();
     await addon.mutations.dispose();
     addon.syncPause.resumeSyncNow();
