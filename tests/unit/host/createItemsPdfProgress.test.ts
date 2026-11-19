@@ -11,13 +11,13 @@ describe('actionCardProgressMessage', () => {
     const open = { isCallOpen: true, isAwaitingApproval: false };
 
     it('shows create_items progress while its items are being added', () => {
-        expect(actionCardProgressMessage('create_items', 'Adding items · 2 of 5', { ...open, status: 'awaiting' }))
-            .toBe('Adding items · 2 of 5');
+        expect(actionCardProgressMessage('create_items', 'Adding items (2 of 5)', { ...open, status: 'awaiting' }))
+            .toBe('Adding items (2 of 5)');
     });
 
     it('keeps create_items progress after its actions settle, while the call waits on PDF fetches', () => {
-        expect(actionCardProgressMessage('create_items', 'Fetching PDFs · 1 of 4', { ...open, status: 'applied' }))
-            .toBe('Fetching PDFs · 1 of 4');
+        expect(actionCardProgressMessage('create_items', 'Fetching PDFs (1 of 4)', { ...open, status: 'applied' }))
+            .toBe('Fetching PDFs (1 of 4)');
         expect(actionCardProgressMessage('create_items', 'Fetching PDF', { ...open, status: 'error' }))
             .toBe('Fetching PDF');
     });
@@ -30,12 +30,12 @@ describe('actionCardProgressMessage', () => {
     });
 
     it('hides progress once the call returned or the run ended', () => {
-        expect(actionCardProgressMessage('create_items', 'Fetching PDFs · 3 of 4', { ...open, isCallOpen: false, status: 'applied' }))
+        expect(actionCardProgressMessage('create_items', 'Fetching PDFs (3 of 4)', { ...open, isCallOpen: false, status: 'applied' }))
             .toBeNull();
     });
 
     it('hides progress while the card waits on the user', () => {
-        expect(actionCardProgressMessage('create_items', 'Adding items · 0 of 2', { ...open, isAwaitingApproval: true, status: 'awaiting' }))
+        expect(actionCardProgressMessage('create_items', 'Adding items (0 of 2)', { ...open, isAwaitingApproval: true, status: 'awaiting' }))
             .toBeNull();
     });
 

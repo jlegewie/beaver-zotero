@@ -777,7 +777,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                     <span className={`font-color-secondary ml-15${isAwaitingToolReturn ? '' : ' shimmer-text'}`}>{headerProgress}</span>
                                 ) : actionTitle && (
                                     <span className="font-color-secondary ml-15">
-                                        {fullTextSummary ? `${actionTitle} · ${fullTextSummary}` : actionTitle}
+                                        {fullTextSummary ? `${actionTitle} (${fullTextSummary})` : actionTitle}
                                     </span>
                                 )}
                             </div>

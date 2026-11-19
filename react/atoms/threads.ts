@@ -32,7 +32,7 @@ import { importActionReference } from "../utils/importItemDisplay";
 import { ExternalReference } from "@beaver/agent-core/types/externalReferences";
 import { threadRunsAtom, activeRunAtom, currentThreadIdAtom, currentThreadNameAtom, isLoadingThreadAtom, resetRunSelectorCaches } from "@beaver/agent-core/run-state/atoms";
 import { loadThreadRuns } from "@beaver/agent-core/run-state/loadThreadRuns";
-import { abandonActiveRunLocallyAtom, canLeaveReconnectingRun, isWSChatPendingAtom, isWSConnectedAtom, isWSReadyAtom, parkableRunId, pdfFetchWaitRunId } from "./agentRunAtoms";
+import { abandonActiveRunLocallyAtom, canLeaveReconnectingRun, isWSChatPendingAtom, isWSConnectedAtom, isWSReadyAtom, parkableRunId } from "./agentRunAtoms";
 import { clearParkedAnswersAtom, syncParkedCardsAtom } from "./parkedRuns";
 import { AgentRun, isRunActive } from "@beaver/agent-core/agents/types";
 import { 
@@ -311,13 +311,11 @@ export const newThreadAtom = atom(
         // activeRunAtom, and prompting over it claims Beaver is still working.
         const hasActiveWork = get(isWSChatPendingAtom) || isRunActive(get(activeRunAtom));
         // A reconnecting run is left, and a run waiting only on cards is
-        // parked, not stopped, so there is nothing to confirm. Nor for a run
-        // waiting only on PDF fetches, which finish in Zotero anyway.
+        // parked, not stopped, so there is nothing to confirm.
         const leaveRunId = leavableRunId(get);
         const parkRunId = leaveRunId ? null : parkableRunId(get);
-        const skipConfirm = !!leaveRunId || !!parkRunId || pdfFetchWaitRunId(get) !== null;
         if (hasActiveWork) {
-            if (!options?.skipActiveRunConfirm && !skipConfirm && !confirmInterruptActiveRun(
+            if (!options?.skipActiveRunConfirm && !leaveRunId && !parkRunId && !confirmInterruptActiveRun(
                 'Start new chat?',
                 'Beaver is still generating a response in this chat. Starting a new chat will stop it.',
                 'Start New Chat',
@@ -432,12 +430,10 @@ export const loadThreadAtom = atom(
         const hasActiveWork = get(isWSChatPendingAtom) || isRunActive(get(activeRunAtom));
         if (canCommit && (hasActiveWork || !canCommit())) return false;
         // A reconnecting run is left, and a run waiting only on cards is
-        // parked, not stopped, so there is nothing to confirm. Nor for a run
-        // waiting only on PDF fetches, which finish in Zotero anyway.
+        // parked, not stopped, so there is nothing to confirm.
         const leaveRunId = leavableRunId(get);
         const parkRunId = leaveRunId ? null : parkableRunId(get);
-        const skipConfirm = !!leaveRunId || !!parkRunId || pdfFetchWaitRunId(get) !== null;
-        if (hasActiveWork && !skipConfirm && !confirmInterruptActiveRun(
+        if (hasActiveWork && !leaveRunId && !parkRunId && !confirmInterruptActiveRun(
             'Switch chat?',
             'Beaver is still generating a response in this chat. Switching chats will stop it.',
             'Switch Chat',

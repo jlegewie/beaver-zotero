@@ -148,7 +148,6 @@ vi.mock('../../../react/atoms/agentRunAtoms', async () => {
         isWSConnectedAtom: atom(false),
         isWSReadyAtom: atom(false),
         parkableRunId: () => null,
-        pdfFetchWaitRunId: () => null,
     };
 });
 

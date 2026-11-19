@@ -131,7 +131,7 @@ export function createdItemsFullText(result: ToolResult | null | undefined): Cre
 
 /**
  * How many created items got full text, appended to the `create_items` header
- * title ("3 Items · 2 with full text"). `single` words it for a card titled by
+ * title ("3 Items (2 with full text)"). `single` words it for a card titled by
  * its one item. Null when no item was created or the return does not report
  * every created item's attachments.
  */
