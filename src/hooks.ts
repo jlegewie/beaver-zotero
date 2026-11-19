@@ -31,6 +31,7 @@ import { InstancePreferences } from './services/instancePreferences';
 import { registerBeaverProtocolHandler, unregisterBeaverProtocolHandler } from "./services/protocolHandler";
 import { BeaverUIFactory } from "./ui/ui";
 import { openTable } from "./ui/openTable";
+import { prepareRendererBundle } from "./ui/rendererBundle";
 import { cleanupBeaverTabs, initBeaverTabs, recoverTabsAfterBeaverTabs, restoreBeaverTabs } from "./ui/beaverTabs";
 import { cleanupTableTabs, initTableTabs } from "./ui/tableTab";
 import {
@@ -334,6 +335,9 @@ async function onStartup() {
     initBeaverTabs();
     initTableTabs((ref, options) => openTable(ref, options));
     initTableWindows((ref) => openTable(ref, { openIn: 'window' }));
+    // The first window's renderer waits for Zotero's UI; compiling its bundle
+    // now, off the main thread, overlaps the two.
+    void prepareRendererBundle();
 
     await Promise.all([
         Zotero.initializationPromise,

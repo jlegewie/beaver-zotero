@@ -293,6 +293,8 @@ describe('hooks auth lock shutdown cleanup', () => {
         vi.resetModules();
         vi.clearAllMocks();
         setupGlobals();
+        // No `compileScript`: renderers load their bundle with a script tag.
+        (globalThis as any).ChromeUtils = {};
         mockDisposeMuPDFWorker.mockResolvedValue(undefined);
     });
 

@@ -37,6 +37,8 @@ beforeEach(() => {
     prefs.values = {};
     (Zotero as any).Reader = { onChangeSidebarWidth: null };
     (globalThis as any).ztoolkit = { log: vi.fn() };
+    // No `compileScript`: renderers load their bundle with a script tag.
+    (globalThis as any).ChromeUtils = {};
 });
 afterEach(() => { for (const dom of doms.splice(0)) dom.window.close(); });
 
