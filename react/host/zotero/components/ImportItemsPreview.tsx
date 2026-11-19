@@ -27,7 +27,7 @@ import { revealSource } from '../../../utils/sourceUtils';
 import { selectCollection, selectLibrary } from '../../../utils/selectItem';
 import { usePdfFetchStatus } from '../../../hooks/useBackgroundTasks';
 import { enrichmentNote, importSourceBadge, importSourceDetail } from '../../../utils/importItemDisplay';
-import { shortenActionError } from './agentActionViewHelpers';
+import { fullTextRowLabel, shortenActionError } from './agentActionViewHelpers';
 import { resolveLibraryRef } from '../../../../src/utils/libraryIdentity';
 
 type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error' | 'awaiting';
@@ -45,6 +45,13 @@ interface ImportItemsPreviewProps {
     actions: AgentAction[];
     /** Batch status of the card; a declined batch strikes every row. */
     status?: ActionStatus;
+    /**
+     * Whether the `create_items` call is still open. Rows show a running PDF
+     * fetch or snapshot only then: Beaver stops following them once it returns.
+     */
+    isCallOpen?: boolean;
+    /** Full text of each created item by Zotero key, from the call's return. */
+    fullTextByKey?: ReadonlyMap<string, string | null>;
 }
 
 const Badge: React.FC<{ label: string; caution?: boolean; tooltip?: string }> = ({ label, caution, tooltip }) => {
@@ -192,7 +199,13 @@ const ImportItemDetails: React.FC<{
 };
 
 /** One `import_item` row; a component so it can subscribe to its background task. */
-const ImportItemRow: React.FC<{ action: AgentAction; cardStatus?: ActionStatus }> = ({ action, cardStatus }) => {
+const ImportItemRow: React.FC<{
+    action: AgentAction;
+    cardStatus?: ActionStatus;
+    isCallOpen: boolean;
+    /** The item's full text from the call's return; undefined when it does not say. */
+    fullText: string | null | undefined;
+}> = ({ action, cardStatus, isCallOpen, fullText }) => {
     const data = action.proposed_data as ImportItemProposedData;
     const result = action.result_data as ImportItemResultData | undefined;
     const status = action.status as ActionStatus;
@@ -200,7 +213,8 @@ const ImportItemRow: React.FC<{ action: AgentAction; cardStatus?: ActionStatus }
     const { openItemMenu, itemMenu } = useItemContextMenu();
 
     const applied = status === 'applied' && !!result?.zotero_key;
-    const attachmentTask = usePdfFetchStatus(applied ? result?.library_id : undefined, applied ? result?.zotero_key : undefined);
+    const followsFetch = applied && isCallOpen;
+    const attachmentTask = usePdfFetchStatus(followsFetch ? result?.library_id : undefined, followsFetch ? result?.zotero_key : undefined);
     const createdRef = applied ? { library_id: result!.library_id, zotero_key: result!.zotero_key, library_ref: result!.library_ref } : null;
 
     const json = importItemDisplayJson(data);
@@ -292,6 +306,11 @@ const ImportItemRow: React.FC<{ action: AgentAction; cardStatus?: ActionStatus }
                         </Tooltip>
                     )}
                     {errorText && <div className="font-color-secondary text-sm">{errorText}</div>}
+                    {applied && !file && fullText !== undefined && (
+                        <span className="text-sm px-15 rounded-md bg-chip font-color-secondary border-quinary" style={{ alignSelf: 'flex-start' }}>
+                            {fullTextRowLabel(fullText)}
+                        </span>
+                    )}
                     {attachmentTask.isLoading && (
                         <div className="display-flex items-center gap-1 font-color-secondary text-sm">
                             <Spinner size={12} />
@@ -414,7 +433,7 @@ const DestinationBar: React.FC<{ destination: Destination }> = ({ destination })
  * Approval card and run view for `import_item` actions (create_items v2).
  * Rows render the item JSON the user is approving: what gets written.
  */
-export const ImportItemsPreview: React.FC<ImportItemsPreviewProps> = ({ actions, status }) => {
+export const ImportItemsPreview: React.FC<ImportItemsPreviewProps> = ({ actions, status, isCallOpen = false, fullTextByKey }) => {
     // Citation imports name no destination: they go wherever the user is when clicking.
     const destination = destinationOf(actions[0]?.proposed_data as ImportItemProposedData | undefined);
     return (
@@ -422,7 +441,13 @@ export const ImportItemsPreview: React.FC<ImportItemsPreviewProps> = ({ actions,
             {destination && <DestinationBar destination={destination} />}
             <div className="display-flex flex-col gap-3">
                 {actions.map((action) => (
-                    <ImportItemRow key={action.id} action={action} cardStatus={status} />
+                    <ImportItemRow
+                        key={action.id}
+                        action={action}
+                        cardStatus={status}
+                        isCallOpen={isCallOpen}
+                        fullText={action.result_data?.zotero_key ? fullTextByKey?.get(action.result_data.zotero_key) : undefined}
+                    />
                 ))}
             </div>
         </div>
