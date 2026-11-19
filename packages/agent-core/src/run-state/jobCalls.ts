@@ -89,7 +89,7 @@ export type FillCallState =
 
 /**
  * A fill tool call's line: the verb, the table's title, and what follows the
- * title (`": 45 of 150 papers · 3 failed"`, `" on Office iMac"`).
+ * title (`": 45 of 150 items · 3 failed"`, `" on Office iMac"`).
  */
 export interface FillCallLine {
     label: string;
@@ -98,15 +98,15 @@ export interface FillCallLine {
 }
 
 function countsText({ filled, total, failed }: FillCounts): string {
-    const papers = `${filled.toLocaleString('en-US')} of ${total.toLocaleString('en-US')} ${total === 1 ? 'paper' : 'papers'}`;
-    return failed > 0 ? `${papers} · ${failed.toLocaleString('en-US')} failed` : papers;
+    const items = `${filled.toLocaleString('en-US')} of ${total.toLocaleString('en-US')} ${total === 1 ? 'item' : 'items'}`;
+    return failed > 0 ? `${items} · ${failed.toLocaleString('en-US')} failed` : items;
 }
 
 /**
- * The line of a fill tool call: "Filling *Soil carbon*: 45 of 150 papers ·
+ * The line of a fill tool call: "Filling *Soil carbon*: 45 of 150 items ·
  * 3 failed", "Filling *Soil carbon* on *Office iMac*", "Filled *Soil carbon*:
- * 147 of 150 papers", "Stopped filling *Soil carbon*: 60 of 150 papers",
- * "Fill interrupted: 60 of 150 papers".
+ * 147 of 150 items", "Stopped filling *Soil carbon*: 60 of 150 items",
+ * "Fill interrupted: 60 of 150 items".
  */
 export function fillCallLine(state: FillCallState, title: string | null): FillCallLine {
     switch (state.kind) {
@@ -185,30 +185,4 @@ export function fillStateFromRecord(fill: TableFillRecord): FillCallState {
         ? 'interrupted'
         : readsAsStopped(fill.stopped_by, fill.rows_not_started) ? 'stopped' : 'done';
     return { kind, filled: fill.rows_filled, total: fill.rows, failed: fill.rows_failed };
-}
-
-/**
- * A finished fill as a job snapshot, from the result its job call stored, so
- * the fill's copy (`resultSummary`, `failedRowsLink`) reads it as it reads a
- * live job.
- */
-export function fillSnapshotFromResult(result: JobResult, title = ''): TableFillJobSnapshot {
-    const progress = result.progress;
-    return {
-        job_id: result.job_id,
-        plan_id: '',
-        table: { libraryID: 0, key: '', title },
-        origin: { kind: 'agent' },
-        state: 'done',
-        rows_total: progress.rows_total,
-        rows_done: progress.rows_done,
-        rows_failed: progress.rows_failed,
-        in_flight: 0,
-        credits_charged: progress.credits_charged,
-        credits_planned: progress.credits_planned,
-        balance: null,
-        started_at: 0,
-        seconds_left: null,
-        result: result.result,
-    };
 }

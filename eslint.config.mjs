@@ -431,10 +431,8 @@ export default tseslint.config(
             // getHost(), not the Zotero global. The label layer it calls lives in
             // the core and is covered by the stricter block below.
             "react/components/agentRuns/ToolCallPartView.tsx",
-            // The table write card and its fill receipt: open tables through
-            // getHost().navigation.
+            // The table write card: opens tables through getHost().navigation.
             "react/components/agentRuns/TableToolCallView.tsx",
-            "react/components/agentRuns/TableFillReceipt.tsx",
             // Column type tags, option chips and source icons, shared by the
             // table card and the table tool card body.
             "react/components/tables/columnTypes.tsx",

@@ -146,10 +146,3 @@ export interface StoredJobCall {
  * window that has been waiting on the job resumes the run.
  */
 export const JOB_CALL_STORED_EVENT = 'job-call:stored';
-
-/**
- * Published on the instance runtime when the set of jobs some window waits on
- * changes; carries their job ids. A fill's receipt offers Stop only while no
- * window waits on it (Stop is then in that window's composer).
- */
-export const JOB_WAITERS_CHANGED_EVENT = 'job-call:waiters';

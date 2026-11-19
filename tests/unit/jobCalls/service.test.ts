@@ -232,21 +232,3 @@ describe("the job-call list", () => {
         expect(h.rows.get("thread-1/call-1")?.result).toMatchObject({ job_id: "job-1" });
     });
 });
-
-describe("the windows waiting on a job", () => {
-    it("tells every window which jobs some window waits on, until it stops or closes", () => {
-        const waiters = vi.fn();
-        const service = new InstanceJobCalls({ onWaitersChanged: waiters } as unknown as JobCallDeps);
-        service.setWaiting("window-1", "job-1");
-        service.setWaiting("window-2", "job-1");
-        expect(service.waitedJobs()).toEqual(["job-1"]);
-        service.setWaiting("window-1", null);
-        expect(service.waitedJobs()).toEqual(["job-1"]);
-        service.setWaiting("window-2", null);
-        expect(service.waitedJobs()).toEqual([]);
-        expect(waiters.mock.calls.map(([ids]) => ids)).toEqual([["job-1"], ["job-1"], ["job-1"], []]);
-        // An unchanged wait tells nobody.
-        service.setWaiting("window-2", null);
-        expect(waiters).toHaveBeenCalledTimes(4);
-    });
-});

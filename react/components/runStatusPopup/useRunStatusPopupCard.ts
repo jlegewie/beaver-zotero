@@ -394,7 +394,7 @@ function useDismissalReset(activeRunId: string | null): void {
 
 /**
  * The fill this window waits on, as the popup shows it: the tool row's line
- * ("Filling *Soil carbon*: 45 of 150 papers") as the activity, and the run
+ * ("Filling *Soil carbon*: 45 of 150 items") as the activity, and the run
  * that parked on it, which reads as running. Null when the window waits on
  * nothing, or once the fill ended during a live run (the run moves on).
  */

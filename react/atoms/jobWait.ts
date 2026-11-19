@@ -1,8 +1,8 @@
 /**
  * The job call this window waits on, the stored results it shows on the open
- * thread's parked calls, and the fill controls a tool call's receipt uses.
- * Kept apart from `jobCalls.ts` so the run atoms and the tool call view can
- * read it without importing the composer's job state.
+ * thread's parked calls, and the table a fill tool call opens. Kept apart
+ * from `jobCalls.ts` so the run atoms and the tool call view can read it
+ * without importing the composer's job state.
  */
 
 import { atom } from 'jotai';
@@ -28,9 +28,6 @@ export interface JobWait {
  * the window leaves the chat, on Stop, and when the resume starts.
  */
 export const jobWaitAtom = atom<JobWait | null>(null);
-
-/** The jobs some window of this Zotero waits on (this one included), by job id. */
-export const waitedJobsAtom = atom<ReadonlySet<string>>(new Set<string>());
 
 /**
  * A run of this window ended: the wait goes on only when the run parked with
@@ -63,8 +60,3 @@ export function chatFillTableKey(snapshot: TableFillJobSnapshot): string | null 
     const ref = libraryRefForLibraryID(snapshot.table.libraryID);
     return ref ? `${ref}-${snapshot.table.key}` : null;
 }
-
-/** Stop a fill this device runs: rows in flight finish, no new ones start. */
-export const stopChatFillAtom = atom(null, (_get, _set, jobId: string) => {
-    Zotero.Beaver?.tableFills?.stop(jobId);
-});

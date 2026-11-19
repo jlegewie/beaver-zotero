@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /**
- * The fill line of a table tool call, live or parked alike, and its receipt's
- * Stop: shown for a fill this device runs that no window waits on.
+ * The fill line of a table tool call, live or parked alike, and what a click
+ * does before the call returns: it opens the table.
  */
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -13,8 +13,7 @@ import type { TableFillJobSnapshot } from '@beaver/agent-core/protocol/tableFill
 import { threadRunsAtom, type ToolResult } from '@beaver/agent-core/run-state/atoms';
 import { chatFillsAtom, recordChatFill } from '@beaver/agent-core/run-state/tableChatFills';
 import { TableToolCallView } from '../../../react/components/agentRuns/TableToolCallView';
-import { setToolExpandedAtom } from '../../../react/atoms/messageUIState';
-import { jobWaitAtom, waitedJobsAtom } from '../../../react/atoms/jobWait';
+import { setHost } from '@beaver/agent-ui/host';
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root | undefined;
@@ -97,17 +96,17 @@ function line(view: HTMLDivElement): string {
 }
 
 describe('a fill tool call line', () => {
-    it('counts filled papers while the run waits on the fill live', () => {
+    it('counts filled items while the run waits on the fill live', () => {
         const store = createStore();
         store.set(chatFillsAtom, recordChatFill(new Map(), snapshot()));
-        expect(line(render(store, 'in_progress'))).toBe('Filling Trials: 2 of 10 papers · 1 failed');
+        expect(line(render(store, 'in_progress'))).toBe('Filling Trials: 2 of 10 items · 1 failed');
     });
 
     it('keeps counting once the run parked on the fill', () => {
         const store = createStore();
         store.set(threadRunsAtom, [parkedRun()]);
         store.set(chatFillsAtom, recordChatFill(new Map(), snapshot()));
-        expect(line(render(store, 'parked'))).toBe('Filling Trials: 2 of 10 papers · 1 failed');
+        expect(line(render(store, 'parked'))).toBe('Filling Trials: 2 of 10 items · 1 failed');
     });
 
     it('names the device for a fill another device runs', () => {
@@ -119,40 +118,21 @@ describe('a fill tool call line', () => {
     it('reads the result stored on the parked call', () => {
         const store = createStore();
         store.set(threadRunsAtom, [parkedRun({ result: done } as Partial<ParkedDeferral>)]);
-        expect(line(render(store, 'parked'))).toBe('Filled Trials: 10 of 10 papers');
+        expect(line(render(store, 'parked'))).toBe('Filled Trials: 10 of 10 items');
     });
 });
 
-describe('a fill tool call receipt', () => {
-    function expanded(waited: 'here' | 'elsewhere' | null): HTMLDivElement {
+describe('a fill tool call that has not returned', () => {
+    it('opens its table on a click, and expands nothing', () => {
+        const openTable = vi.fn(async () => ({ ok: true as const }));
+        setHost({ navigation: { openTable } as any });
         const store = createStore();
-        store.set(threadRunsAtom, [parkedRun()]);
+        store.set(threadRunsAtom, [parkedRun({ state: { job_id: 'job-1', title: 'Trials', table: 'u-TABLE001' } } as Partial<ParkedDeferral>)]);
         store.set(chatFillsAtom, recordChatFill(new Map(), snapshot()));
-        store.set(setToolExpandedAtom, { key: 'run-1:0:call-1', expanded: true });
-        if (waited === 'here') store.set(jobWaitAtom, { threadId: 'thread-1', runId: 'run-1', toolCallId: 'call-1', jobId: 'job-1' });
-        if (waited === 'elsewhere') store.set(waitedJobsAtom, new Set(['job-1']));
-        return render(store, 'parked');
-    }
-
-    it('offers Stop for a fill no window waits on', () => {
-        const view = expanded(null);
-        expect(view.querySelector('[aria-label="Stop fill"]')).not.toBeNull();
-        expect(view.textContent).toContain('Reading 3 of 10 items');
-    });
-
-    it('leaves Stop to the composer while this window waits on the fill', () => {
-        expect(expanded('here').querySelector('[aria-label="Stop fill"]')).toBeNull();
-    });
-
-    it('leaves Stop to the composer while another window waits on the fill', () => {
-        expect(expanded('elsewhere').querySelector('[aria-label="Stop fill"]')).toBeNull();
-    });
-
-    it('stops the fill from the receipt', () => {
-        const stop = vi.fn();
-        (globalThis as any).Zotero = { ...(globalThis as any).Zotero, Beaver: { ...((globalThis as any).Zotero?.Beaver ?? {}), tableFills: { stop } } };
-        const view = expanded(null);
-        act(() => (view.querySelector('[aria-label="Stop fill"]') as HTMLElement).click());
-        expect(stop).toHaveBeenCalledWith('job-1');
+        const view = render(store, 'parked');
+        act(() => (view.querySelector('button[title="Open table"]') as HTMLElement).click());
+        expect(openTable).toHaveBeenCalledWith('u-TABLE001', expect.anything());
+        expect(view.querySelector('#tool-result-call-1')).toBeNull();
+        setHost({});
     });
 });

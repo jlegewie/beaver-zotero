@@ -7,7 +7,6 @@ import { threadRunsAtom } from '@beaver/agent-core/run-state/atoms';
 import {
     fillCallLine,
     fillCallText,
-    fillSnapshotFromResult,
     fillStateFromRecord,
     fillStateFromResult,
     fillStateFromSnapshot,
@@ -15,7 +14,6 @@ import {
     openJobCallsAtom,
     withStoredJobResult,
 } from '@beaver/agent-core/run-state/jobCalls';
-import { resultSummary } from '@beaver/agent-core/run-state/tableFillCopy';
 
 const fill: JobResult = {
     kind: 'table_fill',
@@ -109,9 +107,9 @@ describe('the fill tool call line', () => {
     const result = (overrides: Record<string, unknown>) => ({ ...fill.result, ...overrides }) as any;
     const text = (state: Parameters<typeof fillCallLine>[0]) => fillCallText(fillCallLine(state, 'Soil carbon studies'));
 
-    it('counts filled papers while this device runs the fill', () => {
-        expect(text(fillStateFromSnapshot(snapshot({})))).toBe('Filling Soil carbon studies: 45 of 150 papers · 3 failed');
-        expect(text(fillStateFromSnapshot(snapshot({ rows_done: 45, rows_failed: 0 })))).toBe('Filling Soil carbon studies: 45 of 150 papers');
+    it('counts filled items while this device runs the fill', () => {
+        expect(text(fillStateFromSnapshot(snapshot({})))).toBe('Filling Soil carbon studies: 45 of 150 items · 3 failed');
+        expect(text(fillStateFromSnapshot(snapshot({ rows_done: 45, rows_failed: 0 })))).toBe('Filling Soil carbon studies: 45 of 150 items');
     });
 
     it('names the device that runs a fill elsewhere, without counts', () => {
@@ -121,16 +119,16 @@ describe('the fill tool call line', () => {
 
     it('reads a finished, stopped and interrupted fill', () => {
         const done = snapshot({ state: 'done', rows_done: 150, rows_failed: 3, result: result({ rows_answered: 147 }) });
-        expect(text(fillStateFromSnapshot(done))).toBe('Filled Soil carbon studies: 147 of 150 papers · 3 failed');
+        expect(text(fillStateFromSnapshot(done))).toBe('Filled Soil carbon studies: 147 of 150 items · 3 failed');
         const stopped = snapshot({ state: 'done', rows_done: 60, rows_failed: 0, result: result({ rows_answered: 60, stopped_by: 'stopped', not_started: { stopped: 90 } }) });
-        expect(text(fillStateFromSnapshot(stopped))).toBe('Stopped filling Soil carbon studies: 60 of 150 papers');
+        expect(text(fillStateFromSnapshot(stopped))).toBe('Stopped filling Soil carbon studies: 60 of 150 items');
         const interrupted: JobResult = {
             ...fill,
             interrupted: true,
             progress: { ...fill.progress, rows_total: 150, rows_done: 60, rows_failed: 0 },
             result: result({ rows_answered: 60, stopped_by: 'shutdown' }),
         };
-        expect(text(fillStateFromResult(interrupted))).toBe('Fill interrupted: 60 of 150 papers');
+        expect(text(fillStateFromResult(interrupted))).toBe('Fill interrupted: 60 of 150 items');
     });
 
     it('reads a Stop that came once every paper had started as filled', () => {
@@ -140,14 +138,9 @@ describe('the fill tool call line', () => {
 
     it('reads a returned call from its recorded fill', () => {
         const record = { rows: 150, rows_filled: 147, rows_failed: 3, rows_not_started: {}, stopped_by: null } as any;
-        expect(text(fillStateFromRecord(record))).toBe('Filled Soil carbon studies: 147 of 150 papers · 3 failed');
+        expect(text(fillStateFromRecord(record))).toBe('Filled Soil carbon studies: 147 of 150 items · 3 failed');
         expect(fillStateFromRecord({ ...record, stopped_by: 'stopped', rows_not_started: { stopped: 2 } }).kind).toBe('stopped');
         expect(fillStateFromRecord({ ...record, stopped_by: 'shutdown' }).kind).toBe('interrupted');
     });
 
-    it('reads a stored fill result with the fill copy', () => {
-        const stored = fillSnapshotFromResult(fill, 'Trials');
-        expect(stored).toMatchObject({ state: 'done', rows_total: 12, table: { title: 'Trials' } });
-        expect(resultSummary(stored)).toMatch(/12/);
-    });
 });

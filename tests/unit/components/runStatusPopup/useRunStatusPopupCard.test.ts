@@ -227,7 +227,7 @@ describe('while this window waits on a table fill', () => {
         store.set(activeRunAtom, run({ model_messages: [{ kind: 'response', run_id: 'run-1', parts: [fillCall] }] }));
         waitOnFill();
         mount();
-        expect(latest).toMatchObject({ kind: 'running', statusLine: 'Filling Trials: 4 of 10 papers' });
+        expect(latest).toMatchObject({ kind: 'running', statusLine: 'Filling Trials: 4 of 10 items' });
     });
 
     it('reports the run finished when its fill returned within the live wait', () => {
@@ -268,7 +268,7 @@ describe('while this window waits on a table fill', () => {
             store.set(activeRunAtom, null);
         });
         expect(store.get(runStatusPopupCompletionAtom)).toBeNull();
-        expect(latest).toMatchObject({ kind: 'running', runId: 'run-1', statusLine: 'Filling Trials: 4 of 10 papers' });
+        expect(latest).toMatchObject({ kind: 'running', runId: 'run-1', statusLine: 'Filling Trials: 4 of 10 items' });
     });
 });
 

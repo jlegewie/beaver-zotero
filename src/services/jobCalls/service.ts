@@ -76,8 +76,6 @@ export interface JobCallDeps {
     sendable(entry: JobCallEntry, result: JobResult): JobResult | null;
     /** A result was stored on its parked call. */
     onStored(stored: StoredJobCall): void;
-    /** The jobs some window waits on changed (see {@link InstanceJobCalls.setWaiting}). */
-    onWaitersChanged?(jobIds: string[]): void;
     /** Whether the plugin is shutting down: results are kept, not posted. */
     shuttingDown(): boolean;
     setTimer(callback: () => void, ms: number): unknown;
@@ -107,8 +105,6 @@ export class InstanceJobCalls {
     private writes = new Set<Promise<unknown>>();
     private disposed = false;
     private unsubscribeAccount?: () => void;
-    /** The job each window waits on, by window id. */
-    private waiters = new Map<string, string>();
 
     constructor(private readonly deps: JobCallDeps) {}
 
@@ -219,19 +215,6 @@ export class InstanceJobCalls {
             if (pending.entry.userId !== this.deps.userId()) continue;
             this.schedule(pending, 0);
         }
-    }
-
-    /** A window waits on a job (`jobId`), or no longer waits on any (`null`). */
-    setWaiting(windowId: string, jobId: string | null): void {
-        if (jobId ? this.waiters.get(windowId) === jobId : !this.waiters.has(windowId)) return;
-        if (jobId) this.waiters.set(windowId, jobId);
-        else this.waiters.delete(windowId);
-        this.deps.onWaitersChanged?.(this.waitedJobs());
-    }
-
-    /** The jobs some window waits on. */
-    waitedJobs(): string[] {
-        return [...new Set(this.waiters.values())];
     }
 
     /** The job call this device keeps for a tool call, if any. */

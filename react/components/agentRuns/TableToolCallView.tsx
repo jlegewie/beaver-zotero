@@ -6,7 +6,6 @@ import { tableRecordFromMetadata } from '@beaver/agent-core/run-state/tableResul
 import { chatFillsAtom, fillForToolCall } from '@beaver/agent-core/run-state/tableChatFills';
 import {
     fillCallLine,
-    fillSnapshotFromResult,
     fillStateFromRecord,
     fillStateFromSnapshot,
     jobCallFillState,
@@ -17,7 +16,7 @@ import { jobIdOf } from '@beaver/agent-core/protocol/jobCallProtocol';
 import { TOOL_BASE_LABELS } from '@beaver/agent-core/run-state/toolCallRequest';
 import { tableMessages } from './ToolResultView';
 import { TableResultView } from './toolResultViews/TableResultView';
-import { TableFillReceipt } from './TableFillReceipt';
+import { getHost } from '@beaver/agent-ui/host';
 import {
     AlertIcon,
     ArrowDownIcon,
@@ -27,7 +26,7 @@ import {
     TableIcon,
 } from '../icons/icons';
 import { toolExpandedAtom, setToolExpandedAtom } from '../../atoms/messageUIState';
-import { chatFillTableKey, jobWaitAtom, stopChatFillAtom, waitedJobsAtom } from '../../atoms/jobWait';
+import { chatFillTableKey } from '../../atoms/jobWait';
 
 interface TableToolCallViewProps {
     part: ToolCallPart;
@@ -63,11 +62,12 @@ function doneLabel(toolName: string): string | null {
  * receipt under the answer is where the table is opened, filled or undone.
  *
  * A call that fills the table puts the fill's state in its line, live or
- * parked alike: "Filling *title*: 45 of 150 papers", "Filled *title*: 147 of
+ * parked alike: "Filling *title*: 45 of 150 items", "Filled *title*: 147 of
  * 150 papers", "Filling *title* on *device*" for a fill another device runs.
- * Expanding shows the fill's receipt (with Stop for a fill this device runs
- * that no window waits on) and the call's summary as it was recorded. Status
- * notices (declined, partial, rejected rows) sit under the label.
+ * Until the call returns, clicking the line opens the table, whose own Fill
+ * control can stop the fill; once it returns, the line expands to the call's
+ * summary as it was recorded. Status notices (declined, partial, rejected
+ * rows) sit under the label.
  */
 export const TableToolCallView: React.FC<TableToolCallViewProps> = ({
     part,
@@ -108,24 +108,21 @@ export const TableToolCallView: React.FC<TableToolCallViewProps> = ({
     // A fill known only to have started (Zotero restarted since) does not spin.
     const fillRunning = fillState?.kind === 'running' || fillState?.kind === 'elsewhere';
 
-    // The receipt: the live job, else the stored result read as one.
-    const receiptSnapshot = fill?.snapshot
-        ?? (jobCall?.result && !hasResult ? fillSnapshotFromResult(jobCall.result, jobCall.state?.title) : null);
-    const tableKey = record?.reference.key
-        ?? jobCall?.state?.table
-        ?? (fill ? chatFillTableKey(fill.snapshot) : null);
-    // Stop is in the composer of the window that waits on the fill; the
-    // receipt offers it only while no window waits.
-    const jobWait = useAtomValue(jobWaitAtom);
-    const waitedJobs = useAtomValue(waitedJobsAtom);
-    const stopFill = useSetAtom(stopChatFillAtom);
-    const waited = isLive || jobWait?.toolCallId === part.tool_call_id || (!!fill && waitedJobs.has(fill.snapshot.job_id));
-    const canStop = !!fill && fill.snapshot.state !== 'done' && !waited;
-
-    const canExpand = record !== null || receiptSnapshot !== null;
+    const canExpand = record !== null;
     const isExpanded = (storedExpanded ?? false) && canExpand;
-    const toggleExpanded = () => {
-        if (canExpand) setExpanded({ key: expansionKey, expanded: !isExpanded });
+    // A fill whose call has not returned opens its table: its Fill control
+    // shows the fill and can stop it.
+    const openKey = !record && fillState ? (jobCall?.state?.table ?? (fill ? chatFillTableKey(fill.snapshot) : null)) : null;
+    const canClick = canExpand || openKey !== null;
+    const handleClick = (event: React.MouseEvent) => {
+        if (canExpand) {
+            setExpanded({ key: expansionKey, expanded: !isExpanded });
+            return;
+        }
+        if (!openKey) return;
+        const origin = (event.currentTarget as Element).ownerDocument?.defaultView ?? null;
+        // The host reports a table that cannot be opened.
+        void getHost().navigation?.openTable?.(openKey, origin)?.catch(() => undefined);
     };
 
     const isShimmering = fillRunning ? fillState?.kind === 'running' : isLive;
@@ -133,7 +130,7 @@ export const TableToolCallView: React.FC<TableToolCallViewProps> = ({
     const getIcon = () => {
         if (fillRunning) return Spinner;
         if (isExpanded) return ArrowDownIcon;
-        if (isHovered && canExpand) return ArrowRightIcon;
+        if (isHovered && canClick) return ArrowRightIcon;
         if (fillState?.kind === 'stopped' || fillState?.kind === 'interrupted') return AlertIcon;
         if (fillState) return TableIcon;
         if (isInProgress && (runStatus === 'canceled' || runStatus === 'error')) return AlertIcon;
@@ -141,7 +138,7 @@ export const TableToolCallView: React.FC<TableToolCallViewProps> = ({
         if (isFailed) return AlertIcon;
         return TableIcon;
     };
-    const iconClassName = isFailed && !(isHovered && canExpand) && !isExpanded ? 'color-error' : undefined;
+    const iconClassName = isFailed && !(isHovered && canClick) && !isExpanded ? 'color-error' : undefined;
 
     // The line renders the call as recorded, title included; only a call
     // without a record falls back to the title the model asked for.
@@ -165,12 +162,13 @@ export const TableToolCallView: React.FC<TableToolCallViewProps> = ({
             <div className={`display-flex flex-row py-15 ${isExpanded ? 'bg-senary border-bottom-quinary' : ''}`}>
                 <button
                     type="button"
-                    className={`variant-ghost-secondary display-flex flex-row py-15 gap-2 flex-1 text-left min-w-0 ${canExpand ? 'cursor-pointer' : ''}`}
+                    className={`variant-ghost-secondary display-flex flex-row py-15 gap-2 flex-1 text-left min-w-0 ${canClick ? 'cursor-pointer' : ''}`}
                     style={{ fontSize: '0.95rem', background: 'transparent', border: 0, padding: 0 }}
                     aria-expanded={isExpanded}
                     aria-controls={`tool-result-${part.tool_call_id}`}
-                    onClick={toggleExpanded}
-                    disabled={!canExpand}
+                    title={openKey ? 'Open table' : undefined}
+                    onClick={handleClick}
+                    disabled={!canClick}
                     onMouseEnter={() => setIsHovered(true)}
                     onMouseLeave={() => setIsHovered(false)}
                 >
@@ -197,16 +195,9 @@ export const TableToolCallView: React.FC<TableToolCallViewProps> = ({
                 </button>
             </div>
 
-            {isExpanded && (
+            {isExpanded && record && (
                 <div id={`tool-result-${part.tool_call_id}`} className="display-flex flex-col">
-                    {receiptSnapshot && (!recordFill || recordFill.status === 'running') && (
-                        <TableFillReceipt
-                            snapshot={receiptSnapshot}
-                            tableKey={tableKey}
-                            onStop={canStop ? () => stopFill(fill!.snapshot.job_id) : undefined}
-                        />
-                    )}
-                    {record && <TableResultView view={{ view_type: 'table', record }} />}
+                    <TableResultView view={{ view_type: 'table', record }} />
                 </div>
             )}
         </div>

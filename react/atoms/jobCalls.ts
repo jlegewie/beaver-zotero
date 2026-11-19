@@ -17,12 +17,7 @@
 import { atom } from 'jotai';
 import { selectAtom } from 'jotai/utils';
 import { logger } from '@beaver/agent-core/platform/logger';
-import {
-    JOB_CALL_STORED_EVENT,
-    JOB_WAITERS_CHANGED_EVENT,
-    jobIdOf,
-    type StoredJobCall,
-} from '@beaver/agent-core/protocol/jobCallProtocol';
+import { JOB_CALL_STORED_EVENT, jobIdOf, type StoredJobCall } from '@beaver/agent-core/protocol/jobCallProtocol';
 import { activeRunAtom, currentThreadIdAtom, getRunToolResults } from '@beaver/agent-core/run-state/atoms';
 import { isStoppedJobResult, openJobCallsAtom } from '@beaver/agent-core/run-state/jobCalls';
 import { chatFillsAtom } from '@beaver/agent-core/run-state/tableChatFills';
@@ -32,7 +27,7 @@ import { tryGetWindowRuntime } from '../runtime/windowRuntime';
 import { store } from '../store';
 import { userIdAtom } from './auth';
 import { requestJobResume, waitsOnlyOnJobs } from './agentRunAtoms';
-import { applyStoredJobResultAtom, jobWaitAtom, waitedJobsAtom } from './jobWait';
+import { applyStoredJobResultAtom, jobWaitAtom } from './jobWait';
 import { isThreadParkedAtom } from './parkedRuns';
 import { watchChatFills } from './tableChatFills';
 
@@ -197,17 +192,6 @@ export function watchJobCalls(): void {
             if (wait && wait.threadId !== store.get(currentThreadIdAtom)) store.set(jobWaitAtom, null);
         });
         Zotero.Beaver.runtime.addWindowCleanup(runtime, unsubscribeThread);
-        // Tell the other windows which fill this one waits on, and follow theirs.
-        Zotero.Beaver.runtime.subscribeWindow(runtime, JOB_WAITERS_CHANGED_EVENT, (jobIds: string[]) => {
-            store.set(waitedJobsAtom, new Set(jobIds));
-        });
-        store.set(waitedJobsAtom, new Set(Zotero.Beaver.jobCalls?.waitedJobs() ?? []));
-        const reportWait = () => Zotero.Beaver.jobCalls?.setWaiting(runtime.id, store.get(jobWaitAtom)?.jobId ?? null);
-        const unsubscribeWait = store.sub(jobWaitAtom, reportWait);
-        Zotero.Beaver.runtime.addWindowCleanup(runtime, () => {
-            unsubscribeWait();
-            Zotero.Beaver.jobCalls?.setWaiting(runtime.id, null);
-        });
         watching = true;
     } catch (error) {
         logger(`jobCalls: could not follow job waits: ${String(error)}`, 1);

@@ -7,7 +7,6 @@
 import { logger } from '@beaver/agent-core/platform/logger';
 import {
     JOB_CALL_STORED_EVENT,
-    JOB_WAITERS_CHANGED_EVENT,
     isJobKind,
     type JobDevice,
     type JobResult,
@@ -145,7 +144,6 @@ export function createInstanceJobCalls(): InstanceJobCalls {
         deriveInterrupted,
         sendable,
         onStored: announceStored,
-        onWaitersChanged: (jobIds) => Zotero.Beaver.runtime.publish(JOB_WAITERS_CHANGED_EVENT, jobIds),
         shuttingDown: () => !!Zotero.__beaverShuttingDown,
         setTimer: (callback, ms) => setTimeout(callback, ms),
         clearTimer: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),

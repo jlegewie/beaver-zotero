@@ -1514,12 +1514,6 @@
     border-bottom: 1px solid var(--fill-quinary);
 }
 
-/* The fill a table tool call started, in its expanded row. The rule along
-   the top edge draws rows filled and rows that could not be read. */
-[id^="beaver-pane-"] .table-fill-receipt {
-    position: relative;
-}
-
 [id^="beaver-pane-"] .table-fill-progress-rule {
     position: absolute;
     top: 0;
@@ -1546,32 +1540,6 @@
 [id^="beaver-pane-"] .table-fill-progress-rule-stopping .table-fill-progress-filled,
 [id^="beaver-pane-"] .table-fill-progress-rule-stopping .table-fill-progress-failed {
     opacity: 0.4;
-}
-
-[id^="beaver-pane-"] .table-fill-receipt-warning {
-    color: var(--tag-orange-primary);
-}
-
-/* A follow-up in the receipt: a link, not a button. */
-[id^="beaver-pane-"] .table-fill-receipt-link {
-    align-self: flex-start;
-    font: inherit;
-    font-weight: 600;
-    color: var(--accent-blue);
-    background: none;
-    border: 0;
-    padding: 0;
-    cursor: pointer;
-}
-
-[id^="beaver-pane-"] .table-fill-receipt-link:hover {
-    text-decoration: underline;
-}
-
-[id^="beaver-pane-"] .table-fill-receipt-link:focus-visible {
-    outline: 2px solid var(--accent-blue);
-    outline-offset: 1px;
-    border-radius: 2px;
 }
 
 /* An artifact at the end of a run, a note or a table: a glyph, two lines

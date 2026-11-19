@@ -55,7 +55,7 @@ import { isCreateCard, isFillCard, type TableCardChoice } from '@beaver/agent-co
 import { chatFillsAtom } from '@beaver/agent-core/run-state/tableChatFills';
 import { openJobCallsAtom } from '@beaver/agent-core/run-state/jobCalls';
 import { jobIdOf } from '@beaver/agent-core/protocol/jobCallProtocol';
-import { jobWaitAtom, stopChatFillAtom } from '../../atoms/jobWait';
+import { jobWaitAtom } from '../../atoms/jobWait';
 import { runningChatJobsAtom } from '../../atoms/jobCalls';
 import { resolveItems as resolveCardItems, resolveLibraryScope } from '../../components/tables/card/liveSources';
 import { sendComposedMessageAtom } from '../../atoms/actions';
@@ -764,10 +764,10 @@ async function settleIfAsked(request: any): Promise<SettleReason | null> {
 /**
  * The chat fills this renderer follows, the fill this window waits on
  * (`jobWait`), the open parked run's job calls, and the composer's fill
- * jobs. Body: { stop?: jobId } stops a fill, as the receipt's Stop does.
+ * jobs. Body: { stop?: jobId } stops a fill, as the table's Stop does.
  */
 export async function handleTestTableFillProgressHttpRequest(request?: any) {
-    if (typeof request?.stop === 'string') store.set(stopChatFillAtom, request.stop);
+    if (typeof request?.stop === 'string') Zotero.Beaver.tableFills?.stop(request.stop);
     const all = store.get(chatFillsAtom);
     const fills = Array.from(all.values()).map((fill) => ({
         job_id: fill.snapshot.job_id,
