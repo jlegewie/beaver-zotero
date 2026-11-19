@@ -6,13 +6,18 @@
  * can read a file — attachment handlers today, external image files later —
  * can produce a vision-ready PNG/JPEG.
  *
- * Decoding uses `createImageBitmap` + `OffscreenCanvas` on the main window
- * (both available in Zotero's main window). `<img>`/`<canvas>` elements are
- * avoided because the main window is XUL, where `document.head` is null and
- * element-based image loading fails.
+ * `processImageBytes` routes to the plugin-realm service (`addon.images`), so
+ * the work is owned by the plugin rather than by the window that asked for it.
+ * Decoding uses `createImageBitmap` + `OffscreenCanvas` borrowed from the
+ * window `getImageWindow` returns, since the plugin realm has neither.
+ * `<img>`/`<canvas>` elements are avoided because the main window is XUL,
+ * where `document.head` is null and element-based image loading fails.
  */
 
 import { logger } from '@beaver/agent-core/platform/logger';
+import { getDomWindow } from '../../prosemirror/dom';
+
+declare const Services: any;
 
 /** Default maximum output dimension (longest edge) in pixels. */
 export const DEFAULT_MAX_IMAGE_DIMENSION = 1568;
@@ -87,6 +92,36 @@ export class ImageProcessingError extends Error {
         super(message);
         this.name = 'ImageProcessingError';
     }
+}
+
+// The service throws errors built from the plugin realm's classes, which
+// `instanceof` against a renderer bundle's copy of these classes never
+// matches, so callers classify them by name.
+
+/** Whether `error` is an `UnsupportedImageFormatError` from any bundle. */
+export function isUnsupportedImageFormatError(error: unknown): error is UnsupportedImageFormatError {
+    return (error as { name?: unknown } | null)?.name === 'UnsupportedImageFormatError';
+}
+
+/** Whether `error` is an `ImageDecodeError` from any bundle. */
+export function isImageDecodeError(error: unknown): error is ImageDecodeError {
+    return (error as { name?: unknown } | null)?.name === 'ImageDecodeError';
+}
+
+/**
+ * The window whose `createImageBitmap` and `OffscreenCanvas` decode images:
+ * the application's hidden window, which Zotero keeps for its whole lifetime
+ * whatever windows are open, else any open window. A visible window can close
+ * mid-decode, and a closed window's pending work never settles.
+ */
+export function getImageWindow(): any {
+    try {
+        const hidden = typeof Services !== 'undefined' ? Services.appShell?.hiddenDOMWindow : null;
+        if (hidden?.createImageBitmap && hidden.OffscreenCanvas) return hidden;
+    } catch {
+        // No hidden window in this application.
+    }
+    return getDomWindow();
 }
 
 export interface ProcessImageOptions {
@@ -388,6 +423,19 @@ async function encodeImage(
 }
 
 /**
+ * Decode, downscale, and re-encode an image in the plugin-realm image service
+ * (`addon.images`); without the service (unit tests), in this realm.
+ */
+export function processImageBytes(
+    bytes: Uint8Array,
+    mimeType: string,
+    options: ProcessImageOptions,
+): Promise<ProcessedImage> {
+    const owner = Zotero.Beaver?.images;
+    return owner ? owner.process(bytes, mimeType, options) : processImageBytesHere(bytes, mimeType, options);
+}
+
+/**
  * Decode, downscale, and re-encode an image.
  *
  * - Never upscales; `maxWidth`/`maxHeight` only bound the output.
@@ -398,7 +446,7 @@ async function encodeImage(
  *   halves dimensions up to three times before failing.
  * - Animated sources decode to their first frame.
  */
-export async function processImageBytes(
+async function processImageBytesHere(
     bytes: Uint8Array,
     mimeType: string,
     options: ProcessImageOptions,
@@ -429,9 +477,9 @@ export async function processImageBytes(
     }
     checkpoint('header_dims');
 
-    const win = Zotero.getMainWindow() as any;
+    const win = getImageWindow();
     if (!win) {
-        throw new ImageProcessingError('Main window is not available for image processing');
+        throw new ImageProcessingError('No window is available for image processing');
     }
 
     // Slice out exactly the input byte range — handing `bytes.buffer`
@@ -601,3 +649,8 @@ export async function processImageBytes(
         bitmap.close?.();
     }
 }
+
+/** The in-realm implementation; the image service calls it, other callers use `processImageBytes`. */
+export const imageImplementations = {
+    processImageBytes: processImageBytesHere,
+};

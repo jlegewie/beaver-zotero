@@ -40,11 +40,11 @@ import {
     DEFAULT_MAX_IMAGE_DIMENSION,
     HARD_MAX_IMAGE_DIMENSION,
     MAX_OUTPUT_IMAGE_BYTES,
-    ImageDecodeError,
-    UnsupportedImageFormatError,
+    isImageDecodeError,
+    isUnsupportedImageFormatError,
     processImageBytes,
     uint8ToBase64,
-} from './imageProcessing';
+} from '../images/imageProcessing';
 
 /** Parse a requested dimension: positive finite number clamped to the hard cap. */
 function effectiveMaxDimension(requested: number | undefined): number {
@@ -209,13 +209,13 @@ export async function handleZoteroAttachmentImageRequest(
         } catch (error) {
             // A timeout that fired mid-processing wins over the processing error.
             throwIfTimedOut('image_processing_error_response');
-            if (error instanceof UnsupportedImageFormatError) {
+            if (isUnsupportedImageFormatError(error)) {
                 return errorResponse(
                     `The image file for ${imageKey} has format '${error.mimeType}', which Beaver cannot convert.`,
                     'unsupported_image_format'
                 );
             }
-            if (error instanceof ImageDecodeError) {
+            if (isImageDecodeError(error)) {
                 return errorResponse(
                     `The image file for ${imageKey} could not be decoded (it may be corrupted): ${error.message}`,
                     'decode_failed'

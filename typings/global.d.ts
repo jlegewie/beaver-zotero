@@ -100,6 +100,8 @@ declare namespace Zotero {
         const transactionWatch: import("../src/services/openTransaction").OpenTransactionWatch | undefined;
         let itemImport: import("../src/services/itemImport/service").ItemImportService;
         let exporter: import("../src/services/export/instanceExport").InstanceExport;
+        /** Image decoding and re-encoding; plugin realm, reached from renderers through this slot. */
+        let images: import("../src/services/images/instanceImages").InstanceImages;
         let backgroundTasks: import("../src/utils/backgroundTasks").BackgroundTaskSource;
         let mutations: import("../src/services/libraryMutations").LibraryMutations;
         let syncPause: ReturnType<typeof import("../src/services/syncPause").createSyncPauseService>;

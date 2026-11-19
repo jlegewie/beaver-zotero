@@ -6,12 +6,13 @@
  *   render page via MuPDF (PNG bytes) → drawBBoxOverlayPNG(...) → base64
  * and inspect the result without having a Zotero reader open.
  *
- * Runs in the chrome window. Uses `createImageBitmap` + `OffscreenCanvas`
- * (both available in Zotero's main window) instead of `<img>` / `<canvas>`
- * elements — the main window is XUL, so `document.head` is null and
- * inserting `new Image()` into it fails.
+ * Uses `createImageBitmap` + `OffscreenCanvas` from the image window
+ * (`getImageWindow`) instead of `<img>` / `<canvas>` elements — the main
+ * window is XUL, so `document.head` is null and inserting `new Image()`
+ * into it fails.
  */
 import type { OverlayRect } from "../../beaver-extract/debug/overlayBuilders";
+import { getImageWindow } from "../images/imageProcessing";
 
 /**
  * Draw bbox overlays on a rendered page image.
@@ -32,7 +33,7 @@ export async function drawBBoxOverlayPNG(
     pageHeight: number,
     rects: OverlayRect[],
 ): Promise<Uint8Array> {
-    const win = Zotero.getMainWindow() as any;
+    const win = getImageWindow();
     if (!win || win.closed) throw Object.assign(new Error('Overlay canvas is unavailable'), { code: 'capability_unavailable' });
 
     // Slice out exactly the PNG byte range. Handing `pngBytes.buffer`
