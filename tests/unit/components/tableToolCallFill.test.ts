@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 /**
- * The fill line of a table tool call, live or parked alike, and what a click
- * does before the call returns: it opens the table.
+ * The line of a table tool call: the tool's name, then the table's title or
+ * the fill's status, live or parked alike; and what a click does before the
+ * call returns: it opens the table.
  */
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -80,45 +81,69 @@ function parkedRun(deferral: Partial<ParkedDeferral> = {}): AgentRun {
     } as unknown as AgentRun;
 }
 
-function render(store: ReturnType<typeof createStore>, runStatus: AgentRunStatus, result?: ToolResult): HTMLDivElement {
+function render(
+    store: ReturnType<typeof createStore>,
+    runStatus: AgentRunStatus,
+    result?: ToolResult,
+    call: ToolCallPart = part,
+): HTMLDivElement {
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
     act(() => root!.render(React.createElement(Provider, { store },
-        React.createElement(TableToolCallView, { part, result, runId: 'run-1', responseIndex: 0, runStatus }))));
+        React.createElement(TableToolCallView, { part: call, result, runId: 'run-1', responseIndex: 0, runStatus }))));
     return container;
 }
 
-/** The call's line as it reads: the label, the title, then what follows it. */
+/** The call's line as it reads: the tool's name, then the title or the status. */
 function line(view: HTMLDivElement): string {
-    const [label, title, ...rest] = Array.from(view.querySelector('.truncate')!.children).map((span) => span.textContent ?? '');
-    return `${label} ${title}${rest.join('')}`;
+    return Array.from(view.querySelector('.truncate')!.children).map((span) => span.textContent ?? '').join(' ');
 }
 
-describe('a fill tool call line', () => {
-    it('counts filled items while the run waits on the fill live', () => {
+describe('a table tool call line', () => {
+    it('names the tool in bold and the table after it while the call runs without a fill', () => {
+        const store = createStore();
+        const create = { ...part, tool_name: 'create_table' } as ToolCallPart;
+        const view = render(store, 'in_progress', undefined, create);
+        expect(line(view)).toBe('Create Table Trials');
+        expect(view.querySelector('.truncate')!.children[0].className).toContain('font-medium');
+    });
+
+    it('counts complete items, failed ones included, while the run waits on the fill live', () => {
         const store = createStore();
         store.set(chatFillsAtom, recordChatFill(new Map(), snapshot()));
-        expect(line(render(store, 'in_progress'))).toBe('Filling Trials: 2 of 10 items · 1 failed');
+        expect(line(render(store, 'in_progress'))).toBe('Fill Table: 3 of 10 items complete (1 failed)');
     });
 
     it('keeps counting once the run parked on the fill', () => {
         const store = createStore();
         store.set(threadRunsAtom, [parkedRun()]);
         store.set(chatFillsAtom, recordChatFill(new Map(), snapshot()));
-        expect(line(render(store, 'parked'))).toBe('Filling Trials: 2 of 10 items · 1 failed');
+        expect(line(render(store, 'parked'))).toBe('Fill Table: 3 of 10 items complete (1 failed)');
     });
 
     it('names the device for a fill another device runs', () => {
         const store = createStore();
         store.set(threadRunsAtom, [parkedRun()]);
-        expect(line(render(store, 'parked'))).toBe('Filling Trials on Office iMac');
+        expect(line(render(store, 'parked'))).toBe('Fill Table: running on Office iMac');
     });
 
-    it('reads the result stored on the parked call', () => {
+    it('shows the title for a stored result that completed every item', () => {
         const store = createStore();
         store.set(threadRunsAtom, [parkedRun({ result: done } as Partial<ParkedDeferral>)]);
-        expect(line(render(store, 'parked'))).toBe('Filled Trials: 10 of 10 items');
+        expect(line(render(store, 'parked'))).toBe('Fill Table Trials');
+    });
+
+    it('reads a stopped result stored on the parked call', () => {
+        const store = createStore();
+        const stopped: JobResult = {
+            ...done,
+            stopped: true,
+            progress: { ...done.progress, rows_done: 4, rows_failed: 1 },
+            result: { ...done.result, rows_answered: 3, row_failures: { unreadable: 1 }, stopped_by: 'stopped', not_started: { stopped: 6 } },
+        };
+        store.set(threadRunsAtom, [parkedRun({ result: stopped } as Partial<ParkedDeferral>)]);
+        expect(line(render(store, 'parked'))).toBe('Fill Table: 4 of 10 items complete (stopped, 1 failed)');
     });
 });
 

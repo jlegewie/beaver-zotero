@@ -197,7 +197,7 @@ it("shows a failed table write's status under the title without expanding", asyn
         ),
     );
     const button = container.querySelector<HTMLButtonElement>("button[aria-expanded]")!;
-    expect(button.textContent).toContain("Create table");
+    expect(button.textContent).toContain("Create Table");
     expect(button.textContent).toContain("Study comparison");
     expect(container.querySelector('[role="status"]')?.textContent).toBe(
         "The table was declined. Nothing was created.",

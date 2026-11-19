@@ -5,13 +5,13 @@ import type { JobResult } from '@beaver/agent-core/protocol/jobCallProtocol';
 import type { TableFillJobSnapshot } from '@beaver/agent-core/protocol/tableFillProtocol';
 import { threadRunsAtom } from '@beaver/agent-core/run-state/atoms';
 import {
-    fillCallLine,
-    fillCallText,
     fillStateFromRecord,
     fillStateFromResult,
     fillStateFromSnapshot,
     isStoppedJobResult,
     openJobCallsAtom,
+    tableCallLine,
+    tableCallText,
     withStoredJobResult,
 } from '@beaver/agent-core/run-state/jobCalls';
 
@@ -86,7 +86,7 @@ describe('job calls of the open thread', () => {
     });
 });
 
-describe('the fill tool call line', () => {
+describe('the table tool call line', () => {
     const snapshot = (overrides: Partial<TableFillJobSnapshot>): TableFillJobSnapshot => ({
         job_id: 'job-1',
         plan_id: 'plan-1',
@@ -105,30 +105,45 @@ describe('the fill tool call line', () => {
         ...overrides,
     });
     const result = (overrides: Record<string, unknown>) => ({ ...fill.result, ...overrides }) as any;
-    const text = (state: Parameters<typeof fillCallLine>[0]) => fillCallText(fillCallLine(state, 'Soil carbon studies'));
+    const text = (state: Parameters<typeof tableCallLine>[1], tool = 'fill_table') =>
+        tableCallText(tableCallLine(tool, state, 'Soil carbon studies'));
 
-    it('counts filled items while this device runs the fill', () => {
-        expect(text(fillStateFromSnapshot(snapshot({})))).toBe('Filling Soil carbon studies: 45 of 150 items · 3 failed');
-        expect(text(fillStateFromSnapshot(snapshot({ rows_done: 45, rows_failed: 0 })))).toBe('Filling Soil carbon studies: 45 of 150 items');
+    it('names the tool and the table for a call without a fill', () => {
+        expect(text(null, 'create_table')).toBe('Create Table Soil carbon studies');
+        expect(text(null, 'edit_table')).toBe('Edit Table Soil carbon studies');
+        expect(tableCallLine('edit_table', null, null)).toEqual({ label: 'Edit Table', text: null });
+    });
+
+    it('counts complete items, failed ones included, while this device runs the fill', () => {
+        expect(text(fillStateFromSnapshot(snapshot({})))).toBe('Fill Table: 48 of 150 items complete (3 failed)');
+        expect(text(fillStateFromSnapshot(snapshot({ rows_failed: 0 })), 'create_table')).toBe('Create Table: 48 of 150 items complete');
+        expect(text(fillStateFromSnapshot(snapshot({ state: 'stopping' })))).toBe('Fill Table: 48 of 150 items complete (stopping, 3 failed)');
     });
 
     it('names the device that runs a fill elsewhere, without counts', () => {
-        expect(text({ kind: 'elsewhere', device: 'Office iMac' })).toBe('Filling Soil carbon studies on Office iMac');
-        expect(text({ kind: 'elsewhere' })).toBe('Filling Soil carbon studies');
+        expect(text({ kind: 'elsewhere', device: 'Office iMac' })).toBe('Fill Table: running on Office iMac');
+        expect(text({ kind: 'elsewhere' })).toBe('Fill Table: running');
+        expect(text({ kind: 'started' })).toBe('Fill Table: running');
     });
 
-    it('reads a finished, stopped and interrupted fill', () => {
+    it('shows the title again once every item is complete without failures', () => {
+        const clean = snapshot({ state: 'done', rows_done: 150, rows_failed: 0, result: result({ rows_answered: 150 }) });
+        expect(text(fillStateFromSnapshot(clean))).toBe('Fill Table Soil carbon studies');
+        expect(tableCallLine('fill_table', fillStateFromSnapshot(clean), 'Soil carbon studies')).toEqual({ label: 'Fill Table', text: 'Soil carbon studies' });
+    });
+
+    it('reads a finished fill with failures, a stopped one and an interrupted one', () => {
         const done = snapshot({ state: 'done', rows_done: 150, rows_failed: 3, result: result({ rows_answered: 147 }) });
-        expect(text(fillStateFromSnapshot(done))).toBe('Filled Soil carbon studies: 147 of 150 items · 3 failed');
+        expect(text(fillStateFromSnapshot(done))).toBe('Fill Table: 150 of 150 items complete (3 failed)');
         const stopped = snapshot({ state: 'done', rows_done: 60, rows_failed: 0, result: result({ rows_answered: 60, stopped_by: 'stopped', not_started: { stopped: 90 } }) });
-        expect(text(fillStateFromSnapshot(stopped))).toBe('Stopped filling Soil carbon studies: 60 of 150 items');
+        expect(text(fillStateFromSnapshot(stopped))).toBe('Fill Table: 60 of 150 items complete (stopped)');
         const interrupted: JobResult = {
             ...fill,
             interrupted: true,
-            progress: { ...fill.progress, rows_total: 150, rows_done: 60, rows_failed: 0 },
+            progress: { ...fill.progress, rows_total: 150, rows_done: 62, rows_failed: 2 },
             result: result({ rows_answered: 60, stopped_by: 'shutdown' }),
         };
-        expect(text(fillStateFromResult(interrupted))).toBe('Fill interrupted: 60 of 150 items');
+        expect(text(fillStateFromResult(interrupted), 'create_table')).toBe('Create Table: 62 of 150 items complete (interrupted, 2 failed)');
     });
 
     it('reads a Stop that came once every paper had started as filled', () => {
@@ -136,10 +151,11 @@ describe('the fill tool call line', () => {
         expect(fillStateFromSnapshot(late).kind).toBe('done');
     });
 
-    it('reads a returned call from its recorded fill', () => {
-        const record = { rows: 150, rows_filled: 147, rows_failed: 3, rows_not_started: {}, stopped_by: null } as any;
-        expect(text(fillStateFromRecord(record))).toBe('Filled Soil carbon studies: 147 of 150 items · 3 failed');
-        expect(fillStateFromRecord({ ...record, stopped_by: 'stopped', rows_not_started: { stopped: 2 } }).kind).toBe('stopped');
+    it('reads a returned call from its recorded fill, counting items without input as failed', () => {
+        const record = { rows: 150, rows_filled: 146, rows_failed: 3, rows_without_input: 1, rows_not_started: {}, stopped_by: null } as any;
+        expect(text(fillStateFromRecord(record))).toBe('Fill Table: 150 of 150 items complete (4 failed)');
+        const stopped = { ...record, rows_filled: 50, rows_failed: 0, rows_without_input: 0, stopped_by: 'stopped', rows_not_started: { stopped: 100 } };
+        expect(text(fillStateFromRecord(stopped))).toBe('Fill Table: 50 of 150 items complete (stopped)');
         expect(fillStateFromRecord({ ...record, stopped_by: 'shutdown' }).kind).toBe('interrupted');
     });
 

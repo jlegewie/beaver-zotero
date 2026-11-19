@@ -14,6 +14,7 @@ import { isJobDeferral, type JobDeferral, type JobResult } from '../protocol/job
 import type { TableFillJobSnapshot, TableFillResult } from '../protocol/tableFillProtocol';
 import type { TableFillRecord } from '../protocol/artifactProtocol';
 import { openParkedRunAtom } from './parkedRun';
+import { TOOL_BASE_LABELS } from './toolCallRequest';
 import { readsAsStopped, shownStop } from './tableFillCopy';
 
 /** The open parked run's job calls, in call order. */
@@ -68,19 +69,22 @@ export function isStoppedJobResult(result: JobResult | null | undefined): boolea
 }
 
 // ---------------------------------------------------------------------------
-// The fill's tool call line
+// A table tool call's line
 // ---------------------------------------------------------------------------
 
-/** How far a fill got: items filled of those it works on, and rows that failed. */
+/**
+ * How far a fill got: items complete (answered or failed) of those it works
+ * on, and of those the items that failed.
+ */
 export interface FillCounts {
-    filled: number;
+    complete: number;
     total: number;
     failed: number;
 }
 
 /** What a fill tool call shows: the fill's state, with its counts when known. */
 export type FillCallState =
-    | ({ kind: 'running' } & FillCounts)
+    | ({ kind: 'running'; stopping?: boolean } & FillCounts)
     /** Running on another device: no counts reach this one. */
     | { kind: 'elsewhere'; device?: string | null }
     /** Running, with no counts known here (an older call this renderer no longer follows). */
@@ -88,46 +92,57 @@ export type FillCallState =
     | ({ kind: 'done' | 'stopped' | 'interrupted' } & FillCounts);
 
 /**
- * A fill tool call's line: the verb, the table's title, and what follows the
- * title (`": 45 of 150 items · 3 failed"`, `" on Office iMac"`).
+ * A table tool call's line: the tool's name, then either the table's title or
+ * the call's status. The status takes the title's place while a fill runs
+ * and when it ended short of a clean finish; the title shows otherwise.
  */
-export interface FillCallLine {
+export interface TableCallLine {
+    /** The tool's name, with a colon when a status follows: "Fill Table:". */
     label: string;
-    title: string | null;
-    detail: string | null;
+    /** What follows the label: the status, else the title. */
+    text: string | null;
 }
 
-function countsText({ filled, total, failed }: FillCounts): string {
-    const items = `${filled.toLocaleString('en-US')} of ${total.toLocaleString('en-US')} ${total === 1 ? 'item' : 'items'}`;
-    return failed > 0 ? `${items} · ${failed.toLocaleString('en-US')} failed` : items;
+/** "45 of 150 items complete (stopped, 3 failed)": the phase, then any failures. */
+function countsText({ complete, total, failed }: FillCounts, phase?: string): string {
+    const items = `${complete.toLocaleString('en-US')} of ${total.toLocaleString('en-US')} ${total === 1 ? 'item' : 'items'} complete`;
+    const notes = [phase, failed > 0 ? `${failed.toLocaleString('en-US')} failed` : null].filter(Boolean);
+    return notes.length ? `${items} (${notes.join(', ')})` : items;
 }
 
-/**
- * The line of a fill tool call: "Filling *Soil carbon*: 45 of 150 items ·
- * 3 failed", "Filling *Soil carbon* on *Office iMac*", "Filled *Soil carbon*:
- * 147 of 150 items", "Stopped filling *Soil carbon*: 60 of 150 items",
- * "Fill interrupted: 60 of 150 items".
- */
-export function fillCallLine(state: FillCallState, title: string | null): FillCallLine {
+/** The status of a fill, or null for a clean finish, which shows the title instead. */
+function fillStatus(state: FillCallState): string | null {
     switch (state.kind) {
         case 'running':
-            return { label: 'Filling', title, detail: `: ${countsText(state)}` };
+            return countsText(state, state.stopping ? 'stopping' : undefined);
         case 'elsewhere':
-            return { label: 'Filling', title, detail: state.device ? ` on ${state.device}` : null };
+            return state.device ? `running on ${state.device}` : 'running';
         case 'started':
-            return { label: 'Filling', title, detail: null };
+            return 'running';
         case 'done':
-            return { label: 'Filled', title, detail: `: ${countsText(state)}` };
+            return state.failed > 0 || state.complete < state.total ? countsText(state) : null;
         case 'stopped':
-            return { label: 'Stopped filling', title, detail: `: ${countsText(state)}` };
         case 'interrupted':
-            return { label: 'Fill interrupted', title: null, detail: `: ${countsText(state)}` };
+            return countsText(state, state.kind);
     }
 }
 
-/** A fill line as one string, for surfaces that show plain text (the status popup). */
-export function fillCallText(line: FillCallLine): string {
-    return `${[line.label, line.title].filter(Boolean).join(' ')}${line.detail ?? ''}`;
+/**
+ * The line of a table tool call (`create_table`, `edit_table`, `fill_table`):
+ * "Fill Table: 45 of 150 items complete (3 failed)", "Create Table: 60 of
+ * 150 items complete (stopped)", "Fill Table: running on Office iMac", or,
+ * for a call without a fill or one that filled every item, "Create Table
+ * Soil carbon studies".
+ */
+export function tableCallLine(toolName: string, fill: FillCallState | null, title: string | null): TableCallLine {
+    const label = TOOL_BASE_LABELS[toolName] ?? 'Table';
+    const status = fill ? fillStatus(fill) : null;
+    return status ? { label: `${label}:`, text: status } : { label, text: title };
+}
+
+/** A table call's line as one string, for surfaces that show plain text (the status popup). */
+export function tableCallText(line: TableCallLine): string {
+    return line.text ? `${line.label} ${line.text}` : line.label;
 }
 
 /** How a finished fill reads: interrupted by a quit, stopped early, or done. */
@@ -135,6 +150,26 @@ function endedKind(result: TableFillResult, interrupted = false): 'done' | 'stop
     const stop = shownStop(result);
     if (interrupted || stop === 'shutdown') return 'interrupted';
     return stop ? 'stopped' : 'done';
+}
+
+/** Items complete: the count reported, never below those answered or failed, nor above the total. */
+function completeRows(reported: number, worked: number, total: number): number {
+    return Math.min(total, Math.max(0, reported, worked));
+}
+
+/** A finished fill's state from its last counters and its result. */
+function endedState(
+    progress: Pick<TableFillJobSnapshot, 'rows_done' | 'rows_failed' | 'rows_total'>,
+    result: TableFillResult,
+    interrupted = false,
+): FillCallState {
+    const failed = progress.rows_failed || failedRows(result);
+    return {
+        kind: endedKind(result, interrupted),
+        complete: completeRows(progress.rows_done, result.rows_answered + failed, progress.rows_total),
+        total: progress.rows_total,
+        failed,
+    };
 }
 
 function failedRows(result: TableFillResult): number {
@@ -146,27 +181,18 @@ export function fillStateFromSnapshot(snapshot: TableFillJobSnapshot): FillCallS
     if (snapshot.state !== 'done' || !snapshot.result) {
         return {
             kind: 'running',
-            filled: Math.max(0, snapshot.rows_done - snapshot.rows_failed),
+            stopping: snapshot.state === 'stopping',
+            complete: snapshot.rows_done,
             total: snapshot.rows_total,
             failed: snapshot.rows_failed,
         };
     }
-    return {
-        kind: endedKind(snapshot.result),
-        filled: snapshot.result.rows_answered,
-        total: snapshot.rows_total,
-        failed: snapshot.rows_failed || failedRows(snapshot.result),
-    };
+    return endedState(snapshot, snapshot.result);
 }
 
 /** A fill job's state from the result stored on its parked call. */
 export function fillStateFromResult(result: JobResult): FillCallState {
-    return {
-        kind: endedKind(result.result, result.interrupted),
-        filled: result.result.rows_answered,
-        total: result.progress.rows_total,
-        failed: result.progress.rows_failed || failedRows(result.result),
-    };
+    return endedState(result.progress, result.result, result.interrupted);
 }
 
 /**
@@ -184,5 +210,8 @@ export function fillStateFromRecord(fill: TableFillRecord): FillCallState {
     const kind = fill.stopped_by === 'shutdown'
         ? 'interrupted'
         : readsAsStopped(fill.stopped_by, fill.rows_not_started) ? 'stopped' : 'done';
-    return { kind, filled: fill.rows_filled, total: fill.rows, failed: fill.rows_failed };
+    const failed = fill.rows_failed + (fill.rows_without_input ?? 0);
+    // Every planned item the fill did not leave unstarted was worked on.
+    const notStarted = Object.values(fill.rows_not_started ?? {}).reduce((sum, n) => sum + (n || 0), 0);
+    return { kind, complete: completeRows(fill.rows - notStarted, fill.rows_filled + failed, fill.rows), total: fill.rows, failed };
 }

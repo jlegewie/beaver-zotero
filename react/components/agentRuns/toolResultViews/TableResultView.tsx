@@ -285,8 +285,8 @@ function ColumnRow({ column, progress }: { column: TableRecordColumn; progress: 
  */
 export function TableResultView({ view }: { view: TableView }) {
     const { record } = view;
-    // The card's header already names the tool ("Create table", "Edit
-    // table"), so a change line that only restates it is dropped.
+    // The card's header already names the tool ("Create Table", "Edit
+    // Table"), so a change line that only restates it is dropped.
     const change = /^(created?|read|edited) (the )?table\.?$/i.test(record.change?.trim() ?? "")
         ? null
         : record.change;

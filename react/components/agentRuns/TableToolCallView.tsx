@@ -5,15 +5,14 @@ import { getToolCallStatusFromResult, type ToolResult } from '@beaver/agent-core
 import { tableRecordFromMetadata } from '@beaver/agent-core/run-state/tableResults';
 import { chatFillsAtom, fillForToolCall } from '@beaver/agent-core/run-state/tableChatFills';
 import {
-    fillCallLine,
     fillStateFromRecord,
     fillStateFromSnapshot,
     jobCallFillState,
     openJobCallsAtom,
+    tableCallLine,
     type FillCallState,
 } from '@beaver/agent-core/run-state/jobCalls';
 import { jobIdOf } from '@beaver/agent-core/protocol/jobCallProtocol';
-import { TOOL_BASE_LABELS } from '@beaver/agent-core/run-state/toolCallRequest';
 import { tableMessages } from './ToolResultView';
 import { TableResultView } from './toolResultViews/TableResultView';
 import { getHost } from '@beaver/agent-ui/host';
@@ -48,26 +47,20 @@ function requestedTitle(part: ToolCallPart): string | null {
     }
 }
 
-/** The stream's past-tense line for a call that returned a record. */
-function doneLabel(toolName: string): string | null {
-    if (toolName === 'create_table') return 'Made the table';
-    if (toolName === 'edit_table') return 'Edited the table';
-    if (toolName === 'fill_table') return 'Filled the table';
-    return null;
-}
-
 /**
- * A table write (`create_table`, `edit_table`, `fill_table`) as a plain line
- * in the run's timeline: when it happened, not what to do about it. The
- * receipt under the answer is where the table is opened, filled or undone.
+ * A table write (`create_table`, `edit_table`, `fill_table`) as a line in
+ * the run's timeline, headed like an action card: the tool's name, then the
+ * table's title or the call's status (see `tableCallLine`). The receipt under
+ * the answer is where the table is opened, filled or undone.
  *
- * A call that fills the table puts the fill's state in its line, live or
- * parked alike: "Filling *title*: 45 of 150 items", "Filled *title*: 147 of
- * 150 papers", "Filling *title* on *device*" for a fill another device runs.
- * Until the call returns, clicking the line opens the table, whose own Fill
- * control can stop the fill; once it returns, the line expands to the call's
- * summary as it was recorded. Status notices (declined, partial, rejected
- * rows) sit under the label.
+ * A call that fills the table puts the fill's state in place of the title,
+ * live or parked alike: "Fill Table: 45 of 150 items complete (3 failed)",
+ * "Fill Table: running on Office iMac" for a fill another device runs. A
+ * fill that completed every item shows the title again. Until the call
+ * returns, clicking the line opens the table, whose own Fill control can
+ * stop the fill; once it returns, the line expands to the call's summary as
+ * it was recorded. Status notices (declined, partial, rejected rows) sit
+ * under the label.
  */
 export const TableToolCallView: React.FC<TableToolCallViewProps> = ({
     part,
@@ -145,13 +138,7 @@ export const TableToolCallView: React.FC<TableToolCallViewProps> = ({
     const title = record
         ? (record.reference.title || 'Untitled table')
         : requestedTitle(part) ?? jobCall?.state?.title ?? fill?.snapshot.table.title ?? null;
-    const line = fillState
-        ? fillCallLine(fillState, title)
-        : {
-              label: (record && doneLabel(part.tool_name)) ?? TOOL_BASE_LABELS[part.tool_name] ?? 'Table',
-              title,
-              detail: null,
-          };
+    const line = tableCallLine(part.tool_name, fillState, title);
     const progress = !fillState && isLive ? part.progress : undefined;
 
     return (
@@ -178,9 +165,8 @@ export const TableToolCallView: React.FC<TableToolCallViewProps> = ({
                         </div>
                         <div className="display-flex flex-col min-w-0 gap-1">
                             <div className={`min-w-0 truncate${isShimmering ? ' shimmer-text' : ''}`}>
-                                <span>{line.label}</span>
-                                {line.title && <span className="font-color-secondary ml-15">{line.title}</span>}
-                                {line.detail && <span className="font-color-secondary">{line.detail}</span>}
+                                <span className="font-color-primary font-medium">{line.label}</span>
+                                {line.text && <span className="font-color-secondary ml-15">{line.text}</span>}
                             </div>
                             {progress && (
                                 <span className={`font-color-tertiary text-sm${isInProgress ? ' shimmer-text' : ''}`}>{progress}</span>

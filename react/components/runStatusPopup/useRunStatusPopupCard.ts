@@ -37,6 +37,7 @@ import {
     approvalVerdictInFlightAtom,
     autoReplacementPendingRunIdsAtom,
     beginApprovalVerdictAtom,
+    findToolCallName,
     isRunReconnectingAtom,
     releaseApprovalVerdictAtom,
     sendAskUserQuestionResponseAtom,
@@ -52,11 +53,11 @@ import { isSidebarVisibleAtom } from '../../atoms/ui';
 import { jobWaitAtom, type JobWait } from '../../atoms/jobWait';
 import { chatFillsAtom } from '@beaver/agent-core/run-state/tableChatFills';
 import {
-    fillCallLine,
-    fillCallText,
     fillStateFromSnapshot,
     jobCallFillState,
     openJobCallsAtom,
+    tableCallLine,
+    tableCallText,
 } from '@beaver/agent-core/run-state/jobCalls';
 import { setAnnotationPanelStateAtom } from '../../atoms/messageUIState';
 import {
@@ -394,7 +395,7 @@ function useDismissalReset(activeRunId: string | null): void {
 
 /**
  * The fill this window waits on, as the popup shows it: the tool row's line
- * ("Filling *Soil carbon*: 45 of 150 items") as the activity, and the run
+ * ("Fill Table: 45 of 150 items complete") as the activity, and the run
  * that parked on it, which reads as running. Null when the window waits on
  * nothing, or once the fill ended during a live run (the run moves on).
  */
@@ -411,7 +412,9 @@ function useJobWait(): { parkedRun: AgentRun | null; statusLine: string } | null
     if (!parkedRun && (!fill || fill.snapshot.state === 'done')) return null;
     const title = call?.state?.title ?? fill?.snapshot.table.title ?? null;
     const state = call ? jobCallFillState(call, fill?.snapshot) : fillStateFromSnapshot(fill!.snapshot);
-    return { parkedRun, statusLine: fillCallText(fillCallLine(state, title)) };
+    // A fill runs under `create_table` as well as `fill_table`.
+    const toolName = call?.tool_name ?? findToolCallName(run, wait.toolCallId) ?? 'fill_table';
+    return { parkedRun, statusLine: tableCallText(tableCallLine(toolName, state, title)) };
 }
 
 function useLiveCard(): RunStatusPopupCard | null {
