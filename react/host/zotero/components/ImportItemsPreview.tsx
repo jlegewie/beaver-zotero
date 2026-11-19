@@ -307,7 +307,9 @@ const ImportItemRow: React.FC<{
                     )}
                     {errorText && <div className="font-color-secondary text-sm">{errorText}</div>}
                     {applied && !file && fullText !== undefined && (
-                        <span className="text-xs font-color-secondary">{fullTextRowLabel(fullText)}</span>
+                        <span className="text-sm px-15 rounded-md bg-chip font-color-secondary border-quinary" style={{ alignSelf: 'flex-start' }}>
+                            {fullTextRowLabel(fullText)}
+                        </span>
                     )}
                     {attachmentTask.isLoading && (
                         <div className="display-flex items-center gap-1 font-color-secondary text-sm">
