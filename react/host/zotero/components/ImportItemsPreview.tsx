@@ -54,11 +54,15 @@ interface ImportItemsPreviewProps {
     fullTextByKey?: ReadonlyMap<string, string | null>;
 }
 
+/** Shared frame for the status chips in an import row so they line up in height, padding and type size. */
+const CHIP_CLASS = 'display-flex items-center gap-1 text-xs px-15 rounded-md whitespace-nowrap';
+const CHIP_STYLE: React.CSSProperties = { border: '1px solid var(--fill-quinary)', lineHeight: '1.5' };
+
 const Badge: React.FC<{ label: string; caution?: boolean; tooltip?: string }> = ({ label, caution, tooltip }) => {
     const badge = (
         <span
-            className={`text-xs px-15 rounded-sm whitespace-nowrap ${caution ? 'font-color-orange' : 'font-color-secondary'}`}
-            style={{ border: '1px solid var(--fill-quinary)', lineHeight: '1.5' }}
+            className={`${CHIP_CLASS} ${caution ? 'font-color-orange' : 'font-color-secondary'}`}
+            style={CHIP_STYLE}
         >
             {label}
         </span>
@@ -253,6 +257,8 @@ const ImportItemRow: React.FC<{
         toggle();
     };
 
+    const showFullText = applied && !file && fullText !== undefined;
+
     return (
         <div onContextMenu={createdRef ? (event) => openItemMenu(createdRef, event) : undefined}>
             {itemMenu}
@@ -287,14 +293,9 @@ const ImportItemRow: React.FC<{
                             </>
                         )}
                     </div>
-                    {(meta || badge) && (
+                    {meta && (
                         <div className="display-flex flex-row items-center gap-15 min-w-0">
                             {meta && <span className={`${textClass('font-color-secondary')} truncate`}>{meta}</span>}
-                            {badge && (
-                                <span className="flex-shrink-0">
-                                    <Badge label={badge.label} caution={badge.caution} tooltip={badge.tooltip} />
-                                </span>
-                            )}
                         </div>
                     )}
                     {file && !failed && (
@@ -306,15 +307,24 @@ const ImportItemRow: React.FC<{
                         </Tooltip>
                     )}
                     {errorText && <div className="font-color-secondary text-sm">{errorText}</div>}
-                    {applied && !file && fullText !== undefined && (
-                        <span className="text-sm px-15 rounded-md bg-chip font-color-secondary border-quinary" style={{ alignSelf: 'flex-start' }}>
-                            {fullTextRowLabel(fullText)}
-                        </span>
-                    )}
-                    {attachmentTask.isLoading && (
-                        <div className="display-flex items-center gap-1 font-color-secondary text-sm">
-                            <Spinner size={12} />
-                            <span>{attachmentTask.kind === 'snapshot' ? 'Saving snapshot…' : 'Fetching PDF…'}</span>
+                    {(showFullText || attachmentTask.isLoading || badge) && (
+                        <div className="display-flex flex-row flex-wrap items-center gap-1 min-w-0">
+                            {showFullText && (
+                                <span className={`${CHIP_CLASS} bg-chip font-color-secondary`} style={CHIP_STYLE}>
+                                    {fullTextRowLabel(fullText)}
+                                </span>
+                            )}
+                            {attachmentTask.isLoading && (
+                                <div className={`${CHIP_CLASS} font-color-secondary`} style={CHIP_STYLE}>
+                                    <Spinner size={10} />
+                                    <span>{attachmentTask.kind === 'snapshot' ? 'Saving snapshot…' : 'Fetching PDF…'}</span>
+                                </div>
+                            )}
+                            {badge && (
+                                <span className="display-flex flex-shrink-0">
+                                    <Badge label={badge.label} caution={badge.caution} tooltip={badge.tooltip} />
+                                </span>
+                            )}
                         </div>
                     )}
                 </div>
