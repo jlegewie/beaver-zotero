@@ -11,7 +11,9 @@
  * user's next message.
  *
  * The result has one shape whether it travels live (`job_wait_response`) or is
- * stored, so the backend renders both with one finisher.
+ * stored, so the backend renders both with one finisher. A call whose window
+ * left the chat while the table was open ends with a hand-off instead: the
+ * fill goes on as the table's own.
  */
 
 import type { ParkedDeferral } from '../agents/types';
@@ -59,7 +61,20 @@ export interface TableFillJobResult {
     stopped?: boolean;
 }
 
-export type JobResult = TableFillJobResult;
+/**
+ * The window waiting on a fill left the chat while the table was open: the
+ * fill goes on as the table's own, and the call ends with how far it had got
+ * at that moment. Never sent live; it never resumes the run.
+ */
+export interface TableFillJobHandOff {
+    kind: 'table_fill';
+    job_id: string;
+    status: 'handed_off';
+    progress: TableFillProgress;
+}
+
+/** What a job call's result can be: the job's end, or its hand-off to the table. */
+export type JobResult = TableFillJobResult | TableFillJobHandOff;
 
 /** A parked job call: a deferral of a job kind, with its result once stored. */
 export interface JobDeferral extends ParkedDeferral {
@@ -101,7 +116,7 @@ export interface WSJobWaitResponse {
      * `not_found` for an unknown job.
      */
     status: 'done' | 'running' | 'not_found';
-    result?: JobResult;
+    result?: TableFillJobResult;
 }
 
 // ---------------------------------------------------------------------------

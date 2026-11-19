@@ -31,7 +31,7 @@ import {
     type TableFillTarget,
     type TableFillWirePlan,
 } from '@beaver/agent-core/protocol/tableFillProtocol';
-import type { TableFillJobResult, WSJobWaitRequest, WSJobWaitResponse } from '@beaver/agent-core/protocol/jobCallProtocol';
+import type { JobResult, TableFillJobResult, WSJobWaitRequest, WSJobWaitResponse } from '@beaver/agent-core/protocol/jobCallProtocol';
 import type { InstanceTableFills } from './service';
 
 /** The default safety deadline on a waiting `fill`, in ms. */
@@ -244,10 +244,25 @@ export class AgentTableFills {
     }
 
     /**
-     * A job-call result kept since its job ended, as it may leave the device
-     * now: a library excluded meanwhile sends nothing of its items.
+     * A job call's end when the window waiting on it leaves the chat while
+     * its table is open: the fill goes on as the table's own, and the call
+     * reports how far it had got. Null unless the job runs here: an ended
+     * job's call already holds its end, and one winding down after Stop
+     * reports its stopped result.
      */
-    sendableJobResult(job: TableFillJobResult, target: TableFillTarget): TableFillJobResult {
+    handOffResult(jobId: string): JobResult | null {
+        const snapshot = this.fills.getJob(jobId);
+        if (snapshot?.state !== 'running') return null;
+        return { kind: 'table_fill', job_id: jobId, status: 'handed_off', progress: fillProgress(snapshot) };
+    }
+
+    /**
+     * A job-call result kept since its job ended, as it may leave the device
+     * now: a library excluded meanwhile sends nothing of its items. A
+     * hand-off carries counts only.
+     */
+    sendableJobResult(job: JobResult, target: TableFillTarget): JobResult {
+        if (job.status === 'handed_off') return job;
         const result = this.outbound(job.result, !!this.fills.tableRefusal(target));
         return result === job.result ? job : { ...job, result };
     }

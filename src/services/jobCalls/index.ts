@@ -142,6 +142,10 @@ export function createInstanceJobCalls(): InstanceJobCalls {
         ready: () => !!Zotero.Beaver.account?.getSnapshot().scopeReady && !!Zotero.Beaver.libraryScopeInitialized,
         isLive,
         deriveInterrupted,
+        handOffResult: (entry) => Zotero.Beaver.tableFills?.agent.handOffResult(entry.jobId) ?? null,
+        stopJob: (_kind, jobId) => {
+            Zotero.Beaver.tableFills?.stop(jobId);
+        },
         sendable,
         onStored: announceStored,
         shuttingDown: () => !!Zotero.__beaverShuttingDown,

@@ -6,9 +6,11 @@
  * the run (`jobWaitAtom`). It waits from the run's `job_wait_request`,
  * through the park that ends the live wait, until the fill's result is stored
  * on the parked call; then it resumes the run, and the model continues the
- * same answer. Leaving the chat, Stop, and the resume itself end the wait.
- * Every other window shows the response as ended, and the result reaches the
- * model with the user's next message.
+ * same answer. Stop and the resume itself end the wait, and so does leaving
+ * the chat, which hands the fill to its open table or stops it
+ * (`jobLeave.ts`). Every other window shows the response as going until the
+ * fill's result is stored, and the result reaches the model with the user's
+ * next message.
  *
  * While the window waits, the chat is busy as during any other tool call:
  * the composer's Stop stops the fill (`stopChatJobsAtom`).
@@ -19,7 +21,7 @@ import { selectAtom } from 'jotai/utils';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { JOB_CALL_STORED_EVENT, jobIdOf, type StoredJobCall } from '@beaver/agent-core/protocol/jobCallProtocol';
 import { activeRunAtom, currentThreadIdAtom, getRunToolResults } from '@beaver/agent-core/run-state/atoms';
-import { isStoppedJobResult, openJobCallsAtom } from '@beaver/agent-core/run-state/jobCalls';
+import { isHandedOffJobResult, isStoppedJobResult, openJobCallsAtom } from '@beaver/agent-core/run-state/jobCalls';
 import { chatFillsAtom } from '@beaver/agent-core/run-state/tableChatFills';
 import { isRunActive } from '@beaver/agent-core/agents/types';
 import { agentService } from '@beaver/agent-core/transport/agentService';
@@ -28,6 +30,7 @@ import { store } from '../store';
 import { userIdAtom } from './auth';
 import { requestJobResume, waitsOnlyOnJobs } from './agentRunAtoms';
 import { applyStoredJobResultAtom, jobWaitAtom } from './jobWait';
+import { leaveJobWait } from './jobLeave';
 import { isThreadParkedAtom } from './parkedRuns';
 import { watchChatFills } from './tableChatFills';
 
@@ -151,15 +154,15 @@ export const stopChatJobsAtom = atom(null, (get, set): boolean => {
 /**
  * This device stored a fill's result on its parked call. A window showing the
  * thread shows it on the call; the window waiting on the fill resumes the
- * run with it, and waits until the resume starts. A fill the user stopped
- * resumes nothing.
+ * run with it, and waits until the resume starts. A fill the user stopped,
+ * or one handed to its table, resumes nothing.
  */
 function onStored(stored: StoredJobCall): void {
     if (stored.userId !== store.get(userIdAtom)) return;
     store.set(applyStoredJobResultAtom, stored);
     const wait = store.get(jobWaitAtom);
     if (!wait || wait.threadId !== stored.threadId || wait.toolCallId !== stored.toolCallId) return;
-    if (isStoppedJobResult(stored.result)) {
+    if (isStoppedJobResult(stored.result) || isHandedOffJobResult(stored.result)) {
         store.set(jobWaitAtom, null);
         return;
     }
@@ -186,10 +189,11 @@ export function watchJobCalls(): void {
             store.set(jobWaitAtom, { threadId, runId: wait.runId, toolCallId: wait.toolCallId, jobId: wait.jobId });
         });
         Zotero.Beaver.runtime.addWindowCleanup(runtime, unsubscribeWaits);
-        // Leaving the chat ends the wait: the fill goes on, and nothing resumes.
+        // Leaving the chat ends the wait: the fill goes on in its table, or
+        // stops, and nothing resumes.
         const unsubscribeThread = store.sub(currentThreadIdAtom, () => {
             const wait = store.get(jobWaitAtom);
-            if (wait && wait.threadId !== store.get(currentThreadIdAtom)) store.set(jobWaitAtom, null);
+            if (wait && wait.threadId !== store.get(currentThreadIdAtom)) leaveJobWait();
         });
         Zotero.Beaver.runtime.addWindowCleanup(runtime, unsubscribeThread);
         watching = true;

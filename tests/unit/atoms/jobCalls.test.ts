@@ -6,10 +6,11 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { requestJobResumeMock, waitsOnlyOnJobsMock, stopMock, hooks } = vi.hoisted(() => ({
+const { requestJobResumeMock, waitsOnlyOnJobsMock, stopMock, leaveMock, hooks } = vi.hoisted(() => ({
     requestJobResumeMock: vi.fn(),
     waitsOnlyOnJobsMock: vi.fn(() => false),
     stopMock: vi.fn(() => true),
+    leaveMock: vi.fn(async () => undefined),
     hooks: {
         onStored: null as null | ((stored: unknown) => void),
         onJobWait: null as null | ((wait: unknown) => void),
@@ -39,7 +40,7 @@ import { openJobCallsAtom } from '@beaver/agent-core/run-state/jobCalls';
 import { chatFillsAtom, recordChatFill } from '@beaver/agent-core/run-state/tableChatFills';
 import { store } from '../../../react/store';
 import { sessionAtom } from '../../../react/atoms/auth';
-import { jobWaitAtom, settleJobWait } from '../../../react/atoms/jobWait';
+import { jobWaitAtom, openAnswerRunIdAtom, settleJobWait } from '../../../react/atoms/jobWait';
 import {
     liveJobStoppingAtom,
     runningChatJobsAtom,
@@ -61,6 +62,7 @@ const THREAD = 'thread-1';
             addWindowCleanup: vi.fn(),
         },
         tableFills: { stop: stopMock },
+        jobCalls: { leave: leaveMock },
         data: { env: 'production' },
     },
 };
@@ -182,11 +184,12 @@ describe('the window waiting on a fill', () => {
         expect(store.get(jobWaitAtom)).not.toBeNull();
     });
 
-    it('stops waiting when the window leaves the chat, and leaves the fill running', () => {
+    it('stops waiting when the window leaves the chat, which ends the fill\'s call, and resumes nothing', () => {
         parkedWhileWaiting();
         store.set(currentThreadIdAtom, 'thread-2');
         expect(store.get(jobWaitAtom)).toBeNull();
-        expect(stopMock).not.toHaveBeenCalled();
+        // The table is not on screen: the fill stops (jobLeave.test.ts covers the rest).
+        expect(leaveMock).toHaveBeenCalledWith(THREAD, 'call-1', 'table_fill', 'job-1', 'stop');
         store.set(currentThreadIdAtom, THREAD);
         hooks.onStored!(stored(fillResult()));
         expect(requestJobResumeMock).not.toHaveBeenCalled();
@@ -235,5 +238,29 @@ describe('the composer while a window waits on a fill', () => {
         store.set(activeRunAtom, { ...parkedRun(), parked: undefined, status: 'in_progress' } as AgentRun);
         expect(store.set(stopChatJobsAtom)).toBe(false);
         expect(stopMock).not.toHaveBeenCalled();
+    });
+});
+
+describe('whether the answer of a run parked on a fill has ended', () => {
+    it('goes on while the fill runs, and ends once its result is stored and no window waits', () => {
+        store.set(threadRunsAtom, [parkedRun()]);
+        expect(store.get(openAnswerRunIdAtom)).toBe('run-1');
+        store.set(threadRunsAtom, [parkedRun(fillResult(true))]);
+        expect(store.get(openAnswerRunIdAtom)).toBeNull();
+    });
+
+    it('goes on in the window that waits to continue it with the stored result', () => {
+        store.set(threadRunsAtom, [parkedRun(fillResult())]);
+        hooks.onJobWait!({ runId: 'run-1', threadId: THREAD, toolCallId: 'call-1', jobId: 'job-1' });
+        expect(store.get(openAnswerRunIdAtom)).toBe('run-1');
+    });
+
+    it('goes on while a card of the run waits for the user', () => {
+        const run = parkedRun(fillResult(true));
+        const card = { kind: 'ask_user_question', tool_call_id: 'call-2', tool_name: 'ask_user_question', correlation_id: 'q-1', request: {} };
+        run.model_messages[0].parts.push({ part_kind: 'tool-call', tool_name: 'ask_user_question', tool_call_id: 'call-2', args: {} } as any);
+        run.parked!.requests.push(card as ParkedDeferral);
+        store.set(threadRunsAtom, [run]);
+        expect(store.get(openAnswerRunIdAtom)).toBe('run-1');
     });
 });

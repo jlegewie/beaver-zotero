@@ -52,6 +52,7 @@ import { isWSChatPendingAtom } from '../../../react/atoms/agentRunAtoms';
 import { chatAccessGateAtom } from '../../../react/atoms/chatAccess';
 import { isSidebarVisibleAtom, isThreadListViewAtom } from '../../../react/atoms/ui';
 import { currentReaderAttachmentAtom } from '../../../react/atoms/messageComposition';
+import { jobWaitAtom } from '../../../react/atoms/jobWait';
 import {
     closeQuickPromptAtom,
     hasActiveWorkAtom,
@@ -112,6 +113,13 @@ describe('openQuickPromptAtom', () => {
 
     it('shows the busy notice instead of touching a thread whose run is live', async () => {
         store.set(activeRunAtom, run('in_progress'));
+        await store.set(openQuickPromptAtom);
+        expect(mocks.newThread).not.toHaveBeenCalled();
+        expect(store.get(quickPromptStateAtom)).toEqual({ mode: 'busy' });
+    });
+
+    it('shows the busy notice in a chat that waits on a table fill, which leaving would stop', async () => {
+        store.set(jobWaitAtom, { threadId: 'thread-1', runId: 'run-1', toolCallId: 'call-1', jobId: 'job-1' });
         await store.set(openQuickPromptAtom);
         expect(mocks.newThread).not.toHaveBeenCalled();
         expect(store.get(quickPromptStateAtom)).toEqual({ mode: 'busy' });

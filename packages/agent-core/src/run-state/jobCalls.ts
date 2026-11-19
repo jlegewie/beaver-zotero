@@ -60,12 +60,21 @@ export function runWithStoredJobResult(run: AgentRun | null, toolCallId: string,
 }
 
 /**
- * Whether a job ended because the user stopped it (Stop in the composer, in
- * the receipt, or in the table). Such a result never resumes the run: the
+ * Whether a job ended because the user stopped it (Stop in the composer, on
+ * leaving the chat, or in the table). Such a result never resumes the run: the
  * next message closes the call with it.
  */
 export function isStoppedJobResult(result: JobResult | null | undefined): boolean {
-    return result?.stopped === true;
+    return result?.status === 'done' && result.stopped === true;
+}
+
+/**
+ * Whether the call ended with its fill handed to the open table: the window
+ * waiting on it left the chat, and the fill went on as the table's own. Such
+ * a result never resumes the run either.
+ */
+export function isHandedOffJobResult(result: JobResult | null | undefined): boolean {
+    return result?.status === 'handed_off';
 }
 
 // ---------------------------------------------------------------------------
@@ -89,7 +98,9 @@ export type FillCallState =
     | { kind: 'elsewhere'; device?: string | null }
     /** Running, with no counts known here (an older call this renderer no longer follows). */
     | { kind: 'started' }
-    | ({ kind: 'done' | 'stopped' | 'interrupted' } & FillCounts);
+    | ({ kind: 'done' | 'stopped' | 'interrupted' } & FillCounts)
+    /** Went on as the table's own once the chat was left; the counts are those of that moment. */
+    | ({ kind: 'handed_off' } & FillCounts);
 
 /**
  * A table tool call's line: the tool's name, then either the table's title or
@@ -124,6 +135,8 @@ function fillStatus(state: FillCallState): string | null {
         case 'stopped':
         case 'interrupted':
             return countsText(state, state.kind);
+        case 'handed_off':
+            return countsText(state, 'continued in the table');
     }
 }
 
@@ -192,7 +205,18 @@ export function fillStateFromSnapshot(snapshot: TableFillJobSnapshot): FillCallS
 
 /** A fill job's state from the result stored on its parked call. */
 export function fillStateFromResult(result: JobResult): FillCallState {
+    if (result.status === 'handed_off') return handedOffState(result.progress);
     return endedState(result.progress, result.result, result.interrupted);
+}
+
+/** A fill handed to the table, as far as it had got then. */
+function handedOffState(progress: Pick<TableFillJobSnapshot, 'rows_done' | 'rows_failed' | 'rows_total'>): FillCallState {
+    return {
+        kind: 'handed_off',
+        complete: completeRows(progress.rows_done, 0, progress.rows_total),
+        total: progress.rows_total,
+        failed: progress.rows_failed,
+    };
 }
 
 /**
@@ -207,6 +231,14 @@ export function jobCallFillState(call: JobDeferral, snapshot?: TableFillJobSnaps
 
 /** A finished fill's state from the call's recorded fill (the tool returned). */
 export function fillStateFromRecord(fill: TableFillRecord): FillCallState {
+    if (fill.handed_off) {
+        return {
+            kind: 'handed_off',
+            complete: completeRows(fill.rows_filled + fill.rows_failed, 0, fill.rows),
+            total: fill.rows,
+            failed: fill.rows_failed,
+        };
+    }
     const kind = fill.stopped_by === 'shutdown'
         ? 'interrupted'
         : readsAsStopped(fill.stopped_by, fill.rows_not_started) ? 'stopped' : 'done';

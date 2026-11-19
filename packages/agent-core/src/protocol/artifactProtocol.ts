@@ -78,6 +78,11 @@ export interface TableRecordSource {
 export interface TableFillRecord {
     /** Absent on records of fills that ran inside the chat run: `done`. */
     status?: 'done' | 'running';
+    /**
+     * A `running` fill that went on as the table's own once the chat was
+     * left: its counts are those of that moment.
+     */
+    handed_off?: boolean;
     /** Rows the fill planned. */
     rows: number;
     rows_filled: number;

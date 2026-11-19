@@ -9,6 +9,7 @@ import { atom } from 'jotai';
 import { isJobDeferral, type JobResult } from '@beaver/agent-core/protocol/jobCallProtocol';
 import { activeRunAtom, currentThreadIdAtom, threadRunsAtom } from '@beaver/agent-core/run-state/atoms';
 import { runWithStoredJobResult, withStoredJobResult } from '@beaver/agent-core/run-state/jobCalls';
+import { openParkedRunAtom } from '@beaver/agent-core/run-state/parkedRun';
 import type { AgentRun } from '@beaver/agent-core/agents/types';
 import type { TableFillJobSnapshot } from '@beaver/agent-core/protocol/tableFillProtocol';
 import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
@@ -41,6 +42,25 @@ export function settleJobWait(run: AgentRun | null): void {
     );
     if (!open) store.set(jobWaitAtom, null);
 }
+
+/**
+ * The open parked run while its answer is still going, else null. It goes
+ * on while a card waits for the user, while a fill it started still runs
+ * (its result is not stored yet), and while this window waits to continue
+ * it with a fill's result. A run whose only open calls hold stored fill
+ * results has ended: the fill was stopped, handed to the table, cut off by a
+ * quit, or ended with nobody waiting. Its footer and what it changed show,
+ * though the next message still closes those calls.
+ */
+export const openAnswerRunIdAtom = atom((get): string | null => {
+    const open = get(openParkedRunAtom);
+    if (!open) return null;
+    const wait = get(jobWaitAtom);
+    const going = open.deferrals.some(
+        (deferral) => !isJobDeferral(deferral) || !deferral.result || wait?.toolCallId === deferral.tool_call_id,
+    );
+    return going ? open.runId : null;
+});
 
 /** Put a stored job result on the open thread's parked call. Returns whether it was there. */
 export const applyStoredJobResultAtom = atom(

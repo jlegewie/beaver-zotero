@@ -50,7 +50,7 @@ import {
     type TableRef,
 } from '../services/artifacts/tableItemIdentity';
 import { contextMainWindow, resolveNavigationWindow, WindowUnavailableError } from '../runtime/navigation';
-import { canHostTableTab, openTableTab, setTableTabWarning } from './tableTab';
+import { canHostTableTab, findTableTab, openTableTab, setTableTabWarning } from './tableTab';
 import { findTableWindow, openTableWindow, setTableWindowWarning } from './tableWindow';
 import type { TableFocusTarget, TableTabRequest } from './tableTabTypes';
 
@@ -174,6 +174,15 @@ function downloadTableFiles(item: Zotero.Item): Promise<boolean> {
         downloads.set(id, download);
     }
     return download;
+}
+
+/**
+ * Whether `ref` is on screen: in a Beaver tab of a main window other than
+ * `except` (a window about to close), or in its own table window.
+ */
+export function isTableShown(ref: TableRef, except?: Window | null): boolean {
+    if (findTableWindow(ref)) return true;
+    return Zotero.getMainWindows().some((win) => win !== except && !win.closed && !!findTableTab(win, ref));
 }
 
 /**

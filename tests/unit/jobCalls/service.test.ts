@@ -21,8 +21,18 @@ function fillResult(jobId = "job-1"): JobResult {
     };
 }
 
-function harness(options: { stored?: JobCallEntry[]; live?: Set<string>; userId?: string | null; unsendable?: boolean; ready?: boolean } = {}) {
+function handOff(jobId = "job-1"): JobResult {
+    return {
+        kind: "table_fill",
+        job_id: jobId,
+        status: "handed_off",
+        progress: { state: "running", rows_total: 300, rows_done: 83, rows_failed: 2, in_flight: 3, credits_charged: 4, credits_planned: 60, seconds_left: null },
+    };
+}
+
+function harness(options: { stored?: JobCallEntry[]; live?: Set<string>; userId?: string | null; unsendable?: boolean; ready?: boolean; unknownJob?: boolean } = {}) {
     let ready = options.ready ?? true;
+    const stopJob = vi.fn();
     const rows = new Map<string, JobCallEntry>();
     for (const entry of options.stored ?? []) rows.set(`${entry.threadId}/${entry.toolCallId}`, entry);
     const outcomes: PostOutcome[] = [];
@@ -52,6 +62,8 @@ function harness(options: { stored?: JobCallEntry[]; live?: Set<string>; userId?
         },
         isLive: (_kind, jobId) => options.live?.has(jobId) ?? false,
         deriveInterrupted: async (entry) => ({ ...fillResult(entry.jobId), interrupted: true }),
+        handOffResult: (entry) => (options.unknownJob ? null : handOff(entry.jobId)),
+        stopJob,
         sendable: (_entry, result) => (options.unsendable ? null : result),
         onStored: stored,
         shuttingDown: () => false,
@@ -67,6 +79,7 @@ function harness(options: { stored?: JobCallEntry[]; live?: Set<string>; userId?
         outcomes,
         posted,
         stored,
+        stopJob,
         signIn: (id: string | null) => {
             user = id;
             accountListener?.();
@@ -219,6 +232,44 @@ describe("the job-call list", () => {
         h.signIn("user-2");
         await vi.runAllTimersAsync();
         expect(h.posted).toHaveLength(1);
+    });
+
+    it("hands a job to its table: stores how far it got now, and not its later end", async () => {
+        const h = harness();
+        await h.service.start();
+        await h.service.register({ threadId: "thread-1", toolCallId: "call-1", kind: "table_fill", jobId: "job-1", coverage: { title: "Trials" } });
+        await h.service.leave("thread-1", "call-1", "table_fill", "job-1", "hand_off");
+        await vi.runAllTimersAsync();
+        expect(h.posted.map((post) => post.result)).toEqual([handOff()]);
+        expect(h.stored).toHaveBeenCalledWith(expect.objectContaining({ toolCallId: "call-1", result: handOff() }));
+        expect(h.stopJob).not.toHaveBeenCalled();
+        await h.service.jobEnded("table_fill", "job-1", fillResult());
+        await vi.runAllTimersAsync();
+        expect(h.posted).toHaveLength(1);
+    });
+
+    it("keeps retrying the hand-off when the job ends before it reached the backend", async () => {
+        const h = harness();
+        h.outcomes.push("busy");
+        await h.service.start();
+        await h.service.register({ threadId: "thread-1", toolCallId: "call-1", kind: "table_fill", jobId: "job-1", coverage: { title: "Trials" } });
+        await h.service.leave("thread-1", "call-1", "table_fill", "job-1", "hand_off");
+        await vi.advanceTimersByTimeAsync(0);
+        await h.service.jobEnded("table_fill", "job-1", fillResult());
+        await vi.runAllTimersAsync();
+        expect(h.posted.map((post) => post.result.status)).toEqual(["handed_off", "handed_off"]);
+    });
+
+    it("stops a job it cannot hand off, and one the user chose to stop", async () => {
+        const h = harness({ unknownJob: true });
+        await h.service.start();
+        await h.service.register({ threadId: "thread-1", toolCallId: "call-1", kind: "table_fill", jobId: "job-1", coverage: { title: "Trials" } });
+        await h.service.leave("thread-1", "call-1", "table_fill", "job-1", "hand_off");
+        expect(h.stopJob).toHaveBeenCalledWith("table_fill", "job-1");
+        await h.service.leave("thread-1", "call-2", "table_fill", "job-2", "stop");
+        expect(h.stopJob).toHaveBeenCalledWith("table_fill", "job-2");
+        await vi.runAllTimersAsync();
+        expect(h.posted).toEqual([]);
     });
 
     it("keeps a result at shutdown instead of posting it", async () => {

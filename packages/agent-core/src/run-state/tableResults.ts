@@ -1,5 +1,6 @@
 import type { AgentRun } from "../agents/types";
 import type { TableRecord } from "../protocol/artifactProtocol";
+import { isJobDeferral } from "../protocol/jobCallProtocol";
 
 /** Tools that change a stored table; their cards and the artifacts list are table-shaped. */
 const TABLE_WRITE_TOOL_NAMES = new Set([
@@ -45,30 +46,59 @@ export interface TableArtifact {
  * were first written. Several writes to one table (create, then fill) fold into
  * one entry that keeps its first tool call for identity and its last record
  * for display, so the list reports the table as the answer left it.
+ *
+ * Only the answer's own calls count: a later message that closes a parked
+ * call carries its return, but that answer did not write the table. A fill
+ * call the answer left open (stopped, handed to the table) has no return
+ * yet; its table comes from the state it parked with.
  */
 export function collectTableArtifacts(
-    runs: ReadonlyArray<Pick<AgentRun, "id" | "model_messages">>,
+    runs: ReadonlyArray<Pick<AgentRun, "id" | "model_messages" | "parked">>,
 ): TableArtifact[] {
+    const calls = new Set<string>();
+    for (const run of runs) {
+        for (const message of run.model_messages ?? []) {
+            if (message.kind !== "response") continue;
+            for (const part of message.parts) {
+                if (part.part_kind === "tool-call" && isTableWriteToolName(part.tool_name)) calls.add(part.tool_call_id);
+            }
+        }
+    }
     const byKey = new Map<string, TableArtifact>();
+    const returned = new Set<string>();
+    const add = (runId: string, toolCallId: string, toolName: string, record: TableRecord) => {
+        const existing = byKey.get(record.reference.key);
+        byKey.set(record.reference.key, {
+            runId: existing?.runId ?? runId,
+            toolcallId: existing?.toolcallId ?? toolCallId,
+            record,
+            recordRunId: runId,
+            created: existing?.created === true || toolName === "create_table",
+        });
+    };
     for (const run of runs) {
         for (const message of run.model_messages ?? []) {
             if (message.kind !== "request") continue;
             for (const part of message.parts) {
                 if (part.part_kind !== "tool-return") continue;
-                if (!isTableWriteToolName(part.tool_name)) continue;
+                if (!isTableWriteToolName(part.tool_name) || !calls.has(part.tool_call_id)) continue;
+                returned.add(part.tool_call_id);
                 const record = tableRecordFromMetadata(part.metadata);
-                if (!record) continue;
-                const existing = byKey.get(record.reference.key);
-                byKey.set(record.reference.key, {
-                    runId: existing?.runId ?? run.id,
-                    toolcallId: existing?.toolcallId ?? part.tool_call_id,
-                    record,
-                    recordRunId: run.id,
-                    created:
-                        existing?.created === true ||
-                        part.tool_name === "create_table",
-                });
+                if (record) add(run.id, part.tool_call_id, part.tool_name, record);
             }
+        }
+    }
+    for (const run of runs) {
+        for (const deferral of run.parked?.requests ?? []) {
+            if (!isJobDeferral(deferral) || !calls.has(deferral.tool_call_id) || returned.has(deferral.tool_call_id)) continue;
+            const table = deferral.state?.table;
+            if (!table || byKey.has(table)) continue;
+            add(run.id, deferral.tool_call_id, deferral.tool_name, {
+                reference: { kind: "table", key: table, title: deferral.state?.title ?? "" },
+                change: "",
+                summary: deferral.state?.rows ? { rows: deferral.state.rows } : {},
+                run: "fill",
+            });
         }
     }
     return [...byKey.values()];

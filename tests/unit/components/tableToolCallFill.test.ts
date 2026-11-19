@@ -145,6 +145,27 @@ describe('a table tool call line', () => {
         store.set(threadRunsAtom, [parkedRun({ result: stopped } as Partial<ParkedDeferral>)]);
         expect(line(render(store, 'parked'))).toBe('Fill Table: 4 of 10 items complete (stopped, 1 failed)');
     });
+
+    it('reads a fill handed to its table as of the hand-off, stored or returned, though it runs on here', () => {
+        const store = createStore();
+        const handedOff: JobResult = { kind: 'table_fill', job_id: 'job-1', status: 'handed_off', progress: { ...done.progress, state: 'running', rows_done: 2, rows_failed: 0 } };
+        store.set(threadRunsAtom, [parkedRun({ result: handedOff } as Partial<ParkedDeferral>)]);
+        store.set(chatFillsAtom, recordChatFill(new Map(), snapshot()));
+        expect(line(render(store, 'parked'))).toBe('Fill Table: 2 of 10 items complete (continued in the table)');
+        act(() => root?.unmount());
+        // The next message closed the call: its record says the same.
+        const record = {
+            reference: { kind: 'table', key: 'u-TABLE001', title: 'Trials' },
+            change: 'Filled table',
+            summary: { rows: 10 },
+            run: 'fill',
+            fill: { status: 'running', handed_off: true, rows: 10, rows_filled: 2, rows_failed: 0, rows_not_started: {}, rows_without_input: 0, rows_not_written: 0, answered: 2, not_reported: 0, from_title_abstract: 0, skipped: {}, documents_read: 0, credits_charged: 0 },
+        };
+        const returned = { part_kind: 'tool-return', tool_name: 'fill_table', tool_call_id: 'call-1', content: {}, metadata: { view: { view_type: 'table', record } } } as unknown as ToolResult;
+        const closed = createStore();
+        closed.set(chatFillsAtom, recordChatFill(new Map(), snapshot()));
+        expect(line(render(closed, 'completed', returned))).toBe('Fill Table: 2 of 10 items complete (continued in the table)');
+    });
 });
 
 describe('a fill tool call that has not returned', () => {

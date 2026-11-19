@@ -8,6 +8,7 @@ import {
     fillStateFromRecord,
     fillStateFromResult,
     fillStateFromSnapshot,
+    isHandedOffJobResult,
     isStoppedJobResult,
     openJobCallsAtom,
     tableCallLine,
@@ -77,6 +78,13 @@ describe('job calls of the open thread', () => {
         expect(isStoppedJobResult({ ...fill, stopped: true })).toBe(true);
         expect(isStoppedJobResult(fill)).toBe(false);
         expect(isStoppedJobResult(null)).toBe(false);
+    });
+
+    it('read a fill handed to its table as handed off, and not as stopped', () => {
+        const handedOff: JobResult = { kind: 'table_fill', job_id: 'job-1', status: 'handed_off', progress: fill.progress };
+        expect(isHandedOffJobResult(handedOff)).toBe(true);
+        expect(isStoppedJobResult(handedOff)).toBe(false);
+        expect(isHandedOffJobResult(fill)).toBe(false);
     });
 
     it('patch nothing for a call no run parks, or a card', () => {
@@ -157,6 +165,18 @@ describe('the table tool call line', () => {
         const stopped = { ...record, rows_filled: 50, rows_failed: 0, rows_without_input: 0, stopped_by: 'stopped', rows_not_started: { stopped: 100 } };
         expect(text(fillStateFromRecord(stopped))).toBe('Fill Table: 50 of 150 items complete (stopped)');
         expect(fillStateFromRecord({ ...record, stopped_by: 'shutdown' }).kind).toBe('interrupted');
+    });
+
+    it('reads a fill handed to its table as of the hand-off, stored or returned', () => {
+        const handedOff: JobResult = {
+            kind: 'table_fill',
+            job_id: 'job-1',
+            status: 'handed_off',
+            progress: { ...fill.progress, state: 'running', rows_total: 300, rows_done: 83, rows_failed: 2 },
+        };
+        expect(text(fillStateFromResult(handedOff), 'create_table')).toBe('Create Table: 83 of 300 items complete (continued in the table, 2 failed)');
+        const record = { status: 'running', handed_off: true, rows: 300, rows_filled: 81, rows_failed: 2, rows_without_input: 0, rows_not_started: {} } as any;
+        expect(text(fillStateFromRecord(record))).toBe('Fill Table: 83 of 300 items complete (continued in the table, 2 failed)');
     });
 
 });

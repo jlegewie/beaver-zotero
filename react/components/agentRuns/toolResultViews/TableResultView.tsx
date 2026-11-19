@@ -193,6 +193,12 @@ export function formatFillLines(record: TableRecord): string[] {
     const fill = record.run === "fill" ? record.fill : null;
     if (!fill) return [];
     const lines: string[] = [];
+    if (fill.status === "running" && fill.handed_off) {
+        lines.push(
+            `${(fill.rows_filled + fill.rows_failed).toLocaleString("en-US")} of ${plural(fill.rows, "row")} complete when the fill continued in the table`,
+        );
+        return lines;
+    }
     if (fill.status === "running") {
         lines.push(`Filling ${plural(fill.rows, "row")} in the background`);
         return lines;

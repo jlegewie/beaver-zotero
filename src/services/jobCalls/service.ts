@@ -11,7 +11,9 @@
  * It is the only code that stores job results. Entries are persisted, so a
  * result the device could not report before a quit is reported at the next
  * start: a job that ended has its result kept with the entry; one that was cut
- * off gets an interrupted result derived from local state.
+ * off gets an interrupted result derived from local state. A call whose
+ * window left the chat while the table was open ends early, with a hand-off:
+ * the job goes on as the table's own.
  *
  * A job whose result reached its run live (the run waited for it) needs no
  * stored result: the window that saw the tool call return drops the entry. Posting a
@@ -68,6 +70,10 @@ export interface JobCallDeps {
     isLive(kind: JobKind, jobId: string): boolean;
     /** The result of a job cut off by a quit, derived from local state; null when it cannot be. */
     deriveInterrupted(entry: JobCallEntry): Promise<JobResult | null>;
+    /** The call's end when its job goes on as the table's own (see {@link InstanceJobCalls.leave}). */
+    handOffResult(entry: JobCallEntry): JobResult | null;
+    /** Stop a job this device runs; its stopped result arrives as its end. */
+    stopJob(kind: JobKind, jobId: string): void;
     /**
      * The result as it may leave the device now; null when nothing of it may.
      * A result kept through an outage or a restart is checked again here,
@@ -196,9 +202,33 @@ export class InstanceJobCalls {
             (pending) => pending.entry.kind === kind && pending.entry.jobId === jobId,
         );
         for (const pending of matching) {
+            // A call handed to the table keeps its hand-off: the table holds the end.
+            if (pending.entry.result?.status === 'handed_off') continue;
             await this.keepResult(pending, result);
             if (!this.deps.shuttingDown()) this.schedule(pending, 0);
         }
+    }
+
+    /**
+     * The window waiting on a job left the chat or closed. Handed off, the
+     * job goes on as its table's own, and its call ends now with how far the
+     * job had got; its later end is not stored, the table holds it (a job
+     * that already ended reports that end). Otherwise, or when this device
+     * keeps no such call or knows no such job, the job stops, so the call
+     * ends either way. Plugin realm, so a closing window's request completes
+     * after the window is gone.
+     */
+    async leave(threadId: string, toolCallId: string, kind: JobKind, jobId: string, how: 'hand_off' | 'stop'): Promise<void> {
+        const pending = this.entries.get(entryKey(threadId, toolCallId));
+        if (how === 'hand_off' && pending && !this.disposed) {
+            const result = pending.entry.result ?? this.deps.handOffResult(pending.entry);
+            if (result) {
+                if (!pending.entry.result) await this.keepResult(pending, result);
+                if (!this.deps.shuttingDown()) this.schedule(pending, 0);
+                return;
+            }
+        }
+        this.deps.stopJob(kind, jobId);
     }
 
     /** The run that waited for the job received its result: nothing is left to store. */

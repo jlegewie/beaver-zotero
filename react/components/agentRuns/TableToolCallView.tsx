@@ -89,7 +89,8 @@ export const TableToolCallView: React.FC<TableToolCallViewProps> = ({
     const fills = useAtomValue(chatFillsAtom);
     const fill = (jobCall ? fills.get(jobIdOf(jobCall)) : undefined) ?? fillForToolCall(fills, part.tool_call_id, runId);
     const recordFill = record?.run === 'fill' ? record.fill ?? null : null;
-    const fillState: FillCallState | null = recordFill && recordFill.status !== 'running'
+    // A fill handed to the table reads as of the hand-off, though it runs on.
+    const fillState: FillCallState | null = recordFill && (recordFill.status !== 'running' || recordFill.handed_off)
         ? fillStateFromRecord(recordFill)
         : jobCall && !hasResult
           ? jobCallFillState(jobCall, fill?.snapshot)

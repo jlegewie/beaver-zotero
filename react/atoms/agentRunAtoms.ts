@@ -127,6 +127,7 @@ import {
 import type { StoredJobCall } from '@beaver/agent-core/protocol/jobCallProtocol';
 import { isJobDeferral } from '@beaver/agent-core/protocol/jobCallProtocol';
 import { applyStoredJobResultAtom, jobWaitAtom, settleJobWait } from './jobWait';
+import { leaveJobWait } from './jobLeave';
 import {
     createStreamActivityTracker,
     streamQuietAtom,
@@ -4029,6 +4030,10 @@ export const closeWSConnectionForShutdownAtom = atom(
     ) => {
         // Latch first: a send still preparing has nothing to close or abandon.
         clientShutDown = true;
+        // A window closing while Zotero runs on hands the fill it waits on to
+        // a table still on screen, or stops it. On a quit the fill is cut off
+        // and reported as interrupted at the next start instead.
+        if (!Zotero.__beaverShuttingDown) leaveJobWait({ closing: tryGetWindowRuntime(true)?.hostWindow ?? null });
         if (!agentService.isConnected() && connectLoopsInFlight === 0) { releaseWriter(); return; }
         // A run waiting only on cards parks rather than ending with the
         // client, so they can be answered next time. Best effort: the server

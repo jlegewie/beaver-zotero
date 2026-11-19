@@ -34,6 +34,7 @@ import { threadRunsAtom, activeRunAtom, currentThreadIdAtom, currentThreadNameAt
 import { loadThreadRuns } from "@beaver/agent-core/run-state/loadThreadRuns";
 import { abandonActiveRunLocallyAtom, canLeaveReconnectingRun, isWSChatPendingAtom, isWSConnectedAtom, isWSReadyAtom, parkableRunId } from "./agentRunAtoms";
 import { clearParkedAnswersAtom, syncParkedCardsAtom } from "./parkedRuns";
+import { confirmLeaveJobWaitAtom } from "./jobLeave";
 import { AgentRun, isRunActive } from "@beaver/agent-core/agents/types";
 import { 
     threadAgentActionsAtom,
@@ -306,6 +307,9 @@ export const newThreadAtom = atom(
             preserveDraft?: boolean;
         },
     ): Promise<number | undefined> => {
+        // A fill the response waits on goes on in its open table, or stops;
+        // with the table closed, the user confirms leaving, or stays.
+        if (!options?.skipActiveRunConfirm && !set(confirmLeaveJobWaitAtom, { leave: 'new_chat', window: options?.window })) return;
         // Show loading state immediately if there's an active run to cancel.
         // Gated on run status, not presence: a run that failed keeps sitting in
         // activeRunAtom, and prompting over it claims Beaver is still working.
@@ -526,6 +530,13 @@ export const loadThreadAtom = atom(
                 return false;
             }
             confirmedMismatchedThreadIds.add(threadId);
+        }
+
+        // Leaving a response that waits on a fill: see newThreadAtom.
+        if (isCurrent() && threadId !== get(currentThreadIdAtom) && !liveSet(confirmLeaveJobWaitAtom, { leave: 'switch_chat', window })) {
+            set(pendingScrollToRunAtom, null);
+            if (!canCommit) liveSet(isLoadingThreadAtom, false);
+            return false;
         }
 
         if (!isCurrent()) return false;
