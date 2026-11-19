@@ -162,7 +162,6 @@ export class BeaverUIFactory {
             if (error) Zotero.logError(error as Error);
             else ztoolkit.log("Beaver renderer failed to load");
         });
-        ztoolkit.log("registerChatPanel: injected reactBundle.js script tag");
     }
 
     private static addToolbarButton(win: BeaverWindow) {

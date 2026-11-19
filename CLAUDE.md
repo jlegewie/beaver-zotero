@@ -69,9 +69,10 @@ Consequences:
 | `packages/agent-core/` | both (compiled from source) | consumed as `@beaver/agent-core/<subpath>` |
 | `packages/agent-ui/` | webpack only (compiled from source) | consumed as `@beaver/agent-ui/<subpath>`; its `src/theme/*.css` is copied into `addon/content/styles/` by `scripts/copy-agent-ui-css.mjs` |
 
-**The two bundles cannot import from each other.** The webpack bundle is loaded via a
-`<script>` tag into the window; cross-bundle communication goes through `__beaver*`
-properties on `Window`/`Zotero` (e.g. `__beaverEventBus`, `__beaverJotaiStore`).
+**The two bundles cannot import from each other.** The plugin compiles the webpack bundle
+once and runs it in each renderer window (`src/ui/rendererBundle.ts`, with a `<script>` tag
+as fallback); cross-bundle communication goes through `__beaver*` properties on
+`Window`/`Zotero` (e.g. `__beaverEventBus`, `__beaverJotaiStore`).
 
 ### `addon` global vs `Zotero.Beaver`
 
