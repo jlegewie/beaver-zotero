@@ -99,6 +99,9 @@ import { annotationPanelStateAtom } from '../../../../react/atoms/messageUIState
 import { runStatusPopupCompletionAtom, runStatusPopupPreviewAtom } from '../../../../react/atoms/runStatusPopup';
 import { useRunStatusPopupCard } from '../../../../react/components/runStatusPopup/useRunStatusPopupCard';
 import type { RunStatusPopupCard } from '../../../../react/components/runStatusPopup/runStatusPopupModel';
+import { jobWaitAtom } from '../../../../react/atoms/jobWait';
+import { chatFillsAtom, recordChatFill } from '@beaver/agent-core/run-state/tableChatFills';
+import type { TableFillJobSnapshot } from '@beaver/agent-core/protocol/tableFillProtocol';
 
 function run(overrides: Partial<AgentRun> = {}): AgentRun {
     return {
@@ -193,6 +196,79 @@ describe('while a run works', () => {
         mount();
         latest!.onOpen();
         expect(mocks.dispatch).toHaveBeenCalledExactlyOnceWith('toggleChat', { forceOpen: true });
+    });
+});
+
+describe('while this window waits on a table fill', () => {
+    const fill = (overrides: Partial<TableFillJobSnapshot> = {}): TableFillJobSnapshot => ({
+        job_id: 'job-1',
+        plan_id: 'plan-1',
+        table: { libraryID: 1, key: 'TABLE001', title: 'Trials' },
+        origin: { kind: 'agent', run: { run_id: 'run-1', thread_id: 'thread-1', tool_call_id: 'call-1' } },
+        state: 'running',
+        rows_total: 10,
+        rows_done: 4,
+        rows_failed: 0,
+        in_flight: 2,
+        credits_charged: 0.8,
+        credits_planned: 2,
+        balance: null,
+        started_at: 1,
+        seconds_left: null,
+        ...overrides,
+    });
+    const fillCall = { part_kind: 'tool-call', tool_name: 'fill_table', args: { title: 'Trials' }, tool_call_id: 'call-1' } as const;
+    const waitOnFill = () => {
+        store.set(chatFillsAtom, recordChatFill(new Map(), fill()));
+        store.set(jobWaitAtom, { threadId: 'thread-1', runId: 'run-1', toolCallId: 'call-1', jobId: 'job-1' });
+    };
+
+    it('reads the fill line as the activity during the live wait', () => {
+        store.set(activeRunAtom, run({ model_messages: [{ kind: 'response', run_id: 'run-1', parts: [fillCall] }] }));
+        waitOnFill();
+        mount();
+        expect(latest).toMatchObject({ kind: 'running', statusLine: 'Filling Trials: 4 of 10 papers' });
+    });
+
+    it('reports the run finished when its fill returned within the live wait', () => {
+        store.set(isSidebarVisibleAtom, false);
+        store.set(activeRunAtom, run({ model_messages: [{ kind: 'response', run_id: 'run-1', parts: [fillCall] }] }));
+        waitOnFill();
+        mount();
+        // `run_complete` lands before `done` clears the wait.
+        set(chatFillsAtom, recordChatFill(new Map(), fill({ state: 'done', rows_done: 10, result: {} as any })));
+        set(activeRunAtom, run({ status: 'completed', model_messages: [{ kind: 'response', run_id: 'run-1', parts: [fillCall] }] }));
+        expect(store.get(runStatusPopupCompletionAtom)).toMatchObject({ runId: 'run-1' });
+    });
+
+    it('stays running, not finished, once the run parked on the fill', () => {
+        store.set(isSidebarVisibleAtom, false);
+        store.set(activeRunAtom, run({ model_messages: [{ kind: 'response', run_id: 'run-1', parts: [fillCall] }] }));
+        waitOnFill();
+        mount();
+        const parked = run({
+            status: 'parked' as any,
+            model_messages: [{ kind: 'response', run_id: 'run-1', parts: [fillCall] }],
+            parked: {
+                version: 1,
+                parked_at: '2026-11-18T12:00:00Z',
+                reason: 'timeout',
+                requests: [{
+                    kind: 'table_fill',
+                    tool_call_id: 'call-1',
+                    tool_name: 'fill_table',
+                    correlation_id: 'job-1',
+                    request: { type: 'background_job', kind: 'table_fill', job_id: 'job-1' },
+                    state: { job_id: 'job-1', title: 'Trials' },
+                }],
+            } as any,
+        });
+        act(() => {
+            store.set(threadRunsAtom, [parked]);
+            store.set(activeRunAtom, null);
+        });
+        expect(store.get(runStatusPopupCompletionAtom)).toBeNull();
+        expect(latest).toMatchObject({ kind: 'running', runId: 'run-1', statusLine: 'Filling Trials: 4 of 10 papers' });
     });
 });
 

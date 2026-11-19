@@ -12,6 +12,7 @@ import { atom } from 'jotai';
 import { isRunActive, type ParkedCardAnswer } from '@beaver/agent-core/agents/types';
 import { activeRunAtom, toolResultsMapAtom } from '@beaver/agent-core/run-state/atoms';
 import { openParkedRunAtom, parkedCardRequests } from '@beaver/agent-core/run-state/parkedRun';
+import { isJobDeferral } from '@beaver/agent-core/protocol/jobCallProtocol';
 import { addPendingQuestionAtom, pendingQuestionsAtom } from '@beaver/agent-core/run-state/pendingQuestions';
 import { addPendingBatchApprovalAtom, pendingBatchApprovalsAtom } from '@beaver/agent-core/run-state/pendingBatchApprovals';
 import {
@@ -109,7 +110,11 @@ export const carryLiveAnswersIntoParkedRunAtom = atom(null, (get, set, { parked 
     const queued = new Map(get(parkedAnswerQueueAtom));
     const unparked: string[] = [];
     let carried = false;
+    const jobCalls = new Set(open?.deferrals.filter(isJobDeferral).map((deferral) => deferral.tool_call_id));
     for (const [toolCallId, live] of get(liveCardAnswersAtom)) {
+        // A card whose call was handed over to a job: its answer was applied,
+        // and the call now waits on the job, not on the user.
+        if (jobCalls.has(toolCallId)) continue;
         if (open?.toolCallIds.has(toolCallId)) {
             queued.set(toolCallId, { threadId: open.threadId, answer: live.answer });
             carried = true;

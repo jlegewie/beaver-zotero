@@ -186,8 +186,8 @@ const SKIP_REASONS: Record<string, string> = {
  * What the fill this call started did: rows filled of those planned, rows
  * failed, rows not started and why, rows without a document or abstract,
  * answers from title and abstract, and skipped cells. A
- * fill still running when the call returned says so; its progress is in the
- * panel above the composer. Empty for a call that started no fill.
+ * fill still running when the call returned says so; its progress is on the
+ * tool call's line. Empty for a call that started no fill.
  */
 export function formatFillLines(record: TableRecord): string[] {
     const fill = record.run === "fill" ? record.fill : null;

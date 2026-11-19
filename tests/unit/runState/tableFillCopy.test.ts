@@ -16,6 +16,7 @@ import {
     progressLine,
     resultSummary,
     resultNeedsAttention,
+    readsAsStopped,
     resultText,
     resultTone,
     runningLabel,
@@ -168,37 +169,38 @@ describe("table fill copy", () => {
     });
 
     it("sums up a finished fill", () => {
-        expect(resultText(job({ state: "done", result: result() }))).toBe("Filled 44 rows · 2 couldn't be read");
-        expect(resultText(job({ state: "done", rows_done: 30, result: result({ failed_row_ids: [], stopped_by: "insufficient_credits", credits_charged: 6 }) }))).toBe(
+        expect(resultText(job({ state: "done", result: result() }))).toBe("Filled 44 of 46 items · 2 couldn't be read");
+        expect(resultText(job({ state: "done", result: result({ rows_answered: 46, row_failures: {}, failed_row_ids: [] }) }))).toBe("Filled 46 items");
+        expect(resultText(job({ state: "done", rows_done: 30, result: result({ rows_answered: 30, failed_row_ids: [], stopped_by: "insufficient_credits", not_started: { insufficient_credits: 16 }, credits_charged: 6 }) }))).toBe(
             "Out of credits after 30 of 46 items",
         );
-        expect(resultText(job({ state: "done", rows_done: 30, result: result({ failed_row_ids: [], stopped_by: "stopped", credits_charged: 6 }) }))).toBe(
+        expect(resultText(job({ state: "done", rows_done: 30, result: result({ rows_answered: 30, failed_row_ids: [], stopped_by: "stopped", not_started: { stopped: 16 }, credits_charged: 6 }) }))).toBe(
             "Stopped after 30 of 46 items",
         );
         expect(resultText(job({ state: "done", result: result({ failed_row_ids: [], stopped_by: "price_changed" }) }))).toBe(
             "Prices changed; fill again to see the new cost",
         );
         expect(resultText(job({ state: "done", result: result({ failed_row_ids: [], skipped_cells: { column_changed: 2 } }) }))).toBe(
-            "Filled 44 rows · 2 answers left for the next fill",
+            "Filled 44 of 46 items · 2 answers left for the next fill",
         );
         expect(resultText(job({ state: "done", result: result({ failed_row_ids: [], not_written: 1 }) }))).toBe(
-            "Filled 44 rows · 1 item could not be saved",
+            "Filled 44 of 46 items · 1 item could not be saved",
         );
     });
 
     it("says why a fill stopped: the server, an excluded library, a read-only library, a missing table", () => {
         const stopped = (stopped_by: TableFillResult["stopped_by"]) =>
-            resultText(job({ state: "done", rows_done: 2, rows_total: 3, result: result({ failed_row_ids: [], stopped_by }) }));
+            resultText(job({ state: "done", rows_done: 2, rows_total: 3, result: result({ rows_answered: 2, failed_row_ids: [], stopped_by }) }));
         expect(stopped("unavailable")).toBe("The fill stopped: Beaver could not reach its server after 2 of 3 items");
         expect(stopped("library_excluded")).toBe("The fill stopped after 2 of 3 items because a library was excluded from Beaver");
         expect(stopped("read_only")).toBe("The fill stopped after 2 of 3 items because the library became read-only");
         expect(stopped("table_unavailable")).toBe("The fill stopped after 2 of 3 items because the table is no longer available");
     });
 
-    it("names the rows a stopped fill could not read", () => {
+    it("names the rows a stopped fill could not read, counting the items it filled", () => {
         const stopped = (over: Partial<TableFillResult>) =>
-            resultText(job({ state: "done", rows_done: 7, rows_total: 12, result: result({ credits_charged: 1.4, ...over }) }));
-        expect(stopped({ stopped_by: "stopped" })).toBe("Stopped after 7 of 12 items · 2 couldn't be read");
+            resultText(job({ state: "done", rows_done: 9, rows_total: 12, result: result({ rows_answered: 7, credits_charged: 1.4, ...over }) }));
+        expect(stopped({ stopped_by: "stopped", not_started: { stopped: 3 } })).toBe("Stopped after 7 of 12 items · 2 couldn't be read");
         expect(stopped({ stopped_by: "insufficient_credits", failed_row_ids: ["a"] })).toBe(
             "Out of credits after 7 of 12 items · 1 couldn't be read",
         );
@@ -208,10 +210,10 @@ describe("table fill copy", () => {
     });
 
     it("names the papers a stopped fill answered but could not save", () => {
-        expect(resultText(job({ state: "done", rows_done: 3, rows_total: 3, result: result({ failed_row_ids: [], stopped_by: "read_only", not_written: 1 }) }))).toBe(
+        expect(resultText(job({ state: "done", rows_done: 3, rows_total: 3, result: result({ rows_answered: 3, failed_row_ids: [], stopped_by: "read_only", not_written: 1 }) }))).toBe(
             "The fill stopped after 3 of 3 items because the library became read-only; 1 item could not be saved",
         );
-        expect(resultText(job({ state: "done", rows_done: 30, result: result({ failed_row_ids: [], stopped_by: "stopped", credits_charged: 6, not_written: 2 }) }))).toBe(
+        expect(resultText(job({ state: "done", rows_done: 30, result: result({ rows_answered: 30, failed_row_ids: [], stopped_by: "stopped", not_started: { stopped: 16 }, credits_charged: 6, not_written: 2 }) }))).toBe(
             "Stopped after 30 of 46 items; 2 items could not be saved",
         );
     });
@@ -239,7 +241,9 @@ describe("table fill copy", () => {
         const done = (over: Partial<TableFillResult>) => job({ state: "done", result: result(over) });
         expect(resultTone(done({ failed_row_ids: [] }))).toBe("clean");
         expect(resultTone(done({ failed_row_ids: [], skipped_cells: { column_changed: 2 } }))).toBe("clean");
-        expect(resultTone(done({ failed_row_ids: [], stopped_by: "stopped" }))).toBe("stopped");
+        expect(resultTone(done({ failed_row_ids: [], stopped_by: "stopped", not_started: { stopped: 2 } }))).toBe("stopped");
+        // A Stop that came once every item had started left nothing undone.
+        expect(resultTone(done({ failed_row_ids: [], stopped_by: "stopped" }))).toBe("clean");
         expect(resultTone(done({}))).toBe("warning");
         expect(resultTone(done({ failed_row_ids: [], not_written: 1 }))).toBe("warning");
         expect(resultTone(done({ failed_row_ids: [], stopped_by: "insufficient_credits" }))).toBe("warning");
@@ -250,12 +254,12 @@ describe("table fill copy", () => {
     it("sums up a finished fill in a few words, without its cost or its failures", () => {
         const done = (over: Partial<TableFillResult>, at: Partial<TableFillJobSnapshot> = {}) =>
             resultSummary(job({ state: "done", rows_done: 7, rows_total: 12, ...at, result: result(over) }));
-        expect(done({ rows_answered: 12, failed_row_ids: [] })).toBe("Filled 12 rows");
-        expect(done({ rows_answered: 10 })).toBe("Filled 10 rows");
-        expect(done({ stopped_by: "stopped" })).toBe("Stopped after 7 of 12 items");
-        expect(done({ stopped_by: "insufficient_credits" })).toBe("Out of credits after 7 of 12 items");
-        expect(done({ stopped_by: "read_only" })).toBe("The fill stopped after 7 of 12 items because the library became read-only");
-        expect(done({ rows_answered: 10, not_written: 1 })).toBe("Filled 10 rows · 1 item not saved");
+        expect(done({ rows_answered: 12, failed_row_ids: [] })).toBe("Filled 12 items");
+        expect(done({ rows_answered: 10 })).toBe("Filled 10 of 12 items");
+        expect(done({ rows_answered: 7, stopped_by: "stopped", not_started: { stopped: 5 } })).toBe("Stopped after 7 of 12 items");
+        expect(done({ rows_answered: 7, stopped_by: "insufficient_credits" })).toBe("Out of credits after 7 of 12 items");
+        expect(done({ rows_answered: 7, stopped_by: "read_only" })).toBe("The fill stopped after 7 of 12 items because the library became read-only");
+        expect(done({ rows_answered: 10, not_written: 1 })).toBe("Filled 10 of 12 items · 1 item not saved");
     });
 });
 
@@ -263,9 +267,9 @@ describe("resultNeedsAttention", () => {
     const clean = result({ row_failures: {}, failed_row_ids: [] });
     const done = (over: Partial<TableFillResult> = {}) => job({ state: "done", result: { ...clean, ...over } });
 
-    it("is false for a clean result, which reads as the rows filled", () => {
+    it("is false for a clean result, which reads as the items filled", () => {
         expect(resultNeedsAttention(done())).toBe(false);
-        expect(resultText(done())).toBe("Filled 44 rows");
+        expect(resultText(done())).toBe("Filled 44 of 46 items");
     });
 
     it("is true without a result", () => {
@@ -273,14 +277,31 @@ describe("resultNeedsAttention", () => {
     });
 
     it("is true for a fill that stopped, by the user or for any other reason", () => {
-        expect(resultNeedsAttention(done({ stopped_by: "stopped" }))).toBe(true);
+        expect(resultNeedsAttention(done({ stopped_by: "stopped", not_started: { stopped: 2 } }))).toBe(true);
         expect(resultNeedsAttention(done({ stopped_by: "insufficient_credits" }))).toBe(true);
         expect(resultNeedsAttention(done({ stopped_by: "unavailable" }))).toBe(true);
     });
 
+    it("reads a stop as one only when items were left unstarted, for a result and for a record", () => {
+        expect(readsAsStopped("stopped", { stopped: 3 })).toBe(true);
+        expect(readsAsStopped("stopped", {})).toBe(false);
+        expect(readsAsStopped("stopped", null)).toBe(false);
+        expect(readsAsStopped("insufficient_credits", {})).toBe(true);
+        expect(readsAsStopped(null, { stopped: 3 })).toBe(false);
+    });
+
+    it("is false for a Stop that came once every item had started", () => {
+        // Nothing was left unstarted: the fill reads as finished, by the items it filled.
+        expect(resultText(done({ stopped_by: "stopped" }))).toBe("Filled 44 of 46 items");
+        expect(resultNeedsAttention(done({ stopped_by: "stopped" }))).toBe(false);
+        expect(resultText(job({ state: "done", rows_done: 60, rows_total: 60, result: result({ rows_answered: 55, failed_row_ids: ["a", "b", "c", "d", "e"], stopped_by: "stopped" }) }))).toBe(
+            "Filled 55 of 60 items · 5 couldn't be read",
+        );
+    });
+
     it("is false for a stop reason the result line does not name", () => {
         // `changed` is not a stop the result line reports, so the line reads clean.
-        expect(resultText(done({ stopped_by: "changed" }))).toBe("Filled 44 rows");
+        expect(resultText(done({ stopped_by: "changed" }))).toBe("Filled 44 of 46 items");
         expect(resultNeedsAttention(done({ stopped_by: "changed" }))).toBe(false);
     });
 

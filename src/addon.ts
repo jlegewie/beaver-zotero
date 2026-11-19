@@ -32,6 +32,8 @@ class Addon {
     public preferences?: import("./services/instancePreferences").InstancePreferences;
     public account?: import("./services/instanceAccount").InstanceAccount;
     public tableFills?: import("./services/tableFills/service").InstanceTableFills;
+    /** Job calls this device runs, until each result reaches the backend. */
+    public jobCalls?: import("./services/jobCalls/service").InstanceJobCalls;
     public notePreviews = new NotePreviews();
     public syncPause = createSyncPauseService();
     public mutations = new LibraryMutations(

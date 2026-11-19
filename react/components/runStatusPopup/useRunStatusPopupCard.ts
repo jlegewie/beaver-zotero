@@ -49,6 +49,15 @@ import {
     runApprovalPolicyAtom,
 } from '../../atoms/runApprovalPolicy';
 import { isSidebarVisibleAtom } from '../../atoms/ui';
+import { jobWaitAtom, type JobWait } from '../../atoms/jobWait';
+import { chatFillsAtom } from '@beaver/agent-core/run-state/tableChatFills';
+import {
+    fillCallLine,
+    fillCallText,
+    fillStateFromSnapshot,
+    jobCallFillState,
+    openJobCallsAtom,
+} from '@beaver/agent-core/run-state/jobCalls';
 import { setAnnotationPanelStateAtom } from '../../atoms/messageUIState';
 import {
     dismissRunStatusPopupCardAtom,
@@ -94,11 +103,13 @@ function openBeaver(): void {
 /**
  * Records a run that finished while the sidebar was closed, so the completed
  * card can report it, and forgets it as soon as the sidebar is open or
- * another run has taken the thread over.
+ * another run has taken the thread over. A run that parked while this window
+ * waits on its fill has not finished: the resume that continues it does.
  */
 function useCompletionTracking(): void {
     const summary = useAtomValue(lastRunSummaryAtom);
     const isSidebarVisible = useAtomValue(isSidebarVisibleAtom);
+    const waitedRunId = useAtomValue(jobWaitAtom)?.runId ?? null;
     const setCompletion = useSetAtom(runStatusPopupCompletionAtom);
     const previousRef = useRef(summary);
 
@@ -115,10 +126,13 @@ function useCompletionTracking(): void {
             setCompletion(null);
         }
         const wasLive = previous?.id === summary.id && isRunActive(previous);
-        if (wasLive && !isRunActive(summary) && !isSidebarVisible) {
+        // A run that parked on the fill this window waits on has not finished;
+        // one whose fill returned within the live wait has.
+        const parkedOnFill = waitedRunId === summary.id && summary.status === 'parked';
+        if (wasLive && !isRunActive(summary) && !isSidebarVisible && !parkedOnFill) {
             setCompletion({ runId: summary.id, completedAt: Date.now() });
         }
-    }, [summary, isSidebarVisible, setCompletion]);
+    }, [summary, isSidebarVisible, setCompletion, waitedRunId]);
 
     useEffect(() => {
         if (isSidebarVisible) setCompletion(null);
@@ -378,6 +392,28 @@ function useDismissalReset(activeRunId: string | null): void {
     }, [activeRunId, setDismissed]);
 }
 
+/**
+ * The fill this window waits on, as the popup shows it: the tool row's line
+ * ("Filling *Soil carbon*: 45 of 150 papers") as the activity, and the run
+ * that parked on it, which reads as running. Null when the window waits on
+ * nothing, or once the fill ended during a live run (the run moves on).
+ */
+function useJobWait(): { parkedRun: AgentRun | null; statusLine: string } | null {
+    const wait: JobWait | null = useAtomValue(jobWaitAtom);
+    const calls = useAtomValue(openJobCallsAtom);
+    const fills = useAtomValue(chatFillsAtom);
+    const runs = useAtomValue(allRunsAtom);
+    if (!wait) return null;
+    const call = calls.find((candidate) => candidate.tool_call_id === wait.toolCallId);
+    const fill = fills.get(wait.jobId);
+    const run = runs.find((candidate) => candidate.id === wait.runId) ?? null;
+    const parkedRun = call && run && !isRunActive(run) ? run : null;
+    if (!parkedRun && (!fill || fill.snapshot.state === 'done')) return null;
+    const title = call?.state?.title ?? fill?.snapshot.table.title ?? null;
+    const state = call ? jobCallFillState(call, fill?.snapshot) : fillStateFromSnapshot(fill!.snapshot);
+    return { parkedRun, statusLine: fillCallText(fillCallLine(state, title)) };
+}
+
 function useLiveCard(): RunStatusPopupCard | null {
     useCompletionTracking();
 
@@ -400,8 +436,10 @@ function useLiveCard(): RunStatusPopupCard | null {
     // error is about to be undone: the sidebar shows it as retrying, and so
     // does the card.
     const isAutoRetrying = !!activeRun && autoReplacementPendingRunIds.has(activeRun.id);
-    const isLive = isRunActive(activeRun) || isAutoRetrying;
-    const liveRun = isLive ? activeRun : null;
+    // A run parked on the fill this window waits on reads as running.
+    const jobWait = useJobWait();
+    const isLive = isRunActive(activeRun) || isAutoRetrying || !!jobWait?.parkedRun;
+    const liveRun = isRunActive(activeRun) || isAutoRetrying ? activeRun : jobWait?.parkedRun ?? null;
     const approvals = useMemo(() => [...pendingApprovals.values()], [pendingApprovals]);
     const batch = batchApprovals.values().next().value ?? null;
     const tableCard = tableCards.values().next().value ?? null;
@@ -516,7 +554,11 @@ function useLiveCard(): RunStatusPopupCard | null {
         if (question) {
             return { ...base, kind: 'question', question, onSubmit: onSubmitQuestion, disabled: isReconnecting };
         }
-        return { ...base, kind: 'running', statusLine: isAutoRetrying ? 'Retrying' : statusLine };
+        return {
+            ...base,
+            kind: 'running',
+            statusLine: isAutoRetrying ? 'Retrying' : jobWait?.statusLine ?? statusLine,
+        };
     }
 
     if (completion && completed.run) {

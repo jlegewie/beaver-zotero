@@ -52,7 +52,11 @@ import {
     type TableCardDraft,
 } from '@beaver/agent-core/run-state/tableCardDraft';
 import { isCreateCard, isFillCard, type TableCardChoice } from '@beaver/agent-core/protocol/tableCardProtocol';
-import { activeRunIdAtom, chatFillsAtom, dismissChatFillAtom, panelFill } from '@beaver/agent-core/run-state/tableChatFills';
+import { chatFillsAtom } from '@beaver/agent-core/run-state/tableChatFills';
+import { openJobCallsAtom } from '@beaver/agent-core/run-state/jobCalls';
+import { jobIdOf } from '@beaver/agent-core/protocol/jobCallProtocol';
+import { jobWaitAtom, stopChatFillAtom } from '../../atoms/jobWait';
+import { runningChatJobsAtom } from '../../atoms/jobCalls';
 import { resolveItems as resolveCardItems, resolveLibraryScope } from '../../components/tables/card/liveSources';
 import { sendComposedMessageAtom } from '../../atoms/actions';
 import {
@@ -758,12 +762,12 @@ async function settleIfAsked(request: any): Promise<SettleReason | null> {
 }
 
 /**
- * The chat fills this renderer follows, and the one the progress panel shows
- * in the current thread. Body: { dismiss?: jobId } closes a finished fill's
- * result line, as its × does.
+ * The chat fills this renderer follows, the fill this window waits on
+ * (`jobWait`), the open parked run's job calls, and the composer's fill
+ * jobs. Body: { stop?: jobId } stops a fill, as the receipt's Stop does.
  */
 export async function handleTestTableFillProgressHttpRequest(request?: any) {
-    if (typeof request?.dismiss === 'string') store.set(dismissChatFillAtom, request.dismiss);
+    if (typeof request?.stop === 'string') store.set(stopChatFillAtom, request.stop);
     const all = store.get(chatFillsAtom);
     const fills = Array.from(all.values()).map((fill) => ({
         job_id: fill.snapshot.job_id,
@@ -777,11 +781,23 @@ export async function handleTestTableFillProgressHttpRequest(request?: any) {
         rows_failed: fill.snapshot.rows_failed,
         in_flight: fill.snapshot.in_flight,
         credits_charged: fill.snapshot.credits_charged,
-        dismissed: fill.dismissed,
         result: fill.snapshot.result ?? null,
     }));
-    const shown = panelFill(all, store.get(currentThreadIdAtom), store.get(activeRunIdAtom));
-    return { ok: true, fills, panel: shown ? shown.snapshot.job_id : null, ...currentIds() };
+    const jobCalls = store.get(openJobCallsAtom).map((call) => ({
+        tool_call_id: call.tool_call_id,
+        job_id: jobIdOf(call),
+        state: call.state ?? null,
+        result: call.result ?? null,
+    }));
+    return {
+        ok: true,
+        fills,
+        jobWait: store.get(jobWaitAtom),
+        jobCalls,
+        composerJobs: store.get(runningChatJobsAtom),
+        stored: Zotero.Beaver.jobCalls?.list() ?? [],
+        ...currentIds(),
+    };
 }
 
 /**

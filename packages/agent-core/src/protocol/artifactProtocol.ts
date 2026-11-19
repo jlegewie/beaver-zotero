@@ -194,6 +194,12 @@ export interface ArtifactRequest {
      * deadline); without it, `running` once the job has started.
      */
     wait?: boolean | null;
+    /**
+     * `fill`: the backend hands the call over to a job call (sent with `wait:
+     * false`). The client keeps the job's tool call to store its result once
+     * it ends, and names the device in its answer.
+     */
+    job_call?: boolean | null;
 }
 
 export interface ArtifactVersion {
@@ -271,6 +277,9 @@ export interface ArtifactResponse {
     job_id?: string;
     progress?: TableFillProgress;
     result?: TableFillResult;
+    /** `fill` with `job_call`: the device running the job (Zotero's local user key, host name). */
+    device_key?: string;
+    device_name?: string;
 }
 
 const contracts: Record<string, [string[], string[]]> = {
@@ -287,7 +296,7 @@ const contracts: Record<string, [string[], string[]]> = {
     trim: [["key", "thread_id", "run_ids"], []],
     delete: [["key"], []],
     fill_plan: [["key"], ["rows", "columns"]],
-    fill: [["plan_id", "tool_call_id", "wait"], []],
+    fill: [["plan_id", "tool_call_id", "wait"], ["job_call"]],
 };
 const handle = /^(u|g[1-9]\d*)-[23456789ABCDEFGHIJKLMNPQRSTUVWXYZ]{8}$/;
 const nonempty = (value: unknown): value is string =>

@@ -25,13 +25,12 @@ import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import PendingActionsBar from './PendingActionsBar';
 import ThreadPresenceBar from './ThreadPresenceBar';
 import BatchProgressPanel from './BatchProgressPanel';
-import TableFillProgressPanel from './TableFillProgressPanel';
 import HighTokenUsageWarningBar from './HighTokenUsageWarningBar';
 import NextStepsPanel from '../pages/firstRun/NextStepsPanel';
 import RunContinueDisplay from '../agentRuns/RunContinueDisplay';
 import BackToSuggestions, { FirstRunBackTarget } from '../pages/firstRun/BackToSuggestions';
 import { continuationOfferAtom, hasWhereToStartRunAtom, lastRunSummaryAtom, threadRunIdsAtom } from '@beaver/agent-core/run-state/atoms';
-import { waitsOnFillAtom } from '@beaver/agent-core/run-state/tableChatFills';
+import { liveJobStoppingAtom, runningChatJobsAtom, stopChatJobsAtom } from '../../atoms/jobCalls';
 import { PromptOrigin, isRunFinished } from '@beaver/agent-core/agents/types';
 import { isThreadParkedAtom } from '../../atoms/parkedRuns';
 import { firstRunNextStepsDismissedAtom } from '../../atoms/firstRun';
@@ -88,8 +87,6 @@ const InputArea: React.FC<InputAreaProps> = ({
     const runIds = useAtomValue(threadRunIdsAtom);
     const hasWhereToStartRun = useAtomValue(hasWhereToStartRunAtom);
     const currentThreadId = useAtomValue(currentThreadIdAtom);
-    // While the response waits on a table fill, stopping it stops the fill too.
-    const waitsOnFill = useAtomValue(waitsOnFillAtom);
     const dismissedHighTokenByThread = useAtomValue(dismissedHighTokenWarningByThreadAtom);
     const dismissHighTokenWarning = useSetAtom(dismissHighTokenWarningForThreadAtom);
     const backendHighTokenUsageRuns = useAtomValue(backendHighTokenUsageRunsAtom);
@@ -143,7 +140,20 @@ const InputArea: React.FC<InputAreaProps> = ({
     // answer them. A resume that waits for the rest of the cards looks the
     // same: sending a message parks it first.
     const isParked = useAtomValue(isThreadParkedAtom);
-    const isPending = useAtomValue(isWSChatPendingAtom) && !isParked;
+    // Fills this window waits on. While one goes, the chat is busy as during
+    // any other tool call, parked or not: the composer shows Stop, which
+    // stops the fill and ends the response.
+    const chatJobs = useAtomValue(runningChatJobsAtom);
+    const stopChatJobs = useSetAtom(stopChatJobsAtom);
+    const liveJobStopping = useAtomValue(liveJobStoppingAtom);
+    const jobsBusy = isParked && chatJobs.length > 0;
+    const isPending = (useAtomValue(isWSChatPendingAtom) && !isParked) || jobsBusy;
+    // Stop was pressed on the fill: it winds down, and a run that waited on
+    // it parks by itself.
+    const isStoppingJobs = jobsBusy
+        ? chatJobs.every((job) => job.stopping)
+        : liveJobStopping;
+    const waitsOnJob = isPending && chatJobs.length > 0;
 
     // A file staged for THIS composition is still being attached, so sending is
     // held until it lands. Work left over from a composition the user has since
@@ -533,6 +543,9 @@ const InputArea: React.FC<InputAreaProps> = ({
             e.preventDefault();
             e.stopPropagation();
         }
+        if (isStoppingJobs) return;
+        // A chat that waits only on fills stops them; anything else stops the run.
+        if (stopChatJobs() || jobsBusy) return;
         stopRun();
     };
 
@@ -615,6 +628,8 @@ const InputArea: React.FC<InputAreaProps> = ({
     const getPlaceholderText = () => {
         if (placeholder !== undefined) return placeholder;
         if (isAwaitingApproval) return "Optional instructions, then approve or reject";
+        // The window waits on a fill: the response continues once it is done.
+        if (waitsOnJob) return isStoppingJobs ? "Stopping the table fill…" : "Beaver continues once the table is filled";
         if (isLibraryTab) return "@ to add a source, / for actions";
         if (currentNoteItem) return "@ to add a source, / for actions";
         return "@ to add a source, / for actions, drag to add annotations";
@@ -637,7 +652,6 @@ const InputArea: React.FC<InputAreaProps> = ({
             {/* Live batch progress. Above the band so it stacks as: what the
                 run is doing, then what it wants from the user. */}
             <BatchProgressPanel />
-            <TableFillProgressPanel />
 
             {/* One band, chosen by `composerBand`. Lowest priority first so
                 the winner sits on the composer. */}
@@ -885,7 +899,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                         </>
                     ) : isPending ? (
                         <Tooltip
-                            content={waitsOnFill ? 'Stop response (also stops the table fill)' : 'Stop response'}
+                            content={isStoppingJobs ? 'Stopping…' : waitsOnJob ? 'Stop' : 'Stop response'}
                             showArrow
                             singleLine
                         >
@@ -893,7 +907,8 @@ const InputArea: React.FC<InputAreaProps> = ({
                                 icon={StopIcon}
                                 variant="surface"
                                 className="composer-send composer-send-stop"
-                                ariaLabel={waitsOnFill ? 'Stop response (also stops the table fill)' : 'Stop generating'}
+                                ariaLabel={isStoppingJobs ? 'Stopping' : waitsOnJob ? 'Stop' : 'Stop generating'}
+                                disabled={isStoppingJobs}
                                 onClick={handleStop}
                             />
                         </Tooltip>

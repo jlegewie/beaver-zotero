@@ -33,6 +33,7 @@ vi.mock('@beaver/agent-core/transport/agentService', () => ({
         leaveRun: () => false,
         isReattaching: () => false,
         sendPark: sendParkMock,
+        liveJobWaitCalls: () => new Set(),
     },
     AgentConnectionError: class AgentConnectionError extends Error {
         evidence: any;

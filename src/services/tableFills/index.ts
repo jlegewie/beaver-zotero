@@ -18,6 +18,7 @@ import { InstanceTableFills, type TableFillDeps } from './service';
 import { DEFAULT_FILL_WAIT_MS } from './agentFill';
 import { getPref } from '../../utils/prefs';
 import { tableFillApiClient } from './tableFillApi';
+import { tableFillJobCalls } from '../jobCalls';
 
 /** The page cap of a document a fill reads, as the backend's own. */
 const FILL_MAX_PAGES = 1500;
@@ -117,6 +118,7 @@ const deps: TableFillDeps = {
     publish: (snapshot) => Zotero.Beaver.runtime.publish(TABLE_FILL_CHANGED_EVENT, snapshot),
     newId: () => crypto.randomUUID(),
     now: () => Date.now(),
+    jobCalls: tableFillJobCalls,
 };
 
 /** The safety deadline of a waiting `fill`, from the `tables.fillWaitSeconds` pref. */
