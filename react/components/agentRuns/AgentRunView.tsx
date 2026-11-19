@@ -96,9 +96,9 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
     // Don't show the user message of a run that continues another (a resume,
     // or the answer to a parked card): its content is empty.
     const showUserMessage = !isContinuationPrompt(run.user_prompt) || run.user_prompt.content.length > 0;
-    // A run whose answer is still going: a card waits for the user, or a
-    // fill it started runs on. One whose fills only left stored results
-    // (stopped, handed to the table) has ended, though its calls are open.
+    // A run whose answer is still going: a card waits for the user, or this
+    // window waits on a fill it started. One whose open calls are only fills
+    // nobody here waits on has ended, though its calls are open.
     const isOpenParked = useAtomValue(openAnswerRunIdAtom) === run.id;
     
     // The provider can go quiet mid-response — after the sentence of preamble it

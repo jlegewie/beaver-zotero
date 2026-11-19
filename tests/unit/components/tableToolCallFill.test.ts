@@ -9,7 +9,6 @@ import { createRoot, type Root } from 'react-dom/client';
 import { createStore, Provider } from 'jotai';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentRun, AgentRunStatus, ParkedDeferral, ToolCallPart } from '@beaver/agent-core/agents/types';
-import type { JobResult } from '@beaver/agent-core/protocol/jobCallProtocol';
 import type { TableFillJobSnapshot } from '@beaver/agent-core/protocol/tableFillProtocol';
 import { threadRunsAtom, type ToolResult } from '@beaver/agent-core/run-state/atoms';
 import { chatFillsAtom, recordChatFill } from '@beaver/agent-core/run-state/tableChatFills';
@@ -46,17 +45,6 @@ function snapshot(overrides: Partial<TableFillJobSnapshot> = {}): TableFillJobSn
     };
 }
 
-const done: JobResult = {
-    kind: 'table_fill',
-    job_id: 'job-1',
-    status: 'done',
-    progress: { state: 'done', rows_total: 10, rows_done: 10, rows_failed: 0, in_flight: 0, credits_charged: 2, credits_planned: 2, seconds_left: null },
-    result: {
-        rows_answered: 10, answered: 20, not_reported: 0, from_title_abstract: 0, documents_read: 10, credits_charged: 2,
-        row_failures: {}, failed_row_ids: [], not_started: {}, not_written: 0, skipped_cells: {}, pending: null,
-    },
-};
-
 function parkedRun(deferral: Partial<ParkedDeferral> = {}): AgentRun {
     return {
         id: 'run-1',
@@ -73,7 +61,7 @@ function parkedRun(deferral: Partial<ParkedDeferral> = {}): AgentRun {
                 tool_name: 'fill_table',
                 correlation_id: 'job-1',
                 request: { type: 'background_job', kind: 'table_fill', job_id: 'job-1' },
-                state: { job_id: 'job-1', title: 'Trials', device_name: 'Office iMac' },
+                state: { job_id: 'job-1', title: 'Trials' },
                 ...deferral,
             } as ParkedDeferral],
         },
@@ -122,49 +110,27 @@ describe('a table tool call line', () => {
         expect(line(render(store, 'parked'))).toBe('Fill Table: 3 of 10 items complete (1 failed)');
     });
 
-    it('names the device for a fill another device runs', () => {
+    it('reads a fill another device runs, or one Zotero restarted since, as running', () => {
         const store = createStore();
         store.set(threadRunsAtom, [parkedRun()]);
-        expect(line(render(store, 'parked'))).toBe('Fill Table: running on Office iMac');
+        expect(line(render(store, 'parked'))).toBe('Fill Table: running');
     });
 
-    it('shows the title for a stored result that completed every item', () => {
-        const store = createStore();
-        store.set(threadRunsAtom, [parkedRun({ result: done } as Partial<ParkedDeferral>)]);
-        expect(line(render(store, 'parked'))).toBe('Fill Table Trials');
-    });
-
-    it('reads a stopped result stored on the parked call', () => {
-        const store = createStore();
-        const stopped: JobResult = {
-            ...done,
-            stopped: true,
-            progress: { ...done.progress, rows_done: 4, rows_failed: 1 },
-            result: { ...done.result, rows_answered: 3, row_failures: { unreadable: 1 }, stopped_by: 'stopped', not_started: { stopped: 6 } },
-        };
-        store.set(threadRunsAtom, [parkedRun({ result: stopped } as Partial<ParkedDeferral>)]);
-        expect(line(render(store, 'parked'))).toBe('Fill Table: 4 of 10 items complete (stopped, 1 failed)');
-    });
-
-    it('reads a fill handed to its table as of the hand-off, stored or returned, though it runs on here', () => {
-        const store = createStore();
-        const handedOff: JobResult = { kind: 'table_fill', job_id: 'job-1', status: 'handed_off', progress: { ...done.progress, state: 'running', rows_done: 2, rows_failed: 0 } };
-        store.set(threadRunsAtom, [parkedRun({ result: handedOff } as Partial<ParkedDeferral>)]);
-        store.set(chatFillsAtom, recordChatFill(new Map(), snapshot()));
-        expect(line(render(store, 'parked'))).toBe('Fill Table: 2 of 10 items complete (continued in the table)');
-        act(() => root?.unmount());
-        // The next message closed the call: its record says the same.
+    it('reads a call a message closed while the fill ran from the fill this device runs, else by its title', () => {
+        // The closing text carries the table but no fill: the fill's end is unknown.
         const record = {
             reference: { kind: 'table', key: 'u-TABLE001', title: 'Trials' },
             change: 'Filled table',
             summary: { rows: 10 },
             run: 'fill',
-            fill: { status: 'running', handed_off: true, rows: 10, rows_filled: 2, rows_failed: 0, rows_not_started: {}, rows_without_input: 0, rows_not_written: 0, answered: 2, not_reported: 0, from_title_abstract: 0, skipped: {}, documents_read: 0, credits_charged: 0 },
+            fill: null,
         };
         const returned = { part_kind: 'tool-return', tool_name: 'fill_table', tool_call_id: 'call-1', content: {}, metadata: { view: { view_type: 'table', record } } } as unknown as ToolResult;
-        const closed = createStore();
-        closed.set(chatFillsAtom, recordChatFill(new Map(), snapshot()));
-        expect(line(render(closed, 'completed', returned))).toBe('Fill Table: 2 of 10 items complete (continued in the table)');
+        const here = createStore();
+        here.set(chatFillsAtom, recordChatFill(new Map(), snapshot({ state: 'done', rows_done: 4, result: { rows_answered: 3, answered: 6, not_reported: 0, from_title_abstract: 0, documents_read: 4, credits_charged: 1, row_failures: { unreadable: 1 }, failed_row_ids: [], not_started: { stopped: 6 }, not_written: 0, skipped_cells: {}, pending: null, stopped_by: 'stopped' } })));
+        expect(line(render(here, 'completed', returned))).toBe('Fill Table: 4 of 10 items complete (stopped, 1 failed)');
+        act(() => root?.unmount());
+        expect(line(render(createStore(), 'completed', returned))).toBe('Fill Table Trials');
     });
 });
 

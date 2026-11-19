@@ -1,22 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import { createStore } from 'jotai/vanilla';
 import type { AgentRun } from '@beaver/agent-core/agents/types';
-import type { JobResult } from '@beaver/agent-core/protocol/jobCallProtocol';
+import type { TableFillJobResult } from '@beaver/agent-core/protocol/jobCallProtocol';
 import type { TableFillJobSnapshot } from '@beaver/agent-core/protocol/tableFillProtocol';
 import { threadRunsAtom } from '@beaver/agent-core/run-state/atoms';
 import {
     fillStateFromRecord,
-    fillStateFromResult,
     fillStateFromSnapshot,
-    isHandedOffJobResult,
-    isStoppedJobResult,
+    jobCallFillState,
     openJobCallsAtom,
     tableCallLine,
     tableCallText,
-    withStoredJobResult,
 } from '@beaver/agent-core/run-state/jobCalls';
 
-const fill: JobResult = {
+const fill: TableFillJobResult = {
     kind: 'table_fill',
     job_id: 'job-1',
     status: 'done',
@@ -46,7 +43,7 @@ const jobCall = {
     tool_name: 'fill_table',
     correlation_id: 'job-1',
     request: { type: 'background_job', kind: 'table_fill', job_id: 'job-1' },
-    state: { job_id: 'job-1', title: 'Trials', device_key: 'k' },
+    state: { job_id: 'job-1', title: 'Trials' },
 };
 const question = {
     kind: 'ask_user_question',
@@ -61,36 +58,6 @@ describe('job calls of the open thread', () => {
         const store = createStore();
         store.set(threadRunsAtom, [parkedRun([jobCall, question])]);
         expect(store.get(openJobCallsAtom).map((call) => call.tool_call_id)).toEqual(['call-1']);
-        expect(store.get(openJobCallsAtom)[0].result).toBeUndefined();
-    });
-
-    it('carry the result once it is stored on the parked call', () => {
-        const store = createStore();
-        const runs = [parkedRun([jobCall, question])];
-        const patched = withStoredJobResult(runs, 'call-1', fill)!;
-        expect(patched).not.toBeNull();
-        expect(patched[0].parked!.requests[1]).toBe(runs[0].parked!.requests[1]);
-        store.set(threadRunsAtom, patched);
-        expect(store.get(openJobCallsAtom)[0].result).toEqual(fill);
-    });
-
-    it('read a result the user stopped as stopped', () => {
-        expect(isStoppedJobResult({ ...fill, stopped: true })).toBe(true);
-        expect(isStoppedJobResult(fill)).toBe(false);
-        expect(isStoppedJobResult(null)).toBe(false);
-    });
-
-    it('read a fill handed to its table as handed off, and not as stopped', () => {
-        const handedOff: JobResult = { kind: 'table_fill', job_id: 'job-1', status: 'handed_off', progress: fill.progress };
-        expect(isHandedOffJobResult(handedOff)).toBe(true);
-        expect(isStoppedJobResult(handedOff)).toBe(false);
-        expect(isHandedOffJobResult(fill)).toBe(false);
-    });
-
-    it('patch nothing for a call no run parks, or a card', () => {
-        const runs = [parkedRun([jobCall, question])];
-        expect(withStoredJobResult(runs, 'nope', fill)).toBeNull();
-        expect(withStoredJobResult(runs, 'call-2', fill)).toBeNull();
     });
 });
 
@@ -128,10 +95,9 @@ describe('the table tool call line', () => {
         expect(text(fillStateFromSnapshot(snapshot({ state: 'stopping' })))).toBe('Fill Table: 48 of 150 items complete (stopping, 3 failed)');
     });
 
-    it('names the device that runs a fill elsewhere, without counts', () => {
-        expect(text({ kind: 'elsewhere', device: 'Office iMac' })).toBe('Fill Table: running on Office iMac');
-        expect(text({ kind: 'elsewhere' })).toBe('Fill Table: running');
-        expect(text({ kind: 'started' })).toBe('Fill Table: running');
+    it('reads an open fill call this device does not run as running, without counts', () => {
+        expect(text(jobCallFillState(null))).toBe('Fill Table: running');
+        expect(text(jobCallFillState(snapshot({})))).toBe('Fill Table: 48 of 150 items complete (3 failed)');
     });
 
     it('shows the title again once every item is complete without failures', () => {
@@ -145,13 +111,8 @@ describe('the table tool call line', () => {
         expect(text(fillStateFromSnapshot(done))).toBe('Fill Table: 150 of 150 items complete (3 failed)');
         const stopped = snapshot({ state: 'done', rows_done: 60, rows_failed: 0, result: result({ rows_answered: 60, stopped_by: 'stopped', not_started: { stopped: 90 } }) });
         expect(text(fillStateFromSnapshot(stopped))).toBe('Fill Table: 60 of 150 items complete (stopped)');
-        const interrupted: JobResult = {
-            ...fill,
-            interrupted: true,
-            progress: { ...fill.progress, rows_total: 150, rows_done: 62, rows_failed: 2 },
-            result: result({ rows_answered: 60, stopped_by: 'shutdown' }),
-        };
-        expect(text(fillStateFromResult(interrupted), 'create_table')).toBe('Create Table: 62 of 150 items complete (interrupted, 2 failed)');
+        const interrupted = snapshot({ state: 'done', rows_done: 62, rows_failed: 2, result: result({ rows_answered: 60, stopped_by: 'shutdown' }) });
+        expect(text(fillStateFromSnapshot(interrupted), 'create_table')).toBe('Create Table: 62 of 150 items complete (interrupted, 2 failed)');
     });
 
     it('reads a Stop that came once every paper had started as filled', () => {
@@ -166,17 +127,4 @@ describe('the table tool call line', () => {
         expect(text(fillStateFromRecord(stopped))).toBe('Fill Table: 50 of 150 items complete (stopped)');
         expect(fillStateFromRecord({ ...record, stopped_by: 'shutdown' }).kind).toBe('interrupted');
     });
-
-    it('reads a fill handed to its table as of the hand-off, stored or returned', () => {
-        const handedOff: JobResult = {
-            kind: 'table_fill',
-            job_id: 'job-1',
-            status: 'handed_off',
-            progress: { ...fill.progress, state: 'running', rows_total: 300, rows_done: 83, rows_failed: 2 },
-        };
-        expect(text(fillStateFromResult(handedOff), 'create_table')).toBe('Create Table: 83 of 300 items complete (continued in the table, 2 failed)');
-        const record = { status: 'running', handed_off: true, rows: 300, rows_filled: 81, rows_failed: 2, rows_without_input: 0, rows_not_started: {} } as any;
-        expect(text(fillStateFromRecord(record))).toBe('Fill Table: 83 of 300 items complete (continued in the table, 2 failed)');
-    });
-
 });

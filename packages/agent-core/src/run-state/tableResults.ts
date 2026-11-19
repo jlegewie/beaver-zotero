@@ -49,7 +49,7 @@ export interface TableArtifact {
  *
  * Only the answer's own calls count: a later message that closes a parked
  * call carries its return, but that answer did not write the table. A fill
- * call the answer left open (stopped, handed to the table) has no return
+ * call the answer left open (stopped, or left to its table) has no return
  * yet; its table comes from the state it parked with.
  */
 export function collectTableArtifacts(

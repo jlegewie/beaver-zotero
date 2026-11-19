@@ -11,9 +11,9 @@
  * The transport is a stand-in that hands back the callbacks each run was
  * started with; the atoms and the store are the real thing.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { connectMock, closeMock, sendApprovalResponseMock, sendQuestionResponseMock, sendCardAnswerMock, parkRunMock, isConnectedMock, liveJobWaitCallsMock, transport } = vi.hoisted(() => ({
+const { connectMock, closeMock, sendApprovalResponseMock, sendQuestionResponseMock, sendCardAnswerMock, parkRunMock, isConnectedMock, transport } = vi.hoisted(() => ({
     connectMock: vi.fn(),
     // Like the real service, closing reports the close to the run's callbacks.
     transport: { callbacks: null as null | { onClose?: (code: number, reason: string, wasClean: boolean) => void } },
@@ -23,7 +23,6 @@ const { connectMock, closeMock, sendApprovalResponseMock, sendQuestionResponseMo
     sendCardAnswerMock: vi.fn(() => true),
     parkRunMock: vi.fn(async () => 'ended'),
     isConnectedMock: vi.fn(() => true),
-    liveJobWaitCallsMock: vi.fn((_runId: string): ReadonlySet<string> => new Set()),
 }));
 
 vi.mock('@beaver/agent-core/transport/agentService', () => ({
@@ -41,7 +40,6 @@ vi.mock('@beaver/agent-core/transport/agentService', () => ({
         sendApprovalResponse: sendApprovalResponseMock,
         sendAskUserQuestionResponse: sendQuestionResponseMock,
         sendPark: vi.fn(() => true),
-        liveJobWaitCalls: liveJobWaitCallsMock,
         sendCardAnswer: sendCardAnswerMock,
         parkRun: parkRunMock,
     },
@@ -88,7 +86,6 @@ import {
     sendTableCardResponseAtom,
     sendWSMessageAtom,
     staleApprovalActionIdsAtom,
-    waitsOnlyOnJobs,
     wsErrorAtom,
 } from '../../../react/atoms/agentRunAtoms';
 import { pendingApprovalsAtom, removePendingApprovalAtom } from '../../../react/agents/agentActions';
@@ -101,11 +98,12 @@ import {
     pendingParkedAnswerIdsAtom,
     resumeLiveCardsAtom,
 } from '../../../react/atoms/parkedRuns';
-import { threadAdmissionAtom } from '../../../react/runtime/threadAdmission';
+import { threadAdmissionAtom, threadConflictAtom } from '../../../react/runtime/threadAdmission';
 import { threadNavigationSeqAtom } from '../../../react/atoms/threads';
 import { selectedModelAtom } from '../../../react/atoms/models';
 import { sessionAtom } from '../../../react/atoms/auth';
 import { jobWaitAtom } from '../../../react/atoms/jobWait';
+import { chatFillsAtom, recordChatFill } from '@beaver/agent-core/run-state/tableChatFills';
 
 const THREAD = 'thread-1';
 
@@ -704,16 +702,6 @@ describe('a resume waiting for the cards it shows again', () => {
         expect(parkableRunId(store.get)).toBeNull();
     });
 
-    it('can be parked while the card it answered waits on the fill it started', async () => {
-        const { resumeRunId } = await resume();
-        expect(parkableRunId(store.get)).toBeNull();
-        // The answered card's call was handed over to a fill the run now waits on.
-        liveJobWaitCallsMock.mockImplementation((id: string) => new Set(id === resumeRunId ? ['call-1'] : []));
-        expect(parkableRunId(store.get)).toBe(resumeRunId);
-        liveJobWaitCallsMock.mockReset();
-        liveJobWaitCallsMock.mockReturnValue(new Set());
-    });
-
     it('parks the resume before sending a message written instead', async () => {
         const { callbacks, resumeRunId } = await resume();
         showAgain(callbacks);
@@ -817,49 +805,6 @@ describe('parkableRunId', () => {
         expect(parkableRunId(store.get)).toBe(runId);
     });
 
-    it('names a live run waiting on a fill, so leaving keeps the fill running', async () => {
-        const connected = nextConnection();
-        await store.set(sendWSMessageAtom, 'fill the table');
-        await connected;
-        const runId = store.get(activeRunAtom)!.id;
-        expect(parkableRunId(store.get)).toBeNull();
-        liveJobWaitCallsMock.mockImplementation((id: string) => new Set(id === runId ? ['call-fill'] : []));
-        expect(parkableRunId(store.get)).toBe(runId);
-        // The fill card's answer, given live, was applied: the call now waits on its job.
-        store.set(liveCardAnswersAtom, new Map([['call-fill', { answer: { type: 'table_card_response' }, parking: false }]]));
-        expect(parkableRunId(store.get)).toBe(runId);
-        // Any other answer on its way may still be applying.
-        store.set(liveCardAnswersAtom, new Map([['call-other', { answer: { type: 'table_card_response' }, parking: false }]]));
-        expect(parkableRunId(store.get)).toBeNull();
-        liveJobWaitCallsMock.mockReset();
-        liveJobWaitCallsMock.mockReturnValue(new Set());
-    });
-
-    it('lets Stop stop the fill only while every running tool call is a fill wait', async () => {
-        const connected = nextConnection();
-        await store.set(sendWSMessageAtom, 'add these papers');
-        await connected;
-        const run = store.get(activeRunAtom)!;
-        const call = (id: string, tool: string) => ({ part_kind: 'tool-call', tool_name: tool, tool_call_id: id, args: {} });
-        const withMessages = (...messages: unknown[]) => store.set(activeRunAtom, { ...store.get(activeRunAtom)!, model_messages: messages as any });
-        liveJobWaitCallsMock.mockImplementation((id: string) => new Set(id === run.id ? ['call-fill'] : []));
-        // fill_table waits on its fill while a search runs beside it.
-        withMessages({ kind: 'response', parts: [call('call-fill', 'fill_table'), call('call-search', 'external_search')] });
-        expect(parkableRunId(store.get)).toBe(run.id);
-        expect(waitsOnlyOnJobs(store.get)).toBe(false);
-        // The search returned: only the job wait is left.
-        withMessages(
-            { kind: 'response', parts: [call('call-fill', 'fill_table'), call('call-search', 'external_search')] },
-            { kind: 'request', parts: [{ part_kind: 'tool-return', tool_name: 'external_search', tool_call_id: 'call-search', content: {} }] },
-        );
-        expect(waitsOnlyOnJobs(store.get)).toBe(true);
-        // A card up beside the job: Stop stops the run.
-        store.set(pendingQuestionsAtom, new Map([['q-1', {} as any]]));
-        expect(waitsOnlyOnJobs(store.get)).toBe(false);
-        liveJobWaitCallsMock.mockReset();
-        liveJobWaitCallsMock.mockReturnValue(new Set());
-    });
-
     it('does not park a run waiting on a credit confirmation too', async () => {
         await liveRunWaitingOnACard();
         store.set(pendingCreditConfirmationsAtom, new Map([['confirmation-1', {} as any]]));
@@ -883,7 +828,7 @@ describe('parkableRunId', () => {
     });
 });
 
-describe('resuming with a stored fill result', () => {
+describe('resuming with a fill result', () => {
     beforeEach(resetChat);
 
     function fillJob(toolCallId: string, result?: unknown): ParkedDeferral {
@@ -911,57 +856,101 @@ describe('resuming with a stored fill result', () => {
         return runId;
     }
 
-    function stored(threadId: string) {
-        return { threadId, toolCallId: 'call-1', kind: 'table_fill' as const, jobId: 'job-1', userId: 'user-1', result };
+    const answer = { type: 'job_wait_response', request_id: 'resume-call-1', job_id: 'job-1', status: 'done', result };
+
+    let beaver: unknown;
+    beforeEach(() => {
+        const zotero = (globalThis as any).Zotero;
+        beaver = zotero.Beaver;
+        zotero.Beaver = {
+            ...(beaver as object | undefined),
+            tableFills: { agent: { doneAnswer: (_snapshot: unknown, requestId: string) => ({ ...answer, request_id: requestId }) } },
+        };
+    });
+    afterEach(() => {
+        (globalThis as any).Zotero.Beaver = beaver;
+    });
+
+    /** This window waits on the fill of `call-1`, and the fill ended (or, with `running`, runs on). */
+    function waitOnFill(runId: string, threadId = store.get(currentThreadIdAtom)!, state: 'done' | 'running' = 'done') {
+        store.set(jobWaitAtom, { threadId, runId, toolCallId: 'call-1', jobId: 'job-1' });
+        store.set(chatFillsAtom, recordChatFill(new Map(), {
+            job_id: 'job-1',
+            plan_id: 'plan-1',
+            table: { libraryID: 1, key: 'TABLE001', title: 'Trials' },
+            origin: { kind: 'agent', run: { run_id: runId, thread_id: threadId, tool_call_id: 'call-1' } },
+            state,
+            rows_total: 1, rows_done: 1, rows_failed: 0, in_flight: 0, credits_charged: 0, credits_planned: 0,
+            balance: null, started_at: 0, seconds_left: null,
+            ...(state === 'done' ? { result: {} as any } : {}),
+        }));
     }
 
-    it('resumes the parked run with no answers, and reads as running meanwhile', async () => {
+    it('resumes the parked run with the fill result as the call answer, and reads as running meanwhile', async () => {
         const runId = await parkOnJob();
-        store.set(jobWaitAtom, { threadId: store.get(currentThreadIdAtom)!, runId, toolCallId: 'call-1', jobId: 'job-1' });
+        waitOnFill(runId);
         // A job call is no card: nothing takes the composer over.
         expect(store.get(pendingApprovalsAtom).size + store.get(pendingQuestionsAtom).size).toBe(0);
         const resumed = nextConnection();
-        requestJobResume(stored(store.get(currentThreadIdAtom)!));
+        requestJobResume();
         const { request } = await resumed;
-        expect(request.user_prompt).toMatchObject({ content: '', resumes_run_id: runId, deferred_results: {} });
+        expect(request.user_prompt).toMatchObject({ content: '', resumes_run_id: runId, deferred_results: { 'call-1': answer } });
         // The resume is a response like any other, not a parked thread, and
         // the window no longer waits on the fill.
         expect(store.get(isThreadParkedAtom)).toBe(false);
         expect(store.get(jobWaitAtom)).toBeNull();
     });
 
-    it('resumes once the run that parked has landed, when the result came first', async () => {
+    it('resumes once the run that parked has landed, when the fill ended first', async () => {
         const connected = nextConnection();
         await store.set(sendWSMessageAtom, 'fill it');
         const { callbacks } = await connected;
         store.set(isWSReadyAtom, true);
         const runId = store.get(activeRunAtom)!.id;
         streamToolCalls(callbacks, runId, ['call-1']);
-        store.set(jobWaitAtom, { threadId: store.get(currentThreadIdAtom)!, runId, toolCallId: 'call-1', jobId: 'job-1' });
-        requestJobResume(stored(store.get(currentThreadIdAtom)!));
+        waitOnFill(runId);
+        requestJobResume();
         await Promise.resolve();
         expect(connectMock).toHaveBeenCalledTimes(1);
         const resumed = nextConnection();
         await finish(callbacks, runId, parked([fillJob('call-1')]));
         const { request } = await resumed;
-        expect(request.user_prompt).toMatchObject({ resumes_run_id: runId, deferred_results: {} });
+        expect(request.user_prompt).toMatchObject({ resumes_run_id: runId, deferred_results: { 'call-1': answer } });
     });
 
-    it('does not resume once the user stopped waiting while the resume was admitted', async () => {
+    it('tries a resume the chat was not ready for again, keeping the wait', async () => {
         const runId = await parkOnJob();
-        store.set(jobWaitAtom, { threadId: store.get(currentThreadIdAtom)!, runId, toolCallId: 'call-1', jobId: 'job-1' });
-        requestJobResume(stored(store.get(currentThreadIdAtom)!));
-        // Stop clears the wait before the resume gets past admission.
-        store.set(jobWaitAtom, null);
-        await Promise.resolve();
-        await Promise.resolve();
-        await Promise.resolve();
-        expect(connectMock).toHaveBeenCalledTimes(1);
+        waitOnFill(runId);
+        vi.useFakeTimers();
+        try {
+            // The server still holds the chat for the run that just parked.
+            store.set(threadConflictAtom, 'thread_busy');
+            requestJobResume();
+            await vi.advanceTimersByTimeAsync(0);
+            expect(connectMock).toHaveBeenCalledTimes(1);
+            expect(store.get(jobWaitAtom)).not.toBeNull();
+            store.set(threadConflictAtom, null);
+            const resumed = nextConnection();
+            await vi.advanceTimersByTimeAsync(1000);
+            const { request } = await resumed;
+            expect(request.user_prompt).toMatchObject({ resumes_run_id: runId, deferred_results: { 'call-1': answer } });
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
-    it('does not resume another chat', async () => {
-        await parkOnJob();
-        requestJobResume(stored('another-thread'));
+    it('resumes nothing while the fill runs, once the user stopped waiting, or for another chat', async () => {
+        const runId = await parkOnJob();
+        waitOnFill(runId, undefined, 'running');
+        requestJobResume();
+        await Promise.resolve();
+        waitOnFill(runId);
+        // Stop clears the wait before the resume goes out.
+        store.set(jobWaitAtom, null);
+        requestJobResume();
+        await Promise.resolve();
+        waitOnFill(runId, 'another-thread');
+        requestJobResume();
         await Promise.resolve();
         await Promise.resolve();
         expect(connectMock).toHaveBeenCalledTimes(1);

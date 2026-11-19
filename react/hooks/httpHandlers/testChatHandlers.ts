@@ -787,7 +787,6 @@ export async function handleTestTableFillProgressHttpRequest(request?: any) {
         tool_call_id: call.tool_call_id,
         job_id: jobIdOf(call),
         state: call.state ?? null,
-        result: call.result ?? null,
     }));
     return {
         ok: true,
@@ -795,7 +794,6 @@ export async function handleTestTableFillProgressHttpRequest(request?: any) {
         jobWait: store.get(jobWaitAtom),
         jobCalls,
         composerJobs: store.get(runningChatJobsAtom),
-        stored: Zotero.Beaver.jobCalls?.list() ?? [],
         ...currentIds(),
     };
 }

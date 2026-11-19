@@ -411,7 +411,7 @@ function useJobWait(): { parkedRun: AgentRun | null; statusLine: string } | null
     const parkedRun = call && run && !isRunActive(run) ? run : null;
     if (!parkedRun && (!fill || fill.snapshot.state === 'done')) return null;
     const title = call?.state?.title ?? fill?.snapshot.table.title ?? null;
-    const state = call ? jobCallFillState(call, fill?.snapshot) : fillStateFromSnapshot(fill!.snapshot);
+    const state = call ? jobCallFillState(fill?.snapshot) : fillStateFromSnapshot(fill!.snapshot);
     // A fill runs under `create_table` as well as `fill_table`.
     const toolName = call?.tool_name ?? findToolCallName(run, wait.toolCallId) ?? 'fill_table';
     return { parkedRun, statusLine: tableCallText(tableCallLine(toolName, state, title)) };

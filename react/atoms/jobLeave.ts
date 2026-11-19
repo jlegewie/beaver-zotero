@@ -3,13 +3,13 @@
  *
  * A fill does not outlive its response out of sight. When the window waiting
  * on it leaves the chat, or closes, a fill whose table is open (in a Beaver
- * tab, or its own window) goes on as the table's own, and its call ends with
- * how far it had got; any other fill stops. When the table is not open,
- * leaving asks first, as for any response still going, and says the fill
- * stops too. Either way the response has ended, in every window.
+ * tab, or its own window) goes on as the table's own; any other fill stops.
+ * When the table is not open, leaving asks first, as for any response still
+ * going, and says the fill stops too. Either way the window stops waiting,
+ * and the next message closes the fill's call.
  */
 
-import { atom } from 'jotai';
+import { atom, type Getter } from 'jotai';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { currentThreadIdAtom } from '@beaver/agent-core/run-state/atoms';
 import { chatFillsAtom } from '@beaver/agent-core/run-state/tableChatFills';
@@ -42,6 +42,19 @@ const LEAVE_COPY: Record<ChatLeave, { title: string; doing: string; confirmLabel
 };
 
 /**
+ * The fill that leaving the open chat would stop: the one this window waits
+ * on, while it runs and its table is not open. Leaving then asks with
+ * {@link confirmLeaveJobWaitAtom}, in place of the usual question about
+ * stopping a response.
+ */
+export function fillLeaveStops(get: Getter): TableFillJobSnapshot | null {
+    const wait = get(jobWaitAtom);
+    if (!wait || wait.threadId !== get(currentThreadIdAtom)) return null;
+    const fill = runningFill(get(chatFillsAtom), wait);
+    return fill && !tableShown(fill) ? fill : null;
+}
+
+/**
  * Before the window leaves a chat whose response waits on a fill: unless the
  * fill's table is open, confirm leaving, as for any response still going,
  * and say that the fill stops too. Returns false when the user cancels, and
@@ -50,10 +63,8 @@ const LEAVE_COPY: Record<ChatLeave, { title: string; doing: string; confirmLabel
 export const confirmLeaveJobWaitAtom = atom(
     null,
     (get, _set, { leave, window }: { leave: ChatLeave; window?: Window | null }): boolean => {
-        const wait = get(jobWaitAtom);
-        if (!wait || wait.threadId !== get(currentThreadIdAtom)) return true;
-        const fill = runningFill(get(chatFillsAtom), wait);
-        if (!fill || tableShown(fill)) return true;
+        const fill = fillLeaveStops(get);
+        if (!fill) return true;
         const copy = LEAVE_COPY[leave];
         const table = fill.table.title ? `the fill of “${fill.table.title}”` : 'its table fill';
         return getHost().dialogs?.confirm({
@@ -66,20 +77,25 @@ export const confirmLeaveJobWaitAtom = atom(
 );
 
 /**
- * The window left the chat its fill wait is in, or is closing: end the wait,
- * handing the fill to its table when the table is open (outside a closing
- * window), and stopping it otherwise. Nothing resumes the response.
+ * The window is leaving the chat its fill wait is in, or is closing: end the
+ * wait, leaving the fill to its table when the table is open (outside a
+ * closing window), and stopping it otherwise. Called before the run that
+ * waits live is stopped, so a fill left to its table survives that. Nothing
+ * resumes the response.
  */
 export function leaveJobWait(options: { closing?: Window | null } = {}): void {
     const wait = store.get(jobWaitAtom);
     if (!wait) return;
     store.set(jobWaitAtom, null);
-    // A fill that ended, or is winding down after Stop, stores its result as it is.
+    // A fill that ended, or is winding down after Stop, is left as it is.
     const fill = runningFill(store.get(chatFillsAtom), wait);
     if (!fill) return;
-    const how = tableShown(fill, options.closing) ? 'hand_off' : 'stop';
-    logger(`jobLeave: ${how === 'hand_off' ? 'handing fill to its table' : 'stopping fill'} ${wait.jobId}`, 1);
-    const jobCalls = Zotero.Beaver.jobCalls;
-    if (jobCalls) void jobCalls.leave(wait.threadId, wait.toolCallId, 'table_fill', wait.jobId, how);
-    else Zotero.Beaver.tableFills?.stop(wait.jobId);
+    const fills = Zotero.Beaver.tableFills;
+    if (tableShown(fill, options.closing)) {
+        logger(`jobLeave: leaving fill ${wait.jobId} to its open table`, 1);
+        fills?.agent.release(wait.jobId);
+    } else {
+        logger(`jobLeave: stopping fill ${wait.jobId}`, 1);
+        fills?.stop(wait.jobId);
+    }
 }

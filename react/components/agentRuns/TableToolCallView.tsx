@@ -55,8 +55,8 @@ function requestedTitle(part: ToolCallPart): string | null {
  *
  * A call that fills the table puts the fill's state in place of the title,
  * live or parked alike: "Fill Table: 45 of 150 items complete (3 failed)",
- * "Fill Table: running on Office iMac" for a fill another device runs. A
- * fill that completed every item shows the title again. Until the call
+ * or "Fill Table: running" for a fill this device does not follow. A fill
+ * that completed every item shows the title again. Until the call
  * returns, clicking the line opens the table, whose own Fill control can
  * stop the fill; once it returns, the line expands to the call's summary as
  * it was recorded. Status notices (declined, partial, rejected rows) sit
@@ -83,24 +83,23 @@ export const TableToolCallView: React.FC<TableToolCallViewProps> = ({
     const isInProgress = status === 'in_progress';
     const isLive = isInProgress && runStatus === 'in_progress' && !hasResult;
 
-    // The fill this call started: the job this renderer follows, the result
-    // stored on the parked call, or the fill the returned record describes.
+    // The fill this call started: the job this renderer follows, or the fill
+    // the returned record describes.
     const jobCall = useAtomValue(openJobCallsAtom).find((call) => call.tool_call_id === part.tool_call_id) ?? null;
     const fills = useAtomValue(chatFillsAtom);
     const fill = (jobCall ? fills.get(jobIdOf(jobCall)) : undefined) ?? fillForToolCall(fills, part.tool_call_id, runId);
     const recordFill = record?.run === 'fill' ? record.fill ?? null : null;
-    // A fill handed to the table reads as of the hand-off, though it runs on.
-    const fillState: FillCallState | null = recordFill && (recordFill.status !== 'running' || recordFill.handed_off)
+    const fillState: FillCallState | null = recordFill && recordFill.status !== 'running'
         ? fillStateFromRecord(recordFill)
         : jobCall && !hasResult
-          ? jobCallFillState(jobCall, fill?.snapshot)
+          ? jobCallFillState(fill?.snapshot)
           : fill
             ? fillStateFromSnapshot(fill.snapshot)
             : recordFill
               ? { kind: 'started' }
               : null;
     // A fill known only to have started (Zotero restarted since) does not spin.
-    const fillRunning = fillState?.kind === 'running' || fillState?.kind === 'elsewhere';
+    const fillRunning = fillState?.kind === 'running';
 
     const canExpand = record !== null;
     const isExpanded = (storedExpanded ?? false) && canExpand;
@@ -119,7 +118,7 @@ export const TableToolCallView: React.FC<TableToolCallViewProps> = ({
         void getHost().navigation?.openTable?.(openKey, origin)?.catch(() => undefined);
     };
 
-    const isShimmering = fillRunning ? fillState?.kind === 'running' : isLive;
+    const isShimmering = fillRunning || isLive;
     const isFailed = status === 'error' || (isReturn && !record && notices.length > 0);
     const getIcon = () => {
         if (fillRunning) return Spinner;

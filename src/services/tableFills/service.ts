@@ -65,7 +65,6 @@ import {
 } from './planner';
 import { classifyFillError, fillRequestBody, type SerializedFillDocument } from './tableFillApi';
 import { AgentTableFills } from './agentFill';
-import type { JobDevice, TableFillJobResult } from '@beaver/agent-core/protocol/jobCallProtocol';
 
 /** A table as the store returns it. */
 export interface TableFillTableRead {
@@ -125,31 +124,6 @@ export interface TableFillDeps {
     publish(snapshot: TableFillJobSnapshot): void;
     newId(): string;
     now(): number;
-    /**
-     * Job calls (`fill` with `job_call`): the device that runs the job, and
-     * the job-call list that stores a parked call's result. Absent where job
-     * calls are not wired (tests).
-     */
-    jobCalls?: TableFillJobCalls;
-}
-
-/** The job-call seam of the fill service. */
-export interface TableFillJobCalls {
-    device(): JobDevice;
-    /** A chat run's `fill_table` started this job as a job call. */
-    register(entry: { threadId: string; toolCallId: string; jobId: string; coverage: TableFillJobCoverage }): void;
-    /** A job ended; `result` is the job call's result as it may leave the device. */
-    jobEnded(snapshot: TableFillJobSnapshot, result: TableFillJobResult): void;
-}
-
-/** What a fill job call covers, to derive its result after a restart. */
-export interface TableFillJobCoverage {
-    target: TableFillTarget;
-    title: string;
-    /** Rows the job works on, with the columns each fills. */
-    rows: { row: string; columns: string[] }[];
-    rows_total: number;
-    credits_planned: number;
 }
 
 export interface TableFillSettings {
@@ -310,8 +284,6 @@ class FillJob {
 
     /** Rows the job works on: those it sends, and those it fails at the start. */
     readonly rowsTotal: number;
-    /** The same rows, as planned. */
-    readonly coveredRows: readonly RowPlan[];
 
     constructor(
         private readonly owner: InstanceTableFills,
@@ -328,7 +300,6 @@ class FillJob {
         this.startedAt = deps.now();
         this.queue = [...work];
         this.rowsTotal = work.length + initialRows.length;
-        this.coveredRows = [...work, ...initialRows];
         this.balanceAtStart = deps.account.balance();
         if (dropped) this.result.not_started.changed = dropped;
         this.refresh();
@@ -866,30 +837,6 @@ class FillJob {
         this.publish();
     }
 
-    /**
-     * The job as a shutdown leaves it, for a job call to report at the next
-     * start: what it did so far, the rest not started. Rows still in flight
-     * are abandoned, so they count as not started too.
-     */
-    shutdownSnapshot(): TableFillJobSnapshot {
-        const notStarted = { ...this.result.not_started };
-        if (this.inFlight > 0) notStarted.shutdown = (notStarted.shutdown ?? 0) + this.inFlight;
-        const { cells: _cells, ...snapshot } = this.snapshot;
-        return {
-            ...snapshot,
-            state: 'done',
-            in_flight: 0,
-            seconds_left: null,
-            result: {
-                ...this.result,
-                credits_charged: round(this.charged),
-                not_started: notStarted,
-                stopped_by: 'shutdown',
-                pending: null,
-            },
-        };
-    }
-
     /** Plugin shutdown: stop, abandon requests in flight, flush what has arrived. */
     async abandon(timeoutMs: number): Promise<void> {
         this.stop('shutdown');
@@ -1184,24 +1131,6 @@ export class InstanceTableFills {
         return [...plan.columns.keys()].filter((id) => used.has(id));
     }
 
-    /** The job-call seam, when wired. */
-    get jobCalls(): TableFillJobCalls | undefined {
-        return this.deps.jobCalls;
-    }
-
-    /** What a job covers, for a job call's entry; null for a job no longer kept. */
-    jobCoverage(jobId: string): TableFillJobCoverage | null {
-        const job = this.jobs.get(jobId);
-        if (!job) return null;
-        return {
-            target: job.plan.target,
-            title: job.plan.table.title,
-            rows: job.coveredRows.map((row) => ({ row: row.row, columns: [...row.columns] })),
-            rows_total: job.rowsTotal,
-            credits_planned: job.snapshot.credits_planned,
-        };
-    }
-
     /** Stops a job: no new rows; rows in flight finish. */
     stop(jobId: string): boolean {
         const job = this.jobs.get(jobId);
@@ -1284,9 +1213,6 @@ export class InstanceTableFills {
         this.agent.dispose();
         const running = [...this.leases.values()];
         await Promise.all(running.map((job) => job.abandon(this.settings.shutdownFlushMs)));
-        // A job call keeps the job's result as the shutdown left it: the job
-        // itself may only end after the plugin realm is gone.
-        for (const job of running) if (job.running) this.agent.noteEnded(job.shutdownSnapshot());
         this.plans.clear();
     }
 }

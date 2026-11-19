@@ -1,14 +1,12 @@
 /**
- * The job call this window waits on, the stored results it shows on the open
- * thread's parked calls, and the table a fill tool call opens. Kept apart
- * from `jobCalls.ts` so the run atoms and the tool call view can read it
- * without importing the composer's job state.
+ * The job call this window waits on, whether the open thread's answer is
+ * still going, and the table a fill tool call opens. Kept apart from
+ * `jobCalls.ts` so the run atoms and the tool call view can read it without
+ * importing the composer's job state.
  */
 
 import { atom } from 'jotai';
-import { isJobDeferral, type JobResult } from '@beaver/agent-core/protocol/jobCallProtocol';
-import { activeRunAtom, currentThreadIdAtom, threadRunsAtom } from '@beaver/agent-core/run-state/atoms';
-import { runWithStoredJobResult, withStoredJobResult } from '@beaver/agent-core/run-state/jobCalls';
+import { isJobDeferral } from '@beaver/agent-core/protocol/jobCallProtocol';
 import { openParkedRunAtom } from '@beaver/agent-core/run-state/parkedRun';
 import type { AgentRun } from '@beaver/agent-core/agents/types';
 import type { TableFillJobSnapshot } from '@beaver/agent-core/protocol/tableFillProtocol';
@@ -32,24 +30,23 @@ export const jobWaitAtom = atom<JobWait | null>(null);
 
 /**
  * A run of this window ended: the wait goes on only when the run parked with
- * the waited call still open and its result not stored yet.
+ * the waited call still open.
  */
 export function settleJobWait(run: AgentRun | null): void {
     const wait = store.get(jobWaitAtom);
     if (!wait || !run || run.id !== wait.runId) return;
     const open = (run.parked?.requests ?? []).some(
-        (deferral) => isJobDeferral(deferral) && deferral.tool_call_id === wait.toolCallId && !deferral.result,
+        (deferral) => isJobDeferral(deferral) && deferral.tool_call_id === wait.toolCallId,
     );
     if (!open) store.set(jobWaitAtom, null);
 }
 
 /**
  * The open parked run while its answer is still going, else null. It goes
- * on while a card waits for the user, while a fill it started still runs
- * (its result is not stored yet), and while this window waits to continue
- * it with a fill's result. A run whose only open calls hold stored fill
- * results has ended: the fill was stopped, handed to the table, cut off by a
- * quit, or ended with nobody waiting. Its footer and what it changed show,
+ * on while a card waits for the user, and, in the window waiting on a fill,
+ * until that fill's result continues it. A run whose only open calls are
+ * fills nobody waits on here has ended: the fill was stopped or left to its
+ * table, or another window waits on it. Its footer and what it changed show,
  * though the next message still closes those calls.
  */
 export const openAnswerRunIdAtom = atom((get): string | null => {
@@ -57,23 +54,10 @@ export const openAnswerRunIdAtom = atom((get): string | null => {
     if (!open) return null;
     const wait = get(jobWaitAtom);
     const going = open.deferrals.some(
-        (deferral) => !isJobDeferral(deferral) || !deferral.result || wait?.toolCallId === deferral.tool_call_id,
+        (deferral) => !isJobDeferral(deferral) || wait?.toolCallId === deferral.tool_call_id,
     );
     return going ? open.runId : null;
 });
-
-/** Put a stored job result on the open thread's parked call. Returns whether it was there. */
-export const applyStoredJobResultAtom = atom(
-    null,
-    (get, set, { threadId, toolCallId, result }: { threadId: string; toolCallId: string; result: JobResult }): boolean => {
-        if (get(currentThreadIdAtom) !== threadId) return false;
-        const runs = withStoredJobResult(get(threadRunsAtom), toolCallId, result);
-        if (runs) set(threadRunsAtom, runs);
-        const active = runWithStoredJobResult(get(activeRunAtom), toolCallId, result);
-        if (active) set(activeRunAtom, active);
-        return !!(runs || active);
-    },
-);
 
 /** The table a fill this device runs works on, as a table item id (`u-KEY`). */
 export function chatFillTableKey(snapshot: TableFillJobSnapshot): string | null {

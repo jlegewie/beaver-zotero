@@ -34,7 +34,7 @@ import { threadRunsAtom, activeRunAtom, currentThreadIdAtom, currentThreadNameAt
 import { loadThreadRuns } from "@beaver/agent-core/run-state/loadThreadRuns";
 import { abandonActiveRunLocallyAtom, canLeaveReconnectingRun, isWSChatPendingAtom, isWSConnectedAtom, isWSReadyAtom, parkableRunId } from "./agentRunAtoms";
 import { clearParkedAnswersAtom, syncParkedCardsAtom } from "./parkedRuns";
-import { confirmLeaveJobWaitAtom } from "./jobLeave";
+import { confirmLeaveJobWaitAtom, fillLeaveStops, leaveJobWait } from "./jobLeave";
 import { AgentRun, isRunActive } from "@beaver/agent-core/agents/types";
 import { 
     threadAgentActionsAtom,
@@ -308,8 +308,10 @@ export const newThreadAtom = atom(
         },
     ): Promise<number | undefined> => {
         // A fill the response waits on goes on in its open table, or stops;
-        // with the table closed, the user confirms leaving, or stays.
-        if (!options?.skipActiveRunConfirm && !set(confirmLeaveJobWaitAtom, { leave: 'new_chat', window: options?.window })) return;
+        // with the table closed, the user confirms leaving, or stays. That
+        // question replaces the one about stopping the response.
+        const asksAboutFill = !options?.skipActiveRunConfirm && !!fillLeaveStops(get);
+        if (asksAboutFill && !set(confirmLeaveJobWaitAtom, { leave: 'new_chat', window: options?.window })) return;
         // Show loading state immediately if there's an active run to cancel.
         // Gated on run status, not presence: a run that failed keeps sitting in
         // activeRunAtom, and prompting over it claims Beaver is still working.
@@ -319,7 +321,7 @@ export const newThreadAtom = atom(
         const leaveRunId = leavableRunId(get);
         const parkRunId = leaveRunId ? null : parkableRunId(get);
         if (hasActiveWork) {
-            if (!options?.skipActiveRunConfirm && !leaveRunId && !parkRunId && !confirmInterruptActiveRun(
+            if (!options?.skipActiveRunConfirm && !asksAboutFill && !leaveRunId && !parkRunId && !confirmInterruptActiveRun(
                 'Start new chat?',
                 'Beaver is still generating a response in this chat. Starting a new chat will stop it.',
                 'Start New Chat',
@@ -335,6 +337,8 @@ export const newThreadAtom = atom(
         const isCurrent = () => get(threadNavigationSeqAtom) === navigation;
 
         try {
+            // Before the run stops: a fill left to its open table runs on.
+            leaveJobWait();
             // Cancel any active run before switching threads
             await cancelActiveRunIfNeeded(get, set, isCurrent, leaveRunId, parkRunId);
             if (!isCurrent()) return;
@@ -437,7 +441,13 @@ export const loadThreadAtom = atom(
         // parked, not stopped, so there is nothing to confirm.
         const leaveRunId = leavableRunId(get);
         const parkRunId = leaveRunId ? null : parkableRunId(get);
-        if (hasActiveWork && !leaveRunId && !parkRunId && !confirmInterruptActiveRun(
+        // A fill the response waits on asks below, in place of this question.
+        const leaving = threadId !== get(currentThreadIdAtom);
+        const asksAboutFill = leaving && !!fillLeaveStops(get);
+        // Asked here, the user has agreed to stop the response, and a fill it
+        // starts waiting on meanwhile is not asked about again.
+        const askedToStop = hasActiveWork && !asksAboutFill && !leaveRunId && !parkRunId;
+        if (askedToStop && !confirmInterruptActiveRun(
             'Switch chat?',
             'Beaver is still generating a response in this chat. Switching chats will stop it.',
             'Switch Chat',
@@ -533,7 +543,7 @@ export const loadThreadAtom = atom(
         }
 
         // Leaving a response that waits on a fill: see newThreadAtom.
-        if (isCurrent() && threadId !== get(currentThreadIdAtom) && !liveSet(confirmLeaveJobWaitAtom, { leave: 'switch_chat', window })) {
+        if (isCurrent() && leaving && !askedToStop && !liveSet(confirmLeaveJobWaitAtom, { leave: 'switch_chat', window })) {
             set(pendingScrollToRunAtom, null);
             if (!canCommit) liveSet(isLoadingThreadAtom, false);
             return false;
@@ -547,6 +557,9 @@ export const loadThreadAtom = atom(
 
         let loaded = false;
         try {
+            // Before the run stops: a fill left to its open table runs on. A
+            // staged navigation ends the wait when it commits the new chat.
+            if (leaving && !canCommit) leaveJobWait();
             // Cancel any active run before loading a different thread
             if (!canCommit) await cancelActiveRunIfNeeded(get, set, isCurrent, leaveRunId, parkRunId);
             if (!isCurrent()) return false;

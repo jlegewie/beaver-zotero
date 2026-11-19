@@ -1047,38 +1047,6 @@ describe("shutdown", () => {
         // Not even a render: the next open of the table catches the snapshot up.
         expect(state.renders).toEqual([]);
     });
-
-    it("hands a job call the result as the shutdown left it: what was charged, the rest not started", async () => {
-        const rows = Array.from({ length: 3 }, (_, i) => itemRow(`r${i}`, { documents: [`u-PDFr${i}`] }));
-        const h = harness(rows);
-        const ended: { jobId: string; result: any }[] = [];
-        h.deps.jobCalls = { device: () => ({}), register: () => {}, jobEnded: (snapshot, result) => ended.push({ jobId: snapshot.job_id, result }) };
-        h.fills.settings.concurrency = 2;
-        const held = deferred<void>();
-        h.state.respond = async (request) => {
-            if (request.row_id === "r1") await held.promise;
-            return answer(request);
-        };
-        const planned = await h.fills.plan(TARGET);
-        if (!planned.ok) throw new Error(planned.message);
-        const started = await h.fills.start(planned.plan.plan_id, {
-            kind: "agent",
-            run: { run_id: "run-1", thread_id: "thread-1", tool_call_id: "call-1" },
-        });
-        if (!started.ok) throw new Error(started.message);
-        const job = started.job;
-        await until(() => h.state.snapshots.some((s) => s.rows_done >= 1), "the first answer");
-        await h.fills.dispose();
-        expect(ended).toHaveLength(1);
-        expect(ended[0].jobId).toBe(job.job_id);
-        // r1 is held in flight; the other rows were answered (and charged) before the shutdown.
-        const kept = ended[0].result;
-        expect(kept).toMatchObject({ kind: "table_fill", status: "done", progress: { state: "done" }, result: { stopped_by: "shutdown" } });
-        expect(kept.result.rows_answered).toBeGreaterThanOrEqual(1);
-        expect(kept.result.credits_charged).toBeCloseTo(kept.result.rows_answered * 0.2);
-        expect(kept.result.rows_answered + kept.result.not_started.shutdown).toBe(3);
-        held.resolve();
-    });
 });
 
 beforeEach(() => {
@@ -1417,19 +1385,6 @@ describe("job calls", () => {
         return { receivedAt: Date.now(), reportPhase: vi.fn(), run: RUN, ...overrides };
     }
 
-    function withJobCalls(h: ReturnType<typeof harness>) {
-        const calls = {
-            registered: [] as { threadId: string; toolCallId: string; jobId: string; coverage: unknown }[],
-            ended: [] as { jobId: string; result: unknown }[],
-        };
-        h.deps.jobCalls = {
-            device: () => ({ device_key: "local-key", device_name: "Work-Mac" }),
-            register: (entry) => calls.registered.push(entry),
-            jobEnded: (snapshot, result) => calls.ended.push({ jobId: snapshot.job_id, result }),
-        };
-        return calls;
-    }
-
     async function plan(fills: InstanceTableFills) {
         const answer = await fills.agent.plan(request("fill_plan", { key: "u-TABLE001" }), TARGET);
         if (!answer.ok || !answer.plan) throw new Error(answer.error);
@@ -1447,51 +1402,8 @@ describe("job calls", () => {
         };
     }
 
-    it("a job-call fill answers running with the device and registers the call with what it covers", async () => {
-        const h = harness([itemRow("a"), itemRow("b")]);
-        const calls = withJobCalls(h);
-        const held = deferred<void>();
-        h.state.respond = async (r) => {
-            await held.promise;
-            return answer(r);
-        };
-        const wire = await plan(h.fills);
-        const answered = await h.fills.agent.fill(
-            request("fill", { plan_id: wire.plan_id, tool_call_id: "call-1", wait: false, job_call: true }),
-            context(),
-        );
-        expect(answered).toMatchObject({ ok: true, status: "running", device_key: "local-key", device_name: "Work-Mac" });
-        expect(calls.registered).toEqual([
-            {
-                threadId: "thread-1",
-                toolCallId: "call-1",
-                jobId: answered.job_id,
-                coverage: expect.objectContaining({
-                    target: TARGET,
-                    rows: [expect.objectContaining({ row: "a" }), expect.objectContaining({ row: "b" })],
-                    rows_total: 2,
-                }),
-            },
-        ]);
-        held.resolve();
-        await h.fills.wait(answered.job_id!);
-        expect(calls.ended).toEqual([
-            { jobId: answered.job_id, result: expect.objectContaining({ kind: "table_fill", job_id: answered.job_id, status: "done", result: expect.objectContaining({ rows_answered: 2 }) }) },
-        ]);
-    });
-
-    it("a fill without job_call registers nothing and names no device", async () => {
-        const h = harness([itemRow("a")]);
-        const calls = withJobCalls(h);
-        const wire = await plan(h.fills);
-        const answered = await h.fills.agent.fill(request("fill", { plan_id: wire.plan_id, tool_call_id: "call-1", wait: true }), context());
-        expect(answered).not.toHaveProperty("device_key");
-        expect(calls.registered).toHaveLength(0);
-    });
-
-    it("job_wait answers done with the job-call result once the job ends", async () => {
-        const h = harness([itemRow("a"), itemRow("b")]);
-        withJobCalls(h);
+    /** A job started without waiting, its rows held until `held` resolves. */
+    async function startHeld(h: ReturnType<typeof harness>) {
         const held = deferred<void>();
         h.state.respond = async (r) => {
             await held.promise;
@@ -1499,15 +1411,22 @@ describe("job calls", () => {
         };
         const wire = await plan(h.fills);
         const started = await h.fills.agent.fill(
-            request("fill", { plan_id: wire.plan_id, tool_call_id: "call-1", wait: false, job_call: true }),
+            request("fill", { plan_id: wire.plan_id, tool_call_id: "call-1", wait: false }),
             context(),
         );
-        const waiting = h.fills.agent.waitJob(jobWait(started.job_id!), context());
+        expect(started).toMatchObject({ ok: true, status: "running" });
+        return { held, jobId: started.job_id! };
+    }
+
+    it("job_wait answers done with the job's result once the job ends", async () => {
+        const h = harness([itemRow("a"), itemRow("b")]);
+        const { held, jobId } = await startHeld(h);
+        const waiting = h.fills.agent.waitJob(jobWait(jobId), context());
         held.resolve();
         const answered = await waiting;
         expect(answered).toMatchObject({
             type: "job_wait_response",
-            job_id: started.job_id,
+            job_id: jobId,
             status: "done",
             result: { kind: "table_fill", status: "done", progress: { state: "done", rows_total: 2 }, result: { rows_answered: 2 } },
         });
@@ -1516,24 +1435,14 @@ describe("job calls", () => {
     it("job_wait answers running at its deadline and leaves the job running", async () => {
         const now = 1_000_000;
         const h = harness([itemRow("a")], { now: () => now });
-        withJobCalls(h);
-        const held = deferred<void>();
-        h.state.respond = async (r) => {
-            await held.promise;
-            return answer(r);
-        };
-        const wire = await plan(h.fills);
-        const started = await h.fills.agent.fill(
-            request("fill", { plan_id: wire.plan_id, tool_call_id: "call-1", wait: false, job_call: true }),
-            context({ receivedAt: now }),
-        );
+        const { held, jobId } = await startHeld(h);
         // Arrived 89.99 s ago: almost none of the 90 s wait is left.
-        const answered = await h.fills.agent.waitJob(jobWait(started.job_id!), context({ receivedAt: now - 89_990 }));
+        const answered = await h.fills.agent.waitJob(jobWait(jobId), context({ receivedAt: now - 89_990 }));
         expect(answered).toMatchObject({ status: "running" });
         expect(answered.result).toBeUndefined();
-        expect(h.fills.getJob(started.job_id!)?.state).toBe("running");
+        expect(h.fills.getJob(jobId)?.state).toBe("running");
         held.resolve();
-        await h.fills.wait(started.job_id!);
+        await h.fills.wait(jobId);
     });
 
     it("job_wait answers not_found for a job this device does not know", async () => {
@@ -1543,67 +1452,42 @@ describe("job calls", () => {
 
     it("stopping the run during job_wait stops the job and answers once it has ended", async () => {
         const h = harness([itemRow("a"), itemRow("b"), itemRow("c")]);
-        withJobCalls(h);
-        const held = deferred<void>();
-        h.state.respond = async (r) => {
-            await held.promise;
-            return answer(r);
-        };
-        const wire = await plan(h.fills);
-        const started = await h.fills.agent.fill(
-            request("fill", { plan_id: wire.plan_id, tool_call_id: "call-1", wait: false, job_call: true }),
-            context(),
-        );
+        const { held, jobId } = await startHeld(h);
         const stopped = new AbortController();
-        const waiting = h.fills.agent.waitJob(jobWait(started.job_id!), context({ runStopped: stopped.signal }));
+        const waiting = h.fills.agent.waitJob(jobWait(jobId), context({ runStopped: stopped.signal }));
         await until(() => h.state.requests.length === 1, "the first row in flight");
         stopped.abort();
         held.resolve();
         const answered = await waiting;
-        expect(answered).toMatchObject({ status: "done", result: { stopped: true, result: { stopped_by: "stopped", rows_answered: 1 } } });
+        expect(answered).toMatchObject({ status: "done", result: { result: { stopped_by: "stopped", rows_answered: 1 } } });
     });
 
-    it("marks only a fill the user stopped as stopped", () => {
-        const h = harness([itemRow("a")]);
-        const ended = (stopped_by?: string) =>
-            ({
-                job_id: "job-1", plan_id: "p", table: { libraryID: 1, key: "TABLE001", title: "T" }, origin: { kind: "agent" },
-                state: "done", rows_total: 1, rows_done: 1, rows_failed: 0, in_flight: 0, credits_charged: 0, credits_planned: 0,
-                balance: null, started_at: 0, seconds_left: null,
-                result: { rows_answered: 1, answered: 1, failed_row_ids: [], pending: null, ...(stopped_by ? { stopped_by } : {}) },
-            }) as any;
-        expect(h.fills.agent.jobResult(ended("stopped")).stopped).toBe(true);
-        expect(h.fills.agent.jobResult(ended("shutdown")).stopped).toBeUndefined();
-        expect(h.fills.agent.jobResult(ended()).stopped).toBeUndefined();
+    it("a job left to its open table survives the run that waits on it being stopped", async () => {
+        const h = harness([itemRow("a"), itemRow("b"), itemRow("c")]);
+        const { held, jobId } = await startHeld(h);
+        const stopped = new AbortController();
+        const waiting = h.fills.agent.waitJob(jobWait(jobId), context({ runStopped: stopped.signal }));
+        await until(() => h.state.requests.length === 1, "the first row in flight");
+        h.fills.agent.release(jobId);
+        stopped.abort();
+        expect(h.fills.getJob(jobId)?.state).toBe("running");
+        held.resolve();
+        const ended = await h.fills.wait(jobId);
+        expect(ended?.result).toMatchObject({ rows_answered: 3 });
+        expect(ended?.result?.stopped_by ?? null).toBeNull();
+        await waiting;
     });
 
-    it("keeps an excluded library's row ids out of the job-call result", async () => {
-        const h = harness([itemRow("a"), itemRow("u-SECRET22")]);
-        const calls = withJobCalls(h);
-        h.state.respond = async (r) => (r.row_id === "a" ? answer(r) : { cells: {}, row_failure: { code: "no_answer", message: "No answer." }, charged: 0 });
-        const wire = await plan(h.fills);
-        h.state.excluded.add("SECRET22");
-        const started = await h.fills.agent.fill(
-            request("fill", { plan_id: wire.plan_id, tool_call_id: "call-1", wait: false, job_call: true }),
-            context(),
-        );
-        await h.fills.wait(started.job_id!);
-        expect(calls.ended).toHaveLength(1);
-        expect(JSON.stringify(calls.ended[0].result)).not.toContain("SECRET22");
-    });
-});
-
-describe("a job-call result kept until it is stored", () => {
-    it("is filtered again for libraries excluded since the job ended", async () => {
+    it("keeps an excluded library's row ids out of the job's result", async () => {
         const h = harness([itemRow("a"), itemRow("u-SECRET22")]);
         h.state.respond = async (r) => (r.row_id === "a" ? answer(r) : { cells: {}, row_failure: { code: "no_answer", message: "No answer." }, charged: 0 });
         const { job } = await planAndStart(h.fills);
         const ended = (await h.fills.wait(job.job_id))!;
-        const kept = h.fills.agent.jobResult(ended);
-        expect(JSON.stringify(kept)).toContain("SECRET22");
+        expect(JSON.stringify(h.fills.agent.jobResult(ended))).toContain("SECRET22");
+        // Excluded since the job ended: the waiting window's resume sends nothing of it.
         h.state.excluded.add("SECRET22");
-        expect(JSON.stringify(h.fills.agent.sendableJobResult(kept, TARGET))).not.toContain("SECRET22");
+        expect(JSON.stringify(h.fills.agent.jobResult(ended))).not.toContain("SECRET22");
         h.deps.writeRefusal = () => "library_excluded";
-        expect(h.fills.agent.sendableJobResult(kept, TARGET).result).toMatchObject({ failed_row_ids: [], pending: null });
+        expect(h.fills.agent.jobResult(ended).result).toMatchObject({ failed_row_ids: [], pending: null });
     });
 });

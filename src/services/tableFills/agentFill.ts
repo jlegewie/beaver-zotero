@@ -13,11 +13,11 @@
  * has started. A user stopping the run that waits stops the job; rows in
  * flight finish.
  *
- * Job calls: a `fill` with `job_call` starts the job without waiting and
- * keeps its tool call in the job-call list, which stores the result on the
- * parked call if the run does not wait for it to the end. The run waits, if at
- * all, through `job_wait_request` ({@link AgentTableFills.waitJob}), which the
- * backend can release by parking the call.
+ * Job calls: the run starts the job with a `fill` that does not wait, then
+ * waits for it through `job_wait_request` ({@link AgentTableFills.waitJob}),
+ * which the backend can release by parking the call. The window that waited
+ * resumes the parked run with {@link AgentTableFills.jobResult} once the job
+ * ends.
  */
 
 import type { AgentDataRequestContext } from '@beaver/agent-core/transport/agentDataDispatch';
@@ -31,7 +31,7 @@ import {
     type TableFillTarget,
     type TableFillWirePlan,
 } from '@beaver/agent-core/protocol/tableFillProtocol';
-import type { JobResult, TableFillJobResult, WSJobWaitRequest, WSJobWaitResponse } from '@beaver/agent-core/protocol/jobCallProtocol';
+import type { TableFillJobResult, WSJobWaitRequest, WSJobWaitResponse } from '@beaver/agent-core/protocol/jobCallProtocol';
 import type { InstanceTableFills } from './service';
 
 /** The default safety deadline on a waiting `fill`, in ms. */
@@ -91,6 +91,8 @@ export class AgentTableFills {
     private jobs = new Map<string, ToolCallJob>();
     /** Tool call and plan → its start in progress, so two arrivals start one job. */
     private starting = new Map<string, Promise<Started>>();
+    /** Jobs left to their open table: a run cut off while waiting no longer stops them. */
+    private released = new Set<string>();
 
     constructor(
         private readonly fills: InstanceTableFills,
@@ -144,26 +146,11 @@ export class AgentTableFills {
         if (request.wait && snapshot.state !== 'done') {
             snapshot = await this.waitUntil(snapshot, started.entry.firstArrival + this.waitMs(), context);
         }
-        if (request.job_call) this.registerJobCall(request, snapshot, context);
-        const device = request.job_call ? this.fills.jobCalls?.device() : undefined;
         if (snapshot.state === 'done' && snapshot.result) {
             started.entry.ended = snapshot;
-            return { ...this.answer(request, snapshot, 'done'), ...device };
+            return this.answer(request, snapshot, 'done');
         }
-        return { ...this.answer(request, snapshot, 'running'), ...device };
-    }
-
-    /** Keep a job call's tool call, so its result can be stored once the job ends. */
-    private registerJobCall(request: ArtifactRequest, snapshot: TableFillJobSnapshot, context?: AgentDataRequestContext): void {
-        const jobCalls = this.fills.jobCalls;
-        const threadId = context?.run?.threadId ?? snapshot.origin.run?.thread_id;
-        const toolCallId = request.tool_call_id;
-        if (!jobCalls || !threadId || !toolCallId) return;
-        const coverage = this.fills.jobCoverage(snapshot.job_id);
-        if (!coverage) return;
-        jobCalls.register({ threadId, toolCallId, jobId: snapshot.job_id, coverage });
-        // A job that ended before it was registered reports its end now.
-        if (snapshot.state === 'done' && snapshot.result) jobCalls.jobEnded(snapshot, this.jobResult(snapshot));
+        return this.answer(request, snapshot, 'running');
     }
 
     /**
@@ -174,12 +161,11 @@ export class AgentTableFills {
      * has ended as stopped.
      */
     async waitJob(request: WSJobWaitRequest, context?: AgentDataRequestContext): Promise<WSJobWaitResponse> {
-        const reply = (status: WSJobWaitResponse['status'], snapshot?: TableFillJobSnapshot): WSJobWaitResponse => ({
+        const reply = (status: 'running' | 'not_found'): WSJobWaitResponse => ({
             type: 'job_wait_response',
             request_id: request.request_id,
             job_id: request.job_id,
             status,
-            ...(status === 'done' && snapshot ? { result: this.jobResult(snapshot) } : {}),
         });
         const endedSnapshot = (): TableFillJobSnapshot | null => {
             for (const entry of this.jobs.values()) if (entry.jobId === request.job_id && entry.ended) return entry.ended;
@@ -193,14 +179,15 @@ export class AgentTableFills {
                 untilStopped: true,
             });
         }
-        return snapshot.state === 'done' && snapshot.result ? reply('done', snapshot) : reply('running');
+        return snapshot.state === 'done' && snapshot.result ? this.doneAnswer(snapshot, request.request_id) : reply('running');
     }
 
     /**
      * Wait for a job to end, until `deadline` on this clock. The user stopping
-     * the run that waits stops the job; with `untilStopped` the wait then goes
-     * on until the stopped job has ended (rows in flight finish), so the
-     * answer reports them.
+     * the run that waits stops the job, unless it was left to its table
+     * ({@link release}); with `untilStopped` the wait then goes on until the
+     * stopped job has ended (rows in flight finish), so the answer reports
+     * them.
      */
     private async waitUntil(
         snapshot: TableFillJobSnapshot,
@@ -210,13 +197,15 @@ export class AgentTableFills {
     ): Promise<TableFillJobSnapshot> {
         const jobId = snapshot.job_id;
         context?.reportPhase('filling');
-        const stop = () => this.fills.stop(jobId);
+        const stop = () => {
+            if (!this.released.has(jobId)) this.fills.stop(jobId);
+        };
         const signal = context?.runStopped;
         if (signal?.aborted) stop();
         else signal?.addEventListener('abort', stop, { once: true });
         try {
             snapshot = (await this.fills.wait(jobId, Math.max(0, deadline - this.now()))) ?? snapshot;
-            while (options.untilStopped && snapshot.state !== 'done' && signal?.aborted) {
+            while (options.untilStopped && snapshot.state !== 'done' && signal?.aborted && !this.released.has(jobId)) {
                 snapshot = (await this.fills.wait(jobId, 60_000)) ?? snapshot;
             }
         } finally {
@@ -226,9 +215,32 @@ export class AgentTableFills {
     }
 
     /**
+     * The window waiting on this job left the chat while the job's table is
+     * open: the job goes on as the table's own, so the run that waited being
+     * cut off (Stop, leaving the chat) no longer stops it.
+     */
+    release(jobId: string): void {
+        this.released.add(jobId);
+    }
+
+    /**
+     * The `done` answer to a wait on a job that ended: the live wait's, and
+     * the one the waiting window resumes a parked call with.
+     */
+    doneAnswer(snapshot: TableFillJobSnapshot, requestId: string): WSJobWaitResponse {
+        return {
+            type: 'job_wait_response',
+            request_id: requestId,
+            job_id: snapshot.job_id,
+            status: 'done',
+            result: this.jobResult(snapshot),
+        };
+    }
+
+    /**
      * A finished job's result as a job call carries it, filtered like the
-     * live `done` answer: nothing naming an excluded library's item leaves the
-     * device.
+     * live `done` answer: nothing naming an excluded library's item leaves
+     * the device.
      */
     jobResult(snapshot: TableFillJobSnapshot): TableFillJobResult {
         return {
@@ -238,33 +250,7 @@ export class AgentTableFills {
             progress: fillProgress(snapshot),
             // A table whose library was excluded since the fill started sends only its counts.
             result: this.outbound(snapshot.result!, !!this.fills.tableRefusal(snapshot.table)),
-            // The user stopped it (Stop in the composer, in the table, or of the run).
-            ...(snapshot.result?.stopped_by === 'stopped' ? { stopped: true } : {}),
         };
-    }
-
-    /**
-     * A job call's end when the window waiting on it leaves the chat while
-     * its table is open: the fill goes on as the table's own, and the call
-     * reports how far it had got. Null unless the job runs here: an ended
-     * job's call already holds its end, and one winding down after Stop
-     * reports its stopped result.
-     */
-    handOffResult(jobId: string): JobResult | null {
-        const snapshot = this.fills.getJob(jobId);
-        if (snapshot?.state !== 'running') return null;
-        return { kind: 'table_fill', job_id: jobId, status: 'handed_off', progress: fillProgress(snapshot) };
-    }
-
-    /**
-     * A job-call result kept since its job ended, as it may leave the device
-     * now: a library excluded meanwhile sends nothing of its items. A
-     * hand-off carries counts only.
-     */
-    sendableJobResult(job: JobResult, target: TableFillTarget): JobResult {
-        if (job.status === 'handed_off') return job;
-        const result = this.outbound(job.result, !!this.fills.tableRefusal(target));
-        return result === job.result ? job : { ...job, result };
     }
 
     /**
@@ -335,12 +321,11 @@ export class AgentTableFills {
     noteEnded(snapshot: TableFillJobSnapshot): void {
         if (snapshot.state !== 'done' || !snapshot.result) return;
         for (const entry of this.jobs.values()) if (entry.jobId === snapshot.job_id) entry.ended = snapshot;
-        // The job-call list stores the result if a parked call is waiting for it.
-        if (snapshot.origin.kind === 'agent') this.fills.jobCalls?.jobEnded(snapshot, this.jobResult(snapshot));
     }
 
     dispose(): void {
         this.jobs.clear();
         this.starting.clear();
+        this.released.clear();
     }
 }

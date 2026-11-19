@@ -313,8 +313,6 @@ export class AgentService {
      * hung handler cannot keep sending keepalives on a replacement socket.
      */
     private pendingKeepalives: Map<string, RequestKeepalive> = new Map();
-    /** Unanswered `job_wait_request`s: request id → the run waiting and the tool call. */
-    private liveJobWaits = new Map<string, { runId: string; toolCallId: string }>();
     private jobWaitListeners = new Set<(wait: LiveJobWait) => void>();
     private activeKeepalives: Set<RequestKeepalive> = new Set();
     /**
@@ -1185,16 +1183,6 @@ export class AgentService {
     }
 
     /**
-     * The tool calls whose jobs the run waits for live (a `job_wait_request`
-     * is unanswered). The backend parks such a wait like an open card.
-     */
-    liveJobWaitCalls(runId: string): ReadonlySet<string> {
-        const calls = new Set<string>();
-        for (const wait of this.liveJobWaits.values()) if (wait.runId === runId) calls.add(wait.toolCallId);
-        return calls;
-    }
-
-    /**
      * Follow the job waits this client's runs start (`job_wait_request`), so
      * the window can wait on the job past the live wait. Returns the
      * unsubscribe.
@@ -1982,17 +1970,13 @@ export class AgentService {
                     const tracked = run && requestId !== null
                         ? run.trackReply(requestId, executedAction(eventName, dataEvent))
                         : null;
-                    // A job the run waits for live: leaving the chat parks the
-                    // run rather than stopping it (see `hasLiveJobWait`).
-                    const jobWait = eventName === 'job_wait_request' && requestId !== null && owner
-                        ? { requestId, runId: owner.runId, toolCallId: String(dataEvent?.tool_call_id ?? '') }
-                        : null;
-                    if (jobWait) {
-                        this.liveJobWaits.set(jobWait.requestId, { runId: jobWait.runId, toolCallId: jobWait.toolCallId });
+                    // A job the run waits for live: the window follows it past
+                    // the live wait (`onJobWait`).
+                    if (eventName === 'job_wait_request' && requestId !== null && owner) {
                         const wait: LiveJobWait = {
-                            runId: jobWait.runId,
-                            threadId: owner?.threadId ?? null,
-                            toolCallId: jobWait.toolCallId,
+                            runId: owner.runId,
+                            threadId: owner.threadId ?? null,
+                            toolCallId: String(dataEvent?.tool_call_id ?? ''),
                             jobId: String(dataEvent?.job_id ?? ''),
                         };
                         for (const listener of this.jobWaitListeners) {
@@ -2005,7 +1989,6 @@ export class AgentService {
                     }
                     const respond = (response: Record<string, any> | PreparedJsonMessage) => {
                         keepalive.stop();
-                        if (jobWait) this.liveJobWaits.delete(jobWait.requestId);
                         if (run && tracked) {
                             tracked.settle(response);
                             this.deliverReply(run, tracked.reply);

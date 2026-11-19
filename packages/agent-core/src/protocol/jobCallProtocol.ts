@@ -3,17 +3,12 @@
  * that can park while the work goes on in Zotero.
  *
  * The call waits for its job live (`job_wait_request`). When the wait ends
- * before the job does, the run parks with the call open. When the job ends,
- * the device that ran it stores the result on the parked call (the
- * parked-call endpoint). The window that has been waiting on the job resumes
- * the run with empty `deferred_results`, and the backend takes the stored
- * result as the call's answer. Every other result reaches the model with the
- * user's next message.
- *
- * The result has one shape whether it travels live (`job_wait_response`) or is
- * stored, so the backend renders both with one finisher. A call whose window
- * left the chat while the table was open ends with a hand-off instead: the
- * fill goes on as the table's own.
+ * before the job does, the run parks with the call open. The window that has
+ * been waiting on the job resumes the run once the job ends, answering the
+ * call in `deferred_results` with the same `job_wait_response` the live wait
+ * gets. Otherwise the call is closed by the next message (or by the run
+ * being cut off) with a text saying the job may have stopped or may still be
+ * running; nothing about the job is stored on the call.
  */
 
 import type { ParkedDeferral } from '../agents/types';
@@ -26,24 +21,14 @@ export function isJobKind(kind: unknown): kind is JobKind {
     return typeof kind === 'string' && (JOB_KINDS as readonly string[]).includes(kind);
 }
 
-/** The device running a job: Zotero's local user key, and its host name if known. */
-export interface JobDevice {
-    device_key?: string;
-    device_name?: string;
-}
-
 /** The stored state of a parked `table_fill` call. */
-export interface TableFillJobState extends JobDevice {
+export interface TableFillJobState {
     job_id: string;
-    plan_id?: string;
     /** The table's item id (`u-KEY` / `g<id>-KEY`). */
     table?: string;
     title?: string;
     rows?: number;
-    papers?: number;
     columns?: string[];
-    credits_planned?: number;
-    started_at?: string;
 }
 
 export interface TableFillJobResult {
@@ -52,35 +37,12 @@ export interface TableFillJobResult {
     status: 'done';
     progress: TableFillProgress;
     result: TableFillResult;
-    /** Derived from local state at startup: Zotero closed during the fill. */
-    interrupted?: boolean;
-    /**
-     * The user stopped the job. Its result never resumes the run: a live
-     * wait parks with it, and only a message closes the call.
-     */
-    stopped?: boolean;
 }
 
-/**
- * The window waiting on a fill left the chat while the table was open: the
- * fill goes on as the table's own, and the call ends with how far it had got
- * at that moment. Never sent live; it never resumes the run.
- */
-export interface TableFillJobHandOff {
-    kind: 'table_fill';
-    job_id: string;
-    status: 'handed_off';
-    progress: TableFillProgress;
-}
-
-/** What a job call's result can be: the job's end, or its hand-off to the table. */
-export type JobResult = TableFillJobResult | TableFillJobHandOff;
-
-/** A parked job call: a deferral of a job kind, with its result once stored. */
+/** A parked job call: a deferral of a job kind. */
 export interface JobDeferral extends ParkedDeferral {
     kind: JobKind;
     state?: TableFillJobState;
-    result?: JobResult | null;
 }
 
 export function isJobDeferral(deferral: ParkedDeferral | null | undefined): deferral is JobDeferral {
@@ -111,53 +73,10 @@ export interface WSJobWaitResponse {
     request_id: string;
     job_id: string;
     /**
-     * `done` once the job ended (a job the user stopped carries `stopped` on
-     * its result, and the backend parks the call), `running` at the deadline,
-     * `not_found` for an unknown job.
+     * `done` once the job ended, `running` at the deadline, `not_found` for
+     * an unknown job. Also the answer the waiting window resumes a parked
+     * job call with (always `done`).
      */
     status: 'done' | 'running' | 'not_found';
     result?: TableFillJobResult;
 }
-
-// ---------------------------------------------------------------------------
-// The parked-call result endpoint
-// ---------------------------------------------------------------------------
-
-/** Body of `POST /api/v1/threads/{thread_id}/parked-calls/{tool_call_id}/result`. */
-export interface StoreJobResultRequest {
-    kind: JobKind;
-    job_id: string;
-    result: JobResult;
-}
-
-/**
- * `stored`: the result is on the parked call (or already was). `busy`: a run
- * holds the thread; retry once it ends. `gone`: the call is no longer open;
- * drop the result.
- */
-export type StoreJobResultOutcome = 'stored' | 'busy' | 'gone';
-
-export interface StoreJobResultResponse {
-    outcome: StoreJobResultOutcome;
-}
-
-// ---------------------------------------------------------------------------
-// Plugin runtime notification
-// ---------------------------------------------------------------------------
-
-/** A job result this device stored on its parked call. */
-export interface StoredJobCall {
-    threadId: string;
-    toolCallId: string;
-    kind: JobKind;
-    jobId: string;
-    userId: string;
-    result: JobResult;
-}
-
-/**
- * Published on the instance runtime when this device stored a job's result on
- * its parked call. Windows showing the thread put the result on the call; the
- * window that has been waiting on the job resumes the run.
- */
-export const JOB_CALL_STORED_EVENT = 'job-call:stored';

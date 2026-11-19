@@ -27,24 +27,6 @@ const GROUP_OF_KIND: Record<string, Group> = {
     table_card: "table",
 };
 
-/**
- * Job calls still working for the thread: a table fill. They draw a spinner,
- * not the dot, and need nothing from the user. A job whose result is stored
- * counts under no key.
- */
-const WORKING_JOBS: Record<string, string> = {
-    table_fill: "Filling a table",
-};
-
-/**
- * How a thread list marks the thread: `dot` when the user has something to
- * answer there, `spinner` when only a job is working for it. The dot wins
- * when both apply; an unknown key counts as needing the user.
- */
-export function awaitingIndicator(awaiting: AwaitingInput): "dot" | "spinner" {
-    return Object.keys(awaiting).every((kind) => kind in WORKING_JOBS) ? "spinner" : "dot";
-}
-
 const NOUNS: Record<Group, [string, string]> = {
     question: ["question", "questions"],
     approval: ["approval", "approvals"],
@@ -62,15 +44,8 @@ function count(n: number, group: Group): string {
  * A kind this client does not know leaves only the generic phrase.
  */
 export function awaitingInputLabel(awaiting: AwaitingInput): string {
-    const kinds = Object.keys(awaiting);
-    if (kinds.length && kinds.every((kind) => kind in WORKING_JOBS)) {
-        const labels = [...new Set(kinds.map((kind) => WORKING_JOBS[kind]))];
-        return labels.join(" · ");
-    }
-    // Waiting on the user wins over a job still working: only those keys are described.
-    const needs = Object.entries(awaiting).filter(([kind]) => !(kind in WORKING_JOBS));
     const groups = new Map<Group, number>();
-    for (const [kind, n] of needs) {
+    for (const [kind, n] of Object.entries(awaiting)) {
         const group = GROUP_OF_KIND[kind];
         if (!group) return "Waiting for your input";
         groups.set(group, (groups.get(group) ?? 0) + n);

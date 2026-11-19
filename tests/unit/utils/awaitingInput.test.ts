@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { awaitingIndicator, awaitingInputLabel, parseAwaitingInput } from '../../../src/services/threads/awaitingInput';
+import { awaitingInputLabel, parseAwaitingInput } from '../../../src/services/threads/awaitingInput';
 
 describe('parseAwaitingInput', () => {
     it('keeps positive whole counts by kind', () => {
@@ -42,25 +42,5 @@ describe('awaitingInputLabel', () => {
 
     it('falls back to the generic phrase for a kind it does not know', () => {
         expect(awaitingInputLabel({ ask_user_question: 1, new_card: 1 })).toBe('Waiting for your input');
-    });
-});
-
-describe('job calls in the thread list', () => {
-    it('draws a spinner while only a fill works for the thread', () => {
-        expect(awaitingIndicator({ table_fill: 1 })).toBe('spinner');
-        expect(awaitingInputLabel({ table_fill: 1 })).toBe('Filling a table');
-        expect(awaitingInputLabel({ table_fill: 2 })).toBe('Filling a table');
-    });
-
-    it('draws the dot when the user also has something to answer', () => {
-        expect(awaitingIndicator({ table_fill: 1, ask_user_question: 1 })).toBe('dot');
-    });
-
-    it('describes only what needs the user when a job also works', () => {
-        expect(awaitingInputLabel({ table_fill: 1, ask_user_question: 1 })).toBe('Waiting for your answer to a question');
-    });
-
-    it('reads an unknown key as needing the user', () => {
-        expect(awaitingIndicator({ new_job_kind: 1 })).toBe('dot');
     });
 });

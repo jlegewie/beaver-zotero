@@ -30,7 +30,7 @@ import NextStepsPanel from '../pages/firstRun/NextStepsPanel';
 import RunContinueDisplay from '../agentRuns/RunContinueDisplay';
 import BackToSuggestions, { FirstRunBackTarget } from '../pages/firstRun/BackToSuggestions';
 import { continuationOfferAtom, hasWhereToStartRunAtom, lastRunSummaryAtom, threadRunIdsAtom } from '@beaver/agent-core/run-state/atoms';
-import { liveJobStoppingAtom, runningChatJobsAtom, stopChatJobsAtom } from '../../atoms/jobCalls';
+import { runningChatJobsAtom, stopChatJobsAtom } from '../../atoms/jobCalls';
 import { PromptOrigin, isRunFinished } from '@beaver/agent-core/agents/types';
 import { isThreadParkedAtom } from '../../atoms/parkedRuns';
 import { firstRunNextStepsDismissedAtom } from '../../atoms/firstRun';
@@ -145,14 +145,11 @@ const InputArea: React.FC<InputAreaProps> = ({
     // stops the fill and ends the response.
     const chatJobs = useAtomValue(runningChatJobsAtom);
     const stopChatJobs = useSetAtom(stopChatJobsAtom);
-    const liveJobStopping = useAtomValue(liveJobStoppingAtom);
     const jobsBusy = isParked && chatJobs.length > 0;
     const isPending = (useAtomValue(isWSChatPendingAtom) && !isParked) || jobsBusy;
-    // Stop was pressed on the fill: it winds down, and a run that waited on
-    // it parks by itself.
-    const isStoppingJobs = jobsBusy
-        ? chatJobs.every((job) => job.stopping)
-        : liveJobStopping;
+    // The fill was stopped in its table: it winds down, then the response
+    // continues with how far it got.
+    const isStoppingJobs = chatJobs.length > 0 && chatJobs.every((job) => job.stopping);
     const waitsOnJob = isPending && chatJobs.length > 0;
 
     // A file staged for THIS composition is still being attached, so sending is
@@ -544,8 +541,9 @@ const InputArea: React.FC<InputAreaProps> = ({
             e.stopPropagation();
         }
         if (isStoppingJobs) return;
-        // A chat that waits only on fills stops them; anything else stops the run.
-        if (stopChatJobs() || jobsBusy) return;
+        // A parked chat stops the fills it waits on; a live run stops as any
+        // run does, and its fills with it.
+        if (stopChatJobs()) return;
         stopRun();
     };
 

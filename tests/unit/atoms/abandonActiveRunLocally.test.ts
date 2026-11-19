@@ -33,7 +33,6 @@ vi.mock('@beaver/agent-core/transport/agentService', () => ({
         leaveRun: () => false,
         isReattaching: () => false,
         sendPark: sendParkMock,
-        liveJobWaitCalls: () => new Set(),
     },
     AgentConnectionError: class AgentConnectionError extends Error {
         evidence: any;
@@ -83,6 +82,7 @@ import type { AgentRun } from '@beaver/agent-core/agents/types';
 import { pendingApprovalsAtom } from '../../../react/agents/agentActions';
 import { runApprovalPolicyAtom } from '../../../react/atoms/runApprovalPolicy';
 import { store } from '../../../react/store';
+import { jobWaitAtom } from '../../../react/atoms/jobWait';
 import { sessionAtom } from '../../../react/atoms/auth';
 import { AgentConnectionError } from '@beaver/agent-core/transport/agentService';
 import {
@@ -243,6 +243,15 @@ describe('closing the connection from the stop button', () => {
         expect(store.get(isWSChatPendingAtom)).toBe(false);
         expect(store.get(isWSConnectedAtom)).toBe(false);
         expect(store.get(isWSReadyAtom)).toBe(false);
+    });
+
+    it('ends the window wait on the fill the stopped run waited on', async () => {
+        store.set(activeRunAtom, makeRun());
+        store.set(jobWaitAtom, { threadId: 'thread-1', runId: 'run-1', toolCallId: 'call-1', jobId: 'job-1' });
+
+        await store.set(closeWSConnectionAtom);
+
+        expect(store.get(jobWaitAtom)).toBeNull();
     });
 });
 

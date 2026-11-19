@@ -1,14 +1,14 @@
 /**
  * Leaving a chat whose response waits on a table fill: the fill goes on as
  * the table's own when the table is open, and stops otherwise, after the
- * user confirms leaving.
+ * user confirms leaving. Both happen here, before the run is stopped.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { confirmMock, isShownMock, leaveMock, stopMock } = vi.hoisted(() => ({
+const { confirmMock, isShownMock, releaseMock, stopMock } = vi.hoisted(() => ({
     confirmMock: vi.fn(() => true),
     isShownMock: vi.fn(() => false),
-    leaveMock: vi.fn(async () => undefined),
+    releaseMock: vi.fn(),
     stopMock: vi.fn(() => true),
 }));
 
@@ -23,7 +23,7 @@ import { currentThreadIdAtom } from '@beaver/agent-core/run-state/atoms';
 import { chatFillsAtom, recordChatFill } from '@beaver/agent-core/run-state/tableChatFills';
 import { store } from '../../../react/store';
 import { jobWaitAtom } from '../../../react/atoms/jobWait';
-import { confirmLeaveJobWaitAtom, leaveJobWait } from '../../../react/atoms/jobLeave';
+import { confirmLeaveJobWaitAtom, fillLeaveStops, leaveJobWait } from '../../../react/atoms/jobLeave';
 
 const THREAD = 'thread-1';
 const TABLE = { libraryID: 1, key: 'TABLE001' };
@@ -32,8 +32,7 @@ const TABLE = { libraryID: 1, key: 'TABLE001' };
     ...(globalThis as any).Zotero,
     Beaver: {
         ...((globalThis as any).Zotero?.Beaver ?? {}),
-        jobCalls: { leave: leaveMock },
-        tableFills: { stop: stopMock },
+        tableFills: { stop: stopMock, agent: { release: releaseMock } },
         data: { env: 'production' },
     },
 };
@@ -74,12 +73,15 @@ describe('leaving a chat that waits on a fill', () => {
         isShownMock.mockReturnValue(true);
         expect(store.set(confirmLeaveJobWaitAtom, { leave: 'new_chat', window })).toBe(true);
         expect(confirmMock).not.toHaveBeenCalled();
+        expect(fillLeaveStops(store.get)).toBeNull();
         leaveJobWait();
         expect(store.get(jobWaitAtom)).toBeNull();
-        expect(leaveMock).toHaveBeenCalledWith(THREAD, 'call-1', 'table_fill', 'job-1', 'hand_off');
+        expect(releaseMock).toHaveBeenCalledWith('job-1');
+        expect(stopMock).not.toHaveBeenCalled();
     });
 
     it('confirms leaving like any response still going, naming the fill, and stays on Cancel', () => {
+        expect(fillLeaveStops(store.get)?.job_id).toBe('job-1');
         confirmMock.mockReturnValue(false);
         expect(store.set(confirmLeaveJobWaitAtom, { leave: 'new_chat', window })).toBe(false);
         expect(confirmMock).toHaveBeenCalledWith({
@@ -95,13 +97,14 @@ describe('leaving a chat that waits on a fill', () => {
             confirmLabel: 'Switch Chat',
         }));
         expect(store.get(jobWaitAtom)).not.toBeNull();
-        expect(leaveMock).not.toHaveBeenCalled();
+        expect(stopMock).not.toHaveBeenCalled();
     });
 
     it('stops the fill once the user confirms and the chat changes', () => {
         expect(store.set(confirmLeaveJobWaitAtom, { leave: 'new_chat', window })).toBe(true);
         leaveJobWait();
-        expect(leaveMock).toHaveBeenCalledWith(THREAD, 'call-1', 'table_fill', 'job-1', 'stop');
+        expect(stopMock).toHaveBeenCalledWith('job-1');
+        expect(releaseMock).not.toHaveBeenCalled();
     });
 
     it('asks nothing and leaves the result alone for a fill that ended or is winding down after Stop', () => {
@@ -113,7 +116,8 @@ describe('leaving a chat that waits on a fill', () => {
             expect(store.get(jobWaitAtom)).toBeNull();
         }
         expect(confirmMock).not.toHaveBeenCalled();
-        expect(leaveMock).not.toHaveBeenCalled();
+        expect(stopMock).not.toHaveBeenCalled();
+        expect(releaseMock).not.toHaveBeenCalled();
     });
 });
 
@@ -121,12 +125,13 @@ describe('closing the window that waits on a fill', () => {
     it("does not count the closing window's own tabs", () => {
         leaveJobWait({ closing: window });
         expect(isShownMock).toHaveBeenLastCalledWith(expect.objectContaining(TABLE), window);
-        expect(leaveMock).toHaveBeenCalledWith(THREAD, 'call-1', 'table_fill', 'job-1', 'stop');
+        expect(stopMock).toHaveBeenCalledWith('job-1');
     });
 
     it('hands the fill to a table open in another window', () => {
         isShownMock.mockReturnValue(true);
         leaveJobWait({ closing: window });
-        expect(leaveMock).toHaveBeenCalledWith(THREAD, 'call-1', 'table_fill', 'job-1', 'hand_off');
+        expect(releaseMock).toHaveBeenCalledWith('job-1');
+        expect(stopMock).not.toHaveBeenCalled();
     });
 });
