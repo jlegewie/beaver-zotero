@@ -31,7 +31,7 @@ import {
     normalizeSelectLabel,
 } from '../layouts/table';
 import type { TableFillPricing } from '../protocol/tableFillProtocol';
-import { balanceLine, creditsText, formatCredits, planRowLine } from './tableFillCopy';
+import { balanceLine, creditsText, formatCredits } from './tableFillCopy';
 
 export type TableCardStep = 'sources' | 'screening' | 'columns';
 
@@ -860,10 +860,12 @@ export function tableFillCardResponse(request: WSTableFillCardRequest): WSTableC
     };
 }
 
-/** "Fill 180": the fill card's run button, named for the papers it reads. */
-export function fillActionLabel(request: WSTableFillCardRequest): string {
-    const { rows, documents, title_abstract } = request.cost;
-    return `Fill ${format(documents + title_abstract || rows)}`;
+/** The fill card's one primary button. */
+export const FILL_TABLE_LABEL = 'Fill table';
+
+/** What the fill card's run covers, beside its receipt: "Fill 3 columns". */
+export function fillScopeLine(request: WSTableFillCardRequest): string {
+    return `Fill ${plural(request.columns.length, 'column')}`;
 }
 
 /** The decline; instructions make it a request for something else. */
@@ -934,26 +936,6 @@ export function draftCost(
         cost: { rows, documents, title_abstract: titleAbstract, no_input: 0, credits },
         upperBound: true,
     };
-}
-
-/** The row line of a card's cost: "Reads 180 papers: 150 from their documents, 30 from title and abstract". */
-export function costLine(cost: TableCardCost | null, upperBound = false): string | null {
-    if (!cost) return null;
-    const line = planRowLine({
-        rows: cost.rows,
-        documents: cost.documents,
-        document_kinds: {},
-        title_abstract: cost.title_abstract,
-        no_input: cost.no_input,
-        unavailable: 0,
-    });
-    return upperBound ? line.replace(/^Reads /, 'Reads up to ') : line;
-}
-
-/** The credits line of a card's cost: "0.45 credits", "Up to 9.2 credits". */
-export function costCredits(cost: TableCardCost | null, upperBound = false): string | null {
-    if (!cost) return null;
-    return `${upperBound ? 'Up to ' : ''}${creditsText(cost.credits)}`;
 }
 
 /** The papers a cost reads (a document, or title and abstract); all rows when none can be read. */

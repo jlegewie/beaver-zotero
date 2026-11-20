@@ -13,12 +13,10 @@ import {
     addColumn,
     addItems,
     addLibrarySource,
-    balanceNotice,
     CREATE_TABLE_LABEL,
     createChoice,
     createRunOption,
     columnProblem,
-    costNotice,
     createBlocker,
     createBlockerReason,
     cardDestination,
@@ -84,8 +82,7 @@ import {
     TableIcon,
 } from '../../icons/icons';
 import AddSourcesMenu, { type AddSourcesTarget } from '../../ui/menus/AddSourcesMenu';
-import { TableCardReceipt, useCreditBalance, useFillPricing } from './TableCardCost';
-import { openPreferencesWindow } from '../../../ui/openPreferencesWindow';
+import { TableCardFillWarnings, TableCardReceipt, useFillPricing } from './TableCardCost';
 import { describeItems, resolveItems, resolveLibraryScope } from './liveSources';
 import { previewFacts } from '@beaver/agent-core/layouts/tableEdit';
 import type { SourceEntry } from '@beaver/agent-core/layouts/table';
@@ -552,7 +549,6 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
     // The cost of filling: the backend's for the proposal as sent, then
     // computed here from the edited sources at the user's prices.
     const prices = useFillPricing();
-    const balance = useCreditBalance();
     const { cost, upperBound } = draftCost(draft, request, prices);
     // An edit the card cannot price yet (prices still loading, or unavailable)
     // holds back the run; unticking the checkbox still creates the table.
@@ -868,8 +864,6 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
     const held = disabled && !!heldCaption;
     const blocked = isLast && !!blockerReason && !disabled;
     const fillFacts = isLast && !held && !blocked && fillNow && cost && !upperBound ? cost : null;
-    const balanceWarning = fillFacts ? balanceNotice(fillFacts, balance, prices) : null;
-    const readWarning = fillFacts ? costNotice(fillFacts) : null;
     const bands = held ? (
         <div className="table-card-footer-band table-card-footer-band-pending" role="status">
             <Spinner size={12} />
@@ -892,28 +886,8 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
                 </button>
             )}
         </div>
-    ) : balanceWarning || readWarning ? (
-        <>
-            {balanceWarning && (
-                <div className="table-card-footer-band table-card-footer-band-warning" role="alert">
-                    <Icon icon={SecurityWarningIcon} className="table-card-warning-icon" />
-                    <span className="table-card-notice-text">{balanceWarning}</span>
-                    <button
-                        type="button"
-                        className="table-card-warning-action"
-                        onClick={() => openPreferencesWindow('billing')}
-                    >
-                        Add credits
-                    </button>
-                </div>
-            )}
-            {readWarning && (
-                <div className="table-card-footer-band table-card-footer-band-warning" role="status">
-                    <Icon icon={SecurityWarningIcon} className="table-card-warning-icon" />
-                    <span className="table-card-notice-text">{readWarning}</span>
-                </div>
-            )}
-        </>
+    ) : fillFacts ? (
+        <TableCardFillWarnings cost={fillFacts} prices={prices} />
     ) : null;
 
     // The decision row: whether Create table also runs, and what that costs,

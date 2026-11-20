@@ -2,11 +2,11 @@ import React from 'react';
 import { useAtomValue } from 'jotai';
 import type { TableCardCost } from '@beaver/agent-core/protocol/tableCardProtocol';
 import type { TableFillPricing } from '@beaver/agent-core/protocol/tableFillProtocol';
-import { costBreakdown, costCredits, costLine, costReceipt } from '@beaver/agent-core/run-state/tableCardDraft';
-import { balanceLine, pricingSentence } from '@beaver/agent-core/run-state/tableFillCopy';
+import { balanceNotice, costBreakdown, costNotice, costReceipt } from '@beaver/agent-core/run-state/tableCardDraft';
 import { isImeKeyEvent } from '@beaver/agent-ui/primitives/ime';
 import { profileWithPlanAtom, remainingBeaverCreditsAtom } from '../../../atoms/profile';
-import { Icon, InformationCircleIcon } from '../../icons/icons';
+import { Icon, InformationCircleIcon, SecurityWarningIcon } from '../../icons/icons';
+import { openPreferencesWindow } from '../../../ui/openPreferencesWindow';
 
 /** How long the card waits before asking for the prices again after a failure. */
 const PRICING_RETRY_MS = 5_000;
@@ -46,36 +46,38 @@ export function useCreditBalance(): number | null {
     return profile ? remaining : null;
 }
 
-export interface TableCardCostBlockProps {
+export interface TableCardFillWarningsProps {
     cost: TableCardCost;
-    /** The count is not exact: the user edited the sources. */
-    upperBound?: boolean;
     prices: TableFillPricing | null;
 }
 
 /**
- * A card's cost, as the tab's Fill popover shows a plan: the row line, the
- * credits, how far the balance reaches when the fill costs more, and the
- * pricing sentence. The fill's credits are its own, charged per paper.
+ * The footer bands for the two facts about a fill that change what the user
+ * does: a balance that does not reach (with Add credits), and items without
+ * full text. Renders nothing when neither applies.
  */
-const TableCardCostBlock: React.FC<TableCardCostBlockProps> = ({ cost, upperBound = false, prices }) => {
+export const TableCardFillWarnings: React.FC<TableCardFillWarningsProps> = ({ cost, prices }) => {
     const balance = useCreditBalance();
-    const reach = upperBound
-        ? null
-        : balanceLine({
-              credits: cost.credits,
-              balance,
-              documents: cost.documents,
-              title_abstract: cost.title_abstract,
-              prices: prices ?? { document: cost.credits, title_abstract: cost.credits },
-          });
+    const balanceWarning = balanceNotice(cost, balance, prices);
+    const readWarning = costNotice(cost);
     return (
-        <div className="table-card-cost display-flex flex-col text-sm font-color-secondary" style={{ gap: '0.15rem' }}>
-            <span>{costLine(cost, upperBound)}</span>
-            <span className="font-color-primary">{costCredits(cost, upperBound)}</span>
-            {reach && <span>{reach}</span>}
-            {prices && <span className="opacity-80">{pricingSentence(prices, cost.title_abstract)}</span>}
-        </div>
+        <>
+            {balanceWarning && (
+                <div className="table-card-footer-band table-card-footer-band-warning" role="alert">
+                    <Icon icon={SecurityWarningIcon} className="table-card-warning-icon" />
+                    <span className="table-card-notice-text">{balanceWarning}</span>
+                    <button type="button" className="table-card-warning-action" onClick={() => openPreferencesWindow('billing')}>
+                        Add credits
+                    </button>
+                </div>
+            )}
+            {readWarning && (
+                <div className="table-card-footer-band table-card-footer-band-warning" role="status">
+                    <Icon icon={SecurityWarningIcon} className="table-card-warning-icon" />
+                    <span className="table-card-notice-text">{readWarning}</span>
+                </div>
+            )}
+        </>
     );
 };
 
@@ -186,5 +188,3 @@ export const TableCardReceipt: React.FC<TableCardReceiptProps> = ({ cost, upperB
         </>
     );
 };
-
-export default TableCardCostBlock;

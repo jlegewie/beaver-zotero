@@ -4985,6 +4985,16 @@
     font-size: 0.925rem;
 }
 
+/* The fill card has no run checkbox: what Fill table covers takes its place. */
+[id^="beaver-pane-"] .table-card-decision-label {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--fill-primary);
+}
+
 /* A held answer keeps the decision in view, quiet. */
 [id^="beaver-pane-"] .table-card-decision-held {
     opacity: 0.5;
@@ -5415,11 +5425,6 @@
     white-space: nowrap;
 }
 
-/* The fill card's cost under its columns: what the run would fill and how. */
-[id^="beaver-pane-"] .table-card-cost {
-    padding-top: 0.15rem;
-}
-
 [id^="beaver-pane-"] .table-card-head-action:disabled {
     cursor: default;
     opacity: 0.6;
@@ -5470,6 +5475,12 @@
     min-width: 0;
     padding-top: 0.75rem;
     border-top: 1px solid var(--fill-quinary);
+}
+
+/* A fill card without a description opens on its step: no rule under the title. */
+[id^="beaver-pane-"] .table-card-body > .table-card-step:first-child {
+    padding-top: 0.2rem;
+    border-top: 0;
 }
 
 [id^="beaver-pane-"] .table-card-step-head {
@@ -5771,6 +5782,25 @@
     -webkit-box-orient: vertical;
     overflow: hidden;
     line-height: 1.4;
+    overflow-wrap: anywhere;
+}
+
+/* The fill card's summaries are read only: nothing is clamped. */
+[id^="beaver-pane-"] .table-card-column-question-full {
+    display: block;
+    -webkit-line-clamp: none;
+    line-clamp: none;
+}
+
+[id^="beaver-pane-"] .table-card-options-all {
+    flex-wrap: wrap;
+    row-gap: 4px;
+}
+
+[id^="beaver-pane-"] .table-card-options-all .table-card-option {
+    box-sizing: border-box;
+    max-width: 100%;
+    white-space: normal;
     overflow-wrap: anywhere;
 }
 

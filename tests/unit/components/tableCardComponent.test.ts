@@ -1278,7 +1278,10 @@ describe('TableCard', () => {
     });
 
     describe('the fill card', () => {
-        function renderFill(request: WSTableFillCardRequest) {
+        function renderFill(
+            request: WSTableFillCardRequest,
+            props: { disabled?: boolean; heldCaption?: string; onStop?: () => void } = {},
+        ) {
             sent = [];
             act(() => {
                 root = createRoot(container);
@@ -1286,31 +1289,80 @@ describe('TableCard', () => {
                     React.createElement(
                         Provider,
                         { store: createStore() },
-                        React.createElement(TableFillCard, { request, onSubmit: (r: WSTableCardResponse) => sent.push(r) }),
+                        React.createElement(TableFillCard, { request, onSubmit: (r: WSTableCardResponse) => sent.push(r), ...props }),
                     ),
                 );
             });
         }
 
-        it('shows the columns, the plan\'s cost and a run button named for the papers', async () => {
+        it('shows the columns as the create card does, the receipt, and Fill table', async () => {
             const { request, reply } = read('fill-with-credits');
             const opened: unknown[] = [];
             setHost({ navigation: { openTable: async (key: string) => { opened.push(key); return { ok: true }; } } } as any);
             renderFill(request);
             expect(container.textContent).toContain('Comparison');
-            expect(container.textContent).toContain('Sample size');
-            expect(container.textContent).toContain('Design');
-            const cost = container.querySelector('.table-card-cost')?.textContent ?? '';
-            expect(cost).toContain('Reads 32 items: 30 from their documents, 2 from title and abstract');
-            expect(cost).toContain('6.1 credits');
-            // The balance (6) does not cover the plan.
-            expect(cost).toContain('Your 6 credits cover about');
+            // Each column is a read-only summary: header, type, question, options.
+            const columns = Array.from(container.querySelectorAll('.table-card-column'));
+            expect(columns).toHaveLength(2);
+            expect(columns[0].textContent).toContain('Sample size');
+            expect(columns[0].textContent).toContain('How many participants?');
+            // Read only, so nothing is clamped or cut to a preview.
+            expect(columns[0].querySelector('.table-card-column-question-full')).not.toBeNull();
+            expect(columns[1].querySelector('.table-card-options-all')).not.toBeNull();
+            expect(columns[1].textContent).toContain('What is the study design?');
+            expect(Array.from(columns[1].querySelectorAll('.table-card-option')).map((chip) => chip.textContent)).toEqual([
+                'RCT',
+                'Observational',
+            ]);
+            expect(container.querySelector('.table-card-column[role="button"]')).toBeNull();
+            // The decision row: what Fill table covers, and the receipt.
+            expect(container.querySelector('.table-card-decision-label')?.textContent).toBe('Fill 2 columns');
+            expect(container.querySelector('.table-card-receipt')?.textContent).toBe('32 items · 6.1 credits');
+            // Bands: the balance (6) does not cover the plan, and two items have no full text.
+            const bands = Array.from(container.querySelectorAll('.table-card-footer-band-warning')).map((band) => band.textContent);
+            expect(bands).toHaveLength(2);
+            expect(bands[0]).toContain('Your 6 credits cover about');
+            expect(bands[0]).toContain('Add credits');
+            expect(bands[1]).toContain('2 items have no full text and are read from their abstracts.');
+            await click('Add credits');
+            expect(mocks.openPreferencesWindow).toHaveBeenCalledWith('billing');
             // Nothing on it is editable.
             expect(container.querySelector('input, textarea')).toBeNull();
             await click('Open table');
             expect(opened).toEqual(['u-TABLE222']);
-            await click('Fill 32');
+            await click('Fill table');
             expect(sent).toEqual([{ type: 'table_card_response', card_id: reply.card_id, approved: true, choice: 'fill' }]);
+        });
+
+        it('shows every option of a category column, past the create card\'s preview', () => {
+            const { request } = read('fill-with-credits');
+            const labels = ['RCT', 'Cohort', 'Case-control', 'Cross-sectional', 'Qualitative'];
+            const columns = [{ ...request.columns[1], options: labels.map((label) => ({ label })) }];
+            renderFill({ ...request, columns });
+            expect(Array.from(container.querySelectorAll('.table-card-option')).map((chip) => chip.textContent)).toEqual(labels);
+            expect(container.textContent).not.toContain('+1');
+        });
+
+        it('opens the pricing popover from the receipt', async () => {
+            const { request } = read('fill-with-credits');
+            renderFill(request);
+            await clickElement(container.querySelector('.table-card-receipt-info'));
+            const popover = container.querySelector('.table-card-pricing-popover');
+            expect(popover?.textContent).toContain('Full text');
+            expect(popover?.textContent).toContain('Abstract only');
+        });
+
+        it('while the answer is held, shows why and offers Stop in place of Fill table', async () => {
+            const { request } = read('fill-with-credits');
+            const onStop = vi.fn();
+            renderFill(request, { disabled: true, heldCaption: 'You can answer as soon as Beaver reconnects.', onStop });
+            expect(container.querySelector('.table-card-footer-band-pending')?.textContent).toContain('as soon as Beaver reconnects');
+            // The held band replaces the warnings.
+            expect(container.querySelector('.table-card-footer-band-warning')).toBeNull();
+            expect(button('Fill table')).toBeUndefined();
+            await click('Stop');
+            expect(onStop).toHaveBeenCalled();
+            expect(sent).toEqual([]);
         });
 
         it('declines with instructions from the cancel view', async () => {
