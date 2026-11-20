@@ -6,6 +6,7 @@ import {
     featureCreditEntriesAtom,
     featureCreditsCardDismissedAtom,
     featureTaskSetupStepsAtom,
+    leaveFeatureTaskAtom,
     selectBeaverModelAtom,
     startFeatureTaskAtom,
     type FeatureCreditEntry,
@@ -185,6 +186,7 @@ const FeatureCreditsCard: React.FC<{
     const [activeKey, setActiveKey] = useAtom(activeFeatureTaskAtom);
     const setDismissed = useSetAtom(featureCreditsCardDismissedAtom);
     const startTask = useSetAtom(startFeatureTaskAtom);
+    const leaveTask = useSetAtom(leaveFeatureTaskAtom);
     const pills = useAtomValue(currentMessagePillsAtom);
     const pendingPills = useAtomValue(pendingPillInsertsAtom);
 
@@ -257,7 +259,7 @@ const FeatureCreditsCard: React.FC<{
     if (showSetup && activeEntry && activeDefinition) {
         return (
             <section className="feature-credits-card" aria-label={`${activeDefinition.title}: how to start`}>
-                <SetupView definition={activeDefinition} credits={activeEntry.task.credits} onBack={() => setActiveKey(null)} />
+                <SetupView definition={activeDefinition} credits={activeEntry.task.credits} onBack={leaveTask} />
             </section>
         );
     }

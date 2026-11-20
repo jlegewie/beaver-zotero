@@ -26,14 +26,16 @@ vi.mock('../../../react/utils/sourceUtils', () => ({ getDisplayNameFromItem: () 
 vi.mock('../../../src/utils/libraryIdentity', () => ({ resolveLibraryRef: () => 1 }));
 vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
 
-import { startFeatureTaskAtom } from '../../../react/atoms/featureCredits';
+import { leaveFeatureTaskAtom, startFeatureTaskAtom } from '../../../react/atoms/featureCredits';
 import { activeFeatureTaskAtom } from '../../../react/atoms/featureCreditRuns';
 import {
     automaticMessageCollectionsAtom,
     automaticMessageItemKeysAtom,
     currentMessageCollectionsAtom,
+    currentMessageContentAtom,
     currentMessageItemsAtom,
     currentMessagePillsAtom,
+    pendingPillInsertsAtom,
 } from '../../../react/atoms/messageComposition';
 
 const pill = (actionId: string) => ({ actionId, commandName: actionId.replace(/^builtin-/, ''), title: actionId });
@@ -118,5 +120,48 @@ describe('startFeatureTaskAtom', () => {
             expect(store.get(currentMessageItemsAtom).map((i) => i.key)).toEqual(['SELECTED', 'ADDED']);
             expect(store.get(currentMessageCollectionsAtom)).toHaveLength(2);
         });
+    });
+});
+
+describe('leaveFeatureTaskAtom', () => {
+    const annotate = pill('builtin-annotate');
+
+    function storeWith(content: string, pills: ReturnType<typeof pill>[]) {
+        const store = createStore();
+        store.set(activeFeatureTaskAtom, 'annotate');
+        store.set(currentMessageContentAtom, content);
+        store.set(currentMessagePillsAtom, pills);
+        return store;
+    }
+
+    it("removes the task's /command when nothing else was typed", () => {
+        const store = storeWith('/annotate ', [annotate]);
+        store.set(leaveFeatureTaskAtom);
+        expect(store.get(activeFeatureTaskAtom)).toBeNull();
+        expect(store.get(currentMessageContentAtom)).toBe('');
+        expect(store.get(currentMessagePillsAtom)).toEqual([]);
+    });
+
+    it('keeps the /command with text the user typed', () => {
+        const store = storeWith('/annotate methods ', [annotate]);
+        store.set(leaveFeatureTaskAtom);
+        expect(store.get(activeFeatureTaskAtom)).toBeNull();
+        expect(store.get(currentMessageContentAtom)).toBe('/annotate methods ');
+        expect(store.get(currentMessagePillsAtom)).toEqual([annotate]);
+    });
+
+    it('keeps the message when it holds another /command', () => {
+        const summarize = pill('builtin-summarize');
+        const store = storeWith('/annotate /summarize ', [annotate, summarize]);
+        store.set(leaveFeatureTaskAtom);
+        expect(store.get(currentMessagePillsAtom)).toEqual([annotate, summarize]);
+    });
+
+    it('drops the /command while it waits to be inserted', () => {
+        const store = storeWith('', []);
+        const other = { descriptor: pill('builtin-summarize') };
+        store.set(pendingPillInsertsAtom, [{ descriptor: annotate }, other]);
+        store.set(leaveFeatureTaskAtom);
+        expect(store.get(pendingPillInsertsAtom)).toEqual([other]);
     });
 });

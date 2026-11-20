@@ -13,12 +13,14 @@ import { preferencesRevisionAtom } from './preferences';
 import { getPref, setPref } from '../../src/utils/prefs';
 import { actionRequirementBlockAtom, stageActionPillAtom } from './actions';
 import {
+    clearComposerAtom,
     composerSourceSearchTextAtom,
     currentMessageContentAtom,
     currentMessageItemsAtom,
     currentMessagePillsAtom,
     currentReaderAttachmentAtom,
     messageItemDataRevisionAtom,
+    pendingPillInsertsAtom,
     removeAutomaticAttachmentsAtom,
 } from './messageComposition';
 import { FEATURE_CREDIT_TASKS, FeatureTaskDefinition, TOPIC_PLACEHOLDER, getFeatureCreditTask } from '../constants/featureCreditTasks';
@@ -137,6 +139,25 @@ export const startFeatureTaskAtom = atom(
         });
     },
 );
+
+/**
+ * Go back from a task's setup to the task list. The task's /command goes too
+ * when the chat input holds nothing else: no other /command and no text.
+ */
+export const leaveFeatureTaskAtom = atom(null, (get, set) => {
+    const key = get(activeFeatureTaskAtom);
+    const definition = key ? getFeatureCreditTask(key) : undefined;
+    set(activeFeatureTaskAtom, null);
+    if (!definition) return;
+    const pills = get(currentMessagePillsAtom);
+    if (pills.some((pill) => pill.actionId !== definition.actionId)) return;
+    if (textBesidesPills(get(currentMessageContentAtom), pills).trim()) return;
+    // A /command not inserted yet (Back right after the task started) is dropped too.
+    const pending = get(pendingPillInsertsAtom);
+    const otherPending = pending.filter((insert) => insert.descriptor.actionId !== definition.actionId);
+    if (pills.length > 0) set(clearComposerAtom);
+    if (otherPending.length !== get(pendingPillInsertsAtom).length) set(pendingPillInsertsAtom, otherPending);
+});
 
 const ANNOTATABLE_KINDS = new Set(['pdf', 'epub', 'snapshot']);
 
