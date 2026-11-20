@@ -12,7 +12,13 @@ import {
     tableReadProblem,
     type TableRef,
 } from '../../../src/services/artifacts/tableItemIdentity';
-import { TableFillButton, useFillResultBanner, useTableFillJob, type TableFillButtonHandle } from './TableFillControl';
+import {
+    TableFillButton,
+    useFillResultBanner,
+    useNoCreditsNotice,
+    useTableFillJob,
+    type TableFillButtonHandle,
+} from './TableFillControl';
 import type { TableFillScope } from '@beaver/agent-core/protocol/tableFillProtocol';
 import type { ResearchTableFill } from '@beaver/agent-ui/layouts';
 import { TABLE_UPDATED_EVENT, type TableUpdatedDetail } from '../../../src/services/artifacts/tableStore';
@@ -375,7 +381,11 @@ export default function TableTabView({
         onColumnsAdded: (columnIds) => setReveal({ columnIds, token: ++focusRequests.current }),
     });
     const { showAllRows, showFailedRows } = fillResult;
-    const tableMessage = useTableMessage(edits.toast, edits.clearToast, fillResult.banner, fillResult.jobId);
+    // Without credits, a notice that filling needs them, under any other
+    // message: it waits while an edit's or a fill's message is shown.
+    const noCreditsNotice = useNoCreditsNotice(!readOnly && !fillRunning);
+    const tableMessage =
+        useTableMessage(edits.toast, edits.clearToast, fillResult.banner, fillResult.jobId) ?? noCreditsNotice;
     // A fill's failed rows asked for from the chat, shown once the table is
     // on screen.
     const [request, setRequest] = React.useState<TableTabRequest | null>(() => options.request ?? null);
