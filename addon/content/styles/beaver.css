@@ -5839,8 +5839,11 @@
     overflow: hidden;
 }
 
+/* Preview chips shrink, with an ellipsis, so the "+N" after them stays in
+ * the row; each chip's tooltip holds its full label. */
 [id^="beaver-pane-"] .table-card-option {
-    flex: none;
+    flex: 0 1 auto;
+    min-width: 0;
     max-width: 10rem;
     overflow: hidden;
     text-overflow: ellipsis;

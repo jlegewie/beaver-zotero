@@ -36,7 +36,7 @@ export const PREVIEW_OPTIONS = 4;
 
 /** A category column's options as chips: the first few then "+N", or with `all`, every one, wrapping. */
 export const ColumnOptionChips: React.FC<{
-    /** Labels, or options with a definition the chip shows as its tooltip. */
+    /** Labels, or options with a definition; a chip's tooltip is its label and definition. */
     options: ReadonlyArray<string | { label: string; description?: string | null }>;
     all?: boolean;
 }> = ({ options, all = false }) => (
@@ -48,7 +48,7 @@ export const ColumnOptionChips: React.FC<{
                 <span
                     key={`${label}-${i}`}
                     className="table-card-option"
-                    title={definition ? `${label}: ${definition}` : undefined}
+                    title={definition ? `${label}: ${definition}` : label}
                 >
                     {label}
                 </span>

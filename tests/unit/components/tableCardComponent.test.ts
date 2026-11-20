@@ -425,6 +425,9 @@ describe('TableCard', () => {
             await click('Done');
             const chip = [...container.querySelectorAll('.table-card-option')].find((c) => c.textContent === 'RCT')!;
             expect(chip.getAttribute('title')).toBe('RCT: Random assignment to arms.');
+            // A chip without a definition still names its full label, which the row may shorten.
+            const plain = [...container.querySelectorAll('.table-card-option')].find((c) => c.textContent === 'Observational')!;
+            expect(plain.getAttribute('title')).toBe('Observational');
             await click('Create table');
             expect(sent[0].columns![1].options![0]).toEqual({ label: 'RCT', description: 'Random assignment to arms.' });
         });
