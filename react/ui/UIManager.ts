@@ -13,9 +13,9 @@ const WIDTH_SAVE_DELAY_MS = 250;
 /**
  * The occupied pane's flex-shrink. When the window is too narrow for the pane
  * and its neighbour together, the browser shrinks both in proportion to their
- * width, so a neighbour holding a width from an earlier drag would squeeze the
- * sidebar below its width. Near zero, the neighbour gives way first, down to its
- * minimum, and the sidebar only narrows once nothing else can.
+ * base size, so a wide neighbour would squeeze the sidebar below its width.
+ * Near zero, the neighbour gives way first, down to its minimum, and the
+ * sidebar only narrows once nothing else can.
  */
 const PANE_FLEX_SHRINK = '0.001';
 
@@ -36,8 +36,8 @@ interface Host {
     /** The pane's inline flex-shrink before the sidebar set its own. */
     nativeFlexShrink: string;
     /**
-     * The element on the other side of the pane's splitter, which a drag
-     * resizes too, with its inline width and `width` attribute from before.
+     * The element on the other side of the pane's splitter, with its inline
+     * width and `width` attribute from before the sidebar sized the pane.
      */
     neighbour: { element: HTMLElement; styleWidth: string; widthAttr: string | null } | null;
     /** The user dragged the pane's splitter while the sidebar was in the pane. */
@@ -84,6 +84,19 @@ function hasSize(element: HTMLElement): boolean {
  */
 function widthAttribute(element: Element): string | null {
     return element.hasAttribute('width') ? element.getAttribute('width') : null;
+}
+
+/**
+ * Let the other side of the occupied pane's splitter take whatever width the
+ * sidebar leaves. It fills the row on its own (flex-grow), so an inline width
+ * there is only the size Zotero gave it beside the pane's own width. Kept, that
+ * size plus the sidebar width can exceed the window: Zotero's pane row cannot
+ * shrink below the sum of its panes' inline widths, so the row overflows and
+ * the window cuts the sidebar off.
+ */
+function clearNeighbourWidth(host: Host): void {
+    const element = host.neighbour?.element;
+    if (element?.style.width) element.style.removeProperty('width');
 }
 
 function readStoredWidth(): number {
@@ -463,6 +476,7 @@ class UIManager {
         const css = `${this.width}px`;
         if (host.pane.style.width !== css) host.pane.style.width = css;
         if (host.pane.style.flexShrink !== PANE_FLEX_SHRINK) host.pane.style.flexShrink = PANE_FLEX_SHRINK;
+        clearNeighbourWidth(host);
         if (!host.widthObserver) {
             const observer = new (this.getWindow().MutationObserver)((records: MutationRecord[]) => this.onPaneWidthChange(host, records));
             observer.observe(host.pane, { attributes: true, attributeFilter: ['width', 'style'] });
@@ -515,6 +529,8 @@ class UIManager {
         const css = `${this.width}px`;
         if (this.width && pane.style.width !== css) pane.style.width = css;
         if (pane.style.flexShrink !== PANE_FLEX_SHRINK) pane.style.flexShrink = PANE_FLEX_SHRINK;
+        // A drag writes the other side of the splitter too.
+        clearNeighbourWidth(host);
     }
 
     /** Put back the pane's own width, unless Zotero has since set another. */
@@ -536,14 +552,16 @@ class UIManager {
             if (host.nativeFlexShrink) host.pane.style.flexShrink = host.nativeFlexShrink;
             else host.pane.style.removeProperty('flex-shrink');
         }
-        // A drag sized the other side of the splitter for the sidebar width;
-        // left as it is, it would squeeze the pane now back at its own width.
+        // The other side of the splitter gets back the width it had beside the
+        // pane's own; a drag also wrote its `width` attribute, which Zotero persists.
         const neighbour = host.neighbour;
-        if (host.dragged && neighbour) {
+        if (neighbour) {
             if (neighbour.styleWidth) neighbour.element.style.width = neighbour.styleWidth;
             else neighbour.element.style.removeProperty('width');
-            if (neighbour.widthAttr === null) neighbour.element.removeAttribute('width');
-            else neighbour.element.setAttribute('width', neighbour.widthAttr);
+            if (host.dragged) {
+                if (neighbour.widthAttr === null) neighbour.element.removeAttribute('width');
+                else neighbour.element.setAttribute('width', neighbour.widthAttr);
+            }
         }
         host.nativeStyleWidth = null;
         host.nativeWidthAttr = null;
