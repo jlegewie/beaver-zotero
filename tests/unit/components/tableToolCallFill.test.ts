@@ -13,7 +13,10 @@ import type { TableFillJobSnapshot } from '@beaver/agent-core/protocol/tableFill
 import { threadRunsAtom, type ToolResult } from '@beaver/agent-core/run-state/atoms';
 import { chatFillsAtom, recordChatFill } from '@beaver/agent-core/run-state/tableChatFills';
 import { TableToolCallView } from '../../../react/components/agentRuns/TableToolCallView';
+import { jobWaitAtom } from '../../../react/atoms/jobWait';
 import { setHost } from '@beaver/agent-ui/host';
+import { ArrowUpRightIcon } from '@beaver/agent-ui/icons';
+import { renderToStaticMarkup } from 'react-dom/server';
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root | undefined;
@@ -44,6 +47,9 @@ function snapshot(overrides: Partial<TableFillJobSnapshot> = {}): TableFillJobSn
         ...overrides,
     };
 }
+
+/** A fill stopped after 4 of 10 items, one of them failed. */
+const stoppedFill = snapshot({ state: 'done', rows_done: 4, result: { rows_answered: 3, answered: 6, not_reported: 0, from_title_abstract: 0, documents_read: 4, credits_charged: 1, row_failures: { unreadable: 1 }, failed_row_ids: [], not_started: { stopped: 6 }, not_written: 0, skipped_cells: {}, pending: null, stopped_by: 'stopped' } });
 
 function parkedRun(deferral: Partial<ParkedDeferral> = {}): AgentRun {
     return {
@@ -103,17 +109,52 @@ describe('a table tool call line', () => {
         expect(line(render(store, 'in_progress'))).toBe('Fill Table: 3 of 10 items complete (1 failed)');
     });
 
-    it('keeps counting once the run parked on the fill', () => {
+    it('keeps counting once the run parked on the fill this window waits on', () => {
         const store = createStore();
         store.set(threadRunsAtom, [parkedRun()]);
+        store.set(jobWaitAtom, { threadId: 'thread-1', runId: 'run-1', toolCallId: 'call-1', jobId: 'job-1' });
         store.set(chatFillsAtom, recordChatFill(new Map(), snapshot()));
-        expect(line(render(store, 'parked'))).toBe('Fill Table: 3 of 10 items complete (1 failed)');
+        const view = render(store, 'parked');
+        expect(line(view)).toBe('Fill Table: 3 of 10 items complete (1 failed)');
+        expect(view.querySelector('.shimmer-text')).not.toBeNull();
     });
 
-    it('reads a fill another device runs, or one Zotero restarted since, as running', () => {
+    it('keeps counting when a resume parked on the fill before it wrote anything', () => {
+        // The call sits in the run that parked on its card; the resume that ran
+        // it parked on the fill with no transcript of its own.
         const store = createStore();
-        store.set(threadRunsAtom, [parkedRun()]);
-        expect(line(render(store, 'parked'))).toBe('Fill Table: running');
+        const first = { ...parkedRun(), parked: null, status: 'completed' } as unknown as AgentRun;
+        const resume = { ...parkedRun(), id: 'run-2', model_messages: [] } as unknown as AgentRun;
+        store.set(threadRunsAtom, [first, resume]);
+        store.set(jobWaitAtom, { threadId: 'thread-1', runId: 'run-2', toolCallId: 'call-1', jobId: 'job-1' });
+        store.set(chatFillsAtom, recordChatFill(new Map(), snapshot()));
+        expect(line(render(store, 'completed'))).toBe('Fill Table: 3 of 10 items complete (1 failed)');
+    });
+
+    it('shows the title once the answer ended while the fill still runs: stopped, or left to its table', () => {
+        // Parked, but this window no longer waits on the call.
+        const parked = createStore();
+        parked.set(threadRunsAtom, [parkedRun()]);
+        parked.set(chatFillsAtom, recordChatFill(new Map(), snapshot()));
+        const view = render(parked, 'parked');
+        expect(line(view)).toBe('Fill Table Trials');
+        expect(view.querySelector('.shimmer-text')).toBeNull();
+        act(() => root?.unmount());
+        // Stopped live: the fill winds down after the run ended.
+        const stopped = createStore();
+        stopped.set(chatFillsAtom, recordChatFill(new Map(), snapshot({ state: 'stopping' })));
+        expect(line(render(stopped, 'canceled'))).toBe('Fill Table Trials');
+        act(() => root?.unmount());
+        // A fill this device does not follow.
+        const elsewhere = createStore();
+        elsewhere.set(threadRunsAtom, [parkedRun()]);
+        expect(line(render(elsewhere, 'parked'))).toBe('Fill Table Trials');
+    });
+
+    it('shows how a fill ended once it ends after the answer did', () => {
+        const store = createStore();
+        store.set(chatFillsAtom, recordChatFill(new Map(), stoppedFill));
+        expect(line(render(store, 'canceled'))).toBe('Fill Table: 4 of 10 items complete (stopped, 1 failed)');
     });
 
     it('reads a call a message closed while the fill ran from the fill this device runs, else by its title', () => {
@@ -127,7 +168,7 @@ describe('a table tool call line', () => {
         };
         const returned = { part_kind: 'tool-return', tool_name: 'fill_table', tool_call_id: 'call-1', content: {}, metadata: { view: { view_type: 'table', record } } } as unknown as ToolResult;
         const here = createStore();
-        here.set(chatFillsAtom, recordChatFill(new Map(), snapshot({ state: 'done', rows_done: 4, result: { rows_answered: 3, answered: 6, not_reported: 0, from_title_abstract: 0, documents_read: 4, credits_charged: 1, row_failures: { unreadable: 1 }, failed_row_ids: [], not_started: { stopped: 6 }, not_written: 0, skipped_cells: {}, pending: null, stopped_by: 'stopped' } })));
+        here.set(chatFillsAtom, recordChatFill(new Map(), stoppedFill));
         expect(line(render(here, 'completed', returned))).toBe('Fill Table: 4 of 10 items complete (stopped, 1 failed)');
         act(() => root?.unmount());
         expect(line(render(createStore(), 'completed', returned))).toBe('Fill Table Trials');
@@ -135,14 +176,19 @@ describe('a table tool call line', () => {
 });
 
 describe('a fill tool call that has not returned', () => {
-    it('opens its table on a click, and expands nothing', () => {
+    it('shows the open icon on hover while the fill runs, opens its table on a click, and expands nothing', () => {
         const openTable = vi.fn(async () => ({ ok: true as const }));
         setHost({ navigation: { openTable } as any });
         const store = createStore();
         store.set(threadRunsAtom, [parkedRun({ state: { job_id: 'job-1', title: 'Trials', table: 'u-TABLE001' } } as Partial<ParkedDeferral>)]);
+        store.set(jobWaitAtom, { threadId: 'thread-1', runId: 'run-1', toolCallId: 'call-1', jobId: 'job-1' });
         store.set(chatFillsAtom, recordChatFill(new Map(), snapshot()));
         const view = render(store, 'parked');
-        act(() => (view.querySelector('button[title="Open table"]') as HTMLElement).click());
+        const button = view.querySelector('button[title="Open table"]') as HTMLElement;
+        act(() => button.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })));
+        const openIcon = renderToStaticMarkup(React.createElement(ArrowUpRightIcon)).match(/<path d="([^"]+)"/)![1];
+        expect(button.innerHTML).toContain(openIcon);
+        act(() => button.click());
         expect(openTable).toHaveBeenCalledWith('u-TABLE001', expect.anything());
         expect(view.querySelector('#tool-result-call-1')).toBeNull();
         setHost({});

@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import type { AgentRunStatus, ToolCallPart } from '@beaver/agent-core/agents/types';
+import { isRunActive, type AgentRunStatus, type ToolCallPart } from '@beaver/agent-core/agents/types';
 import { getToolCallStatusFromResult, type ToolResult } from '@beaver/agent-core/run-state/atoms';
 import { tableRecordFromMetadata } from '@beaver/agent-core/run-state/tableResults';
 import { chatFillsAtom, fillForToolCall } from '@beaver/agent-core/run-state/tableChatFills';
@@ -20,12 +20,13 @@ import {
     AlertIcon,
     ArrowDownIcon,
     ArrowRightIcon,
+    ArrowUpRightIcon,
     Icon,
     Spinner,
     TableIcon,
 } from '../icons/icons';
 import { toolExpandedAtom, setToolExpandedAtom } from '../../atoms/messageUIState';
-import { chatFillTableKey } from '../../atoms/jobWait';
+import { chatFillTableKey, jobWaitAtom, openAnswerRunIdAtom } from '../../atoms/jobWait';
 
 interface TableToolCallViewProps {
     part: ToolCallPart;
@@ -56,11 +57,13 @@ function requestedTitle(part: ToolCallPart): string | null {
  * A call that fills the table puts the fill's state in place of the title,
  * live or parked alike: "Fill Table: 45 of 150 items complete (3 failed)",
  * or "Fill Table: running" for a fill this device does not follow. A fill
- * that completed every item shows the title again. Until the call
- * returns, clicking the line opens the table, whose own Fill control can
- * stop the fill; once it returns, the line expands to the call's summary as
- * it was recorded. Status notices (declined, partial, rejected rows) sit
- * under the label.
+ * that completed every item shows the title again. Once the answer has
+ * ended (stopped, or left while the fill runs), a fill still running shows
+ * the title: the answer no longer follows it, and the table's card under
+ * the answer shows its progress. Until the call returns, clicking the line
+ * opens the table, whose own Fill control can stop the fill; once it
+ * returns, the line expands to the call's summary as it was recorded.
+ * Status notices (declined, partial, rejected rows) sit under the label.
  */
 export const TableToolCallView: React.FC<TableToolCallViewProps> = ({
     part,
@@ -89,7 +92,7 @@ export const TableToolCallView: React.FC<TableToolCallViewProps> = ({
     const fills = useAtomValue(chatFillsAtom);
     const fill = (jobCall ? fills.get(jobIdOf(jobCall)) : undefined) ?? fillForToolCall(fills, part.tool_call_id, runId);
     const recordFill = record?.run === 'fill' ? record.fill ?? null : null;
-    const fillState: FillCallState | null = recordFill && recordFill.status !== 'running'
+    const knownFill: FillCallState | null = recordFill && recordFill.status !== 'running'
         ? fillStateFromRecord(recordFill)
         : jobCall && !hasResult
           ? jobCallFillState(fill?.snapshot)
@@ -98,6 +101,16 @@ export const TableToolCallView: React.FC<TableToolCallViewProps> = ({
             : recordFill
               ? { kind: 'started' }
               : null;
+    // The answer is going while its run is, while it waits on a card, or while
+    // this window waits on this call's fill (which a resume may have parked
+    // on). An answer that ended no longer shows a fill still running.
+    const openAnswerRunId = useAtomValue(openAnswerRunIdAtom);
+    const wait = useAtomValue(jobWaitAtom);
+    const jobId = fill?.snapshot.job_id ?? (jobCall ? jobIdOf(jobCall) : null);
+    const waitedOn = wait !== null && wait.toolCallId === part.tool_call_id && wait.jobId === jobId;
+    const answerGoing = isRunActive({ status: runStatus }) || openAnswerRunId === runId || waitedOn;
+    const fillLeft = !answerGoing && (knownFill?.kind === 'running' || knownFill?.kind === 'started');
+    const fillState = fillLeft ? null : knownFill;
     // A fill known only to have started (Zotero restarted since) does not spin.
     const fillRunning = fillState?.kind === 'running';
 
@@ -105,7 +118,7 @@ export const TableToolCallView: React.FC<TableToolCallViewProps> = ({
     const isExpanded = (storedExpanded ?? false) && canExpand;
     // A fill whose call has not returned opens its table: its Fill control
     // shows the fill and can stop it.
-    const openKey = !record && fillState ? (jobCall?.state?.table ?? (fill ? chatFillTableKey(fill.snapshot) : null)) : null;
+    const openKey = !record && knownFill ? (jobCall?.state?.table ?? (fill ? chatFillTableKey(fill.snapshot) : null)) : null;
     const canClick = canExpand || openKey !== null;
     const handleClick = (event: React.MouseEvent) => {
         if (canExpand) {
@@ -121,17 +134,18 @@ export const TableToolCallView: React.FC<TableToolCallViewProps> = ({
     const isShimmering = fillRunning || isLive;
     const isFailed = status === 'error' || (isReturn && !record && notices.length > 0);
     const getIcon = () => {
+        if (isHovered && openKey) return ArrowUpRightIcon;
         if (fillRunning) return Spinner;
         if (isExpanded) return ArrowDownIcon;
-        if (isHovered && canClick) return ArrowRightIcon;
+        if (isHovered && canExpand) return ArrowRightIcon;
         if (fillState?.kind === 'stopped' || fillState?.kind === 'interrupted') return AlertIcon;
-        if (fillState) return TableIcon;
+        if (fillState || fillLeft) return TableIcon;
         if (isInProgress && (runStatus === 'canceled' || runStatus === 'error')) return AlertIcon;
         if (isInProgress) return Spinner;
         if (isFailed) return AlertIcon;
         return TableIcon;
     };
-    const iconClassName = isFailed && !(isHovered && canClick) && !isExpanded ? 'color-error' : undefined;
+    const iconClassName = isFailed && !fillLeft && !(isHovered && canClick) && !isExpanded ? 'color-error' : undefined;
 
     // The line renders the call as recorded, title included; only a call
     // without a record falls back to the title the model asked for.
