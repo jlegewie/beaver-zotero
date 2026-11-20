@@ -6548,6 +6548,51 @@
     font-weight: 600;
     color: var(--fill-primary);
 }
+/* A setup card's header: one button that goes back to the task list. */
+.beaver-root .feature-credits-back-heading {
+    display: flex;
+    margin: 0;
+    font-size: inherit;
+    font-weight: inherit;
+}
+/* Only as wide as the arrow and title. Padded for the hover background like
+   the task rows; the negative margin keeps the arrow and title where they
+   would sit without it. */
+.beaver-root .feature-credits-back {
+    display: inline-flex;
+    max-width: calc(100% + 12px);
+    margin: -4px -6px;
+    padding: 4px 6px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: background-color 0.2s ease-in-out;
+}
+.beaver-root .feature-credits-back:hover {
+    background-color: var(--beaver-fill-hover);
+}
+/* Sized and colored like the ghost-secondary icon button it replaces. */
+.beaver-root .feature-credits-back-icon {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    /* padding: 2px; */
+    font-size: 0.9rem;
+    color: var(--fill-secondary);
+    transition: color 0.2s ease-in-out;
+}
+.beaver-root .feature-credits-back-icon svg {
+    width: 1em;
+    height: 1em;
+}
+.beaver-root .feature-credits-back:hover .feature-credits-back-icon {
+    color: var(--fill-primary);
+}
 .beaver-root .feature-credits-text {
     margin: 0;
     padding-right: 4px;

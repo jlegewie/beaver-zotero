@@ -134,10 +134,16 @@ const SetupView: React.FC<{ definition: FeatureTaskDefinition; credits: number; 
 
     return (
         <>
-            <div className="feature-credits-header">
-                <IconButton icon={ArrowLeftIcon} variant="ghost-secondary" ariaLabel="Back to all tasks" onClick={onBack} />
-                <h2 className="feature-credits-title">{definition.title}</h2>
-            </div>
+            {/* The whole header goes back to the task list, not just its arrow. */}
+            <h2 className="feature-credits-back-heading">
+                <button type="button" className="feature-credits-header feature-credits-back" onClick={onBack}>
+                    <span className="feature-credits-back-icon" aria-hidden="true">
+                        <Icon icon={ArrowLeftIcon} />
+                    </span>
+                    <span className="sr-only">Back to all tasks: </span>
+                    <span className="feature-credits-title">{definition.title}</span>
+                </button>
+            </h2>
             <ol className="feature-credits-steps">
                 {steps.map((step, index) => (
                     <li key={step.key} className={`feature-credits-step is-${step.status}`}>
