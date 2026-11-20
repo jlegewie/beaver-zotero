@@ -268,7 +268,7 @@ describe('TableFillBanner', () => {
             },
         };
         render(React.createElement(TableFillBanner, { job: done, showingFailed: false, onShowFailed, onDismiss }));
-        expect(container.textContent).toContain("Filled 44 rows · 2 couldn't be read");
+        expect(container.textContent).toContain("Filled 44 of 46 items · 2 couldn't be read");
         act(() => buttonNamed('Show')!.click());
         expect(onShowFailed).toHaveBeenCalledWith(true);
         act(() => (container.querySelector('[aria-label="Dismiss"]') as HTMLButtonElement).click());

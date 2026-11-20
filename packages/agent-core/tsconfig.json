@@ -145,6 +145,8 @@
     "./src/run-state/tableEditCopy.ts",
     "./src/protocol/tableCardProtocol.ts",
     "./src/protocol/tableFillProtocol.ts",
+    "./src/protocol/jobCallProtocol.ts",
+    "./src/run-state/jobCalls.ts",
     "./src/protocol/tableEditProtocol.ts",
     "./src/run-state/toolLabels.ts",
     "./src/run-state/runErrorCopy.ts",

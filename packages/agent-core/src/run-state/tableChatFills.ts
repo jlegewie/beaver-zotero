@@ -1,21 +1,17 @@
 /**
- * Table fills a chat run started, as the chat shows them: the progress panel
- * above the composer (while the run lasts) and the `fill_table` tool call's
- * status line.
+ * Table fills a chat run started, as the chat shows them: the fill tool
+ * call's line and receipt, and the composer while a window waits on one.
  *
  * Fed by the fill job's own snapshots (the same ones the table's tab
  * follows), never by backend events: a snapshot names the run's thread and
  * tool call (`origin.run`). State is keyed by job and kept per renderer, so
- * the tool call's status line can report a fill that went on in the
- * background. A finished fill stays as its result line until the user
- * dismisses it or the run ends. Fills the user started in the tab have no
- * run and never appear here.
+ * the tool call can report a fill that went on after its run parked or
+ * ended. Fills the user started in the tab have no run and never appear
+ * here.
  */
 
 import { atom } from 'jotai/vanilla';
 import type { TableFillJobSnapshot } from '../protocol/tableFillProtocol';
-import { isRunActive } from '../agents/types';
-import { activeRunAtom, getRunToolResults } from './atoms';
 
 export interface ChatFill {
     /** The job's latest snapshot. */
@@ -24,8 +20,6 @@ export interface ChatFill {
     threadId: string;
     /** The tool call that started it (`fill_table`, or `create_table` approved with the fill ticked). */
     toolCallId: string;
-    /** The user dismissed its result line. */
-    dismissed: boolean;
 }
 
 /** Chat fills by job id. */
@@ -46,7 +40,6 @@ export function recordChatFill(fills: Map<string, ChatFill>, snapshot: TableFill
         snapshot,
         threadId: run.thread_id,
         toolCallId: run.tool_call_id,
-        dismissed: held?.dismissed ?? false,
     });
     return next;
 }
@@ -64,83 +57,6 @@ export const recordChatFillAtom = atom(null, (get, set, snapshot: TableFillJobSn
     if (next !== current) set(chatFillsAtom, next);
 });
 
-/** The user closed a finished fill's result line. */
-export const dismissChatFillAtom = atom(null, (get, set, jobId: string) => {
-    const current = get(chatFillsAtom);
-    const fill = current.get(jobId);
-    if (!fill || fill.dismissed) return;
-    const next = new Map(current);
-    next.set(jobId, { ...fill, dismissed: true });
-    set(chatFillsAtom, next);
-});
-
-/**
- * The fill the panel shows in `threadId`: a running one first, else the most
- * recently started finished one the user has not dismissed. Only fills the
- * thread's active run started show: once that run ends, the table receipt
- * under its answer carries the fill's progress and result, and a second
- * copy above the composer would only crowd it. Other threads' fills never
- * show.
- */
-export function panelFill(
-    fills: Map<string, ChatFill>,
-    threadId: string | null,
-    activeRunId: string | null,
-): ChatFill | null {
-    if (!threadId || !activeRunId) return null;
-    let running: ChatFill | null = null;
-    let finished: ChatFill | null = null;
-    for (const fill of fills.values()) {
-        if (fill.threadId !== threadId) continue;
-        if (fill.snapshot.origin.run?.run_id !== activeRunId) continue;
-        if (fill.snapshot.state !== 'done') {
-            if (!running || fill.snapshot.started_at > running.snapshot.started_at) running = fill;
-        } else if (!fill.dismissed) {
-            if (!finished || fill.snapshot.started_at > finished.snapshot.started_at) finished = fill;
-        }
-    }
-    return running ?? finished;
-}
-
-/** The id of the thread's run while it is active, for {@link panelFill}. */
-export const activeRunIdAtom = atom((get) => {
-    const run = get(activeRunAtom);
-    return isRunActive(run) ? run!.id : null;
-});
-
-/**
- * The running fill the active run waits on: one whose tool call has not
- * returned yet. Stop response stops it too (the plugin does that itself).
- */
-export function waitingFill(
-    fills: Map<string, ChatFill>,
-    runId: string | null,
-    returned: (toolCallId: string) => boolean,
-): ChatFill | null {
-    if (!runId) return null;
-    for (const fill of fills.values()) {
-        if (fill.snapshot.state === 'done') continue;
-        if (fill.snapshot.origin.run?.run_id !== runId) continue;
-        if (!returned(fill.toolCallId)) return fill;
-    }
-    return null;
-}
-
-/**
- * Whether the active run waits on a table fill, for the composer's stop. A
- * boolean, so a streamed frame that changes the run but not the answer
- * re-renders nothing; only the active run's own results count, since some
- * models reuse tool call ids across runs.
- */
-export const waitsOnFillAtom = atom((get) => {
-    const fills = get(chatFillsAtom);
-    if (!fills.size) return false;
-    const run = get(activeRunAtom);
-    if (!run) return false;
-    const returned = getRunToolResults(run);
-    return waitingFill(fills, run.id, (id) => returned.has(id)) !== null;
-});
-
 /**
  * The fill a run's tool call started, if this renderer has seen it. Scoped to
  * the run: some models reuse tool call ids across responses.
@@ -149,16 +65,4 @@ export function fillForToolCall(fills: Map<string, ChatFill>, toolCallId: string
     for (const fill of fills.values())
         if (fill.toolCallId === toolCallId && fill.snapshot.origin.run?.run_id === runId) return fill;
     return null;
-}
-
-/**
- * The `fill_table` tool call's status line: "Filling 46 papers…" while the
- * tool waits on its fill, "Filling in the background" once it returned
- * `running`. No live counts: those are in the panel.
- */
-export function fillStatusLine(state: 'waiting' | 'background' | 'started', rows?: number): string {
-    if (state === 'background') return 'Filling in the background';
-    // A fill this renderer no longer follows (Zotero restarted since): what is known is that it started.
-    if (state === 'started') return 'Started filling in the background';
-    return rows && rows > 0 ? `Filling ${rows.toLocaleString('en-US')} ${rows === 1 ? 'item' : 'items'}…` : 'Filling…';
 }

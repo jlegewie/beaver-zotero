@@ -1,4 +1,5 @@
 import { regenerateFromRunAtom } from './atoms/agentRunAtoms';
+import { watchJobCalls } from './atoms/jobCalls';
 import { threadAdmissionAtom, threadConflictAtom } from './runtime/threadAdmission';
 import { openPreferencesWindow } from './ui/openPreferencesWindow';
 import { attachThreadAdmission } from "./runtime/threadAdmission";
@@ -206,6 +207,9 @@ const GlobalContextInitializer = () => {
     useBackgroundWorkerStatus();
 
     useBackgroundProcessingWelcome();
+
+    // Table fills a chat waits on: the waiting window resumes the run with the result.
+    React.useEffect(() => watchJobCalls(), []);
 
     // Command readiness follows the subscription effects above, not createRoot().render().
     React.useEffect(() => {

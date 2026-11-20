@@ -119,6 +119,9 @@ const VERSION_GATES: { feature: string; minVersion: string; op: Op }[] = [
 // PubMed and trial capabilities are offered only to declaring clients.
 // tables is declaration-only because the client serves the table data and runs
 // fills itself; the backend never infers it from a version.
+// background_jobs is declaration-only because it commits the client to answering
+// `job_wait_request`, storing parked fill results and resuming without
+// answers.
 const DECLARATION_ONLY_FEATURES = [
     'external_files',
     'pdf_candidates',
@@ -154,6 +157,7 @@ const DECLARATION_ONLY_FEATURES = [
     'parked_runs',
     'external_records',
     'tables',
+    'background_jobs',
 ];
 
 // The full backend feature vocabulary (ALL_FEATURES in version_gates.py): every

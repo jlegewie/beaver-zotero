@@ -104,6 +104,11 @@ export interface TablesApi {
      * from). See `src/ui/openTable.ts`.
      */
     openTable(ref: TableRef, options?: OpenTableOptions): Promise<OpenTableOutcome>;
+    /**
+     * Whether the table is on screen: in a Beaver tab of a main window other
+     * than `except` (a window about to close), or in its own window.
+     */
+    isShown(ref: TableRef, except?: Window | null): boolean;
 
     local: {
         commands(win: Window): TableLocalCommands;

@@ -3231,6 +3231,14 @@ export const CLIENT_FEATURES = {
      */
     PARKED_RUNS: 'parked_runs',
     /**
+     * A table fill is a job call: a tool call that waits for the fill live
+     * and parks when the wait ends first. The client starts the fill without
+     * waiting, answers `job_wait_request`, and the window that waited resumes
+     * the parked run once the fill ends, answering the call with the same
+     * `job_wait_response`. Used only together with `parked_runs`.
+     */
+    BACKGROUND_JOBS: 'background_jobs',
+    /**
      * Research tables: the client serves `artifact_request` for table
      * attachments, runs table fills and renders table tool results. Gates the
      * `tables` capability.

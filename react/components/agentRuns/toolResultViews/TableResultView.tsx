@@ -186,8 +186,8 @@ const SKIP_REASONS: Record<string, string> = {
  * What the fill this call started did: rows filled of those planned, rows
  * failed, rows not started and why, rows without a document or abstract,
  * answers from title and abstract, and skipped cells. A
- * fill still running when the call returned says so; its progress is in the
- * panel above the composer. Empty for a call that started no fill.
+ * fill still running when the call returned says so; its progress is on the
+ * tool call's line. Empty for a call that started no fill.
  */
 export function formatFillLines(record: TableRecord): string[] {
     const fill = record.run === "fill" ? record.fill : null;
@@ -285,8 +285,8 @@ function ColumnRow({ column, progress }: { column: TableRecordColumn; progress: 
  */
 export function TableResultView({ view }: { view: TableView }) {
     const { record } = view;
-    // The card's header already names the tool ("Create table", "Edit
-    // table"), so a change line that only restates it is dropped.
+    // The card's header already names the tool ("Create Table", "Edit
+    // Table"), so a change line that only restates it is dropped.
     const change = /^(created?|read|edited) (the )?table\.?$/i.test(record.change?.trim() ?? "")
         ? null
         : record.change;
