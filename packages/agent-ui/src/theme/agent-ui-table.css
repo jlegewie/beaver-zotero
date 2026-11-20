@@ -446,6 +446,7 @@
 .beaver-root .rt-header {
     flex: 0 0 auto;
     display: flex;
+    flex-wrap: wrap;
     align-items: flex-start;
     gap: 0.9rem;
     padding: 1.2rem 1.55rem 0.9rem;
@@ -462,8 +463,10 @@
     color: var(--fill-secondary);
 }
 
+/* The title keeps room to be read: in a narrow window the actions move to a
+   line of their own instead of squeezing it. */
 .beaver-root .rt-identity {
-    flex: 1 1 auto;
+    flex: 1 1 12rem;
     min-width: 0;
     display: flex;
     flex-direction: column;
@@ -488,6 +491,7 @@
 
 .beaver-root .rt-header-actions {
     flex: 0 0 auto;
+    margin-left: auto;
     display: flex;
     align-items: center;
     gap: 0.6rem;
@@ -535,9 +539,16 @@
 .beaver-root .rt-toolbar-left,
 .beaver-root .rt-selectionbar {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 0.6rem;
     min-width: 0;
+}
+
+.beaver-root .rt-toolbar-adds {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
 }
 
 .beaver-root .rt-selection-count {
