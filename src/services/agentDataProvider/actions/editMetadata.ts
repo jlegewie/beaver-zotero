@@ -554,6 +554,12 @@ async function validateEditMetadataAction(
         currentValue.current_creators = item.getCreatorsJSON();
     }
 
+    // A child attachment's parent (same library), so a batch over parent items
+    // can credit an edit to one of their attachments.
+    if (item.isAttachment() && item.parentKey) {
+        currentValue.parent_key = item.parentKey;
+    }
+
     // Get user preference from settings
     const preference = getDeferredToolPreference('edit_metadata', undefined, request.operation);
 
