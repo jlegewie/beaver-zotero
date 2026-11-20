@@ -3,52 +3,21 @@ import { atom, createStore } from 'jotai';
 
 vi.mock('../../../react/atoms/actions', () => ({ stageActionPillAtom: atom(null, () => true) }));
 vi.mock('../../../react/utils/sourceUtils', () => ({ getDisplayNameFromItem: (item: { key: string }) => item.key }));
-vi.mock('../../../src/utils/libraryIdentity', () => ({ resolveLibraryRef: () => 1 }));
-vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
 vi.mock('../../../src/services/documentExtraction/attachmentResolution', () => ({
     getReadableContentKind: (item: { kind?: string }) => item.kind ?? null,
     getContentKind: (item: { kind?: string }) => item.kind ?? 'other',
 }));
 
-import { featureTaskAttachmentSummaryAtom } from '../../../react/atoms/featureCredits';
+import { featureTaskAttachedPapersAtom, featureTaskSendBlockAtom } from '../../../react/atoms/featureCredits';
+import { activeFeatureTaskAtom } from '../../../react/atoms/featureCreditRuns';
 import {
-    createDefaultMessageFilters,
-    currentMessageCollectionsAtom,
-    currentMessageFiltersAtom,
+    currentMessageContentAtom,
     currentMessageItemsAtom,
+    currentMessagePillsAtom,
     currentReaderAttachmentAtom,
 } from '../../../react/atoms/messageComposition';
+import { profileProjectionAtom } from '../../../react/atoms/profile';
 import { itemValidationResultsAtom, type ItemValidationState } from '../../../react/atoms/itemValidation';
-
-const regular = { isRegularItem: () => true };
-
-describe('setup card step 1: attached collections', () => {
-    beforeEach(() => {
-        (Zotero as any).Collections = {
-            get: vi.fn((id: number) => (id === 7 ? { name: 'Graph', libraryID: 1, key: 'GRAPHKEY' } : false)),
-            getByLibraryAndKey: vi.fn(() => ({ getChildItems: () => [regular, regular, regular] })),
-        };
-    });
-
-    it('counts a collection kept as a filter (dragged in or picked under Filter by Collections)', () => {
-        const store = createStore();
-        store.set(currentMessageFiltersAtom, { ...createDefaultMessageFilters(), collectionIds: [7] });
-        expect(store.get(featureTaskAttachmentSummaryAtom).collections).toEqual([{ name: 'Graph', itemCount: 3 }]);
-    });
-
-    it('lists a collection that is both attached and a filter once', () => {
-        const store = createStore();
-        store.set(currentMessageCollectionsAtom, [{ name: 'Graph', zotero_key: 'GRAPHKEY', library_id: 1 } as any]);
-        store.set(currentMessageFiltersAtom, { ...createDefaultMessageFilters(), collectionIds: [7] });
-        expect(store.get(featureTaskAttachmentSummaryAtom).collections).toHaveLength(1);
-    });
-
-    it('ignores a filter for a collection that no longer exists', () => {
-        const store = createStore();
-        store.set(currentMessageFiltersAtom, { ...createDefaultMessageFilters(), collectionIds: [99] });
-        expect(store.get(featureTaskAttachmentSummaryAtom).collections).toEqual([]);
-    });
-});
 
 type FakeItem = Record<string, unknown>;
 
@@ -78,7 +47,7 @@ function paper(key: string, childIDs: number[] = []): FakeItem {
 const checked = (state: 'readable' | 'unreadable', contentKind = 'pdf'): ItemValidationState =>
     ({ state, contentKind, isValidating: false } as ItemValidationState);
 
-describe('setup card step 1: whether attached papers have a file to annotate', () => {
+describe('setup card: whether attached papers have a file to annotate', () => {
     let items: Map<number, FakeItem>;
 
     beforeEach(() => {
@@ -89,7 +58,7 @@ describe('setup card step 1: whether attached papers have a file to annotate', (
     const summarize = (setup: (store: ReturnType<typeof createStore>) => void) => {
         const store = createStore();
         setup(store);
-        return store.get(featureTaskAttachmentSummaryAtom).papers;
+        return store.get(featureTaskAttachedPapersAtom);
     };
 
     it('rates a paper with no PDF, EPUB or snapshot as having none', () => {
@@ -122,5 +91,60 @@ describe('setup card step 1: whether attached papers have a file to annotate', (
             store.set(currentReaderAttachmentAtom, pdf as any);
             store.set(itemValidationResultsAtom, new Map([['1-PDF1', checked('readable')]]));
         })).toEqual([{ name: 'P1', document: 'readable' }]);
+    });
+});
+
+describe('featureTaskSendBlockAtom', () => {
+    const annotatePill = { actionId: 'builtin-annotate', commandName: 'annotate', title: 'Annotate' };
+
+    const setup = (options: { completed?: boolean; pill?: boolean; content?: string } = {}) => {
+        const store = createStore();
+        store.set(profileProjectionAtom, {
+            first_run_completed_at: '2026-11-01T00:00:00Z',
+            feature_credits: {
+                tasks: [{ key: 'annotate', credits: 5, completed_at: options.completed ? '2026-11-02T00:00:00Z' : null }],
+            },
+        } as any);
+        store.set(activeFeatureTaskAtom, 'annotate');
+        store.set(currentMessagePillsAtom, options.pill === false ? [] : [annotatePill] as any);
+        store.set(currentMessageContentAtom, options.content ?? '/annotate Color-code the methods');
+        return store;
+    };
+
+    it("holds Send on the setup card's first open required step", () => {
+        expect(setup().get(featureTaskSendBlockAtom)).toEqual({ hint: 'Choose a PDF' });
+    });
+
+    it('lifts once every required step is done', () => {
+        const store = setup();
+        const pdf = attachment('PDF1', 'pdf');
+        store.set(currentMessageItemsAtom, [pdf] as any);
+        store.set(itemValidationResultsAtom, new Map([['1-PDF1', checked('readable')]]));
+        expect(store.get(featureTaskSendBlockAtom)).toBeNull();
+        store.set(currentMessageContentAtom, '/annotate Highlight every mention of [your topic]');
+        expect(store.get(featureTaskSendBlockAtom)).toBeNull();
+        store.set(currentMessageContentAtom, '/annotate ');
+        expect(store.get(featureTaskSendBlockAtom)).toEqual({ hint: 'Describe what to highlight' });
+    });
+
+    it('keeps the topic step open until a picked example names a topic', () => {
+        const store = createStore();
+        store.set(profileProjectionAtom, {
+            feature_credits: { tasks: [{ key: 'research_table', credits: 5, completed_at: null }] },
+        } as any);
+        store.set(activeFeatureTaskAtom, 'research_table');
+        store.set(currentMessagePillsAtom, [{ actionId: 'builtin-research-table', commandName: 'table', title: 'Table' }] as any);
+        store.set(currentMessageContentAtom, '/table Papers on [your topic]: method, sample, and main finding');
+        expect(store.get(featureTaskSendBlockAtom)).toEqual({ hint: 'Name a topic and what to compare' });
+        store.set(currentMessageContentAtom, '/table Papers on school choice: method, sample, and main finding');
+        expect(store.get(featureTaskSendBlockAtom)).toBeNull();
+    });
+
+    it('applies only while the message would start the task', () => {
+        const noSetup = setup();
+        noSetup.set(activeFeatureTaskAtom, null);
+        expect(noSetup.get(featureTaskSendBlockAtom)).toBeNull();
+        expect(setup({ pill: false, content: 'Color-code the methods' }).get(featureTaskSendBlockAtom)).toBeNull();
+        expect(setup({ completed: true }).get(featureTaskSendBlockAtom)).toBeNull();
     });
 });

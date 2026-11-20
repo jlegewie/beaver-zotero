@@ -44,7 +44,8 @@ import { useAddSourcesMenu, AddSourcesMenuHandle } from '@beaver/agent-ui/compos
 import { useComposerPasteHandlers } from '../../hooks/useComposerPasteHandlers';
 import { useActionPopupResolver } from '../../hooks/useActionPopupResolver';
 import { useStopRun } from '../../hooks/useStopRun';
-import { actionRequirementBlockAtom, sendComposedMessageAtom } from '../../atoms/actions';
+import { sendComposedMessageAtom } from '../../atoms/actions';
+import { composerSendBlockAtom } from '../../atoms/featureCredits';
 import { dismissActiveEditNotePreview } from '../../host/zotero/editNotePreviewLifecycle';
 
 const HIGH_INPUT_TOKEN_WARNING_THRESHOLD = 100_000;
@@ -96,9 +97,10 @@ const InputArea: React.FC<InputAreaProps> = ({
     // dequeued (see the claim effect below).
     const pendingPillInsert = useAtomValue(pendingPillInsertsAtom)[0] ?? null;
     const composerResetToken = useAtomValue(composerResetTokenAtom);
-    // A /command pill whose action needs text after it, in a message that has
-    // none: Send is held, and its tooltip says what is missing.
-    const actionRequirementBlock = useAtomValue(actionRequirementBlockAtom);
+    // Send is held, and its tooltip says what is missing, while a feature
+    // task's setup card has a required step open or a /command pill's action
+    // needs text after it that the message lacks.
+    const sendBlock = useAtomValue(composerSendBlockAtom);
     const store = useStore();
     const webSearchDescriptionId = useId();
     const requirementHintId = useId();
@@ -543,7 +545,7 @@ const InputArea: React.FC<InputAreaProps> = ({
         if (isPending || message.length === 0) return;
         // Read from the store, not the render: the flush above may have just
         // published the text that satisfies the requirement.
-        if (store.get(actionRequirementBlockAtom)) return;
+        if (store.get(composerSendBlockAtom)) return;
         // If the message contains /command pills, resolve each back to its
         // action's prompt (and attach its items/collection) before sending.
         const pills = editorHandleRef.current?.getSlashCommands() ?? [];
@@ -849,9 +851,9 @@ const InputArea: React.FC<InputAreaProps> = ({
                     <span id={webSearchDescriptionId} className="sr-only">
                         {webSearchDescription}
                     </span>
-                    {actionRequirementBlock && (
+                    {sendBlock && (
                         <span id={requirementHintId} className="sr-only">
-                            {actionRequirementBlock.hint}
+                            {sendBlock.hint}
                         </span>
                     )}
                     {!showVerdictButtons && (
@@ -938,8 +940,8 @@ const InputArea: React.FC<InputAreaProps> = ({
                         </Tooltip>
                     ) : (
                         <Tooltip
-                            content={actionRequirementBlock?.hint ?? ''}
-                            disabled={!actionRequirementBlock}
+                            content={sendBlock?.hint ?? ''}
+                            disabled={!sendBlock}
                             showArrow
                             singleLine
                         >
@@ -948,9 +950,9 @@ const InputArea: React.FC<InputAreaProps> = ({
                                 variant="solid"
                                 className="composer-send"
                                 ariaLabel="Send message"
-                                ariaDescribedBy={actionRequirementBlock ? requirementHintId : undefined}
+                                ariaDescribedBy={sendBlock ? requirementHintId : undefined}
                                 onClick={handleSubmit}
-                                disabled={threadReadOnly || messageContent.length === 0 || !selectedModel || isSlashMenuOpen || isAttachingFiles || actionRequirementBlock !== null}
+                                disabled={threadReadOnly || messageContent.length === 0 || !selectedModel || isSlashMenuOpen || isAttachingFiles || sendBlock !== null}
                             />
                         </Tooltip>
                     )}

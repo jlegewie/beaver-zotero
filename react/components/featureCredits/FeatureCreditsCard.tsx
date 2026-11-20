@@ -5,18 +5,16 @@ import { ArrowLeftIcon, ArrowRightIcon, CancelIcon, CheckmarkCircleSolidIcon, Ci
 import {
     featureCreditEntriesAtom,
     featureCreditsCardDismissedAtom,
-    featureTaskAttachmentSummaryAtom,
+    featureTaskSetupStepsAtom,
     selectBeaverModelAtom,
     startFeatureTaskAtom,
     type FeatureCreditEntry,
 } from '../../atoms/featureCredits';
 import { activeFeatureTaskAtom } from '../../atoms/featureCreditRuns';
-import { isUsingBeaverCreditsAtom } from '../../atoms/models';
-import { currentMessageContentAtom, currentMessagePillsAtom, pendingPillInsertsAtom } from '../../atoms/messageComposition';
-import { hasTextBesidesPills } from '../../utils/actionRequirements';
+import { currentMessagePillsAtom, pendingPillInsertsAtom } from '../../atoms/messageComposition';
 import { searchableLibraryIdsAtom } from '../../atoms/profile';
-import { examplesForLibrary, getFeatureCreditTask, promptSection, type FeatureTaskDefinition, type LibraryShape } from '../../constants/featureCreditTasks';
-import { attachmentsSetScope, featureTaskModelNote, setupSource } from '../../utils/featureCredits';
+import { examplesForLibrary, getFeatureCreditTask, type FeatureTaskDefinition, type LibraryShape } from '../../constants/featureCreditTasks';
+import type { SetupStep, StepStatus } from '../../utils/featureCredits';
 import { countLibraryItems, readLibraryShape } from '../../utils/libraryShape';
 import { SMALL_LIBRARY_THRESHOLD } from '../../atoms/zoteroContext';
 
@@ -60,22 +58,6 @@ const TaskRow: React.FC<{ entry: FeatureCreditEntry; onStart: (key: string, win:
     );
 };
 
-/**
- * One step of a setup card. `done` shows a check, `active` (the step to act
- * on next) an accented number, `checking` a spinner; otherwise a plain number.
- */
-type StepStatus = 'done' | 'active' | 'checking' | 'pending';
-
-interface SetupStep {
-    key: string;
-    title: string;
-    optional?: boolean;
-    status: StepStatus;
-    /** Required before sending: an active candidate until done. */
-    required: boolean;
-    body: React.ReactNode;
-}
-
 const StepMarker: React.FC<{ status: StepStatus; number: number }> = ({ status, number }) => (
     <span className={`feature-credits-step-marker is-${status}`} aria-hidden="true">
         {status === 'done' ? <Icon icon={TickIcon} className="scale-11" />
@@ -85,18 +67,17 @@ const StepMarker: React.FC<{ status: StepStatus; number: number }> = ({ status, 
 );
 
 /**
- * The setup card, the same for every task: numbered steps (what Beaver works
- * on, what it should do) that turn into checks as they are done, then one
- * line on the reward. The first open required step is accented.
+ * The setup card, the same for every task: numbered steps (the model when a
+ * task needs it, the PDF for a task that works on one, what Beaver should do)
+ * that turn into checks as they are done, then one line on the reward. The
+ * first open required step is accented; required steps hold Send (see
+ * `featureTaskSendBlockAtom`).
  */
 const SetupView: React.FC<{ definition: FeatureTaskDefinition; credits: number; onBack: () => void }> = ({ definition, credits, onBack }) => {
-    const summary = useAtomValue(featureTaskAttachmentSummaryAtom);
+    const steps = useAtomValue(featureTaskSetupStepsAtom);
     const startTask = useSetAtom(startFeatureTaskAtom);
     const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
-    const onBeaverModel = useAtomValue(isUsingBeaverCreditsAtom);
     const selectBeaverModel = useSetAtom(selectBeaverModelAtom);
-    const content = useAtomValue(currentMessageContentAtom);
-    const pills = useAtomValue(currentMessagePillsAtom);
     const [shape, setShape] = useState<LibraryShape | null>(null);
     const needsShape = definition.examples.some((example) => example.when);
 
@@ -111,72 +92,45 @@ const SetupView: React.FC<{ definition: FeatureTaskDefinition; credits: number; 
         };
     }, [needsShape, searchableLibraryIds]);
 
-    // Wording and examples that assume the attached papers are the scope.
-    const attached = attachmentsSetScope(summary);
-    const source = setupSource(definition.attach, summary);
-    const prompt = promptSection(definition.prompt, attached);
-    const examples = examplesForLibrary(definition, shape, attached);
-    const modelNote = featureTaskModelNote(definition.key, onBeaverModel);
-    const hasInstruction = hasTextBesidesPills(content, pills);
+    if (!steps) return null;
+    const examples = examplesForLibrary(definition, shape);
 
-    const beaverModelLink = (label: string) => (
-        <a href="#" className="feature-credits-link" onClick={(event) => { event.preventDefault(); selectBeaverModel(); }}>
-            {label}
-        </a>
-    );
     const applyExample = (text: string, event: React.MouseEvent<HTMLElement>) => {
         event.preventDefault();
         startTask({ key: definition.key, targetWindow: event.currentTarget.ownerDocument.defaultView ?? undefined, argumentText: text });
     };
 
-    const steps: SetupStep[] = [];
-    if (modelNote?.required) {
-        steps.push({
-            key: 'model',
-            title: 'Use the Beaver model',
-            status: 'pending',
-            required: true,
-            body: <>{modelNote.text} {beaverModelLink('Switch to it')}</>,
-        });
-    }
-    steps.push({
-        key: 'source',
-        title: source.title,
-        optional: source.optional,
-        status: source.state === 'ready' ? 'done' : source.state === 'checking' ? 'checking' : 'pending',
-        required: source.state === 'missing' || source.state === 'checking',
-        body: source.text,
-    });
-    steps.push({
-        key: 'prompt',
-        title: prompt.heading,
-        optional: prompt.optional,
-        status: hasInstruction ? 'done' : 'pending',
-        required: !prompt.optional,
-        body: (
+    const stepBody = (step: SetupStep) => {
+        if (step.key === 'model') {
+            return (
+                <>
+                    {step.text}{' '}
+                    <a href="#" className="feature-credits-link" onClick={(event) => { event.preventDefault(); selectBeaverModel(); }}>
+                        Switch to it
+                    </a>
+                </>
+            );
+        }
+        if (step.key === 'source' || examples.length === 0) return step.text;
+        return (
             <>
-                {prompt.hint}
-                {examples.length > 0 && (
-                    <ul className="feature-credits-examples" aria-label="Examples">
-                        {examples.map((example) => (
-                            <li key={example.text}>
-                                <button
-                                    type="button"
-                                    className="feature-credits-example"
-                                    onClick={(event) => applyExample(example.text, event)}
-                                >
-                                    {example.text}
-                                </button>
-                            </li>
-                        ))}
-                    </ul>
-                )}
+                {step.text}
+                <ul className="feature-credits-examples" aria-label="Examples">
+                    {examples.map((example) => (
+                        <li key={example.text}>
+                            <button
+                                type="button"
+                                className="feature-credits-example"
+                                onClick={(event) => applyExample(example.text, event)}
+                            >
+                                {example.text}
+                            </button>
+                        </li>
+                    ))}
+                </ul>
             </>
-        ),
-    });
-    // The step to act on next: the first required one not yet done.
-    const next = steps.find((step) => step.required && step.status === 'pending');
-    if (next) next.status = 'active';
+        );
+    };
 
     return (
         <>
@@ -192,9 +146,9 @@ const SetupView: React.FC<{ definition: FeatureTaskDefinition; credits: number; 
                             <h3 className="feature-credits-step-title">
                                 {step.status === 'done' && <span className="sr-only">Done: </span>}
                                 {step.title}
-                                {step.optional && <span className="feature-credits-step-optional"> (optional)</span>}
+                                {!step.requiredHint && <span className="feature-credits-step-optional"> (optional)</span>}
                             </h3>
-                            <div className="feature-credits-step-text">{step.body}</div>
+                            <div className="feature-credits-step-text">{stepBody(step)}</div>
                         </div>
                     </li>
                 ))}
@@ -202,7 +156,6 @@ const SetupView: React.FC<{ definition: FeatureTaskDefinition; credits: number; 
             <p className="feature-credits-reward">
                 Send your prompt to earn {credits} free credits.
                 {definition.footnote && <> {definition.footnote}</>}
-                {modelNote && !modelNote.required && <> {modelNote.text} {beaverModelLink('Use it')}</>}
             </p>
         </>
     );

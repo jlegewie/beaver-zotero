@@ -1,60 +1,48 @@
 import { isStoredAction } from '@beaver/agent-core/types/actions';
 import { describe, expect, it } from 'vitest';
 import {
-    attachmentsSetScope,
     combineDocumentStatuses,
-    featureTaskModelNote,
-    setupSource,
-    type AttachmentSummary,
+    pdfSource,
+    sendHoldHint,
+    setupSteps,
+    type AttachedPaper,
     type DocumentStatus,
+    type SetupInput,
 } from '../../../react/utils/featureCredits';
-import { FEATURE_CREDIT_TASKS, examplesForLibrary, getFeatureCreditTask, promptSection } from '../../../react/constants/featureCreditTasks';
+import { FEATURE_CREDIT_TASKS, examplesForLibrary, getFeatureCreditTask } from '../../../react/constants/featureCreditTasks';
 import { ALL_BUILTIN_ACTIONS } from '../../../react/types/builtinActions';
 
-const none: AttachmentSummary = { papers: [], collections: [] };
-const papers = (...names: string[]): AttachmentSummary => ({
-    papers: names.map((name) => ({ name, document: 'readable' })),
-    collections: [],
-});
-const withFiles = (...documents: DocumentStatus[]): AttachmentSummary => ({
-    papers: documents.map((document, index) => ({ name: `Paper ${index + 1}`, document })),
-    collections: [],
-});
-const collection = (name: string, itemCount: number | null): AttachmentSummary => ({ papers: [], collections: [{ name, itemCount }] });
+const papers = (...names: string[]): AttachedPaper[] => names.map((name) => ({ name, document: 'readable' }));
+const withFiles = (...documents: DocumentStatus[]): AttachedPaper[] =>
+    documents.map((document, index) => ({ name: `Paper ${index + 1}`, document }));
 
-describe('setup card step 1: what Beaver works on', () => {
-    it('asks for a PDF to annotate as the missing input', () => {
-        expect(setupSource({ kind: 'paper' }, none)).toEqual({
-            title: 'Choose a PDF',
-            optional: false,
+describe('setup card: the PDF to annotate', () => {
+    it('asks for a PDF as the missing input', () => {
+        expect(pdfSource([])).toEqual({
             state: 'missing',
             text: 'Open one in Zotero, type @ to find a paper, or drag one into the prompt.',
         });
     });
 
     it('names the attached PDF once it is readable', () => {
-        expect(setupSource({ kind: 'paper' }, papers('Smith 2020'))).toMatchObject({ state: 'ready', text: 'Smith 2020 is attached.' });
-        expect(setupSource({ kind: 'paper' }, papers('A', 'B', 'C'))).toMatchObject({ state: 'ready', text: '3 papers are attached.' });
+        expect(pdfSource(papers('Smith 2020'))).toEqual({ state: 'ready', text: 'Smith 2020 is attached.' });
+        expect(pdfSource(papers('A', 'B', 'C'))).toEqual({ state: 'ready', text: '3 papers are attached.' });
     });
 
     it('checks the attached paper has a readable file before taking it', () => {
-        expect(setupSource({ kind: 'paper' }, withFiles('checking'))).toMatchObject({ state: 'checking', text: 'Checking Paper 1…' });
-        expect(setupSource({ kind: 'paper' }, withFiles('none'))).toMatchObject({
+        expect(pdfSource(withFiles('checking'))).toEqual({ state: 'checking', text: 'Checking Paper 1…' });
+        expect(pdfSource(withFiles('none'))).toEqual({
             state: 'missing',
             text: 'Paper 1 has no PDF, EPUB or snapshot. Open a PDF in Zotero, or type @ to find another paper.',
         });
-        expect(setupSource({ kind: 'paper' }, withFiles('unreadable')).text)
+        expect(pdfSource(withFiles('unreadable')).text)
             .toBe("Beaver can't read the text of Paper 1. Open a PDF in Zotero, or type @ to find another paper.");
     });
 
     it('is ready once one attached paper is readable, and says how many are skipped', () => {
-        expect(setupSource({ kind: 'paper' }, withFiles('readable', 'checking'))).toMatchObject({ state: 'ready', text: '2 papers are attached.' });
-        expect(setupSource({ kind: 'paper' }, withFiles('readable', 'none', 'unreadable')).text)
+        expect(pdfSource(withFiles('readable', 'checking'))).toEqual({ state: 'ready', text: '2 papers are attached.' });
+        expect(pdfSource(withFiles('readable', 'none', 'unreadable')).text)
             .toBe('3 papers are attached. 2 papers without a readable PDF, EPUB or snapshot are skipped.');
-    });
-
-    it('takes an attached collection as ready: its papers are checked when the run starts', () => {
-        expect(setupSource({ kind: 'paper' }, collection('X', 4)).state).toBe('ready');
     });
 
     it('rates a paper by its best file', () => {
@@ -63,61 +51,57 @@ describe('setup card step 1: what Beaver works on', () => {
         expect(combineDocumentStatuses(['unreadable', 'checking'])).toBe('checking');
         expect(combineDocumentStatuses(['none', 'unreadable'])).toBe('unreadable');
     });
-
-    it('lets a review or table go without attachments, on a topic', () => {
-        for (const kind of ['collection', 'topic'] as const) {
-            expect(setupSource({ kind }, none)).toEqual({
-                title: 'Choose papers',
-                optional: true,
-                state: 'default',
-                text: 'Type @ or drag in a collection or papers. Without any, Beaver finds papers on your topic in your library.',
-            });
-        }
-    });
-
-    it('names an attached collection, and a collection and papers attached together', () => {
-        expect(setupSource({ kind: 'collection' }, collection('Neighborhood effects', 14)).text)
-            .toBe('The Neighborhood effects collection (14 papers) is attached.');
-        expect(setupSource({ kind: 'collection' }, { papers: papers('A', 'B').papers, collections: [{ name: 'X', itemCount: 1 }] }).text)
-            .toBe('The X collection (1 paper) and 2 papers are attached.');
-        expect(setupSource({ kind: 'collection' }, { papers: [], collections: [{ name: 'A', itemCount: 2 }, { name: 'B', itemCount: null }] }).text)
-            .toBe('The A collection (2 papers) and the B collection are attached.');
-    });
-
-    it('asks for a topic when only one paper is attached to a review or table', () => {
-        expect(setupSource({ kind: 'topic' }, papers('A')).text).toBe('A is attached. Name a topic in the next step, and Beaver adds related papers.');
-        expect(attachmentsSetScope(papers('A'))).toBe(false);
-        expect(attachmentsSetScope(papers('A', 'B'))).toBe(true);
-        expect(attachmentsSetScope(collection('X', 3))).toBe(true);
-    });
-
-    it('follows the 10-20 paper rule for tables', () => {
-        expect(setupSource({ kind: 'topic' }, collection('Big', 300)).text).toContain('Beaver will pick the most relevant papers from it. Remove it to search your whole library.');
-        expect(setupSource({ kind: 'topic' }, collection('Mid', 14)).text).toContain('Beaver will use these papers.');
-        expect(setupSource({ kind: 'topic' }, papers('A', 'B')).text).toContain('Beaver will add related papers from your library.');
-        expect(setupSource({ kind: 'topic' }, collection('Unknown', null)).text).toContain('pick the most relevant');
-    });
-
-    it('needs nothing attached to organize', () => {
-        expect(setupSource({ kind: 'none' }, papers('Smith 2020'))).toMatchObject({ title: 'Nothing to attach', state: 'ready' });
-    });
 });
 
-describe('setup card: what Beaver should do', () => {
-    it('requires an instruction to annotate', () => {
-        expect(promptSection(getFeatureCreditTask('annotate')!.prompt, true).optional).toBe(false);
+describe('setup card steps and Send', () => {
+    const steps = (key: string, input: Partial<Omit<SetupInput, 'definition'>> = {}) => setupSteps({
+        definition: getFeatureCreditTask(key)!,
+        papers: [],
+        onBeaverModel: true,
+        hasInstruction: false,
+        ...input,
+    });
+    const summary = (key: string, input?: Partial<Omit<SetupInput, 'definition'>>) =>
+        steps(key, input).map(({ key: step, status, requiredHint }) => `${step}:${status}${requiredHint ? '' : ':optional'}`);
+    const holding = (key: string, input?: Partial<Omit<SetupInput, 'definition'>>) => sendHoldHint(steps(key, input));
+
+    it('asks for a PDF, then what to highlight, before an annotation can be sent', () => {
+        expect(summary('annotate')).toEqual(['source:active', 'prompt:pending']);
+        expect(holding('annotate')).toBe('Choose a PDF');
+        expect(holding('annotate', { hasInstruction: true })).toBe('Choose a PDF');
+        expect(summary('annotate', { papers: papers('A') })).toEqual(['source:done', 'prompt:active']);
+        expect(holding('annotate', { papers: papers('A') })).toBe('Describe what to highlight');
+        expect(holding('annotate', { papers: papers('A'), hasInstruction: true })).toBeNull();
     });
 
-    it('makes the instruction optional once papers are attached to a review or table', () => {
-        for (const key of ['literature_review', 'research_table']) {
-            const prompt = getFeatureCreditTask(key)!.prompt;
-            expect(promptSection(prompt, false).optional).toBe(false);
-            expect(promptSection(prompt, true)).toMatchObject({ optional: true, hint: prompt.hintWhenAttached });
+    it('holds Send while the attached PDF is still being checked', () => {
+        expect(summary('annotate', { papers: withFiles('checking'), hasInstruction: true })).toEqual(['source:checking', 'prompt:done']);
+        expect(holding('annotate', { papers: withFiles('checking'), hasInstruction: true })).toBe('Checking the PDF…');
+        expect(holding('annotate', { papers: withFiles('unreadable'), hasInstruction: true })).toBe('Choose a PDF');
+    });
+
+    it('asks a review or table only for a topic, whatever is attached', () => {
+        expect(summary('literature_review')).toEqual(['prompt:active']);
+        expect(holding('literature_review')).toBe('Name a topic for the review');
+        expect(holding('literature_review', { papers: papers('A', 'B') })).toBe('Name a topic for the review');
+        expect(holding('literature_review', { hasInstruction: true })).toBeNull();
+        expect(summary('research_table')).toEqual(['prompt:active']);
+        expect(holding('research_table')).toBe('Name a topic and what to compare');
+        expect(holding('research_table', { hasInstruction: true })).toBeNull();
+    });
+
+    it('requires the Beaver model only for a table, first', () => {
+        expect(summary('research_table', { onBeaverModel: false })).toEqual(['model:active', 'prompt:pending']);
+        expect(holding('research_table', { onBeaverModel: false, hasInstruction: true })).toBe('Switch to the Beaver model');
+        for (const key of ['annotate', 'literature_review', 'organize']) {
+            expect(summary(key, { onBeaverModel: false })).not.toContain('model:active');
         }
     });
 
-    it('lets organizing run without an instruction', () => {
-        expect(promptSection(getFeatureCreditTask('organize')!.prompt, false).optional).toBe(true);
+    it('lets organizing go without an instruction', () => {
+        expect(summary('organize')).toEqual(['prompt:pending:optional']);
+        expect(holding('organize')).toBeNull();
+        expect(summary('organize', { hasInstruction: true })).toEqual(['prompt:done:optional']);
     });
 });
 
@@ -147,31 +131,10 @@ describe('task registry', () => {
 
     it('fits the organize examples to how the library is organized', () => {
         const organize = getFeatureCreditTask('organize')!;
-        const texts = (shape: Parameters<typeof examplesForLibrary>[1]) => examplesForLibrary(organize, shape, false).map((e) => e.text);
+        const texts = (shape: Parameters<typeof examplesForLibrary>[1]) => examplesForLibrary(organize, shape).map((e) => e.text);
         expect(texts({ collectionCount: 0, usesTags: false })).toEqual(['Fill in missing abstracts and DOIs']);
         expect(texts({ collectionCount: 3, usesTags: true })).toHaveLength(3);
         expect(texts(null)).toEqual(['Fill in missing abstracts and DOIs']);
-    });
-});
-
-describe('model note', () => {
-    it('says nothing on the Beaver model', () => {
-        for (const task of FEATURE_CREDIT_TASKS) {
-            expect(featureTaskModelNote(task.key, true)).toBeNull();
-        }
-    });
-
-    it('recommends the Beaver model for most tasks, and requires it for tables', () => {
-        for (const key of ['annotate', 'organize', 'literature_review']) {
-            expect(featureTaskModelNote(key, false)).toEqual({
-                text: 'These tasks work best with the Beaver model.',
-                required: false,
-            });
-        }
-        expect(featureTaskModelNote('research_table', false)).toEqual({
-            text: 'Tables run on Beaver credits.',
-            required: true,
-        });
     });
 });
 
@@ -184,15 +147,11 @@ describe('completion starter actions', () => {
 });
 
 describe('setup card examples', () => {
-    it('fits review and table examples to whether papers are attached', () => {
+    it('gives the review and table examples a topic to fill in', () => {
         for (const key of ['literature_review', 'research_table']) {
-            const task = getFeatureCreditTask(key)!;
-            const withPapers = examplesForLibrary(task, null, true).map((example) => example.text);
-            const withoutPapers = examplesForLibrary(task, null, false).map((example) => example.text);
-            expect(withPapers.length).toBeGreaterThan(0);
-            expect(withoutPapers.length).toBeGreaterThan(0);
-            expect(withPapers.some((text) => text.includes('[your topic]'))).toBe(false);
-            expect(withoutPapers.every((text) => text.includes('[your topic]'))).toBe(true);
+            const texts = examplesForLibrary(getFeatureCreditTask(key)!, null).map((example) => example.text);
+            expect(texts.length).toBeGreaterThan(0);
+            expect(texts.every((text) => text.includes('[your topic]'))).toBe(true);
         }
     });
 

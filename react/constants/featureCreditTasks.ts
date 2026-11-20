@@ -9,17 +9,6 @@
 
 import type { Action } from '@beaver/agent-core/types/actions';
 
-/** What a setup card's "Which papers?" section asks the user to attach. */
-export type FeatureTaskAttachKind =
-    /** One or more papers: required. */
-    | { kind: 'paper' }
-    /** A collection or papers; without either, the papers on a topic. */
-    | { kind: 'collection' }
-    /** Papers on a topic; attachments adjust which papers Beaver picks. */
-    | { kind: 'topic' }
-    /** Nothing to attach: the action finds what to work on itself. */
-    | { kind: 'none' };
-
 /** How the user organizes the library, used to pick fitting examples. */
 export interface LibraryShape {
     /** Collections across the searchable libraries. */
@@ -28,16 +17,20 @@ export interface LibraryShape {
     usesTags: boolean;
 }
 
+/**
+ * Stands for the topic in an example, so the example fits any library. The
+ * topic step stays open until the user replaces it.
+ */
+export const TOPIC_PLACEHOLDER = '[your topic]';
+
 export interface FeatureTaskExample {
     /**
      * Put after the /command when picked; the user reviews it before sending.
-     * A topic is written as "[your topic]", so an example fits any library.
+     * A topic is written as `TOPIC_PLACEHOLDER`.
      */
     text: string;
     /** Shown only when this returns true for the user's library. */
     when?: (shape: LibraryShape) => boolean;
-    /** Shown only when the attachments are (true) or are not (false) what the task covers. */
-    attached?: boolean;
 }
 
 /** The setup card's "what should Beaver do" section. */
@@ -45,10 +38,11 @@ export interface FeatureTaskPrompt {
     heading: string;
     /** Under the heading, above the examples. */
     hint: string;
-    /** The hint when the attachments are what the task covers. */
-    hintWhenAttached?: string;
-    /** When the action runs without an instruction. */
-    optional?: 'always' | 'whenAttached';
+    /**
+     * Set when Send waits for an instruction: Send's tooltip meanwhile.
+     * Without it the action runs without one, and the step reads "(optional)".
+     */
+    requiredHint?: string;
 }
 
 export interface FeatureTaskDefinition {
@@ -57,7 +51,14 @@ export interface FeatureTaskDefinition {
     subtitle: string;
     /** The built-in action the setup card stages. */
     actionId: string;
-    attach: FeatureTaskAttachKind;
+    /**
+     * `pdf`: the task works on an attached PDF, which the card asks for.
+     * `none`: Beaver finds what to work on in the library. Whatever the chat
+     * input carries is still sent, but the card does not describe or ask for it.
+     */
+    attach: 'pdf' | 'none';
+    /** The task does not run on the user's own API key. */
+    requiresBeaverModel?: boolean;
     prompt: FeatureTaskPrompt;
     examples: FeatureTaskExample[];
     /** Added after the reward line under the steps. */
@@ -92,22 +93,19 @@ export const FEATURE_CREDIT_TASKS: FeatureTaskDefinition[] = [
         title: 'Write a literature review',
         subtitle: 'A cited review as a Zotero note',
         actionId: 'builtin-collection-literature-review',
-        attach: { kind: 'collection' },
+        attach: 'none',
         prompt: {
             heading: 'What should the review cover?',
-            hint: 'Name a topic, and a purpose or length if you like. For example:',
-            hintWhenAttached: 'Add a purpose or length, or send as is. For example:',
-            optional: 'whenAttached',
+            hint: 'Name a topic, and a purpose or length if you like. Beaver finds the papers in your library. For example:',
+            requiredHint: 'Name a topic for the review',
         },
         examples: [
-            { text: 'A short review of these papers, organized by theme', attached: true },
-            { text: 'An outline first', attached: true },
-            { text: 'Background on [your topic] for a grant proposal', attached: false },
-            { text: 'An outline of the research on [your topic]', attached: false },
+            { text: `Background on ${TOPIC_PLACEHOLDER} for a grant proposal` },
+            { text: `An outline of the research on ${TOPIC_PLACEHOLDER}` },
         ],
         footnote: 'A long review can cost more; Beaver asks before going past your credit limit.',
         completion: {
-            tip: 'Beaver writes a review as a note in Zotero: click a citation to open the passage it cites.',
+            tip: 'Beaver writes a review as a note in Zotero: click a citation to open the passage it cites. Next time, attach a collection to review its papers.',
             noteTip: 'Your literature review is stored as a note in Zotero. Export it as Word, PDF or LaTeX using',
             docsUrl: `${DOCS_BASE_URL}/notes`,
         },
@@ -117,10 +115,11 @@ export const FEATURE_CREDIT_TASKS: FeatureTaskDefinition[] = [
         title: 'Annotate a PDF',
         subtitle: 'Add highlights and comments directly to your PDFs.',
         actionId: 'builtin-annotate',
-        attach: { kind: 'paper' },
+        attach: 'pdf',
         prompt: {
             heading: 'What should Beaver highlight?',
             hint: 'Type it in the prompt, or start from an example:',
+            requiredHint: 'Describe what to highlight',
         },
         examples: [
             { text: 'Highlight key passages for a quick skim' },
@@ -147,11 +146,10 @@ export const FEATURE_CREDIT_TASKS: FeatureTaskDefinition[] = [
         title: 'Organize your library',
         subtitle: 'Collections, tags, metadata and more',
         actionId: 'builtin-tidy-up',
-        attach: { kind: 'none' },
+        attach: 'none',
         prompt: {
             heading: 'What should Beaver tidy up?',
-            hint: 'Name a focus, or send as is. For example:',
-            optional: 'always',
+            hint: 'Beaver looks over your whole library. Name a focus, or send as is. For example:',
         },
         examples: [
             { text: 'File my unfiled papers into my collections', when: (shape) => shape.collectionCount >= 2 },
@@ -169,22 +167,20 @@ export const FEATURE_CREDIT_TASKS: FeatureTaskDefinition[] = [
         title: 'Compare papers in a table',
         subtitle: 'Systematic comparison of research papers',
         actionId: 'builtin-research-table',
-        attach: { kind: 'topic' },
+        attach: 'none',
+        requiresBeaverModel: true,
         prompt: {
             heading: 'What should the table compare?',
-            hint: 'Name a topic and the questions to ask of each paper. For example:',
-            hintWhenAttached: 'Say what to compare, or send as is and Beaver picks the questions. For example:',
-            optional: 'whenAttached',
+            hint: 'Name a topic and the questions to ask of each paper. Beaver finds the papers in your library. For example:',
+            requiredHint: 'Name a topic and what to compare',
         },
         examples: [
-            { text: 'Method, sample, and main finding', attached: true },
-            { text: 'How each paper defines and measures its key concept', attached: true },
-            { text: 'Papers on [your topic]: method, sample, and main finding', attached: false },
-            { text: 'Papers on [your topic]: how each defines and measures its key concept', attached: false },
+            { text: `Papers on ${TOPIC_PLACEHOLDER}: method, sample, and main finding` },
+            { text: `Papers on ${TOPIC_PLACEHOLDER}: how each defines and measures its key concept` },
         ],
         // footnote: 'Filling a table uses credits per row. You see the cost before anything is filled.',
         completion: {
-            tip: 'Click a cell to see the quote behind it. You can add a column with a new question and fill the remaining rows.',
+            tip: 'Click a cell to see the quote behind it. Next time, attach a collection to compare its papers.',
             docsUrl: `${DOCS_BASE_URL}/research-tables`,
         },
     },
@@ -198,22 +194,9 @@ export function getFeatureCreditTask(key: string): FeatureTaskDefinition | undef
 }
 
 /**
- * The examples that fit the user's library (only those without a library
- * condition while its shape is unknown) and the chat input's attachments.
+ * The examples that fit the user's library: only those without a library
+ * condition while its shape is unknown.
  */
-export function examplesForLibrary(task: FeatureTaskDefinition, shape: LibraryShape | null, attached: boolean): FeatureTaskExample[] {
-    return task.examples.filter((example) => {
-        if (example.attached !== undefined && example.attached !== attached) return false;
-        if (!example.when) return true;
-        return !!shape && example.when(shape);
-    });
-}
-
-/** The "what should Beaver do" section as the attachments make it read. */
-export function promptSection(prompt: FeatureTaskPrompt, attached: boolean): { heading: string; hint: string; optional: boolean } {
-    return {
-        heading: prompt.heading,
-        hint: attached ? (prompt.hintWhenAttached ?? prompt.hint) : prompt.hint,
-        optional: prompt.optional === 'always' || (prompt.optional === 'whenAttached' && attached),
-    };
+export function examplesForLibrary(task: FeatureTaskDefinition, shape: LibraryShape | null): FeatureTaskExample[] {
+    return task.examples.filter((example) => !example.when || (!!shape && example.when(shape)));
 }

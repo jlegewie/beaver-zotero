@@ -8,26 +8,32 @@
 import { atom } from 'jotai';
 import type { FeatureCreditTask } from '@beaver/agent-core/types/profile';
 import { profileWithPlanAtom } from './profile';
-import { beaverDefaultModelAtom, updateSelectedModelAtom } from './models';
+import { beaverDefaultModelAtom, isUsingBeaverCreditsAtom, updateSelectedModelAtom } from './models';
 import { preferencesRevisionAtom } from './preferences';
 import { getPref, setPref } from '../../src/utils/prefs';
-import { stageActionPillAtom } from './actions';
+import { actionRequirementBlockAtom, stageActionPillAtom } from './actions';
 import {
-    currentMessageCollectionsAtom,
-    currentMessageFiltersAtom,
+    currentMessageContentAtom,
     currentMessageItemsAtom,
     currentMessagePillsAtom,
     currentReaderAttachmentAtom,
     messageItemDataRevisionAtom,
+    removeAutomaticAttachmentsAtom,
 } from './messageComposition';
-import { FEATURE_CREDIT_TASKS, FeatureTaskDefinition, getFeatureCreditTask } from '../constants/featureCreditTasks';
-import { combineDocumentStatuses, type AttachmentSummary, type DocumentStatus } from '../utils/featureCredits';
+import { FEATURE_CREDIT_TASKS, FeatureTaskDefinition, TOPIC_PLACEHOLDER, getFeatureCreditTask } from '../constants/featureCreditTasks';
+import {
+    combineDocumentStatuses,
+    sendHoldHint,
+    setupSteps,
+    type AttachedPaper,
+    type DocumentStatus,
+    type SetupStep,
+} from '../utils/featureCredits';
+import { hasTextBesidesPills, type ActionRequirementBlock } from '../utils/actionRequirements';
 import { itemValidationResultsAtom, type ItemValidationState } from './itemValidation';
 import { getReadableContentKind } from '../../src/services/documentExtraction/attachmentResolution';
 import { activeFeatureTaskAtom } from './featureCreditRuns';
 import { getDisplayNameFromItem } from '../utils/sourceUtils';
-import { resolveLibraryRef } from '../../src/utils/libraryIdentity';
-import { logger } from '@beaver/agent-core/platform/logger';
 
 /** A server task this client can present, with its definition. */
 export interface FeatureCreditEntry {
@@ -95,14 +101,20 @@ export const selectBeaverModelAtom = atom(null, (get, set): boolean => {
 
 /**
  * Start a task: show its setup card and stage its action in the chat input.
- * Attaches nothing; what the chat input already carries stays, except another
- * task's /command, which this one replaces.
+ * Starting it (not picking one of its examples) switches to the Beaver model
+ * and, for a task that finds its papers in the library, removes what the chat
+ * input took from the Zotero selection; attachments the user added stay.
+ * Another task's /command is replaced by this one.
  */
 export const startFeatureTaskAtom = atom(
     null,
     (get, set, payload: { key: string; targetWindow?: Window; argumentText?: string }): boolean => {
         const definition = getFeatureCreditTask(payload.key);
         if (!definition) return false;
+        if (get(activeFeatureTaskAtom) !== definition.key) {
+            set(selectBeaverModelAtom);
+            if (definition.attach === 'none') set(removeAutomaticAttachmentsAtom);
+        }
         set(activeFeatureTaskAtom, definition.key);
         const pills = get(currentMessagePillsAtom);
         // The chat input already has this /command: keep it, and only replace
@@ -124,17 +136,6 @@ export const startFeatureTaskAtom = atom(
         });
     },
 );
-
-function collectionItemCount(libraryID: number, key: string): number | null {
-    try {
-        const collection = Zotero.Collections.getByLibraryAndKey(libraryID, key);
-        if (!collection) return null;
-        return collection.getChildItems(false, false).filter((item: Zotero.Item) => item.isRegularItem()).length;
-    } catch (error) {
-        logger(`featureCredits: could not count collection items: ${String(error)}`, 2);
-        return null;
-    }
-}
 
 const ANNOTATABLE_KINDS = new Set(['pdf', 'epub', 'snapshot']);
 
@@ -158,12 +159,11 @@ function childAttachments(item: Zotero.Item): Zotero.Item[] {
     }
 }
 
-/** What the chat input has attached, for the setup card's first step. */
-export const featureTaskAttachmentSummaryAtom = atom<AttachmentSummary>((get) => {
+/** The papers the chat input carries, for the setup card's "Choose a PDF" step. */
+export const featureTaskAttachedPapersAtom = atom<AttachedPaper[]>((get) => {
     get(messageItemDataRevisionAtom);
     const items = get(currentMessageItemsAtom);
     const reader = get(currentReaderAttachmentAtom);
-    const collections = get(currentMessageCollectionsAtom);
     // Read the results map itself, not `getItemValidationAtom`: through that
     // derived getter, this atom's subscribers were not notified when a check
     // finished, and the card kept showing "Checking".
@@ -189,32 +189,47 @@ export const featureTaskAttachmentSummaryAtom = atom<AttachmentSummary>((get) =>
     for (const item of items) add(item);
     if (reader) add(reader);
 
-    const summaries: AttachmentSummary['collections'] = [];
-    const seenCollections = new Set<string>();
-    const addCollection = (name: string, libraryID: number | null, key: string) => {
-        if (libraryID) {
-            const id = `${libraryID}-${key}`;
-            if (seenCollections.has(id)) return;
-            seenCollections.add(id);
-        }
-        summaries.push({ name, itemCount: libraryID ? collectionItemCount(libraryID, key) : null });
-    };
-    for (const collection of collections) {
-        addCollection(collection.name, resolveLibraryRef(collection) ?? null, collection.zotero_key);
-    }
-    // A collection dragged into the chat input, or picked under "Filter by
-    // Collections", is kept as a filter; it scopes the message the same way.
-    for (const collectionID of get(currentMessageFiltersAtom).collectionIds) {
-        try {
-            const collection = Zotero.Collections.get(collectionID);
-            if (collection) addCollection(collection.name, collection.libraryID, collection.key);
-        } catch {
-            // A filter for a collection deleted since: nothing to show.
-        }
-    }
-
-    return {
-        papers: [...papers.values()].map(({ name, files }) => ({ name, document: combineDocumentStatuses(files) })),
-        collections: summaries,
-    };
+    return [...papers.values()].map(({ name, files }) => ({ name, document: combineDocumentStatuses(files) }));
 });
+
+/** The open setup card's steps, or null while no task's setup is open. */
+export const featureTaskSetupStepsAtom = atom<SetupStep[] | null>((get) => {
+    const key = get(activeFeatureTaskAtom);
+    const definition = key ? getFeatureCreditTask(key) : undefined;
+    if (!definition) return null;
+    const content = get(currentMessageContentAtom);
+    // A picked example counts once its topic placeholder is replaced.
+    const usesPlaceholder = definition.examples.some((example) => example.text.includes(TOPIC_PLACEHOLDER));
+    return setupSteps({
+        definition,
+        papers: definition.attach === 'pdf' ? get(featureTaskAttachedPapersAtom) : [],
+        onBeaverModel: get(isUsingBeaverCreditsAtom),
+        hasInstruction: hasTextBesidesPills(content, get(currentMessagePillsAtom))
+            && !(usesPlaceholder && content.includes(TOPIC_PLACEHOLDER)),
+    });
+});
+
+/**
+ * Why Send waits for the open setup card: the first required step not yet
+ * done, or null. Applies only while the message would start the task (its
+ * setup is open, the task is not done and its /command is in the chat
+ * input); the action itself runs without these steps elsewhere.
+ */
+export const featureTaskSendBlockAtom = atom<ActionRequirementBlock | null>((get) => {
+    const key = get(activeFeatureTaskAtom);
+    if (!key) return null;
+    const entry = get(featureCreditEntriesAtom)?.find(({ definition }) => definition.key === key);
+    if (!entry || entry.task.completed_at) return null;
+    if (!get(currentMessagePillsAtom).some((pill) => pill.actionId === entry.definition.actionId)) return null;
+    const steps = get(featureTaskSetupStepsAtom);
+    const hint = steps && sendHoldHint(steps);
+    return hint ? { hint } : null;
+});
+
+/**
+ * Why the composer holds Send, or null: an open setup step first (the step
+ * the card accents), then a /command whose action needs text it lacks.
+ */
+export const composerSendBlockAtom = atom<ActionRequirementBlock | null>(
+    (get) => get(featureTaskSendBlockAtom) ?? get(actionRequirementBlockAtom),
+);

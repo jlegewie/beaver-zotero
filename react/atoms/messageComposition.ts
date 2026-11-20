@@ -19,7 +19,7 @@ import { InvalidItemsMessageContent } from '../components/ui/popup/InvalidItemsM
 import { agentItemFilter } from "../../src/utils/agentItemSupport";
 import { getCurrentReader } from "../utils/readerUtils";
 import { TextSelection, zoteroReferenceLookupKeys, messageAttachmentKey, type ViewAttachment } from "@beaver/agent-core/types/attachments/apiTypes";
-import { ZoteroTag, CollectionReference } from "@beaver/agent-core/types/zotero";
+import { ZoteroTag, CollectionReference, collectionReferenceKey } from "@beaver/agent-core/types/zotero";
 import type { ExternalFileRecord } from "../../src/services/database";
 import { currentNoteItemAtom } from "./zoteroContext";
 import type { SlashCommandDescriptor } from "@beaver/agent-ui/composer/slashCommands";
@@ -452,6 +452,23 @@ export const removeItemFromMessageAtom = atom(
         set(removePopupMessageAtom, item.key);
     }
 );
+
+/**
+ * Remove the items and collections the chat input took from the Zotero
+ * selection, keeping those the user added.
+ */
+export const removeAutomaticAttachmentsAtom = atom(null, (get, set) => {
+    const automaticItemKeys = get(automaticMessageItemKeysAtom);
+    for (const item of get(currentMessageItemsAtom)) {
+        if (automaticItemKeys.has(messageItemKey(item))) set(removeItemFromMessageAtom, item);
+    }
+    const automaticCollections = get(automaticMessageCollectionsAtom);
+    if (automaticCollections.length > 0) {
+        const keys = new Set(automaticCollections.map(collectionReferenceKey));
+        set(currentMessageCollectionsAtom, (collections) => collections.filter((collection) => !keys.has(collectionReferenceKey(collection))));
+        set(automaticMessageCollectionsAtom, []);
+    }
+});
 
 /**
 * Remove all editable context from the current message at once.
