@@ -470,6 +470,45 @@ describe('one sidebar for library and reader tabs', () => {
         done();
     });
 
+    it('lets the other side of the splitter fill what the sidebar leaves, and gives it its width back', async () => {
+        prefs.values.sidebarWidth = 780;
+        const { win, uiManager, itemPane, done } = await setup();
+        // A drag made while the sidebar was hidden sized both sides for Zotero's own pane width.
+        const itemsPane = win.document.createElement('div');
+        itemsPane.setAttribute('width', '924');
+        itemsPane.style.width = '924px';
+        const splitter = win.document.createElement('splitter');
+        itemPane.before(itemsPane, splitter);
+
+        uiManager.updateUI({ isVisible: true, isLibraryTab: true });
+        expect(itemPane.style.width).toBe('780px');
+        expect(itemsPane.style.width).toBe('');
+        expect(itemsPane.getAttribute('width')).toBe('924');
+
+        // Closed without a drag, it gets its width back too.
+        uiManager.updateUI({ isVisible: false, isLibraryTab: true });
+        expect(itemsPane.style.width).toBe('924px');
+        uiManager.updateUI({ isVisible: true, isLibraryTab: true });
+        expect(itemsPane.style.width).toBe('');
+
+        // A drag writes both sides again.
+        splitter.dispatchEvent(new win.MouseEvent('mousedown', { bubbles: true }));
+        itemsPane.style.width = '600px';
+        itemPane.setAttribute('width', '700');
+        itemPane.style.width = '700px';
+        await settle();
+        splitter.dispatchEvent(new win.MouseEvent('mouseup', { bubbles: true }));
+        await settle();
+        expect(itemPane.style.width).toBe('700px');
+        expect(itemsPane.style.width).toBe('');
+
+        uiManager.updateUI({ isVisible: false, isLibraryTab: true });
+        expect(itemPane.style.width).toBe('337px');
+        expect(itemsPane.style.width).toBe('924px');
+        expect(itemsPane.getAttribute('width')).toBe('924');
+        done();
+    });
+
     it('takes a splitter drag that ends on the width Zotero persists', async () => {
         prefs.values.sidebarWidth = 420;
         const { win, uiManager, itemPane, done } = await setup();
