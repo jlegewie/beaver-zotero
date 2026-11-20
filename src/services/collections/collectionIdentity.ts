@@ -89,6 +89,42 @@ export function serializeCollectionReadIdentity(collection: Zotero.Collection): 
     };
 }
 
+export interface CollectionAncestor {
+    collection_key: string;
+    collection_id?: string;
+    name: string;
+}
+
+const MAX_COLLECTION_DEPTH = 64;
+
+/**
+ * The collection's ancestors, top-level first and immediate parent last.
+ * Returns undefined for a top-level collection and for any chain that cannot
+ * be walked completely (missing or trashed ancestor, cycle, depth cap), so
+ * callers never send a partial path. `collection_id` is omitted when the
+ * library has no portable mapping on this computer.
+ */
+export function serializeCollectionAncestors(collection: Zotero.Collection): CollectionAncestor[] | undefined {
+    if (!collection.parentKey) return undefined;
+    const ref = libraryRefForLibraryID(collection.libraryID);
+    const ancestors: CollectionAncestor[] = [];
+    const seen = new Set<string>([collection.key]);
+    let parentKey: string | false | undefined = collection.parentKey;
+    while (parentKey) {
+        if (seen.has(parentKey) || ancestors.length >= MAX_COLLECTION_DEPTH) return undefined;
+        seen.add(parentKey);
+        const parent = Zotero.Collections.getByLibraryAndKey(collection.libraryID, parentKey);
+        if (!parent || parent.deleted) return undefined;
+        ancestors.push({
+            collection_key: parent.key,
+            ...(ref ? { collection_id: `${ref}-${parent.key}` } : {}),
+            name: parent.name,
+        });
+        parentKey = parent.parentKey;
+    }
+    return ancestors.reverse();
+}
+
 function allowedLibraries(scope: CollectionScope): number[] {
     const accessible = scope.access === 'local'
         ? Zotero.Libraries.getAll().map(library => library.libraryID)

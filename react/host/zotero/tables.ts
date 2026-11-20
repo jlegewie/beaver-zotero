@@ -207,7 +207,7 @@ async function readDisplayedTable(key: string): Promise<DisplayedTable> {
 /** Local display only; submission validates access through the provider separately. */
 export async function resolveTableDisplay(key: string): Promise<TableDisplay> {
     const read = await readDisplayedTable(key);
-    if (read.status === "unavailable") return { status: "unavailable", reason: read.reason };
+    if (read.status === "unavailable") return read;
     return {
         status: "available",
         title: read.title,

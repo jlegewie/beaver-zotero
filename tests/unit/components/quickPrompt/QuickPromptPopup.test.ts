@@ -189,7 +189,7 @@ describe('QuickPromptPopup', () => {
 
     it('does not hand focus back into the sidebar it closed', async () => {
         const sidebar = document.createElement('div');
-        sidebar.id = 'beaver-react-root-library';
+        sidebar.id = 'beaver-react-root-sidebar';
         const composer = document.createElement('button');
         sidebar.appendChild(composer);
         document.body.appendChild(sidebar);

@@ -189,6 +189,14 @@ const PARK_SETTLE_WAIT_MS = 1500;
  */
 export type ParkOutcome = 'ended' | 'sent' | 'refused' | 'unavailable';
 
+/** A run of this client that started waiting live for a job (`job_wait_request`). */
+export interface LiveJobWait {
+    runId: string;
+    threadId: string | null;
+    toolCallId: string;
+    jobId: string;
+}
+
 interface ConnectionAttemptState {
     stage: ConnectionFailureStage;
     socketOpened: boolean;
@@ -305,6 +313,7 @@ export class AgentService {
      * hung handler cannot keep sending keepalives on a replacement socket.
      */
     private pendingKeepalives: Map<string, RequestKeepalive> = new Map();
+    private jobWaitListeners = new Set<(wait: LiveJobWait) => void>();
     private activeKeepalives: Set<RequestKeepalive> = new Set();
     /**
      * Map of backend data-request event -> handler. Injectable so a non-Zotero
@@ -1174,6 +1183,16 @@ export class AgentService {
     }
 
     /**
+     * Follow the job waits this client's runs start (`job_wait_request`), so
+     * the window can wait on the job past the live wait. Returns the
+     * unsubscribe.
+     */
+    onJobWait(listener: (wait: LiveJobWait) => void): () => void {
+        this.jobWaitListeners.add(listener);
+        return () => this.jobWaitListeners.delete(listener);
+    }
+
+    /**
      * Send the `park` frame for `runId` without waiting for an answer, for a
      * client that is going away. Returns false when it could not be sent.
      */
@@ -1952,6 +1971,23 @@ export class AgentService {
                     const tracked = run && requestId !== null
                         ? run.trackReply(requestId, executedAction(eventName, dataEvent))
                         : null;
+                    // A job the run waits for live: the window follows it past
+                    // the live wait (`onJobWait`).
+                    if (eventName === 'job_wait_request' && requestId !== null && owner) {
+                        const wait: LiveJobWait = {
+                            runId: owner.runId,
+                            threadId: owner.threadId ?? null,
+                            toolCallId: String(dataEvent?.tool_call_id ?? ''),
+                            jobId: String(dataEvent?.job_id ?? ''),
+                        };
+                        for (const listener of this.jobWaitListeners) {
+                            try {
+                                listener(wait);
+                            } catch (error) {
+                                logger(`AgentService: job wait listener failed: ${String(error)}`, 1);
+                            }
+                        }
+                    }
                     const respond = (response: Record<string, any> | PreparedJsonMessage) => {
                         keepalive.stop();
                         if (run && tracked) {

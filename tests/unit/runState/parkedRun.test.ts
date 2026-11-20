@@ -141,6 +141,26 @@ describe('findOpenParkedRun', () => {
         expect(findOpenParkedRun(runs)?.runId).toBe('parked');
     });
 
+    it('names a resume that parked again without a transcript, its card handed over to a job', () => {
+        const runs = [
+            run('parked', {
+                status: 'parked',
+                model_messages: [callsResponse('parked', 'call-1')],
+                parked: parkedRecord([deferral('call-1', 'table_card')]),
+            }),
+            run('resume', {
+                status: 'parked',
+                model_messages: [],
+                user_prompt: { content: '', resumes_run_id: 'parked' },
+                parked: parkedRecord([deferral('call-1', 'table_fill')]),
+            }),
+        ];
+
+        const open = findOpenParkedRun(runs);
+        expect(open?.runId).toBe('resume');
+        expect(open?.deferrals.map((d) => d.kind)).toEqual(['table_fill']);
+    });
+
     it('is closed by a later run with a transcript, such as a message that superseded the cards', () => {
         const runs = [
             run('parked', {

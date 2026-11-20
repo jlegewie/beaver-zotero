@@ -6,6 +6,7 @@ import { AgentRunView } from "./AgentRunView";
 import { pinToBottom, scrollToBottom } from "../../utils/scrollToBottom";
 import { AT_BOTTOM_EPSILON, BOTTOM_THRESHOLD, scrollAtoms, latchIntentFromDistance, markProgrammaticScroll, measureDistanceFromBottom, publishDistanceFromBottom, publishScrollPosition, resumeFollowing } from "../../utils/scrollPosition";
 import { currentThreadIdAtom, pendingScrollToRunAtom, isLoadingThreadAtom } from "../../atoms/threads";
+import { resolveScrollAnchor } from "../../utils/scrollAnchor";
 import { pendingApprovalsAtom } from "../../agents/agentActions";
 import { store } from "../../store";
 import { useAutoScroll } from "../../hooks/useAutoScroll";
@@ -13,6 +14,14 @@ import { toolExpansionRevisionAtom, messageSourcesVisibilityAtom, annotationPane
 import { logger } from "@beaver/agent-core/platform/logger";
 
 const RESTORE_THRESHOLD = 100; // pixels - threshold for restoring scroll position
+/**
+ * The threshold for restoring a remembered place rather than the bottom. A
+ * place resolved in a wider pane can sit only a few dozen pixels down, and a
+ * newly mounted container starts at the top, so the bottom's threshold would
+ * leave the reader at the wrong text. The remembered place is itself only
+ * re-recorded every 10px of scrolling, so nothing finer is meaningful.
+ */
+const ANCHOR_RESTORE_THRESHOLD = 10; // pixels
 const RESTORE_DEBOUNCE_MS = 50; // ms - debounce delay for scroll restoration
 const ANIMATION_LOCKOUT_MS = 400; // ms - time to wait after animation before allowing restore
 const PENDING_APPROVAL_SCROLL_DELAY = 100; // ms - delay before scrolling for pending approval (allows content to render)
@@ -225,12 +234,15 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                 return;
             }
 
-            // No remembered offset means the bottom — the reader was following
+            // No remembered place means the bottom — the reader was following
             // the response when this thread was last shown, or has never opened
             // it. Taken from the container now rather than remembered as an
             // offset, because the bottom has moved if the response kept
-            // arriving while the pane was closed.
-            const targetScrollTop = store.get(scrollPositionAtom) ?? container.scrollHeight;
+            // arriving while the pane was closed. A remembered place is
+            // resolved against the current layout: the other sidebar, or a
+            // resized pane, wraps the same text to a different height.
+            const anchor = store.get(scrollPositionAtom);
+            const targetScrollTop = anchor ? resolveScrollAnchor(container, anchor) : container.scrollHeight;
             const delta = Math.abs(container.scrollTop - targetScrollTop);
             
             // Check if this is a thread switch
@@ -238,7 +250,7 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
 
             // Only restore if there's a significant difference (e.g., thread switch)
             // Use a larger threshold to avoid oscillation near boundaries
-            if (delta > RESTORE_THRESHOLD) {
+            if (delta > (anchor ? ANCHOR_RESTORE_THRESHOLD : RESTORE_THRESHOLD)) {
                 restoredFromAtomRef.current = true;
                 container.scrollTop = targetScrollTop;
                 // A restore usually moves the container a long way back, which

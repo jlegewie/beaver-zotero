@@ -55,10 +55,10 @@ describe('reader tab tracking mount point', () => {
         expect(source).toMatch(/useReaderTabSelection\(\)/);
     });
 
-    it('is not mounted by the reader sidebar', () => {
+    it('is not mounted by the sidebar', () => {
         // Mounting it there ties reader context to the sidebar, which leaves the
         // separate window with no current attachment, page, or text selection.
-        const source = readSource('react/components/ReaderSidebar.tsx');
+        const source = readSource('react/components/MainSidebar.tsx');
 
         expect(source).not.toMatch(/useReaderTabSelection\(\)/);
     });

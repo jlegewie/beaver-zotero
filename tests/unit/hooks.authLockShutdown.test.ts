@@ -167,6 +167,10 @@ function setupGlobals() {
             addObserver: vi.fn(),
             removeObserver: vi.fn(),
         },
+        wm: {
+            addListener: vi.fn(),
+            removeListener: vi.fn(),
+        },
     };
 
     (globalThis as any).Cc = {
@@ -193,6 +197,7 @@ function setupGlobals() {
         runtime: new BeaverInstance(),
         mutations: { cancelOwner: vi.fn(), dispose: vi.fn().mockResolvedValue(undefined) },
         itemImport: { dispose: vi.fn() },
+        images: { dispose: vi.fn() },
         notePreviews: { detachOwner: vi.fn().mockResolvedValue(undefined) },
         syncPause: { releaseWindow: vi.fn(), scheduleResumeAfterRun: vi.fn(), resumeSyncNow: vi.fn() },
         transactionWatch: { start: vi.fn(), stop: vi.fn(), openAgeMs: vi.fn(() => 0) },
@@ -215,6 +220,7 @@ function setupGlobals() {
     Object.assign(globalThis.Zotero, {
         getMainWindows: vi.fn(() => []),
         getMainWindow: vi.fn(() => null),
+        logError: vi.fn(),
         __beaverShuttingDown: false,
         Beaver: {},
     });
@@ -287,6 +293,8 @@ describe('hooks auth lock shutdown cleanup', () => {
         vi.resetModules();
         vi.clearAllMocks();
         setupGlobals();
+        // No `compileScript`: renderers load their bundle with a script tag.
+        (globalThis as any).ChromeUtils = {};
         mockDisposeMuPDFWorker.mockResolvedValue(undefined);
     });
 
@@ -308,6 +316,67 @@ describe('hooks auth lock shutdown cleanup', () => {
         expect(Zotero.PreferencePanes.register).toHaveBeenCalledOnce();
         const prefs = await import('../../src/utils/prefs');
         expect(prefs.clearPref).toHaveBeenCalledWith('backgroundProcessingContinuous');
+    });
+
+    describe('main windows opened after startup', () => {
+        async function startWatching() {
+            (globalThis as any).Services.startup.shuttingDown = false;
+            (Zotero as any).DBConnection = vi.fn(function () { return { test: vi.fn().mockResolvedValue(undefined) }; });
+            (Zotero as any).PreferencePanes = { register: vi.fn().mockResolvedValue(undefined) };
+            const hooks = await loadHooks();
+            await hooks.onStartup();
+            const listener = vi.mocked((globalThis as any).Services.wm.addListener).mock.calls[0]?.[0];
+            expect(listener).toBeDefined();
+            return { hooks, listener };
+        }
+
+        function openWindow(listener: any, pane: Record<string, unknown>) {
+            let onLoad: (() => void) | undefined;
+            const win: any = {
+                EventTarget,
+                closed: false,
+                location: { href: 'chrome://zotero/content/zoteroPane.xhtml' },
+                document: { getElementById: vi.fn(() => null), querySelector: vi.fn(() => null) },
+                ZoteroPane: pane,
+                addEventListener: vi.fn((type: string, handler: () => void) => { if (type === 'load') onLoad = handler; }),
+                removeEventListener: vi.fn(),
+            };
+            listener.onOpenWindow({ docShell: { domWindow: win } });
+            return { win, load: () => onLoad?.() };
+        }
+
+        it('attaches a Zotero 11 window that opens without a library view, once Zotero has set it up', async () => {
+            const { listener } = await startWatching();
+            let paneLoaded!: () => void;
+            const { win, load } = openWindow(listener, {
+                libraryViews: [],
+                loadedPromise: new Promise<void>(resolve => { paneLoaded = resolve; }),
+            });
+            load();
+            await Promise.resolve();
+            expect((globalThis as any).addon.runtime.getWindow(win)).toBeUndefined();
+            paneLoaded();
+            await vi.waitFor(() => expect((globalThis as any).addon.runtime.getWindow(win)).toBeDefined());
+        });
+
+        it('leaves Zotero 7–10 windows to Zotero\'s own load notification', async () => {
+            const { listener } = await startWatching();
+            const { win, load } = openWindow(listener, { loadedPromise: Promise.resolve() });
+            load();
+            await new Promise(resolve => setTimeout(resolve, 0));
+            expect((globalThis as any).addon.runtime.getWindow(win)).toBeUndefined();
+        });
+
+        it('stops attaching windows once Beaver shuts down', async () => {
+            const { hooks, listener } = await startWatching();
+            const { win, load } = openWindow(listener, { libraryViews: [], loadedPromise: Promise.resolve() });
+            (globalThis as any).Services.startup.shuttingDown = true;
+            await hooks.onShutdown();
+            expect((globalThis as any).Services.wm.removeListener).toHaveBeenCalledWith(listener);
+            load();
+            await new Promise(resolve => setTimeout(resolve, 0));
+            expect((globalThis as any).addon.runtime.getWindow(win)).toBeUndefined();
+        });
     });
 
     it('holds the quit until running table fills have flushed, and disposes the account after', async () => {

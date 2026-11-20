@@ -123,6 +123,10 @@ import {
     wsRetryAtom,
     resetRunSelectorCaches,
 } from '@beaver/agent-core/run-state/atoms';
+import { isJobDeferral } from '@beaver/agent-core/protocol/jobCallProtocol';
+import { chatFillsAtom } from '@beaver/agent-core/run-state/tableChatFills';
+import { jobWaitAtom, settleJobWait } from './jobWait';
+import { leaveJobWait } from './jobLeave';
 import {
     createStreamActivityTracker,
     streamQuietAtom,
@@ -1839,8 +1843,9 @@ export function createWSCallbacks(
         settleLiveCardAnswers(set, finishedParked);
         settleRunCards(store.get, set);
         // Answers queued behind a resume that parked again but lost its
-        // connection before `done` go out now, as `onDone` would send them.
-        if (store.get(parkedAnswerQueueAtom).size > 0) scheduleParkedAnswerFlush();
+        // connection before `done` go out now, as `onDone` would send them,
+        // and so does a fill result that arrived meanwhile.
+        if (store.get(parkedAnswerQueueAtom).size > 0 || store.get(jobWaitAtom)) scheduleParkedAnswerFlush();
     };
 
     /**
@@ -2111,8 +2116,10 @@ export function createWSCallbacks(
             }
 
             // Surface an OS-native notification if the user can't currently see
-            // the completed response (e.g. working in another app).
-            notifyRunComplete();
+            // the completed response (e.g. working in another app). A run that
+            // parked has not finished: it waits on a card (whose own
+            // notification asked for it) or on a fill (its resume notifies).
+            if (!event.parked) notifyRunComplete();
         },
 
         onRunCitations: (event: WSRunCitationsEvent) => {
@@ -2200,6 +2207,8 @@ export function createWSCallbacks(
                 set(removeApprovalResponseIntentAtom, actionId);
                 set(unmarkApprovalStaleAtom, actionId);
             }
+            // The window keeps waiting on a fill only when the run parked on it.
+            settleJobWait(completed);
             settleRunCards(store.get, set);
             if (completed?.parked) scheduleParkedAnswerFlush();
             else set(clearParkedAnswersAtom);
@@ -3972,6 +3981,9 @@ export const closeWSConnectionAtom = atom(null, async (get, set) => {
     // back. Until the server confirms, the chat waits for it.
     const activeRun = get(activeRunAtom);
     const stopIsHeld = !!activeRun && isRunActive(activeRun) && agentService.isReattaching(activeRun.id);
+    // The stopped run no longer waits on its fill (its abort stops it), and
+    // the run's own end is not heard once its callbacks are revoked.
+    if (activeRun && get(jobWaitAtom)?.runId === activeRun.id) set(jobWaitAtom, null);
     set(abandonActiveRunLocallyAtom);
     if (stopIsHeld) {
         heldStopRunIds.add(activeRun.id);
@@ -4005,6 +4017,9 @@ export const closeWSConnectionForShutdownAtom = atom(
     ) => {
         // Latch first: a send still preparing has nothing to close or abandon.
         clientShutDown = true;
+        // A window closing while Zotero runs on leaves the fill it waits on to
+        // a table still on screen, or stops it. On a quit Zotero stops it.
+        if (!Zotero.__beaverShuttingDown) leaveJobWait({ closing: tryGetWindowRuntime(true)?.hostWindow ?? null });
         if (!agentService.isConnected() && connectLoopsInFlight === 0) { releaseWriter(); return; }
         // A run waiting only on cards parks rather than ending with the
         // client, so they can be answered next time. Best effort: the server
@@ -4528,6 +4543,50 @@ function scheduleParkedAnswerFlush(): void {
 let parkedResumeStarting = false;
 
 /**
+ * The fill result that resumes the open chat's parked run: the fill this
+ * window waits on ended, and its call is parked. Read as the resume goes
+ * out, so the result is filtered by the library scope as it is then.
+ */
+function jobResumeAnswer(get: Getter): { toolCallId: string; answer: ParkedCardAnswer } | null {
+    const wait = get(jobWaitAtom);
+    if (!wait || wait.threadId !== get(currentThreadIdAtom)) return null;
+    const snapshot = get(chatFillsAtom).get(wait.jobId)?.snapshot;
+    if (snapshot?.state !== 'done' || !snapshot.result) return null;
+    const parked = get(openParkedRunAtom)?.deferrals.some(
+        (deferral) => deferral.tool_call_id === wait.toolCallId && isJobDeferral(deferral),
+    );
+    const agent = Zotero.Beaver?.tableFills?.agent;
+    if (!parked || !agent) return null;
+    return { toolCallId: wait.toolCallId, answer: agent.doneAnswer(snapshot, `resume-${wait.toolCallId}`) };
+}
+
+/** Fill resumes the server was not ready for yet, in a row. */
+let jobResumeRetries = 0;
+const JOB_RESUME_RETRIES = 4;
+
+/**
+ * A fill resume that did not start: the server may still hold the chat for
+ * the run that just parked. Try again shortly, a few times; then the window
+ * stops waiting, and the next message closes the fill's call instead.
+ */
+function retryJobResume(set: Setter): void {
+    if (jobResumeRetries >= JOB_RESUME_RETRIES) {
+        jobResumeRetries = 0;
+        set(jobWaitAtom, null);
+        return;
+    }
+    setTimeout(scheduleParkedAnswerFlush, 1000 * 2 ** jobResumeRetries++);
+}
+
+/**
+ * The fill this window waits on may have ended: resume its parked run with
+ * the result, at once or once the run still landing has ended.
+ */
+export function requestJobResume(): void {
+    scheduleParkedAnswerFlush();
+}
+
+/**
  * Whether a run of this window is going or still landing, so a resume has to
  * wait for it: `onDone` sends what was queued meanwhile.
  */
@@ -4547,7 +4606,8 @@ function parkedResumeBlocked(get: Getter): boolean {
  */
 export const flushParkedAnswersAtom = atom(null, async (get, set) => {
     const queue = get(parkedAnswerQueueAtom);
-    if (queue.size === 0 || parkedResumeBlocked(get)) return;
+    const job = jobResumeAnswer(get);
+    if ((queue.size === 0 && !job) || parkedResumeBlocked(get)) return;
     const threadId = get(currentThreadIdAtom);
     const open = get(openParkedRunAtom);
     const answers: Record<string, ParkedCardAnswer> = {};
@@ -4556,6 +4616,8 @@ export const flushParkedAnswersAtom = atom(null, async (get, set) => {
             answers[toolcallId] = queued.answer;
         }
     }
+    const jobCallId = job?.toolCallId ?? null;
+    if (job) answers[job.toolCallId] = job.answer;
     set(parkedAnswerQueueAtom, new Map());
     if (!open || Object.keys(answers).length === 0) {
         set(syncParkedCardsAtom);
@@ -4566,13 +4628,16 @@ export const flushParkedAnswersAtom = atom(null, async (get, set) => {
     let started = false;
     try {
         started = (await withThreadWriter(get, set, guardedSet =>
-            startParkedResumeOwned(get, guardedSet, open, answers))) ?? false;
+            startParkedResumeOwned(get, guardedSet, open, answers, jobCallId))) ?? false;
     } finally {
         parkedResumeStarting = false;
         if (!started) {
             // Nothing was sent: the cards are still open, and answerable again.
             set(parkedAnswersInFlightAtom, new Set<string>());
             set(syncParkedCardsAtom);
+            if (jobCallId) retryJobResume(set);
+        } else {
+            jobResumeRetries = 0;
         }
         if (get(parkedAnswerQueueAtom).size > 0) scheduleParkedAnswerFlush();
     }
@@ -4584,15 +4649,24 @@ export const flushParkedAnswersAtom = atom(null, async (get, set) => {
  *
  * Like a continuation it carries no message: `deferred_results` names the
  * cards it answers and `resumes_run_id` the run it continues. The cards still
- * open stay on screen and answerable while it runs.
+ * open stay on screen and answerable while it runs. `jobCallId` names a
+ * fill's call the answers include: the window's wait on it ends here.
  */
 async function startParkedResumeOwned(
     get: Getter,
     set: Setter,
     open: OpenParkedRun,
     answers: Record<string, ParkedCardAnswer>,
+    jobCallId: string | null = null,
 ): Promise<boolean> {
     const logPrefix = 'resumeParkedRun';
+    // A fill's wait the user ended (Stop, leaving) while the resume was being admitted.
+    if (jobCallId && get(jobWaitAtom)?.toolCallId !== jobCallId) {
+        const { [jobCallId]: _ended, ...rest } = answers;
+        if (!Object.keys(rest).length) return false;
+        answers = rest;
+        jobCallId = null;
+    }
     if (retryCommitInFlight(get, logPrefix)) return false;
     if (get(isRunReconnectingAtom)) {
         logger(`${logPrefix}: Blocked — the active run is reconnecting`, 1);
@@ -4605,7 +4679,7 @@ async function startParkedResumeOwned(
         logger(`${logPrefix}: No model, user or thread`, 1);
         return false;
     }
-    logger(`${logPrefix}: Resuming parked run ${open.runId} with ${Object.keys(answers).length} answer(s)`, 1);
+    logger(`${logPrefix}: Resuming parked run ${open.runId} with ${Object.keys(answers).length} answer(s)${jobCallId ? ', one a fill result' : ''}`, 1);
 
     let newRunId: string | null = null;
     try {
@@ -4615,6 +4689,8 @@ async function startParkedResumeOwned(
         set(prepareForNewRunAtom, { keepParkedCards: true });
         prewarmMuPDFWorker();
         set(isWSChatPendingAtom, true);
+        // The window no longer waits on the fill: the resume carries it on.
+        if (jobCallId) set(jobWaitAtom, null);
 
         const { run, request } = createAgentRunShell(
             { content: '', deferred_results: answers, resumes_run_id: open.runId },

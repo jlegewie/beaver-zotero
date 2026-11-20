@@ -6,15 +6,20 @@
  * Kept free of the action and agent-run atoms so both can import it.
  */
 import { atom, type createStore } from 'jotai';
-import type { PromptAction } from '@beaver/agent-core/agents/types';
+import { isRunActive, type PromptAction } from '@beaver/agent-core/agents/types';
 import type { FeatureCreditGrant } from '@beaver/agent-core/protocol/agentProtocol';
-import { currentThreadIdAtom } from '@beaver/agent-core/run-state/atoms';
-import { activeRunIdAtom } from '@beaver/agent-core/run-state/tableChatFills';
+import { activeRunAtom, currentThreadIdAtom } from '@beaver/agent-core/run-state/atoms';
 import { composerResetTokenAtom } from './messageComposition';
 import { accountGenerationAtom } from './profile';
 import { getFeatureCreditTask } from '../constants/featureCreditTasks';
 
 type Store = ReturnType<typeof createStore>;
+
+/** The id of the thread's run while it is active; changes only when that run starts or ends. */
+const activeRunIdAtom = atom((get) => {
+    const run = get(activeRunAtom);
+    return isRunActive(run) ? run!.id : null;
+});
 
 const activeFeatureTaskStateAtom = atom<{ key: string; composerResetToken: number } | null>(null);
 

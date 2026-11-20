@@ -83,10 +83,10 @@ export function extractZoteroReferencesFromToolCall(part: ToolCallPart): ZoteroI
  * Maps tool_name to a human-readable base label.
  */
 export const TOOL_BASE_LABELS: Record<string, string> = {
-    create_table: 'Create table',
+    create_table: 'Create Table',
     read_table: 'Read table',
-    edit_table: 'Edit table',
-    fill_table: 'Fill table',
+    edit_table: 'Edit Table',
+    fill_table: 'Fill Table',
     // Search tools
     item_search: 'Item search',
     item_search_by_topic: 'Item search',

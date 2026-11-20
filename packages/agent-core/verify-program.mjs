@@ -176,6 +176,9 @@ if (!parsed.options.lib || nonEsLibs.length > 0) {
 // `protocol/tableFillProtocol.ts` (the fill endpoint and the plugin's fill job)
 // are roots for the same reason: a client plans and shows fills with them, and
 // nothing inside the package runs one.
+// `protocol/jobCallProtocol.ts` and `run-state/jobCalls.ts` (job calls: the
+// wire shapes and the open thread's job calls) are roots too: a client runs
+// jobs and shows them, and nothing inside the package does.
 // `identity/itemLinks.ts` parses the Zotero object links the model writes in
 // chat markdown. Clients render and export them; nothing inside the package
 // follows a link, so it is a root too.
@@ -226,6 +229,8 @@ const entryPaths = [
   "src/layouts/tableFill.ts",
   "src/layouts/tableEdit.ts",
   "src/protocol/tableFillProtocol.ts",
+  "src/protocol/jobCallProtocol.ts",
+  "src/run-state/jobCalls.ts",
   "src/layouts/tableCitations.ts",
   "src/layouts/tableExport.ts",
   "src/identity/itemLinks.ts",

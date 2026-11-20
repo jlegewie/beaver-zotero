@@ -63,7 +63,10 @@ export function findOpenParkedRun(
 ): OpenParkedRun | null {
     for (let index = runs.length - 1; index >= 0; index--) {
         const run = runs[index];
-        if (isRunActive(run) || !run.model_messages?.length) continue;
+        // A run without a transcript never reached the model, except a resume
+        // that parked again before it did: its approved card's call was handed
+        // over to a job, and its parked record holds the open calls.
+        if (isRunActive(run) || (!run.model_messages?.length && !run.parked)) continue;
         const parked = run.parked;
         if (!parked || parked.version !== PARKED_RUN_VERSION || !Array.isArray(parked.requests)) return null;
 

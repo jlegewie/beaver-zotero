@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { applyReaderPaneVisibility } from '../../../react/utils/zoteroLayout';
+import { readerMountParent, restoreReaderSiblings } from '../../../react/utils/zoteroLayout';
 
 class TestStyle {
     display = '';
@@ -66,10 +66,19 @@ function createWindow(root: TestElement): Window {
     return { document: new TestDocument([root]) } as unknown as Window;
 }
 
-describe('applyReaderPaneVisibility', () => {
+describe('reader pane helpers', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         setLayout('standard');
+    });
+
+    it('places the sidebar in the context pane, or in its inner strip in the stacked layout', () => {
+        const ctxPane = new TestElement('zotero-context-pane');
+        const ctxInner = new TestElement('zotero-context-pane-inner');
+        ctxPane.appendChild(ctxInner);
+        expect(readerMountParent(createWindow(ctxPane))).toBe(ctxPane);
+        setLayout('stacked');
+        expect(readerMountParent(createWindow(ctxPane))).toBe(ctxInner);
     });
 
     it('restores standard reader content when the Beaver pane has already been removed', () => {
@@ -79,7 +88,7 @@ describe('applyReaderPaneVisibility', () => {
         ctxPane.appendChild(deck);
         ctxPane.appendChild(sidenav);
 
-        applyReaderPaneVisibility(createWindow(ctxPane), false);
+        restoreReaderSiblings(createWindow(ctxPane));
 
         expect(deck.style.display).toBe('');
         expect(sidenav.style.display).toBe('');
@@ -95,25 +104,25 @@ describe('applyReaderPaneVisibility', () => {
         ctxInner.appendChild(deck);
         ctxInner.appendChild(sidenav);
 
-        applyReaderPaneVisibility(createWindow(ctxPane), false);
+        restoreReaderSiblings(createWindow(ctxPane));
 
         expect(deck.style.display).toBe('');
         expect(sidenav.style.display).toBe('');
     });
 
-    it('restores both possible reader parents when hiding an existing Beaver pane', () => {
+    it('restores both possible reader parents and leaves the sidebar alone', () => {
         setLayout('standard');
         const ctxPane = new TestElement('zotero-context-pane');
         const standardContent = new TestElement('standard-reader-content', 'none');
         const ctxInner = new TestElement('zotero-context-pane-inner');
         const stackedContent = new TestElement('stacked-reader-content', 'none');
-        const beaver = new TestElement('beaver-pane-reader');
+        const beaver = new TestElement('beaver-pane-sidebar', 'none');
         ctxPane.appendChild(standardContent);
         ctxPane.appendChild(ctxInner);
         ctxInner.appendChild(stackedContent);
         ctxPane.appendChild(beaver);
 
-        applyReaderPaneVisibility(createWindow(ctxPane), false);
+        restoreReaderSiblings(createWindow(ctxPane));
 
         expect(standardContent.style.display).toBe('');
         expect(stackedContent.style.display).toBe('');
