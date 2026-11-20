@@ -82,7 +82,7 @@ import {
     TableIcon,
 } from '../../icons/icons';
 import AddSourcesMenu, { type AddSourcesTarget } from '../../ui/menus/AddSourcesMenu';
-import { TableCardFillWarnings, TableCardReceipt, useFillPricing } from './TableCardCost';
+import { TableCardFillWarnings, TableCardReceipt, useFillPricing, useShortWindow } from './TableCardCost';
 import { describeItems, resolveItems, resolveLibraryScope } from './liveSources';
 import { previewFacts } from '@beaver/agent-core/layouts/tableEdit';
 import type { SourceEntry } from '@beaver/agent-core/layouts/table';
@@ -549,6 +549,7 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
     // The cost of filling: the backend's for the proposal as sent, then
     // computed here from the edited sources at the user's prices.
     const prices = useFillPricing();
+    const shortWindow = useShortWindow();
     const { cost, upperBound } = draftCost(draft, request, prices);
     // An edit the card cannot price yet (prices still loading, or unavailable)
     // holds back the run; unticking the checkbox still creates the table.
@@ -860,7 +861,8 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
     // in flight, or why Create table is disabled (blockers only on the last
     // step, where Create table is). Otherwise, while the run is ticked, the
     // two facts about the fill that change what the user does: a balance that
-    // does not reach, and papers without full text.
+    // does not reach, and papers without full text. In a short window those two
+    // scroll at the end of the content, so the footer leaves the step room.
     const held = disabled && !!heldCaption;
     const blocked = isLast && !!blockerReason && !disabled;
     const fillFacts = isLast && !held && !blocked && fillNow && cost && !upperBound ? cost : null;
@@ -886,7 +888,7 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
                 </button>
             )}
         </div>
-    ) : fillFacts ? (
+    ) : fillFacts && !shortWindow ? (
         <TableCardFillWarnings cost={fillFacts} prices={prices} />
     ) : null;
 
@@ -1044,6 +1046,8 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
                     {stepHeading}
                     {draft.step === 'sources' ? sourcesStep : draft.step === 'screening' ? screeningStep : columnsStep}
                 </div>
+                {/* In a short window the fill's warnings scroll at the end of the content. */}
+                {fillFacts && shortWindow && <TableCardFillWarnings cost={fillFacts} prices={prices} inBody />}
             </div>
 
             <div className="table-card-footer table-card-footer-stack">

@@ -20,7 +20,7 @@ import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import { ArrowUpRightIcon, Icon, Spinner, StopStrokeIcon, TableIcon } from '../../icons/icons';
 import AutoGrowTextarea from './AutoGrowTextarea';
 import { ColumnSummary } from './TableColumnsStep';
-import { TableCardFillWarnings, TableCardReceipt, useFillPricing } from './TableCardCost';
+import { TableCardFillWarnings, TableCardReceipt, useFillPricing, useShortWindow } from './TableCardCost';
 
 const BLOCK_GAP = '0.85rem';
 
@@ -62,6 +62,7 @@ export const TableFillCard: React.FC<TableFillCardProps> = ({ request, onSubmit,
         [cardId, initialDraft, setDrafts],
     );
     const prices = useFillPricing();
+    const shortWindow = useShortWindow();
     const [isDecided, setIsDecided] = useState(false);
     const [openMessage, setOpenMessage] = useState('');
     const [bodyScrolled, setBodyScrolled] = useState(false);
@@ -193,13 +194,15 @@ export const TableFillCard: React.FC<TableFillCardProps> = ({ request, onSubmit,
     }
 
     // The band above the decision: the held answer, or else the fill's
-    // warnings, as on the create card.
-    const bands = disabled && heldCaption ? (
+    // warnings, as on the create card. In a short window the warnings scroll
+    // at the end of the content instead.
+    const held = disabled && !!heldCaption;
+    const bands = held ? (
         <div className="table-card-footer-band table-card-footer-band-pending" role="status">
             <Spinner size={12} />
             <span className="table-card-notice-text">{heldCaption}</span>
         </div>
-    ) : (
+    ) : shortWindow ? null : (
         <TableCardFillWarnings cost={request.cost} prices={prices} />
     );
 
@@ -232,6 +235,7 @@ export const TableFillCard: React.FC<TableFillCardProps> = ({ request, onSubmit,
                         ))}
                     </div>
                 </div>
+                {!held && shortWindow && <TableCardFillWarnings cost={request.cost} prices={prices} inBody />}
             </div>
 
             <div className="table-card-footer table-card-footer-stack">

@@ -4973,6 +4973,18 @@
     font-weight: 600;
 }
 
+/* In a short window the fill warnings close the scrolling content instead,
+ * flush with the card's edges and the footer below them. */
+[id^="beaver-pane-"] .table-card-body-bands {
+    display: flex;
+    flex-direction: column;
+    margin: 0 -0.8rem -0.75rem;
+}
+
+[id^="beaver-pane-"] .table-card-body-bands > .table-card-footer-band:last-child {
+    border-bottom: 0;
+}
+
 /* The decision and its price, side by side: unticking visibly changes it. */
 [id^="beaver-pane-"] .table-card-decision {
     display: flex;

@@ -28,6 +28,15 @@ const mocks = vi.hoisted(() => ({
     describeItems: vi.fn(async (ids: string[]) => ids.map((id) => ({ item_id: id, display_name: `Paper ${id}`, has_pdf: true }))),
     target: null as any,
     openPreferencesWindow: vi.fn(),
+    /** Whether the card's window reads as short (max-height: 500px). */
+    shortWindow: false,
+}));
+
+// The card's window answers the short-window media query from `mocks.shortWindow`.
+vi.mock('../../../react/runtime/SurfaceWindowContext', () => ({
+    useSurfaceWindow: () => ({
+        matchMedia: () => ({ matches: mocks.shortWindow, addEventListener: () => {}, removeEventListener: () => {} }),
+    }),
 }));
 
 vi.mock('../../../react/components/tables/card/liveSources', () => ({
@@ -1151,6 +1160,21 @@ describe('TableCard', () => {
             expect(container.querySelector('.table-card-footer-band')).toBeNull();
         });
 
+        it('in a short window, scrolls the fill warnings with the step and keeps the decision pinned', async () => {
+            mocks.shortWindow = true;
+            try {
+                render({ ...costedFixture('create-items'), cost: { rows: 46, documents: 44, title_abstract: 2, no_input: 0, credits: 9.2 } });
+                await click('Next');
+                const footer = container.querySelector('.table-card-footer')!;
+                const inBody = container.querySelectorAll('.table-card-body .table-card-body-bands .table-card-footer-band-warning');
+                expect(inBody).toHaveLength(2);
+                expect(footer.querySelector('.table-card-footer-band')).toBeNull();
+                expect(footer.querySelector('.table-card-decision')).not.toBeNull();
+            } finally {
+                mocks.shortWindow = false;
+            }
+        });
+
         it('replaces the decision with the blocker and leads to the part that needs the fix', async () => {
             mocks.resolveLibraryScope.mockResolvedValue({
                 resolved: { count: 1, total: 1, truncated: false, without_pdf: 0, sample: [] },
@@ -1344,6 +1368,24 @@ describe('TableCard', () => {
             renderFill({ ...request, columns });
             expect(Array.from(container.querySelectorAll('.table-card-option')).map((chip) => chip.textContent)).toEqual(labels);
             expect(container.textContent).not.toContain('+1');
+        });
+
+        it('in a short window, scrolls its warnings with the columns but keeps the held band pinned', () => {
+            const { request } = read('fill-with-credits');
+            mocks.shortWindow = true;
+            try {
+                renderFill(request);
+                const footer = container.querySelector('.table-card-footer')!;
+                expect(container.querySelectorAll('.table-card-body .table-card-body-bands .table-card-footer-band-warning')).toHaveLength(2);
+                expect(footer.querySelector('.table-card-footer-band')).toBeNull();
+                expect(footer.querySelector('.table-card-decision')).not.toBeNull();
+                act(() => root?.unmount());
+                renderFill(request, { disabled: true, heldCaption: 'You can answer as soon as Beaver reconnects.', onStop: () => {} });
+                expect(container.querySelector('.table-card-footer .table-card-footer-band-pending')).not.toBeNull();
+                expect(container.querySelector('.table-card-body-bands')).toBeNull();
+            } finally {
+                mocks.shortWindow = false;
+            }
         });
 
         it('opens the pricing popover from the receipt', async () => {

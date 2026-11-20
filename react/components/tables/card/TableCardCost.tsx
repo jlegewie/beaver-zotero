@@ -7,6 +7,7 @@ import { isImeKeyEvent } from '@beaver/agent-ui/primitives/ime';
 import { profileWithPlanAtom, remainingBeaverCreditsAtom } from '../../../atoms/profile';
 import { Icon, InformationCircleIcon, SecurityWarningIcon } from '../../icons/icons';
 import { openPreferencesWindow } from '../../../ui/openPreferencesWindow';
+import { useSurfaceWindow } from '../../../runtime/SurfaceWindowContext';
 
 /** How long the card waits before asking for the prices again after a failure. */
 const PRICING_RETRY_MS = 5_000;
@@ -46,21 +47,47 @@ export function useCreditBalance(): number | null {
     return profile ? remaining : null;
 }
 
+/** Window heights at which a card's fill warnings scroll with its content. */
+const SHORT_WINDOW_QUERY = '(max-height: 500px)';
+
+/**
+ * Whether the card's window is short. There the footer would leave the
+ * card's content almost no room, so the fill warnings scroll at the end of
+ * the content; the decision row and the controls stay pinned.
+ */
+export function useShortWindow(): boolean {
+    const win = useSurfaceWindow();
+    // Gecko's matchMedia may return null (for example in a hidden frame).
+    const [short, setShort] = React.useState(() => win.matchMedia(SHORT_WINDOW_QUERY)?.matches ?? false);
+    React.useEffect(() => {
+        const query = win.matchMedia(SHORT_WINDOW_QUERY);
+        if (!query) return;
+        const update = () => setShort(query.matches);
+        update();
+        query.addEventListener('change', update);
+        return () => query.removeEventListener('change', update);
+    }, [win]);
+    return short;
+}
+
 export interface TableCardFillWarningsProps {
     cost: TableCardCost;
     prices: TableFillPricing | null;
+    /** Rendered at the end of the card's scrolling content rather than in its footer. */
+    inBody?: boolean;
 }
 
 /**
- * The footer bands for the two facts about a fill that change what the user
- * does: a balance that does not reach (with Add credits), and items without
- * full text. Renders nothing when neither applies.
+ * The bands for the two facts about a fill that change what the user does: a
+ * balance that does not reach (with Add credits), and items without full
+ * text. Renders nothing when neither applies.
  */
-export const TableCardFillWarnings: React.FC<TableCardFillWarningsProps> = ({ cost, prices }) => {
+export const TableCardFillWarnings: React.FC<TableCardFillWarningsProps> = ({ cost, prices, inBody = false }) => {
     const balance = useCreditBalance();
     const balanceWarning = balanceNotice(cost, balance, prices);
     const readWarning = costNotice(cost);
-    return (
+    if (!balanceWarning && !readWarning) return null;
+    const bands = (
         <>
             {balanceWarning && (
                 <div className="table-card-footer-band table-card-footer-band-warning" role="alert">
@@ -79,6 +106,7 @@ export const TableCardFillWarnings: React.FC<TableCardFillWarningsProps> = ({ co
             )}
         </>
     );
+    return inBody ? <div className="table-card-body-bands">{bands}</div> : bands;
 };
 
 export interface TableCardReceiptProps {
