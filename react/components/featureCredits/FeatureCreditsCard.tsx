@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
-import { ArrowLeftIcon, ArrowRightIcon, CancelIcon, CheckmarkCircleSolidIcon, CircleIcon, HighlighterIcon, Icon, LayersIcon, QuillWriteIcon, TableIcon } from '../icons/icons';
+import { ArrowLeftIcon, ArrowRightIcon, CancelIcon, CheckmarkCircleSolidIcon, CircleIcon, HighlighterIcon, Icon, LayersIcon, QuillWriteIcon, Spinner, TableIcon, TickIcon } from '../icons/icons';
 import {
     featureCreditEntriesAtom,
     featureCreditsCardDismissedAtom,
@@ -12,12 +12,11 @@ import {
 } from '../../atoms/featureCredits';
 import { activeFeatureTaskAtom } from '../../atoms/featureCreditRuns';
 import { isUsingBeaverCreditsAtom } from '../../atoms/models';
-import { currentMessagePillsAtom, pendingPillInsertsAtom } from '../../atoms/messageComposition';
+import { currentMessageContentAtom, currentMessagePillsAtom, pendingPillInsertsAtom } from '../../atoms/messageComposition';
+import { hasTextBesidesPills } from '../../utils/actionRequirements';
 import { searchableLibraryIdsAtom } from '../../atoms/profile';
-import { actionsAtom } from '../../atoms/actions';
-import { getActionCommand } from '@beaver/agent-ui/composer/slashCommands';
-import { examplesForLibrary, getFeatureCreditTask, type FeatureTaskDefinition, type LibraryShape } from '../../constants/featureCreditTasks';
-import { attachStep, featureTaskModelNote, topicStatus } from '../../utils/featureCredits';
+import { examplesForLibrary, getFeatureCreditTask, promptSection, type FeatureTaskDefinition, type LibraryShape } from '../../constants/featureCreditTasks';
+import { attachmentsSetScope, featureTaskModelNote, setupSource } from '../../utils/featureCredits';
 import { countLibraryItems, readLibraryShape } from '../../utils/libraryShape';
 import { SMALL_LIBRARY_THRESHOLD } from '../../atoms/zoteroContext';
 
@@ -61,13 +60,43 @@ const TaskRow: React.FC<{ entry: FeatureCreditEntry; onStart: (key: string, win:
     );
 };
 
-/** The setup card: what the skill does and how to start it in the chat input. */
+/**
+ * One step of a setup card. `done` shows a check, `active` (the step to act
+ * on next) an accented number, `checking` a spinner; otherwise a plain number.
+ */
+type StepStatus = 'done' | 'active' | 'checking' | 'pending';
+
+interface SetupStep {
+    key: string;
+    title: string;
+    optional?: boolean;
+    status: StepStatus;
+    /** Required before sending: an active candidate until done. */
+    required: boolean;
+    body: React.ReactNode;
+}
+
+const StepMarker: React.FC<{ status: StepStatus; number: number }> = ({ status, number }) => (
+    <span className={`feature-credits-step-marker is-${status}`} aria-hidden="true">
+        {status === 'done' ? <Icon icon={TickIcon} className="scale-11" />
+            : status === 'checking' ? <Spinner size={12} />
+            : number}
+    </span>
+);
+
+/**
+ * The setup card, the same for every task: numbered steps (what Beaver works
+ * on, what it should do) that turn into checks as they are done, then one
+ * line on the reward. The first open required step is accented.
+ */
 const SetupView: React.FC<{ definition: FeatureTaskDefinition; credits: number; onBack: () => void }> = ({ definition, credits, onBack }) => {
     const summary = useAtomValue(featureTaskAttachmentSummaryAtom);
     const startTask = useSetAtom(startFeatureTaskAtom);
     const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
     const onBeaverModel = useAtomValue(isUsingBeaverCreditsAtom);
     const selectBeaverModel = useSetAtom(selectBeaverModelAtom);
+    const content = useAtomValue(currentMessageContentAtom);
+    const pills = useAtomValue(currentMessagePillsAtom);
     const [shape, setShape] = useState<LibraryShape | null>(null);
     const needsShape = definition.examples.some((example) => example.when);
 
@@ -82,60 +111,72 @@ const SetupView: React.FC<{ definition: FeatureTaskDefinition; credits: number; 
         };
     }, [needsShape, searchableLibraryIds]);
 
-    // The command as the user knows it: built-ins can be renamed.
-    const action = useAtomValue(actionsAtom).find((candidate) => candidate.id === definition.actionId);
-    const command = `/${action ? getActionCommand(action) : definition.actionId.replace(/^builtin-/, '')}`;
-    const attach = attachStep(definition.attach, summary);
-    const status = definition.attach.kind === 'topic' ? topicStatus(summary) : null;
-    const examples = examplesForLibrary(definition, shape);
-    // One-click examples fill the chat input; illustrations name a topic and
-    // only show the form of an instruction.
-    const illustrations = examples.filter((example) => example.illustration);
-    const clickable = examples.filter((example) => !example.illustration);
+    // Wording and examples that assume the attached papers are the scope.
+    const attached = attachmentsSetScope(summary);
+    const source = setupSource(definition.attach, summary);
+    const prompt = promptSection(definition.prompt, attached);
+    const examples = examplesForLibrary(definition, shape, attached);
     const modelNote = featureTaskModelNote(definition.key, onBeaverModel);
-    const beaverModelLink = (
-        <a href="#" className="text-link" onClick={(event) => { event.preventDefault(); selectBeaverModel(); }}>
-            Use the Beaver model
+    const hasInstruction = hasTextBesidesPills(content, pills);
+
+    const beaverModelLink = (label: string) => (
+        <a href="#" className="feature-credits-link" onClick={(event) => { event.preventDefault(); selectBeaverModel(); }}>
+            {label}
         </a>
     );
-
-    // Numbered in order; a done step shows ✓ and keeps its place.
-    const steps: { done?: boolean; content: React.ReactNode }[] = [];
-    if (modelNote?.required) {
-        steps.push({ content: <>{modelNote.text} {beaverModelLink}</> });
-    }
-    if (attach) {
-        steps.push({ done: attach.done, content: <><strong className="font-medium">{attach.lead}</strong> {attach.text}</> });
-    }
-    steps.push({
-        content: (
-            <>
-                After <span className="feature-credits-command">{command}</span>, {definition.instruction}.
-                {clickable.length > 0 && <> For example:{' '}</>}
-                {clickable.map((example, index) => (
-                    <React.Fragment key={example.text}>
-                        {index > 0 && ' · '}
-                        <a href="#" className="feature-credits-link" onClick={(event) => applyExample(example.text, event)}>
-                            {example.text}
-                        </a>
-                    </React.Fragment>
-                ))}
-                {illustrations.length > 0 && <>{clickable.length > 0 ? '. Or a topic: ' : ' For example: '}</>}
-                {illustrations.map((example, index) => (
-                    <React.Fragment key={example.text}>
-                        {index > 0 && ' or '}
-                        <span className="feature-credits-illustration">“{example.text}”</span>
-                    </React.Fragment>
-                ))}
-            </>
-        ),
-    });
-    steps.push({ content: `Press Send. Your ${credits} credits are added right away.` });
-
-    const applyExample = (text: string, event: React.MouseEvent<HTMLAnchorElement>) => {
+    const applyExample = (text: string, event: React.MouseEvent<HTMLElement>) => {
         event.preventDefault();
         startTask({ key: definition.key, targetWindow: event.currentTarget.ownerDocument.defaultView ?? undefined, argumentText: text });
     };
+
+    const steps: SetupStep[] = [];
+    if (modelNote?.required) {
+        steps.push({
+            key: 'model',
+            title: 'Use the Beaver model',
+            status: 'pending',
+            required: true,
+            body: <>{modelNote.text} {beaverModelLink('Switch to it')}</>,
+        });
+    }
+    steps.push({
+        key: 'source',
+        title: source.title,
+        optional: source.optional,
+        status: source.state === 'ready' ? 'done' : source.state === 'checking' ? 'checking' : 'pending',
+        required: source.state === 'missing' || source.state === 'checking',
+        body: source.text,
+    });
+    steps.push({
+        key: 'prompt',
+        title: prompt.heading,
+        optional: prompt.optional,
+        status: hasInstruction ? 'done' : 'pending',
+        required: !prompt.optional,
+        body: (
+            <>
+                {prompt.hint}
+                {examples.length > 0 && (
+                    <ul className="feature-credits-examples" aria-label="Examples">
+                        {examples.map((example) => (
+                            <li key={example.text}>
+                                <button
+                                    type="button"
+                                    className="feature-credits-example"
+                                    onClick={(event) => applyExample(example.text, event)}
+                                >
+                                    {example.text}
+                                </button>
+                            </li>
+                        ))}
+                    </ul>
+                )}
+            </>
+        ),
+    });
+    // The step to act on next: the first required one not yet done.
+    const next = steps.find((step) => step.required && step.status === 'pending');
+    if (next) next.status = 'active';
 
     return (
         <>
@@ -143,29 +184,26 @@ const SetupView: React.FC<{ definition: FeatureTaskDefinition; credits: number; 
                 <IconButton icon={ArrowLeftIcon} variant="ghost-secondary" ariaLabel="Back to all tasks" onClick={onBack} />
                 <h2 className="feature-credits-title">{definition.title}</h2>
             </div>
-            <p className="feature-credits-text">{definition.explanation}</p>
-            {status && (
-                <p className="feature-credits-text">
-                    <span className="feature-credits-check" aria-hidden="true">✓ </span>
-                    <strong className="font-medium">{status.lead}</strong> {status.text}
-                </p>
-            )}
-            {modelNote && !modelNote.required && (
-                <p className="feature-credits-text">
-                    {modelNote.text} {beaverModelLink}
-                </p>
-            )}
             <ol className="feature-credits-steps">
                 {steps.map((step, index) => (
-                    <li key={index} className="feature-credits-step">
-                        <span className={`feature-credits-step-marker ${step.done ? 'feature-credits-check' : ''}`} aria-hidden="true">
-                            {step.done ? '✓' : `${index + 1}.`}
-                        </span>
-                        <div className="feature-credits-step-body">{step.content}</div>
+                    <li key={step.key} className={`feature-credits-step is-${step.status}`}>
+                        <StepMarker status={step.status} number={index + 1} />
+                        <div className="feature-credits-step-body">
+                            <h3 className="feature-credits-step-title">
+                                {step.status === 'done' && <span className="sr-only">Done: </span>}
+                                {step.title}
+                                {step.optional && <span className="feature-credits-step-optional"> (optional)</span>}
+                            </h3>
+                            <div className="feature-credits-step-text">{step.body}</div>
+                        </div>
                     </li>
                 ))}
             </ol>
-            {definition.footnote && <p className="feature-credits-text">{definition.footnote}</p>}
+            <p className="feature-credits-reward">
+                Send your prompt to earn {credits} free credits.
+                {definition.footnote && <> {definition.footnote}</>}
+                {modelNote && !modelNote.required && <> {modelNote.text} {beaverModelLink('Use it')}</>}
+            </p>
         </>
     );
 };

@@ -6526,7 +6526,7 @@
 .beaver-root .feature-credits-card {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
     padding: 10px 8px 8px 12px;
     border: 1px solid var(--beaver-border-subtle);
     border-radius: var(--beaver-radius-card);
@@ -6605,37 +6605,121 @@
     /* font-size: 0.9em; */
     color: var(--fill-secondary);
 }
+/* Setup card: numbered steps. A step's number turns into a check when it
+   is done; the step to act on next has the accent. */
 .beaver-root .feature-credits-steps {
     list-style: none;
-    margin: 0;
+    margin: 2px 0 0;
     padding: 0 4px 0 0;
     display: flex;
     flex-direction: column;
-    gap: 6px;
-    color: var(--fill-primary);
-    line-height: 1.45;
+    gap: 12px;
 }
 .beaver-root .feature-credits-step {
     display: flex;
     flex-direction: row;
-    gap: 6px;
+    align-items: flex-start;
+    gap: 8px;
 }
 .beaver-root .feature-credits-step-marker {
     flex: none;
-    min-width: 1.1em;
-    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    width: 17px;
+    height: 17px;
+    margin-top: 1px;
+    border: 1px solid var(--fill-quarternary);
+    border-radius: 50%;
+    font-size: 0.75rem;
     font-variant-numeric: tabular-nums;
+    line-height: 1;
+    color: var(--fill-secondary);
+}
+.beaver-root .feature-credits-step-marker.is-active {
+    border-color: var(--accent-blue);
+    color: var(--accent-blue);
+}
+.beaver-root .feature-credits-step-marker.is-done {
+    border-color: transparent;
+    background-color: var(--fill-quinary);
+    color: var(--fill-secondary);
+}
+.beaver-root .feature-credits-step-marker.is-checking {
+    border-color: transparent;
 }
 .beaver-root .feature-credits-step-body {
     flex: 1;
     min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    line-height: 1.4;
 }
-/* A done step or status line. Declared after the marker so it wins. */
-.beaver-root .feature-credits-check {
-    font-weight: 600;
-    color: var(--tag-green);
+.beaver-root .feature-credits-step-title {
+    margin: 0;
+    font: inherit;
+    font-weight: 550;
+    color: var(--fill-primary);
 }
-/* One-click examples: inline links in the text color, blue on hover. */
+.beaver-root .feature-credits-step-optional {
+    font-weight: 400;
+    color: var(--fill-secondary);
+}
+.beaver-root .feature-credits-step-text {
+    /* color: var(--fill-secondary); */
+    overflow-wrap: anywhere;
+}
+/* The reward, under the steps. */
+.beaver-root .feature-credits-reward {
+    margin: 2px 0 0;
+    padding-right: 4px;
+    color: var(--fill-secondary);
+    line-height: 1.4;
+}
+/* Examples, one per row under the step text: picking one fills and focuses
+   the chat input. */
+.beaver-root .feature-credits-examples {
+    list-style: none;
+    margin: 2px 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+}
+/* Examples read as links: underlined text color, blue on hover. */
+.beaver-root .feature-credits-example {
+    display: block;
+    width: fit-content;
+    max-width: 100%;
+    padding: 2px 0;
+    border: 0;
+    background: transparent;
+    font: inherit;
+    line-height: 1.4;
+    text-align: left;
+    color: var(--fill-primary);
+    text-decoration: underline;
+    text-decoration-color: var(--fill-secondary);
+    text-underline-offset: 2px;
+    cursor: pointer;
+}
+.beaver-root .feature-credits-example::before {
+    content: "\201C";
+}
+.beaver-root .feature-credits-example::after {
+    content: "\201D";
+}
+.beaver-root .feature-credits-example:hover {
+    color: var(--accent-blue);
+    text-decoration-color: var(--accent-blue);
+}
+.beaver-root .feature-credits-example:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: 1px;
+    border-radius: 3px;
+}
+/* Inline links in the text color, blue on hover. */
 .beaver-root .feature-credits-link {
     color: var(--fill-primary);
     text-decoration: underline;
@@ -6646,11 +6730,6 @@
 .beaver-root .feature-credits-link:hover {
     color: var(--accent-blue);
     text-decoration-color: var(--accent-blue);
-}
-.beaver-root .feature-credits-command {
-    font-family: var(--beaver-font-mono, monospace);
-    font-size: 0.95em;
-    color: var(--fill-primary);
 }
 .beaver-root .feature-credits-completion {
     gap: 4px;
@@ -6695,8 +6774,4 @@
 }
 .beaver-root .feature-credits-next:hover {
     background-color: var(--beaver-fill-hover);
-}
-/* An example instruction shown as text (not a link that fills the input). */
-.beaver-root .feature-credits-illustration {
-    color: var(--fill-primary);
 }

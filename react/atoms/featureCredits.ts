@@ -21,7 +21,9 @@ import {
     messageItemDataRevisionAtom,
 } from './messageComposition';
 import { FEATURE_CREDIT_TASKS, FeatureTaskDefinition, getFeatureCreditTask } from '../constants/featureCreditTasks';
-import type { AttachmentSummary } from '../utils/featureCredits';
+import { combineDocumentStatuses, type AttachmentSummary, type DocumentStatus } from '../utils/featureCredits';
+import { itemValidationResultsAtom, type ItemValidationState } from './itemValidation';
+import { getReadableContentKind } from '../../src/services/documentExtraction/attachmentResolution';
 import { activeFeatureTaskAtom } from './featureCreditRuns';
 import { getDisplayNameFromItem } from '../utils/sourceUtils';
 import { resolveLibraryRef } from '../../src/utils/libraryIdentity';
@@ -134,22 +136,55 @@ function collectionItemCount(libraryID: number, key: string): number | null {
     }
 }
 
+const ANNOTATABLE_KINDS = new Set(['pdf', 'epub', 'snapshot']);
+
+/** Whether a file can be annotated, from the chat input's readability check of it. */
+function fileStatus(attachment: Zotero.Item, validation: ItemValidationState | undefined): DocumentStatus {
+    const checked = validation && !validation.isValidating && validation.state !== 'checking' ? validation : undefined;
+    const kind = checked?.contentKind ?? getReadableContentKind(attachment);
+    if (!kind || !ANNOTATABLE_KINDS.has(kind)) return 'none';
+    // Not checked yet: the chat input validates every attachment it adds.
+    if (!checked) return 'checking';
+    return checked.state === 'readable' ? 'readable' : 'unreadable';
+}
+
+function childAttachments(item: Zotero.Item): Zotero.Item[] {
+    try {
+        return item.getAttachments()
+            .map((id: number) => Zotero.Items.get(id))
+            .filter((attachment): attachment is Zotero.Item => !!attachment);
+    } catch {
+        return [];
+    }
+}
+
 /** What the chat input has attached, for the setup card's first step. */
 export const featureTaskAttachmentSummaryAtom = atom<AttachmentSummary>((get) => {
     get(messageItemDataRevisionAtom);
     const items = get(currentMessageItemsAtom);
     const reader = get(currentReaderAttachmentAtom);
     const collections = get(currentMessageCollectionsAtom);
+    // Read the results map itself, not `getItemValidationAtom`: through that
+    // derived getter, this atom's subscribers were not notified when a check
+    // finished, and the card kept showing "Checking".
+    const validations = get(itemValidationResultsAtom);
+    const getValidation = (item: Zotero.Item) => validations.get(`${item.libraryID}-${item.key}`);
 
-    const papers: string[] = [];
-    const seen = new Set<string>();
+    // Papers in the order attached, each with the statuses of its files.
+    const papers = new Map<string, { name: string; files: DocumentStatus[] }>();
     const add = (item: Zotero.Item) => {
-        // An attachment stands for its parent paper.
-        const paper = item.isAttachment() && item.parentItem ? item.parentItem : item;
+        // An attachment or annotation stands for its paper, and only its own
+        // file counts; an attached paper brings all of its files.
+        const file = item.isAnnotation() ? item.parentItem : item.isAttachment() ? item : null;
+        const paper = file?.parentItem ?? file ?? item;
         const key = `${paper.libraryID}-${paper.key}`;
-        if (seen.has(key)) return;
-        seen.add(key);
-        papers.push(getDisplayNameFromItem(paper));
+        let entry = papers.get(key);
+        if (!entry) {
+            entry = { name: getDisplayNameFromItem(paper), files: [] };
+            papers.set(key, entry);
+        }
+        const files = file ? [file] : item.isRegularItem() ? childAttachments(item) : [];
+        for (const attachment of files) entry.files.push(fileStatus(attachment, getValidation(attachment)));
     };
     for (const item of items) add(item);
     if (reader) add(reader);
@@ -178,5 +213,8 @@ export const featureTaskAttachmentSummaryAtom = atom<AttachmentSummary>((get) =>
         }
     }
 
-    return { papers, collections: summaries };
+    return {
+        papers: [...papers.values()].map(({ name, files }) => ({ name, document: combineDocumentStatuses(files) })),
+        collections: summaries,
+    };
 });

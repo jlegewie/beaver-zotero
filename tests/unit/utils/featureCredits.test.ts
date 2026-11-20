@@ -1,85 +1,123 @@
 import { isStoredAction } from '@beaver/agent-core/types/actions';
 import { describe, expect, it } from 'vitest';
 import {
-    attachStep,
+    attachmentsSetScope,
+    combineDocumentStatuses,
     featureTaskModelNote,
-    topicStatus,
+    setupSource,
     type AttachmentSummary,
+    type DocumentStatus,
 } from '../../../react/utils/featureCredits';
-import { FEATURE_CREDIT_TASKS, examplesForLibrary, getFeatureCreditTask } from '../../../react/constants/featureCreditTasks';
+import { FEATURE_CREDIT_TASKS, examplesForLibrary, getFeatureCreditTask, promptSection } from '../../../react/constants/featureCreditTasks';
 import { ALL_BUILTIN_ACTIONS } from '../../../react/types/builtinActions';
 
 const none: AttachmentSummary = { papers: [], collections: [] };
-const papers = (...names: string[]): AttachmentSummary => ({ papers: names, collections: [] });
+const papers = (...names: string[]): AttachmentSummary => ({
+    papers: names.map((name) => ({ name, document: 'readable' })),
+    collections: [],
+});
+const withFiles = (...documents: DocumentStatus[]): AttachmentSummary => ({
+    papers: documents.map((document, index) => ({ name: `Paper ${index + 1}`, document })),
+    collections: [],
+});
 const collection = (name: string, itemCount: number | null): AttachmentSummary => ({ papers: [], collections: [{ name, itemCount }] });
 
-describe('setup card step 1', () => {
-    it('asks for a paper when nothing is attached', () => {
-        expect(attachStep({ kind: 'paper' }, none)).toEqual({
-            done: false,
-            lead: 'Attach a paper:',
-            text: 'type @ to search your library, drag it in from Zotero, or open its PDF.',
+describe('setup card step 1: what Beaver works on', () => {
+    it('asks for a PDF to annotate as the missing input', () => {
+        expect(setupSource({ kind: 'paper' }, none)).toEqual({
+            title: 'Choose a PDF',
+            optional: false,
+            state: 'missing',
+            text: 'Open one in Zotero, type @ to find a paper, or drag one into the prompt.',
         });
     });
 
-    it('names a single attached paper', () => {
-        expect(attachStep({ kind: 'paper' }, papers('Smith 2020'))).toEqual({
-            done: true,
-            lead: 'Smith 2020 is attached.',
-            text: 'Add other papers with @ or drag and drop.',
-        });
+    it('names the attached PDF once it is readable', () => {
+        expect(setupSource({ kind: 'paper' }, papers('Smith 2020'))).toMatchObject({ state: 'ready', text: 'Smith 2020 is attached.' });
+        expect(setupSource({ kind: 'paper' }, papers('A', 'B', 'C'))).toMatchObject({ state: 'ready', text: '3 papers are attached.' });
     });
 
-    it('counts several attached papers', () => {
-        expect(attachStep({ kind: 'paper' }, papers('A', 'B', 'C'))).toMatchObject({
-            done: true,
-            lead: '3 papers are attached.',
-            text: 'Add more with @ or drag and drop.',
+    it('checks the attached paper has a readable file before taking it', () => {
+        expect(setupSource({ kind: 'paper' }, withFiles('checking'))).toMatchObject({ state: 'checking', text: 'Checking Paper 1…' });
+        expect(setupSource({ kind: 'paper' }, withFiles('none'))).toMatchObject({
+            state: 'missing',
+            text: 'Paper 1 has no PDF, EPUB or snapshot. Open a PDF in Zotero, or type @ to find another paper.',
         });
+        expect(setupSource({ kind: 'paper' }, withFiles('unreadable')).text)
+            .toBe("Beaver can't read the text of Paper 1. Open a PDF in Zotero, or type @ to find another paper.");
     });
 
-    it('asks for a collection or papers, says what happens without, and names an attached collection', () => {
-        const attach = { kind: 'collection', ifNone: 'If you attach nothing, Beaver works on your recent additions.' } as const;
-        expect(attachStep(attach, none)).toEqual({
-            done: false,
-            lead: 'Attach a collection or papers:',
-            text: 'type @ to search, or drag them in from Zotero. If you attach nothing, Beaver works on your recent additions.',
-        });
-        expect(attachStep(attach, collection('Neighborhood effects', 14))?.lead)
+    it('is ready once one attached paper is readable, and says how many are skipped', () => {
+        expect(setupSource({ kind: 'paper' }, withFiles('readable', 'checking'))).toMatchObject({ state: 'ready', text: '2 papers are attached.' });
+        expect(setupSource({ kind: 'paper' }, withFiles('readable', 'none', 'unreadable')).text)
+            .toBe('3 papers are attached. 2 papers without a readable PDF, EPUB or snapshot are skipped.');
+    });
+
+    it('takes an attached collection as ready: its papers are checked when the run starts', () => {
+        expect(setupSource({ kind: 'paper' }, collection('X', 4)).state).toBe('ready');
+    });
+
+    it('rates a paper by its best file', () => {
+        expect(combineDocumentStatuses([])).toBe('none');
+        expect(combineDocumentStatuses(['none', 'unreadable', 'readable'])).toBe('readable');
+        expect(combineDocumentStatuses(['unreadable', 'checking'])).toBe('checking');
+        expect(combineDocumentStatuses(['none', 'unreadable'])).toBe('unreadable');
+    });
+
+    it('lets a review or table go without attachments, on a topic', () => {
+        for (const kind of ['collection', 'topic'] as const) {
+            expect(setupSource({ kind }, none)).toEqual({
+                title: 'Choose papers',
+                optional: true,
+                state: 'default',
+                text: 'Type @ or drag in a collection or papers. Without any, Beaver finds papers on your topic in your library.',
+            });
+        }
+    });
+
+    it('names an attached collection, and a collection and papers attached together', () => {
+        expect(setupSource({ kind: 'collection' }, collection('Neighborhood effects', 14)).text)
             .toBe('The Neighborhood effects collection (14 papers) is attached.');
-    });
-
-    it('lets a literature review go without attachments, on a topic', () => {
-        const review = getFeatureCreditTask('literature_review')!;
-        expect(attachStep(review.attach, none)?.text).toContain('Or attach nothing and name a topic in the next step.');
-    });
-
-    it('names a collection and papers attached together', () => {
-        const attach = { kind: 'collection', ifNone: '' } as const;
-        expect(attachStep(attach, { papers: ['A', 'B'], collections: [{ name: 'X', itemCount: 1 }] })?.lead)
+        expect(setupSource({ kind: 'collection' }, { papers: papers('A', 'B').papers, collections: [{ name: 'X', itemCount: 1 }] }).text)
             .toBe('The X collection (1 paper) and 2 papers are attached.');
-        expect(attachStep(attach, { papers: [], collections: [{ name: 'A', itemCount: 2 }, { name: 'B', itemCount: null }] })?.lead)
+        expect(setupSource({ kind: 'collection' }, { papers: [], collections: [{ name: 'A', itemCount: 2 }, { name: 'B', itemCount: null }] }).text)
             .toBe('The A collection (2 papers) and the B collection are attached.');
     });
 
-    it('has no attach step for topic tasks', () => {
-        expect(attachStep({ kind: 'topic' }, papers('A'))).toBeNull();
+    it('asks for a topic when only one paper is attached to a review or table', () => {
+        expect(setupSource({ kind: 'topic' }, papers('A')).text).toBe('A is attached. Name a topic in the next step, and Beaver adds related papers.');
+        expect(attachmentsSetScope(papers('A'))).toBe(false);
+        expect(attachmentsSetScope(papers('A', 'B'))).toBe(true);
+        expect(attachmentsSetScope(collection('X', 3))).toBe(true);
+    });
+
+    it('follows the 10-20 paper rule for tables', () => {
+        expect(setupSource({ kind: 'topic' }, collection('Big', 300)).text).toContain('Beaver will pick the most relevant papers from it. Remove it to search your whole library.');
+        expect(setupSource({ kind: 'topic' }, collection('Mid', 14)).text).toContain('Beaver will use these papers.');
+        expect(setupSource({ kind: 'topic' }, papers('A', 'B')).text).toContain('Beaver will add related papers from your library.');
+        expect(setupSource({ kind: 'topic' }, collection('Unknown', null)).text).toContain('pick the most relevant');
+    });
+
+    it('needs nothing attached to organize', () => {
+        expect(setupSource({ kind: 'none' }, papers('Smith 2020'))).toMatchObject({ title: 'Nothing to attach', state: 'ready' });
     });
 });
 
-describe('research table status line', () => {
-    it('shows nothing when nothing is attached', () => {
-        expect(topicStatus(none)).toBeNull();
+describe('setup card: what Beaver should do', () => {
+    it('requires an instruction to annotate', () => {
+        expect(promptSection(getFeatureCreditTask('annotate')!.prompt, true).optional).toBe(false);
     });
 
-    it('follows the 10-20 paper rule', () => {
-        expect(topicStatus(collection('Big', 300))?.text).toBe('Beaver will pick the most relevant papers from it. Remove it to search your whole library.');
-        expect(topicStatus(collection('Mid', 14))?.text).toBe('Beaver will use these papers.');
-        expect(topicStatus(papers('A', 'B'))?.text).toBe('Beaver will add related papers from your library.');
+    it('makes the instruction optional once papers are attached to a review or table', () => {
+        for (const key of ['literature_review', 'research_table']) {
+            const prompt = getFeatureCreditTask(key)!.prompt;
+            expect(promptSection(prompt, false).optional).toBe(false);
+            expect(promptSection(prompt, true)).toMatchObject({ optional: true, hint: prompt.hintWhenAttached });
+        }
     });
 
-    it('treats a collection of unknown size as large', () => {
-        expect(topicStatus(collection('Unknown', null))?.text).toContain('pick the most relevant');
+    it('lets organizing run without an instruction', () => {
+        expect(promptSection(getFeatureCreditTask('organize')!.prompt, false).optional).toBe(true);
     });
 });
 
@@ -109,16 +147,10 @@ describe('task registry', () => {
 
     it('fits the organize examples to how the library is organized', () => {
         const organize = getFeatureCreditTask('organize')!;
-        const texts = (shape: Parameters<typeof examplesForLibrary>[1]) => examplesForLibrary(organize, shape).map((e) => e.text);
-        expect(texts({ collectionCount: 0, usesTags: false })).toEqual(['fill in missing abstracts and DOIs']);
+        const texts = (shape: Parameters<typeof examplesForLibrary>[1]) => examplesForLibrary(organize, shape, false).map((e) => e.text);
+        expect(texts({ collectionCount: 0, usesTags: false })).toEqual(['Fill in missing abstracts and DOIs']);
         expect(texts({ collectionCount: 3, usesTags: true })).toHaveLength(3);
-        expect(texts(null)).toEqual(['fill in missing abstracts and DOIs']);
-    });
-
-    it('has no attach step for organizing: /tidy-up finds what to work on', () => {
-        const organize = getFeatureCreditTask('organize')!;
-        expect(organize.attach).toEqual({ kind: 'none' });
-        expect(attachStep(organize.attach, { papers: ['Smith 2020'], collections: [] })).toBeNull();
+        expect(texts(null)).toEqual(['Fill in missing abstracts and DOIs']);
     });
 });
 
@@ -152,24 +184,23 @@ describe('completion starter actions', () => {
 });
 
 describe('setup card examples', () => {
-    it('shows topic examples for tables as text, not as links that fill the input', () => {
-        const table = getFeatureCreditTask('research_table')!;
-        expect(table.examples.length).toBeGreaterThan(0);
-        expect(table.examples.every((example) => example.illustration)).toBe(true);
+    it('fits review and table examples to whether papers are attached', () => {
+        for (const key of ['literature_review', 'research_table']) {
+            const task = getFeatureCreditTask(key)!;
+            const withPapers = examplesForLibrary(task, null, true).map((example) => example.text);
+            const withoutPapers = examplesForLibrary(task, null, false).map((example) => example.text);
+            expect(withPapers.length).toBeGreaterThan(0);
+            expect(withoutPapers.length).toBeGreaterThan(0);
+            expect(withPapers.some((text) => text.includes('[your topic]'))).toBe(false);
+            expect(withoutPapers.every((text) => text.includes('[your topic]'))).toBe(true);
+        }
     });
 
-    it('offers a literature review in any library as links, and its topic only as text', () => {
-        const review = getFeatureCreditTask('literature_review')!;
-        expect(review.examples.filter((example) => !example.illustration).map((example) => example.text))
-            .toEqual(['a short review of the papers in this collection', 'an outline first']);
-        expect(review.examples.filter((example) => example.illustration)).toHaveLength(1);
-    });
-
-    it('keeps one-click examples only where they fit any library', () => {
-        const linked = FEATURE_CREDIT_TASKS
-            .filter((task) => task.key !== 'research_table')
-            .flatMap((task) => task.examples.map((example) => example.text));
-        expect(linked).not.toContain('what my library says about measurement error');
-        expect(linked).not.toContain('every definition of social capital');
+    it('names no real topic, so every example fits any library', () => {
+        for (const task of FEATURE_CREDIT_TASKS) {
+            for (const example of task.examples) {
+                expect(example.text).not.toMatch(/neighborhood|social capital/i);
+            }
+        }
     });
 });
