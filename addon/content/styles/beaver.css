@@ -5132,7 +5132,7 @@
     color: var(--fill-secondary);
 }
 
-/* Ways out on the left, the one way forward on the right. */
+/* Cancel on the left; Back, when there is one, beside the way forward on the right. */
 [id^="beaver-pane-"] .table-card-controls {
     display: flex;
     flex-direction: row;

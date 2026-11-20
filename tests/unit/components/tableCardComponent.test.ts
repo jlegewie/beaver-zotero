@@ -1063,7 +1063,7 @@ describe('TableCard', () => {
             expect(runOption()).toBeNull();
             expect(controls()).toEqual(['Cancel', 'Next']);
             await click('Next');
-            expect(controls()).toEqual(['Back', 'Cancel', 'Create table']);
+            expect(controls()).toEqual(['Cancel', 'Back', 'Create table']);
             expect(button('Create only')).toBeUndefined();
             expect(container.querySelector('.table-card-run-option')?.textContent).toBe('Fill the table now');
             expect(runOption()!.checked).toBe(true);

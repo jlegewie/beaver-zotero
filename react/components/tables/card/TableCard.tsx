@@ -205,8 +205,9 @@ function resolutionKey(source: DraftSource): string {
  * The footer stacks up to three parts, each with one job: a band for what the
  * user must know first (a held answer, why Create table is disabled, a balance
  * that does not reach, papers without full text), the decision row on
- * the last step (the run checkbox and its receipt), and the controls (ways out
- * on the left, the one way forward on the right).
+ * the last step (the run checkbox and its receipt), and the controls (Cancel
+ * on the left, in the same place on every step; Back beside the one way
+ * forward on the right).
  */
 export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disabled = false, heldCaption, onStop }) => {
     // The draft lives in the renderer's store, keyed by card, so a remount
@@ -1054,6 +1055,17 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
                 {bands}
                 {decisionRow}
                 <div className="table-card-controls">
+                    {/* The way out stays put on every step; Back sits with the way forward. */}
+                    <Button
+                        variant="ghost"
+                        onClick={() => setDraft((prev) => setCancelling(prev, true))}
+                        disabled={locked}
+                        className="flex-none whitespace-nowrap"
+                    >
+                        Cancel
+                    </Button>
+                    {/* "Add screening" joins this row when screening exists (P4). */}
+                    <div className="flex-1" />
                     {stepIndex > 0 && !disabled && (
                         <Button
                             variant="ghost"
@@ -1065,16 +1077,6 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
                             Back
                         </Button>
                     )}
-                    <Button
-                        variant="ghost"
-                        onClick={() => setDraft((prev) => setCancelling(prev, true))}
-                        disabled={locked}
-                        className="flex-none whitespace-nowrap"
-                    >
-                        Cancel
-                    </Button>
-                    {/* "Add screening" joins this row when screening exists (P4). */}
-                    <div className="flex-1" />
                     {/* While the answer is held, Stop takes the way forward's place. */}
                     {stopButton ? (
                         stopButton
