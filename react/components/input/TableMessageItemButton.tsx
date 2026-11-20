@@ -15,21 +15,15 @@ export function TableMessageItemButton({
     const key = `${libraryRefForLibraryID(item.libraryID)}-${item.key}`;
     const current = useTableDisplay(key);
     return (
-        <span className="display-flex items-center gap-1">
-            <TableChip
-                tableKey={key}
-                title={
-                    current?.status === "available"
-                        ? current.title
-                        : String(item.getField("title") || "Table")
-                }
-                remove={onRemove ? { onRemove, onRemoveAll } : undefined}
-            />
-            {current?.status === "unavailable" && (
-                <span role="status" className="text-xs">
-                    {current.reason}
-                </span>
-            )}
-        </span>
+        <TableChip
+            tableKey={key}
+            title={
+                current?.status === "available"
+                    ? current.title
+                    : String(item.getField("title") || "Table")
+            }
+            unavailable={current?.status === "unavailable" ? current : null}
+            remove={onRemove ? { onRemove, onRemoveAll } : undefined}
+        />
     );
 }
