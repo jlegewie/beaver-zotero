@@ -30,10 +30,17 @@ export interface ActionRequirementInput {
     actions: Pick<Action, 'id' | 'argumentRequired' | 'argumentRequiredHint'>[];
 }
 
+/** The message's text other than its /command tokens. */
+export function textBesidesPills(content: string, pills: SlashCommandDescriptor[]): string {
+    return splitContentByCommandTokens(content, pills, pill => pill.commandName)
+        .filter(segment => !segment.match)
+        .map(segment => segment.text)
+        .join('');
+}
+
 /** Whether the message holds text other than its /command tokens. */
 export function hasTextBesidesPills(content: string, pills: SlashCommandDescriptor[]): boolean {
-    return splitContentByCommandTokens(content, pills, pill => pill.commandName)
-        .some(segment => !segment.match && segment.text.trim().length > 0);
+    return textBesidesPills(content, pills).trim().length > 0;
 }
 
 /**

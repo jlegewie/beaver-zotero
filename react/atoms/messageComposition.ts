@@ -102,6 +102,13 @@ export const validateFiltersAtom = atom((get) => {
 export const currentMessageContentAtom = atom<string>('');
 
 /**
+ * The `@query` text the composer holds while its Add Sources menu searches
+ * from it, or null. It is a search in progress, not part of the message: the
+ * menu deletes it when an item is picked.
+ */
+export const composerSourceSearchTextAtom = atom<string | null>(null);
+
+/**
 * Current message items
 * Items that are currently being added to the message
 */

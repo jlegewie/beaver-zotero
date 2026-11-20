@@ -13,6 +13,7 @@ import { preferencesRevisionAtom } from './preferences';
 import { getPref, setPref } from '../../src/utils/prefs';
 import { actionRequirementBlockAtom, stageActionPillAtom } from './actions';
 import {
+    composerSourceSearchTextAtom,
     currentMessageContentAtom,
     currentMessageItemsAtom,
     currentMessagePillsAtom,
@@ -29,7 +30,7 @@ import {
     type DocumentStatus,
     type SetupStep,
 } from '../utils/featureCredits';
-import { hasTextBesidesPills, type ActionRequirementBlock } from '../utils/actionRequirements';
+import { textBesidesPills, type ActionRequirementBlock } from '../utils/actionRequirements';
 import { itemValidationResultsAtom, type ItemValidationState } from './itemValidation';
 import { getReadableContentKind } from '../../src/services/documentExtraction/attachmentResolution';
 import { activeFeatureTaskAtom } from './featureCreditRuns';
@@ -192,20 +193,27 @@ export const featureTaskAttachedPapersAtom = atom<AttachedPaper[]>((get) => {
     return [...papers.values()].map(({ name, files }) => ({ name, document: combineDocumentStatuses(files) }));
 });
 
+/** The message text without the `@query` an open Add Sources menu is searching from. */
+function withoutSourceSearch(content: string, search: string | null): string {
+    const index = search ? content.lastIndexOf(search) : -1;
+    return search && index >= 0 ? content.slice(0, index) + content.slice(index + search.length) : content;
+}
+
 /** The open setup card's steps, or null while no task's setup is open. */
 export const featureTaskSetupStepsAtom = atom<SetupStep[] | null>((get) => {
     const key = get(activeFeatureTaskAtom);
     const definition = key ? getFeatureCreditTask(key) : undefined;
     if (!definition) return null;
-    const content = get(currentMessageContentAtom);
+    const content = withoutSourceSearch(get(currentMessageContentAtom), get(composerSourceSearchTextAtom));
+    const instruction = textBesidesPills(content, get(currentMessagePillsAtom));
     // A picked example counts once its topic placeholder is replaced.
     const usesPlaceholder = definition.examples.some((example) => example.text.includes(TOPIC_PLACEHOLDER));
     return setupSteps({
         definition,
         papers: definition.attach === 'pdf' ? get(featureTaskAttachedPapersAtom) : [],
         onBeaverModel: get(isUsingBeaverCreditsAtom),
-        hasInstruction: hasTextBesidesPills(content, get(currentMessagePillsAtom))
-            && !(usesPlaceholder && content.includes(TOPIC_PLACEHOLDER)),
+        // An instruction has a word in it: a stray "@" or "?" is not one.
+        hasInstruction: /[\p{L}\p{N}]/u.test(instruction) && !(usesPlaceholder && instruction.includes(TOPIC_PLACEHOLDER)),
     });
 });
 

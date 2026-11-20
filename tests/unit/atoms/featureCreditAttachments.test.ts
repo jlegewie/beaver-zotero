@@ -11,6 +11,7 @@ vi.mock('../../../src/services/documentExtraction/attachmentResolution', () => (
 import { featureTaskAttachedPapersAtom, featureTaskSendBlockAtom } from '../../../react/atoms/featureCredits';
 import { activeFeatureTaskAtom } from '../../../react/atoms/featureCreditRuns';
 import {
+    composerSourceSearchTextAtom,
     currentMessageContentAtom,
     currentMessageItemsAtom,
     currentMessagePillsAtom,
@@ -124,6 +125,23 @@ describe('featureTaskSendBlockAtom', () => {
         store.set(currentMessageContentAtom, '/annotate Highlight every mention of [your topic]');
         expect(store.get(featureTaskSendBlockAtom)).toBeNull();
         store.set(currentMessageContentAtom, '/annotate ');
+        expect(store.get(featureTaskSendBlockAtom)).toEqual({ hint: 'Describe what to highlight' });
+    });
+
+    it('does not take an @ search in progress for an instruction', () => {
+        const store = setup({ content: '/annotate @smi' });
+        store.set(currentMessageItemsAtom, [attachment('PDF1', 'pdf')] as any);
+        store.set(itemValidationResultsAtom, new Map([['1-PDF1', checked('readable')]]));
+        store.set(composerSourceSearchTextAtom, '@smi');
+        expect(store.get(featureTaskSendBlockAtom)).toEqual({ hint: 'Describe what to highlight' });
+        store.set(currentMessageContentAtom, '/annotate the methods @smi');
+        expect(store.get(featureTaskSendBlockAtom)).toBeNull();
+        // The menu closed without a pick: the text is the user's.
+        store.set(composerSourceSearchTextAtom, null);
+        store.set(currentMessageContentAtom, '/annotate @smi');
+        expect(store.get(featureTaskSendBlockAtom)).toBeNull();
+        // A bare "@" left behind has no word in it.
+        store.set(currentMessageContentAtom, '/annotate @ ');
         expect(store.get(featureTaskSendBlockAtom)).toEqual({ hint: 'Describe what to highlight' });
     });
 

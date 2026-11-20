@@ -2,11 +2,11 @@ import { threadReadOnlyAtom } from '../../runtime/threadProjection';
 import { RECONNECT_HELD_CAPTION, RECONNECT_UNAVAILABLE_TOOLTIP } from '@beaver/agent-core/transport/connectionFailure';
 import { useRunReconnectShown } from '../../hooks/useVisibleReconnect';
 import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
-import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { StopIcon, GlobalSearchIcon, ArrowUpLineIcon } from '../icons/icons';
 import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai';
 import { newThreadAtom, currentThreadIdAtom } from '../../atoms/threads';
-import { currentMessageContentAtom, currentMessagePillsAtom, pendingPillInsertsAtom, composerResetTokenAtom, pendingAttachmentTokensAtom, clearComposerAtom } from '../../atoms/messageComposition';
+import { currentMessageContentAtom, currentMessagePillsAtom, pendingPillInsertsAtom, composerResetTokenAtom, pendingAttachmentTokensAtom, clearComposerAtom, composerSourceSearchTextAtom } from '../../atoms/messageComposition';
 import { sendWSMessageAtom, isWSChatPendingAtom, answerPendingApprovalsAtom, setRunPermissionModeAtom, approvalVerdictInFlightAtom, beginApprovalVerdictAtom, releaseApprovalVerdictAtom, streamingDoneRunIdsAtom, isRunReconnectingAtom, stoppingPreviousRunAtom } from '../../atoms/agentRunAtoms';
 import { pendingApprovalsAtom, agentActionsByRunAtom } from '../../agents/agentActions';
 import { isCoveredByFullAccess, runApprovalPolicyAtom } from '../../atoms/runApprovalPolicy';
@@ -365,6 +365,16 @@ const InputArea: React.FC<InputAreaProps> = ({
         setMessageContent,
         menuRef: addSourcesMenuRef,
     });
+
+    // Publish the `@query` the menu is searching from, so readers of the
+    // message text (the feature-credit setup steps) can leave it out. A layout
+    // effect, so the setup card never paints the query as an instruction.
+    const setSourceSearchText = useSetAtom(composerSourceSearchTextAtom);
+    const sourceSearchText = isAddSourcesMenuOpen && addSourcesQuerySource === 'editor' ? `@${addSourcesSearchQuery}` : null;
+    useLayoutEffect(() => {
+        setSourceSearchText(sourceSearchText);
+    }, [sourceSearchText, setSourceSearchText]);
+    useEffect(() => () => setSourceSearchText(null), [setSourceSearchText]);
 
     useEffect(() => {
         if (isPending && getPref('focusResponseForScreenReaders')) {
