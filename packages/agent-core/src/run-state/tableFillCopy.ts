@@ -235,6 +235,52 @@ export function balanceLine(
     return `Your ${balance} ${balance.endsWith("credit") ? "covers" : "cover"} about ${Math.min(covered, paying)} of ${paying} items`;
 }
 
+/** The price of the cheapest item a plan pays for; null when it pays for none. */
+function cheapestItem(
+    plan: Pick<TableFillPlanSummary, "documents" | "title_abstract" | "prices">,
+): number | null {
+    const prices: number[] = [];
+    if (plan.documents) prices.push(plan.prices.document);
+    if (plan.title_abstract) prices.push(plan.prices.title_abstract);
+    return prices.length ? Math.min(...prices) : null;
+}
+
+/**
+ * Why a plan cannot start when the balance cannot pay for a single item it
+ * fills, so the fill would stop before answering anything: "Filling uses
+ * Beaver credits: 0.2 per item. You have 0 credits." Null when the balance
+ * pays for an item, is unknown, or the plan costs nothing.
+ */
+export function noCreditsText(
+    plan: Pick<TableFillPlanSummary, "credits" | "documents" | "title_abstract" | "prices">,
+    balance: number | null,
+): string | null {
+    if (balance == null || plan.credits <= 0) return null;
+    const cheapest = cheapestItem(plan);
+    if (cheapest == null || balance + 1e-9 >= cheapest) return null;
+    const price = plan.documents ? plan.prices.document : plan.prices.title_abstract;
+    return `Filling uses Beaver credits: ${formatCredits(price)} per item. You have ${creditsText(balance)}.`;
+}
+
+/** What a table can still do without credits. */
+export const FILL_BY_HAND_NOTE = "You can still add rows and edit cells by hand.";
+
+/** The table tab's notice for an account without credits. */
+export const NO_CREDITS_NOTICE = `Filling uses Beaver credits, and you have none. ${FILL_BY_HAND_NOTE}`;
+
+/** Whether the balance reads as no credits at all ("0 credits"). False when unknown. */
+export function hasNoCredits(balance: number | null): boolean {
+    return balance != null && formatCredits(balance) === "0";
+}
+
+/**
+ * The label of a way to buy credits: "Get credits" with none to spend (or an
+ * unknown balance), "Add credits" to top up a balance.
+ */
+export function creditsActionLabel(balance: number | null): string {
+    return balance == null || hasNoCredits(balance) ? "Get credits" : "Add credits";
+}
+
 /** "About 3 minutes left". */
 export function timeLeftText(seconds: number | null): string | null {
     if (seconds == null) return null;
@@ -309,8 +355,9 @@ function stoppedText(job: TableFillJobSnapshot, result: TableFillResult): string
     const unread = failed ? `${failed.toLocaleString("en-US")} couldn't be read` : null;
     const after = afterText(job, result);
     const stop = shownStop(result);
+    // Rows a fill never started stay pending, so the next fill picks them up.
     if (stop === "insufficient_credits")
-        return unread ? `Out of credits ${after} · ${unread}` : `Out of credits ${after}`;
+        return `Out of credits ${after}${unread ? ` · ${unread}` : ""} · the rest stay pending`;
     if (stop === "stopped") return unread ? `Stopped ${after} · ${unread}` : `Stopped ${after}`;
     const sentence = stopSentence(stop, after);
     return sentence && unread ? `${sentence}; ${unread}` : sentence;

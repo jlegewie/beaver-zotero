@@ -945,20 +945,25 @@ export function ResearchTable({
                                         ) : null}
                                     </span>
                                 ) : null}
-                                {editing?.addItems}
-                                {editing?.onAddColumn ? (
-                                    // A disabled button shows no tooltip of its own.
-                                    <span title={addColumnDisabled}>
-                                        <button
-                                            type="button"
-                                            className="rt-add-column-action"
-                                            aria-label="Add column"
-                                            disabled={!!addColumnDisabled}
-                                            onClick={editing.onAddColumn}
-                                        >
-                                            <Icon icon={PlusSignIcon} size={13} />
-                                            <span>Column</span>
-                                        </button>
+                                {editing?.addItems || editing?.onAddColumn ? (
+                                    // The add actions wrap to the next line together.
+                                    <span className="rt-toolbar-adds">
+                                        {editing.addItems}
+                                        {editing.onAddColumn ? (
+                                            // A disabled button shows no tooltip of its own.
+                                            <span title={addColumnDisabled}>
+                                                <button
+                                                    type="button"
+                                                    className="rt-add-column-action"
+                                                    aria-label="Add column"
+                                                    disabled={!!addColumnDisabled}
+                                                    onClick={editing.onAddColumn}
+                                                >
+                                                    <Icon icon={PlusSignIcon} size={13} />
+                                                    <span>Column</span>
+                                                </button>
+                                            </span>
+                                        ) : null}
                                     </span>
                                 ) : null}
                             </div>

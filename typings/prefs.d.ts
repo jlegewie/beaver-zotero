@@ -71,6 +71,7 @@ declare namespace _ZoteroTypes {
       "onboardingWelcomeShownAt": string;
       "versionUpdatePopupShownAt": string;
       "onboardingSignInTextShown": boolean;
+      "tableNoCreditsNoticeDismissed": boolean;
       "interruptedThread": string;
       "beaverTabsToRestore": string;
       "tableWindowsToRestore": string;

@@ -9,10 +9,15 @@ import {
 } from '@beaver/agent-core/protocol/tableFillProtocol';
 import {
     balanceLine,
+    creditsActionLabel,
+    FILL_BY_HAND_NOTE,
     fillActionLabel,
     fillButtonLabel,
     fillButtonRows,
     creditsText,
+    hasNoCredits,
+    NO_CREDITS_NOTICE,
+    noCreditsText,
     pendingLines,
     planSourcesLine,
     planTitle,
@@ -20,6 +25,7 @@ import {
     resultNeedsAttention,
     resultText,
     runningLabel,
+    shownStop,
     timeLeftText,
 } from '@beaver/agent-core/run-state/tableFillCopy';
 import { ArrowDownIcon, CancelIcon, Icon, PlayIcon, Spinner, StopIcon } from '@beaver/agent-ui/icons';
@@ -29,6 +35,39 @@ import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
 import type { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
 import type { TableRef } from '../../../src/services/artifacts/tableItemIdentity';
 import { getWindowRuntime } from '../../runtime/windowRuntime';
+import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
+import { openPreferencesWindow } from '../../ui/openPreferencesWindow';
+import { useAtom } from 'jotai';
+import { tableNoCreditsNoticeDismissedAtom } from '../../atoms/preferences';
+import { useCreditBalance } from './card/TableCardCost';
+
+/** Opens Plan & Usage, where credits are bought. */
+function openBilling(): void {
+    openPreferencesWindow('billing');
+}
+
+/** Focus events a credits prompt already answered with a refresh. */
+const refreshedOnFocus = new WeakSet<Event>();
+
+/**
+ * While a way to credits is on screen, reads the balance again whenever the
+ * window comes back into focus: credits bought in the browser otherwise reach
+ * the profile only at its next periodic refresh. One focus refreshes once,
+ * however many prompts are mounted.
+ */
+function useRefreshBalanceOnFocus(active: boolean): void {
+    const win = useSurfaceWindow();
+    React.useEffect(() => {
+        if (!active) return;
+        const refresh = (event: Event) => {
+            if (refreshedOnFocus.has(event)) return;
+            refreshedOnFocus.add(event);
+            void Zotero.Beaver.account?.refresh(true);
+        };
+        win.addEventListener('focus', refresh);
+        return () => win.removeEventListener('focus', refresh);
+    }, [active, win]);
+}
 
 /**
  * The table's fill job as the tab shows it: the running job, else the last
@@ -99,9 +138,10 @@ const EMPTY_ROWS: string[] = [];
  * are offered in its menu but do not light it. A click plans the fill in the
  * plugin and shows the plan in a popover: how many items, the exact cost (the
  * price per item on hover), what changed, where the answers come from, and a
- * warning only when the balance falls short. "Fill N" starts exactly that
- * plan; "Try 5 first" plans and starts the five-row trial in one step. While
- * a job runs it is the Stop button.
+ * warning with a way to credits only when the balance falls short. "Fill N"
+ * starts exactly that plan; "Try 5 first" plans and starts the five-row trial
+ * in one step. A balance that cannot pay for one item offers "Get credits"
+ * instead of Fill. While a job runs it is the Stop button.
  */
 export const TableFillButton = React.forwardRef<TableFillButtonHandle, TableFillButtonProps>(function TableFillButton(
     { tableRef, table, job, improvableRows, disabledReason, selectedRowIds = EMPTY_ROWS },
@@ -326,6 +366,16 @@ function FillPopover({
     onTrial: () => void;
     onCancel: () => void;
 }): React.ReactElement {
+    // The live balance, so credits bought while the popover is open turn
+    // "Get credits" back into Fill; the plan's own when the profile is unknown.
+    const liveBalance = useCreditBalance();
+    const shownPlan = popover.state === 'ready' || popover.state === 'starting' ? popover.plan : null;
+    const balance = shownPlan ? (liveBalance ?? shownPlan.balance) : null;
+    // A balance short of one item would stop the fill before it answers
+    // anything: the way to credits replaces Fill.
+    const noCredits = shownPlan ? noCreditsText(shownPlan, balance) : null;
+    const reach = shownPlan && !noCredits ? balanceLine({ ...shownPlan, balance }) : null;
+    useRefreshBalanceOnFocus(!!(noCredits || reach));
     let body: React.ReactNode;
     let action: React.ReactNode = null;
     let trial: React.ReactNode = null;
@@ -346,7 +396,6 @@ function FillPopover({
         const labeled = lines.filter((line) => line.label);
         const sentences = lines.filter((line) => !line.label);
         const sources = planSourcesLine(plan);
-        const reach = balanceLine(plan);
         const starting = popover.state === 'starting';
         body = (
             <>
@@ -376,7 +425,21 @@ function FillPopover({
                         {sources ? <div className="bt-fill-note">{sources}</div> : null}
                     </div>
                 ) : null}
-                {reach ? <div className="bt-fill-reach">{reach}.</div> : null}
+                {noCredits ? (
+                    <>
+                        <div className="bt-fill-reach" role="status">
+                            {noCredits}
+                        </div>
+                        <div className="bt-fill-note">{FILL_BY_HAND_NOTE}</div>
+                    </>
+                ) : reach ? (
+                    <div className="bt-fill-reach bt-fill-reach-action">
+                        <span>{reach}.</span>
+                        <button type="button" className="text-link bt-fill-reach-link" onClick={openBilling}>
+                            {creditsActionLabel(balance)}
+                        </button>
+                    </div>
+                ) : null}
                 {popover.error ? (
                     <div className="bt-fill-error" role="alert">
                         {popover.error}
@@ -384,24 +447,32 @@ function FillPopover({
                 ) : null}
             </>
         );
-        // A whole pending fill can be tried on its first rows first.
-        if (popover.scope.kind === 'pending' && !popover.scope.limit && plan.rows > TRIAL_ROWS)
-            trial = (
-                <Button
-                    variant="ghost-secondary"
-                    onClick={onTrial}
-                    disabled={starting}
-                    loading={starting && popover.trial}
-                    title={`Fill the first ${TRIAL_ROWS} rows now to check the answers`}
-                >
-                    Try {TRIAL_ROWS} first
+        if (noCredits) {
+            action = (
+                <Button variant="solid" onClick={openBilling}>
+                    {creditsActionLabel(balance)}
                 </Button>
             );
-        action = (
-            <Button variant="solid" onClick={onStart} disabled={starting} loading={starting && !popover.trial}>
-                {fillActionLabel(plan)}
-            </Button>
-        );
+        } else {
+            // A whole pending fill can be tried on its first rows first.
+            if (popover.scope.kind === 'pending' && !popover.scope.limit && plan.rows > TRIAL_ROWS)
+                trial = (
+                    <Button
+                        variant="ghost-secondary"
+                        onClick={onTrial}
+                        disabled={starting}
+                        loading={starting && popover.trial}
+                        title={`Fill the first ${TRIAL_ROWS} rows now to check the answers`}
+                    >
+                        Try {TRIAL_ROWS} first
+                    </Button>
+                );
+            action = (
+                <Button variant="solid" onClick={onStart} disabled={starting} loading={starting && !popover.trial}>
+                    {fillActionLabel(plan)}
+                </Button>
+            );
+        }
     }
     return (
         <div className="bt-fill-popover" role="dialog" aria-label="Fill the table">
@@ -429,15 +500,50 @@ export interface TableFillBannerProps {
 /** The result of the last fill, over the grid, until dismissed. */
 export function TableFillBanner({ job, showingFailed, onShowFailed, onDismiss }: TableFillBannerProps): React.ReactElement {
     const failed = job.result?.failed_row_ids.length ?? 0;
+    const balance = useCreditBalance();
+    const outOfCredits = !!job.result && shownStop(job.result) === 'insufficient_credits';
+    useRefreshBalanceOnFocus(outOfCredits);
     return (
-        <span className="bt-fill-banner">
+        <span className={`bt-fill-banner${outOfCredits ? ' bt-fill-banner-wrap' : ''}`}>
             <span className="bt-fill-banner-text">{resultText(job)}</span>
             {failed > 0 ? (
                 <button type="button" className="bt-fill-banner-link" onClick={() => onShowFailed(!showingFailed)}>
                     {showingFailed ? 'Show all' : 'Show'}
                 </button>
             ) : null}
+            {outOfCredits ? (
+                <button type="button" className="bt-fill-banner-link" onClick={openBilling}>
+                    {creditsActionLabel(balance)}
+                </button>
+            ) : null}
             <button type="button" className="bt-fill-banner-close" aria-label="Dismiss" onClick={onDismiss}>
+                <Icon icon={CancelIcon} size={10} />
+            </button>
+        </span>
+    );
+}
+
+/**
+ * The tab's notice for an account without credits: filling needs them, the
+ * table still works by hand, and a way to get them. Null while the balance is
+ * unknown or above zero, when `enabled` is false, and for good once the user
+ * dismisses it.
+ */
+export function useNoCreditsNotice(enabled: boolean): React.ReactElement | null {
+    const balance = useCreditBalance();
+    const [dismissed, dismiss] = useAtom(tableNoCreditsNoticeDismissedAtom);
+    const shown = enabled && !dismissed && hasNoCredits(balance);
+    useRefreshBalanceOnFocus(shown);
+    if (!shown) return null;
+    return (
+        <span className="bt-fill-banner bt-fill-banner-wrap" role="status">
+            <span className="bt-fill-banner-text">
+                {NO_CREDITS_NOTICE}
+            </span>
+            <button type="button" className="bt-fill-banner-link" onClick={openBilling}>
+                {creditsActionLabel(balance)}
+            </button>
+            <button type="button" className="bt-fill-banner-close" aria-label="Dismiss" onClick={() => dismiss()}>
                 <Icon icon={CancelIcon} size={10} />
             </button>
         </span>

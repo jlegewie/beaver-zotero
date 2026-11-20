@@ -11,6 +11,18 @@ export const CHAT_LINE_SPACING = {
 
 export type ChatLineSpacing = keyof typeof CHAT_LINE_SPACING;
 
+/**
+ * Whether the table tab's no-credits notice was dismissed, for good and in
+ * every window: the native observer projects the write back into each one.
+ */
+export const tableNoCreditsNoticeDismissedAtom = atom(
+    (get): boolean => {
+        get(preferencesRevisionAtom);
+        return !!getPref('tableNoCreditsNoticeDismissed');
+    },
+    () => setPref('tableNoCreditsNoticeDismissed', true),
+);
+
 /** Local display preference, projected into each window by the native observer. */
 export const chatLineSpacingAtom = atom(
     (get): ChatLineSpacing => {

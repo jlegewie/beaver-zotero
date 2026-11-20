@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
 
@@ -23,6 +23,7 @@ vi.mock('../../../src/utils/libraryMessages', () => ({
 }));
 vi.mock('../../../src/utils/zoteroUtils', () => ({
     resolveFieldForItemType,
+    canSetField: () => true,
     sanitizeCreators: (creators: unknown) => creators,
 }));
 
@@ -30,7 +31,10 @@ import {
     executeEditMetadataAction,
     undoEditMetadataAction,
 } from '../../../src/services/manualActions/editMetadataActions';
-import { executeEditMetadataAction as executeOverSocket } from '../../../src/services/agentDataProvider/actions/editMetadata';
+import {
+    executeEditMetadataAction as executeOverSocket,
+    validateEditMetadataAction as validateOverSocket,
+} from '../../../src/services/agentDataProvider/actions/editMetadata';
 
 const DOCUMENT_FIELDS = new Set(['title', 'publisher']);
 
@@ -275,5 +279,58 @@ describe('an edit_metadata applied over the socket', () => {
 
         expect(response).toMatchObject({ success: false, error_code: 'edit_failed' });
         expect(response.result_data).toBeUndefined();
+    });
+});
+
+describe('validating an edit_metadata over the socket', () => {
+    const zotero = (globalThis as any).Zotero;
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        resolveFieldForItemType.mockImplementation((_typeID: number, field: string) => field);
+        zotero.Libraries.get = vi.fn(() => ({ editable: true, name: 'My Library' }));
+        zotero.Beaver = { libraryScopeInitialized: true, searchableLibraryIds: [1] };
+    });
+
+    afterEach(() => {
+        delete zotero.Libraries.get;
+        delete zotero.Beaver;
+    });
+
+    function makeAttachment(parentKey: string | false) {
+        return {
+            libraryID: 1,
+            itemTypeID: 3,
+            parentKey,
+            isNote: () => false,
+            isAnnotation: () => false,
+            isAttachment: () => true,
+            isRegularItem: () => false,
+            getField: vi.fn(() => 'Full Text PDF'),
+        };
+    }
+
+    const validate = () => validateOverSocket({
+        request_id: 'r1',
+        action_type: 'edit_metadata',
+        action_data: { library_id: 1, zotero_key: 'ATTA2345', edits: [{ field: 'title', new_value: 'Smith 2020' }] },
+    } as any);
+
+    it('names the parent of a child attachment', async () => {
+        resolveItemReference.mockResolvedValue({ status: 'found', item: makeAttachment('PRNT2345') });
+
+        const response = await validate();
+
+        expect(response.valid).toBe(true);
+        expect(response.current_value).toEqual({ title: 'Full Text PDF', parent_key: 'PRNT2345' });
+    });
+
+    it('names no parent for a standalone attachment', async () => {
+        resolveItemReference.mockResolvedValue({ status: 'found', item: makeAttachment(false) });
+
+        const response = await validate();
+
+        expect(response.valid).toBe(true);
+        expect(response.current_value).toEqual({ title: 'Full Text PDF' });
     });
 });
