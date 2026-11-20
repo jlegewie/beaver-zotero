@@ -17,6 +17,7 @@ import { DeferredCommits } from './services/committedTransaction';
 import { OpenTransactionWatch } from './services/openTransaction';
 import { ItemImportService } from './services/itemImport/service';
 import { InstanceExport } from './services/export/instanceExport';
+import { InstanceImages } from './services/images/instanceImages';
 import { NotePreviews } from './services/notePreviews';
 import { AIProvider } from "./services/OpenAIProvider";
 import { createSyncPauseService } from './services/syncPause';
@@ -49,6 +50,7 @@ class Addon {
     public transactionWatch = new OpenTransactionWatch();
     public itemImport = new ItemImportService();
     public exporter = new InstanceExport();
+    public images = new InstanceImages();
     public runtime = new BeaverInstance();
     public data: {
         alive: boolean;

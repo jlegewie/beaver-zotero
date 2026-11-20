@@ -34,8 +34,8 @@ vi.mock('../../../src/beaver-extract', async () => {
     };
 });
 
-vi.mock('../../../src/services/agentDataProvider/imageProcessing', async () => {
-    const actual = await vi.importActual<any>('../../../src/services/agentDataProvider/imageProcessing');
+vi.mock('../../../src/services/images/imageProcessing', async () => {
+    const actual = await vi.importActual<any>('../../../src/services/images/imageProcessing');
     return {
         ...actual,
         processImageBytes: processImageBytesMock,
@@ -44,7 +44,7 @@ vi.mock('../../../src/services/agentDataProvider/imageProcessing', async () => {
 
 import { handleZoteroViewImagesRequest } from '../../../src/services/agentDataProvider/handleZoteroViewImagesRequest';
 import { resolveExternalFile } from '../../../src/services/externalFiles';
-import { MAX_PAGE_IMAGE_DIMENSION } from '../../../src/services/agentDataProvider/imageProcessing';
+import { MAX_PAGE_IMAGE_DIMENSION } from '../../../src/services/images/imageProcessing';
 import type { WSZoteroViewImagesRequest } from '@beaver/agent-core/protocol/agentProtocol';
 
 const EXT_KEY = 'AB12CD34';

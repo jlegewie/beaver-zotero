@@ -177,12 +177,13 @@ describe("current table display and snapshot navigation", () => {
             "reason",
             "Table file is missing on this device.",
         );
-        deps.fileSync.mockReturnValueOnce(true);
+        deps.fileSync.mockReturnValue(true);
         deps.read.mockResolvedValueOnce({ ok: false, code: "no_file" });
-        expect(await resolveTableDisplay("u-ABCDEFGH")).toHaveProperty(
-            "reason",
-            "Table files are not on this device yet. Opening the table downloads them.",
-        );
+        expect(await resolveTableDisplay("u-ABCDEFGH")).toEqual({
+            status: "unavailable",
+            reason: "Table files are not on this device yet. Opening the table downloads them.",
+            openable: true,
+        });
         deps.api.mockReturnValue(null);
         expect(await resolveTableDisplay("u-ABCDEFGH")).toHaveProperty(
             "reason",

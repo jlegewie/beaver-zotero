@@ -2969,6 +2969,11 @@
     background-color: transparent;
 }
 
+/* A source chip that cannot be used: trashed, excluded, unreadable. */
+[id^="beaver-pane-"] .variant-outline.border-red {
+    border-color: var(--tag-red-secondary);
+}
+
 [id^="beaver-pane-"] .variant-outline.loading {
     position: relative;
 }

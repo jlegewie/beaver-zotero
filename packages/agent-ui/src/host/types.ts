@@ -846,7 +846,12 @@ export type TableDisplay =
           /** Content columns: every column except system metadata (year, DOI, row type). */
           contentColumns?: number;
       }
-    | { status: 'unavailable'; reason: string };
+    | {
+          status: 'unavailable';
+          reason: string;
+          /** The files are not here yet, and opening the table downloads them. */
+          openable?: boolean;
+      };
 
 export interface ClientHost {
     navigation?: NavigationHost;
