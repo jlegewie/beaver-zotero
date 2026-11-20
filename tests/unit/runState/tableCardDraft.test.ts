@@ -18,10 +18,8 @@ import {
     addLibrarySource,
     addScreening,
     cardTotals,
-    costCredits,
-    costLine,
     draftCost,
-    fillActionLabel,
+    fillScopeLine,
     tableFillCardResponse,
     balanceNotice,
     columnProblem,
@@ -574,17 +572,6 @@ describe('table card draft', () => {
     describe('cost', () => {
         const PRICES = { document: 0.2, title_abstract: 0.05 };
 
-        it('writes the row line and the credits, with "up to" while the count is not exact', () => {
-            const cost = { rows: 180, documents: 150, title_abstract: 18, no_input: 12, credits: 30.9 };
-            expect(costLine(cost)).toBe(
-                "Reads 168 items: 150 from their documents, 18 from title and abstract. 12 items can't be read and are skipped",
-            );
-            expect(costLine(cost, true)).toMatch(/^Reads up to 168 items/);
-            expect(costCredits(cost)).toBe('30.9 credits');
-            expect(costCredits(cost, true)).toBe('Up to 30.9 credits');
-            expect(costLine(null)).toBeNull();
-        });
-
         it('keeps the proposal\'s cost until the sources change; a question edit changes nothing', () => {
             const { request } = fixture('create-items');
             let draft = initialTableCardDraft(request);
@@ -691,9 +678,9 @@ describe('table card draft', () => {
                 approved: true,
                 choice: reply!.choice,
             });
-            expect(fillActionLabel(request)).toBe('Fill 32');
-            expect(costLine(request.cost)).toBe('Reads 32 items: 30 from their documents, 2 from title and abstract');
-            expect(costCredits(request.cost)).toBe('6.1 credits');
+            expect(fillScopeLine(request)).toBe('Fill 2 columns');
+            expect(fillScopeLine({ ...request, columns: request.columns.slice(0, 1) })).toBe('Fill 1 column');
+            expect(costReceipt(request.cost)).toEqual({ papers: '32 items', credits: '6.1 credits' });
         });
 
         it('declines with the instructions typed', () => {
