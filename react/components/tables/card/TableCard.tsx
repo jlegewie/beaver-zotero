@@ -61,6 +61,7 @@ import {
     type TableCardStep,
 } from '@beaver/agent-core/run-state/tableCardDraft';
 import { MAX_MODEL_COLUMNS } from '@beaver/agent-core/layouts/table';
+import { creditsActionLabel } from '@beaver/agent-core/run-state/tableFillCopy';
 import { useAddSourcesMenu, type AddSourcesMenuHandle } from '@beaver/agent-ui/composer/useAddSourcesMenu';
 import { ArrowLeftIcon } from '@beaver/agent-ui/icons';
 import Button from '@beaver/agent-ui/primitives/Button';
@@ -903,7 +904,7 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
                         className="table-card-warning-action"
                         onClick={() => openPreferencesWindow('billing')}
                     >
-                        Add credits
+                        {creditsActionLabel(balance)}
                     </button>
                 </div>
             )}

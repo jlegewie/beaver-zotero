@@ -879,6 +879,17 @@ describe("failed requests", () => {
         expect(state.table.rows.slice(1).every((row) => !row.cells.method && !row.failure)).toBe(true);
     });
 
+    it("refreshes the balance after a refusal for credits that charged nothing", async () => {
+        const { state, fills, deps } = harness([itemRow("a", { documents: ["u-PDFa"] })]);
+        state.respond = async () => {
+            throw new ApiError(402, "Payment Required", "insufficient_credits", "insufficient_credits");
+        };
+        const { job } = await planAndStart(fills);
+        const done = await fills.wait(job.job_id);
+        expect(done?.result).toMatchObject({ rows_answered: 0, credits_charged: 0, stopped_by: "insufficient_credits" });
+        expect(deps.account.refreshProfile).toHaveBeenCalledTimes(1);
+    });
+
     it("stops on price_changed before anything is charged", async () => {
         const { state, fills } = harness([itemRow("a", { documents: ["u-PDFa"] }), itemRow("b", { documents: ["u-PDFb"] })]);
         state.respond = async () => {

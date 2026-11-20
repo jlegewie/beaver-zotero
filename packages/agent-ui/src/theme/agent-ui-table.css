@@ -239,6 +239,11 @@
     white-space: nowrap;
 }
 
+/* A credits message wraps rather than hide what it asks of the user. */
+.beaver-root .bt-fill-banner-wrap .bt-fill-banner-text {
+    white-space: normal;
+}
+
 .beaver-root .bt-fill-banner-link,
 .beaver-root .bt-fill-banner-close {
     flex: 0 0 auto;
@@ -373,6 +378,22 @@
     background: var(--tag-orange-quinary, var(--fill-quinary));
     color: var(--tag-orange-primary, var(--fill-primary));
     font-size: 0.86rem;
+}
+
+/* A short balance's line, with the way to credits at its end. */
+.beaver-root .bt-fill-reach-action {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.6rem;
+}
+
+.beaver-root .bt-fill-reach-link {
+    flex: 0 0 auto;
+    padding: 0;
+    font: inherit;
+    font-weight: 500;
+    white-space: nowrap;
 }
 
 .beaver-root .bt-fill-status {

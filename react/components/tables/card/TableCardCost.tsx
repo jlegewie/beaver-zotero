@@ -1,5 +1,5 @@
 import React from 'react';
-import { useAtomValue } from 'jotai';
+import { atom, useAtomValue } from 'jotai';
 import type { TableCardCost } from '@beaver/agent-core/protocol/tableCardProtocol';
 import type { TableFillPricing } from '@beaver/agent-core/protocol/tableFillProtocol';
 import { costBreakdown, costCredits, costLine, costReceipt } from '@beaver/agent-core/run-state/tableCardDraft';
@@ -39,11 +39,12 @@ export function useFillPricing(): TableFillPricing | null {
     return prices;
 }
 
+/** The spendable balance as a number, so a reader re-renders only when it changes. */
+const creditBalanceAtom = atom((get) => (get(profileWithPlanAtom) ? get(remainingBeaverCreditsAtom) : null));
+
 /** The user's credit balance, or null while the profile is not loaded. */
 export function useCreditBalance(): number | null {
-    const profile = useAtomValue(profileWithPlanAtom);
-    const remaining = useAtomValue(remainingBeaverCreditsAtom);
-    return profile ? remaining : null;
+    return useAtomValue(creditBalanceAtom);
 }
 
 export interface TableCardCostBlockProps {
