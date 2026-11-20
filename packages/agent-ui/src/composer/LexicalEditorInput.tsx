@@ -821,6 +821,9 @@ const PlainTextSync: React.FC<{
             root.append(p);
         });
         lastEmitted.current = next;
+        // The parent's pills came with the value: compare later edits with
+        // them, or a pill it just cleared, inserted again, is never reported.
+        lastEmittedPills.current = pillsRef.current;
         // A rebuild replaces the content wholesale, superseding any blur
         // snapshot the imperative focus() would otherwise restore.
         blurSelectionRef.current = null;

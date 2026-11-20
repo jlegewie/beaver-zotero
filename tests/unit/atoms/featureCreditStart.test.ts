@@ -31,11 +31,13 @@ import { activeFeatureTaskAtom } from '../../../react/atoms/featureCreditRuns';
 import {
     automaticMessageCollectionsAtom,
     automaticMessageItemKeysAtom,
+    composerResetTokenAtom,
     currentMessageCollectionsAtom,
     currentMessageContentAtom,
     currentMessageItemsAtom,
     currentMessagePillsAtom,
     pendingPillInsertsAtom,
+    readerActionContextAtom,
 } from '../../../react/atoms/messageComposition';
 
 const pill = (actionId: string) => ({ actionId, commandName: actionId.replace(/^builtin-/, ''), title: actionId });
@@ -140,6 +142,17 @@ describe('leaveFeatureTaskAtom', () => {
         expect(store.get(activeFeatureTaskAtom)).toBeNull();
         expect(store.get(currentMessageContentAtom)).toBe('');
         expect(store.get(currentMessagePillsAtom)).toEqual([]);
+    });
+
+    it('leaves the attachments\' reader context and files being attached alone', () => {
+        const store = storeWith('/annotate ', [annotate]);
+        const context = { item: { id: 1 } as Zotero.Item, selection: null };
+        store.set(readerActionContextAtom, context);
+        const token = store.get(composerResetTokenAtom);
+        store.set(leaveFeatureTaskAtom);
+        expect(store.get(currentMessagePillsAtom)).toEqual([]);
+        expect(store.get(readerActionContextAtom)).toBe(context);
+        expect(store.get(composerResetTokenAtom)).toBe(token);
     });
 
     it('keeps the /command with text the user typed', () => {

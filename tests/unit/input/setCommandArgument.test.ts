@@ -20,6 +20,8 @@ describe('LexicalEditorInputHandle.setCommandArgument', () => {
     let saved: SavedDescriptor[] = [];
     // What the parent holds, as published by the editor.
     let published = { value: '', pills: [] as SlashCommandDescriptor[] };
+    // Clears the parent's text and pills, as a programmatic composer reset does.
+    let clear = () => {};
 
     const patch = (target: object, key: PropertyKey, value: unknown) => {
         saved.push({ target, key, descriptor: Object.getOwnPropertyDescriptor(target, key) });
@@ -57,6 +59,7 @@ describe('LexicalEditorInputHandle.setCommandArgument', () => {
         function Harness() {
             const [value, setValue] = useState('');
             const [pills, setPills] = useState<SlashCommandDescriptor[]>([]);
+            clear = () => { published = { value: '', pills: [] }; setValue(''); setPills([]); };
             return React.createElement(LexicalEditorInput, {
                 ref: handle,
                 value,
@@ -225,5 +228,16 @@ describe('LexicalEditorInputHandle.setCommandArgument', () => {
             expect(removed).toBe(0);
             expect(published.value).toBe('hello');
         });
+    });
+
+    it('publishes a pill inserted again after the parent cleared it', async () => {
+        const { handle } = await mount();
+        await act(async () => handle.current!.insertSlashCommand(annotate, null));
+        await act(async () => clear());
+        expect(handle.current!.getSlashCommands()).toEqual([]);
+
+        await act(async () => handle.current!.insertSlashCommand(annotate, null));
+        expect(published.value).toBe('/annotate ');
+        expect(published.pills.map(p => p.actionId)).toEqual(['builtin-annotate']);
     });
 });

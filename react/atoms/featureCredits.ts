@@ -13,7 +13,6 @@ import { preferencesRevisionAtom } from './preferences';
 import { getPref, setPref } from '../../src/utils/prefs';
 import { actionRequirementBlockAtom, stageActionPillAtom } from './actions';
 import {
-    clearComposerAtom,
     composerSourceSearchTextAtom,
     currentMessageContentAtom,
     currentMessageItemsAtom,
@@ -32,7 +31,7 @@ import {
     type DocumentStatus,
     type SetupStep,
 } from '../utils/featureCredits';
-import { textBesidesPills, type ActionRequirementBlock } from '../utils/actionRequirements';
+import { hasTextBesidesPills, textBesidesPills, type ActionRequirementBlock } from '../utils/actionRequirements';
 import { itemValidationResultsAtom, type ItemValidationState } from './itemValidation';
 import { getReadableContentKind } from '../../src/services/documentExtraction/attachmentResolution';
 import { activeFeatureTaskAtom } from './featureCreditRuns';
@@ -151,12 +150,17 @@ export const leaveFeatureTaskAtom = atom(null, (get, set) => {
     if (!definition) return;
     const pills = get(currentMessagePillsAtom);
     if (pills.some((pill) => pill.actionId !== definition.actionId)) return;
-    if (textBesidesPills(get(currentMessageContentAtom), pills).trim()) return;
+    if (hasTextBesidesPills(get(currentMessageContentAtom), pills)) return;
+    // Only the text and the /command: attachments, the reader context that
+    // comes with them, and files still being attached stay.
+    if (pills.length > 0) {
+        set(currentMessageContentAtom, '');
+        set(currentMessagePillsAtom, []);
+    }
     // A /command not inserted yet (Back right after the task started) is dropped too.
     const pending = get(pendingPillInsertsAtom);
     const otherPending = pending.filter((insert) => insert.descriptor.actionId !== definition.actionId);
-    if (pills.length > 0) set(clearComposerAtom);
-    if (otherPending.length !== get(pendingPillInsertsAtom).length) set(pendingPillInsertsAtom, otherPending);
+    if (otherPending.length !== pending.length) set(pendingPillInsertsAtom, otherPending);
 });
 
 const ANNOTATABLE_KINDS = new Set(['pdf', 'epub', 'snapshot']);
