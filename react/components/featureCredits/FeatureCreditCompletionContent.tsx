@@ -123,7 +123,7 @@ const FeatureCreditCompletionContent: React.FC<Props> = ({ data, runs, onDismiss
 
                 {next ? (
                     <button type="button" className="feature-credits-next" onClick={(event) => void startNext(event)}>
-                        <span className="flex-1">Next: {next.definition.title}</span>
+                        <span>Next: {next.definition.title}</span>
                         <Icon icon={ArrowRightIcon} className="font-color-secondary" />
                     </button>
                 ) : (

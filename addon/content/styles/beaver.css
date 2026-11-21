@@ -6544,7 +6544,7 @@
     flex: 1;
     min-width: 0;
     margin: 0;
-    font-size: 1rem;
+    font-size: 1.1rem;
     font-weight: 600;
     color: var(--fill-primary);
 }
@@ -6806,6 +6806,8 @@
     display: flex;
     flex-direction: row;
     align-items: center;
+    /* Only as wide as the label and arrow, not the whole column. */
+    align-self: flex-start;
     gap: 6px;
     margin: -4px -6px;
     padding: 4px 6px;
