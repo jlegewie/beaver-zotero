@@ -1209,6 +1209,9 @@ export function registerEndpoints(): (() => void) | undefined {
 
         endpoints['/beaver/test/select-tab'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/select-tab', request));
 
+        // The pane holding the main-window sidebar, measured while Zotero sizes it.
+        endpoints['/beaver/test/sidebar-pane-width'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/sidebar-pane-width', request));
+
         endpoints['/beaver/test/run-status-popup'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/run-status-popup', request));
 
         endpoints['/beaver/test/feature-tip'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/feature-tip', request));

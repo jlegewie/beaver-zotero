@@ -103,6 +103,26 @@ export const setBeaverWindow = (open: boolean) =>
 export const setBeaverSidebar = (open: boolean) =>
     settlePost<SettleResponse>('/beaver/test/beaver-sidebar', { open });
 
+export interface SidebarPaneWidthResponse {
+    ok: boolean;
+    error?: 'sidebar_hidden' | 'stacked_layout';
+    location?: 'reader' | 'library';
+    /** The width Zotero was made to size the pane to. */
+    zotero_width?: number;
+    /** The pane's inline width right after Zotero wrote it. */
+    inline_width_during?: string;
+    width_before?: number;
+    /** The pane's laid-out width right after Zotero wrote its own. */
+    width_during?: number;
+}
+
+/**
+ * Make Zotero size the pane holding the sidebar to a width of its own, and
+ * measure the pane in the same task, before Beaver can react.
+ */
+export const sidebarPaneWidth = () =>
+    post<SidebarPaneWidthResponse>('/beaver/test/sidebar-pane-width', {});
+
 /** Select the library tab. */
 export const selectLibraryTab = () =>
     settlePost<SelectTabResponse>('/beaver/test/select-tab', { tab: 'library' });

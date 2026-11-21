@@ -53,3 +53,12 @@ export function restoreReaderSiblings(win: Window): void {
         }
     }
 }
+
+/**
+ * An element's `width` attribute, or null when it has none. Zotero 7's Gecko
+ * returns "" from `getAttribute` for a missing XUL attribute, and putting that
+ * "" back would create an attribute Zotero then persists.
+ */
+export function widthAttribute(element: Element): string | null {
+    return element.hasAttribute('width') ? element.getAttribute('width') : null;
+}

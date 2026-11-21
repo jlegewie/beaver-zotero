@@ -1,7 +1,7 @@
 import { getHostWindow, tryGetWindowRuntime } from '../runtime/windowRuntime';
 import { collapseTableTabContextPane, isTableTabSelected, openTableTabContextPane } from '../../src/ui/tableTabContextPane';
 import { SidebarLocation, UIState } from './types';
-import { isStackedLayout, readerMountParent, restoreReaderSiblings } from '../utils/zoteroLayout';
+import { isStackedLayout, readerMountParent, restoreReaderSiblings, widthAttribute } from '../utils/zoteroLayout';
 import { activeItemPane } from '../../src/ui/libraryPane';
 import { getPref, setPref } from '../../src/utils/prefs';
 import { store } from '../store';
@@ -77,15 +77,6 @@ function restoreScroll(snapshot: ScrollSnapshot): void {
 function hasSize(element: HTMLElement): boolean {
     const rect = element.getBoundingClientRect();
     return rect.width > 0 && rect.height > 0;
-}
-
-/**
- * An element's `width` attribute, or null when it has none. Zotero 7's Gecko
- * returns "" from `getAttribute` for a missing XUL attribute, and putting that
- * "" back would create an attribute Zotero then persists.
- */
-function widthAttribute(element: Element): string | null {
-    return element.hasAttribute('width') ? element.getAttribute('width') : null;
 }
 
 /**
@@ -538,7 +529,14 @@ class UIManager {
         this.sizePane(host);
     }
 
-    /** Size the occupied pane by the sidebar width and let its neighbour take the rest. */
+    /**
+     * Size the occupied pane by the sidebar width and let its neighbour take the rest.
+     *
+     * The flex-basis is what sizes the pane. The inline width must still be the
+     * sidebar width: a splitter drag starts from the pane's inline width, not
+     * from the width it is shown at, so Zotero's width there would make a drag
+     * jump by the difference.
+     */
     private sizePane(host: Host): void {
         const style = host.pane.style;
         const css = `${this.width}px`;
