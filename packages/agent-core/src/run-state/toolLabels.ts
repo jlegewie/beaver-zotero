@@ -509,9 +509,23 @@ export function getToolCallLabel(
     status: ToolCallStatus,
     opts?: ToolCallLabelOptions,
 ): string {
-    const main = computeMainLabel(part, status, opts);
-    const suffix = getToolResultLabelSuffix(opts?.view ?? null, part.tool_name);
+    const { main, suffix } = getToolCallLabelParts(part, status, opts);
     return suffix ? `${main}${suffix}` : main;
+}
+
+/**
+ * The label in two parts: the text, and the count suffix (" (3 of 24)") or
+ * null. A one-line header shortens the text and keeps the count whole.
+ */
+export function getToolCallLabelParts(
+    part: ToolCallPart,
+    status: ToolCallStatus,
+    opts?: ToolCallLabelOptions,
+): { main: string; suffix: string | null } {
+    return {
+        main: computeMainLabel(part, status, opts),
+        suffix: getToolResultLabelSuffix(opts?.view ?? null, part.tool_name),
+    };
 }
 
 /**
@@ -852,8 +866,9 @@ function computeMainLabel(
         case 'external_search':
         case 'openalex_search_by_topic':
         case 'openalex_search_by_keywords': {
+            // Not cut here: the header shortens it to its width, and copied text keeps it whole.
             const text = toolCallSearchText(part, view);
-            return text ? `${baseLabel}: ${truncate(text, 60)}` : baseLabel;
+            return text ? `${baseLabel}: ${text}` : baseLabel;
         }
 
         case 'openalex_resolve_names': {
@@ -861,7 +876,7 @@ function computeMainLabel(
                 ? 'Author lookup'
                 : args.kind === 'venue' ? 'Journal lookup' : baseLabel;
             const text = toolCallSearchText(part, view);
-            return text ? `${kindLabel}: ${truncate(text, 60)}` : kindLabel;
+            return text ? `${kindLabel}: ${text}` : kindLabel;
         }
 
         case 'get_trial': {

@@ -3,7 +3,7 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import { AgentRunStatus, ToolCallPart, isEmptyWriteReturn, isNotFoundWriteReturn, isUnsuccessfulToolReturn } from '@beaver/agent-core/agents/types';
 import { getToolCallStatusFromResult, toolResultAtom } from '@beaver/agent-core/run-state/atoms';
 import { isTableToolName, isTableWriteToolName, tableResultMessages } from '@beaver/agent-core/run-state/tableResults';
-import { getToolCallLabel, type ToolCallLabelEnrich } from '@beaver/agent-core/run-state/toolLabels';
+import { getToolCallLabelParts, type ToolCallLabelEnrich } from '@beaver/agent-core/run-state/toolLabels';
 import { parseArgs } from '@beaver/agent-core/run-state/toolCallRequest';
 import {
     isExternalReferenceListView,
@@ -50,7 +50,6 @@ import {
     TableIcon,
     BookCopyIcon,
     BookSearchIcon,
-    MedicalFileIcon,
     FilterLinesIcon,
     AuthorIcon,
     LibraryIcon,
@@ -120,9 +119,9 @@ const TOOL_ICONS: Record<string, IconComponent> = {
     pubmed_search: GlobalSearchIcon,
     openalex_search_by_topic: GlobalSearchIcon,
     openalex_search_by_keywords: GlobalSearchIcon,
-    trials_search: MedicalFileIcon,
-    search_trials: MedicalFileIcon,
-    get_trial: MedicalFileIcon,
+    trials_search: GlobalSearchIcon,
+    search_trials: GlobalSearchIcon,
+    get_trial: FileViewIcon,
 
     // Create item tool
     create_zotero_item: DocumentValidationIcon,
@@ -358,7 +357,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
         !showAgentActionView &&
         isEmptyWriteReturn(result);
 
-    const label = getToolCallLabel(part, status, {
+    const { main: label, suffix: labelSuffix } = getToolCallLabelParts(part, status, {
         view,
         enrich: labelEnrich,
         noChange: isNoChangeReturn,
@@ -539,8 +538,14 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
                             names/locators get an ellipsis instead of wrapping. Must stay a
                             block (not display-flex) — text-overflow:ellipsis is ignored on
                             flex containers, which clips the text without the "…". */}
-                        <div className={`min-w-0 truncate ${effectiveLabelColor} ${isShimmering ? 'shimmer-text' : ''}`}>
-                            {label}
+                        <div className="display-flex flex-row gap-1 min-w-0">
+                            <div className={`min-w-0 truncate ${effectiveLabelColor} ${isShimmering ? 'shimmer-text' : ''}`}>
+                                {label}
+                            </div>
+                            {/* The count stays whole while the text before it shortens. */}
+                            {labelSuffix && (
+                                <div className={`flex-none ${effectiveLabelColor}`}>{labelSuffix.trim()}</div>
+                            )}
                         </div>
                     </div>
                 </button>
@@ -560,6 +565,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
                                 ariaLabel="Search details"
                                 ariaExpanded={searchDetailsOpen}
                                 ariaControls={searchDetailsId}
+                                style={{ padding: '3px' }}
                             />
                         </Tooltip>
                     </div>

@@ -85,14 +85,14 @@ describe('getToolCallDetails for database searches', () => {
         expect(details).toBe('[Literature search: peer effects]');
     });
 
-    it('labels a name lookup by its names, and keeps every name the label truncates', () => {
+    it('labels a name lookup by all its names', () => {
         const details = getToolCallDetails(tc('openalex_resolve_names', { names: ['Katrin Wisniewski'], kind: 'author' }), new Map());
         expect(details).toBe('[Author lookup: Katrin Wisniewski]');
         expect(getToolCallDetails(tc('openalex_resolve_names', { names: ['Nature', 'Science', 'Cell'], kind: 'venue' }), new Map()))
             .toBe('[Journal lookup: Nature, Science, Cell]');
         const names = ['Katrin Wisniewski', 'Esther Duflo', 'Abhijit Banerjee', 'Michael Kremer'];
         expect(getToolCallDetails(tc('openalex_resolve_names', { names, kind: 'author' }), new Map()))
-            .toBe(`[Author lookup: ${names.join(', ').slice(0, 60)}...: "${names.join(', ')}"]`);
+            .toBe(`[Author lookup: ${names.join(', ')}]`);
     });
 
     it('reads names the model sent as a JSON-encoded list', () => {
@@ -100,12 +100,12 @@ describe('getToolCallDetails for database searches', () => {
             .toBe('[Author lookup: Alice Smith, Bob Jones, Carol Gray]');
     });
 
-    it('keeps the full terms of a trial search the label truncates', () => {
+    it('keeps the full terms of a long trial search, once', () => {
         const condition = 'type 2 diabetes mellitus with obesity and chronic kidney disease stage 3';
         const details = getToolCallDetails(tc('trials_search', { condition, intervention: 'tirzepatide' }), new Map());
-        expect(details).toContain(`: "${condition} · tirzepatide"]`);
+        expect(details).toBe(`[ClinicalTrials.gov search: ${condition} · tirzepatide]`);
         const mixed = getToolCallDetails(tc('trials_search', { query: 'randomized', condition, intervention: 'tirzepatide' }), new Map());
-        expect(mixed).toContain(`: "randomized · ${condition} · tirzepatide"]`);
+        expect(mixed).toBe(`[ClinicalTrials.gov search: randomized · ${condition} · tirzepatide]`);
     });
 
     it('keeps every author id of a filter-only listing', () => {
@@ -127,10 +127,10 @@ describe('getToolCallDetails for database searches', () => {
             .toBe('[ClinicalTrials.gov search: obesity]');
     });
 
-    it('keeps the full text of a query the label truncates', () => {
+    it('keeps the full text of a long query, once', () => {
         const query = 'Research on how classmates or school peers influence student achievement and test scores';
         const details = getToolCallDetails(tc('openalex_search_by_topic', { query }), new Map());
-        expect(details).toBe(`[Literature search: ${query.slice(0, 60)}...: "${query}"]`);
+        expect(details).toBe(`[Literature search: ${query}]`);
     });
 
     it('still reads the search_label of an older thread', () => {

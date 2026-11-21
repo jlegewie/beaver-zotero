@@ -7,7 +7,7 @@ import type { ExternalReference } from '@beaver/agent-core/types/externalReferen
 import { setHost } from '@beaver/agent-ui/host';
 import {
     ExternalReferenceListResultView,
-    searchFilterLabels,
+    searchFilterFacts,
 } from '../../../react/components/agentRuns/toolResultViews/ExternalReferenceListResultView';
 
 vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
@@ -224,19 +224,19 @@ describe('search details panel', () => {
         },
     };
 
-    it('shows the query, filters and the query as PubMed ran it, with a copy button', () => {
+    it('shows the query, filters and the PubMed query, with a copy button', () => {
         const html = render(view, true);
         expect(html).toContain('id="search-details-call"');
         expect(html).toContain('>Query<');
         expect(html).toContain('semaglutide obesity');
-        expect(html).toContain('Published 2020–2024');
-        expect(html).toContain('As PubMed ran it');
-        expect(html).toContain('aria-label="Copy the query as PubMed ran it"');
+        expect(html).toContain('<span class="ext-fact-label">Published</span><span class="ext-fact-value">2020–2024</span>');
+        expect(html).toContain('>PubMed query<');
+        expect(html).toContain('aria-label="Copy the PubMed query"');
     });
 
     it('opens on an empty search too', () => {
         const html = render({ ...view, references: [] }, true);
-        expect(html).toContain('As PubMed ran it');
+        expect(html).toContain('>PubMed query<');
         expect(html).toContain('No results in PubMed');
     });
 });
@@ -253,16 +253,22 @@ describe('trial details', () => {
     });
 });
 
-describe('searchFilterLabels', () => {
-    it('labels known filters and shows unknown ones as key and value', () => {
-        expect(searchFilterLabels({
+describe('searchFilterFacts', () => {
+    it('labels known filters, states the order, and shows unknown ones as key and value', () => {
+        expect(searchFilterFacts({
             query: 'x', status: ['recruiting', 'not_yet_recruiting'], has_results: true,
             start_year_min: 2018, sort: 'newest', future_flag: 'on',
-        })).toEqual(['Recruiting, Not yet recruiting', 'With results', 'Started 2018 or later', 'Newest first', 'Future flag: on']);
+        })).toEqual([
+            ['Status', 'Recruiting, Not yet recruiting'],
+            ['Results', 'With posted results'],
+            ['Started', '2018 or later'],
+            ['Order', 'Newest first'],
+            ['Future flag', 'on'],
+        ]);
     });
 
-    it('names the authors and venues of an OpenAlex search without their ids, and states its order', () => {
-        expect(searchFilterLabels({
+    it('names the authors and journals of an OpenAlex search without their ids', () => {
+        expect(searchFilterFacts({
             authors: ['Katrin Wisniewski (A5012345678)', 'A5099999999'],
             venues: ['Nature (S137773608)'],
             work_types: ['book-chapter', 'review'],
@@ -272,22 +278,26 @@ describe('searchFilterLabels', () => {
             max_year: 2024,
             ranking: 'Most cited first',
         })).toEqual([
-            'By Katrin Wisniewski, A5099999999',
-            'In Nature',
-            'Book chapter, Review',
-            'Language: DE',
-            'Open access only',
-            'Published 2020–2024',
-            'Most cited first',
+            ['Authors', 'Katrin Wisniewski, A5099999999'],
+            ['Journal', 'Nature'],
+            ['Type', 'Book chapter, Review'],
+            ['Language', 'DE'],
+            ['Access', 'Open access only'],
+            ['Published', '2020–2024'],
+            ['Order', 'Most cited first'],
         ]);
     });
 
     it('labels the trial filters trials_search sends', () => {
-        expect(searchFilterLabels({
+        expect(searchFilterFacts({
             condition: 'obesity', age_group: ['older_adult'], has_publications: false,
             min_start_year: 2015, max_start_year: 2020, ranking: 'Last updated first',
         })).toEqual([
-            'Condition: obesity', 'Older adult', 'Without publications', 'Started 2015–2020', 'Last updated first',
+            ['Condition', 'obesity'],
+            ['Ages', 'Older adult'],
+            ['Publications', 'Without publications'],
+            ['Started', '2015–2020'],
+            ['Order', 'Last updated first'],
         ]);
     });
 });
@@ -327,7 +337,8 @@ describe('OpenAlex search results', () => {
     it('names OpenAlex in an empty result and shows the ranking in the search details', () => {
         const html = render(view([], null), true);
         expect(html).toContain('No results in OpenAlex');
-        expect(html).toContain('Reranked semantic top 50');
+        expect(html).toMatch(/<span class="ext-fact-label">Order<\/span><span class="ext-fact-value">Reranked semantic top 50<\/span>/);
+        expect(html).toMatch(/<span class="ext-fact-label">Query<\/span><span class="ext-fact-value">transformers<\/span>/);
     });
 
     it('links the same search on the source site from the search details', () => {

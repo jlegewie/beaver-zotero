@@ -120,6 +120,15 @@ it("shows one search-details toggle on the expanded card; the site link lives in
     expect(received.searchDetails.at(-1)).toEqual({ open: true, id: "search-details-call" });
 });
 
+it("keeps the result count whole, outside the text that shortens", async () => {
+    const el = await renderCard(pubmedView([record]), "pubmed_search", true);
+    const header = el.querySelector('button[aria-controls="tool-result-call"]')!;
+    const text = header.querySelector(".truncate")!;
+    expect(text.textContent).toBe("PubMed search: semaglutide obesity");
+    expect(text.nextElementSibling?.textContent).toBe("(1 result)");
+    expect(text.nextElementSibling?.className).toContain("flex-none");
+});
+
 it("offers the details toggle for a search that has only a site link", async () => {
     const view = pubmedView([record]);
     view.tool_info = { ...view.tool_info, query: null, query_translation: null } as any;

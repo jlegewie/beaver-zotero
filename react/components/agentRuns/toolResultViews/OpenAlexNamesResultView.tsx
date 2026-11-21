@@ -85,13 +85,13 @@ const CandidateRow: React.FC<{
 
 /**
  * openalex_resolve_names: the author or venue candidates OpenAlex found for
- * each name. A lookup of several names puts each name above its candidates;
- * a name without candidates is one "not found" line, as in lookup_work.
+ * each name, one group per name in the order looked up, separated by a rule.
+ * Candidates carry their own names (two can share one), so the groups have no
+ * heading; a name without candidates is one "not found" line, as in lookup_work.
  */
 export const OpenAlexNamesResultView: React.FC<{ view: OpenAlexNamesView }> = ({ view }) => {
     const [hovered, setHovered] = useState<string | null>(null);
     const results = view.results;
-    const grouped = results.length > 1;
 
     return (
         <div className="display-flex flex-col">
@@ -108,9 +108,6 @@ export const OpenAlexNamesResultView: React.FC<{ view: OpenAlexNamesView }> = ({
                 }
                 return (
                     <div key={`name-${resultIndex}`} className={`display-flex flex-col ${divider}`}>
-                        {grouped && (
-                            <div className="px-3 pt-2 text-sm font-color-tertiary truncate">{result.query}</div>
-                        )}
                         {candidates.map((candidate, index) => {
                             const key = `${resultIndex}-${candidate.id ?? index}`;
                             return (

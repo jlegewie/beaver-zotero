@@ -6521,6 +6521,7 @@
 .beaver-root .ext-facts > .ext-fact-value {
     color: var(--fill-primary);
     min-width: 0;
+    overflow-wrap: anywhere;
 }
 .beaver-root .ext-chip {
     display: inline-block;

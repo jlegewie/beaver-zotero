@@ -60,7 +60,7 @@ describe('OpenAlexNamesResultView', () => {
         expect(html).toContain('ISSN 0028-4793 · 1 work');
     });
 
-    it('puts each name above its candidates and reports names without any', () => {
+    it('separates the names without headings and reports names without candidates', () => {
         const html = render({
             view_type: 'openalex_names',
             kind: 'author',
@@ -70,7 +70,8 @@ describe('OpenAlexNamesResultView', () => {
                 { query: 'Jane Roe', candidates: [], error: 'OpenAlex could not be reached for this name; try again later.' },
             ],
         });
-        expect(html.split('Katrin Wisniewski').length - 1).toBe(2);
+        // No heading repeats the looked-up name above its candidates.
+        expect(html.split('Katrin Wisniewski').length - 1).toBe(1);
         expect(html).toContain('Nobody Known</span><span> — not found');
         expect(html).toContain('Jane Roe</span><span> — lookup unavailable');
     });
