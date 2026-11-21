@@ -1,7 +1,7 @@
 import { getHostWindow, tryGetWindowRuntime } from '../runtime/windowRuntime';
 import { collapseTableTabContextPane, isTableTabSelected, openTableTabContextPane } from '../../src/ui/tableTabContextPane';
 import { SidebarLocation, UIState } from './types';
-import { isStackedLayout, readerMountParent, restoreReaderSiblings } from '../utils/zoteroLayout';
+import { isStackedLayout, readerMountParent, restoreReaderSiblings, widthAttribute } from '../utils/zoteroLayout';
 import { activeItemPane } from '../../src/ui/libraryPane';
 import { getPref, setPref } from '../../src/utils/prefs';
 import { store } from '../store';
@@ -35,6 +35,8 @@ interface Host {
     nativeWidthAttr: string | null;
     /** The pane's inline flex-shrink before the sidebar set its own. */
     nativeFlexShrink: string;
+    /** The pane's inline flex-basis before the sidebar set its own. */
+    nativeFlexBasis: string;
     /**
      * The element on the other side of the pane's splitter, with its inline
      * width and `width` attribute from before the sidebar sized the pane.
@@ -75,15 +77,6 @@ function restoreScroll(snapshot: ScrollSnapshot): void {
 function hasSize(element: HTMLElement): boolean {
     const rect = element.getBoundingClientRect();
     return rect.width > 0 && rect.height > 0;
-}
-
-/**
- * An element's `width` attribute, or null when it has none. Zotero 7's Gecko
- * returns "" from `getAttribute` for a missing XUL attribute, and putting that
- * "" back would create an attribute Zotero then persists.
- */
-function widthAttribute(element: Element): string | null {
-    return element.hasAttribute('width') ? element.getAttribute('width') : null;
 }
 
 /**
@@ -381,7 +374,7 @@ class UIManager {
         const win = this.getWindow();
         const host = this.host ??= {
             location, pane, openedCollapsed: false,
-            nativeStyleWidth: null, nativeWidthAttr: null, nativeFlexShrink: '',
+            nativeStyleWidth: null, nativeWidthAttr: null, nativeFlexShrink: '', nativeFlexBasis: '',
             neighbour: null, dragged: false, widthObserver: null,
         };
         if (location === 'library') {
@@ -464,6 +457,7 @@ class UIManager {
             host.nativeStyleWidth = host.pane.style.width;
             host.nativeWidthAttr = widthAttribute(host.pane);
             host.nativeFlexShrink = host.pane.style.flexShrink;
+            host.nativeFlexBasis = host.pane.style.flexBasis;
             const splitter = host.pane.previousElementSibling;
             const neighbour = splitter?.localName === 'splitter'
                 ? splitter.previousElementSibling as HTMLElement | null
@@ -473,10 +467,7 @@ class UIManager {
                 : null;
             host.dragged = false;
         }
-        const css = `${this.width}px`;
-        if (host.pane.style.width !== css) host.pane.style.width = css;
-        if (host.pane.style.flexShrink !== PANE_FLEX_SHRINK) host.pane.style.flexShrink = PANE_FLEX_SHRINK;
-        clearNeighbourWidth(host);
+        this.sizePane(host);
         if (!host.widthObserver) {
             const observer = new (this.getWindow().MutationObserver)((records: MutationRecord[]) => this.onPaneWidthChange(host, records));
             observer.observe(host.pane, { attributes: true, attributeFilter: ['width', 'style'] });
@@ -494,6 +485,14 @@ class UIManager {
      * drag is Zotero sizing its own pane, and is kept as the pane's width for
      * when the sidebar leaves it. Any inline width other than the sidebar's is
      * then replaced by the sidebar width.
+     *
+     * The pane is sized by its flex-basis, which in its flex row takes the
+     * place of `width`. Zotero writes the pane's inline width on each window
+     * resize and forces a layout before this observer can put the sidebar
+     * width back. Sized by `width`, the pane would be laid out at Zotero's
+     * width in between, resizing the reader beside it; the reader's resize
+     * event reaches the window's resize listeners, Zotero writes its width
+     * again, and the PDF flickers without end.
      */
     private onPaneWidthChange(host: Host, records: MutationRecord[]): void {
         if (this.host !== host || host.nativeStyleWidth === null || isStackedLayout()) return;
@@ -526,10 +525,24 @@ class UIManager {
             host.nativeWidthAttr = attr;
             if (pane.style.width !== `${this.width}px`) host.nativeStyleWidth = pane.style.width;
         }
-        const css = `${this.width}px`;
-        if (this.width && pane.style.width !== css) pane.style.width = css;
-        if (pane.style.flexShrink !== PANE_FLEX_SHRINK) pane.style.flexShrink = PANE_FLEX_SHRINK;
         // A drag writes the other side of the splitter too.
+        this.sizePane(host);
+    }
+
+    /**
+     * Size the occupied pane by the sidebar width and let its neighbour take the rest.
+     *
+     * The flex-basis is what sizes the pane. The inline width must still be the
+     * sidebar width: a splitter drag starts from the pane's inline width, not
+     * from the width it is shown at, so Zotero's width there would make a drag
+     * jump by the difference.
+     */
+    private sizePane(host: Host): void {
+        const style = host.pane.style;
+        const css = `${this.width}px`;
+        if (this.width && style.width !== css) style.width = css;
+        if (this.width && style.flexBasis !== css) style.flexBasis = css;
+        if (style.flexShrink !== PANE_FLEX_SHRINK) style.flexShrink = PANE_FLEX_SHRINK;
         clearNeighbourWidth(host);
     }
 
@@ -552,6 +565,9 @@ class UIManager {
             if (host.nativeFlexShrink) host.pane.style.flexShrink = host.nativeFlexShrink;
             else host.pane.style.removeProperty('flex-shrink');
         }
+        // Zotero never sets the pane's flex-basis, so it is always the sidebar's
+        // here, even after the sidebar width changed. An empty value removes it.
+        host.pane.style.flexBasis = host.nativeFlexBasis;
         // The other side of the splitter gets back the width it had beside the
         // pane's own; a drag also wrote its `width` attribute, which Zotero persists.
         const neighbour = host.neighbour;

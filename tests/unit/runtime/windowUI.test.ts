@@ -462,6 +462,7 @@ describe('one sidebar for library and reader tabs', () => {
         splitter.dispatchEvent(new win.MouseEvent('mouseup', { bubbles: true }));
         await settle();
         expect(contextPane.style.width).toBe('460px');
+        expect(contextPane.style.flexBasis).toBe('460px');
 
         uiManager.updateUI({ isVisible: false, isLibraryTab: false });
         expect(contextPane.style.width).toBe('600px');
@@ -554,10 +555,15 @@ describe('one sidebar for library and reader tabs', () => {
     it('keeps the sidebar width when Zotero re-applies its own, and keeps Zotero\'s own attribute changes', async () => {
         prefs.values.sidebarWidth = 420;
         const { uiManager, contextPane, done } = await setup();
+        contextPane.style.flexBasis = '10px';
         uiManager.updateUI({ isVisible: true, isLibraryTab: false });
+        expect(contextPane.style.flexBasis).toBe('420px');
 
-        // Zotero re-applies its persisted width when a reader tab is selected.
+        // Zotero re-applies its persisted width when a reader tab is selected,
+        // and on every window resize. The pane is sized by flex-basis, so the
+        // write does not resize it before the sidebar width is put back.
         contextPane.style.width = '600px';
+        expect(contextPane.style.flexBasis).toBe('420px');
         await settle();
         expect(contextPane.style.width).toBe('420px');
 
@@ -569,6 +575,7 @@ describe('one sidebar for library and reader tabs', () => {
 
         uiManager.updateUI({ isVisible: false, isLibraryTab: false });
         expect(contextPane.style.width).toBe('600px');
+        expect(contextPane.style.flexBasis).toBe('10px');
         done();
     });
 

@@ -204,8 +204,11 @@ A main window renders **one** sidebar. On a tab switch `react/ui/UIManager.ts` m
 element (`#beaver-pane-sidebar`) to the other pane instead of rendering a second copy, so the
 switch re-renders nothing and component state survives. Moving an element resets the scroll
 offsets inside it; the UI manager saves and restores them. In the standard layout the pane it
-occupies takes the `sidebarWidth` pref as its inline width; a splitter drag updates the pref,
-and the pane's `width` attribute (which Zotero persists as its own width) is put back.
+occupies takes the `sidebarWidth` pref as its inline width and flex-basis; a splitter drag
+updates the pref, and the pane's `width` attribute (which Zotero persists as its own width) is
+put back. The flex-basis keeps Zotero's own width writes, which it lays out at once on every
+window resize, from resizing the pane (they made the reader resize in a loop). The inline width
+is where a splitter drag starts from.
 
 A hidden `#beaver-global-initializer-root` mounts `<GlobalContextInitializer />` for global
 hooks (auth, tab tracking, …).
