@@ -183,20 +183,23 @@ function $removeArgumentAfter(pill: SlashCommandNode): SlashCommandNode | null {
 
 /** Replace the argument of the first pill of `actionId` (see
  *  `$removeArgumentAfter`) with a space and `text` (whitespace collapsed to
- *  single spaces), caret after it. Returns null when no such pill exists,
- *  else whether the new text ends the content. Must be called inside an
+ *  single spaces), caret after it, or `select` selected when `text` holds it.
+ *  Returns null when no such pill exists, else whether the new text ends the
+ *  content and whether `select` was selected. Must be called inside an
  *  update context. */
-function $setCommandArgument(actionId: string, text: string): { atEnd: boolean } | null {
+function $setCommandArgument(actionId: string, text: string, select?: string): { atEnd: boolean; selected: boolean } | null {
     const pill = $findSlashCommand(actionId);
     if (!pill) return null;
     const next = $removeArgumentAfter(pill);
     const argument = text.replace(/\s+/g, ' ').trim();
     const tail = $createTextNode(argument ? ` ${argument}` : ' ');
     pill.insertAfter(tail);
-    tail.selectEnd();
     // A command right after on the same line keeps a space before it.
     if (next && next.is(tail.getNextSibling())) next.insertBefore($createTextNode(' '));
-    return { atEnd: next === null };
+    const start = select ? tail.getTextContent().indexOf(select) : -1;
+    if (select && start > 0) tail.select(start, start + select.length);
+    else tail.selectEnd();
+    return { atEnd: next === null, selected: start > 0 };
 }
 
 /** Remove every pill of `actionId` together with its argument (see
@@ -393,11 +396,11 @@ export type LexicalEditorInputHandle = {
     /**
      * Sets the text after the first pill of `actionId`: its argument (what
      * follows it up to the next pill, or to the end) is replaced by a space
-     * and `text`, and the caret is left after it. Later commands and their
-     * text stay. Returns false, changing nothing, when the editor holds no
-     * pill for that action.
+     * and `text`, and the caret is left after it, or `select` (a part of
+     * `text`) is selected. Later commands and their text stay. Returns false,
+     * changing nothing, when the editor holds no pill for that action.
      */
-    setCommandArgument: (actionId: string, text: string) => boolean;
+    setCommandArgument: (actionId: string, text: string, select?: string) => boolean;
     /**
      * Removes every pill of `actionId`, each with its argument (what follows
      * it up to the next pill, or to the end). Other commands and their text
@@ -512,16 +515,16 @@ export interface LexicalEditorInputProps {
 // Exposes a textarea-like focus()/clear() API to the parent via ref so the
 // surrounding InputArea can keep its existing imperative usage.
 const EditorApi = forwardRef<LexicalEditorInputHandle, {
-    pinnedEndCaretRef: React.MutableRefObject<boolean>;
+    pinnedCaretRef: React.MutableRefObject<PinnedCaret>;
     blurSelectionRef: React.MutableRefObject<LexicalSelectionOffsets | null>;
     selectionRepairGenerationRef: React.MutableRefObject<number>;
     pendingTextRef: React.MutableRefObject<PendingTextControls | null>;
 }>(
-    function EditorApi({ pinnedEndCaretRef, blurSelectionRef, selectionRepairGenerationRef, pendingTextRef }, ref) {
+    function EditorApi({ pinnedCaretRef, blurSelectionRef, selectionRepairGenerationRef, pendingTextRef }, ref) {
         const [editor] = useLexicalComposerContext();
         const setPlainText = useCallback((text: string, selectionStart = text.length, selectionEnd = selectionStart) => {
             selectionRepairGenerationRef.current++;
-            pinnedEndCaretRef.current = false;
+            pinnedCaretRef.current = null;
             blurSelectionRef.current = null;
             editor.update(() => {
                 const root = $getRoot();
@@ -540,7 +543,7 @@ const EditorApi = forwardRef<LexicalEditorInputHandle, {
                     p.select();
                 }
             });
-        }, [editor, pinnedEndCaretRef, blurSelectionRef, selectionRepairGenerationRef]);
+        }, [editor, pinnedCaretRef, blurSelectionRef, selectionRepairGenerationRef]);
 
         useImperativeHandle(
             ref,
@@ -556,7 +559,7 @@ const EditorApi = forwardRef<LexicalEditorInputHandle, {
                         // BlurSelectionSnapshotPlugin); editor.focus() would re-assert it.
                         // Restore the snapshot taken at blur instead.
                         blurSelectionRef.current = null;
-                        pinnedEndCaretRef.current = false;
+                        pinnedCaretRef.current = null;
                         editor.update(
                             () => $selectFlatSelection(snap),
                             { discrete: true },
@@ -582,7 +585,7 @@ const EditorApi = forwardRef<LexicalEditorInputHandle, {
                 deleteTrailingQuery: (length, keepAfter = 0) => {
                     if (length <= 0) return;
                     selectionRepairGenerationRef.current++;
-                    pinnedEndCaretRef.current = false;
+                    pinnedCaretRef.current = null;
                     blurSelectionRef.current = null;
                     editor.update(() => {
                         if (keepAfter <= 0) {
@@ -599,7 +602,7 @@ const EditorApi = forwardRef<LexicalEditorInputHandle, {
                 },
                 selectRange: (start, end, options) => {
                     selectionRepairGenerationRef.current++;
-                    pinnedEndCaretRef.current = false;
+                    pinnedCaretRef.current = null;
                     blurSelectionRef.current = null;
                     editor.update(
                         () => $selectFlatRange(start, end),
@@ -697,7 +700,7 @@ const EditorApi = forwardRef<LexicalEditorInputHandle, {
                     // inserted pill + space.
                     editor.focus(() => { /* noop */ }, { defaultSelection: 'rootEnd' });
                     if (inPlace) {
-                        pinnedEndCaretRef.current = false;
+                        pinnedCaretRef.current = null;
                         return;
                     }
                     // Pin the caret to the end until the user interacts: the
@@ -705,29 +708,31 @@ const EditorApi = forwardRef<LexicalEditorInputHandle, {
                     // panels re-rendering, attachments mounting) can reset the
                     // chrome document's selection offsets to 0, dropping the
                     // caret behind the pill or to the start of the input. See
-                    // PinnedEndCaretPlugin.
-                    pinnedEndCaretRef.current = true;
+                    // PinnedCaretPlugin.
+                    pinnedCaretRef.current = 'end';
                 },
-                setCommandArgument: (actionId, text) => {
+                setCommandArgument: (actionId, text, select) => {
                     // Null when the editor holds no pill for the action.
-                    let atEnd: boolean | null = null;
+                    let pin: PinnedCaret | undefined;
                     // Discrete, so the edit is committed (and published to the
                     // parent's value and pills) before this returns.
                     editor.update(() => {
-                        atEnd = $setCommandArgument(actionId, text)?.atEnd ?? null;
+                        const placed = $setCommandArgument(actionId, text, select);
+                        if (!placed) return;
+                        pin = placed.selected ? $getFlatSelectionOffsets() : placed.atEnd ? 'end' : null;
                     }, { discrete: true });
-                    if (atEnd === null) return false;
+                    if (pin === undefined) return false;
                     selectionRepairGenerationRef.current++;
                     blurSelectionRef.current = null;
                     editor.focus(() => { /* noop */ }, { defaultSelection: 'rootEnd' });
-                    // The same end-of-content pin as a staged pill insert: the
-                    // caret belongs after the new text, and the UI churn around
-                    // a programmatic edit can drop it elsewhere (see
-                    // PinnedEndCaretPlugin). When a later command follows the
+                    // Pinned like a staged pill insert: the caret belongs after
+                    // the new text (or on the part selected in it), and the UI
+                    // churn around a programmatic edit can drop it elsewhere
+                    // (see PinnedCaretPlugin). When a later command follows the
                     // text, the end of the content is not after it: clear any
                     // pin an earlier insert left, or it would move the caret
                     // past that command.
-                    pinnedEndCaretRef.current = atEnd;
+                    pinnedCaretRef.current = pin;
                     return true;
                 },
                 removeCommandsWithArguments: (actionId) => {
@@ -763,7 +768,7 @@ const EditorApi = forwardRef<LexicalEditorInputHandle, {
                     pendingTextRef.current?.discard();
                 },
             }),
-            [editor, setPlainText, pinnedEndCaretRef, blurSelectionRef, selectionRepairGenerationRef, pendingTextRef],
+            [editor, setPlainText, pinnedCaretRef, blurSelectionRef, selectionRepairGenerationRef, pendingTextRef],
         );
         return null;
     },
@@ -2135,9 +2140,14 @@ const BlurSelectionSnapshotPlugin: React.FC<{
     return null;
 };
 
+/** Where PinnedCaretPlugin holds the caret: the end of the content, a
+ *  selection, or nowhere (not pinned). */
+type PinnedCaret = 'end' | LexicalSelectionOffsets | null;
+
 /**
- * Keeps the caret pinned to the end of the content after a programmatic
- * /command pill insert, until the user interacts with the editor.
+ * Keeps the caret pinned after a programmatic /command pill insert, until the
+ * user interacts with the editor: at the end of the content, or on the part of
+ * the text `setCommandArgument` selected.
  *
  * A staged pill always ends as "pill + space" with the caret at the very end
  * (`/action |`). But the insert is followed by heavy UI churn — the sidebar
@@ -2151,14 +2161,15 @@ const BlurSelectionSnapshotPlugin: React.FC<{
  * repair fires.
  *
  * This plugin closes that gap deterministically: while pinned, any
- * selectionchange that leaves the selection inside the editor but NOT at the
- * end of the content is corrected back to the end. The pin is released on the
- * first real user interaction (keydown in the editor, pointerdown anywhere,
- * IME composition) and whenever the caret is placed explicitly through the
- * imperative handle (setText / selectRange / clear / deleteTrailingQuery).
+ * selectionchange that leaves the selection inside the editor but NOT where it
+ * was pinned is corrected back. The pin is released on the first real user
+ * interaction (keydown in the editor, pointerdown anywhere, IME composition)
+ * and whenever the caret is placed explicitly through the imperative handle
+ * (setText / selectRange / clear / deleteTrailingQuery).
  */
-const PinnedEndCaretPlugin: React.FC<{
-    pinnedRef: React.MutableRefObject<boolean>;
+
+const PinnedCaretPlugin: React.FC<{
+    pinnedRef: React.MutableRefObject<PinnedCaret>;
     ime: ImeCompositionTracker;
 }> = ({ pinnedRef, ime }) => {
     const [editor] = useLexicalComposerContext();
@@ -2169,11 +2180,12 @@ const PinnedEndCaretPlugin: React.FC<{
             if (!win) return () => {};
 
             const unpin = () => {
-                pinnedRef.current = false;
+                pinnedRef.current = null;
             };
 
             const onSelectionChange = () => {
-                if (!pinnedRef.current) return;
+                const pinned = pinnedRef.current;
+                if (!pinned) return;
                 if (ime.isImeActive()) return;
                 // Correcting the caret writes the selection, which pulls DOM
                 // focus back to the editor; never do that while focus is
@@ -2185,13 +2197,14 @@ const PinnedEndCaretPlugin: React.FC<{
                 // selection elsewhere means another surface owns it (and the
                 // editor state selection is restored by focus() on return).
                 if (!root.contains(sel.anchorNode) || !root.contains(sel.focusNode)) return;
-                let textLength = 0;
+                let target = { anchor: 0, focus: 0 };
                 editor.getEditorState().read(() => {
-                    textLength = $getRoot().getTextContent().length;
+                    const textLength = $getRoot().getTextContent().length;
+                    target = pinned === 'end' ? { anchor: textLength, focus: textLength } : pinned;
                 });
                 const live = getDomFlatSelectionOffsets(root, sel);
-                if (live && live.anchor === textLength && live.focus === textLength) return;
-                editor.update(() => $selectFlatRange(textLength, textLength));
+                if (live && live.anchor === target.anchor && live.focus === target.focus) return;
+                editor.update(() => $selectFlatRange(target.anchor, target.focus));
             };
 
             doc.addEventListener('selectionchange', onSelectionChange);
@@ -2358,11 +2371,12 @@ export const LexicalEditorInput = forwardRef<LexicalEditorInputHandle, LexicalEd
         // reads when repairing chrome-document selection resets).
         const pendingDomSelectionRef = useRef<DomSelectionSnapshot | null>(null);
 
-        // True after a programmatic /command pill insert, until the first user
-        // interaction: while set, PinnedEndCaretPlugin holds the caret at the
-        // end of the content ("/action |") against chrome-document selection
-        // resets. Written by EditorApi, read by PinnedEndCaretPlugin.
-        const pinnedEndCaretRef = useRef(false);
+        // Set after a programmatic /command pill insert, until the first user
+        // interaction: while set, PinnedCaretPlugin holds the caret at the
+        // end of the content ("/action |"), or on the text an example selected,
+        // against chrome-document selection resets. Written by EditorApi, read
+        // by PinnedCaretPlugin.
+        const pinnedCaretRef = useRef<PinnedCaret>(null);
 
         // The editor state's selection offsets captured at the last element
         // blur (focusout), used by EditorApi's imperative focus() to restore
@@ -2457,7 +2471,7 @@ export const LexicalEditorInput = forwardRef<LexicalEditorInputHandle, LexicalEd
                     <EmptyEditorInsertionPlugin ime={ime} />
                     <DeferredSelectionRepairPlugin selectionRepairGenerationRef={selectionRepairGenerationRef} ime={ime} />
                     <BlurSelectionSnapshotPlugin blurSelectionRef={blurSelectionRef} />
-                    <PinnedEndCaretPlugin pinnedRef={pinnedEndCaretRef} ime={ime} />
+                    <PinnedCaretPlugin pinnedRef={pinnedCaretRef} ime={ime} />
                     <SlashCommandClickPlugin />
                     <SlashCommandHoverCardPlugin resolveAction={resolveAction} />
                     <SubmitOnEnterPlugin onSubmit={onSubmit} />
@@ -2467,7 +2481,7 @@ export const LexicalEditorInput = forwardRef<LexicalEditorInputHandle, LexicalEd
                     <ImeTracePlugin ime={ime} />
                     <EditorApi
                         ref={ref}
-                        pinnedEndCaretRef={pinnedEndCaretRef}
+                        pinnedCaretRef={pinnedCaretRef}
                         blurSelectionRef={blurSelectionRef}
                         selectionRepairGenerationRef={selectionRepairGenerationRef}
                         pendingTextRef={pendingTextRef}

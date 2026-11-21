@@ -1,12 +1,15 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
-import { ArrowLeftIcon, ArrowRightIcon, CancelIcon, CheckmarkCircleSolidIcon, CircleIcon, HighlighterIcon, Icon, LayersIcon, QuillWriteIcon, Spinner, TableIcon, TickIcon } from '../icons/icons';
+import { ArrowLeftIcon, ArrowRightIcon, CancelIcon, CheckmarkCircleSolidIcon, CircleIcon, FolderAddIcon, HighlighterIcon, Icon, LayersIcon, QuillWriteIcon, Spinner, TableIcon, TickIcon } from '../icons/icons';
 import {
     featureCreditEntriesAtom,
     featureCreditsCardDismissedAtom,
+    featureCreditTotalsAtom,
+    featureTaskAttachedPapersAtom,
     featureTaskSetupStepsAtom,
     leaveFeatureTaskAtom,
+    lookUpOcrPreparedPdfsAtom,
     selectBeaverModelAtom,
     startFeatureTaskAtom,
     type FeatureCreditEntry,
@@ -14,7 +17,7 @@ import {
 import { activeFeatureTaskAtom } from '../../atoms/featureCreditRuns';
 import { currentMessagePillsAtom, pendingPillInsertsAtom } from '../../atoms/messageComposition';
 import { searchableLibraryIdsAtom } from '../../atoms/profile';
-import { examplesForLibrary, getFeatureCreditTask, type FeatureTaskDefinition, type LibraryShape } from '../../constants/featureCreditTasks';
+import { examplesForLibrary, getFeatureCreditTask, type FeatureTaskDefinition, type FeatureTaskExample, type LibraryShape } from '../../constants/featureCreditTasks';
 import type { SetupStep, StepStatus } from '../../utils/featureCredits';
 import { countLibraryItems, readLibraryShape } from '../../utils/libraryShape';
 import { SMALL_LIBRARY_THRESHOLD } from '../../atoms/zoteroContext';
@@ -22,6 +25,7 @@ import { SMALL_LIBRARY_THRESHOLD } from '../../atoms/zoteroContext';
 const TASK_ICONS: Record<string, React.ComponentType<React.SVGProps<SVGSVGElement>>> = {
     literature_review: QuillWriteIcon,
     annotate: HighlighterIcon,
+    start_project: FolderAddIcon,
     organize: LayersIcon,
     research_table: TableIcon,
 };
@@ -93,12 +97,25 @@ const SetupView: React.FC<{ definition: FeatureTaskDefinition; credits: number; 
         };
     }, [needsShape, searchableLibraryIds]);
 
+    // A scan reads like any other PDF but cannot be highlighted: the PDF step
+    // needs to know where each attached PDF's text comes from.
+    const worksOnPdf = definition.attach === 'pdf';
+    const papers = useAtomValue(featureTaskAttachedPapersAtom);
+    const lookUpOcrPreparedPdfs = useSetAtom(lookUpOcrPreparedPdfsAtom);
+    useEffect(() => {
+        if (worksOnPdf) void lookUpOcrPreparedPdfs();
+    }, [worksOnPdf, papers, lookUpOcrPreparedPdfs]);
+
     if (!steps) return null;
     const examples = examplesForLibrary(definition, shape);
 
-    const applyExample = (text: string, event: React.MouseEvent<HTMLElement>) => {
+    const applyExample = (example: FeatureTaskExample, event: React.MouseEvent<HTMLElement>) => {
         event.preventDefault();
-        startTask({ key: definition.key, targetWindow: event.currentTarget.ownerDocument.defaultView ?? undefined, argumentText: text });
+        startTask({
+            key: definition.key,
+            targetWindow: event.currentTarget.ownerDocument.defaultView ?? undefined,
+            argumentText: example.text,
+        });
     };
 
     const stepBody = (step: SetupStep) => {
@@ -112,7 +129,7 @@ const SetupView: React.FC<{ definition: FeatureTaskDefinition; credits: number; 
                 </>
             );
         }
-        if (step.key === 'source' || examples.length === 0) return step.text;
+        if (step.key === 'source' || step.hideExamples || examples.length === 0) return step.text;
         return (
             <>
                 {step.text}
@@ -122,7 +139,7 @@ const SetupView: React.FC<{ definition: FeatureTaskDefinition; credits: number; 
                             <button
                                 type="button"
                                 className="feature-credits-example"
-                                onClick={(event) => applyExample(example.text, event)}
+                                onClick={(event) => applyExample(example, event)}
                             >
                                 {example.text}
                             </button>
@@ -183,6 +200,7 @@ const FeatureCreditsCard: React.FC<{
     onShownChange?: (shown: boolean) => void;
 }> = ({ onShownChange }) => {
     const entries = useAtomValue(featureCreditEntriesAtom);
+    const totals = useAtomValue(featureCreditTotalsAtom);
     const [activeKey, setActiveKey] = useAtom(activeFeatureTaskAtom);
     const setDismissed = useSetAtom(featureCreditsCardDismissedAtom);
     const startTask = useSetAtom(startFeatureTaskAtom);
@@ -264,14 +282,22 @@ const FeatureCreditsCard: React.FC<{
         );
     }
 
+    // What each open task earns, when they all earn the same.
+    const openAmounts = new Set(entries.filter((entry) => !entry.task.completed_at).map((entry) => entry.task.credits));
+    const perTask = openAmounts.size === 1 ? [...openAmounts][0] : null;
+
     return (
         <section className="feature-credits-card" aria-labelledby="feature-credits-title">
             <div className="feature-credits-header">
-                <h2 id="feature-credits-title" className="feature-credits-title">Try Beaver and earn free credits</h2>
+                <h2 id="feature-credits-title" className="feature-credits-title">
+                    Try Beaver and earn {totals.total - totals.earned} {totals.earned > 0 ? 'more ' : ''}free credits
+                </h2>
                 <IconButton icon={CancelIcon} variant="ghost-secondary" ariaLabel="Dismiss" onClick={() => setDismissed(true)} />
             </div>
             <p className="feature-credits-text">
-                Choose a task below. You'll earn credits the first time you send it.
+                {perTask !== null
+                    ? `Choose a task below. Each earns ${perTask} credits the first time you send it.`
+                    : "Choose a task below. You'll earn credits the first time you send it."}
             </p>
             <ul className="feature-credits-list">
                 {entries.map((entry) => (

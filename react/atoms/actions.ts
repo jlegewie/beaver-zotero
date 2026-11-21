@@ -27,6 +27,7 @@ import {
 import { messageParksResume, parkResumeForMessageAtom, sendWSMessageAtom, withThreadWriter } from './agentRunAtoms';
 import {
     currentMessageItemsAtom,
+    addCollectionsToCurrentMessageAtom,
     currentMessageCollectionsAtom,
     pendingPillInsertsAtom,
     addItemsToCurrentMessageItemsAtom,
@@ -425,14 +426,9 @@ export const resolveActionForStagingAtom = atom(
             // Goes through the shared add path, so the targets are validated in
             // the background like any other attachment the user adds.
             if (items.length > 0) void set(addItemsToCurrentMessageItemsAtom, items);
-            if (collections.length > 0) {
-                // Merge rather than replace: the composer may already carry
-                // collections the user attached.
-                const current = get(currentMessageCollectionsAtom) as CollectionReference[];
-                const existingKeys = new Set(current.map(collectionReferenceKey));
-                const added = collections.filter(c => !existingKeys.has(collectionReferenceKey(c)));
-                if (added.length > 0) set(currentMessageCollectionsAtom, [...current, ...added]);
-            }
+            // Merged rather than replaced: the composer may already carry
+            // collections the user attached.
+            if (collections.length > 0) set(addCollectionsToCurrentMessageAtom, collections);
             if (views.length > 0) set(addViewsToCurrentMessageAtom, views);
         }
 
@@ -470,6 +466,8 @@ export const stageActionPillAtom = atom(
          *  When the editor already holds a pill for this action, no second pill
          *  is inserted: only the text after the existing one is replaced. */
         argumentText?: string;
+        /** A part of `argumentText` to select (see `PendingPillInsert`). */
+        selectText?: string;
         /** Actions whose pills this one replaces (see `PendingPillInsert`). */
         replaceActionIds?: string[];
     }): boolean => {
@@ -489,6 +487,7 @@ export const stageActionPillAtom = atom(
                 descriptor,
                 targetWindow: payload.targetWindow,
                 argumentText: payload.argumentText,
+                selectText: payload.selectText,
                 replaceActionIds: payload.replaceActionIds,
             },
         ]);
@@ -787,16 +786,7 @@ export const sendComposedMessageAtom = atom(
             }
         }
 
-        if (variableCollections.length > 0) {
-            const currentCollections = get(currentMessageCollectionsAtom) as CollectionReference[];
-            const existingCollectionKeys = new Set(currentCollections.map(collectionReferenceKey));
-            const newCollections = variableCollections.filter(
-                c => !existingCollectionKeys.has(collectionReferenceKey(c)),
-            );
-            if (newCollections.length > 0) {
-                set(currentMessageCollectionsAtom, [...currentCollections, ...newCollections]);
-            }
-        }
+        if (variableCollections.length > 0) set(addCollectionsToCurrentMessageAtom, variableCollections);
 
         const featureTask = featureTaskForMessage(setupTask, promptActions);
         await set(sendWSMessageAtom, baseText.trim(), {

@@ -155,6 +155,14 @@ export const currentMessageItemsAtom = atom(
  */
 export const currentMessageCollectionsAtom = atom<CollectionReference[]>([]);
 
+/** Attach collections to the current message, keeping those it already carries. */
+export const addCollectionsToCurrentMessageAtom = atom(null, (get, set, collections: CollectionReference[]) => {
+    const current = get(currentMessageCollectionsAtom);
+    const existingKeys = new Set(current.map(collectionReferenceKey));
+    const added = collections.filter((collection) => !existingKeys.has(collectionReferenceKey(collection)));
+    if (added.length > 0) set(currentMessageCollectionsAtom, [...current, ...added]);
+});
+
 /**
  * Saved searches and built-in views (Unfiled Items, …) attached to the current
  * message. Set when a collection action is picked over one, the way a selected
@@ -224,6 +232,8 @@ export interface PendingPillInsert {
     /** Text to set right after the pill, replacing anything already after it
      *  (see `stageActionPillAtom`). Absent → the pill is inserted as is. */
     argumentText?: string;
+    /** A part of `argumentText` selected once it is placed, so typing replaces it. */
+    selectText?: string;
     /** Actions whose pills this one replaces: every pill of each is removed,
      *  with its text, before this pill is placed. */
     replaceActionIds?: string[];

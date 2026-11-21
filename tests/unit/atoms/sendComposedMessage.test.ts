@@ -27,9 +27,15 @@ vi.mock('../../../react/atoms/messageComposition', async () => {
     const { atom } = await import('jotai');
     const currentMessageItemsAtom = atom<any[]>([]);
     const currentMessageViewsAtom = atom<any[]>([]);
+    const currentMessageCollectionsAtom = atom<any[]>([]);
     return {
         currentMessageItemsAtom,
-        currentMessageCollectionsAtom: atom<unknown[]>([]),
+        currentMessageCollectionsAtom,
+        addCollectionsToCurrentMessageAtom: atom(null, (get, set, collections: any[]) => {
+            const current = get(currentMessageCollectionsAtom);
+            const added = collections.filter((c) => !current.some((a: any) => a.library_id === c.library_id && a.zotero_key === c.zotero_key));
+            if (added.length > 0) set(currentMessageCollectionsAtom, [...current, ...added]);
+        }),
         currentMessageViewsAtom,
         pendingPillInsertsAtom: atom<unknown[]>([]),
         currentMessageContentAtom: atom(''),
@@ -736,9 +742,10 @@ describe('stageActionPillAtom', () => {
 
     it('carries the text to put after the pill', () => {
         const store = makeStore();
-        store.set(stageActionPillAtom, { actionId: 'custom-1', argumentText: 'the methods' });
+        store.set(stageActionPillAtom, { actionId: 'custom-1', argumentText: 'the methods', selectText: 'methods' });
         const pending = store.get(pendingPillInsertsAtom) as any[];
         expect(pending[0].argumentText).toBe('the methods');
+        expect(pending[0].selectText).toBe('methods');
     });
 
     it('binds and attaches nothing when staged without a target type', () => {

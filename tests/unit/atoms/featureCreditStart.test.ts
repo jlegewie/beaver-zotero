@@ -55,14 +55,22 @@ describe('startFeatureTaskAtom', () => {
         expect(staged).toEqual([{ actionId: 'builtin-tidy-up', targetWindow: undefined, argumentText: undefined }]);
     });
 
-    it("replaces another task's /command left in the chat input", () => {
+    it('replaces every other /command in the chat input, so the message runs the task alone', () => {
         const store = createStore();
-        store.set(currentMessagePillsAtom, [pill('builtin-annotate'), pill('builtin-summarize')]);
+        store.set(currentMessagePillsAtom, [pill('builtin-annotate'), pill('builtin-summarize'), pill('builtin-annotate')]);
         store.set(startFeatureTaskAtom, { key: 'organize' });
         expect(staged).toEqual([expect.objectContaining({
             actionId: 'builtin-tidy-up',
-            replaceActionIds: ['builtin-annotate'],
+            replaceActionIds: ['builtin-annotate', 'builtin-summarize'],
         })]);
+    });
+
+    it('attaches the collection the task should work on, once', () => {
+        const store = createStore();
+        const collection = { library_id: 1, zotero_key: 'COLL0001', name: 'School choice', parent_key: null };
+        store.set(startFeatureTaskAtom, { key: 'research_table', collection });
+        store.set(startFeatureTaskAtom, { key: 'research_table', collection });
+        expect(store.get(currentMessageCollectionsAtom)).toEqual([collection]);
     });
 
     it('keeps its own /command, and only sets its text when an example is picked', () => {
@@ -73,6 +81,19 @@ describe('startFeatureTaskAtom', () => {
 
         store.set(startFeatureTaskAtom, { key: 'organize', argumentText: 'tag my untagged papers' });
         expect(staged).toEqual([{ actionId: 'builtin-tidy-up', targetWindow: undefined, argumentText: 'tag my untagged papers' }]);
+    });
+
+    it("has a picked example's topic placeholder selected, so typing replaces it", () => {
+        const store = createStore();
+        store.set(startFeatureTaskAtom, {
+            key: 'literature_review',
+            argumentText: 'Background on [your topic] for a grant proposal',
+        });
+        expect(staged).toEqual([expect.objectContaining({
+            actionId: 'builtin-collection-literature-review',
+            argumentText: 'Background on [your topic] for a grant proposal',
+            selectText: '[your topic]',
+        })]);
     });
 
     it('does nothing for a task this client does not know', () => {

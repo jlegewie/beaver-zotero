@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { atom, createStore } from 'jotai';
 
 vi.mock('../../../react/atoms/actions', () => ({ stageActionPillAtom: atom(null, () => true) }));
@@ -8,7 +8,7 @@ vi.mock('../../../src/services/documentExtraction/attachmentResolution', () => (
     getContentKind: (item: { kind?: string }) => item.kind ?? 'other',
 }));
 
-import { featureTaskAttachedPapersAtom, featureTaskSendBlockAtom } from '../../../react/atoms/featureCredits';
+import { featureTaskAttachedPapersAtom, featureTaskSendBlockAtom, lookUpOcrPreparedPdfsAtom } from '../../../react/atoms/featureCredits';
 import { activeFeatureTaskAtom } from '../../../react/atoms/featureCreditRuns';
 import {
     composerSourceSearchTextAtom,
@@ -56,38 +56,101 @@ describe('setup card: whether attached papers have a file to annotate', () => {
         (Zotero as any).Items = { get: vi.fn((id: number) => items.get(id) ?? false) };
     });
 
-    const summarize = (setup: (store: ReturnType<typeof createStore>) => void) => {
+    // With the lookup of where each readable PDF's text comes from, as the
+    // setup card runs it.
+    const summarize = async (setup: (store: ReturnType<typeof createStore>) => void) => {
         const store = createStore();
         setup(store);
+        await store.set(lookUpOcrPreparedPdfsAtom);
         return store.get(featureTaskAttachedPapersAtom);
     };
 
-    it('rates a paper with no PDF, EPUB or snapshot as having none', () => {
+    it('rates a paper with no PDF, EPUB or snapshot as having none', async () => {
         items.set(1, attachment('NOTEFILE', 'text'));
-        expect(summarize((store) => store.set(currentMessageItemsAtom, [paper('P1', [1])] as any)))
+        expect(await summarize((store) => store.set(currentMessageItemsAtom, [paper('P1', [1])] as any)))
             .toEqual([{ name: 'P1', document: 'none' }]);
-        expect(summarize((store) => store.set(currentMessageItemsAtom, [paper('P2')] as any)))
+        expect(await summarize((store) => store.set(currentMessageItemsAtom, [paper('P2')] as any)))
             .toEqual([{ name: 'P2', document: 'none' }]);
     });
 
-    it('waits for the readability check of a paper\'s PDF', () => {
+    it('waits for the readability check of a paper\'s PDF', async () => {
         items.set(1, attachment('PDF1', 'pdf'));
-        expect(summarize((store) => store.set(currentMessageItemsAtom, [paper('P1', [1])] as any))[0].document).toBe('checking');
-        expect(summarize((store) => {
+        expect((await summarize((store) => store.set(currentMessageItemsAtom, [paper('P1', [1])] as any)))[0].document).toBe('checking');
+        expect((await summarize((store) => {
             store.set(currentMessageItemsAtom, [paper('P1', [1])] as any);
             store.set(itemValidationResultsAtom, new Map([['1-PDF1', checked('readable')]]));
-        })[0].document).toBe('readable');
-        expect(summarize((store) => {
+        }))[0].document).toBe('readable');
+        expect((await summarize((store) => {
             store.set(currentMessageItemsAtom, [paper('P1', [1])] as any);
             store.set(itemValidationResultsAtom, new Map([['1-PDF1', checked('unreadable')]]));
-        })[0].document).toBe('unreadable');
+        }))[0].document).toBe('unreadable');
     });
 
-    it('counts the open reader file once under its paper', () => {
+    it('keeps checking a readable PDF until it is known where its text comes from', () => {
+        items.set(1, attachment('PDF1', 'pdf'));
+        const store = createStore();
+        store.set(currentMessageItemsAtom, [paper('P1', [1])] as any);
+        store.set(itemValidationResultsAtom, new Map([['1-PDF1', checked('readable')]]));
+        expect(store.get(featureTaskAttachedPapersAtom)[0].document).toBe('checking');
+    });
+
+    describe('a scan, which Beaver can read but not highlight', () => {
+        const hasOcrText = vi.fn();
+        let beaver: unknown;
+
+        beforeEach(() => {
+            hasOcrText.mockReset();
+            beaver = (Zotero as any).Beaver;
+            (Zotero as any).Beaver = { documentCache: { hasOcrText } };
+        });
+
+        afterEach(() => {
+            (Zotero as any).Beaver = beaver;
+        });
+
+        const lookedUp = async (validation: ItemValidationState) => {
+            const pdf = attachment('PDF1', 'pdf');
+            items.set(1, pdf);
+            const store = createStore();
+            store.set(currentMessageItemsAtom, [paper('P1', [1])] as any);
+            store.set(itemValidationResultsAtom, new Map([['1-PDF1', validation]]));
+            await store.set(lookUpOcrPreparedPdfsAtom);
+            return store;
+        };
+
+        it('is told apart once its text turns out to come from OCR', async () => {
+            hasOcrText.mockResolvedValue(true);
+            const store = await lookedUp(checked('readable'));
+            expect(hasOcrText).toHaveBeenCalledWith({ libraryId: 1, zoteroKey: 'PDF1' });
+            expect(store.get(featureTaskAttachedPapersAtom)).toEqual([{ name: 'P1', document: 'scan' }]);
+            // Looked up once per file.
+            await store.set(lookUpOcrPreparedPdfsAtom);
+            expect(hasOcrText).toHaveBeenCalledTimes(1);
+        });
+
+        it('leaves a PDF with its own text layer readable', async () => {
+            hasOcrText.mockResolvedValue(false);
+            expect((await lookedUp(checked('readable'))).get(featureTaskAttachedPapersAtom)[0].document).toBe('readable');
+        });
+
+        it('is known without a lookup while it is not prepared yet', async () => {
+            const store = await lookedUp({ ...checked('readable'), statusCode: 'pdf_needs_ocr' } as ItemValidationState);
+            expect(store.get(featureTaskAttachedPapersAtom)[0].document).toBe('scan');
+            expect(hasOcrText).not.toHaveBeenCalled();
+        });
+
+        it('does not look up files Beaver cannot read, or that are not PDFs', async () => {
+            await lookedUp(checked('unreadable'));
+            await lookedUp(checked('readable', 'epub'));
+            expect(hasOcrText).not.toHaveBeenCalled();
+        });
+    });
+
+    it('counts the open reader file once under its paper', async () => {
         const parent = paper('P1', [1]);
         const pdf = attachment('PDF1', 'pdf', parent);
         items.set(1, pdf);
-        expect(summarize((store) => {
+        expect(await summarize((store) => {
             store.set(currentMessageItemsAtom, [parent] as any);
             store.set(currentReaderAttachmentAtom, pdf as any);
             store.set(itemValidationResultsAtom, new Map([['1-PDF1', checked('readable')]]));
@@ -116,22 +179,26 @@ describe('featureTaskSendBlockAtom', () => {
         expect(setup().get(featureTaskSendBlockAtom)).toEqual({ hint: 'Choose a PDF' });
     });
 
-    it('lifts once every required step is done', () => {
+    it('lifts once every required step is done', async () => {
         const store = setup();
         const pdf = attachment('PDF1', 'pdf');
         store.set(currentMessageItemsAtom, [pdf] as any);
         store.set(itemValidationResultsAtom, new Map([['1-PDF1', checked('readable')]]));
+        // Readable, but not yet known to have a text layer of its own.
+        expect(store.get(featureTaskSendBlockAtom)).toEqual({ hint: 'Checking the PDF…' });
+        await store.set(lookUpOcrPreparedPdfsAtom);
         expect(store.get(featureTaskSendBlockAtom)).toBeNull();
-        store.set(currentMessageContentAtom, '/annotate Highlight every mention of [your topic]');
+        store.set(currentMessageContentAtom, '/annotate Highlight every mention of selection bias');
         expect(store.get(featureTaskSendBlockAtom)).toBeNull();
         store.set(currentMessageContentAtom, '/annotate ');
         expect(store.get(featureTaskSendBlockAtom)).toEqual({ hint: 'Describe what to highlight' });
     });
 
-    it('does not take an @ search in progress for an instruction', () => {
+    it('does not take an @ search in progress for an instruction', async () => {
         const store = setup({ content: '/annotate @smi' });
         store.set(currentMessageItemsAtom, [attachment('PDF1', 'pdf')] as any);
         store.set(itemValidationResultsAtom, new Map([['1-PDF1', checked('readable')]]));
+        await store.set(lookUpOcrPreparedPdfsAtom);
         store.set(composerSourceSearchTextAtom, '@smi');
         expect(store.get(featureTaskSendBlockAtom)).toEqual({ hint: 'Describe what to highlight' });
         store.set(currentMessageContentAtom, '/annotate the methods @smi');
@@ -145,17 +212,25 @@ describe('featureTaskSendBlockAtom', () => {
         expect(store.get(featureTaskSendBlockAtom)).toEqual({ hint: 'Describe what to highlight' });
     });
 
-    it('keeps the topic step open until a picked example names a topic', () => {
-        const store = createStore();
-        store.set(profileProjectionAtom, {
-            feature_credits: { tasks: [{ key: 'research_table', credits: 5, completed_at: null }] },
-        } as any);
-        store.set(activeFeatureTaskAtom, 'research_table');
-        store.set(currentMessagePillsAtom, [{ actionId: 'builtin-research-table', commandName: 'table', title: 'Table' }] as any);
-        store.set(currentMessageContentAtom, '/table Papers on [your topic]: method, sample, and main finding');
-        expect(store.get(featureTaskSendBlockAtom)).toEqual({ hint: 'Name a topic and what to compare' });
-        store.set(currentMessageContentAtom, '/table Papers on school choice: method, sample, and main finding');
-        expect(store.get(featureTaskSendBlockAtom)).toBeNull();
+    it('lets a table or review go without a topic, but not with a picked example left unfilled', () => {
+        const cases = [
+            { key: 'research_table', actionId: 'builtin-research-table', command: '/table', example: 'Papers on [your topic]: method, sample, and main finding' },
+            { key: 'literature_review', actionId: 'builtin-collection-literature-review', command: '/review', example: 'Background on [your topic] for a grant proposal' },
+        ];
+        for (const { key, actionId, command, example } of cases) {
+            const store = createStore();
+            store.set(profileProjectionAtom, {
+                feature_credits: { tasks: [{ key, credits: 5, completed_at: null }] },
+            } as any);
+            store.set(activeFeatureTaskAtom, key);
+            store.set(currentMessagePillsAtom, [{ actionId, commandName: command.slice(1), title: key }] as any);
+            store.set(currentMessageContentAtom, `${command} `);
+            expect(store.get(featureTaskSendBlockAtom)).toBeNull();
+            store.set(currentMessageContentAtom, `${command} ${example}`);
+            expect(store.get(featureTaskSendBlockAtom)).toEqual({ hint: 'Replace [your topic] with your topic' });
+            store.set(currentMessageContentAtom, `${command} ${example.replace('[your topic]', 'school choice')}`);
+            expect(store.get(featureTaskSendBlockAtom)).toBeNull();
+        }
     });
 
     it('applies only while the message would start the task', () => {

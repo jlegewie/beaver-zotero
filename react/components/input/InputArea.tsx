@@ -428,17 +428,17 @@ const InputArea: React.FC<InputAreaProps> = ({
             store.set(pendingPillInsertsAtom, queue.slice(1));
             const editor = editorHandleRef.current;
             if (!editor) return;
-            const { argumentText, replaceActionIds } = pendingPillInsert;
+            const { argumentText, selectText, replaceActionIds } = pendingPillInsert;
             // Pills this one takes the place of go first, every one of them,
             // with their text.
             for (const actionId of replaceActionIds ?? []) editor.removeCommandsWithArguments(actionId);
             // Staged with text for after the command (an example the user
             // picked): reuse a pill of the same action rather than adding a
             // second one, and replace whatever follows it.
-            if (argumentText !== undefined && editor.setCommandArgument(descriptor.actionId, argumentText)) return;
+            if (argumentText !== undefined && editor.setCommandArgument(descriptor.actionId, argumentText, selectText)) return;
             editor.insertSlashCommand(descriptor, null);
             if (argumentText !== undefined) {
-                editor.setCommandArgument(descriptor.actionId, argumentText);
+                editor.setCommandArgument(descriptor.actionId, argumentText, selectText);
                 return;
             }
             focusEditor();

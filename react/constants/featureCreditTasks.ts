@@ -18,8 +18,9 @@ export interface LibraryShape {
 }
 
 /**
- * Stands for the topic in an example, so the example fits any library. The
- * topic step stays open until the user replaces it.
+ * Stands for the topic in an example, so the example fits any library. It is
+ * selected when the example is picked, so typing replaces it, and Send waits
+ * until the user does.
  */
 export const TOPIC_PLACEHOLDER = '[your topic]';
 
@@ -43,6 +44,12 @@ export interface FeatureTaskPrompt {
      * Without it the action runs without one, and the step reads "(optional)".
      */
     requiredHint?: string;
+    /**
+     * Set on a task that works on an attached collection's papers: shown
+     * instead of `hint` and the examples while one is attached. `{collection}`
+     * stands for what is attached.
+     */
+    collectionHint?: string;
 }
 
 export interface FeatureTaskDefinition {
@@ -54,7 +61,7 @@ export interface FeatureTaskDefinition {
     /**
      * `pdf`: the task works on an attached PDF, which the card asks for.
      * `none`: Beaver finds what to work on in the library. Whatever the chat
-     * input carries is still sent, but the card does not describe or ask for it.
+     * input carries is still sent, but the card does not ask for it.
      */
     attach: 'pdf' | 'none';
     /** The task does not run on the user's own API key. */
@@ -75,6 +82,11 @@ export interface FeatureTaskDefinition {
          */
         noteTip?: string;
         /**
+         * Shown instead of the tip and the docs link when the run made a
+         * table: one sentence, then a link that opens the table.
+         */
+        tableTip?: { text: string; label: string };
+        /**
          * A starter action of the user's own, offered instead of the docs
          * link: clicking saves it as a custom action and opens it for editing.
          */
@@ -88,28 +100,6 @@ export interface FeatureTaskDefinition {
 const DOCS_BASE_URL = 'https://www.beaverapp.ai/docs';
 
 export const FEATURE_CREDIT_TASKS: FeatureTaskDefinition[] = [
-    {
-        key: 'literature_review',
-        title: 'Write a literature review',
-        subtitle: 'A cited review as a Zotero note',
-        actionId: 'builtin-collection-literature-review',
-        attach: 'none',
-        prompt: {
-            heading: 'What should the review cover?',
-            hint: 'Name a topic, and a purpose or length if you like. Beaver finds the papers in your library. For example:',
-            requiredHint: 'Name a topic for the review',
-        },
-        examples: [
-            { text: `Background on ${TOPIC_PLACEHOLDER} for a grant proposal` },
-            { text: `An outline of the research on ${TOPIC_PLACEHOLDER}` },
-        ],
-        footnote: 'A long review can cost more; Beaver asks before going past your credit limit.',
-        completion: {
-            tip: 'Beaver writes a review as a note in Zotero: click a citation to open the passage it cites. Next time, attach a collection to review its papers.',
-            noteTip: 'Your literature review is stored as a note in Zotero. Export it as Word, PDF or LaTeX using',
-            docsUrl: `${DOCS_BASE_URL}/notes`,
-        },
-    },
     {
         key: 'annotate',
         title: 'Annotate a PDF',
@@ -142,6 +132,66 @@ export const FEATURE_CREDIT_TASKS: FeatureTaskDefinition[] = [
         },
     },
     {
+        key: 'start_project',
+        title: 'Start a research project',
+        subtitle: 'A collection of your papers, plus new ones Beaver finds',
+        actionId: 'builtin-start-project',
+        attach: 'none',
+        prompt: {
+            heading: 'What is the project about?',
+            hint: 'Type a topic or research question, or send as is and Beaver suggests topics from your library.',
+        },
+        examples: [],
+        footnote: 'Beaver asks before it adds anything to your library.',
+        completion: {
+            tip: 'The project has its own collection. Attach a collection with @ and Beaver works on its papers.',
+            docsUrl: `${DOCS_BASE_URL}/library-management`,
+        },
+    },
+    {
+        key: 'research_table',
+        title: 'Compare papers in a table',
+        subtitle: 'Systematic comparison of research papers',
+        actionId: 'builtin-research-table',
+        attach: 'none',
+        requiresBeaverModel: true,
+        prompt: {
+            heading: 'What should the table compare?',
+            hint: 'Type a topic and what to ask of each paper, or send as is and Beaver suggests topics from your library. Examples:',
+            collectionHint: 'Beaver compares the papers in {collection}. Say what to ask of each, or send as is.',
+        },
+        examples: [
+            { text: `Papers on ${TOPIC_PLACEHOLDER}: method, sample, and main finding` },
+            { text: `Papers on ${TOPIC_PLACEHOLDER}: how each defines and measures its key concept` },
+        ],
+        completion: {
+            tip: 'Click a cell to see the quote behind it. Next time, attach a collection to compare its papers.',
+            tableTip: { text: 'Click a cell in the table to see the quote behind it.', label: 'Open the table' },
+            docsUrl: `${DOCS_BASE_URL}/research-tables`,
+        },
+    },
+    {
+        key: 'literature_review',
+        title: 'Write a literature review',
+        subtitle: 'A cited review as a Zotero note',
+        actionId: 'builtin-collection-literature-review',
+        attach: 'none',
+        prompt: {
+            heading: 'What should the review cover?',
+            hint: 'Type a topic, and a purpose or length if you like, or send as is and Beaver suggests topics from your library. Examples:',
+            collectionHint: 'Beaver reviews the papers in {collection}. Add a purpose or length if you like, or send as is.',
+        },
+        examples: [
+            { text: `Background on ${TOPIC_PLACEHOLDER} for a grant proposal` },
+            { text: `An outline of the research on ${TOPIC_PLACEHOLDER}` },
+        ],
+        completion: {
+            tip: 'Beaver writes a review as a note in Zotero: click a citation to open the passage it cites. Next time, attach a collection to review its papers.',
+            noteTip: 'Your literature review is stored as a note in Zotero. Export it as Word, PDF or LaTeX using',
+            docsUrl: `${DOCS_BASE_URL}/notes`,
+        },
+    },
+    {
         key: 'organize',
         title: 'Organize your library',
         subtitle: 'Collections, tags, metadata and more',
@@ -158,30 +208,8 @@ export const FEATURE_CREDIT_TASKS: FeatureTaskDefinition[] = [
         ],
         footnote: 'You approve a large clean-up before it runs, and can undo every change.',
         completion: {
-            tip: 'Beaver can also merge duplicates, split a big collection into sub-collections, and set up a collection for a new project.',
+            tip: 'Beaver can also merge duplicates, split a big collection into sub-collections, and fill in missing metadata.',
             docsUrl: `${DOCS_BASE_URL}/library-management`,
-        },
-    },
-    {
-        key: 'research_table',
-        title: 'Compare papers in a table',
-        subtitle: 'Systematic comparison of research papers',
-        actionId: 'builtin-research-table',
-        attach: 'none',
-        requiresBeaverModel: true,
-        prompt: {
-            heading: 'What should the table compare?',
-            hint: 'Name a topic and the questions to ask of each paper. Beaver finds the papers in your library. For example:',
-            requiredHint: 'Name a topic and what to compare',
-        },
-        examples: [
-            { text: `Papers on ${TOPIC_PLACEHOLDER}: method, sample, and main finding` },
-            { text: `Papers on ${TOPIC_PLACEHOLDER}: how each defines and measures its key concept` },
-        ],
-        // footnote: 'Filling a table uses credits per row. You see the cost before anything is filled.',
-        completion: {
-            tip: 'Click a cell to see the quote behind it. Next time, attach a collection to compare its papers.',
-            docsUrl: `${DOCS_BASE_URL}/research-tables`,
         },
     },
 ];

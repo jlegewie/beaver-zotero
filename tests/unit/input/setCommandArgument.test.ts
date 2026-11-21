@@ -141,6 +141,41 @@ describe('LexicalEditorInputHandle.setCommandArgument', () => {
         expect(handle.current!.getSelectionOffset()).toBe('/annotate the methods'.length);
     });
 
+    it('selects the part of the text it was asked to, so typing replaces it', async () => {
+        const { handle } = await mount();
+        await act(async () => handle.current!.insertSlashCommand(annotate, null));
+        await act(async () => {
+            handle.current!.setCommandArgument('builtin-annotate', 'Background on CRISPR for a grant', 'CRISPR');
+        });
+        const start = '/annotate Background on '.length;
+        expect(published.value).toBe('/annotate Background on CRISPR for a grant');
+        expect(handle.current!.getSelectionOffset()).toBe(start);
+        expect(document.getSelection()?.toString()).toBe('CRISPR');
+    });
+
+    it('holds that selection against a selection reset until the user acts', async () => {
+        const { handle, editable } = await mount();
+        await act(async () => handle.current!.insertSlashCommand(annotate, null));
+        await act(async () => {
+            handle.current!.setCommandArgument('builtin-annotate', 'Background on CRISPR for a grant', 'CRISPR');
+        });
+        // The chrome document resets the selection to the start of the input.
+        await act(async () => {
+            document.getSelection()!.collapse(editable.firstChild!, 0);
+            document.dispatchEvent(new Event('selectionchange'));
+        });
+        expect(handle.current!.getSelectionOffset()).toBe('/annotate Background on '.length);
+        expect(document.getSelection()?.toString()).toBe('CRISPR');
+    });
+
+    it('leaves the caret at the end when the text does not hold the part to select', async () => {
+        const { handle } = await mount();
+        await act(async () => handle.current!.insertSlashCommand(annotate, null));
+        await act(async () => { handle.current!.setCommandArgument('builtin-annotate', 'the methods', 'CRISPR'); });
+        expect(handle.current!.getSelectionOffset()).toBe('/annotate the methods'.length);
+        expect(document.getSelection()?.toString()).toBe('');
+    });
+
     it('collapses line breaks in the text to spaces', async () => {
         const { handle } = await mount();
         await act(async () => handle.current!.insertSlashCommand(annotate, null));

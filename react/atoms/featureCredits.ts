@@ -7,13 +7,16 @@
  */
 import { atom } from 'jotai';
 import type { FeatureCreditTask } from '@beaver/agent-core/types/profile';
+import type { CollectionReference } from '@beaver/agent-core/types/zotero';
 import { profileWithPlanAtom } from './profile';
 import { beaverDefaultModelAtom, isUsingBeaverCreditsAtom, updateSelectedModelAtom } from './models';
 import { preferencesRevisionAtom } from './preferences';
 import { getPref, setPref } from '../../src/utils/prefs';
 import { actionRequirementBlockAtom, stageActionPillAtom } from './actions';
 import {
+    addCollectionsToCurrentMessageAtom,
     composerSourceSearchTextAtom,
+    currentMessageCollectionsAtom,
     currentMessageContentAtom,
     currentMessageItemsAtom,
     currentMessagePillsAtom,
@@ -22,7 +25,7 @@ import {
     pendingPillInsertsAtom,
     removeAutomaticAttachmentsAtom,
 } from './messageComposition';
-import { FEATURE_CREDIT_TASKS, FeatureTaskDefinition, TOPIC_PLACEHOLDER, getFeatureCreditTask } from '../constants/featureCreditTasks';
+import { FeatureTaskDefinition, TOPIC_PLACEHOLDER, getFeatureCreditTask } from '../constants/featureCreditTasks';
 import {
     combineDocumentStatuses,
     sendHoldHint,
@@ -105,35 +108,41 @@ export const selectBeaverModelAtom = atom(null, (get, set): boolean => {
  * Start a task: show its setup card and stage its action in the chat input.
  * Starting it (not picking one of its examples) switches to the Beaver model
  * and, for a task that finds its papers in the library, removes what the chat
- * input took from the Zotero selection; attachments the user added stay.
- * Another task's /command is replaced by this one.
+ * input took from the Zotero selection; attachments the user added stay, and
+ * `collection` is attached for the task to work on. Any other /command in the
+ * chat input is replaced by this one. A picked example's topic placeholder is
+ * selected, so typing replaces it.
  */
 export const startFeatureTaskAtom = atom(
     null,
-    (get, set, payload: { key: string; targetWindow?: Window; argumentText?: string }): boolean => {
+    (get, set, payload: {
+        key: string;
+        targetWindow?: Window;
+        argumentText?: string;
+        collection?: CollectionReference;
+    }): boolean => {
         const definition = getFeatureCreditTask(payload.key);
         if (!definition) return false;
         if (get(activeFeatureTaskAtom) !== definition.key) {
             set(selectBeaverModelAtom);
             if (definition.attach === 'none') set(removeAutomaticAttachmentsAtom);
         }
+        if (payload.collection) set(addCollectionsToCurrentMessageAtom, [payload.collection]);
         set(activeFeatureTaskAtom, definition.key);
         const pills = get(currentMessagePillsAtom);
         // The chat input already has this /command: keep it, and only replace
         // its text when an example was picked.
         const staged = pills.some((pill) => pill.actionId === definition.actionId);
         if (staged && payload.argumentText === undefined) return true;
-        // Another task's /command, left from a setup the user went back from:
-        // removed with its text, so one message does not run both.
-        const otherTaskActionIds = new Set(
-            FEATURE_CREDIT_TASKS.map((task) => task.actionId).filter((actionId) => actionId !== definition.actionId),
-        );
+        // Every other /command goes, with its text, so a command left from
+        // something else does not run with the task.
         const replaceActionIds = [...new Set(pills.map((pill) => pill.actionId))]
-            .filter((actionId) => otherTaskActionIds.has(actionId));
+            .filter((actionId) => actionId !== definition.actionId);
         return set(stageActionPillAtom, {
             actionId: definition.actionId,
             targetWindow: payload.targetWindow,
             argumentText: payload.argumentText,
+            ...(payload.argumentText?.includes(TOPIC_PLACEHOLDER) ? { selectText: TOPIC_PLACEHOLDER } : {}),
             ...(replaceActionIds.length > 0 ? { replaceActionIds } : {}),
         });
     },
@@ -165,14 +174,37 @@ export const leaveFeatureTaskAtom = atom(null, (get, set) => {
 
 const ANNOTATABLE_KINDS = new Set(['pdf', 'epub', 'snapshot']);
 
-/** Whether a file can be annotated, from the chat input's readability check of it. */
-function fileStatus(attachment: Zotero.Item, validation: ItemValidationState | undefined): DocumentStatus {
+const fileKey = (item: Zotero.Item) => `${item.libraryID}-${item.key}`;
+
+/**
+ * Whether the text of a PDF the chat input can read was prepared by OCR, by
+ * `fileKey`. A scan reads like any other PDF once it is prepared, but has no
+ * text layer for a highlight to attach to. Absent until looked up (see
+ * `lookUpOcrPreparedPdfsAtom`).
+ */
+const ocrPreparedPdfsAtom = atom<ReadonlyMap<string, boolean>>(new Map());
+
+/**
+ * Whether a file can be annotated, from the chat input's readability check of
+ * it and, for a readable PDF, where its text comes from (`ocrPrepared`;
+ * undefined while not looked up, when the file is still being checked).
+ */
+function fileStatus(
+    attachment: Zotero.Item,
+    validation: ItemValidationState | undefined,
+    ocrPrepared: boolean | undefined,
+): DocumentStatus {
     const checked = validation && !validation.isValidating && validation.state !== 'checking' ? validation : undefined;
     const kind = checked?.contentKind ?? getReadableContentKind(attachment);
     if (!kind || !ANNOTATABLE_KINDS.has(kind)) return 'none';
     // Not checked yet: the chat input validates every attachment it adds.
     if (!checked) return 'checking';
-    return checked.state === 'readable' ? 'readable' : 'unreadable';
+    if (checked.state !== 'readable') return 'unreadable';
+    if (kind !== 'pdf') return 'readable';
+    // A scan a vision model may read, not prepared yet.
+    if (checked.statusCode === 'pdf_needs_ocr') return 'scan';
+    if (ocrPrepared === undefined) return 'checking';
+    return ocrPrepared ? 'scan' : 'readable';
 }
 
 function childAttachments(item: Zotero.Item): Zotero.Item[] {
@@ -185,23 +217,66 @@ function childAttachments(item: Zotero.Item): Zotero.Item[] {
     }
 }
 
+/**
+ * The file an attached attachment or annotation stands for; null for a paper,
+ * which brings all of its files.
+ */
+function ownFile(item: Zotero.Item): Zotero.Item | null {
+    return (item.isAnnotation() ? item.parentItem : item.isAttachment() ? item : null) ?? null;
+}
+
+/** The files an attached item counts with: its own, or every file of an attached paper. */
+function filesOf(item: Zotero.Item): Zotero.Item[] {
+    const file = ownFile(item);
+    return file ? [file] : item.isRegularItem() ? childAttachments(item) : [];
+}
+
+/**
+ * Look up where the text of the attached, readable PDFs comes from, for those
+ * not looked up yet. The setup card of a task that works on a PDF runs this
+ * as the attachments and their readability checks change.
+ */
+export const lookUpOcrPreparedPdfsAtom = atom(null, async (get, set) => {
+    const validations = get(itemValidationResultsAtom);
+    const known = get(ocrPreparedPdfsAtom);
+    const reader = get(currentReaderAttachmentAtom);
+    const attached = reader ? [...get(currentMessageItemsAtom), reader] : get(currentMessageItemsAtom);
+    const pending = attached.flatMap(filesOf).filter((file) => {
+        const validation = validations.get(fileKey(file));
+        return !known.has(fileKey(file))
+            && !!validation && !validation.isValidating && validation.state === 'readable'
+            && validation.contentKind === 'pdf'
+            // A scan not prepared yet says so itself.
+            && validation.statusCode !== 'pdf_needs_ocr';
+    });
+    if (pending.length === 0) return;
+    const cache = Zotero.Beaver?.documentCache;
+    const results = await Promise.all(pending.map(async (file) => {
+        // Without the cache nothing says the PDF is a scan: it counts as annotatable.
+        const prepared = await cache?.hasOcrText({ libraryId: file.libraryID, zoteroKey: file.key }).catch(() => false);
+        return [fileKey(file), prepared === true] as const;
+    }));
+    set(ocrPreparedPdfsAtom, new Map([...get(ocrPreparedPdfsAtom), ...results]));
+});
+
 /** The papers the chat input carries, for the setup card's "Choose a PDF" step. */
 export const featureTaskAttachedPapersAtom = atom<AttachedPaper[]>((get) => {
     get(messageItemDataRevisionAtom);
     const items = get(currentMessageItemsAtom);
     const reader = get(currentReaderAttachmentAtom);
+    const ocrPrepared = get(ocrPreparedPdfsAtom);
     // Read the results map itself, not `getItemValidationAtom`: through that
     // derived getter, this atom's subscribers were not notified when a check
     // finished, and the card kept showing "Checking".
     const validations = get(itemValidationResultsAtom);
-    const getValidation = (item: Zotero.Item) => validations.get(`${item.libraryID}-${item.key}`);
+    const getValidation = (item: Zotero.Item) => validations.get(fileKey(item));
 
     // Papers in the order attached, each with the statuses of its files.
     const papers = new Map<string, { name: string; files: DocumentStatus[] }>();
     const add = (item: Zotero.Item) => {
         // An attachment or annotation stands for its paper, and only its own
         // file counts; an attached paper brings all of its files.
-        const file = item.isAnnotation() ? item.parentItem : item.isAttachment() ? item : null;
+        const file = ownFile(item);
         const paper = file?.parentItem ?? file ?? item;
         const key = `${paper.libraryID}-${paper.key}`;
         let entry = papers.get(key);
@@ -209,8 +284,9 @@ export const featureTaskAttachedPapersAtom = atom<AttachedPaper[]>((get) => {
             entry = { name: getDisplayNameFromItem(paper), files: [] };
             papers.set(key, entry);
         }
-        const files = file ? [file] : item.isRegularItem() ? childAttachments(item) : [];
-        for (const attachment of files) entry.files.push(fileStatus(attachment, getValidation(attachment)));
+        for (const attachment of filesOf(item)) {
+            entry.files.push(fileStatus(attachment, getValidation(attachment), ocrPrepared.get(fileKey(attachment))));
+        }
     };
     for (const item of items) add(item);
     if (reader) add(reader);
@@ -231,14 +307,16 @@ export const featureTaskSetupStepsAtom = atom<SetupStep[] | null>((get) => {
     if (!definition) return null;
     const content = withoutSourceSearch(get(currentMessageContentAtom), get(composerSourceSearchTextAtom));
     const instruction = textBesidesPills(content, get(currentMessagePillsAtom));
-    // A picked example counts once its topic placeholder is replaced.
     const usesPlaceholder = definition.examples.some((example) => example.text.includes(TOPIC_PLACEHOLDER));
     return setupSteps({
         definition,
         papers: definition.attach === 'pdf' ? get(featureTaskAttachedPapersAtom) : [],
         onBeaverModel: get(isUsingBeaverCreditsAtom),
         // An instruction has a word in it: a stray "@" or "?" is not one.
-        hasInstruction: /[\p{L}\p{N}]/u.test(instruction) && !(usesPlaceholder && instruction.includes(TOPIC_PLACEHOLDER)),
+        hasInstruction: /[\p{L}\p{N}]/u.test(instruction),
+        // A picked example still names no topic.
+        placeholderLeft: usesPlaceholder && instruction.includes(TOPIC_PLACEHOLDER),
+        collections: get(currentMessageCollectionsAtom).map((collection) => collection.name),
     });
 });
 
