@@ -14,6 +14,12 @@ import type { DomDocument } from '@beaver/agent-core/extract/document/dom/schema
  * Pure function over the extraction schemas: no Zotero, DOM or I/O access.
  */
 
+/**
+ * Version of the derivation heuristics. Bump it when a change should re-derive
+ * stored embedding text; stale rows are re-derived lazily.
+ */
+export const EMBEDDING_TEXT_VERSION = 2;
+
 export type EmbeddingTextSource =
     | {
           contentKind: 'pdf';
@@ -63,6 +69,8 @@ const LONG_DOCUMENT_PAGES = 60;
 const MAX_SKIPPED_PAGE_FACTOR = 4;
 /** DOM documents have no pages; scanning stops after this many blocks. */
 const MAX_DOM_BLOCKS = 1500;
+/** Longer "headings" inside an abstract are text lines led by a bold run-in label. */
+const MAX_ABSTRACT_HEADING_UNITS = 10;
 /** Blocks inspected after a label-only abstract heading while looking for its text. */
 const ABSTRACT_LOOKAHEAD = 12;
 /** Minimum size of a derived abstract; shorter matches are treated as false positives. */
@@ -207,7 +215,48 @@ function decodeEntities(text: string): string {
         .replace(/&amp;/g, '&');
 }
 
-function truncateAtSentence(text: string, maxChars: number): string {
+/** Scripts written without spaces between words. */
+const UNSPACED_SCRIPT = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}\p{Script=Tibetan}]/gu;
+
+/** A token made of letters, lowercase unless its script has no case, and not switching case mid-word. */
+function isWordToken(token: string): boolean {
+    const core = token.replace(/^[^\p{L}\p{M}]+|[^\p{L}\p{M}]+$/gu, '');
+    if (core.length < 2 || !/^[\p{L}\p{M}]+(?:['’-][\p{L}\p{M}]+)*$/u.test(core)) return false;
+    if (/\p{Ll}\p{Lu}/u.test(core)) return false;
+    return /\p{Ll}/u.test(core) || !/\p{Lu}/u.test(core);
+}
+
+/** Whether text reads as words rather than OCR noise, form fields or numbers. */
+function readsAsWords(text: string): boolean {
+    const nonSpace = text.replace(/\s/g, '');
+    // Combining marks carry vowels and diacritics in Indic, Southeast Asian and
+    // pointed Semitic scripts, and in decomposed (NFD) text; they count as letters.
+    const linguistic = nonSpace.match(/[\p{L}\p{M}]/gu)?.length ?? 0;
+    if (linguistic < nonSpace.length * 0.6) return false;
+    // Tokens say nothing about scripts without spaces; their letter share has to do.
+    if ((nonSpace.match(UNSPACED_SCRIPT)?.length ?? 0) > linguistic / 2) return true;
+    const tokens = text.split(/\s+/).filter(Boolean);
+    return tokens.filter(isWordToken).length >= tokens.length * 0.5;
+}
+
+/**
+ * Whether stored derived text is fit to embed and to send for reranking.
+ * Decided from the stored row rather than at derivation, so the rule can change
+ * without re-extracting documents. Outlines of OCR'd scans are mostly
+ * recognition noise; other text must read as words.
+ */
+export function isUsableEmbeddingBody(row: {
+    body: string;
+    bodySource: EmbeddingBodySource;
+    extractionSource: 'native' | 'ocr';
+}): boolean {
+    if (!row.body || row.bodySource === 'none') return false;
+    if (row.bodySource === 'outline' && row.extractionSource === 'ocr') return false;
+    return readsAsWords(row.body);
+}
+
+/** Cut text to `maxChars`, preferring a sentence end, then a word boundary. */
+export function truncateAtSentence(text: string, maxChars: number): string {
     if (text.length <= maxChars) return text;
     const cut = text.slice(0, maxChars);
     const end = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('。'), cut.lastIndexOf('? '), cut.lastIndexOf('! '));
@@ -564,6 +613,9 @@ function isMetadataBlock(block: Block): boolean {
         || isNameOrAffiliationBlock(block.text, block.units);
 }
 
+/** A numbered introduction heading, possibly run into its first sentence. */
+const INTRODUCTION = /^(\d+(\.\d+)*\.?|[ivx]+\.)\s*introduction\b/i;
+
 function endsAbstract(block: Block): boolean {
     if (KEYWORD_LABEL.test(block.text)) return true;
     if (block.kind === 'heading') return !STRUCTURED_ABSTRACT_PART.test(block.text);
@@ -602,7 +654,18 @@ function findAbstract(blocks: Block[], skipUnits: Set<number>, maxChars: number)
         for (let j = i + 1; j < Math.min(blocks.length, i + 1 + ABSTRACT_LOOKAHEAD) && size < maxChars; j++) {
             const next = blocks[j];
             if (next.unit > block.unit + 1 || isSkipped(next, skipUnits)) break;
-            if (parts.length > 0 && endsAbstract(next)) break;
+            // Bold run-in sub-headings ("Methods We searched …") can make whole
+            // abstract lines come out as headings. A heading that long is text.
+            const runIn = next.kind === 'heading' && next.units > MAX_ABSTRACT_HEADING_UNITS;
+            if (parts.length > 0 && (runIn ? KEYWORD_LABEL.test(next.text) || INTRODUCTION.test(next.text) : endsAbstract(next))) {
+                break;
+            }
+            if (runIn) {
+                const text = next.text.replace(STRUCTURED_ABSTRACT_PART, '$&:');
+                parts.push(text);
+                size += text.length;
+                continue;
+            }
             if (next.kind === 'heading') {
                 if (STRUCTURED_ABSTRACT_PART.test(next.text) && next.units <= 6) {
                     parts.push(`${next.text.replace(/[:：]$/, '')}:`);

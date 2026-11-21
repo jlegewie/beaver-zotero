@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { DocumentItem, StructuredDocument } from '@beaver/agent-core/extract/schema';
 import type { DomDocument, DomItem } from '@beaver/agent-core/extract/document/dom/schema';
-import { deriveEmbeddingText } from '../../../../src/services/documentExtraction/embeddingText';
+import { deriveEmbeddingText, isUsableEmbeddingBody } from '../../../../src/services/documentExtraction/embeddingText';
 
 // ---------------------------------------------------------------------------
 // Builders
@@ -116,6 +116,32 @@ describe('deriveEmbeddingText', () => {
         expect(structured.bodySource).toBe('abstract');
         expect(structured.body).toMatch(/^BACKGROUND: .*cognitive processing therapy.*METHODS: .*meta-analysis/);
         expect(structured.body).not.toContain('separate introduction');
+    });
+
+    it('keeps structured abstract lines whose bold run-in heads made them headings', () => {
+        const result = deriveEmbeddingText({
+            contentKind: 'pdf',
+            document: pdf([[
+                heading('Large language models for generating medical examinations: systematic review'),
+                heading('Abstract'),
+                heading('Background Writing multiple choice questions (MCQs) for the purpose of medical exams is challenging. It requires'),
+                heading('extensive medical knowledge, time and effort from medical educators. This systematic review focuses on large language models.'),
+                heading('Methods The authors searched for studies published up to November 2023. Search terms focused on LLMs'),
+                para('generated MCQs for medical examinations. Non-English studies were excluded. MEDLINE was used as a search database.'),
+                heading('Results Overall, eight studies published between April 2023 and October 2023 were included in the review.'),
+                heading('Keywords Large language models, Generative pre-trained transformer, Multiple choice questions, Medical'),
+                heading('Background'),
+                para(prose('an unrelated background section')),
+            ]]),
+        });
+
+        expect(result.bodySource).toBe('abstract');
+        expect(result.body).toMatch(/^Background: Writing multiple choice questions .* It requires extensive medical knowledge/);
+        expect(result.body).toContain('Methods: The authors searched');
+        expect(result.body).toContain('generated MCQs for medical examinations');
+        expect(result.body).toContain('Results: Overall, eight studies');
+        expect(result.body).not.toContain('Generative pre-trained');
+        expect(result.body).not.toContain('unrelated background');
     });
 
     it('does not treat words that start with a label as labels', () => {
@@ -479,5 +505,65 @@ describe('deriveEmbeddingText', () => {
 
         expect(result.body.length).toBeLessThanOrEqual(500);
         expect(result.body.endsWith('.')).toBe(true);
+    });
+});
+
+describe('isUsableEmbeddingBody', () => {
+    const usable = (body: string, bodySource: 'abstract' | 'opening' | 'outline' = 'opening', extractionSource: 'native' | 'ocr' = 'native') =>
+        isUsableEmbeddingBody({ body, bodySource, extractionSource });
+
+    const vietnamese = 'Nghiên cứu này xem xét điều kiện khu phố ảnh hưởng đến kết quả giáo dục của trẻ em như thế nào.';
+    const korean = '본 논문에서는 한국어 자연어 처리 작업에 적용되는 사전 학습 언어 모델의 성능을 평가한다.';
+    it.each([
+        ['English', prose('neighborhood effects on schooling')],
+        ['German', 'Die Apokalypse des Johannes war und ist bis heute sicherlich kein leicht zu gebrauchendes Buch.'],
+        ['Turkish', 'Bu çalışma, mahalle koşullarının çocukların eğitim sonuçlarını nasıl şekillendirdiğini incelemektedir.'],
+        ['Vietnamese', vietnamese],
+        ['Vietnamese (NFD)', vietnamese.normalize('NFD')],
+        ['Greek', 'Η μελέτη αυτή εξετάζει πώς οι συνθήκες της γειτονιάς διαμορφώνουν τα εκπαιδευτικά αποτελέσματα.'],
+        ['Russian', 'В данной работе рассматривается влияние условий района на образовательные результаты детей.'],
+        ['Arabic', 'تتناول هذه الدراسة كيفية تأثير ظروف الحي على النتائج التعليمية للأطفال عبر العقود.'],
+        ['Arabic with harakat', 'تَتَنَاوَلُ هَذِهِ الدِّرَاسَةُ كَيْفِيَّةَ تَأْثِيرِ ظُرُوفِ الحَيِّ عَلَى النَّتَائِجِ التَّعْلِيمِيَّةِ لِلْأَطْفَالِ.'],
+        ['Hebrew with niqqud', 'בְּרֵאשִׁית בָּרָא אֱלֹהִים אֵת הַשָּׁמַיִם וְאֵת הָאָרֶץ וְהָאָרֶץ הָיְתָה תֹהוּ וָבֹהוּ.'],
+        ['Persian', 'این پژوهش بررسی می‌کند که شرایط محله چگونه بر نتایج آموزشی کودکان اثر می‌گذارد.'],
+        ['Hindi', 'इस शोध पत्र में हम हिंदी भाषा के स्वचालित संसाधन के लिए उपलब्ध तकनीकों का अध्ययन प्रस्तुत करते हैं।'],
+        ['Bengali', 'এই গবেষণায় আমরা বাংলা ভাষার স্বয়ংক্রিয় প্রক্রিয়াকরণের কৌশলগুলি পর্যালোচনা করি।'],
+        ['Tamil', 'தமிழ் மொழியில் இயற்கை மொழிச் செயலாக்கம் குறித்த ஆய்வுகள் முக்கியத்துவம் பெறுகின்றன.'],
+        ['Telugu', 'ఈ పరిశోధనలో తెలుగు భాష యొక్క సహజ భాషా ప్రక్రియను మేము అధ్యయనం చేస్తాము.'],
+        ['Kannada', 'ಈ ಸಂಶೋಧನೆಯಲ್ಲಿ ನಾವು ಕನ್ನಡ ಭಾಷೆಯ ಸ್ವಯಂಚಾಲಿತ ಸಂಸ್ಕರಣೆಯನ್ನು ಅಧ್ಯಯನ ಮಾಡುತ್ತೇವೆ.'],
+        ['Malayalam', 'ഈ ഗവേഷണത്തിൽ മലയാള ഭാഷയുടെ സ്വാഭാവിക ഭാഷാ സംസ്കരണം ഞങ്ങൾ പഠിക്കുന്നു.'],
+        ['Sinhala', 'මෙම පර්යේෂණයේදී අපි සිංහල භාෂාවේ ස්වභාවික භාෂා සැකසීම අධ්‍යයනය කරමු.'],
+        ['Gujarati', 'આ સંશોધનમાં અમે ગુજરાતી ભાષાની સ્વયંસંચાલિત પ્રક્રિયાનો અભ્યાસ કરીએ છીએ.'],
+        ['Punjabi', 'ਇਸ ਖੋਜ ਵਿੱਚ ਅਸੀਂ ਪੰਜਾਬੀ ਭਾਸ਼ਾ ਦੀ ਕੁਦਰਤੀ ਪ੍ਰਕਿਰਿਆ ਦਾ ਅਧਿਐਨ ਕਰਦੇ ਹਾਂ।'],
+        ['Burmese', 'ဤသုတေသနတွင် မြန်မာဘာသာစကား၏ သဘာဝဘာသာစကားလုပ်ဆောင်ခြင်းကို လေ့လာပါသည်။'],
+        ['Thai', 'การประมวลผลภาษาธรรมชาติสำหรับภาษาไทยด้วยโมเดลที่ฝึกฝนล่วงหน้าเป็นหัวข้อสำคัญ'],
+        ['Lao', 'ການຄົ້ນຄວ້ານີ້ສຶກສາການປະມວນຜົນພາສາທຳມະຊາດສຳລັບພາສາລາວ'],
+        ['Khmer', 'ការស្រាវជ្រាវនេះសិក្សាអំពីដំណើរការភាសាធម្មជាតិសម្រាប់ភាសាខ្មែរ'],
+        ['Tibetan', 'འདི་ནི་བོད་ཡིག་གི་རང་བྱུང་སྐད་ཡིག་ལས་སྣོན་སྐོར་གྱི་ཞིབ་འཇུག་ཡིན།'],
+        ['Georgian', 'ეს კვლევა იკვლევს, თუ როგორ აყალიბებს სამეზობლოს პირობები ბავშვების განათლების შედეგებს.'],
+        ['Armenian', 'Այս ուսումնասիրությունը քննում է, թե ինչպես են թաղամասի պայմանները ձևավորում կրթական արդյունքները։'],
+        ['Amharic', 'ይህ ጥናት የሰፈር ሁኔታዎች የልጆችን የትምህርት ውጤቶች እንዴት እንደሚቀርጹ ይመረምራል።'],
+        ['Korean', korean],
+        ['Korean (NFD)', korean.normalize('NFD')],
+        ['Japanese', '本論文では、日本語の自然言語処理タスクにおける事前学習モデルの有効性について検証する。'],
+        ['Chinese', '本文研究了预训练语言模型在中文自然语言处理任务中的应用。我们重点关注文本分类。'],
+    ])('accepts %s prose', (_language, text) => {
+        expect(usable(text)).toBe(true);
+    });
+
+    it('accepts an outline of headings from a native PDF', () => {
+        expect(usable('Introduction. Methods. Results. Discussion of regional labor markets', 'outline')).toBe(true);
+    });
+
+    it('rejects OCR noise, form fields and outlines of OCR scans', () => {
+        const receipt = 'WELCOME 15. OUR STORE. LONG WHARF. MOBIL. , CT ee | 4 sexPRE- AUTHORIZED RECEIPT ke. mp '
+            + '<CUSTOMER CoPY>. PREPAY CR #06 _s 25.00. Subtotal > 25.00 Tax 0.00. TOTAL 25 -00. PREAUTH $ 25.00. '
+            + 'Acct/Card #: x cccckexax%9503. Invoice #: 69688 Shift #291. TERMINAL 1D: 001 a. ae aoooo00004 1010';
+        expect(usable(receipt, 'opening', 'ocr')).toBe(false);
+        expect(usable('12 34 56 78 90 11 22 33 44 55 66 77 88 99 10 20 30 40 50 60')).toBe(false);
+        expect(usable('SUBTOTAL TAX TOTAL CASH CHANGE VISA APPROVED TERMINAL STORE MERCHANT INVOICE RECEIPT')).toBe(false);
+        expect(usable('Chapter one. Our approach. The data we collected', 'outline', 'ocr')).toBe(false);
+        expect(usable('', 'abstract')).toBe(false);
+        expect(isUsableEmbeddingBody({ body: 'Some text', bodySource: 'none', extractionSource: 'native' })).toBe(false);
     });
 });

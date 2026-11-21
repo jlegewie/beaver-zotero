@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BeaverDB } from '../../../src/services/database';
 import { MockDBConnection } from '../../mocks/mockDBConnection';
 import { getUncachedCandidates, prepareUncachedFiles } from '../../../src/services/backgroundProcessing/cachePreparation';
+import { shouldStopCachePreparation } from '../../../src/services/backgroundProcessing/cachePreparationBudget';
 import type { DocumentCacheStats } from '../../../src/services/documentCache';
 
 const prefs = vi.hoisted(() => ({ enabled: true }));
@@ -37,6 +38,16 @@ describe('explicit cache preparation', () => {
         await conn.closeDatabase();
         delete (Zotero as any).Beaver;
     });
+    it('stops only pure cache preparation at the budget, not work in the local extraction band', async () => {
+        const full = { payload_budget_bytes: 1000, payload_total_bytes: 950 } as DocumentCacheStats;
+        (Zotero as any).Beaver.documentCache.getStats = async () => full;
+        const record = (priority: number) => ({ priority, payload: { content_kind: 'pdf', prepare_cache: true } }) as any;
+
+        expect(await shouldStopCachePreparation(record(110))).toBe(true);
+        expect(await shouldStopCachePreparation(record(102))).toBe(false);
+        expect(await shouldStopCachePreparation(record(90))).toBe(false);
+    });
+
     async function seed(key: string, date: string, libraryId = 1, ocr = 'na') {
         await db.ensureAttachmentProcessingState({ libraryId, zoteroKey: key, contentKind: 'pdf' });
         await conn.queryAsync(`UPDATE attachment_processing_state SET extract_status = 'done', ocr_status = ?,

@@ -6,7 +6,6 @@ const mocks = vi.hoisted(() => ({
     deleteEmbeddings: vi.fn(),
 }));
 vi.mock("../../../src/services/embeddingIndexer", () => ({
-    MIN_CONTENT_LENGTH: 10,
     INDEX_BATCH_SIZE: 100,
     mergeIndexingErrors: vi.fn(),
     EmbeddingIndexer: class {
@@ -39,6 +38,22 @@ vi.mock(
     }),
 );
 import { InstanceBackground } from "../../../src/services/instanceBackground";
+import { EMBEDDING_TEXT_VERSION } from "../../../src/services/documentExtraction/embeddingText";
+
+const zoteroItems = new Map<number, any>();
+const regular = (id: number, libraryID = 1) => ({
+    id,
+    libraryID,
+    isRegularItem: () => true,
+    isAttachment: () => false,
+});
+const attachment = (id: number, parentID: number | false, libraryID = 1) => ({
+    id,
+    libraryID,
+    parentID,
+    isRegularItem: () => false,
+    isAttachment: () => true,
+});
 
 describe("instance embedding events across background generations", () => {
     let service: InstanceBackground;
@@ -59,7 +74,7 @@ describe("instance embedding events across background generations", () => {
         vi.clearAllMocks();
         // The fast scan cannot detect a second edit within the same timestamp second.
         mocks.diff.mockResolvedValue({ needsDiff: false, reason: "unchanged" });
-        mocks.index.mockResolvedValue({ indexed: 1, skipped: 0, failed: 0 });
+        mocks.index.mockResolvedValue({ indexed: 1, skipped: 0, failed: 0, unindexable: [] });
         mocks.deleteEmbeddings.mockResolvedValue(undefined);
         snapshot = {
             generation: 1,
@@ -70,6 +85,13 @@ describe("instance embedding events across background generations", () => {
         owner = {
             db: {
                 deleteEmbeddingsBatch: mocks.deleteEmbeddings,
+                deleteAttachmentEmbeddingTextsByItemIds: vi.fn(),
+                getUnitIdsBySourceAttachment: vi.fn(async () => []),
+                getPendingAttachmentEmbeddingTextIds: vi.fn(async () => []),
+                getEmbeddingTextIndexVersion: vi.fn(async () => EMBEDDING_TEXT_VERSION),
+                setEmbeddingTextIndexVersion: vi.fn(),
+                deleteEmbeddingIndexState: vi.fn(),
+                clearAttachmentEmbeddingTextPending: vi.fn(),
                 subscribeProcessingChanges: () => () => {},
                 configureProcessingProgress: async () => {},
                 getProcessingProgress: async () => ({ runId: 0, total: 0, pending: 0 }),
@@ -93,9 +115,10 @@ describe("instance embedding events across background generations", () => {
             },
         };
         (Zotero as any).Beaver = owner;
+        zoteroItems.clear();
         (Zotero as any).Items = {
             getAsync: vi.fn(async (ids: number[]) =>
-                ids.map((id) => ({ id, libraryID: id === 2 ? 2 : 1 })),
+                ids.map((id) => zoteroItems.get(id) ?? regular(id, id === 2 ? 2 : 1)),
             ),
         };
         (Zotero as any).Notifier = {
@@ -157,5 +180,154 @@ describe("instance embedding events across background generations", () => {
             expect.anything(),
         );
         expect(mocks.deleteEmbeddings).toHaveBeenCalledExactlyOnceWith([3]);
+    });
+    describe("derived attachment text", () => {
+        const drain = async () => {
+            await vi.advanceTimersByTimeAsync(4500);
+        };
+
+        it("recomputes an attachment's parent and re-checks the attachment's file", async () => {
+            zoteroItems.set(20, attachment(20, 10));
+            await vi.advanceTimersByTimeAsync(500);
+            await observer.notify("modify", "item", [20]);
+            await drain();
+            expect(mocks.index).toHaveBeenCalledExactlyOnceWith(
+                [10],
+                expect.objectContaining({
+                    skipUnchanged: true,
+                    extractions: { checkFileIdentity: new Set([20]) },
+                }),
+            );
+            expect(owner.db.clearAttachmentEmbeddingTextPending).toHaveBeenCalledWith(
+                [20],
+                expect.any(Number),
+            );
+        });
+
+        it("treats a file download like a change to the attachment", async () => {
+            zoteroItems.set(20, attachment(20, 10));
+            await vi.advanceTimersByTimeAsync(500);
+            await observer.notify("download", "file", [20]);
+            await drain();
+            expect(mocks.index).toHaveBeenCalledExactlyOnceWith([10], expect.anything());
+        });
+
+        it("finds the units of an erased attachment through the reverse link", async () => {
+            owner.db.getUnitIdsBySourceAttachment.mockResolvedValue([10]);
+            await vi.advanceTimersByTimeAsync(500);
+            await observer.notify("delete", "item", [20], { 20: { libraryID: 1, key: "ATTACH01" } });
+            await drain();
+            expect(owner.db.getUnitIdsBySourceAttachment).toHaveBeenCalledWith([20]);
+            expect(mocks.deleteEmbeddings).toHaveBeenCalledWith([20]);
+            expect(owner.db.deleteAttachmentEmbeddingTextsByItemIds).toHaveBeenCalledWith([20]);
+            expect(mocks.index).toHaveBeenCalledExactlyOnceWith([10], expect.anything());
+        });
+
+        it("ignores standalone attachments and units outside the searchable libraries", async () => {
+            zoteroItems.set(20, attachment(20, false));
+            owner.db.getUnitIdsBySourceAttachment.mockResolvedValue([2]);
+            await vi.advanceTimersByTimeAsync(500);
+            await observer.notify("modify", "item", [20]);
+            owner.searchableLibraryIds = [1];
+            reconcile(snapshot);
+            await drain();
+            expect(mocks.index).not.toHaveBeenCalled();
+            expect(owner.db.clearAttachmentEmbeddingTextPending).toHaveBeenCalledWith([20], expect.any(Number));
+        });
+
+        it("removes embeddings of units that are no longer indexable", async () => {
+            mocks.index.mockResolvedValue({ indexed: 0, skipped: 1, failed: 0, unindexable: [10] });
+            await vi.advanceTimersByTimeAsync(500);
+            await observer.notify("modify", "item", [10]);
+            await drain();
+            expect(mocks.deleteEmbeddings).toHaveBeenCalledExactlyOnceWith([10]);
+        });
+
+        it("keeps derived text pending when indexing could not finish", async () => {
+            zoteroItems.set(20, attachment(20, 10));
+            mocks.index.mockResolvedValue({ indexed: 0, skipped: 0, failed: 0, unindexable: [], incomplete: true });
+            await vi.advanceTimersByTimeAsync(500);
+            await observer.notify("modify", "item", [20]);
+            await drain();
+            expect(owner.db.clearAttachmentEmbeddingTextPending).not.toHaveBeenCalled();
+        });
+
+        it("applies newly derived text marked dirty by the instance", async () => {
+            zoteroItems.set(20, attachment(20, 10));
+            await vi.advanceTimersByTimeAsync(500);
+            service.markEmbeddingDirty([20]);
+            await drain();
+            expect(mocks.index).toHaveBeenCalledExactlyOnceWith([10], expect.anything());
+        });
+
+        it("runs a pass after the max wait while changes keep arriving", async () => {
+            await vi.advanceTimersByTimeAsync(500);
+            for (let i = 0; i < 29; i++) {
+                service.markEmbeddingDirty([1]);
+                await vi.advanceTimersByTimeAsync(1000);
+            }
+            expect(mocks.index).not.toHaveBeenCalled();
+            service.markEmbeddingDirty([1]);
+            await vi.advanceTimersByTimeAsync(1500);
+            expect(mocks.index).toHaveBeenCalledExactlyOnceWith([1], expect.anything());
+
+            // The next change starts a fresh window with the normal debounce.
+            service.markEmbeddingDirty([1]);
+            await drain();
+            expect(mocks.index).toHaveBeenCalledTimes(2);
+        });
+
+        it("reports updating only for a pass that re-embeds", async () => {
+            const statuses: string[] = [];
+            owner.runtime = {
+                publish: vi.fn((topic: string, state: { status: string }) => {
+                    if (topic === "embedding-index:status") statuses.push(state.status);
+                }),
+            };
+            await vi.advanceTimersByTimeAsync(500);
+            statuses.length = 0;
+            mocks.index.mockResolvedValue({ indexed: 0, skipped: 1, failed: 0, unindexable: [] });
+            service.markEmbeddingDirty([1]);
+            await drain();
+            expect(statuses).not.toContain("updating");
+
+            mocks.index.mockImplementation(async (_ids: number[], options: { onEmbed?: () => void }) => {
+                options.onEmbed?.();
+                return { indexed: 1, skipped: 0, failed: 0, unindexable: [] };
+            });
+            statuses.length = 0;
+            service.markEmbeddingDirty([1]);
+            await drain();
+            expect(statuses).toContain("updating");
+            expect(statuses.at(-1)).toBe("idle");
+        });
+
+        it("runs one full diff for a new derived-text version", async () => {
+            await vi.runAllTimersAsync();
+            await service.dispose();
+            (Zotero as any).Libraries = { getAll: () => [{ libraryID: 1 }, { libraryID: 2 }] };
+            owner.db.getEmbeddingTextIndexVersion.mockResolvedValue(null);
+            service = new InstanceBackground();
+            service.start(owner.account);
+            await vi.advanceTimersByTimeAsync(500);
+            expect(owner.db.deleteEmbeddingIndexState).toHaveBeenCalledWith(1);
+            expect(owner.db.deleteEmbeddingIndexState).toHaveBeenCalledWith(2);
+            expect(owner.db.setEmbeddingTextIndexVersion).toHaveBeenCalledWith(EMBEDDING_TEXT_VERSION);
+        });
+
+        it("catches up on derived text stored while no generation ran", async () => {
+            await vi.runAllTimersAsync();
+            await service.dispose();
+            mocks.index.mockClear();
+            zoteroItems.set(20, attachment(20, 10));
+            owner.db.getPendingAttachmentEmbeddingTextIds.mockResolvedValue([20]);
+            mocks.diff.mockResolvedValue({ needsDiff: false, reason: "unchanged" });
+            service = new InstanceBackground();
+            service.start(owner.account);
+            await vi.advanceTimersByTimeAsync(500);
+            await drain();
+            expect(owner.db.getPendingAttachmentEmbeddingTextIds).toHaveBeenCalledWith([1, 2]);
+            expect(mocks.index).toHaveBeenCalledWith([10], expect.anything());
+        });
     });
 });
