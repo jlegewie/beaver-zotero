@@ -68,6 +68,8 @@ pref("enableResponseCompleteNotifications", true);
 pref("enableRunStatusPopup", true);
 // Separate Beaver window: whether the chat history sidebar is collapsed.
 pref("windowSidebarCollapsed", false);
+// Whether the "Get more out of Beaver" feature-credits card on the home screen was dismissed.
+pref("featureCreditsCardDismissed", false);
 // Width of the sidebar in a main window, in CSS pixels; 0 until it is first shown.
 pref("sidebarWidth", 0);
 

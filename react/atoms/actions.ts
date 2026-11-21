@@ -6,7 +6,7 @@
 
 import { atom } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
-import { Action, ActionOverride, ActionTargetType, generateActionId, sameTargets } from '@beaver/agent-core/types/actions';
+import { Action, ActionOverride, ActionTargetType, generateActionId, sameTargets, stripBuiltinOnlyFields } from '@beaver/agent-core/types/actions';
 import { ALL_BUILTIN_ACTIONS } from '../types/builtinActions';
 import {
     getMergedActions,
@@ -27,12 +27,15 @@ import {
 import { messageParksResume, parkResumeForMessageAtom, sendWSMessageAtom, withThreadWriter } from './agentRunAtoms';
 import {
     currentMessageItemsAtom,
+    addCollectionsToCurrentMessageAtom,
     currentMessageCollectionsAtom,
     pendingPillInsertsAtom,
     addItemsToCurrentMessageItemsAtom,
     messageItemDataRevisionAtom,
     currentMessageViewsAtom,
     addViewsToCurrentMessageAtom,
+    currentMessageContentAtom,
+    currentMessagePillsAtom,
 } from './messageComposition';
 import { CollectionReference, collectionReferenceKey } from '@beaver/agent-core/types/zotero';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
@@ -44,12 +47,25 @@ import { MessageAttachment, ViewAttachment, isViewAttachment, messageAttachmentI
 import { toValidatedMessageAttachment } from '../types/attachments/converters';
 import { resolveLibraryRef } from '../../src/utils/libraryIdentity';
 import { isTargetInLibraries } from '../utils/zoteroReferences';
+import { getActionRequirementBlock, type ActionRequirementBlock } from '../utils/actionRequirements';
+import { activeFeatureTaskAtom, featureTaskForMessage } from './featureCreditRuns';
 
 // ---------------------------------------------------------------------------
 // Base atom — initialised once from prefs + built-ins
 // ---------------------------------------------------------------------------
 
 export const actionsAtom = atom<Action[]>(getMergedActions());
+
+/**
+ * Re-read the actions from prefs into this store. Each renderer loads its list
+ * once, so an action saved from another window is missing here until then.
+ * Prefs hold every saved change, so nothing of this store's is lost.
+ */
+export const reloadActionsAtom = atom(null, (_get, set): Action[] => {
+    const actions = getMergedActions();
+    set(actionsAtom, actions);
+    return actions;
+});
 
 // ---------------------------------------------------------------------------
 // Write atom — saves actions back to prefs
@@ -104,9 +120,9 @@ export const saveActionsAtom = atom(
                 }
             } else {
                 // Custom action — strip runtime-only `lastUsed` and the
-                // built-in-only `locked` flag (locking is code-defined and must
-                // never live in user data) before persisting.
-                const { lastUsed: _lastUsed, locked: _locked, ...rest } = action;
+                // built-in-only fields (`locked`, `argumentRequired`: code-defined,
+                // they must never live in user data) before persisting.
+                const { lastUsed: _lastUsed, ...rest } = stripBuiltinOnlyFields(action);
                 newCustom.push(rest);
             }
         }
@@ -178,8 +194,9 @@ export const importActionAtom = atom(
         const name = commandRenamed ? command : incoming.name;
 
         // Strip local/runtime and built-in-only fields the importer owns.
-        // `locked` never rides along: a duplicated/imported action is editable.
-        const { lastUsed: _lastUsed, deprecated: _deprecated, locked: _locked, ...rest } = incoming;
+        // `locked` and `argumentRequired` never ride along: a duplicated or
+        // imported action is the user's, and its editor cannot show them.
+        const { lastUsed: _lastUsed, deprecated: _deprecated, ...rest } = stripBuiltinOnlyFields(incoming);
         const newAction: Action = {
             ...rest,
             id,
@@ -409,14 +426,9 @@ export const resolveActionForStagingAtom = atom(
             // Goes through the shared add path, so the targets are validated in
             // the background like any other attachment the user adds.
             if (items.length > 0) void set(addItemsToCurrentMessageItemsAtom, items);
-            if (collections.length > 0) {
-                // Merge rather than replace: the composer may already carry
-                // collections the user attached.
-                const current = get(currentMessageCollectionsAtom) as CollectionReference[];
-                const existingKeys = new Set(current.map(collectionReferenceKey));
-                const added = collections.filter(c => !existingKeys.has(collectionReferenceKey(c)));
-                if (added.length > 0) set(currentMessageCollectionsAtom, [...current, ...added]);
-            }
+            // Merged rather than replaced: the composer may already carry
+            // collections the user attached.
+            if (collections.length > 0) set(addCollectionsToCurrentMessageAtom, collections);
             if (views.length > 0) set(addViewsToCurrentMessageAtom, views);
         }
 
@@ -450,6 +462,14 @@ export const stageActionPillAtom = atom(
         contextOverride?: TargetTypeContext;
         /** Window whose editor should receive the pill (where the user acted). */
         targetWindow?: Window;
+        /** Text to put right after the pill, replacing whatever follows it.
+         *  When the editor already holds a pill for this action, no second pill
+         *  is inserted: only the text after the existing one is replaced. */
+        argumentText?: string;
+        /** A part of `argumentText` to select (see `PendingPillInsert`). */
+        selectText?: string;
+        /** Actions whose pills this one replaces (see `PendingPillInsert`). */
+        replaceActionIds?: string[];
     }): boolean => {
         const descriptor = set(resolveActionForStagingAtom, {
             actionId: payload.actionId,
@@ -463,11 +483,35 @@ export const stageActionPillAtom = atom(
         // action the user launched whose targets are already attached.
         set(pendingPillInsertsAtom, [
             ...get(pendingPillInsertsAtom),
-            { descriptor, targetWindow: payload.targetWindow },
+            {
+                descriptor,
+                targetWindow: payload.targetWindow,
+                argumentText: payload.argumentText,
+                selectText: payload.selectText,
+                replaceActionIds: payload.replaceActionIds,
+            },
         ]);
         return true;
     },
 );
+
+// ---------------------------------------------------------------------------
+// Required input for the composer's /command pills.
+//
+// While a pill's action requires text after its /command and the message
+// holds none, the composer disables Send and its tooltip shows the hint. See
+// `getActionRequirementBlock`.
+// ---------------------------------------------------------------------------
+
+export const actionRequirementBlockAtom = atom<ActionRequirementBlock | null>((get) => {
+    const pills = get(currentMessagePillsAtom);
+    if (pills.length === 0) return null;
+    return getActionRequirementBlock({
+        content: get(currentMessageContentAtom),
+        pills,
+        actions: get(actionsAtom),
+    });
+});
 
 // ---------------------------------------------------------------------------
 // Build the structured wire actions for the /command pills in a message.
@@ -715,6 +759,9 @@ export const sendComposedMessageAtom = atom(
             pills: SlashCommandDescriptor[];
         },
     ): Promise<boolean> => {
+        // Read while the feature task's setup card is still open: sending
+        // resets the chat input, which ends it.
+        const setupTask = get(activeFeatureTaskAtom);
         if (messageParksResume(get) && !(await set(parkResumeForMessageAtom))) return false;
         return (await withThreadWriter(get, set, async set => {
         const { baseText, pills } = payload;
@@ -739,18 +786,13 @@ export const sendComposedMessageAtom = atom(
             }
         }
 
-        if (variableCollections.length > 0) {
-            const currentCollections = get(currentMessageCollectionsAtom) as CollectionReference[];
-            const existingCollectionKeys = new Set(currentCollections.map(collectionReferenceKey));
-            const newCollections = variableCollections.filter(
-                c => !existingCollectionKeys.has(collectionReferenceKey(c)),
-            );
-            if (newCollections.length > 0) {
-                set(currentMessageCollectionsAtom, [...currentCollections, ...newCollections]);
-            }
-        }
+        if (variableCollections.length > 0) set(addCollectionsToCurrentMessageAtom, variableCollections);
 
-        await set(sendWSMessageAtom, baseText.trim(), { actions: promptActions });
+        const featureTask = featureTaskForMessage(setupTask, promptActions);
+        await set(sendWSMessageAtom, baseText.trim(), {
+            actions: promptActions,
+            ...(featureTask ? { featureTask } : {}),
+        });
         return true;
         })) ?? false;
     },

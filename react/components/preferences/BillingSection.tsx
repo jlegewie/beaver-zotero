@@ -2,6 +2,7 @@ import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
 import React, { useCallback, useEffect, useState } from "react";
 import Button from "@beaver/agent-ui/primitives/Button";
 import {SettingsGroup, SettingsRow, SectionLabel, DocLink} from "./components/SettingsElements";
+import EarnCreditsSection from "../featureCredits/EarnCreditsSection";
 import { Spinner } from '../icons/icons';
 import { activePreferencePageTabAtom } from "../../atoms/ui";
 import { userAtom } from "../../atoms/auth";
@@ -562,7 +563,7 @@ const BillingSection: React.FC = () => {
                             <span className="font-color-secondary">No credits remaining</span>
                         ) : (
                             <span className="font-color-secondary">
-                                Credits from sign-up bonus and credit packs
+                                Sign-up bonus, feature rewards and credit packs
                                 {creditBreakdown.purchasedExpiresAt && (creditBreakdown.purchasedCredits || 0) > 0 && (
                                     <>
                                         <br />
@@ -613,6 +614,8 @@ const BillingSection: React.FC = () => {
                     {creditsError}
                 </div>
             )}
+
+            <EarnCreditsSection />
 
             <SectionLabel>Credit Limit</SectionLabel>
             <SettingsGroup>

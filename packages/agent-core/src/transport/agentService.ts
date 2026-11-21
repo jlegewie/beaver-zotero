@@ -1683,6 +1683,7 @@ export class AgentService {
                         modelId: event.model_id,
                         modelName: event.model_name,
                         chargeType: event.charge_type,
+                        ...(event.feature_credit ? { featureCredit: event.feature_credit } : {}),
                     };
                     this.callbacks.onRequestAck?.(ackData);
                     break;

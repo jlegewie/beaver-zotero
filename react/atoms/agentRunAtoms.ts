@@ -89,6 +89,7 @@ import {
     syncWithZoteroAtom,
 } from './profile';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
+import { recordFeatureCreditGrantAtom } from './featureCreditRuns';
 import {
     readComposerDraft,
     restoreMissingComposerDraft,
@@ -1929,6 +1930,10 @@ export function createWSCallbacks(
         onRequestAck: (data: WSRequestAckData) => {
             logger('WS onRequestAck:', data, 1);
             set(wsRequestAckDataAtom, data);
+            // The completion card shows when this run ends.
+            if (data.featureCredit) {
+                set(recordFeatureCreditGrantAtom, { runId: data.runId, ...data.featureCredit });
+            }
         },
 
         onPart: async (event: WSPartEvent) => {
@@ -2920,6 +2925,8 @@ export interface SendWSMessageOptions {
     origin?: PromptOrigin;
     /** Saved actions invoked as /command tokens in the message content */
     actions?: PromptAction[];
+    /** The feature-credit task this message was started for, from its setup card. */
+    featureTask?: string;
 }
 
 const sendWSMessage = async (
@@ -2934,7 +2941,7 @@ const sendWSMessage = async (
             assertCredentialGeneration(accountGeneration);
             return originalSet(...args);
         }) as Setter;
-        const { runIdOverride, permissionsOverride, origin, actions } = options ?? {};
+        const { runIdOverride, permissionsOverride, origin, actions, featureTask } = options ?? {};
         const isPending = get(isWSChatPendingAtom);
         logger('sendWSMessageAtom: Called at ' + Date.now() + ' with message: ' + message.substring(0, 50) + ' (isPending: ' + isPending + ')', 1);
 
@@ -3222,6 +3229,7 @@ const sendWSMessage = async (
             ...(toolRequests ? { tool_requests: toolRequests } : {}),
             ...(origin ? { origin } : {}),
             ...(actions?.length ? { actions } : {}),
+            ...(featureTask ? { feature_task: featureTask } : {}),
         };
 
         // Get current thread ID (null for new thread)
