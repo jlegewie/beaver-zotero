@@ -6530,7 +6530,9 @@
     border-radius: 10px;
     color: var(--fill-primary);
     background-color: var(--beaver-fill-chip);
-    white-space: nowrap;
+    /* A long chip (several filter names) wraps inside the card instead of overflowing it. */
+    max-width: 100%;
+    overflow-wrap: break-word;
 }
 .beaver-root .ext-chip[data-muted] {
     color: var(--fill-secondary);

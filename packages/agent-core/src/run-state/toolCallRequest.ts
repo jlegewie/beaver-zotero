@@ -20,7 +20,8 @@ export function parseArgs(part: ToolCallPart): Record<string, unknown> {
     if (!part.args) return {};
     if (typeof part.args === 'string') {
         try {
-            return JSON.parse(part.args);
+            const parsed = JSON.parse(part.args);
+            return parsed && typeof parsed === 'object' ? parsed : {};
         } catch {
             return {};
         }
@@ -170,6 +171,10 @@ export const TOOL_BASE_LABELS: Record<string, string> = {
     find_related_works: 'Related works',
     find_book_chapters: 'Book chapters',
     pubmed_search: 'PubMed search',
+    openalex_search_by_topic: 'Literature search',
+    openalex_search_by_keywords: 'Literature search',
+    openalex_resolve_names: 'Name lookup',
+    trials_search: 'ClinicalTrials.gov search',
     search_trials: 'ClinicalTrials.gov search',
     get_trial: 'ClinicalTrials.gov record',
 

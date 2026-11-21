@@ -119,6 +119,7 @@ export { default as FileIcon } from './FileIcon';
 export { default as LayersIcon } from './LayersIcon';
 export { default as BookSearchIcon } from './BookSearchIcon';
 export { default as FilterIcon } from './FilterIcon';
+export { default as FilterLinesIcon } from './FilterLinesIcon';
 export { default as ImportIcon } from './ImportIcon';
 export { default as HelpCircleIcon } from './HelpCircleIcon';
 export { default as HandIcon } from './HandIcon';

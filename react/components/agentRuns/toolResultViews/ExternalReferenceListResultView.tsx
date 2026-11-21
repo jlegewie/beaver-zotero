@@ -3,9 +3,13 @@ import {
     ExternalReferenceListView,
     RelatedWorksViewInfo,
     SearchViewInfo,
+    openAlexFilterName,
     relatedWorksViewInfo,
+    searchSiteLabel,
     searchViewInfo,
 } from '@beaver/agent-core/run-state/toolResultViews';
+import { ArrowUpRightIcon } from '@beaver/agent-ui/icons';
+import { RecordLink } from '../../externalReferences/ExternalRecordParts';
 import {
     ExternalReference,
     authorLastNames,
@@ -79,7 +83,7 @@ const SORT_LABELS: Record<string, string> = {
 };
 
 function humanize(value: string): string {
-    const spaced = value.replace(/_/g, ' ').trim();
+    const spaced = value.replace(/[_-]/g, ' ').trim();
     return spaced ? spaced.charAt(0).toUpperCase() + spaced.slice(1) : spaced;
 }
 
@@ -110,20 +114,33 @@ export function searchFilterLabels(filters: Record<string, unknown> | null | und
         handled.add(key);
         if (typeof value === 'string' && value.trim()) labels.push(`${label}: ${value.trim()}`);
     }
-    const listOf = (key: string, format: (value: string) => string) => {
+    const listOf = (key: string, format: (value: string) => string, prefix = '') => {
         handled.add(key);
         const value = filters[key];
-        if (Array.isArray(value) && value.length) labels.push(value.map((entry) => format(String(entry))).join(', '));
+        if (Array.isArray(value) && value.length) labels.push(prefix + value.map((entry) => format(String(entry))).join(', '));
     };
+    // OpenAlex names the author and venue ids: "Katrin Wisniewski (A5012345678)".
+    const entityName = (value: string) => openAlexFilterName(value) ?? value;
+    listOf('authors', entityName, 'By ');
+    listOf('venues', entityName, 'In ');
+    listOf('work_types', humanize);
+    handled.add('language');
+    if (typeof filters.language === 'string' && filters.language) labels.push(`Language: ${filters.language.toUpperCase()}`);
+    handled.add('open_access_only');
+    if (filters.open_access_only === true) labels.push('Open access only');
     listOf('status', humanize);
     listOf('phase', phaseLabel);
+    listOf('age_group', humanize);
     handled.add('study_type');
     if (typeof filters.study_type === 'string') labels.push(humanize(filters.study_type));
-    handled.add('has_results');
-    if (filters.has_results === true) labels.push('With results');
-    if (filters.has_results === false) labels.push('Without results');
+    for (const [key, noun] of [['has_results', 'results'], ['has_publications', 'publications']] as const) {
+        handled.add(key);
+        if (filters[key] === true) labels.push(`With ${noun}`);
+        if (filters[key] === false) labels.push(`Without ${noun}`);
+    }
     for (const [minKey, maxKey, prefix] of [
         ['start_year_min', 'start_year_max', 'Started'],
+        ['min_start_year', 'max_start_year', 'Started'],
         ['min_year', 'max_year', 'Published'],
     ] as const) {
         handled.add(minKey);
@@ -135,6 +152,9 @@ export function searchFilterLabels(filters: Record<string, unknown> | null | und
     if (typeof filters.sort === 'string' && filters.sort !== 'relevance') {
         labels.push(SORT_LABELS[filters.sort] ?? humanize(filters.sort));
     }
+    // The order the rows are in, described by the backend ("Most cited first").
+    handled.add('ranking');
+    if (typeof filters.ranking === 'string' && filters.ranking.trim()) labels.push(filters.ranking.trim());
     for (const [key, value] of Object.entries(filters)) {
         if (handled.has(key) || value === null || value === undefined || value === '') continue;
         labels.push(`${humanize(key)}: ${Array.isArray(value) ? value.join(', ') : String(value)}`);
@@ -143,9 +163,9 @@ export function searchFilterLabels(filters: Record<string, unknown> | null | und
 }
 
 /**
- * The search a source search ran (pubmed_search, search_trials): the query as
- * sent, its filters, and for PubMed the query as PubMed ran it, which can be
- * copied. Opened from the card header's search-details button, it sits on the
+ * The search a source search ran (OpenAlex, PubMed, trials): the query as
+ * sent, its filters, for PubMed the query as PubMed ran it, which can be
+ * copied, and a link that runs the same search on the source's site. Opened from the card header's search-details button, it sits on the
  * header's band so it reads as part of the header. Fields without content are
  * left out.
  */
@@ -190,6 +210,14 @@ const SearchDetailsPanel: React.FC<{ info: SearchViewInfo; id: string }> = ({ in
                         />
                     </div>
                     <div className="ext-query-translation select-text" tabIndex={0}>{translation}</div>
+                </div>
+            )}
+            {info.search_url && (
+                <div className="text-sm">
+                    <RecordLink url={info.search_url} className="inline-flex items-center gap-05">
+                        {searchSiteLabel(info)}
+                        <ArrowUpRightIcon width={12} height={12} color="currentColor" />
+                    </RecordLink>
                 </div>
             )}
         </div>

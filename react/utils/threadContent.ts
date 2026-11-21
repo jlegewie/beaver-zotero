@@ -1,19 +1,8 @@
 import { AgentRun, TextPart, ToolCallPart } from '@beaver/agent-core/agents/types';
 import { isRenderableMessage } from '@beaver/agent-core/agents/messageVisibility';
-import { getToolCallLabel, type ToolCallLabelEnrich } from '@beaver/agent-core/run-state/toolLabels';
+import { getToolCallLabel, toolCallSearchText, type ToolCallLabelEnrich } from '@beaver/agent-core/run-state/toolLabels';
+import { parseArgs } from '@beaver/agent-core/run-state/toolCallRequest';
 import { isToolResultView } from '@beaver/agent-core/run-state/toolResultViews';
-
-/**
- * Parse args from a ToolCallPart, handling both string and object formats.
- */
-function parseToolCallArgs(part: ToolCallPart): Record<string, unknown> {
-    if (!part.args) return {};
-    if (typeof part.args === 'object') return part.args as Record<string, unknown>;
-    if (typeof part.args === 'string') {
-        try { return JSON.parse(part.args); } catch { return {}; }
-    }
-    return {};
-}
 
 /**
  * Extract tool call details as a formatted string.
@@ -39,20 +28,15 @@ export function getToolCallDetails(
         view,
         enrich: enrichMap?.get(part.tool_call_id) ?? null,
     });
-    let query = "";
-    try {
-        const args = typeof part.args === 'object' && part.args
-            ? part.args
-            : typeof part.args === 'string' && part.args.startsWith('{')
-                ? JSON.parse(part.args)
-                : {};
-        query = args.search_label || args.query || args.q || args.keywords || args.topic || args.search_term || "";
-    } catch (e) {
-        console.error('Error parsing tool call arguments:', e);
-    }
+    // Database searches and lookups: their full search, which the label may cut.
+    const args = parseArgs(part);
+    const raw = toolCallSearchText(part, view)
+        ?? (args.query || args.q || args.keywords || args.topic || args.search_term);
+    const query = (Array.isArray(raw) ? raw.join(', ') : typeof raw === 'string' ? raw : '').trim();
 
     let details = `[${label}`;
-    if (query) details += `: "${query}"`;
+    // Copied text keeps the full query; skip it only when the label already shows all of it.
+    if (query && !label.includes(query)) details += `: "${query}"`;
     details += `]`;
     return details;
 }
@@ -90,7 +74,7 @@ export function extractRunResponseContent(
                     .map(p => {
                         // For create_note, include the note content inline
                         if (p.tool_name === 'create_note') {
-                            const args = parseToolCallArgs(p);
+                            const args = parseArgs(p);
                             const title = args.title as string | undefined;
                             const content = args.content as string | undefined;
                             if (title && content) {
