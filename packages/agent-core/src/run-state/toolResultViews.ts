@@ -204,7 +204,8 @@ export interface RelatedWorksViewInfo {
 }
 
 /**
- * Search-tool view data (pubmed_search, search_trials): the searched source,
+ * Search-tool view data (the OpenAlex searches, pubmed_search, trials_search):
+ * the searched source,
  * the executed query or filters, counts, and a link that reproduces the
  * search on the source's own site.
  */
@@ -267,11 +268,14 @@ export function relatedWorksViewInfo(view: Pick<ExternalReferenceListView, "tool
     return null;
 }
 
-/** Whether a search carries details worth showing: its query, filters, or the query as the source ran it. */
+/**
+ * Whether a search carries details worth showing: its query, filters, the
+ * query as the source ran it, or a link that runs it on the source's site.
+ */
 export function searchHasDetails(info: SearchViewInfo): boolean {
     const hasFilters = !!info.filters && Object.values(info.filters).some((value) =>
         value !== null && value !== undefined && value !== '' && !(Array.isArray(value) && value.length === 0));
-    return !!info.query?.trim() || hasFilters || !!info.query_translation?.trim();
+    return !!info.query?.trim() || hasFilters || !!info.query_translation?.trim() || !!info.search_url;
 }
 
 /** "Open in PubMed", "Open on ClinicalTrials.gov": the link that runs a search on the source's site. */
@@ -393,6 +397,60 @@ export interface TableView {
     record: TableRecord;
 }
 
+/** An OpenAlex author found for a name. The backend omits empty fields. */
+export interface OpenAlexAuthorCandidate {
+    /** OpenAlex author id ("A5012345678"), the value of the search tools' `author_ids`. */
+    id: string;
+    name: string;
+    alternative_names?: string[];
+    /** Last known institutions. */
+    institutions?: string[];
+    /** "2012–2024", or one year. */
+    active_years?: string | null;
+    works_count?: number | null;
+    cited_by_count?: number | null;
+    h_index?: number | null;
+    topics?: string[];
+    orcid?: string | null;
+}
+
+/** An OpenAlex venue (journal, conference, repository, book series) found for a name. */
+export interface OpenAlexVenueCandidate {
+    /** OpenAlex source id ("S137773608"), the value of the search tools' `venue_ids`. */
+    id: string;
+    name: string;
+    abbreviation?: string | null;
+    type?: string | null;
+    publisher?: string | null;
+    issn_l?: string | null;
+    works_count?: number | null;
+}
+
+/** The candidates found for one name; an empty list means not found. */
+export interface OpenAlexNameResult {
+    query: string;
+    candidates: Array<OpenAlexAuthorCandidate | OpenAlexVenueCandidate>;
+    /** Set when the lookup for this name failed. */
+    error?: string | null;
+}
+
+/**
+ * The name in an OpenAlex search's resolved `authors` / `venues` filter:
+ * "Katrin Wisniewski (A5012345678)" → "Katrin Wisniewski". An id the backend
+ * could not name stays as it is.
+ */
+export function openAlexFilterName(value: unknown): string | null {
+    if (typeof value !== "string" || !value.trim()) return null;
+    return value.replace(/\s*\([AS]\d+\)$/i, "").trim();
+}
+
+/** openalex_resolve_names: the author or venue candidates for each name, in input order. */
+export interface OpenAlexNamesView {
+    view_type: "openalex_names";
+    kind: "author" | "venue";
+    results: OpenAlexNameResult[];
+}
+
 export type ToolResultView =
     | DuplicatesResultView
     | TableView
@@ -403,7 +461,8 @@ export type ToolResultView =
     | TagListView
     | AttachmentSearchView
     | UserQuestionView
-    | BatchJobView;
+    | BatchJobView
+    | OpenAlexNamesView;
 
 // ---------------------------------------------------------------------------
 // Type guards
@@ -421,6 +480,9 @@ export function isToolResultView(value: unknown): value is ToolResultView {
             && typeof record.reference.title === 'string'
             && typeof record.change === 'string'
             && !!record.summary && typeof record.summary === 'object';
+    }
+    if (viewType === 'openalex_names') {
+        return Array.isArray((value as OpenAlexNamesView).results);
     }
     return (
         viewType === "duplicates" ||
@@ -501,6 +563,9 @@ export function getToolResultRenderableCount(view: ToolResultView): number | nul
             return view.found_count ?? view.references.length;
         case "user_question":
             return view.answers.length;
+        case "openalex_names":
+            // A name without candidates still shows its "not found" line.
+            return view.results.length;
         case "batch_operation":
             // A batch card always has something to show (goal + population),
             // so it must not be gated on a count.

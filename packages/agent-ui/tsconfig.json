@@ -113,6 +113,7 @@
     "./src/icons/FileLinkIcon.tsx",
     "./src/icons/FileViewIcon.tsx",
     "./src/icons/FilterIcon.tsx",
+    "./src/icons/FilterLinesIcon.tsx",
     "./src/icons/FolderAddIcon.tsx",
     "./src/icons/FolderDetailIcon.tsx",
     "./src/icons/FlowConnectionIcon.tsx",

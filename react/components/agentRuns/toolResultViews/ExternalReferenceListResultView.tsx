@@ -3,9 +3,13 @@ import {
     ExternalReferenceListView,
     RelatedWorksViewInfo,
     SearchViewInfo,
+    openAlexFilterName,
     relatedWorksViewInfo,
+    searchSiteLabel,
     searchViewInfo,
 } from '@beaver/agent-core/run-state/toolResultViews';
+import { ArrowUpRightIcon } from '@beaver/agent-ui/icons';
+import { RecordFacts, RecordLink } from '../../externalReferences/ExternalRecordParts';
 import {
     ExternalReference,
     authorLastNames,
@@ -79,7 +83,7 @@ const SORT_LABELS: Record<string, string> = {
 };
 
 function humanize(value: string): string {
-    const spaced = value.replace(/_/g, ' ').trim();
+    const spaced = value.replace(/[_-]/g, ' ').trim();
     return spaced ? spaced.charAt(0).toUpperCase() + spaced.slice(1) : spaced;
 }
 
@@ -97,99 +101,120 @@ function yearRange(min: unknown, max: unknown): string | null {
     return from ? `${from} or later` : `${to} or earlier`;
 }
 
+/** A search fact: a label and its value, e.g. ["Published", "2010–2020"]. */
+type SearchFact = [string, string];
+
 /**
- * The filters a search ran with, as short labels. The query itself is shown
- * separately; keys this client does not know render as "key: value".
+ * The filters and order a search ran with, as labelled facts. The query is
+ * shown separately; keys this client does not know show as "Key: value".
  */
-export function searchFilterLabels(filters: Record<string, unknown> | null | undefined): string[] {
+export function searchFilterFacts(filters: Record<string, unknown> | null | undefined): SearchFact[] {
     if (!filters) return [];
-    const labels: string[] = [];
+    const facts: SearchFact[] = [];
     const handled = new Set(['query']);
-    for (const [key, label] of Object.entries(FILTER_LABELS)) {
-        const value = filters[key];
-        handled.add(key);
-        if (typeof value === 'string' && value.trim()) labels.push(`${label}: ${value.trim()}`);
-    }
-    const listOf = (key: string, format: (value: string) => string) => {
-        handled.add(key);
-        const value = filters[key];
-        if (Array.isArray(value) && value.length) labels.push(value.map((entry) => format(String(entry))).join(', '));
+    const add = (label: string, value: string | null | undefined) => {
+        if (value && value.trim()) facts.push([label, value.trim()]);
     };
-    listOf('status', humanize);
-    listOf('phase', phaseLabel);
+    const list = (key: string, format: (value: string) => string = humanize): string | null => {
+        handled.add(key);
+        const value = filters[key];
+        return Array.isArray(value) && value.length ? value.map((entry) => format(String(entry))).join(', ') : null;
+    };
+    for (const [key, label] of Object.entries(FILTER_LABELS)) {
+        handled.add(key);
+        add(label, typeof filters[key] === 'string' ? filters[key] as string : null);
+    }
+    // OpenAlex names the author and venue ids: "Katrin Wisniewski (A5012345678)".
+    const entityName = (value: string) => openAlexFilterName(value) ?? value;
+    const authors = list('authors', entityName);
+    add(Array.isArray(filters.authors) && filters.authors.length > 1 ? 'Authors' : 'Author', authors);
+    const venues = list('venues', entityName);
+    add(Array.isArray(filters.venues) && filters.venues.length > 1 ? 'Journals' : 'Journal', venues);
+    add('Type', list('work_types'));
+    handled.add('language');
+    add('Language', typeof filters.language === 'string' ? filters.language.toUpperCase() : null);
+    handled.add('open_access_only');
+    add('Access', filters.open_access_only === true ? 'Open access only' : null);
+    add('Status', list('status'));
+    add('Phase', list('phase', phaseLabel));
+    add('Ages', list('age_group'));
     handled.add('study_type');
-    if (typeof filters.study_type === 'string') labels.push(humanize(filters.study_type));
-    handled.add('has_results');
-    if (filters.has_results === true) labels.push('With results');
-    if (filters.has_results === false) labels.push('Without results');
-    for (const [minKey, maxKey, prefix] of [
+    add('Study type', typeof filters.study_type === 'string' ? humanize(filters.study_type) : null);
+    for (const [key, label, noun] of [
+        ['has_results', 'Results', 'posted results'],
+        ['has_publications', 'Publications', 'publications'],
+    ] as const) {
+        handled.add(key);
+        if (typeof filters[key] === 'boolean') add(label, `${filters[key] ? 'With' : 'Without'} ${noun}`);
+    }
+    for (const [minKey, maxKey, label] of [
         ['start_year_min', 'start_year_max', 'Started'],
+        ['min_start_year', 'max_start_year', 'Started'],
         ['min_year', 'max_year', 'Published'],
     ] as const) {
         handled.add(minKey);
         handled.add(maxKey);
-        const range = yearRange(filters[minKey], filters[maxKey]);
-        if (range) labels.push(`${prefix} ${range}`);
+        add(label, yearRange(filters[minKey], filters[maxKey]));
     }
+    // The order of the rows: the backend's description ("Most cited first"),
+    // or an older search's sort key.
+    handled.add('ranking');
     handled.add('sort');
-    if (typeof filters.sort === 'string' && filters.sort !== 'relevance') {
-        labels.push(SORT_LABELS[filters.sort] ?? humanize(filters.sort));
-    }
+    const ranking = typeof filters.ranking === 'string' ? filters.ranking.trim() : null;
+    const sort = typeof filters.sort === 'string' && filters.sort !== 'relevance'
+        ? SORT_LABELS[filters.sort] ?? humanize(filters.sort)
+        : null;
+    add('Order', ranking || sort);
     for (const [key, value] of Object.entries(filters)) {
         if (handled.has(key) || value === null || value === undefined || value === '') continue;
-        labels.push(`${humanize(key)}: ${Array.isArray(value) ? value.join(', ') : String(value)}`);
+        add(humanize(key), Array.isArray(value) ? value.join(', ') : String(value));
     }
-    return labels;
+    return facts;
 }
 
 /**
- * The search a source search ran (pubmed_search, search_trials): the query as
- * sent, its filters, and for PubMed the query as PubMed ran it, which can be
- * copied. Opened from the card header's search-details button, it sits on the
+ * The search a source search ran (OpenAlex, PubMed, trials): the query as
+ * sent, its filters, for PubMed the query PubMed actually searched, which can be
+ * copied, and a link that runs the same search on the source's site. Opened from the card header's search-details button, it sits on the
  * header's band so it reads as part of the header. Fields without content are
  * left out.
  */
 const SearchDetailsPanel: React.FC<{ info: SearchViewInfo; id: string }> = ({ info, id }) => {
-    const filters = searchFilterLabels(info.filters);
     const query = typeof info.query === 'string' ? info.query.trim() : '';
     const translation = info.query_translation?.trim();
     const sourceName = info.source_label || info.source;
     const showTranslation = !!translation && translation !== query;
+    const facts: SearchFact[] = query ? [['Query', query], ...searchFilterFacts(info.filters)] : searchFilterFacts(info.filters);
 
     return (
         <div
             id={id}
             role="region"
             aria-label="Search details"
-            className="bg-senary border-bottom-quinary px-3 pt-1 pb-25 display-flex flex-col gap-2"
+            className="bg-senary border-bottom-quinary px-3 pt-2 pb-25 display-flex flex-col gap-2 select-text"
         >
-            {query && (
-                <div className="display-flex flex-col gap-05">
-                    <div className="text-xs font-color-secondary">Query</div>
-                    <div className="text-sm font-color-primary select-text">{query}</div>
-                </div>
-            )}
-            {filters.length > 0 && (
-                <div className="display-flex flex-col gap-05">
-                    <div className="text-xs font-color-secondary">Filters</div>
-                    <div className="display-flex flex-row flex-wrap gap-1">
-                        {filters.map((filter) => <span key={filter} className="ext-chip">{filter}</span>)}
-                    </div>
-                </div>
-            )}
+            <RecordFacts facts={facts} />
             {showTranslation && (
                 <div className="display-flex flex-col gap-05">
                     <div className="display-flex flex-row items-center">
-                        <span className="text-xs font-color-secondary">{`As ${sourceName} ran it`}</span>
+                        <span className="text-sm font-color-secondary">{`${sourceName} query`}</span>
                         <div className="flex-1" />
                         <CopyButton
                             content={translation!}
                             className="scale-90"
                             title="Copy query"
-                            ariaLabel={`Copy the query as ${sourceName} ran it`}
+                            ariaLabel={`Copy the ${sourceName} query`}
                         />
                     </div>
                     <div className="ext-query-translation select-text" tabIndex={0}>{translation}</div>
+                </div>
+            )}
+            {info.search_url && (
+                <div className="text-sm mt-1">
+                    <RecordLink url={info.search_url} className="inline-flex items-center gap-05">
+                        {searchSiteLabel(info)}
+                        <ArrowUpRightIcon width={12} height={12} color="currentColor" />
+                    </RecordLink>
                 </div>
             )}
         </div>
