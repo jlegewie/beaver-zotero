@@ -5,6 +5,7 @@ import {
     handleTestBeaverSidebarHttpRequest,
     handleTestBeaverWindowHttpRequest,
     handleTestSelectTabHttpRequest,
+    handleTestSidebarPaneWidthHttpRequest,
 } from './httpHandlers/testApplicationStateHandlers';
 import {
     handleBatchProgressClear,
@@ -108,6 +109,7 @@ export function registerWindowTestCommands(
         '/beaver/test/open-stored-table': handleTestOpenStoredTableHttpRequest,
         '/beaver/test/beaver-sidebar': handleTestBeaverSidebarHttpRequest,
         '/beaver/test/select-tab': handleTestSelectTabHttpRequest,
+        '/beaver/test/sidebar-pane-width': handleTestSidebarPaneWidthHttpRequest,
         '/beaver/test/run-status-popup': handleTestRunStatusPopupHttpRequest,
         '/beaver/test/feature-tip': handleTestFeatureTipHttpRequest,
         '/beaver/test/quick-prompt': handleTestQuickPromptHttpRequest,

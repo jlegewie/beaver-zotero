@@ -908,6 +908,72 @@ describe('retry via synchronous truncation', () => {
         expect(threadRunIds()).toEqual(['a']);
     });
 
+    describe('table changes', () => {
+        /** A run whose create_table call returned a table record. */
+        function makeTableRun(id: string): AgentRun {
+            return makeRun(id, {
+                model_messages: [
+                    {
+                        kind: 'response',
+                        parts: [{ part_kind: 'tool-call', tool_name: 'create_table', tool_call_id: 'tc-1', args: {} }],
+                    },
+                    {
+                        kind: 'request',
+                        parts: [{
+                            part_kind: 'tool-return',
+                            tool_name: 'create_table',
+                            tool_call_id: 'tc-1',
+                            content: { ok: true },
+                            metadata: {
+                                view: {
+                                    view_type: 'table',
+                                    record: { reference: { kind: 'table', key: 'TABLE001', title: 'Effect sizes' } },
+                                },
+                            },
+                        }],
+                    },
+                ],
+            } as any);
+        }
+
+        const TABLES_NOTE = 'Changes to tables are kept. To go back, use Version history in the table.';
+
+        it('notes that tables are kept when the dialog lists other changes', async () => {
+            store.set(threadRunsAtom, [makeRun('a'), makeTableRun('b')]);
+            store.set(threadAgentActionsAtom, [makeAppliedMetadataEdit('edit-1', 'b')]);
+            truncateMock.mockImplementation(async (_thread, ids) => okReport(ids));
+
+            await store.set(regenerateFromRunAtom, { runId: 'b' });
+
+            expect(promptConfirmMock).toHaveBeenCalledOnce();
+            const text: string = promptConfirmMock.mock.calls[0][0].text;
+            expect(text).toContain('1 metadata edit');
+            expect(text).toContain(TABLES_NOTE);
+        });
+
+        it('leaves the note out when no removed run wrote a table', async () => {
+            // The kept run wrote a table; only the removed runs count.
+            store.set(threadRunsAtom, [makeTableRun('a'), makeRun('b')]);
+            store.set(threadAgentActionsAtom, [makeAppliedMetadataEdit('edit-1', 'b')]);
+            truncateMock.mockImplementation(async (_thread, ids) => okReport(ids));
+
+            await store.set(regenerateFromRunAtom, { runId: 'b' });
+
+            expect(promptConfirmMock.mock.calls[0][0].text).not.toContain('tables');
+        });
+
+        it('retries without a dialog when the only changes are to tables', async () => {
+            store.set(threadRunsAtom, [makeRun('a'), makeTableRun('b')]);
+            truncateMock.mockImplementation(async (_thread, ids) => okReport(ids));
+
+            await store.set(regenerateFromRunAtom, { runId: 'b' });
+
+            expect(promptConfirmMock).not.toHaveBeenCalled();
+            expect(connectMock).toHaveBeenCalled();
+            expect(threadRunIds()).toEqual(['a']);
+        });
+    });
+
     it('undoes a merge in reverse order with the other applied actions', async () => {
         store.set(threadRunsAtom, [makeRun('a'), makeRun('b')]);
         const edit = { ...makeAppliedMetadataEdit('edit-1', 'b'), created_at: '2026-10-02T10:00:01Z' };

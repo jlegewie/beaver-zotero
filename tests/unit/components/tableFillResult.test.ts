@@ -13,7 +13,7 @@ import type { TableFillJobSnapshot, TableFillResult } from '@beaver/agent-core/p
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
-vi.mock('../../../react/runtime/windowRuntime', () => ({ getWindowRuntime: () => ({}) }));
+vi.mock('../../../react/runtime/windowRuntime', () => ({ getWindowRuntime: () => ({}), getHostWindow: () => window }));
 vi.mock('../../../react/components/tables/card/liveSources', () => ({ describeItems: vi.fn() }));
 
 import { setHost } from '@beaver/agent-ui/host';

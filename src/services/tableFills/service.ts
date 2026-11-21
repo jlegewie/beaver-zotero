@@ -871,7 +871,10 @@ class FillJob {
         this.publish();
         // A chat run's tool call keeps the result, whether or not a request still waits on it.
         this.owner.agent.noteEnded(this.snapshot);
-        if (this.charged > 0 && !this.abandoned) this.deps.account.refreshProfile();
+        // A refusal for credits refreshes too: a balance the cache still
+        // shows as enough would offer the same refused fill again.
+        if ((this.charged > 0 || this.stopReason === 'insufficient_credits') && !this.abandoned)
+            this.deps.account.refreshProfile();
     }
 
     private async renderSnapshot(): Promise<void> {

@@ -1,4 +1,5 @@
 import React, { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
+import type { TableCardColumn } from '@beaver/agent-core/protocol/tableCardProtocol';
 import type { DraftColumn } from '@beaver/agent-core/run-state/tableCardDraft';
 import { columnProblem } from '@beaver/agent-core/run-state/tableCardDraft';
 import Button from '@beaver/agent-ui/primitives/Button';
@@ -43,6 +44,43 @@ function fieldAt(target: EventTarget | null, column: DraftColumn): ColumnField {
     if (el?.closest('.table-card-options') && column.type === 'select') return 'options';
     return 'header';
 }
+
+/**
+ * A column at rest: its header and type tag, the question clamped to two
+ * lines, and a category's first options as chips. The create card wraps it in
+ * a button that opens the editor. The read-only fill card has no editor to
+ * reveal the rest, so it passes `full`: the whole question and every option.
+ */
+export const ColumnSummary: React.FC<{ column: Readonly<TableCardColumn>; incomplete?: boolean; full?: boolean }> = ({
+    column,
+    incomplete = false,
+    full = false,
+}) => {
+    const header = column.header.trim();
+    const question = (column.description ?? '').trim();
+    const options = (column.options ?? [])
+        .map((option) => ({ label: option.label.trim(), description: (option.description ?? '').trim() }))
+        .filter((option) => option.label);
+    return (
+        <>
+            <div className="display-flex flex-row items-center gap-2 min-w-0">
+                <span className={`flex-1 min-w-0 truncate font-medium ${header ? 'font-color-primary' : 'font-color-secondary'}`}>
+                    {header || 'Untitled column'}
+                </span>
+                {incomplete && <span className="table-card-badge-warning flex-none">Incomplete</span>}
+                <span className="flex-none">
+                    <ColumnTypeTag type={column.type} />
+                </span>
+            </div>
+            <div
+                className={`table-card-column-question text-sm font-color-secondary ${full ? 'table-card-column-question-full' : ''} ${question ? '' : 'table-card-empty'}`}
+            >
+                {question || 'No question yet'}
+            </div>
+            {column.type === 'select' && options.length > 0 && <ColumnOptionChips options={options} all={full} />}
+        </>
+    );
+};
 
 /**
  * One question column. At rest it reads as a summary (header, type, the
@@ -113,9 +151,6 @@ const ColumnCard: React.FC<ColumnCardProps> = ({
     }, [editing, onClose]);
 
     if (!editing) {
-        const options = column.options
-            .map((option) => ({ label: option.label.trim(), description: option.description.trim() }))
-            .filter((option) => option.label);
         return (
             <div
                 ref={cardRef}
@@ -134,23 +169,7 @@ const ColumnCard: React.FC<ColumnCardProps> = ({
                     }
                 }}
             >
-                <div className="display-flex flex-row items-center gap-2 min-w-0">
-                    <span
-                        className={`flex-1 min-w-0 truncate font-medium ${column.header.trim() ? 'font-color-primary' : 'font-color-secondary'}`}
-                    >
-                        {column.header.trim() || 'Untitled column'}
-                    </span>
-                    {problem && <span className="table-card-badge-warning flex-none">Incomplete</span>}
-                    <span className="flex-none">
-                        <ColumnTypeTag type={column.type} />
-                    </span>
-                </div>
-                <div
-                    className={`table-card-column-question text-sm ${column.description.trim() ? 'font-color-secondary' : 'font-color-secondary table-card-empty'}`}
-                >
-                    {column.description.trim() || 'No question yet'}
-                </div>
-                {column.type === 'select' && options.length > 0 && <ColumnOptionChips options={options} />}
+                <ColumnSummary column={column} incomplete={!!problem} />
             </div>
         );
     }

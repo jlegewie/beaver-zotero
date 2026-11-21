@@ -214,7 +214,7 @@ import {
 } from './parkedRuns';
 import { isCreateCard, isFillCard } from '@beaver/agent-core/protocol/tableCardProtocol';
 import type { WSTableCardRequest, WSTableCardResponse, WSTableCardStale } from '@beaver/agent-core/protocol/tableCardProtocol';
-import { tableRecordFromMetadata } from '@beaver/agent-core/run-state/tableResults';
+import { collectTableArtifacts, tableRecordFromMetadata } from '@beaver/agent-core/run-state/tableResults';
 import { openCreatedTable } from '../host/zotero/tables';
 import { readCreditThreshold } from '../utils/creditThreshold';
 import { flushPendingPartEvents, queuePartEvent } from '../utils/streamingPartQueue';
@@ -1131,8 +1131,12 @@ type UndoConfirmResult = 'undo' | 'skip' | 'cancel';
  * Shows a combined dialog listing all types of changes that will be undone.
  * Returns 'undo' to undo and regenerate, 'skip' to regenerate without undoing,
  * or 'cancel' to abort regeneration entirely.
+ *
+ * Table changes are never undone here: a fill's answers cost credits, and each
+ * table keeps its own version history. `tablesChanged` only adds a note saying
+ * so, since the dialog otherwise reads as undoing everything the response did.
  */
-function confirmUndoAppliedActions(actions: ActionsToUndo, win: Window): UndoConfirmResult {
+function confirmUndoAppliedActions(actions: ActionsToUndo, tablesChanged: boolean, win: Window): UndoConfirmResult {
     const { annotations, annotationEdits, metadataEdits, noteEdits, createItems, createCollections, organizeItems, manageTags, manageCollections, createNotes, mergeItems } = actions;
     const totalActions = annotations.length + annotationEdits.length + metadataEdits.length +
                          noteEdits.length + createItems.length + createCollections.length + organizeItems.length +
@@ -1191,7 +1195,10 @@ function confirmUndoAppliedActions(actions: ActionsToUndo, win: Window): UndoCon
     }
 
     const title = 'Retry?';
-    const message = `The following changes were applied and can be undone:\n\n${changeLines.join('\n')}\n\nUndo them and retry, or retry without undoing?`;
+    const tablesNote = tablesChanged
+        ? '\n\nChanges to tables are kept. To go back, use Version history in the table.'
+        : '';
+    const message = `The following changes were applied and can be undone:\n\n${changeLines.join('\n')}${tablesNote}\n\nUndo them and retry, or retry without undoing?`;
 
     const buttonIndex = Zotero.Prompt.confirm({
         window: win,
@@ -3638,7 +3645,7 @@ async function startRegenerateRunOwned(
                 manageCollections: manageCollectionsToUndo,
                 createNotes: createNotesToUndo,
                 mergeItems: mergeItemsToUndo,
-            }, options.window ?? getHostWindow());
+            }, collectTableArtifacts(removedRuns).length > 0, options.window ?? getHostWindow());
             if (confirmResult === 'cancel') {
                 return;
             }

@@ -7,7 +7,7 @@ import type { ExternalReference } from '@beaver/agent-core/types/externalReferen
 import { setHost } from '@beaver/agent-ui/host';
 import {
     ExternalReferenceListResultView,
-    searchFilterLabels,
+    searchFilterFacts,
 } from '../../../react/components/agentRuns/toolResultViews/ExternalReferenceListResultView';
 
 vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
@@ -224,19 +224,19 @@ describe('search details panel', () => {
         },
     };
 
-    it('shows the query, filters and the query as PubMed ran it, with a copy button', () => {
+    it('shows the query, filters and the PubMed query, with a copy button', () => {
         const html = render(view, true);
         expect(html).toContain('id="search-details-call"');
         expect(html).toContain('>Query<');
         expect(html).toContain('semaglutide obesity');
-        expect(html).toContain('Published 2020–2024');
-        expect(html).toContain('As PubMed ran it');
-        expect(html).toContain('aria-label="Copy the query as PubMed ran it"');
+        expect(html).toContain('<span class="ext-fact-label">Published</span><span class="ext-fact-value">2020–2024</span>');
+        expect(html).toContain('>PubMed query<');
+        expect(html).toContain('aria-label="Copy the PubMed query"');
     });
 
     it('opens on an empty search too', () => {
         const html = render({ ...view, references: [] }, true);
-        expect(html).toContain('As PubMed ran it');
+        expect(html).toContain('>PubMed query<');
         expect(html).toContain('No results in PubMed');
     });
 });
@@ -253,11 +253,96 @@ describe('trial details', () => {
     });
 });
 
-describe('searchFilterLabels', () => {
-    it('labels known filters and shows unknown ones as key and value', () => {
-        expect(searchFilterLabels({
+describe('searchFilterFacts', () => {
+    it('labels known filters, states the order, and shows unknown ones as key and value', () => {
+        expect(searchFilterFacts({
             query: 'x', status: ['recruiting', 'not_yet_recruiting'], has_results: true,
             start_year_min: 2018, sort: 'newest', future_flag: 'on',
-        })).toEqual(['Recruiting, Not yet recruiting', 'With results', 'Started 2018 or later', 'Newest first', 'Future flag: on']);
+        })).toEqual([
+            ['Status', 'Recruiting, Not yet recruiting'],
+            ['Results', 'With posted results'],
+            ['Started', '2018 or later'],
+            ['Order', 'Newest first'],
+            ['Future flag', 'on'],
+        ]);
+    });
+
+    it('names the authors and journals of an OpenAlex search without their ids', () => {
+        expect(searchFilterFacts({
+            authors: ['Katrin Wisniewski (A5012345678)', 'A5099999999'],
+            venues: ['Nature (S137773608)'],
+            work_types: ['book-chapter', 'review'],
+            language: 'de',
+            open_access_only: true,
+            min_year: 2020,
+            max_year: 2024,
+            ranking: 'Most cited first',
+        })).toEqual([
+            ['Authors', 'Katrin Wisniewski, A5099999999'],
+            ['Journal', 'Nature'],
+            ['Type', 'Book chapter, Review'],
+            ['Language', 'DE'],
+            ['Access', 'Open access only'],
+            ['Published', '2020–2024'],
+            ['Order', 'Most cited first'],
+        ]);
+    });
+
+    it('labels the trial filters trials_search sends', () => {
+        expect(searchFilterFacts({
+            condition: 'obesity', age_group: ['older_adult'], has_publications: false,
+            min_start_year: 2015, max_start_year: 2020, ranking: 'Last updated first',
+        })).toEqual([
+            ['Condition', 'obesity'],
+            ['Ages', 'Older adult'],
+            ['Publications', 'Without publications'],
+            ['Started', '2015–2020'],
+            ['Order', 'Last updated first'],
+        ]);
+    });
+});
+
+describe('OpenAlex search results', () => {
+    const work: ExternalReference = {
+        source: 'openalex',
+        source_id: 'W2741809807',
+        title: 'Attention is all you need',
+        authors: ['Ashish Vaswani', 'Noam Shazeer', 'Niki Parmar', 'Jakob Uszkoreit'],
+        year: 2017,
+        venue: 'NeurIPS',
+        abstract: 'The dominant sequence transduction models are based on complex recurrent networks.',
+        identifiers: { doi: '10.48550/arxiv.1706.03762' },
+        library_items: [{ library_id: 1, zotero_key: 'ABCD1234', library_ref: 'u', item_id: 'u-ABCD1234' } as any],
+    };
+    const view = (references: ExternalReference[], total: number | null): ExternalReferenceListView => ({
+        view_type: 'external_reference_list',
+        tool_name: 'openalex_search_by_topic',
+        references,
+        tool_info: {
+            info_type: 'search', source: 'openalex', source_label: 'OpenAlex', query: 'transformers',
+            filters: { ranking: 'Reranked semantic top 50' }, total_count: total, returned: references.length,
+            search_url: 'https://openalex.org/works?search.semantic=transformers',
+        },
+    });
+
+    it('renders full records: "et al." for more than three authors, and the library item to the host actions', () => {
+        const html = render(view([work], null));
+        expect(html).toContain('Attention is all you need');
+        expect(html).toContain('Ashish Vaswani et al.');
+        expect(actionProps[0].item.library_items[0].zotero_key).toBe('ABCD1234');
+        // Inside an OpenAlex view the title and Web button open the DOI.
+        expect(actionProps[0].webUrl).toBe('https://doi.org/10.48550/arxiv.1706.03762');
+    });
+
+    it('names OpenAlex in an empty result and shows the ranking in the search details', () => {
+        const html = render(view([], null), true);
+        expect(html).toContain('No results in OpenAlex');
+        expect(html).toMatch(/<span class="ext-fact-label">Order<\/span><span class="ext-fact-value">Reranked semantic top 50<\/span>/);
+        expect(html).toMatch(/<span class="ext-fact-label">Query<\/span><span class="ext-fact-value">transformers<\/span>/);
+    });
+
+    it('links the same search on the source site from the search details', () => {
+        expect(render(view([work], null), true)).toMatch(/<a class="text-link-muted inline-flex items-center gap-05" role="link" tabindex="0">Open on OpenAlex<svg/);
+        expect(render(view([work], null), false)).not.toContain('Open on OpenAlex');
     });
 });

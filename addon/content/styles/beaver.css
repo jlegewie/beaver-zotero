@@ -4973,6 +4973,18 @@
     font-weight: 600;
 }
 
+/* In a short window the fill warnings close the scrolling content instead,
+ * flush with the card's edges and the footer below them. */
+[id^="beaver-pane-"] .table-card-body-bands {
+    display: flex;
+    flex-direction: column;
+    margin: 0 -0.8rem -0.75rem;
+}
+
+[id^="beaver-pane-"] .table-card-body-bands > .table-card-footer-band:last-child {
+    border-bottom: 0;
+}
+
 /* The decision and its price, side by side: unticking visibly changes it. */
 [id^="beaver-pane-"] .table-card-decision {
     display: flex;
@@ -4983,6 +4995,16 @@
     padding: 0.55rem 0.8rem 0.5rem;
     border-bottom: 1px solid var(--fill-quinary);
     font-size: 0.925rem;
+}
+
+/* The fill card has no run checkbox: what Fill table covers takes its place. */
+[id^="beaver-pane-"] .table-card-decision-label {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--fill-primary);
 }
 
 /* A held answer keeps the decision in view, quiet. */
@@ -5110,7 +5132,7 @@
     color: var(--fill-secondary);
 }
 
-/* Ways out on the left, the one way forward on the right. */
+/* Cancel on the left; Back, when there is one, beside the way forward on the right. */
 [id^="beaver-pane-"] .table-card-controls {
     display: flex;
     flex-direction: row;
@@ -5415,11 +5437,6 @@
     white-space: nowrap;
 }
 
-/* The fill card's cost under its columns: what the run would fill and how. */
-[id^="beaver-pane-"] .table-card-cost {
-    padding-top: 0.15rem;
-}
-
 [id^="beaver-pane-"] .table-card-head-action:disabled {
     cursor: default;
     opacity: 0.6;
@@ -5470,6 +5487,12 @@
     min-width: 0;
     padding-top: 0.75rem;
     border-top: 1px solid var(--fill-quinary);
+}
+
+/* A fill card without a description opens on its step: no rule under the title. */
+[id^="beaver-pane-"] .table-card-body > .table-card-step:first-child {
+    padding-top: 0.2rem;
+    border-top: 0;
 }
 
 [id^="beaver-pane-"] .table-card-step-head {
@@ -5774,6 +5797,25 @@
     overflow-wrap: anywhere;
 }
 
+/* The fill card's summaries are read only: nothing is clamped. */
+[id^="beaver-pane-"] .table-card-column-question-full {
+    display: block;
+    -webkit-line-clamp: none;
+    line-clamp: none;
+}
+
+[id^="beaver-pane-"] .table-card-options-all {
+    flex-wrap: wrap;
+    row-gap: 4px;
+}
+
+[id^="beaver-pane-"] .table-card-options-all .table-card-option {
+    box-sizing: border-box;
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
 [id^="beaver-pane-"] .table-card-empty {
     font-style: italic;
 }
@@ -5809,8 +5851,11 @@
     overflow: hidden;
 }
 
+/* Preview chips shrink, with an ellipsis, so the "+N" after them stays in
+ * the row; each chip's tooltip holds its full label. */
 [id^="beaver-pane-"] .table-card-option {
-    flex: none;
+    flex: 0 1 auto;
+    min-width: 0;
     max-width: 10rem;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -6476,6 +6521,7 @@
 .beaver-root .ext-facts > .ext-fact-value {
     color: var(--fill-primary);
     min-width: 0;
+    overflow-wrap: anywhere;
 }
 .beaver-root .ext-chip {
     display: inline-block;
@@ -6485,7 +6531,9 @@
     border-radius: 10px;
     color: var(--fill-primary);
     background-color: var(--beaver-fill-chip);
-    white-space: nowrap;
+    /* A long chip (several filter names) wraps inside the card instead of overflowing it. */
+    max-width: 100%;
+    overflow-wrap: break-word;
 }
 .beaver-root .ext-chip[data-muted] {
     color: var(--fill-secondary);

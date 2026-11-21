@@ -3159,8 +3159,9 @@ export const CLIENT_FEATURES = {
      * and `tool_info.info_type === 'search'`, combines per-source snapshots of
      * one id, prepares unresolved imports through the import-proposals
      * endpoint, applies the fill-only rules when resolving, and attaches a
-     * proposal's `attachments` in order. Gates the `pubmed_search` and
-     * `clinical_trials` capabilities.
+     * proposal's `attachments` in order, and renders the OpenAlex tools and
+     * their `openalex_names` view. Gates the `openalex`, `pubmed_search` and
+     * `clinical_trials` capabilities; `openalex` replaces `external_sources`.
      */
     EXTERNAL_RECORDS: 'external_records',
     /**
