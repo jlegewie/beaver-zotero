@@ -108,7 +108,7 @@ export const FEATURE_CREDIT_TASKS: FeatureTaskDefinition[] = [
     {
         key: 'annotate',
         title: 'Annotate a PDF',
-        subtitle: 'Add highlights and comments directly to your PDFs.',
+        subtitle: 'Add highlights and comments directly to your PDFs',
         actionId: 'builtin-annotate',
         attach: 'pdf',
         prompt: {
