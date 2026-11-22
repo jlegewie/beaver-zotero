@@ -3,11 +3,11 @@
  */
 import React from "react";
 import {
-    anchorColumn,
     isColumnFilterable,
     isColumnSortable,
     selectLabelsInColumn,
     selectOption,
+    type Column,
     type Filter,
     type TableSpec,
 } from "@beaver/agent-core/layouts/table";
@@ -73,88 +73,63 @@ function describeFilter(filter: Filter): string {
 }
 
 /**
- * The filter menu is built from the spec, not configured per surface: a select
- * column offers its categories, a boolean column offers yes/no.
+ * A column's filter choices, ticked while active: a select column's
+ * categories, a boolean column's Yes / No. Empty for any other column, and for
+ * a select column with no categories yet. The toolbar's filter menu and the
+ * column's own menu both list them.
+ */
+export function columnFilterItems(
+    table: TableSpec,
+    column: Column,
+    state: TableState,
+): MenuItem[] {
+    if (!isColumnFilterable(column)) return [];
+    const filter = state.filters.find((f) => f.column_id === column.id);
+
+    if (column.type === "select") {
+        const labels = column.options?.length
+            ? column.options.map((o) => o.label)
+            : selectLabelsInColumn(table, column.id);
+        return labels.map((label) =>
+            checkItem(
+                label,
+                filter?.kind === "in" && filter.labels.includes(label),
+                () => state.toggleSelectFilter(column.id, label),
+                selectOption(column, label)?.description || undefined,
+            ),
+        );
+    }
+
+    if (column.type === "boolean")
+        return (
+            [
+                ["Yes", true],
+                ["No", false],
+            ] as const
+        ).map(([label, value]) =>
+            checkItem(
+                label,
+                filter?.kind === "equals" && filter.value === value,
+                () => state.toggleBooleanFilter(column.id, value),
+            ),
+        );
+
+    return [];
+}
+
+/**
+ * The toolbar's filter menu, built from the spec rather than configured per
+ * surface: one section per select or boolean column, with its choices.
  */
 export function buildFilterMenu(
     table: TableSpec,
     state: TableState,
 ): MenuItem[] {
     const items: MenuItem[] = [];
-    const anchorId = anchorColumn(table)?.id;
-
     for (const column of table.columns) {
-        if (!isColumnFilterable(column)) continue;
-
-        if (
-            column.id !== anchorId &&
-            column.type !== "select" &&
-            column.type !== "boolean" &&
-            !state.hiddenColumns.has(column.id)
-        ) {
-            items.push(sectionItem(column.header));
-            for (const [label, empty] of [
-                ["Has a value", false],
-                ["No value", true],
-            ] as const) {
-                const active = state.filters.some(
-                    (f) =>
-                        f.column_id === column.id &&
-                        f.kind === "empty" &&
-                        f.empty === empty,
-                );
-                items.push(
-                    checkItem(label, active, () =>
-                        state.toggleEmptyFilter(column.id, empty),
-                    ),
-                );
-            }
-            continue;
-        }
-
-        if (column.type === "select") {
-            const labels = column.options?.length
-                ? column.options.map((o) => o.label)
-                : selectLabelsInColumn(table, column.id);
-            if (labels.length === 0) continue;
-            items.push(sectionItem(column.header));
-            for (const label of labels) {
-                const active = state.filters.some(
-                    (f) =>
-                        f.column_id === column.id &&
-                        f.kind === "in" &&
-                        f.labels.includes(label),
-                );
-                items.push(
-                    checkItem(
-                        label,
-                        active,
-                        () => state.toggleSelectFilter(column.id, label),
-                        selectOption(column, label)?.description || undefined,
-                    ),
-                );
-            }
-        }
-
-        if (column.type === "boolean") {
-            items.push(sectionItem(column.header));
-            for (const [label, value] of [
-                ["Yes", true],
-                ["No", false],
-            ] as const) {
-                const active = state.filters.some(
-                    (f) =>
-                        f.column_id === column.id &&
-                        f.kind === "equals" &&
-                        f.value === value,
-                );
-                items.push(
-                    checkItem(label, active, () =>
-                        state.toggleBooleanFilter(column.id, value),
-                    ),
-                );
-            }
-        }
+        const choices = columnFilterItems(table, column, state);
+        if (choices.length === 0) continue;
+        items.push(sectionItem(column.header), ...choices);
     }
 
     if (items.length === 0) return [];

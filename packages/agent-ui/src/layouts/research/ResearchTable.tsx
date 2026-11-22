@@ -34,7 +34,7 @@ import MenuButton from "../../primitives/MenuButton";
 import ContextMenu, { type MenuItem, type MenuPosition } from "../../primitives/ContextMenu";
 import { HoverLayerProvider, selectionWithin } from "../../primitives/HoverLayer";
 import { FindQueryProvider } from "../../chat/findContext";
-import { buildFilterMenu, buildSortMenu, FilterChips } from "../tableMenus";
+import { buildFilterMenu, buildSortMenu, columnFilterItems, FilterChips } from "../tableMenus";
 import { renderPlainText, type TableDensity, type TextRenderer } from "../tableView";
 import { useTableState } from "../useTableState";
 import { CellEditor, editsAsList, type CellEditInput } from "./CellEditor";
@@ -520,9 +520,27 @@ export function ResearchTable({
         [state, columns.year],
     );
 
+    // A category or yes/no column's Filter submenu: its choices, then Clear
+    // filter while one is active.
+    const filterEntry = useCallback(
+        (column: Column): MenuItem[] => {
+            const choices = columnFilterItems(table, column, state);
+            if (choices.length === 0) return [];
+            const submenu = state.filters.some((filter) => filter.column_id === column.id)
+                ? [
+                      ...choices,
+                      { label: "", isDivider: true, onClick: () => {} },
+                      { label: "Clear filter", icon: CancelIcon, onClick: () => state.clearFilter(column.id) },
+                  ]
+                : choices;
+            return [{ label: "Filter", icon: FilterIcon, onClick: () => {}, submenu }];
+        },
+        [table, state],
+    );
+
     // A column's menu. The paper's and the year's offer only the sort; a
     // question's has its edits (when the host makes them), then the view's
-    // own Sort and Hide.
+    // own Sort, Filter and Hide.
     const columnMenu = useCallback(
         (column: Column): MenuItem[] => {
             if (column === columns.paper || column === columns.year) return sortEntries(column);
@@ -540,7 +558,7 @@ export function ResearchTable({
                 });
             }
             if (items.length) items.push({ label: "", isDivider: true, onClick: () => {} });
-            items.push(...sortEntries(column));
+            items.push(...sortEntries(column), ...filterEntry(column));
             items.push({ label: "Hide column", icon: ViewIcon, onClick: () => state.toggleColumn(column.id) });
             if (editing?.onChangeType) {
                 const current = COLUMN_TYPE_LABELS.find((entry) => entry.type === column.type);
@@ -573,7 +591,7 @@ export function ResearchTable({
             }
             return items;
         },
-        [editing, state, fill, fillable, columns, sortEntries],
+        [editing, state, fill, fillable, columns, sortEntries, filterEntry],
     );
     const hiddenQuestions = columns.questions.filter((column) => state.hiddenColumns.has(column.id));
 
