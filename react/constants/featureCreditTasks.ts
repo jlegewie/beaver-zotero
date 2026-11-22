@@ -34,22 +34,26 @@ export interface FeatureTaskExample {
     when?: (shape: LibraryShape) => boolean;
 }
 
-/** The setup card's "what should Beaver do" section. */
+/**
+ * The setup card's "what should Beaver do" step. It is optional: Send waits
+ * only while a picked example still holds `TOPIC_PLACEHOLDER`.
+ */
 export interface FeatureTaskPrompt {
     heading: string;
     /** Under the heading, above the examples. */
     hint: string;
-    /**
-     * Set when Send waits for an instruction: Send's tooltip meanwhile.
-     * Without it the action runs without one, and the step reads "(optional)".
-     */
-    requiredHint?: string;
     /**
      * Set on a task that works on an attached collection's papers: shown
      * instead of `hint` and the examples while one is attached. `{collection}`
      * stands for what is attached.
      */
     collectionHint?: string;
+    /**
+     * Set on a task that works on a research table's papers: shown instead of
+     * `hint` and the examples while a table is attached or open in its tab,
+     * and no collection is attached. `{table}` stands for the table.
+     */
+    tableHint?: string;
 }
 
 export interface FeatureTaskDefinition {
@@ -71,7 +75,11 @@ export interface FeatureTaskDefinition {
      * when the library is below the small-library threshold.
      */
     worksWithoutPapers?: boolean;
-    prompt: FeatureTaskPrompt;
+    /**
+     * The setup card's "what should Beaver do" step. Without it the action
+     * runs as is, and the card asks only for what it works on.
+     */
+    prompt?: FeatureTaskPrompt;
     examples: FeatureTaskExample[];
     /** Added after the reward line under the steps. */
     footnote?: string;
@@ -108,18 +116,10 @@ export const FEATURE_CREDIT_TASKS: FeatureTaskDefinition[] = [
     {
         key: 'annotate',
         title: 'Annotate a PDF',
-        subtitle: 'Add highlights and comments directly to your PDFs',
-        actionId: 'builtin-annotate',
+        subtitle: 'Color-coded highlights and comments in your PDF',
+        actionId: 'builtin-color-code',
         attach: 'pdf',
-        prompt: {
-            heading: 'What should Beaver highlight?',
-            hint: 'Type it in the prompt, or start from an example:',
-            requiredHint: 'Describe what to highlight',
-        },
-        examples: [
-            { text: 'Highlight key passages for a quick skim' },
-            { text: 'Color-code the methods, findings, and limitations' },
-        ],
+        examples: [],
         completion: {
             tip: 'Annotate the same way every time: create a reusable prompt with your colors and what to highlight.',
             customAction: {
@@ -148,7 +148,6 @@ export const FEATURE_CREDIT_TASKS: FeatureTaskDefinition[] = [
             hint: 'Type a topic or research question, or send as is and Beaver suggests topics from your library.',
         },
         examples: [],
-        footnote: 'Beaver asks before it adds anything to your library.',
         completion: {
             tip: 'The project has its own collection. Attach a collection with @ and Beaver works on its papers.',
             docsUrl: `${DOCS_BASE_URL}/library-management`,
@@ -186,6 +185,7 @@ export const FEATURE_CREDIT_TASKS: FeatureTaskDefinition[] = [
             heading: 'What should the review cover?',
             hint: 'Type a topic, and a purpose or length if you like, or send as is and Beaver suggests topics from your library. Examples:',
             collectionHint: 'Beaver reviews the papers in {collection}. Add a purpose or length if you like, or send as is.',
+            tableHint: 'Beaver reviews the papers in {table}. Add a purpose or length if you like, or send as is.',
         },
         examples: [
             { text: `Background on ${TOPIC_PLACEHOLDER} for a grant proposal` },
