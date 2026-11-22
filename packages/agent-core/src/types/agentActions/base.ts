@@ -303,6 +303,12 @@ export interface ManageTagsResultData {
      * which keep it on undo. Absent on older results.
      */
     target_item_ids?: string[];
+    /**
+     * Merge only: the color `new_name` had before the merge (null when none),
+     * which the rename replaces with the source tag's color. Absent on older
+     * results.
+     */
+    target_color?: TagColorSnapshot | null;
 }
 
 // =============================================================================

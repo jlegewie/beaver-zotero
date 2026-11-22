@@ -24,7 +24,7 @@ import {
     WSAgentActionExecuteResponse,
     WSAgentActionValidateResponse
 } from '@beaver/agent-core/protocol/agentProtocol';
-import type { ManageTagsProposedData, ManageTagsResultData } from '@beaver/agent-core/types/agentActions/base';
+import type { ManageTagsProposedData, ManageTagsResultData, TagColorSnapshot } from '@beaver/agent-core/types/agentActions/base';
 import { libraryRefForLibraryID, modelObjectId, resolveWriteTargetLibrary, writeTargetLibraryError } from '../../../utils/libraryIdentity';
 import { findLibraryTag, removeTagFromLibrary } from '../../../utils/zoteroTags';
 import { checkAborted, TimeoutContext } from '../timeout';
@@ -53,6 +53,16 @@ async function itemIdsToKeys(libraryID: number, itemIDs: number[]): Promise<Map<
         await Zotero.Items.loadDataTypes(valid, ['primaryData']);
     }
     return new Map(valid.map((item) => [item.id, modelObjectId(libraryID, item.key)]));
+}
+
+
+/** A tag's color in a library, or null when it has none. */
+function tagColorSnapshot(libraryID: number, name: string): TagColorSnapshot | null {
+    // Colors are keyed by the NFC-normalized name.
+    const raw = Zotero.Tags.getColor(libraryID, name.normalize());
+    return raw && typeof raw === 'object'
+        ? { color: (raw as any).color, position: (raw as any).position }
+        : null;
 }
 
 
@@ -507,13 +517,10 @@ export async function applyManageTags(
         }
     }
     const affectedItemIds = [...snapshotKeys.values()];
-    const rawColor = Zotero.Tags.getColor(resolvedLibraryId, resolvedName);
-    const oldColor = rawColor && typeof rawColor === 'object'
-        ? { color: (rawColor as any).color, position: (rawColor as any).position }
-        : null;
+    const oldColor = tagColorSnapshot(resolvedLibraryId, resolvedName);
 
     let isMerge: boolean | null = null;
-    let targetItemIds: string[] | undefined;
+    let mergeSnapshot: Pick<ManageTagsResultData, 'target_item_ids' | 'target_color'> | undefined;
 
     if (action === 'rename') {
         const target = (new_name ?? '').trim();
@@ -523,8 +530,11 @@ export async function applyManageTags(
         const targetTag = await findLibraryTag(resolvedLibraryId, target);
         isMerge = targetTag.inLibrary;
         if (isMerge) {
-            // Undo keeps the target tag only on items that already had it.
-            targetItemIds = targetTag.itemIDs.flatMap((id) => snapshotKeys.get(id) ?? []);
+            mergeSnapshot = {
+                // Undo keeps the target tag only on items that already had it.
+                target_item_ids: targetTag.itemIDs.flatMap((id) => snapshotKeys.get(id) ?? []),
+                target_color: tagColorSnapshot(resolvedLibraryId, target),
+            };
         }
 
         checkAborted(ctx, 'manage_tags:before_rename');
@@ -555,7 +565,7 @@ export async function applyManageTags(
         affected_item_ids: affectedItemIds,
         old_color: oldColor,
         is_merge: isMerge,
-        ...(targetItemIds ? { target_item_ids: targetItemIds } : {}),
+        ...mergeSnapshot,
     };
 }
 

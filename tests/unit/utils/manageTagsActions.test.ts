@@ -259,7 +259,7 @@ describe("manage_tags rename merge undo", () => {
         loadDataTypes: vi.fn().mockResolvedValue(undefined),
       },
       Tags: {
-        getID: vi.fn((name: string) => tagIDs[name] ?? false),
+        getID: vi.fn((name: string) => tagIDs[name.normalize()] ?? false),
         getTagItems: vi.fn(async (libraryID: number, tagID: number) =>
           libraryID === 12 ? tagItems[tagID] ?? [] : [],
         ),
@@ -323,6 +323,76 @@ describe("manage_tags rename merge undo", () => {
     expect([...onlySource.tags].sort()).toEqual(["Fishing Policy", "Ocean Threats"]);
     expect([...both.tags].sort()).toEqual(["Fishing Policy", "Ocean Threats"]);
     expect(onlySource.removeTag).not.toHaveBeenCalled();
+  });
+
+  const useColors = (colors: Record<string, { color: string; position: number }>) => {
+    (Zotero.Tags.getColor as any).mockImplementation((libraryID: number, name: string) =>
+      libraryID === 12 ? colors[name] ?? null : null,
+    );
+  };
+
+  it("restores both tags' colors in their original order on merge undo", async () => {
+    useColors({
+      "Ocean Threats": { color: "#AA0000", position: 2 },
+      "Fishing Policy": { color: "#0000BB", position: 0 },
+    });
+    const result = await executeManageTagsAction({ proposed_data: proposal } as any);
+    expect(result.target_color).toEqual({ color: "#0000BB", position: 0 });
+    mergeInZotero();
+
+    await undoManageTagsAction({ proposed_data: proposal, result_data: result } as any);
+
+    expect((Zotero.Tags.setColor as any).mock.calls).toEqual([
+      [12, "Fishing Policy", false],
+      [12, "Fishing Policy", "#0000BB", 0],
+      [12, "Ocean Threats", "#AA0000", 2],
+    ]);
+  });
+
+  it("removes the source color from a target that had none on merge undo", async () => {
+    useColors({ "Ocean Threats": { color: "#AA0000", position: 1 } });
+    const result = await executeManageTagsAction({ proposed_data: proposal } as any);
+    expect(result.target_color).toBeNull();
+    mergeInZotero();
+
+    await undoManageTagsAction({ proposed_data: proposal, result_data: result } as any);
+
+    expect((Zotero.Tags.setColor as any).mock.calls).toEqual([
+      [12, "Fishing Policy", false],
+      [12, "Ocean Threats", "#AA0000", 1],
+    ]);
+  });
+
+  it("detects a colored target and records its color when the new name is spelled in decomposed form", async () => {
+    tagIDs["Caf\u00e9"] = 44;
+    // Only the color puts the target in the library.
+    tagItems[44] = [];
+    useColors({ "Caf\u00e9": { color: "#0000BB", position: 0 } });
+
+    const result = await executeManageTagsAction({
+      proposed_data: { ...proposal, new_name: "Cafe\u0301" },
+    } as any);
+
+    expect(result.is_merge).toBe(true);
+    expect(result.target_color).toEqual({ color: "#0000BB", position: 0 });
+    delete tagIDs["Caf\u00e9"];
+  });
+
+  it("leaves the target color alone when undoing a merge recorded without it", async () => {
+    mergeInZotero();
+
+    await undoManageTagsAction({
+      proposed_data: proposal,
+      result_data: {
+        is_merge: true,
+        affected_item_ids: ["g42-ONLYSRC1", "g42-BOTHTAGS"],
+        old_color: { color: "#AA0000", position: 1 },
+      },
+    } as any);
+
+    expect((Zotero.Tags.setColor as any).mock.calls).toEqual([
+      [12, "Ocean Threats", "#AA0000", 1],
+    ]);
   });
 
   it("treats a target tag that exists only in another library as a plain rename", async () => {

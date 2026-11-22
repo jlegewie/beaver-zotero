@@ -102,7 +102,8 @@ export async function executeManageTagsAction(
  *   every snapshot item.
  * - `delete`: re-add the tag to items in the snapshot.
  *
- * In all cases the tag color (if any) is restored.
+ * In all cases the tag color (if any) is restored, and a merge also restores
+ * the target tag's own color (`target_color`).
  */
 export async function undoManageTagsAction(
     action: AgentAction
@@ -161,7 +162,24 @@ export async function undoManageTagsAction(
             // Zotero stores tag names NFC-normalized; item tags compare exactly.
             keepTarget ? { name: target.normalize(), keepItemIds: keepTarget } : undefined,
         );
-        await restoreColor();
+        if (old_color && 'target_color' in result) {
+            // The rename moved the source color onto the target, replacing the
+            // target's own. Clear it, then reinsert both colors in position
+            // order so the library's color list is as before.
+            try {
+                await (Zotero.Tags.setColor as any)(resolvedLibraryID, target, false);
+                const colors: [string, TagColorSnapshot][] = [[name, old_color]];
+                if (result.target_color) colors.push([target, result.target_color]);
+                colors.sort((a, b) => (a[1].position ?? 0) - (b[1].position ?? 0));
+                for (const [tag, c] of colors) {
+                    await Zotero.Tags.setColor(resolvedLibraryID, tag, c.color, c.position ?? 0);
+                }
+            } catch (e) {
+                logger(`undoManageTagsAction: Failed to restore colors: ${e}`, 1);
+            }
+        } else {
+            await restoreColor();
+        }
         logger(`undoManageTagsAction: Re-tagged ${affected_item_ids.length} items with '${name}' (merge undo)`, 1);
     } else if (op === 'delete') {
         if (affected_item_ids.length === 0) {

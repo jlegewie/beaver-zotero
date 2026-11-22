@@ -40,5 +40,6 @@ export async function findLibraryTag(
 ): Promise<{ inLibrary: boolean; itemIDs: number[] }> {
     const tagID = Zotero.Tags.getID(name);
     const itemIDs = tagID ? await Zotero.Tags.getTagItems(libraryID, tagID) : [];
-    return { inLibrary: itemIDs.length > 0 || !!Zotero.Tags.getColor(libraryID, name), itemIDs };
+    // Colors are keyed by the NFC-normalized name.
+    return { inLibrary: itemIDs.length > 0 || !!Zotero.Tags.getColor(libraryID, name.normalize()), itemIDs };
 }
