@@ -79,17 +79,17 @@ describe('setup card steps and Send', () => {
         steps(key, input).map(({ key: step, status, requiredHint }) => `${step}:${status}${requiredHint ? '' : ':optional'}`);
     const holding = (key: string, input?: Partial<Omit<SetupInput, 'definition'>>) => sendHoldHint(steps(key, input));
 
-    it('asks for a PDF, then what to highlight, before an annotation can be sent', () => {
-        expect(summary('annotate')).toEqual(['source:active', 'prompt:pending']);
+    it('asks only for a PDF before an annotation can be sent: color-coding needs no instruction', () => {
+        expect(summary('annotate')).toEqual(['source:active']);
         expect(holding('annotate')).toBe('Choose a PDF');
         expect(holding('annotate', { hasInstruction: true })).toBe('Choose a PDF');
-        expect(summary('annotate', { papers: papers('A') })).toEqual(['source:done', 'prompt:active']);
-        expect(holding('annotate', { papers: papers('A') })).toBe('Describe what to highlight');
+        expect(summary('annotate', { papers: papers('A') })).toEqual(['source:done']);
+        expect(holding('annotate', { papers: papers('A') })).toBeNull();
         expect(holding('annotate', { papers: papers('A'), hasInstruction: true })).toBeNull();
     });
 
     it('holds Send while the attached PDF is still being checked', () => {
-        expect(summary('annotate', { papers: withFiles('checking'), hasInstruction: true })).toEqual(['source:checking', 'prompt:done']);
+        expect(summary('annotate', { papers: withFiles('checking'), hasInstruction: true })).toEqual(['source:checking']);
         expect(holding('annotate', { papers: withFiles('checking'), hasInstruction: true })).toBe('Checking the PDF…');
         expect(holding('annotate', { papers: withFiles('unreadable'), hasInstruction: true })).toBe('Choose a PDF');
     });
@@ -128,6 +128,22 @@ describe('setup card steps and Send', () => {
         }
     });
 
+    it('reviews the papers of an attached or open table, unless a collection is attached', () => {
+        const [review] = steps('literature_review', { tables: ['Education & Inequality'] });
+        expect(review).toMatchObject({
+            status: 'done',
+            hideExamples: true,
+            text: 'Beaver reviews the papers in the “Education & Inequality” table. Add a purpose or length if you like, or send as is.',
+        });
+        expect(steps('literature_review', { tables: ['A', 'B'] })[0].text).toContain('the 2 attached tables');
+        expect(steps('literature_review', { tables: ['A'], collections: ['Thesis'] })[0].text)
+            .toContain('the “Thesis” collection');
+        // A table does not settle what another task works on.
+        for (const key of ['research_table', 'start_project', 'organize']) {
+            expect(steps(key, { tables: ['A'] })[0]).toEqual(steps(key)[0]);
+        }
+    });
+
     it('requires the Beaver model only for a table, first', () => {
         expect(summary('research_table', { onBeaverModel: false })).toEqual(['model:active', 'prompt:pending:optional']);
         expect(holding('research_table', { onBeaverModel: false, hasInstruction: true })).toBe('Switch to the Beaver model');
@@ -146,7 +162,7 @@ describe('setup card steps and Send', () => {
 describe('task registry', () => {
     it('has the five tasks, each with the action the server checks for', () => {
         expect(Object.fromEntries(FEATURE_CREDIT_TASKS.map((task) => [task.key, task.actionId]))).toEqual({
-            annotate: 'builtin-annotate',
+            annotate: 'builtin-color-code',
             start_project: 'builtin-start-project',
             organize: 'builtin-tidy-up',
             research_table: 'builtin-research-table',

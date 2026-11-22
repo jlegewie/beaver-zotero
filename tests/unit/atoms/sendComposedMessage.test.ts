@@ -420,34 +420,34 @@ describe('sendComposedMessageAtom', () => {
 });
 
 describe('sending from a feature-credit setup card', () => {
-    const annotate: Action = { id: 'builtin-annotate', name: 'annotate', title: 'Annotate', text: 'Annotate.', targets: ['global'] };
+    const colorCode: Action = { id: 'builtin-color-code', name: 'color-code', title: 'Color-code this paper', text: 'Color-code.', targets: ['attachment'] };
     const pill = (action: Action) => ({ commandName: action.name!, actionId: action.id, title: action.title });
 
     it('names the task when the message runs the task action', async () => {
-        const store = makeStore([annotate, summarizeAction]);
+        const store = makeStore([colorCode, summarizeAction]);
         store.set(activeFeatureTaskAtom, 'annotate');
-        await store.set(sendComposedMessageAtom, { baseText: '/annotate the methods', pills: [pill(annotate)] });
+        await store.set(sendComposedMessageAtom, { baseText: '/color-code', pills: [pill(colorCode)] });
         expect(sendWSMessageMock.mock.calls[0][1].featureTask).toBe('annotate');
     });
 
     it('names no task for another action, or without a setup card', async () => {
-        const store = makeStore([annotate, summarizeAction]);
+        const store = makeStore([colorCode, summarizeAction]);
         store.set(activeFeatureTaskAtom, 'annotate');
         await store.set(sendComposedMessageAtom, { baseText: '/summarize', pills: [pill({ ...summarizeAction, name: 'summarize' })] });
         expect(sendWSMessageMock.mock.calls[0][1]).not.toHaveProperty('featureTask');
 
         store.set(activeFeatureTaskAtom, null);
-        await store.set(sendComposedMessageAtom, { baseText: '/annotate the methods', pills: [pill(annotate)] });
+        await store.set(sendComposedMessageAtom, { baseText: '/color-code', pills: [pill(colorCode)] });
         expect(sendWSMessageMock.mock.calls[1][1]).not.toHaveProperty('featureTask');
     });
 
     it('names no task on a later message, once the chat input was reset', async () => {
-        const store = makeStore([annotate]);
+        const store = makeStore([colorCode]);
         store.set(activeFeatureTaskAtom, 'annotate');
-        await store.set(sendComposedMessageAtom, { baseText: '/annotate the methods', pills: [pill(annotate)] });
+        await store.set(sendComposedMessageAtom, { baseText: '/color-code', pills: [pill(colorCode)] });
         // Sending clears the chat input.
         store.set(composerResetTokenAtom, store.get(composerResetTokenAtom) + 1);
-        await store.set(sendComposedMessageAtom, { baseText: '/annotate the results', pills: [pill(annotate)] });
+        await store.set(sendComposedMessageAtom, { baseText: '/color-code', pills: [pill(colorCode)] });
         expect(sendWSMessageMock.mock.calls[0][1].featureTask).toBe('annotate');
         expect(sendWSMessageMock.mock.calls[1][1]).not.toHaveProperty('featureTask');
     });

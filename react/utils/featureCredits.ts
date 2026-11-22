@@ -107,6 +107,8 @@ export interface SetupInput {
     placeholderLeft?: boolean;
     /** The names of the collections the chat input carries. */
     collections?: string[];
+    /** The names of the research tables it carries, attached or open in their tab. */
+    tables?: string[];
 }
 
 /** How a task's `collectionHint` names what is attached. */
@@ -114,19 +116,24 @@ function attachedCollections(names: string[]): string {
     return names.length === 1 ? `the “${names[0]}” collection` : `the ${names.length} attached collections`;
 }
 
+/** How a task's `tableHint` names the tables it works on. */
+function attachedTables(names: string[]): string {
+    return names.length === 1 ? `the “${names[0]}” table` : `the ${names.length} attached tables`;
+}
+
 /**
  * The numbered steps of a task's setup card: the Beaver model for a task that
  * only runs on it (starting a task selects it, so the step shows only after a
  * switch away), the PDF for a task that works on one, and what Beaver should
- * do. The first required step not yet done is `active`.
+ * do for a task that asks. The first required step not yet done is `active`.
  *
  * What Beaver should do is optional for a task that can find it out itself,
- * with two exceptions to how it reads: an attached collection settles it for
- * a task that works on one, and a picked example holds Send until its topic
- * placeholder is replaced.
+ * with two exceptions to how it reads: an attached collection (or, for a task
+ * that takes one, a research table) settles it, and a picked example holds
+ * Send until its topic placeholder is replaced.
  */
 export function setupSteps({
-    definition, papers, onBeaverModel, hasInstruction, placeholderLeft = false, collections = [],
+    definition, papers, onBeaverModel, hasInstruction, placeholderLeft = false, collections = [], tables = [],
 }: SetupInput): SetupStep[] {
     const steps: SetupStep[] = [];
     if (definition.requiresBeaverModel && !onBeaverModel) {
@@ -149,17 +156,24 @@ export function setupSteps({
         });
     }
     const { prompt } = definition;
-    const onCollection = !!prompt.collectionHint && collections.length > 0;
-    steps.push({
-        key: 'prompt',
-        title: prompt.heading,
-        text: onCollection
-            ? prompt.collectionHint!.replace('{collection}', attachedCollections(collections))
-            : prompt.hint,
-        status: !placeholderLeft && (hasInstruction || onCollection) ? 'done' : 'pending',
-        requiredHint: placeholderLeft ? `Replace ${TOPIC_PLACEHOLDER} with your topic` : prompt.requiredHint,
-        ...(onCollection ? { hideExamples: true } : {}),
-    });
+    if (prompt) {
+        // An attached collection settles what the task works on; a table does
+        // when no collection is attached.
+        const onCollection = !!prompt.collectionHint && collections.length > 0;
+        const onTable = !onCollection && !!prompt.tableHint && tables.length > 0;
+        steps.push({
+            key: 'prompt',
+            title: prompt.heading,
+            text: onCollection
+                ? prompt.collectionHint!.replace('{collection}', attachedCollections(collections))
+                : onTable
+                    ? prompt.tableHint!.replace('{table}', attachedTables(tables))
+                    : prompt.hint,
+            status: !placeholderLeft && (hasInstruction || onCollection || onTable) ? 'done' : 'pending',
+            ...(placeholderLeft ? { requiredHint: `Replace ${TOPIC_PLACEHOLDER} with your topic` } : {}),
+            ...(onCollection || onTable ? { hideExamples: true } : {}),
+        });
+    }
     const next = steps.find((step) => step.requiredHint && step.status === 'pending');
     if (next) next.status = 'active';
     return steps;

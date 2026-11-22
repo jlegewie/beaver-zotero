@@ -35,7 +35,7 @@ afterEach(() => {
 
 describe('the feature task a message starts', () => {
     it('is the open setup card task when the message runs its action', () => {
-        expect(featureTaskForMessage('annotate', [action('builtin-annotate')])).toBe('annotate');
+        expect(featureTaskForMessage('annotate', [action('builtin-color-code')])).toBe('annotate');
         expect(featureTaskForMessage('literature_review', [action('custom-1'), action('builtin-collection-literature-review')]))
             .toBe('literature_review');
     });
@@ -43,7 +43,9 @@ describe('the feature task a message starts', () => {
     it('is none without the task action, without a setup card, or for an unknown task', () => {
         expect(featureTaskForMessage('annotate', [])).toBeUndefined();
         expect(featureTaskForMessage('annotate', [action('builtin-tidy-up')])).toBeUndefined();
-        expect(featureTaskForMessage(null, [action('builtin-annotate')])).toBeUndefined();
+        // General /annotate is not the task's action.
+        expect(featureTaskForMessage('annotate', [action('builtin-annotate')])).toBeUndefined();
+        expect(featureTaskForMessage(null, [action('builtin-color-code')])).toBeUndefined();
         expect(featureTaskForMessage('note', [action('builtin-create-note')])).toBeUndefined();
     });
 

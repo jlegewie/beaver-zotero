@@ -147,7 +147,7 @@ describe('startFeatureTaskAtom', () => {
 });
 
 describe('leaveFeatureTaskAtom', () => {
-    const annotate = pill('builtin-annotate');
+    const colorCode = pill('builtin-color-code');
 
     function storeWith(content: string, pills: ReturnType<typeof pill>[]) {
         const store = createStore();
@@ -158,7 +158,7 @@ describe('leaveFeatureTaskAtom', () => {
     }
 
     it("removes the task's /command when nothing else was typed", () => {
-        const store = storeWith('/annotate ', [annotate]);
+        const store = storeWith('/color-code ', [colorCode]);
         store.set(leaveFeatureTaskAtom);
         expect(store.get(activeFeatureTaskAtom)).toBeNull();
         expect(store.get(currentMessageContentAtom)).toBe('');
@@ -166,7 +166,7 @@ describe('leaveFeatureTaskAtom', () => {
     });
 
     it('leaves the attachments\' reader context and files being attached alone', () => {
-        const store = storeWith('/annotate ', [annotate]);
+        const store = storeWith('/color-code ', [colorCode]);
         const context = { item: { id: 1 } as Zotero.Item, selection: null };
         store.set(readerActionContextAtom, context);
         const token = store.get(composerResetTokenAtom);
@@ -177,24 +177,24 @@ describe('leaveFeatureTaskAtom', () => {
     });
 
     it('keeps the /command with text the user typed', () => {
-        const store = storeWith('/annotate methods ', [annotate]);
+        const store = storeWith('/color-code methods ', [colorCode]);
         store.set(leaveFeatureTaskAtom);
         expect(store.get(activeFeatureTaskAtom)).toBeNull();
-        expect(store.get(currentMessageContentAtom)).toBe('/annotate methods ');
-        expect(store.get(currentMessagePillsAtom)).toEqual([annotate]);
+        expect(store.get(currentMessageContentAtom)).toBe('/color-code methods ');
+        expect(store.get(currentMessagePillsAtom)).toEqual([colorCode]);
     });
 
     it('keeps the message when it holds another /command', () => {
         const summarize = pill('builtin-summarize');
-        const store = storeWith('/annotate /summarize ', [annotate, summarize]);
+        const store = storeWith('/color-code /summarize ', [colorCode, summarize]);
         store.set(leaveFeatureTaskAtom);
-        expect(store.get(currentMessagePillsAtom)).toEqual([annotate, summarize]);
+        expect(store.get(currentMessagePillsAtom)).toEqual([colorCode, summarize]);
     });
 
     it('drops the /command while it waits to be inserted', () => {
         const store = storeWith('', []);
         const other = { descriptor: pill('builtin-summarize') };
-        store.set(pendingPillInsertsAtom, [{ descriptor: annotate }, other]);
+        store.set(pendingPillInsertsAtom, [{ descriptor: colorCode }, other]);
         store.set(leaveFeatureTaskAtom);
         expect(store.get(pendingPillInsertsAtom)).toEqual([other]);
     });

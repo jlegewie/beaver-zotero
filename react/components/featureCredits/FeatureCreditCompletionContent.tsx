@@ -145,7 +145,7 @@ const FeatureCreditCompletionContent: React.FC<Props> = ({ data, runs, onDismiss
         // Undefined when the user kept the current chat, or another
         // navigation superseded this one.
         // Read before the new chat replaces this one.
-        const collection = next.definition.prompt.collectionHint
+        const collection = next.definition.prompt?.collectionHint
             ? collectionToCarry(runs, runActions, searchableLibraryIds)
             : null;
         if ((await newThread({ window: win })) === undefined) return;

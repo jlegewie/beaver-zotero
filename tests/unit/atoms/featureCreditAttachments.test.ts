@@ -3,12 +3,16 @@ import { atom, createStore } from 'jotai';
 
 vi.mock('../../../react/atoms/actions', () => ({ stageActionPillAtom: atom(null, () => true) }));
 vi.mock('../../../react/utils/sourceUtils', () => ({ getDisplayNameFromItem: (item: { key: string }) => item.key }));
+vi.mock('../../../src/services/artifacts/tableItemIdentity', async (importOriginal) => ({
+    ...(await importOriginal<object>()),
+    isTableAttachment: (item: { isTable?: boolean } | null | undefined) => !!item?.isTable,
+}));
 vi.mock('../../../src/services/documentExtraction/attachmentResolution', () => ({
     getReadableContentKind: (item: { kind?: string }) => item.kind ?? null,
     getContentKind: (item: { kind?: string }) => item.kind ?? 'other',
 }));
 
-import { featureTaskAttachedPapersAtom, featureTaskSendBlockAtom, lookUpOcrPreparedPdfsAtom } from '../../../react/atoms/featureCredits';
+import { featureTaskAttachedPapersAtom, featureTaskSendBlockAtom, featureTaskSetupStepsAtom, lookUpOcrPreparedPdfsAtom } from '../../../react/atoms/featureCredits';
 import { activeFeatureTaskAtom } from '../../../react/atoms/featureCreditRuns';
 import {
     composerSourceSearchTextAtom,
@@ -159,7 +163,7 @@ describe('setup card: whether attached papers have a file to annotate', () => {
 });
 
 describe('featureTaskSendBlockAtom', () => {
-    const annotatePill = { actionId: 'builtin-annotate', commandName: 'annotate', title: 'Annotate' };
+    const colorCodePill = { actionId: 'builtin-color-code', commandName: 'color-code', title: 'Color-code this paper' };
 
     const setup = (options: { completed?: boolean; pill?: boolean; content?: string } = {}) => {
         const store = createStore();
@@ -170,8 +174,8 @@ describe('featureTaskSendBlockAtom', () => {
             },
         } as any);
         store.set(activeFeatureTaskAtom, 'annotate');
-        store.set(currentMessagePillsAtom, options.pill === false ? [] : [annotatePill] as any);
-        store.set(currentMessageContentAtom, options.content ?? '/annotate Color-code the methods');
+        store.set(currentMessagePillsAtom, options.pill === false ? [] : [colorCodePill] as any);
+        store.set(currentMessageContentAtom, options.content ?? '/color-code ');
         return store;
     };
 
@@ -179,7 +183,7 @@ describe('featureTaskSendBlockAtom', () => {
         expect(setup().get(featureTaskSendBlockAtom)).toEqual({ hint: 'Choose a PDF' });
     });
 
-    it('lifts once every required step is done', async () => {
+    it('lifts once the PDF is attached and checked, with or without an instruction', async () => {
         const store = setup();
         const pdf = attachment('PDF1', 'pdf');
         store.set(currentMessageItemsAtom, [pdf] as any);
@@ -188,28 +192,8 @@ describe('featureTaskSendBlockAtom', () => {
         expect(store.get(featureTaskSendBlockAtom)).toEqual({ hint: 'Checking the PDF…' });
         await store.set(lookUpOcrPreparedPdfsAtom);
         expect(store.get(featureTaskSendBlockAtom)).toBeNull();
-        store.set(currentMessageContentAtom, '/annotate Highlight every mention of selection bias');
+        store.set(currentMessageContentAtom, '/color-code Use red for methods');
         expect(store.get(featureTaskSendBlockAtom)).toBeNull();
-        store.set(currentMessageContentAtom, '/annotate ');
-        expect(store.get(featureTaskSendBlockAtom)).toEqual({ hint: 'Describe what to highlight' });
-    });
-
-    it('does not take an @ search in progress for an instruction', async () => {
-        const store = setup({ content: '/annotate @smi' });
-        store.set(currentMessageItemsAtom, [attachment('PDF1', 'pdf')] as any);
-        store.set(itemValidationResultsAtom, new Map([['1-PDF1', checked('readable')]]));
-        await store.set(lookUpOcrPreparedPdfsAtom);
-        store.set(composerSourceSearchTextAtom, '@smi');
-        expect(store.get(featureTaskSendBlockAtom)).toEqual({ hint: 'Describe what to highlight' });
-        store.set(currentMessageContentAtom, '/annotate the methods @smi');
-        expect(store.get(featureTaskSendBlockAtom)).toBeNull();
-        // The menu closed without a pick: the text is the user's.
-        store.set(composerSourceSearchTextAtom, null);
-        store.set(currentMessageContentAtom, '/annotate @smi');
-        expect(store.get(featureTaskSendBlockAtom)).toBeNull();
-        // A bare "@" left behind has no word in it.
-        store.set(currentMessageContentAtom, '/annotate @ ');
-        expect(store.get(featureTaskSendBlockAtom)).toEqual({ hint: 'Describe what to highlight' });
     });
 
     it('lets a table or review go without a topic, but not with a picked example left unfilled', () => {
@@ -233,11 +217,55 @@ describe('featureTaskSendBlockAtom', () => {
         }
     });
 
+    it('does not take an @ search in progress for an instruction', () => {
+        const store = createStore();
+        store.set(profileProjectionAtom, {
+            feature_credits: { tasks: [{ key: 'literature_review', credits: 5, completed_at: null }] },
+        } as any);
+        store.set(activeFeatureTaskAtom, 'literature_review');
+        store.set(currentMessagePillsAtom, [{ actionId: 'builtin-collection-literature-review', commandName: 'literature-review', title: 'Review' }] as any);
+        const promptStatus = () => store.get(featureTaskSetupStepsAtom)!.find((step) => step.key === 'prompt')!.status;
+        store.set(currentMessageContentAtom, '/literature-review @smi');
+        store.set(composerSourceSearchTextAtom, '@smi');
+        expect(promptStatus()).toBe('pending');
+        store.set(currentMessageContentAtom, '/literature-review school choice @smi');
+        expect(promptStatus()).toBe('done');
+        // The menu closed without a pick: the text is the user's.
+        store.set(composerSourceSearchTextAtom, null);
+        store.set(currentMessageContentAtom, '/literature-review @smi');
+        expect(promptStatus()).toBe('done');
+        // A bare "@" left behind has no word in it.
+        store.set(currentMessageContentAtom, '/literature-review @ ');
+        expect(promptStatus()).toBe('pending');
+    });
+
+    it('names a table open in its tab, or attached, as what a review works on', () => {
+        const store = createStore();
+        store.set(profileProjectionAtom, {
+            feature_credits: { tasks: [{ key: 'literature_review', credits: 5, completed_at: null }] },
+        } as any);
+        store.set(activeFeatureTaskAtom, 'literature_review');
+        store.set(currentMessagePillsAtom, [{ actionId: 'builtin-collection-literature-review', commandName: 'literature-review', title: 'Review' }] as any);
+        store.set(currentMessageContentAtom, '/literature-review ');
+        const table = (key: string, title: string) => ({ ...attachment(key, null), isTable: true, getField: () => title });
+        const prompt = () => store.get(featureTaskSetupStepsAtom)!.find((step) => step.key === 'prompt')!;
+
+        expect(prompt().text).toContain('send as is and Beaver suggests topics');
+        store.set(currentReaderAttachmentAtom, table('TBL1', 'Education & Inequality') as any);
+        expect(prompt()).toMatchObject({ status: 'done', hideExamples: true });
+        expect(prompt().text).toContain('the papers in the “Education & Inequality” table');
+        // The same table attached as well counts once.
+        store.set(currentMessageItemsAtom, [table('TBL1', 'Education & Inequality'), attachment('PDF1', 'pdf')] as any);
+        expect(prompt().text).toContain('the “Education & Inequality” table');
+        store.set(currentMessageItemsAtom, [table('TBL2', 'Second')] as any);
+        expect(prompt().text).toContain('the 2 attached tables');
+    });
+
     it('applies only while the message would start the task', () => {
         const noSetup = setup();
         noSetup.set(activeFeatureTaskAtom, null);
         expect(noSetup.get(featureTaskSendBlockAtom)).toBeNull();
-        expect(setup({ pill: false, content: 'Color-code the methods' }).get(featureTaskSendBlockAtom)).toBeNull();
+        expect(setup({ pill: false, content: 'Color-code this paper' }).get(featureTaskSendBlockAtom)).toBeNull();
         expect(setup({ completed: true }).get(featureTaskSendBlockAtom)).toBeNull();
     });
 });
