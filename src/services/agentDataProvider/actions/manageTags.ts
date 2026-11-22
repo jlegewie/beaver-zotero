@@ -3,14 +3,14 @@ import type { ActionExecuteRequest, ActionValidateRequest } from '../operationCo
  * Validate and execute library-wide tag operations (manage_tags).
  *
  * Supports two actions:
- *   - 'rename': renames a tag. If the new name already exists in the library,
+ *   - 'rename': renames a tag. If the new name is already in the library,
  *     Zotero atomically merges the two tags (via UPDATE OR REPLACE itemTags +
  *     purge). The merge is flagged via `is_merge` for UI and undo awareness.
  *   - 'delete': removes the tag from every item in the library.
  *
  * Both operations snapshot the affected item IDs and the tag's color at
- * validation time so destructive operations (delete, merge-on-rename) can be
- * undone by the user.
+ * execute time (plus, for a merge, which of those items already had the new
+ * name) so destructive operations (delete, merge-on-rename) can be undone.
  *
  * The source tag `name` is matched exactly first (Zotero tags are
  * case-sensitive); if absent, a unique case/format-insensitive match in the
@@ -26,7 +26,7 @@ import {
 } from '@beaver/agent-core/protocol/agentProtocol';
 import type { ManageTagsProposedData, ManageTagsResultData } from '@beaver/agent-core/types/agentActions/base';
 import { libraryRefForLibraryID, modelObjectId, resolveWriteTargetLibrary, writeTargetLibraryError } from '../../../utils/libraryIdentity';
-import { removeTagFromLibrary } from '../../../utils/zoteroTags';
+import { findLibraryTag, removeTagFromLibrary } from '../../../utils/zoteroTags';
 import { checkAborted, TimeoutContext } from '../timeout';
 import { getDeferredToolPreference, validateLibraryAccess } from '../utils';
 import { actionError, resolveActionWriteLibrary, toExecuteResponse } from './actionExecution';
@@ -42,16 +42,17 @@ const MAX_TAG_SUGGESTIONS = 3;
 
 
 /**
- * Convert Zotero numeric item IDs to device-portable model-facing IDs.
+ * Map Zotero numeric item IDs to device-portable model-facing IDs, skipping
+ * items that no longer exist.
  */
-async function itemIdsToKeys(libraryID: number, itemIDs: number[]): Promise<string[]> {
-    if (itemIDs.length === 0) return [];
+async function itemIdsToKeys(libraryID: number, itemIDs: number[]): Promise<Map<number, string>> {
+    if (itemIDs.length === 0) return new Map();
     const items = await Zotero.Items.getAsync(itemIDs);
     const valid = items.filter((i): i is Zotero.Item => i !== null);
     if (valid.length > 0) {
         await Zotero.Items.loadDataTypes(valid, ['primaryData']);
     }
-    return valid.map((item) => modelObjectId(libraryID, item.key));
+    return new Map(valid.map((item) => [item.id, modelObjectId(libraryID, item.key)]));
 }
 
 
@@ -353,9 +354,20 @@ export async function validateManageTagsAction(
                 preference: 'always_ask',
             };
         }
-        // Merge detection: does new_name already exist in this library?
-        const existingTarget = Zotero.Tags.getID(newName);
-        isMerge = existingTarget !== false && existingTarget != null;
+        // A rename merges when new_name is already in this library.
+        try {
+            isMerge = (await findLibraryTag(libraryID, newName)).inLibrary;
+        } catch (e) {
+            logger(`validateManageTagsAction: target tag lookup failed: ${e}`, 1);
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error: `Failed to look up tag '${newName}' in library '${library.name}': ${String(e)}`,
+                error_code: 'validation_failed',
+                preference: 'always_ask',
+            };
+        }
     } else if (action === 'delete') {
         newName = null;
     } else {
@@ -472,7 +484,8 @@ export async function applyManageTags(
     }
     await hooks.assertUnchanged?.(resolvedLibraryId, tagID);
 
-    let affectedItemIds: string[] = [];
+    // Snapshot items as numeric ID -> portable ID; empty when the lookup failed.
+    let snapshotKeys = new Map<number, string>();
     if (tagID !== null) {
         // A failed lookup leaves the snapshot empty rather than blocking the
         // change; the cap below is a refusal, never swallowed.
@@ -487,26 +500,32 @@ export async function applyManageTags(
         }
         if (ids) {
             try {
-                affectedItemIds = await itemIdsToKeys(resolvedLibraryId, ids);
+                snapshotKeys = await itemIdsToKeys(resolvedLibraryId, ids);
             } catch (e) {
                 logger(`applyManageTags: snapshot key lookup failed: ${e}`, 1);
             }
         }
     }
+    const affectedItemIds = [...snapshotKeys.values()];
     const rawColor = Zotero.Tags.getColor(resolvedLibraryId, resolvedName);
     const oldColor = rawColor && typeof rawColor === 'object'
         ? { color: (rawColor as any).color, position: (rawColor as any).position }
         : null;
 
     let isMerge: boolean | null = null;
+    let targetItemIds: string[] | undefined;
 
     if (action === 'rename') {
         const target = (new_name ?? '').trim();
         if (!target) throw actionError('invalid_new_name', 'new_name required for rename');
         // Re-check merge status at execute time (the tag state may have
         // shifted since validation if the user edited tags manually).
-        const existingTarget = Zotero.Tags.getID(target);
-        isMerge = existingTarget !== false && existingTarget != null;
+        const targetTag = await findLibraryTag(resolvedLibraryId, target);
+        isMerge = targetTag.inLibrary;
+        if (isMerge) {
+            // Undo keeps the target tag only on items that already had it.
+            targetItemIds = targetTag.itemIDs.flatMap((id) => snapshotKeys.get(id) ?? []);
+        }
 
         checkAborted(ctx, 'manage_tags:before_rename');
         await Zotero.Tags.rename(resolvedLibraryId, resolvedName, target);
@@ -536,6 +555,7 @@ export async function applyManageTags(
         affected_item_ids: affectedItemIds,
         old_color: oldColor,
         is_merge: isMerge,
+        ...(targetItemIds ? { target_item_ids: targetItemIds } : {}),
     };
 }
 

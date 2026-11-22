@@ -164,6 +164,21 @@ describe('validateManageTagsAction', () => {
         expect(resp.preference).toBe('always_ask');
     });
 
+    it('does not flag a merge when the rename target exists only in another library', async () => {
+        okLibrary();
+        Zot.Tags.getID.mockImplementation((name: string) => (name === 'old' ? 7 : name === 'new' ? 8 : false));
+        Zot.Tags.getTagItems.mockImplementation(async (_lib: number, tagID: number) => (tagID === 7 ? [10, 20] : []));
+
+        const resp = await validateManageTagsAction({
+            event: 'agent_action_validate',
+            request_id: 'r4b',
+            action_type: 'manage_tags',
+            action_data: { action: 'rename', name: 'old', new_name: 'new' },
+        } as any);
+        expect(resp.valid).toBe(true);
+        expect(resp.current_value?.is_merge).toBe(false);
+    });
+
     it('reports item_count in current_value (preview) for delete', async () => {
         okLibrary();
         Zot.Tags.getID.mockReturnValue(42);
@@ -474,7 +489,7 @@ describe('executeManageTagsAction', () => {
         // tagID for source, no existing target → no merge
         Zot.Tags.getID.mockImplementation((n: string) => (n === 'old' ? 7 : false));
         Zot.Tags.getTagItems.mockResolvedValue([10, 20]);
-        Zot.Tags.getColor.mockReturnValue({ color: '#00ff00', position: 1 });
+        Zot.Tags.getColor.mockImplementation((_lib: number, n: string) => (n === 'old' ? { color: '#00ff00', position: 1 } : null));
 
         const resp = await executeManageTagsAction({
             event: 'agent_action_execute',

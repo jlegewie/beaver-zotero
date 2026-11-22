@@ -197,4 +197,158 @@ describe("undoManageTagsAction", () => {
   });
 });
 
+
+describe("manage_tags rename merge undo", () => {
+  type FakeItem = {
+    id: number;
+    key: string;
+    tags: Set<string>;
+    getTags: () => { tag: string }[];
+    addTag: ReturnType<typeof vi.fn>;
+    removeTag: ReturnType<typeof vi.fn>;
+    save: ReturnType<typeof vi.fn>;
+  };
+
+  const makeItem = (id: number, key: string, tags: string[]): FakeItem => {
+    const item: FakeItem = {
+      id,
+      key,
+      tags: new Set(tags),
+      getTags: () => [...item.tags].map((tag) => ({ tag })),
+      addTag: vi.fn((tag: string) => item.tags.add(tag)),
+      removeTag: vi.fn((tag: string) => item.tags.delete(tag)),
+      save: vi.fn().mockResolvedValue(undefined),
+    };
+    return item;
+  };
+
+  const tagIDs: Record<string, number> = { "Ocean Threats": 33, "Fishing Policy": 44 };
+  let itemsByID: Map<number, FakeItem>;
+  // Items per tagID in library 12 (group 42).
+  let tagItems: Record<number, number[]>;
+
+  const proposal = {
+    library_id: 12,
+    library_ref: "g42",
+    action: "rename",
+    name: "Ocean Threats",
+    new_name: "Fishing Policy",
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    itemsByID = new Map([
+      [201, makeItem(201, "ONLYSRC1", ["Ocean Threats"])],
+      [202, makeItem(202, "BOTHTAGS", ["Ocean Threats", "Fishing Policy"])],
+      [203, makeItem(203, "ONLYTGT1", ["Fishing Policy"])],
+    ]);
+    tagItems = { 33: [201, 202], 44: [202, 203] };
+
+    (globalThis as any).Zotero = {
+      ...(globalThis as any).Zotero,
+      Libraries: { userLibraryID: 1 },
+      Groups: {
+        getLibraryIDFromGroupID: vi.fn((groupID: number) => (groupID === 42 ? 12 : null)),
+        getGroupIDFromLibraryID: vi.fn((libraryID: number) => (libraryID === 12 ? 42 : null)),
+      },
+      Items: {
+        getAsync: vi.fn(async (ids: number[]) => ids.map((id) => itemsByID.get(id) ?? null)),
+        getByLibraryAndKeyAsync: vi.fn(async (libraryID: number, key: string) =>
+          libraryID === 12 ? [...itemsByID.values()].find((i) => i.key === key) ?? null : null,
+        ),
+        loadDataTypes: vi.fn().mockResolvedValue(undefined),
+      },
+      Tags: {
+        getID: vi.fn((name: string) => tagIDs[name] ?? false),
+        getTagItems: vi.fn(async (libraryID: number, tagID: number) =>
+          libraryID === 12 ? tagItems[tagID] ?? [] : [],
+        ),
+        getColor: vi.fn(() => null),
+        rename: vi.fn().mockResolvedValue(undefined),
+        setColor: vi.fn().mockResolvedValue(undefined),
+      },
+      DB: {
+        executeTransaction: vi.fn(async (callback: () => Promise<void>) => callback()),
+      },
+    };
+  });
+
+  /** Mimic Zotero's merge: every item with the source tag now has only the target. */
+  const mergeInZotero = () => {
+    for (const id of tagItems[33]) {
+      const item = itemsByID.get(id)!;
+      item.tags.delete("Ocean Threats");
+      item.tags.add("Fishing Policy");
+    }
+  };
+
+  it("records which merged items already had the target tag", async () => {
+    const result = await executeManageTagsAction({ proposed_data: proposal } as any);
+
+    expect(result).toMatchObject({
+      is_merge: true,
+      affected_item_ids: ["g42-ONLYSRC1", "g42-BOTHTAGS"],
+      target_item_ids: ["g42-BOTHTAGS"],
+    });
+  });
+
+  it("removes the target tag on undo only from items that lacked it before the merge", async () => {
+    const result = await executeManageTagsAction({ proposed_data: proposal } as any);
+    mergeInZotero();
+
+    await undoManageTagsAction({ proposed_data: proposal, result_data: result } as any);
+
+    const [onlySource, both, onlyTarget] = [201, 202, 203].map((id) => itemsByID.get(id)!);
+    expect([...onlySource.tags]).toEqual(["Ocean Threats"]);
+    expect([...both.tags].sort()).toEqual(["Fishing Policy", "Ocean Threats"]);
+    expect([...onlyTarget.tags]).toEqual(["Fishing Policy"]);
+    expect(both.removeTag).not.toHaveBeenCalled();
+    expect(onlyTarget.save).not.toHaveBeenCalled();
+    expect(onlySource.save).toHaveBeenCalledTimes(1);
+    expect(Zotero.Tags.rename).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the target tag on every item when undoing a merge recorded without target items", async () => {
+    mergeInZotero();
+
+    await undoManageTagsAction({
+      proposed_data: proposal,
+      result_data: {
+        is_merge: true,
+        affected_item_ids: ["g42-ONLYSRC1", "g42-BOTHTAGS"],
+      },
+    } as any);
+
+    const [onlySource, both] = [201, 202].map((id) => itemsByID.get(id)!);
+    expect([...onlySource.tags].sort()).toEqual(["Fishing Policy", "Ocean Threats"]);
+    expect([...both.tags].sort()).toEqual(["Fishing Policy", "Ocean Threats"]);
+    expect(onlySource.removeTag).not.toHaveBeenCalled();
+  });
+
+  it("treats a target tag that exists only in another library as a plain rename", async () => {
+    // The global tag row exists, but no item in library 12 carries it.
+    tagItems[44] = [];
+
+    const result = await executeManageTagsAction({
+      proposed_data: { ...proposal, baseline: { item_count: 2, is_merge: false } },
+    } as any);
+
+    expect(result.is_merge).toBe(false);
+    expect(result).not.toHaveProperty("target_item_ids");
+    expect(Zotero.Tags.rename).toHaveBeenCalledWith(12, "Ocean Threats", "Fishing Policy");
+
+    await undoManageTagsAction({ proposed_data: proposal, result_data: result } as any);
+    expect(Zotero.Tags.rename).toHaveBeenLastCalledWith(12, "Fishing Policy", "Ocean Threats");
+  });
+
+  it("refuses a rename proposed as a merge once the target is gone from the library", async () => {
+    tagItems[44] = [];
+
+    await expect(executeManageTagsAction({
+      proposed_data: { ...proposal, baseline: { is_merge: true } },
+    } as any)).rejects.toMatchObject({ code: "stale_proposal" });
+    expect(Zotero.Tags.rename).not.toHaveBeenCalled();
+  });
+});
+
 beforeEach(installMutationInstance);
