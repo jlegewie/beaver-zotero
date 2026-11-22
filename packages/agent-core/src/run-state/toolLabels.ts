@@ -341,7 +341,8 @@ function legacySearchLabel(toolName: string, args: Record<string, unknown>): str
  * Label for an OpenAlex keyword search without a query, which lists works by
  * its filters: "Works by Katrin Wisniewski in Nature, 2020–2024". Names come
  * from the completed view, which resolves the ids; until then (or when the
- * call failed) the label shows the ids.
+ * call failed) the label shows the arguments: names, or ids (`author_ids` /
+ * `venue_ids` in older calls).
  */
 function openAlexListingLabel(args: Record<string, unknown>, view: ToolResultView | null): string | null {
     const info = view && isExternalReferenceListView(view) ? searchViewInfo(view) : null;
@@ -352,8 +353,8 @@ function openAlexListingLabel(args: Record<string, unknown>, view: ToolResultVie
             .filter((name): name is string => !!name);
         return names.length ? names.join(', ') : null;
     };
-    const authors = entities(filters?.authors, args.author_ids);
-    const venues = entities(filters?.venues, args.venue_ids);
+    const authors = entities(filters?.authors, args.authors ?? args.author_ids);
+    const venues = entities(filters?.venues, args.venues ?? args.venue_ids);
     const minYear = typeof args.min_year === 'number' ? args.min_year : null;
     const maxYear = typeof args.max_year === 'number' ? args.max_year : null;
     const years = minYear !== null && maxYear !== null

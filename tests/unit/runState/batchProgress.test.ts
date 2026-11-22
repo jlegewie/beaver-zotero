@@ -996,3 +996,34 @@ describe('the population record', () => {
         expect(batchPopulationItemFor(undefined, 'u-A')).toBeNull();
     });
 });
+
+describe('parallel calls stored in call order', () => {
+    // The last part in call order finished first; its stamp is the older one.
+    const finishedLast = { ...stamp(entry({ progress_primary: '40 of 184' })), seq: 7 };
+    const finishedFirst = { ...stamp(entry({ progress_primary: '39 of 184' })), seq: 6 };
+
+    it('takes the stamp with the highest seq in a message', () => {
+        const runs = [run('r1', [request(finishedLast, finishedFirst)])];
+        expect(selectBatchProgress(runs)?.batches[0].progress_primary).toBe('40 of 184');
+    });
+
+    it('falls back to the last part when stamps carry no seq', () => {
+        const runs = [run('r1', [request(stamp(entry({ progress_primary: '1' })), stamp(entry({ progress_primary: '2' })))])];
+        expect(selectBatchProgress(runs)?.batches[0].progress_primary).toBe('2');
+    });
+
+    it('takes the item record from the stamp with the highest seq', () => {
+        const part = (seq: number, label: string, index: number) => ({
+            part_kind: 'tool-return',
+            tool_name: 'organize_items',
+            tool_call_id: `call-${index}`,
+            content: {},
+            metadata: {
+                batch_progress: { ...stamp(entry()), seq },
+                batch_items: { batches: [{ batch_id: 'b1', groups: [{ kind: 'destination', label, item_ids: ['u-A'] }] }] },
+            },
+        });
+        const message = { kind: 'request', run_id: 'r1', instructions: '', parts: [part(9, 'ML', 0), part(8, 'ml', 1)] } as unknown as ModelMessage;
+        expect(selectChainBatchItems([run('r1', [message], 'completed')]).get('b1')?.groups[0].label).toBe('ML');
+    });
+});
