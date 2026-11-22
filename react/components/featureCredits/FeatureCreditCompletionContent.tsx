@@ -79,7 +79,7 @@ const FeatureCreditCompletionContent: React.FC<Props> = ({ data, runs, onDismiss
     const entries = useAtomValue(featureCreditEntriesAtom) ?? [];
     const totals = useAtomValue(featureCreditTotalsAtom);
     const startTask = useSetAtom(startFeatureTaskAtom);
-    const unavailableReason = useAtomValue(featureTaskUnavailableAtom);
+    const isUnavailable = useAtomValue(featureTaskUnavailableAtom);
     const newThread = useSetAtom(newThreadAtom);
     const actions = useAtomValue(actionsAtom);
     const importAction = useSetAtom(importActionAtom);
@@ -128,7 +128,7 @@ const FeatureCreditCompletionContent: React.FC<Props> = ({ data, runs, onDismiss
     // around to the first open one.
     const position = entries.findIndex((entry) => entry.definition.key === data.key);
     const next = [...entries.slice(position + 1), ...entries.slice(0, Math.max(position, 0))]
-        .find((entry) => !entry.task.completed_at && entry.definition.key !== data.key && !unavailableReason(entry.definition));
+        .find((entry) => !entry.task.completed_at && entry.definition.key !== data.key && !isUnavailable(entry.definition));
     const { docsUrl, tip, customAction, noteTip, tableTip } = definition.completion;
     // Updates when the user creates a proposed note.
     const showNoteTip = !!noteTip && noteInLibrary(runActions);

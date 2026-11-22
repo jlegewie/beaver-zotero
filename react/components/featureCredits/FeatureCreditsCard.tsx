@@ -22,6 +22,7 @@ import { completeCreditsFirstRunAtom } from '../../atoms/firstRun';
 import { CREDITS_DOCS_URL, examplesForLibrary, getFeatureCreditTask, type FeatureTaskDefinition, type FeatureTaskExample, type LibraryShape } from '../../constants/featureCreditTasks';
 import type { SetupStep, StepStatus } from '../../utils/featureCredits';
 import { readLibraryShape } from '../../utils/libraryShape';
+import { SMALL_LIBRARY_THRESHOLD } from '../../atoms/zoteroContext';
 
 const TASK_ICONS: Record<string, React.ComponentType<React.SVGProps<SVGSVGElement>>> = {
     literature_review: QuillWriteIcon,
@@ -31,34 +32,28 @@ const TASK_ICONS: Record<string, React.ComponentType<React.SVGProps<SVGSVGElemen
     research_table: TableIcon,
 };
 
-/**
- * One task in the list: done, unavailable with the reason in place of its
- * subtitle, or a button that opens its setup card.
- */
+/** One task in the list: done, or a button that opens its setup card. */
 const TaskRow: React.FC<{
     entry: FeatureCreditEntry;
     onStart: (key: string, win: Window | null) => void;
-    unavailableReason: string | null;
-}> = ({ entry, onStart, unavailableReason }) => {
+}> = ({ entry, onStart }) => {
     const { task, definition } = entry;
     const done = !!task.completed_at;
-    const unavailable = !done && !!unavailableReason;
     const body = (
         <>
             <Icon
                 icon={done ? CheckmarkCircleSolidIcon : (TASK_ICONS[definition.key] ?? CircleIcon)}
-                className={`feature-credits-row-mark scale-12 ${done ? 'font-color-green' : unavailable ? 'font-color-tertiary' : 'font-color-primary'}`}
+                className={`feature-credits-row-mark scale-12 ${done ? 'font-color-green' : 'font-color-primary'}`}
                 aria-label={done ? 'Done' : undefined}
             />
             <span className="feature-credits-row-text">
-                <span className={done || unavailable ? 'font-color-secondary text-base' : 'font-color-primary font-medium text-base'}>{definition.title}</span>
-                <span className="feature-credits-row-subtitle">{unavailable ? unavailableReason : definition.subtitle}</span>
+                <span className={done ? 'font-color-secondary text-base' : 'font-color-primary font-medium text-base'}>{definition.title}</span>
+                <span className="feature-credits-row-subtitle">{definition.subtitle}</span>
             </span>
-            {!done && !unavailable && <Icon icon={ArrowRightIcon} className="feature-credits-row-arrow font-color-secondary" />}
+            {!done && <Icon icon={ArrowRightIcon} className="feature-credits-row-arrow font-color-secondary" />}
         </>
     );
     if (done) return <li className="feature-credits-row">{body}</li>;
-    if (unavailable) return <li className="feature-credits-row is-unavailable" aria-disabled="true">{body}</li>;
     return (
         <li>
             <button
@@ -206,7 +201,7 @@ const FeatureCreditsCard: React.FC = () => {
     const totals = useAtomValue(featureCreditTotalsAtom);
     const [activeKey, setActiveKey] = useAtom(activeFeatureTaskAtom);
     const setDismissed = useSetAtom(featureCreditsCardDismissedAtom);
-    const unavailableReason = useAtomValue(featureTaskUnavailableAtom);
+    const isUnavailable = useAtomValue(featureTaskUnavailableAtom);
     const completeCreditsFirstRun = useSetAtom(completeCreditsFirstRunAtom);
     const startTask = useSetAtom(startFeatureTaskAtom);
     const leaveTask = useSetAtom(leaveFeatureTaskAtom);
@@ -264,6 +259,10 @@ const FeatureCreditsCard: React.FC = () => {
         );
     }
 
+    // Tasks that cannot start yet stay out of the list; a line says how many.
+    const listed = entries.filter((entry) => entry.task.completed_at || !isUnavailable(entry.definition));
+    const locked = entries.length - listed.length;
+
     // What each open task earns, when they all earn the same.
     const openAmounts = new Set(entries.filter((entry) => !entry.task.completed_at).map((entry) => entry.task.credits));
     const perTask = openAmounts.size === 1 ? [...openAmounts][0] : null;
@@ -277,10 +276,8 @@ const FeatureCreditsCard: React.FC = () => {
                 <IconButton icon={CancelIcon} variant="ghost-secondary" ariaLabel="Dismiss" onClick={dismiss} />
             </div>
             <p className="feature-credits-text">
-                {perTask !== null
-                    ? `Choose a task below. Each earns ${perTask} credits the first time you send it.`
-                    : "Choose a task below. You'll earn credits the first time you send it."}
-                {' '}Most messages cost 1 credit.{' '}
+                {perTask !== null ? `Each task earns ${perTask} credits.` : 'Each task earns credits.'}
+                {' '}Most messages cost 1.{' '}
                 <a
                     href={CREDITS_DOCS_URL}
                     className="feature-credits-link"
@@ -293,15 +290,15 @@ const FeatureCreditsCard: React.FC = () => {
                 </a>
             </p>
             <ul className="feature-credits-list">
-                {entries.map((entry) => (
-                    <TaskRow
-                        key={entry.definition.key}
-                        entry={entry}
-                        onStart={onStart}
-                        unavailableReason={unavailableReason(entry.definition)}
-                    />
+                {listed.map((entry) => (
+                    <TaskRow key={entry.definition.key} entry={entry} onStart={onStart} />
                 ))}
             </ul>
+            {locked > 0 && (
+                <p className="feature-credits-text font-color-secondary">
+                    {locked === 1 ? '1 more task unlocks' : `${locked} more tasks unlock`} once your library has {SMALL_LIBRARY_THRESHOLD} items.
+                </p>
+            )}
         </section>
     );
 };

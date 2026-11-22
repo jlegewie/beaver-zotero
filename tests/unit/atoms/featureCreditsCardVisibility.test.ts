@@ -78,26 +78,26 @@ describe('featureTaskUnavailableAtom', () => {
     const reasons = (count: number | null) => {
         const store = createStore();
         store.set(libraryItemCountAtom, count);
-        const reason = store.get(featureTaskUnavailableAtom);
+        const isUnavailable = store.get(featureTaskUnavailableAtom);
         return Object.fromEntries(
             ['annotate', 'start_project', 'research_table', 'literature_review', 'organize']
-                .map((key) => [key, reason(getFeatureCreditTask(key)!)]),
+                .map((key) => [key, isUnavailable(getFeatureCreditTask(key)!)]),
         );
     };
 
     it('holds the tasks that work on papers in the library in a small library', () => {
         expect(reasons(3)).toEqual({
-            annotate: 'Needs 10 or more items in your library',
-            start_project: null,
-            research_table: 'Needs 10 or more items in your library',
-            literature_review: null,
-            organize: 'Needs 10 or more items in your library',
+            annotate: true,
+            start_project: false,
+            research_table: true,
+            literature_review: false,
+            organize: true,
         });
     });
 
     it('lets every task start in a library of a useful size, or before it is counted', () => {
         for (const count of [10, null]) {
-            expect(Object.values(reasons(count)).every((reason) => reason === null)).toBe(true);
+            expect(Object.values(reasons(count)).every((unavailable) => !unavailable)).toBe(true);
         }
     });
 });

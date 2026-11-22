@@ -101,15 +101,15 @@ export const featureCreditsCardVisibleAtom = atom((get) => {
 });
 
 /**
- * Why a task cannot start yet, or null when it can. The one rule: a task that
- * works on papers in the library (`needsPapers`) waits until the library has
- * `SMALL_LIBRARY_THRESHOLD` items.
+ * Whether a task cannot start yet. The one rule: a task that works on papers in
+ * the library (`needsPapers`) waits until the library has
+ * `SMALL_LIBRARY_THRESHOLD` items. Unavailable tasks are left out of the task
+ * list, which says how many unlock.
  */
 export const featureTaskUnavailableAtom = atom((get) => {
     const count = get(libraryItemCountAtom);
     const small = count !== null && count < SMALL_LIBRARY_THRESHOLD;
-    return (definition: Pick<FeatureTaskDefinition, 'needsPapers'>): string | null =>
-        small && definition.needsPapers ? `Needs ${SMALL_LIBRARY_THRESHOLD} or more items in your library` : null;
+    return (definition: Pick<FeatureTaskDefinition, 'needsPapers'>): boolean => small && !!definition.needsPapers;
 });
 
 /** Switch the chat input to the Beaver model, as the setup card's link does. */

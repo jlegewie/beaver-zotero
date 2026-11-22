@@ -45,7 +45,7 @@ vi.mock('../../../../react/atoms/featureCredits', async () => {
     return {
         featureCreditEntriesAtom: atom(() => mocks.featureTasks?.map((task) => ({ task, definition: { key: task.key } })) ?? null),
         featureTaskUnavailableAtom: atom(() => (definition: { key: string }) =>
-            (mocks.unavailableTasks.includes(definition.key) ? 'Needs papers' : null)),
+            mocks.unavailableTasks.includes(definition.key)),
     };
 });
 vi.mock('../../../../react/hooks/useStartFeatureTaskInNewChat', () => ({
