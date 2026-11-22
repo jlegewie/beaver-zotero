@@ -2291,6 +2291,17 @@
     z-index: 4;
 }
 
+/* A header that can be dragged to reorder shows the open hand, its badges
+ * included; its menu button keeps its own cursor. */
+.beaver-root .rt-th[data-column-drag],
+.beaver-root .rt-th[data-column-drag] .rt-badge {
+    cursor: grab;
+}
+
+.beaver-root .rt-th[data-column-drag] .rt-column-menu {
+    cursor: default;
+}
+
 /* Reordering a question column by dragging its header: the column being
  * dragged is tinted, header and cells, and a line marks where it would land. */
 .beaver-root .rt-grid[data-column-dragging],
