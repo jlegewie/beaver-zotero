@@ -102,6 +102,7 @@ export interface FeatureTaskDefinition {
         /**
          * A starter action of the user's own, offered instead of the docs
          * link: clicking saves it as a custom action and opens it for editing.
+         * The tip runs on into its label, which ends the sentence.
          */
         customAction?: {
             label: string;
@@ -121,9 +122,9 @@ export const FEATURE_CREDIT_TASKS: FeatureTaskDefinition[] = [
         attach: 'pdf',
         examples: [],
         completion: {
-            tip: 'Annotate the same way every time: create a reusable prompt with your colors and what to highlight.',
+            tip: 'To color-code another PDF, open it and type /color-code. For your own colors and categories,',
             customAction: {
-                label: 'Create my annotation action',
+                label: 'create a custom action',
                 template: {
                     title: 'My annotations',
                     description: 'Highlight a paper the way I like it.',
