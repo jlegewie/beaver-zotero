@@ -281,6 +281,12 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
                 getHost().components?.pendingActionsReview({ runs: chainRuns }) ?? null
             )}
 
+            {/* A client's card for the finished answer (a reward it earned),
+                after what the answer did. */}
+            {showRunOutcomes && (
+                getHost().components?.runEndCard?.({ runs: chainRuns }) ?? null
+            )}
+
             {/* Suggestions (only for the last run, rendered below footer) */}
             {showSuggestions && (
                 <div className="px-4">

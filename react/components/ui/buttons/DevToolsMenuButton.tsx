@@ -25,8 +25,7 @@ import { threadService } from '@beaver/agent-core/transport/threadService';
 import { libraryRefForLibraryID } from '../../../../src/utils/libraryIdentity';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { zoteroContextAtom } from '../../../atoms/zoteroContext';
-import { firstRunReturnRequestedAtom } from '../../../atoms/firstRun';
-import { whereToStartVisibleAtom } from '../../../atoms/whereToStart';
+import { firstRunPreviewAtom } from '../../../atoms/firstRun';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { clearDocumentCache } from '../../../../src/services/backgroundProcessing/resetLocalState';
 
@@ -47,8 +46,7 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
 }) => {
     const zoteroContext = useAtomValue(zoteroContextAtom);
     const [isResettingCache, setIsResettingCache] = useState(false);
-    const setFirstRunReturnRequested = useSetAtom(firstRunReturnRequestedAtom);
-    const setWhereToStartVisible = useSetAtom(whereToStartVisibleAtom);
+    const setFirstRunPreview = useSetAtom(firstRunPreviewAtom);
 
     // Log Zotero context state
     const handleLogZoteroContext = () => {
@@ -710,14 +708,12 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
         }
     };
 
-    // Show the first-run suggestions page via the routing atom
-    const handleShowFirstRunPage = () => {
-        setFirstRunReturnRequested(true);
+    // Preview either first-run page, whichever the account was assigned
+    const handleShowFeatureCreditsFirstRunPage = () => {
+        setFirstRunPreview('feature_credits');
     };
-
-    // Show the "Where should we start?" action launcher
     const handleShowWhereToStartPage = () => {
-        setWhereToStartVisible(true);
+        setFirstRunPreview('where_to_start');
     };
 
     // Create menu items for dev testing functions
@@ -735,8 +731,8 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
             disabled: false,
         },
         {
-            label: "Show First Run Page",
-            onClick: handleShowFirstRunPage,
+            label: "Show 'Earn credits' First Run Page",
+            onClick: handleShowFeatureCreditsFirstRunPage,
             icon: SearchIcon,
             disabled: false,
         },

@@ -320,6 +320,22 @@ export class DocumentCache {
     }
 
     /**
+     * Whether a document's cached text was prepared by OCR: its PDF is a scan
+     * with no text layer of its own, so nothing in it can be highlighted.
+     * False for a document that is not cached.
+     */
+    async hasOcrText(ref: DocumentRef): Promise<boolean> {
+        try {
+            const record = await this.db.getDocumentCacheMetadataByKey(ref.libraryId, ref.zoteroKey);
+            if (!record || record.contentKind !== 'pdf') return false;
+            return (await this.db.getDocumentCachePayloadsForMetadata(record.id)).some(p => p.extractionSource === 'ocr');
+        } catch (error) {
+            logger(`DocumentCache.hasOcrText error: ${error}`, 1);
+            return false;
+        }
+    }
+
+    /**
      * Describe a retained OCR preparation of the current source that can no
      * longer be served because a metadata, payload or extraction version moved
      * on. Its bytes stay on disk until a compatible OCR preparation replaces

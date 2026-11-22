@@ -36,8 +36,11 @@ export type VersionUpdateAction =
     /** Open Beaver with an action's /command in the chat input, bound to the
      *  current selection like the home launcher. `requiresPlusTools`: the
      *  feature runs only with Plus Tools (Beaver model, or own model with Plus
-     *  Tools on), so the card says what is missing instead. */
-    | { type: 'stage-action'; label: string; actionId: string; requiresPlusTools?: boolean };
+     *  Tools on), so the card says what is missing instead. `featureTask`:
+     *  the feature-credit task (`react/constants/featureCreditTasks.ts`) that
+     *  teaches the action; while the account can still earn it, the button
+     *  opens its setup card instead. */
+    | { type: 'stage-action'; label: string; actionId: string; requiresPlusTools?: boolean; featureTask?: string };
 
 /**
  * Example prompt shown as a chat bubble in the feature tour
@@ -659,7 +662,7 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
         title: "Extract data from every paper. Compare them side by side",
         text: "Introducing research tables in Zotero. Beaver reads each paper, fills in every answer and links it to the page it came from. Export the table to Excel or CSV.",
         showcase: 'research-table',
-        primaryAction: { type: 'stage-action', label: 'Try it', actionId: 'builtin-research-table', requiresPlusTools: true },
+        primaryAction: { type: 'stage-action', label: 'Try it', actionId: 'builtin-research-table', requiresPlusTools: true, featureTask: 'research_table' },
         inPanel: false,
         learnMoreUrl: "https://www.beaverapp.ai/docs/research-tables",
         learnMoreLabel: "Learn more",

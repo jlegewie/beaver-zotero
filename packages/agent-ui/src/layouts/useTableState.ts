@@ -46,11 +46,6 @@ export interface TableState {
     toggleSelectFilter(columnId: string, label: string): void;
     /** Toggle a boolean column's `equals` filter; passing the active value clears it. */
     toggleBooleanFilter(columnId: string, value: boolean): void;
-    /**
-     * Toggle a column's `empty` filter: rows without a value (`true`) or with
-     * one (`false`). Passing the active choice clears it.
-     */
-    toggleEmptyFilter(columnId: string, empty: boolean): void;
     /** True when anything narrows the view — what the Filter control lights up on. */
     hasFilters: boolean;
 
@@ -240,19 +235,6 @@ export function useTableState(
         [],
     );
 
-    const toggleEmptyFilter = useCallback(
-        (columnId: string, empty: boolean) => {
-            setFilters((current) => {
-                const existing = current.find((f) => f.column_id === columnId);
-                const rest = current.filter((f) => f.column_id !== columnId);
-                if (existing?.kind === "empty" && existing.empty === empty)
-                    return rest;
-                return [...rest, { column_id: columnId, kind: "empty", empty }];
-            });
-        },
-        [],
-    );
-
     // Kept while the terms are the same (a trailing space, a changed case),
     // so the rows and every highlighting cell stay as they are. A term never
     // holds a newline: the search box is one line.
@@ -328,7 +310,6 @@ export function useTableState(
         clearFilters,
         toggleSelectFilter,
         toggleBooleanFilter,
-        toggleEmptyFilter,
         hasFilters: filters.length > 0 || terms.length > 0,
         rows,
         hiddenColumns,

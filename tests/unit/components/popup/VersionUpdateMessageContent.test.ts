@@ -18,6 +18,8 @@ const mocks = vi.hoisted(() => ({
     runAction: vi.fn(),
     setPref: vi.fn(),
     openPreferences: vi.fn(),
+    startFeatureTask: vi.fn(async () => {}),
+    featureTasks: null as { key: string; completed_at: string | null }[] | null,
     surfaceWindow: { name: 'surface' },
 }));
 vi.mock('../../../../react/atoms/chatAccess', async () => {
@@ -36,6 +38,15 @@ vi.mock('../../../../react/atoms/actions', async () => {
     const { atom } = await import('jotai');
     return { actionsAtom: atom(() => [{ id: 'builtin-research-table', text: 'Create a table' }]) };
 });
+vi.mock('../../../../react/atoms/featureCredits', async () => {
+    const { atom } = await import('jotai');
+    return {
+        featureCreditEntriesAtom: atom(() => mocks.featureTasks?.map((task) => ({ task, definition: { key: task.key } })) ?? null),
+    };
+});
+vi.mock('../../../../react/hooks/useStartFeatureTaskInNewChat', () => ({
+    useStartFeatureTaskInNewChat: () => mocks.startFeatureTask,
+}));
 vi.mock('../../../../react/atoms/ui', async () => {
     const { atom } = await import('jotai');
     return { requestPlusToolsAtom: atom(false) };
@@ -87,6 +98,7 @@ beforeEach(() => {
     mocks.usesBeaverModel = true;
     mocks.plusToolsPref = false;
     mocks.credits = 10;
+    mocks.featureTasks = null;
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
     (globalThis as any).Zotero = { launchURL: vi.fn() };
 });
@@ -153,6 +165,28 @@ describe('VersionUpdateMessageContent', () => {
         expect(mocks.openPreferences).toHaveBeenCalledWith('billing');
         expect(mocks.runAction).not.toHaveBeenCalled();
         expect(eventManager.dispatch).not.toHaveBeenCalled();
+    });
+
+    const taughtAction = { ...tableAction, featureTask: 'research_table' };
+
+    it('starts the feature-credit task on a new chat while the account can earn it, even without credits', () => {
+        mocks.credits = 0;
+        mocks.featureTasks = [{ key: 'research_table', completed_at: null }];
+        render({ primaryAction: taughtAction }, true);
+        expect(container.textContent).not.toContain('you have none left');
+        clickButton('Try it for free');
+        expect(mocks.dismiss).toHaveBeenCalledOnce();
+        expect(mocks.startFeatureTask).toHaveBeenCalledWith('research_table');
+        expect(mocks.runAction).not.toHaveBeenCalled();
+        expect(mocks.openPreferences).not.toHaveBeenCalled();
+    });
+
+    it('keeps the usual button once the task is earned', () => {
+        mocks.featureTasks = [{ key: 'research_table', completed_at: '2026-11-01T00:00:00Z' }];
+        render({ primaryAction: taughtAction }, true);
+        clickButton('Try it');
+        expect(mocks.runAction).toHaveBeenCalledOnce();
+        expect(mocks.startFeatureTask).not.toHaveBeenCalled();
     });
 
     it('asks a signed-out user to sign in, opening Beaver without staging', () => {

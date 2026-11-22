@@ -286,11 +286,21 @@ export class AccountService extends ApiService {
     }
 
     /**
+     * Records that the account was shown the feature-credits card. The server
+     * keeps the first time only, so analysis can tell users who saw the card
+     * from those who did not.
+     */
+    async markFeatureCreditsCardSeen(options?: RequestOptions): Promise<void> {
+        await this.post<unknown>('/api/v1/account/feature-credits/card-seen', {}, options);
+    }
+
+    /**
      * Idempotently stamps `first_run_completed_at` on the user's profile.
-     * Called when a Free user clicks a first-run suggestion card or "Skip"
-     * on the FirstRunPage. Backend treats already-stamped as a no-op.
+     * Called when a Free user starts something or skips on a first-run
+     * page. Backend treats already-stamped as a no-op.
      *
-     * @param completionKind 'skip' or a CardKind value
+     * @param completionKind what the user chose, e.g. `where_to_start_tidy_up`
+     *     or `feature_credits_skip`
      */
     async completeFirstRun(completionKind?: string): Promise<{ message: string }> {
         return this.post<{ message: string }>('/api/v1/account/first-run/complete', {

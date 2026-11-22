@@ -12,6 +12,7 @@ import type { AgentRun } from '@beaver/agent-core/agents/types';
 import { CSSItemTypeIcon } from '../../../components/icons/zotero';
 import { ZOTERO_ICONS, ZoteroIcon } from '../../../components/icons/ZoteroIcon';
 import { RequestSourcesMenu } from '../../../components/ui/menus/RequestSourcesMenu';
+import FeatureCreditRunCard from '../../../components/featureCredits/FeatureCreditRunCard';
 
 /**
  * Zotero implementations of the host-provided, client-specific UI components.
@@ -30,6 +31,9 @@ export const zoteroComponents: ComponentsHost = {
     },
     pendingActionsReview(props: { runs: AgentRun[] }) {
         return <AgentActionsReview runs={props.runs} />;
+    },
+    runEndCard(props: { runs: AgentRun[] }) {
+        return <FeatureCreditRunCard runs={props.runs} />;
     },
     itemTypeIcon({ itemType, className }: { itemType: string; className?: string }) {
         // Zotero's item-type glyphs are CSS icons keyed by the item type itself,

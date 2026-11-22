@@ -165,6 +165,15 @@ describe('OpenAlex and trial search labels', () => {
             .toBe('Literature search: "growth mindset" AND intervention (20 of 1234)');
     });
 
+    it('labels a filter-only listing by the author and venue names passed while it runs', () => {
+        const part = toolCall({
+            tool_name: 'openalex_search_by_keywords',
+            args: { authors: ['Legewie', 'A5036443997'], venues: ['American Sociological Review'], min_year: 2016, max_year: 2016 },
+        });
+        expect(getToolCallLabel(part, 'in_progress'))
+            .toBe('Literature search: Works by Legewie, A5036443997 in American Sociological Review, 2016');
+    });
+
     it('labels a filter-only listing by the names the view resolved, and by ids while it runs', () => {
         const part = toolCall({
             tool_name: 'openalex_search_by_keywords',

@@ -39,7 +39,7 @@ export function clearUserScopedPrefs(): void {
     clearPref("skippedItems");
     clearPref("deletionJobs");
 
-    // Per-account caches — regenerated on demand.
+    // Library suggestions an older version cached for the account.
     clearPref("librarySuggestions");
     clearPref("librarySuggestionsGeneratedAt");
 }

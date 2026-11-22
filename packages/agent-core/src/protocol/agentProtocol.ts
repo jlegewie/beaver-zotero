@@ -161,6 +161,18 @@ export interface WSRequestAckEvent extends WSBaseEvent {
      * losing its socket. Only for runs the backend lets outlive their socket.
      */
     reattach_token?: string;
+    /**
+     * Feature credits this request granted (see `BeaverAgentPrompt.feature_task`).
+     * Present only on the request that earned them.
+     */
+    feature_credit?: FeatureCreditGrant;
+}
+
+/** Credits granted for starting a feature-credit task. */
+export interface FeatureCreditGrant {
+    /** The task key, e.g. `annotate`. */
+    key: string;
+    credits: number;
 }
 
 /** Part event for streaming content (text, thinking, tool calls) */
@@ -3597,6 +3609,8 @@ export interface WSRequestAckData {
     modelId: string | null;
     modelName: string | null;
     chargeType: ChargeType;
+    /** Feature credits this request granted; absent otherwise. */
+    featureCredit?: FeatureCreditGrant;
 }
 
 /** A run lost its socket and is waiting on the server to be reattached. */

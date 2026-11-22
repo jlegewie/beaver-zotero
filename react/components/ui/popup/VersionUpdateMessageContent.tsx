@@ -1,8 +1,10 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { plusToolsAccessAtom } from '../../../atoms/chatAccess';
 import { openQuickPromptAtom } from '../../../atoms/quickPrompt';
 import { actionsAtom } from '../../../atoms/actions';
+import { featureCreditEntriesAtom } from '../../../atoms/featureCredits';
+import { useStartFeatureTaskInNewChat } from '../../../hooks/useStartFeatureTaskInNewChat';
 import { requestPlusToolsAtom } from '../../../atoms/ui';
 import { useActionRunner } from '../../../hooks/useActionRunner';
 import { useSurfaceWindow } from '../../../runtime/SurfaceWindowContext';
@@ -150,7 +152,13 @@ const FloatingVersionCard: React.FC<{
     onDismiss: () => void;
 }> = ({ version, title, text, subtitle, features, footer, learnMoreUrl, learnMoreLabel, Showcase, alsoNew, primaryAction, onDismiss }) => {
     const access = useAtomValue(plusToolsAccessAtom);
-    const action = resolveVersionUpdateAction(primaryAction, access);
+    const featureCreditEntries = useAtomValue(featureCreditEntriesAtom);
+    const earnableFeatureTasks = useMemo(
+        () => new Set((featureCreditEntries ?? []).filter(({ task }) => !task.completed_at).map(({ task }) => task.key)),
+        [featureCreditEntries],
+    );
+    const action = resolveVersionUpdateAction(primaryAction, access, earnableFeatureTasks);
+    const startFeatureTask = useStartFeatureTaskInNewChat();
     const openQuickPrompt = useSetAtom(openQuickPromptAtom);
     const actions = useAtomValue(actionsAtom);
     const setRequestPlusTools = useSetAtom(requestPlusToolsAtom);
@@ -168,6 +176,9 @@ const FloatingVersionCard: React.FC<{
                 return;
             case 'get-credits':
                 openPreferencesWindow('billing');
+                return;
+            case 'feature-task':
+                void startFeatureTask(action.key);
                 return;
             case 'stage-action': {
                 if (action.enablePlusTools) {

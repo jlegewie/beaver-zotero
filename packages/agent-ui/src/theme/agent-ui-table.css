@@ -728,8 +728,9 @@
     white-space: nowrap;
 }
 
-/* The column the view is sorted by: a quiet arrow after its name. */
-.beaver-root .rt-th-sort {
+/* The column the view is sorted or filtered by: a quiet mark after its name. */
+.beaver-root .rt-th-sort,
+.beaver-root .rt-th-filter {
     flex: 0 0 auto;
     display: inline-flex;
     margin-left: -0.15rem;

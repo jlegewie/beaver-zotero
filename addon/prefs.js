@@ -68,6 +68,8 @@ pref("enableResponseCompleteNotifications", true);
 pref("enableRunStatusPopup", true);
 // Separate Beaver window: whether the chat history sidebar is collapsed.
 pref("windowSidebarCollapsed", false);
+// Whether the "Get more out of Beaver" feature-credits card on the home screen was dismissed.
+pref("featureCreditsCardDismissed", false);
 // Width of the sidebar in a main window, in CSS pixels; 0 until it is first shown.
 pref("sidebarWidth", 0);
 
@@ -177,13 +179,6 @@ pref("backgroundProcessingWelcomeDeferred", false);
 // Upgrade flags and pending version notifications
 pref("runEmbeddingFullDiff", false);
 pref("pendingVersionNotifications", "[]");
-
-// Library suggestions cache (JSON-encoded LibrarySuggestionsResponse + ISO timestamp)
-pref("librarySuggestions", "");
-pref("librarySuggestionsGeneratedAt", "");
-
-// Account-scoped first-run assignment map, keyed by Beaver user id.
-pref("firstRunAssignments", "{}");
 
 // Size budget for the local document-extraction cache
 // (profile/beaver/document-cache). When the total compressed payload size

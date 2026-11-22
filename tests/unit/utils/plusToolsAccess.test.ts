@@ -5,6 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { getPlusToolsAccess, type PlusToolsAccessInput } from '../../../react/utils/plusToolsAccess';
 import {
+    FEATURE_TASK_LABEL,
     NO_CREDITS_NOTE,
     PLUS_TOOLS_OFF_NOTE,
     resolveVersionUpdateAction,
@@ -94,6 +95,32 @@ describe('resolveVersionUpdateAction', () => {
         const action: VersionUpdateAction = { type: 'stage-action', label: 'Try it', actionId: 'builtin-x' };
         expect(resolve(action, { credits: 0 }))
             .toEqual({ type: 'stage-action', label: 'Try it', actionId: 'builtin-x', enablePlusTools: false });
+    });
+
+    describe('with a feature-credit task', () => {
+        const taught: VersionUpdateAction = { ...table, featureTask: 'research_table' } as VersionUpdateAction;
+        const earnable = new Set(['research_table']);
+        const resolveWithTask = (overrides: Partial<PlusToolsAccessInput> = {}, tasks: ReadonlySet<string> = earnable) =>
+            resolveVersionUpdateAction(taught, getPlusToolsAccess(input(overrides)), tasks);
+        const setup = { type: 'feature-task', label: FEATURE_TASK_LABEL, key: 'research_table' };
+
+        it('opens the task\'s setup card while the account can earn it, with or without credits or Plus Tools', () => {
+            expect(resolveWithTask()).toEqual(setup);
+            expect(resolveWithTask({ credits: 0 })).toEqual(setup);
+            expect(resolveWithTask({ credits: 0, usesBeaverModel: false })).toEqual(setup);
+            expect(resolveWithTask({ usesBeaverModel: false })).toEqual(setup);
+        });
+
+        it('keeps the usual button once the task is earned, or when the account has no such task', () => {
+            expect(resolveWithTask({}, new Set())).toMatchObject({ type: 'stage-action', label: 'Try it' });
+            expect(resolveWithTask({ credits: 0 }, new Set(['annotate']))).toMatchObject({ type: 'get-credits' });
+            expect(resolve(taught)).toMatchObject({ type: 'stage-action', label: 'Try it' });
+        });
+
+        it('still asks a signed-out user to sign in first', () => {
+            expect(resolveWithTask({ gate: 'signed-out' })).toEqual({ type: 'open-beaver', label: 'Sign in to try' });
+            expect(resolveWithTask({ gate: 'restoring' })).toEqual({ type: 'open-beaver', label: 'Open Beaver' });
+        });
     });
 
     it('keeps URL and plain open actions, and defaults to opening Beaver', () => {

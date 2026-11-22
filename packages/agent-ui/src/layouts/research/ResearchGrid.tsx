@@ -12,7 +12,7 @@ import {
     type TableSpec,
 } from "@beaver/agent-core/layouts/table";
 import { FindHighlight } from "../../chat/highlightText";
-import { ArrowDownIcon, ArrowUpLineIcon, CancelIcon, CopyIcon, EditIcon, Icon, PlusSignIcon, RepeatIcon, TickIcon } from "../../icons";
+import { ArrowDownIcon, ArrowUpLineIcon, CancelIcon, CopyIcon, EditIcon, FilterIcon, Icon, PlusSignIcon, RepeatIcon, TickIcon } from "../../icons";
 import type { MenuItem } from "../../primitives/ContextMenu";
 import MenuButton from "../../primitives/MenuButton";
 import { selectionWithin, useHoverAnchor, useHoverLayer } from "../../primitives/HoverLayer";
@@ -282,6 +282,7 @@ export function ResearchGrid({
                                 column={column}
                                 kind="question"
                                 sort={state.sort}
+                                filtered={state.filters.some((filter) => filter.column_id === column.id)}
                                 badges={badges.get(column.id)!}
                                 menuItems={columnMenuItems}
                                 isAdded={!!addedColumns?.has(column.id)}
@@ -489,13 +490,15 @@ function SelectBox({
 
 /**
  * A column's header: its name, the sort mark when the view is sorted by it,
- * and the column menu's button on hover. A question's header adds its badges
- * and, under the name, its question.
+ * the filter mark while a filter narrows it, and the column menu's button on
+ * hover. A question's header adds its badges and, under the name, its
+ * question.
  */
 function ColumnHeader({
     column,
     kind,
     sort,
+    filtered = false,
     badges,
     menuItems,
     isAdded = false,
@@ -511,6 +514,7 @@ function ColumnHeader({
     draggable?: boolean;
     kind: "paper" | "year" | "question";
     sort: TableSort | undefined;
+    filtered?: boolean;
     badges?: ReturnType<typeof columnBadges>;
     menuItems?(column: Column): MenuItem[];
 }): React.ReactElement {
@@ -544,6 +548,11 @@ function ColumnHeader({
             <div className="rt-th-top">
                 <span className="rt-th-label">{label}</span>
                 {direction ? <SortMark direction={direction} year={kind === "year"} /> : null}
+                {filtered ? (
+                    <span className="rt-th-filter" title="Filtered">
+                        <Icon icon={FilterIcon} size={11} aria-hidden="true" />
+                    </span>
+                ) : null}
                 {badges && badges.staleCells > 0 ? (
                     <Badge
                         className="rt-badge rt-badge-stale"

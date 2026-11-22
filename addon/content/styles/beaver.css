@@ -6568,3 +6568,399 @@
 .beaver-root .tool-header-toggle[aria-expanded="true"] {
     background-color: var(--fill-quinary);
 }
+
+/* Feature credits: the home card ("Get more out of Beaver") and the
+   reward card shown under a run that earned a task. */
+.beaver-root .feature-credits-card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 8px 8px 12px;
+    border: 1px solid var(--beaver-border-subtle);
+    border-radius: var(--beaver-radius-card);
+    background-color: var(--beaver-fill-subtle);
+    font-size: 0.95rem;
+}
+/* On home the card is a tray attached under the chat input its steps fill
+   in: the input's bottom corners square off and the tray continues its
+   border, the way docked bars attach to the input's top edge. Its text lines
+   up with the input's. */
+.beaver-root .feature-credits-dock {
+    display: flex;
+    flex-direction: column;
+}
+.beaver-root .feature-credits-dock.is-docked .user-message-display {
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+}
+.beaver-root .feature-credits-home {
+    gap: 6px;
+    padding: 10px calc(var(--beaver-card-pad-x) - 4px) 10px var(--beaver-card-pad-x);
+    border: 1px solid var(--beaver-border-default);
+    border-top: 0;
+    border-radius: 0 0 var(--beaver-radius-card) var(--beaver-radius-card);
+    background-color: var(--beaver-fill-bar);
+}
+.beaver-root .feature-credits-home .feature-credits-title {
+    font-size: 1rem;
+}
+.beaver-root .feature-credits-home .feature-credits-text {
+    color: var(--fill-secondary);
+}
+.beaver-root .feature-credits-header {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+.beaver-root .feature-credits-title {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--fill-primary);
+}
+/* A setup card's header: one button that goes back to the task list. */
+.beaver-root .feature-credits-back-heading {
+    display: flex;
+    margin: 0;
+    font-size: inherit;
+    font-weight: inherit;
+}
+/* Only as wide as the arrow and title. Padded for the hover background like
+   the task rows; the negative margin keeps the arrow and title where they
+   would sit without it. */
+.beaver-root .feature-credits-back {
+    display: inline-flex;
+    max-width: calc(100% + 12px);
+    margin: -4px -6px;
+    padding: 4px 6px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: background-color 0.2s ease-in-out;
+}
+.beaver-root .feature-credits-back:hover {
+    background-color: var(--beaver-fill-hover);
+}
+/* Sized and colored like the ghost-secondary icon button it replaces. */
+.beaver-root .feature-credits-back-icon {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    /* padding: 2px; */
+    font-size: 0.9rem;
+    color: var(--fill-secondary);
+    transition: color 0.2s ease-in-out;
+}
+.beaver-root .feature-credits-back-icon svg {
+    width: 1em;
+    height: 1em;
+}
+.beaver-root .feature-credits-back:hover .feature-credits-back-icon {
+    color: var(--fill-primary);
+}
+.beaver-root .feature-credits-text {
+    margin: 0;
+    padding-right: 4px;
+    color: var(--fill-primary);
+    line-height: 1.45;
+}
+.beaver-root .feature-credits-list {
+    list-style: none;
+    margin: 0 0 0 -6px;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+}
+.beaver-root .feature-credits-row {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 8px;
+    width: 100%;
+    padding: 5px 6px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    text-align: left;
+    font: inherit;
+    color: inherit;
+}
+.beaver-root .feature-credits-row-button {
+    cursor: pointer;
+}
+.beaver-root .feature-credits-row-button:hover:not(:disabled) {
+    background-color: var(--beaver-fill-hover);
+}
+.beaver-root .feature-credits-row-button:disabled {
+    cursor: default;
+    opacity: 0.6;
+}
+.beaver-root .feature-credits-row-mark {
+    flex: none;
+    margin-top: 2px;
+}
+.beaver-root .feature-credits-row-arrow {
+    flex: none;
+    margin-top: 2px;
+}
+.beaver-root .feature-credits-row-credits {
+    flex: none;
+    color: var(--fill-secondary);
+    font-variant-numeric: tabular-nums;
+}
+.beaver-root .feature-credits-row-text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    line-height: 1.3;
+}
+.beaver-root .feature-credits-row-subtitle {
+    font-size: 0.92em;
+    color: var(--fill-secondary);
+}
+/* Setup card: numbered steps. A step's number turns into a check when it
+   is done; the step to act on next has the accent. */
+.beaver-root .feature-credits-steps {
+    list-style: none;
+    margin: 2px 0 0;
+    padding: 0 4px 0 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+.beaver-root .feature-credits-step {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 8px;
+}
+.beaver-root .feature-credits-step-marker {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    width: 17px;
+    height: 17px;
+    margin-top: 1px;
+    border: 1px solid var(--fill-quarternary);
+    border-radius: 50%;
+    font-size: 0.75rem;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    color: var(--fill-secondary);
+}
+.beaver-root .feature-credits-step-marker.is-active {
+    border-color: var(--accent-blue);
+    color: var(--accent-blue);
+}
+.beaver-root .feature-credits-step-marker.is-done {
+    border-color: transparent;
+    background-color: var(--fill-quinary);
+    color: var(--fill-secondary);
+}
+.beaver-root .feature-credits-step-marker.is-checking {
+    border-color: transparent;
+}
+.beaver-root .feature-credits-step-body {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    line-height: 1.4;
+}
+.beaver-root .feature-credits-step-title {
+    margin: 0;
+    font: inherit;
+    font-weight: 550;
+    color: var(--fill-primary);
+}
+.beaver-root .feature-credits-step-optional {
+    font-weight: 400;
+    color: var(--fill-secondary);
+}
+.beaver-root .feature-credits-step-text {
+    /* color: var(--fill-secondary); */
+    overflow-wrap: anywhere;
+}
+/* The reward, under the steps. */
+.beaver-root .feature-credits-reward {
+    margin: 2px 0 0;
+    padding-right: 4px;
+    color: var(--fill-secondary);
+    line-height: 1.4;
+}
+/* Examples, one per row under the step text: picking one fills and focuses
+   the chat input. */
+.beaver-root .feature-credits-examples {
+    list-style: none;
+    margin: 2px 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+}
+/* Examples read as links: underlined text color, blue on hover. */
+.beaver-root .feature-credits-example {
+    display: block;
+    width: fit-content;
+    max-width: 100%;
+    padding: 2px 0;
+    border: 0;
+    background: transparent;
+    font: inherit;
+    line-height: 1.4;
+    text-align: left;
+    color: var(--fill-primary);
+    text-decoration: underline;
+    text-decoration-color: var(--fill-secondary);
+    text-underline-offset: 2px;
+    cursor: pointer;
+}
+.beaver-root .feature-credits-example::before {
+    content: "\201C";
+}
+.beaver-root .feature-credits-example::after {
+    content: "\201D";
+}
+.beaver-root .feature-credits-example:hover {
+    color: var(--accent-blue);
+    text-decoration-color: var(--accent-blue);
+}
+.beaver-root .feature-credits-example:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: 1px;
+    border-radius: 3px;
+}
+/* Inline links in the text color, blue on hover. */
+.beaver-root .feature-credits-link {
+    color: var(--fill-primary);
+    text-decoration: underline;
+    text-decoration-color: var(--fill-secondary);
+    text-underline-offset: 2px;
+    cursor: pointer;
+}
+.beaver-root .feature-credits-link:hover {
+    color: var(--accent-blue);
+    text-decoration-color: var(--accent-blue);
+}
+.beaver-root .feature-credits-completion {
+    gap: 4px;
+    padding: 6px 6px 8px 10px;
+}
+.beaver-root .feature-credits-completion-title {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    font-size: 1em;
+    font-weight: 600;
+    color: var(--fill-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+/* The note card's export icon, named in the text. */
+.beaver-root .feature-credits-inline-icon {
+    vertical-align: -0.15em;
+}
+/* Lined up with the title, after the mark. */
+.beaver-root .feature-credits-completion-body {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding-left: 20px;
+}
+.beaver-root .feature-credits-next {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    /* Only as wide as the label and arrow, not the whole column. */
+    align-self: flex-start;
+    gap: 6px;
+    margin: -4px -6px;
+    padding: 4px 6px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    font: inherit;
+    color: var(--fill-primary);
+    text-align: left;
+    cursor: pointer;
+}
+.beaver-root .feature-credits-next:hover {
+    background-color: var(--beaver-fill-hover);
+}
+
+/* First-run pages ("Where should we start?" and the feature-credit tasks):
+   a centered heading over one card, with the footer below. */
+.beaver-root .first-run-page {
+    background: var(--material-sidepane);
+}
+.beaver-root .first-run-scroll {
+    padding: 18px 18px 12px;
+}
+.beaver-root .first-run-shell {
+    width: 100%;
+    max-width: 560px;
+    margin: 0 auto;
+}
+.beaver-root .first-run-heading {
+    text-align: center;
+    margin: 4px 0 18px;
+}
+.beaver-root .first-run-title {
+    font-size: 2rem;
+    line-height: 1.08;
+    font-weight: 700;
+    letter-spacing: 0;
+    color: var(--fill-primary);
+    margin-bottom: 10px;
+}
+.beaver-root .first-run-subtitle {
+    font-size: 1.1rem;
+    line-height: 1.35;
+    color: var(--fill-secondary);
+}
+.beaver-root .first-run-card {
+    background: var(--material-sidepane);
+    border: 1px solid var(--fill-quarternary);
+    border-radius: 18px;
+    box-shadow: 0 10px 24px rgba(0,0,0,0.06);
+    padding: 16px;
+}
+.beaver-root .first-run-loader {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.beaver-root .first-run-loader-row {
+    height: 56px;
+    border-radius: 10px;
+    background: var(--fill-quinary);
+    opacity: 0.72;
+}
+@media (max-width: 520px) {
+    .beaver-root .first-run-scroll {
+        padding: 16px 14px 10px;
+    }
+    .beaver-root .first-run-heading {
+        text-align: left;
+        margin-bottom: 14px;
+    }
+    .beaver-root .first-run-title {
+        font-size: 1.75rem;
+    }
+    .beaver-root .first-run-card {
+        padding: 12px;
+    }
+}

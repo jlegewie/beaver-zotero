@@ -756,6 +756,13 @@ export interface ComponentsHost {
      */
     pendingActionsReview(props: { runs: AgentRun[] }): ReactNode;
     /**
+     * Render a card the client shows at the end of a finished answer, below
+     * its review block (a reward the answer earned). Gets the answer's complete
+     * run chain, like {@link pendingActionsReview}. Optional; return null when
+     * there is nothing to show.
+     */
+    runEndCard?(props: { runs: AgentRun[] }): ReactNode;
+    /**
      * Render the icon that stands for a bibliographic item of the given type.
      *
      * `itemType` is the client-agnostic icon name produced by

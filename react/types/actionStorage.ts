@@ -17,6 +17,7 @@ import {
     normalizeStoredAction,
     normalizeStoredOverride,
     generateActionId,
+    stripBuiltinOnlyFields,
 } from '@beaver/agent-core/types/actions';
 import { ALL_BUILTIN_ACTIONS } from './builtinActions';
 import { CustomPrompt, getCustomPromptsFromPreferences } from './settings';
@@ -54,14 +55,11 @@ export const getActionCustomizations = (): ActionCustomizations => {
 export const saveActionCustomizations = (c: ActionCustomizations): void => {
     // Enforce the storage boundary even for callers that bypass the preferences
     // UI: locked built-ins cannot acquire overrides, and custom actions cannot
-    // acquire the code-defined `locked` flag.
+    // acquire the code-defined built-in-only fields (`locked`, `argumentRequired`).
     const overrides = Object.fromEntries(
         Object.entries(c.overrides).filter(([id]) => !isLockedBuiltinAction(id)),
     );
-    const custom = c.custom.map(action => {
-        const { locked: _locked, ...rest } = action;
-        return rest;
-    });
+    const custom = c.custom.map(action => stripBuiltinOnlyFields(action));
     setPref('actions', JSON.stringify({ ...c, overrides, custom }));
 };
 
