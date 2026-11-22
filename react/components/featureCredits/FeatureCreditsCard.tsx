@@ -43,11 +43,11 @@ export const TaskRow: React.FC<{
         <>
             <Icon
                 icon={done ? CheckmarkCircleSolidIcon : (TASK_ICONS[definition.key] ?? CircleIcon)}
-                className={`feature-credits-row-mark scale-11 ${done ? 'font-color-green' : 'font-color-secondary'}`}
+                className={`feature-credits-row-mark scale-12 ${done ? 'font-color-green' : 'font-color-primary'}`}
                 aria-label={done ? 'Done' : undefined}
             />
             <span className="feature-credits-row-text">
-                <span className={done ? 'font-color-secondary' : 'font-color-primary font-medium'}>{definition.title}</span>
+                <span className={done ? 'font-color-secondary text-base' : 'font-color-primary font-medium text-base'}>{definition.title}</span>
                 <span className="feature-credits-row-subtitle">{definition.subtitle}</span>
             </span>
             {/* {!done && <span className="feature-credits-row-credits">+{task.credits}</span>} */}

@@ -6590,16 +6590,17 @@
     flex-direction: column;
 }
 .beaver-root .feature-credits-dock.is-docked .user-message-display {
+    border-bottom-color: var(--beaver-border-strong);
     border-bottom-left-radius: 0;
     border-bottom-right-radius: 0;
 }
 .beaver-root .feature-credits-home {
     gap: 6px;
     padding: 10px calc(var(--beaver-card-pad-x) - 4px) 10px var(--beaver-card-pad-x);
-    border: 1px solid var(--beaver-border-default);
+    border: 0px solid var(--beaver-border-default);
     border-top: 0;
     border-radius: 0 0 var(--beaver-radius-card) var(--beaver-radius-card);
-    background-color: var(--beaver-fill-bar);
+    background-color: var(--beaver-fill-chip);
 }
 .beaver-root .feature-credits-home .feature-credits-title {
     font-size: 1rem;
@@ -6613,6 +6614,7 @@
     align-items: center;
     gap: 6px;
     min-width: 0;
+    margin-right: 4px;
 }
 .beaver-root .feature-credits-title {
     flex: 1;
@@ -6645,6 +6647,7 @@
     text-align: left;
     cursor: pointer;
     transition: background-color 0.2s ease-in-out;
+    margin-bottom: 4px;
 }
 .beaver-root .feature-credits-back:hover {
     background-color: var(--beaver-fill-hover);
@@ -6683,8 +6686,8 @@
 .beaver-root .feature-credits-row {
     display: flex;
     flex-direction: row;
-    align-items: flex-start;
-    gap: 8px;
+    align-items: center;
+    gap: 10px;
     width: 100%;
     padding: 5px 6px;
     border: 0;
@@ -6707,6 +6710,7 @@
 .beaver-root .feature-credits-row-mark {
     flex: none;
     margin-top: 2px;
+    color: var(--fill-secondary);
 }
 .beaver-root .feature-credits-row-arrow {
     flex: none;
@@ -6725,7 +6729,7 @@
     line-height: 1.3;
 }
 .beaver-root .feature-credits-row-subtitle {
-    font-size: 0.92em;
+    font-size: 0.95em;
     color: var(--fill-secondary);
 }
 /* Setup card: numbered steps. A step's number turns into a check when it
