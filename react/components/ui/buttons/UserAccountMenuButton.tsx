@@ -1,12 +1,11 @@
 import React from 'react';
 import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
 import { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
-import { SettingsIcon, UserIcon, LogoutIcon, BugIcon, InformationCircleIcon, IdeaIcon } from '../../icons/icons';
+import { SettingsIcon, UserIcon, LogoutIcon, BugIcon, InformationCircleIcon } from '../../icons/icons';
 import { isErrorReportDialogVisibleAtom } from '../../../atoms/ui';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { updateRequiredAtom, profileWithPlanAtom } from '../../../atoms/profile';
+import { updateRequiredAtom } from '../../../atoms/profile';
 import { logoutAtom, userAtom } from '../../../atoms/auth';
-import { firstRunReturnRequestedAtom, firstRunSuggestionsModeAtom } from '../../../atoms/firstRun';
 import { openPreferencesWindow } from '../../../ui/openPreferencesWindow';
 
 interface UserAccountMenuButtonProps {
@@ -20,18 +19,9 @@ interface UserAccountMenuButtonProps {
  */
 export function useAccountMenuItems(): MenuItem[] {
     const updateRequired = useAtomValue(updateRequiredAtom);
-    const profile = useAtomValue(profileWithPlanAtom);
     const setErrorReportDialogVisible = useSetAtom(isErrorReportDialogVisibleAtom);
     const logout = useSetAtom(logoutAtom);
     const user = useAtomValue(userAtom);
-    const setFirstRunReturnRequested = useSetAtom(firstRunReturnRequestedAtom);
-    const setFirstRunSuggestionsMode = useSetAtom(firstRunSuggestionsModeAtom);
-    const hasCompletedFirstRun = !!profile?.first_run_completed_at;
-
-    const handleShowIdeas = () => {
-        setFirstRunSuggestionsMode(true);
-        setFirstRunReturnRequested(true);
-    };
 
     // Settings is hidden when an update is required.
     return [
@@ -47,12 +37,6 @@ export function useAccountMenuItems(): MenuItem[] {
             icon: UserIcon,
             disabled: false,
         },
-        ...(!updateRequired && hasCompletedFirstRun ? [{
-            label: "Get ideas",
-            onClick: handleShowIdeas,
-            icon: IdeaIcon,
-            disabled: false,
-        }] : []),
         {
             label: "Get Help",
             onClick: () => Zotero.launchURL(`${process.env.WEBAPP_BASE_URL}/docs/getting-started`),

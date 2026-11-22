@@ -6671,8 +6671,12 @@
 .beaver-root .feature-credits-row-button {
     cursor: pointer;
 }
-.beaver-root .feature-credits-row-button:hover {
+.beaver-root .feature-credits-row-button:hover:not(:disabled) {
     background-color: var(--beaver-fill-hover);
+}
+.beaver-root .feature-credits-row-button:disabled {
+    cursor: default;
+    opacity: 0.6;
 }
 .beaver-root .feature-credits-row-mark {
     flex: none;
@@ -6869,4 +6873,68 @@
 }
 .beaver-root .feature-credits-next:hover {
     background-color: var(--beaver-fill-hover);
+}
+
+/* First-run pages ("Where should we start?" and the feature-credit tasks):
+   a centered heading over one card, with the footer below. */
+.beaver-root .first-run-page {
+    background: var(--material-sidepane);
+}
+.beaver-root .first-run-scroll {
+    padding: 18px 18px 12px;
+}
+.beaver-root .first-run-shell {
+    width: 100%;
+    max-width: 560px;
+    margin: 0 auto;
+}
+.beaver-root .first-run-heading {
+    text-align: center;
+    margin: 4px 0 18px;
+}
+.beaver-root .first-run-title {
+    font-size: 2rem;
+    line-height: 1.08;
+    font-weight: 700;
+    letter-spacing: 0;
+    color: var(--fill-primary);
+    margin-bottom: 10px;
+}
+.beaver-root .first-run-subtitle {
+    font-size: 1.1rem;
+    line-height: 1.35;
+    color: var(--fill-secondary);
+}
+.beaver-root .first-run-card {
+    background: var(--material-sidepane);
+    border: 1px solid var(--fill-quarternary);
+    border-radius: 18px;
+    box-shadow: 0 10px 24px rgba(0,0,0,0.06);
+    padding: 16px;
+}
+.beaver-root .first-run-loader {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.beaver-root .first-run-loader-row {
+    height: 56px;
+    border-radius: 10px;
+    background: var(--fill-quinary);
+    opacity: 0.72;
+}
+@media (max-width: 520px) {
+    .beaver-root .first-run-scroll {
+        padding: 16px 14px 10px;
+    }
+    .beaver-root .first-run-heading {
+        text-align: left;
+        margin-bottom: 14px;
+    }
+    .beaver-root .first-run-title {
+        font-size: 1.75rem;
+    }
+    .beaver-root .first-run-card {
+        padding: 12px;
+    }
 }

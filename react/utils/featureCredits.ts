@@ -237,3 +237,13 @@ export function createdHighlights(
         .sort((a, b) => a.page - b.page)
         .map(({ library_id, zotero_key }) => ({ library_id, zotero_key }));
 }
+
+/**
+ * The tasks the first-run page offers: every task in a library of a useful
+ * size, otherwise only those that need no papers.
+ */
+export function firstRunOfferedTasks<T extends {
+    definition: Pick<FeatureTaskDefinition, 'worksWithoutPapers'>;
+}>(entries: T[], libraryReady: boolean): T[] {
+    return libraryReady ? entries : entries.filter(({ definition }) => definition.worksWithoutPapers);
+}

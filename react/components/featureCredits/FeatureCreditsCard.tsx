@@ -32,7 +32,11 @@ const TASK_ICONS: Record<string, React.ComponentType<React.SVGProps<SVGSVGElemen
 };
 
 /** One task in the list: done, or a button that opens its setup card. */
-const TaskRow: React.FC<{ entry: FeatureCreditEntry; onStart: (key: string, win: Window | null) => void }> = ({ entry, onStart }) => {
+export const TaskRow: React.FC<{
+    entry: FeatureCreditEntry;
+    onStart: (key: string, win: Window | null) => void;
+    disabled?: boolean;
+}> = ({ entry, onStart, disabled }) => {
     const { task, definition } = entry;
     const done = !!task.completed_at;
     const body = (
@@ -56,6 +60,7 @@ const TaskRow: React.FC<{ entry: FeatureCreditEntry; onStart: (key: string, win:
             <button
                 type="button"
                 className="feature-credits-row feature-credits-row-button"
+                disabled={disabled}
                 onClick={(event) => onStart(definition.key, event.currentTarget.ownerDocument.defaultView)}
             >
                 {body}

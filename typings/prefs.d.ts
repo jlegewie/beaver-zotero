@@ -87,9 +87,6 @@ declare namespace _ZoteroTypes {
       "backgroundProcessingWelcomeDeferred": boolean;
       "runEmbeddingFullDiff": boolean;
       "pendingVersionNotifications": string;
-      "librarySuggestions": string;
-      "librarySuggestionsGeneratedAt": string;
-      "firstRunAssignments": string;
       "documentCacheMaxBytes": number;
       "maxAttachmentFileSizeMB": number;
       "tables.defaultLibraryID": number;
