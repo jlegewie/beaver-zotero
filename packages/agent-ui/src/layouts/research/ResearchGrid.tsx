@@ -172,7 +172,8 @@ export function ResearchGrid({
     const rootRef = useRef<HTMLDivElement>(null);
     const bodyRef = useRef<HTMLTableSectionElement>(null);
     const dropIndicatorRef = useRef<HTMLDivElement>(null);
-    const columnDrag = useColumnDrag({ rootRef, indicatorRef: dropIndicatorRef, onMove: onMoveColumn });
+    const dragGhostRef = useRef<HTMLDivElement>(null);
+    const columnDrag = useColumnDrag({ rootRef, indicatorRef: dropIndicatorRef, ghostRef: dragGhostRef, onMove: onMoveColumn });
     const questions = useMemo(
         () => columns.questions.filter((column) => !state.hiddenColumns.has(column.id)),
         [columns.questions, state.hiddenColumns],
@@ -358,7 +359,12 @@ export function ResearchGrid({
                 </div>
             ) : null}
             {cellEditor ? <CellEditorLayer rootRef={rootRef} {...cellEditor} /> : null}
-            {onMoveColumn ? <div ref={dropIndicatorRef} className="rt-drop-indicator" aria-hidden="true" /> : null}
+            {onMoveColumn ? (
+                <>
+                    <div ref={dropIndicatorRef} className="rt-drop-indicator" aria-hidden="true" />
+                    <div ref={dragGhostRef} className="rt-drag-ghost" aria-hidden="true" />
+                </>
+            ) : null}
         </div>
     );
 }

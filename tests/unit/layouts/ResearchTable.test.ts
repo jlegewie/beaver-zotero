@@ -1563,7 +1563,7 @@ describe('moving columns', () => {
         expect(header('design').hasAttribute('data-column-drag')).toBe(false);
     });
 
-    it('drags a header before another column or past the last one, marking where it lands', () => {
+    it('drags a header before another column or past the last one, showing the header and where it lands', () => {
         const onMoveColumn = vi.fn();
         mount({ editing: { onMoveColumn } });
         drag('amount', 320, false);
@@ -1572,7 +1572,16 @@ describe('moving columns', () => {
         const line = container!.querySelector<HTMLElement>('.rt-drop-indicator')!;
         expect(line.style.display).toBe('block');
         expect(line.style.left).toBe('300px');
+        // A copy of the header follows the mouse, held where it was pressed (50 px in).
+        const ghost = container!.querySelector<HTMLElement>('.rt-drag-ghost')!;
+        expect(ghost.style.display).toBe('block');
+        expect(ghost.style.left).toBe('270px');
+        expect(ghost.querySelector('.rt-th-label')?.textContent).toBe('Amount');
+        expect(ghost.querySelector('.rt-th-question-text')?.textContent).toBe('Transfer size?');
+        expect(ghost.querySelector('.rt-column-menu, button')).toBeNull();
         releaseAt(320);
+        expect(ghost.style.display).toBe('none');
+        expect(ghost.childElementCount).toBe(0);
         expect(onMoveColumn).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'amount' }), null);
         expect(header('amount').classList.contains('rt-th-dragging')).toBe(false);
         expect(line.style.display).toBe('none');

@@ -14,8 +14,9 @@ const HEADER_SELECTOR = "th[data-column-drag]";
 
 /**
  * Reordering question columns by dragging their headers. A press on a header
- * becomes a drag once the mouse moves; a line in the grid then marks where
- * the column would land, and a release over the grid moves it there.
+ * becomes a drag once the mouse moves: a faint copy of the header follows
+ * the mouse along the header row, a line in the grid marks where the column
+ * would land, and a release over the grid moves it there.
  * Released elsewhere, or with Escape, the column stays.
  * Near the grid's left or right edge the grid scrolls sideways.
  *
@@ -24,17 +25,19 @@ const HEADER_SELECTOR = "th[data-column-drag]";
  *
  * `rootRef` is the grid, whose parent scrolls; its headers that may be
  * dragged carry `data-column-drag` and `data-column-id`, and the header row
- * takes the press handler. The line is drawn
- * imperatively in `indicatorRef`, so a drag re-renders the grid only when it
- * starts and ends.
+ * takes the press handler. The line (`indicatorRef`) and the header's copy
+ * (`ghostRef`, empty elements the grid renders) are drawn imperatively, so a
+ * drag re-renders the grid only when it starts and ends.
  */
 export function useColumnDrag({
     rootRef,
     indicatorRef,
+    ghostRef,
     onMove,
 }: {
     rootRef: React.RefObject<HTMLElement>;
     indicatorRef: React.RefObject<HTMLElement>;
+    ghostRef: React.RefObject<HTMLElement>;
     /** Absent, no header can be dragged. */
     onMove?: (columnId: string, drop: ColumnDrop) => void;
 }): {
@@ -58,9 +61,10 @@ export function useColumnDrag({
     const onHeadMouseDown = (event: React.MouseEvent<HTMLElement>) => {
         const root = rootRef.current;
         const target = event.target as Element | null;
-        const columnId = (target?.closest?.(HEADER_SELECTOR) as HTMLElement | null)?.dataset.columnId;
+        const header = target?.closest?.(HEADER_SELECTOR) as HTMLElement | null;
+        const columnId = header?.dataset.columnId;
         // The header's menu button keeps its own clicks.
-        if (event.button !== 0 || !root || !columnId || stopRef.current || target?.closest("button, [role='menu'], .rt-column-menu")) return;
+        if (event.button !== 0 || !root || !header || !columnId || stopRef.current || target?.closest("button, [role='menu'], .rt-column-menu")) return;
         // No text selection starts from the header.
         event.preventDefault();
         const doc = root.ownerDocument;
@@ -72,6 +76,8 @@ export function useColumnDrag({
         let lastY = start.y;
         let drop: ColumnDrop | null = null;
         let frame: number | null = null;
+        // Where in the header the press was, which the copy keeps under the mouse.
+        const grab = event.clientX - header.getBoundingClientRect().left;
 
         // Where the questions start in view: past a pinned Paper column,
         // which they scroll under, else the grid's own left edge.
@@ -82,9 +88,19 @@ export function useColumnDrag({
 
         const headers = (): HTMLElement[] => Array.from(root.querySelectorAll<HTMLElement>(HEADER_SELECTOR) as ArrayLike<HTMLElement>);
 
+        // The header's copy, in the header row under the mouse.
+        const moveGhost = () => {
+            const ghost = ghostRef.current;
+            if (!ghost) return;
+            const origin = root.getBoundingClientRect();
+            ghost.style.left = `${lastX - grab - origin.left}px`;
+            ghost.style.top = `${header.getBoundingClientRect().top - origin.top}px`;
+        };
+
         // The gap the mouse is nearest, as a drop; null outside the grid and
         // where the column would not move (either side of itself).
         const place = () => {
+            moveGhost();
             const indicator = indicatorRef.current;
             const view = (scroller ?? root).getBoundingClientRect();
             if (lastX < view.left || lastX > view.right || lastY < view.top || lastY > view.bottom) {
@@ -138,6 +154,19 @@ export function useColumnDrag({
                 if (Math.abs(move.clientX - start.x) < DRAG_THRESHOLD_PX && Math.abs(move.clientY - start.y) < DRAG_THRESHOLD_PX) return;
                 started = true;
                 setDragging(columnId);
+                const ghost = ghostRef.current;
+                if (ghost) {
+                    // The header's name, badges and question; not its menu button.
+                    ghost.replaceChildren(
+                        ...Array.from(header.children as ArrayLike<Element>)
+                            .filter((child) => !child.classList.contains("rt-column-menu"))
+                            .map((child) => child.cloneNode(true)),
+                    );
+                    const size = header.getBoundingClientRect();
+                    ghost.style.width = `${size.width}px`;
+                    ghost.style.height = `${size.height}px`;
+                    ghost.style.display = "block";
+                }
             }
             move.preventDefault();
             place();
@@ -151,6 +180,10 @@ export function useColumnDrag({
             if (frame != null) win?.cancelAnimationFrame(frame);
             frame = null;
             if (indicatorRef.current) indicatorRef.current.style.display = "none";
+            if (ghostRef.current) {
+                ghostRef.current.style.display = "none";
+                ghostRef.current.replaceChildren();
+            }
             stopRef.current = null;
             if (started) setDragging(null);
         };

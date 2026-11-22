@@ -2305,6 +2305,23 @@
     background-color: color-mix(in srgb, var(--accent-blue) 8%, transparent);
 }
 
+/* The dragged header's copy, following the mouse along the header row. */
+.beaver-root .rt-drag-ghost {
+    display: none;
+    position: absolute;
+    z-index: 6;
+    box-sizing: border-box;
+    padding: 0.75rem 0.9rem;
+    overflow: hidden;
+    pointer-events: none;
+    background:
+        linear-gradient(color-mix(in srgb, var(--accent-blue) 10%, transparent), color-mix(in srgb, var(--accent-blue) 10%, transparent)),
+        var(--material-background);
+    border: 1px solid color-mix(in srgb, var(--accent-blue) 45%, transparent);
+    border-radius: 6px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+}
+
 .beaver-root .rt-drop-indicator {
     display: none;
     position: absolute;
