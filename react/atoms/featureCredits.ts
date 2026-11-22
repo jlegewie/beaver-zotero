@@ -8,7 +8,7 @@
 import { atom } from 'jotai';
 import type { FeatureCreditTask } from '@beaver/agent-core/types/profile';
 import type { CollectionReference } from '@beaver/agent-core/types/zotero';
-import { profileWithPlanAtom } from './profile';
+import { allLibrariesExcludedAtom, profileWithPlanAtom } from './profile';
 import { beaverDefaultModelAtom, isUsingBeaverCreditsAtom, updateSelectedModelAtom } from './models';
 import { preferencesRevisionAtom } from './preferences';
 import { getPref, setPref } from '../../src/utils/prefs';
@@ -103,6 +103,17 @@ export const featureCreditsCardVisibleAtom = atom((get) => {
     if (get(featureCreditsCardDismissedAtom)) return false;
     const entries = get(featureCreditEntriesAtom);
     return !!entries?.some(({ task }) => !task.completed_at);
+});
+
+/**
+ * The feature-credit tasks for the first-run page, or null when there are none
+ * to offer (the feature is off or the user is held out, every library is
+ * excluded, or every task is done), so first run shows the launcher instead.
+ */
+export const firstRunFeatureTasksAtom = atom<FeatureCreditEntry[] | null>((get) => {
+    const entries = get(featureCreditEntriesAtom);
+    if (!entries || get(allLibrariesExcludedAtom)) return null;
+    return entries.some(({ task }) => !task.completed_at) ? entries : null;
 });
 
 /** Switch the chat input to the Beaver model, as the setup card's link does. */

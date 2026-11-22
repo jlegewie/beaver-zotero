@@ -28,7 +28,7 @@ import BatchProgressPanel from './BatchProgressPanel';
 import HighTokenUsageWarningBar from './HighTokenUsageWarningBar';
 import NextStepsPanel from '../pages/firstRun/NextStepsPanel';
 import RunContinueDisplay from '../agentRuns/RunContinueDisplay';
-import BackToSuggestions, { FirstRunBackTarget } from '../pages/firstRun/BackToSuggestions';
+import BackToSuggestions from '../pages/firstRun/BackToSuggestions';
 import { continuationOfferAtom, hasWhereToStartRunAtom, lastRunSummaryAtom, threadRunIdsAtom } from '@beaver/agent-core/run-state/atoms';
 import { runningChatJobsAtom, stopChatJobsAtom } from '../../atoms/jobCalls';
 import { PromptOrigin, isRunFinished } from '@beaver/agent-core/agents/types';
@@ -272,26 +272,26 @@ const InputArea: React.FC<InputAreaProps> = ({
         ? streamingDoneRunIds.has(continuation.runId)
         : false;
 
-    // Guided next steps surface after a suggestion-card run or a "Where should
-    // we start?" launcher run — both carry the context NextStepsPanel needs.
-    // Not while that run waits on its cards: it has not finished yet.
+    // Guided next steps surface after a "Where should we start?" launcher run,
+    // which carries the context NextStepsPanel needs. Not while that run waits
+    // on its cards: it has not finished yet.
     const lastRunOriginKind = lastRun?.origin?.kind;
     const canShowNextSteps = Boolean(
         lastRun &&
-        (lastRunOriginKind === 'first_run_card' || lastRunOriginKind === 'where_to_start') &&
+        lastRunOriginKind === 'where_to_start' &&
         isRunFinished(lastRun) &&
         !isParked &&
         !nextStepsDismissedRunIds.has(lastRun.id)
     );
+    // After a launcher follow-up, the way back to the launcher.
     const canShowBackToSuggestions = Boolean(
         lastRun &&
         lastRunOriginKind === 'first_run_followup' &&
+        hasWhereToStartRun &&
         isRunFinished(lastRun) &&
         !isParked &&
         !nextStepsDismissedRunIds.has(lastRun.id)
     );
-    // The follow-up run's origin
-    const firstRunBackTarget: FirstRunBackTarget = hasWhereToStartRun ? 'launcher' : 'suggestions';
 
     // Counted labels, so the destructive verdict states its blast radius where
     // the decision is actually taken rather than only in the bar above.
@@ -699,19 +699,18 @@ const InputArea: React.FC<InputAreaProps> = ({
             )}
 
             {/* First-run "Next steps" panel — shown after a run that originated
-                from a first-run suggestion card. Auto-dismisses on type. */}
+                from the launcher. Auto-dismisses on type. */}
             {composerBand === 'next-steps' && lastRun && (
                 <NextStepsPanel
-                    origin={lastRun.origin as Extract<PromptOrigin, { kind: 'first_run_card' | 'where_to_start' }>}
+                    origin={lastRun.origin as Extract<PromptOrigin, { kind: 'where_to_start' }>}
                     onDismiss={handleDismissNextSteps}
                 />
             )}
 
-            {/* After a first-run follow-up run, offer a path back to the
-                originating surface (suggestion grid or launcher). */}
+            {/* After a launcher follow-up run, offer a path back to the launcher. */}
             {composerBand === 'back-to-suggestions' && (
                 <div className="composer-docked-bar next-steps-panel px-3 py-2">
-                    <BackToSuggestions onDismiss={handleDismissNextSteps} backTarget={firstRunBackTarget} />
+                    <BackToSuggestions onDismiss={handleDismissNextSteps} />
                 </div>
             )}
 

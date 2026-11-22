@@ -11,7 +11,7 @@ import { isFirstRunVisibleAtom } from './firstRun';
  * One-time citation tip: shown once the thread holds an external or
  * page-locator citation. A persistent pref ensures it fires at most once.
  *
- * Suppressed without setting the pref while: (1) FirstRunPage is visible, or
+ * Suppressed without setting the pref while: (1) a first-run page is visible, or
  * (2) the active thread is a first-run thread (any run carries a first-run
  * origin — `first_run_card` or `first_run_followup`). Avoids overlapping the
  * citation popup with the NextStepsPanel / BackToSuggestions panels.

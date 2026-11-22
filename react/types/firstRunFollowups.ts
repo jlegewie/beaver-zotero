@@ -14,25 +14,8 @@ export interface FirstRunFollowup {
     promptWithTopic?: string;
 }
 
-/**
- * Curated follow-ups for the empty-library discovery flow.
- */
-export const EMPTY_LIBRARY_DISCOVER_FOLLOWUPS: FirstRunFollowup[] = [
-    {
-        id: 'save_top_to_collection',
-        title: 'Save the top results to a new collection',
-        prompt: 'Create a new Zotero collection for this research and save the top results into it. Pick a clear, descriptive name for the collection.',
-    },
-    {
-        id: 'synthesis_note',
-        title: 'Create a summary note with key findings',
-        prompt: 'Write a Zotero note that summarizes the key findings, methods, and open questions across the top results above. Group related papers together, use short section headings, and cite each paper referenced. Save the note to my library.',
-    },
-];
-
 // ---------------------------------------------------------------------------
-// Shared follow-ups reused across the suggestion-card and "Where should we
-// start?" surfaces. Kept as named constants so both records stay in sync.
+// Follow-ups shared by several launcher actions.
 // ---------------------------------------------------------------------------
 const RELATED_IN_LIBRARY: FirstRunFollowup = {
     id: 'related_in_library',
@@ -57,58 +40,6 @@ const COMPARE_TO_LIBRARY: FirstRunFollowup = {
     title: 'Compare these to research in my library',
     prompt: 'For the top results above, briefly compare how each relates to or extends the work already in my library on this topic.',
     promptWithTopic: 'For the top results above, briefly compare how each relates to or extends the work already in my library on {topic}.',
-};
-
-export const FIRST_RUN_FOLLOWUPS: Record<CardKind, FirstRunFollowup[]> = {
-    reading_assistant: [
-        {
-            id: 'skim_with_highlights',
-            title: 'Skim this paper with highlights',
-            prompt: 'Help me skim this paper. Use highlight annotations to mark the key passages I should read to get the gist: the central argument and contribution, data and methods, main findings, and key conclusions. Aim for 6-10 short highlights in the main body of the paper. Be selective: together they should be the shortest path to understanding what the paper says.',
-        },
-        RELATED_IN_LIBRARY,
-        FIND_RELATED_ONLINE,
-    ],
-    skim_paper: [
-        {
-            id: 'save_summary_note',
-            title: 'Save this summary as a note',
-            prompt: 'Slightly extend the summary above and save it as a Zotero note attached to this paper.',
-        },
-        RELATED_IN_LIBRARY,
-    ],
-    literature_review: [
-        {
-            id: 'discover_external',
-            title: 'Find new research on this topic',
-            titleWithTopic: 'Find new research on {topic}',
-            prompt: 'Use external search to find recent papers on this topic that go beyond what I already have in my library. Briefly summarize and cite the most relevant papers including how they extend work in my library. Prefer the last 5 years and highly-cited work. If external search is not available, tell me I can switch to the Beaver model or enable Plus Tools in settings rather than reporting on my library alone.',
-        },
-        {
-            id: 'create_collection', // only if the lit review is NOT collection based!!!
-            title: 'Organize items on this topic into a collection',
-            titleWithTopic: 'Organize papers on {topic} into a collection',
-            prompt: "Create a new collection for research on this topic. Move papers cited in the synthesis into the collection along with the synthesis note.",
-        },
-    ],
-    discover_research: [
-        SAVE_TOP_TO_COLLECTION,
-        COMPARE_TO_LIBRARY,
-    ],
-    organize_library: [
-        // {
-        //     id: 'next_batch',
-        //     title: 'Continue with the next batch',
-        //     prompt: 'Continue sorting the next 30 unfiled papers using the same approach.',
-        // },
-    ],
-    organize_tags: [
-        {
-            id: 'approve_plan',
-            title: 'Looks good, apply the plan',
-            prompt: 'Looks good. Apply the plan as proposed.',
-        },
-    ],
 };
 
 /**
@@ -166,57 +97,29 @@ export const WHERE_TO_START_FOLLOWUPS: Record<string, FirstRunFollowup[]> = {
     ],
 };
 
-function fillTemplate(
-    text: string,
-    topic?: string | null,
-    collection?: string | null,
-): string {
+function fillTemplate(text: string, topic?: string | null): string {
     return text
         .replace(/\{topic\}/g, topic ?? '')
-        .replace(/\{collection\}/g, collection ?? '')
         .replace(/\s{2,}/g, ' ')
         .trim();
 }
 
-export function renderFollowupTemplate(
-    text: string,
-    topic?: string | null,
-    collection?: string | null,
-): string {
-    return fillTemplate(text, topic, collection);
-}
-
 /**
- * Picks the topic-anchored variant when `topic` is non-empty (the lit-review
- * and discover-research cards always populate `topic_label`), otherwise falls
+ * Picks the topic-anchored variant when `topic` is non-empty, otherwise falls
  * back to the base copy. Returns the rendered title and prompt together so
  * call sites don't have to repeat the variant-selection logic.
  */
 export function renderFollowup(
     fu: FirstRunFollowup,
     topic?: string | null,
-    collection?: string | null,
 ): { title: string; prompt: string } {
     const hasTopic = !!topic && topic.trim().length > 0;
     const titleSource = hasTopic && fu.titleWithTopic ? fu.titleWithTopic : fu.title;
     const promptSource = hasTopic && fu.promptWithTopic ? fu.promptWithTopic : fu.prompt;
     return {
-        title: fillTemplate(titleSource, topic, collection),
-        prompt: fillTemplate(promptSource, topic, collection),
+        title: fillTemplate(titleSource, topic),
+        prompt: fillTemplate(promptSource, topic),
     };
-}
-
-/**
- * Resolve the follow-up list for a given run. Empty-library runs get the
- * curated bootstrapping list regardless of `card_kind`; everything else
- * falls back to the per-card-kind list.
- */
-export function getFollowupsForCardKind(
-    cardKind: CardKind,
-    emptyLibrary: boolean,
-): FirstRunFollowup[] {
-    if (emptyLibrary) return EMPTY_LIBRARY_DISCOVER_FOLLOWUPS;
-    return FIRST_RUN_FOLLOWUPS[cardKind] ?? [];
 }
 
 /**
@@ -230,8 +133,8 @@ export function getFollowupsForWhereToStart(actionId: string): FirstRunFollowup[
 /**
  * Representative card kind per launcher action, kept client-side (not sent on
  * the where_to_start run origin). Used only to tag the `first_run_followup` run
- * a launcher follow-up spawns, so follow-up analytics align with the first-run
- * card kinds. Follow-up selection itself is keyed by action id, not this.
+ * a launcher follow-up spawns, which the run origin requires. Follow-up
+ * selection itself is keyed by action id, not this.
  */
 const WHERE_TO_START_CARD_KIND: Record<string, CardKind> = {
     'builtin-start-project': 'literature_review',

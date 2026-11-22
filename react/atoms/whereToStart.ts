@@ -8,8 +8,9 @@ import { SignalItem } from '@beaver/agent-core/types/librarySuggestions';
 import { getActiveItems, getRecentItems, toSignalItem } from '../../src/utils/librarySignals';
 import { libraryItemCountAtom, SMALL_LIBRARY_THRESHOLD } from './zoteroContext';
 import { currentReaderAttachmentAtom, currentMessageItemsAtom } from './messageComposition';
+import { searchableLibraryIdsAtom } from './profile';
 import { actionsAtom, markActionUsedAtom } from './actions';
-import { markFirstRunCompleteAtom, firstRunReturnRequestedAtom } from './firstRun';
+import { markFirstRunCompleteAtom, firstRunPreviewAtom } from './firstRun';
 import { newThreadAtom } from './threads';
 import { sendWSMessageAtom } from './agentRunAtoms';
 import { isWebSearchAllowedAtom, isWebSearchEnabledAtom } from './ui';
@@ -70,8 +71,8 @@ export interface StartOption {
 }
 
 // Session visibility flag for showing the launcher outside the first-run gate:
-// reopened via "Back to starting points" after a launcher follow-up, or from
-// the Dev Tools menu. Cleared when a run launches or the launcher is skipped.
+// reopened via "Back to starting points" after a launcher follow-up. Cleared
+// when a run launches or the launcher is skipped.
 export const whereToStartVisibleAtom = atom<boolean>(false);
 
 // null = not yet computed.
@@ -96,14 +97,16 @@ function labelFromSignal(s: SignalItem): string {
  *   1. currently open in the reader
  *   2. most recently read (with an agent-supported attachment)
  *   3. most recently added (with an agent-supported attachment)
- * Returns the parent regular item + a short label, or null when nothing fits.
+ * Only from libraries Beaver can access: 2 and 3 look in the user library, or
+ * the first accessible library when it is excluded. Returns the parent regular
+ * item + a short label, or null when nothing fits.
  */
 async function pickColorCodeTarget(
     readerAttachment: Zotero.Item | null,
-    libraryID: number,
+    searchableLibraryIds: number[],
 ): Promise<{ item: Zotero.Item; label: string } | null> {
     // 1. Currently open reader attachment → its parent regular item.
-    if (readerAttachment) {
+    if (readerAttachment && searchableLibraryIds.includes(readerAttachment.libraryID)) {
         const parent = readerAttachment.parentItem;
         if (parent && parent.isRegularItem()) {
             await Zotero.Items.loadDataTypes([parent], ['itemData', 'creators', 'childItems']);
@@ -111,6 +114,10 @@ async function pickColorCodeTarget(
             return { item: parent, label: labelFromSignal(sig) };
         }
     }
+
+    const userLibraryID = Zotero.Libraries.userLibraryID;
+    const libraryID = searchableLibraryIds.includes(userLibraryID) ? userLibraryID : searchableLibraryIds[0];
+    if (libraryID === undefined) return null;
 
     // 2. Most recently read with a supported attachment.
     const active = await getActiveItems(libraryID);
@@ -161,7 +168,6 @@ export const loadWhereToStartOptionsAtom = atom(null, async (get, set) => {
     try {
         const actions = get(actionsAtom);
         const byId = new Map(actions.map((a) => [a.id, a]));
-        const libraryID = Zotero.Libraries.userLibraryID;
         const count = get(libraryItemCountAtom);
         const isEmpty = count !== null && count < SMALL_LIBRARY_THRESHOLD;
 
@@ -176,7 +182,7 @@ export const loadWhereToStartOptionsAtom = atom(null, async (get, set) => {
         } else {
             // 2. Color-code the best available paper — or Discover if none fits.
             const readerAttachment = get(currentReaderAttachmentAtom);
-            const target = await pickColorCodeTarget(readerAttachment, libraryID);
+            const target = await pickColorCodeTarget(readerAttachment, get(searchableLibraryIdsAtom));
             if (target) {
                 const action = byId.get(COLOR_CODE);
                 options.push({
@@ -293,6 +299,13 @@ export const startSelectedOptionAtom = atom(null, async (get, set) => {
             enableWebSearchForLaunch(get, set);
         }
 
+        // The paper was picked when the options loaded; its library may have
+        // been excluded since. The page reloads the options on that change.
+        if (option.attachmentItem && !get(searchableLibraryIdsAtom).includes(option.attachmentItem.libraryID)) {
+            logger('whereToStart: target paper is in an excluded library', 1);
+            return;
+        }
+
         // Mark completion before creating chat state so failures keep the launcher open.
         await set(markFirstRunCompleteAtom, COMPLETION_KIND[option.actionId] ?? 'where_to_start');
 
@@ -315,7 +328,7 @@ export const startSelectedOptionAtom = atom(null, async (get, set) => {
         set(markActionUsedAtom, action.id);
 
         const runId = uuidv4();
-        set(firstRunReturnRequestedAtom, false);
+        set(firstRunPreviewAtom, null);
 
         await set(sendWSMessageAtom, ensurePromptActionTokens(topic, [promptAction]), {
             runIdOverride: runId,
@@ -346,6 +359,7 @@ export const startSelectedOptionAtom = atom(null, async (get, set) => {
 export const skipWhereToStartAtom = atom(null, async (_get, set) => {
     try {
         await set(markFirstRunCompleteAtom, SKIP_COMPLETION_KIND);
+        set(firstRunPreviewAtom, null);
         set(whereToStartVisibleAtom, false);
         resetSelectionState(set);
     } catch (e) {

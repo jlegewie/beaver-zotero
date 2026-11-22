@@ -66,6 +66,11 @@ export interface FeatureTaskDefinition {
     attach: 'pdf' | 'none';
     /** The task does not run on the user's own API key. */
     requiresBeaverModel?: boolean;
+    /**
+     * The task needs no papers in the library: first run offers only these
+     * when the library is below the small-library threshold.
+     */
+    worksWithoutPapers?: boolean;
     prompt: FeatureTaskPrompt;
     examples: FeatureTaskExample[];
     /** Added after the reward line under the steps. */
@@ -137,6 +142,7 @@ export const FEATURE_CREDIT_TASKS: FeatureTaskDefinition[] = [
         subtitle: 'A collection of your papers, plus new ones Beaver finds',
         actionId: 'builtin-start-project',
         attach: 'none',
+        worksWithoutPapers: true,
         prompt: {
             heading: 'What is the project about?',
             hint: 'Type a topic or research question, or send as is and Beaver suggests topics from your library.',

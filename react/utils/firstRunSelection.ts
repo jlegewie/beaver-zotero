@@ -1,65 +1,33 @@
-import { getPref, setPref } from '../../src/utils/prefs';
-import { logger } from '@beaver/agent-core/platform/logger';
+/** The two first-run pages new accounts are split between. */
+export type FirstRunVariant = 'feature_credits' | 'where_to_start';
 
-export type FirstRunSelectionVariant = 'first_run' | 'where_to_start';
+/**
+ * Salt for the split. Changing it reassigns every account, so a new
+ * experiment gets a new salt.
+ */
+const SPLIT_SALT = 'first_run_v2';
 
-const VARIANTS: readonly FirstRunSelectionVariant[] = [
-    'first_run',
-    'where_to_start',
-];
-
-type AssignmentMap = Record<string, FirstRunSelectionVariant>;
-
-function isVariant(value: unknown): value is FirstRunSelectionVariant {
-    return VARIANTS.includes(value as FirstRunSelectionVariant);
-}
-
-function readAssignments(): AssignmentMap {
-    const raw = getPref('firstRunAssignments');
-    if (!raw) return {};
-
-    try {
-        const parsed = JSON.parse(raw);
-        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-            return {};
-        }
-
-        const assignments: AssignmentMap = {};
-        for (const [userId, variant] of Object.entries(parsed)) {
-            if (typeof userId === 'string' && isVariant(variant)) {
-                assignments[userId] = variant;
-            }
-        }
-        return assignments;
-    } catch (e) {
-        logger(`FirstRunSelection: failed to read assignments: ${e}`, 1);
-        return {};
+/** 32-bit FNV-1a over the UTF-16 code units of `text`. */
+function fnv1a32(text: string): number {
+    let hash = 0x811c9dc5;
+    for (let i = 0; i < text.length; i++) {
+        hash ^= text.charCodeAt(i);
+        hash = Math.imul(hash, 0x01000193) >>> 0;
     }
-}
-
-function writeAssignments(assignments: AssignmentMap): void {
-    try {
-        setPref('firstRunAssignments', JSON.stringify(assignments));
-    } catch (e) {
-        logger(`FirstRunSelection: failed to persist assignment: ${e}`, 1);
-    }
+    return hash;
 }
 
 /**
- * Return the sticky first-run surface for a Beaver account, assigning it on
- * first use. The assignment is account-scoped within this Zotero profile so
- * reloads and window reopenings do not flip the user's onboarding surface.
+ * The first-run page for an account: half see the feature-credit tasks, half
+ * "Where should we start?".
+ *
+ * The split is a pure function of the user id, the same on every device and
+ * recomputable in analysis: FNV-1a (32 bit) of `first_run_v2:<user id>` with
+ * the id as a lowercase UUID string, modulo 100, below 50 for the credit
+ * tasks. It is independent of the server's feature-credit holdout.
  */
-export function getFirstRunSelectionVariant(userId: string): FirstRunSelectionVariant {
-    const assignments = readAssignments();
-    const existing = assignments[userId];
-    if (existing) return existing;
-
-    const assigned: FirstRunSelectionVariant = Math.random() < 0.5
-        ? 'first_run'
+export function getFirstRunVariant(userId: string): FirstRunVariant {
+    return fnv1a32(`${SPLIT_SALT}:${userId.toLowerCase()}`) % 100 < 50
+        ? 'feature_credits'
         : 'where_to_start';
-    assignments[userId] = assigned;
-    writeAssignments(assignments);
-    logger(`FirstRunSelection: assigned ${assigned} to user ${userId}`);
-    return assigned;
 }
