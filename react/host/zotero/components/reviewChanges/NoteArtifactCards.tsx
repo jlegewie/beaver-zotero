@@ -11,9 +11,9 @@ import { NoteIcon } from '../../../../components/icons/icons';
 import { UNRESOLVED_LIBRARY_ID } from '@beaver/agent-core/identity/libraryRef';
 import { openSource } from '../../../../utils/sourceUtils';
 import { resolveLibraryRef } from '../../../../../src/utils/libraryIdentity';
-import { exportWithFeedback, fileExportFormatMenuItems } from '../../../../utils/fileExportFeedback';
-import { addPopupMessageAtom } from '../../../../utils/popupMessageUtils';
-import { exportNoteToFile, openExportedFile, revealExportedFile } from '../../fileExport';
+import { fileExportFormatMenuItems } from '../../../../utils/fileExportFeedback';
+import { useFileExport } from '../../../../hooks/useFileExport';
+import { exportNoteToFile } from '../../fileExport';
 import { applyAgentActionsAtom, inFlightAgentActionIdsAtom, rejectAgentActionsAtom } from '../../agentActionExecution';
 import { getExportNoteTarget, type NoteEditSummary, type OpenNoteTarget, type ReviewRow } from '../reviewChangeRows';
 import { countPendingNoteEdits } from './useRunActionRows';
@@ -27,21 +27,8 @@ function openNote(note: OpenNoteTarget): Promise<void> {
 
 /** A note card's Export: the note as it is now, in the format picked, with the usual feedback. */
 function useNoteExport(exportFile: (format: FileExportFormat) => Promise<FileExportResult>) {
-    const [exporting, setExporting] = useState(false);
-    const addPopupMessage = useSetAtom(addPopupMessageAtom);
-    const handleExport = useCallback(async (format: FileExportFormat) => {
-        if (exporting) return;
-        setExporting(true);
-        try {
-            await exportWithFeedback(format, () => exportFile(format), addPopupMessage, {
-                reveal: revealExportedFile,
-                open: openExportedFile,
-            });
-        } finally {
-            setExporting(false);
-        }
-    }, [exporting, exportFile, addPopupMessage]);
-    return { exporting, items: fileExportFormatMenuItems((format) => void handleExport(format)) };
+    const { exporting, run } = useFileExport();
+    return { exporting, items: fileExportFormatMenuItems((format) => void run(format, () => exportFile(format))) };
 }
 
 /**

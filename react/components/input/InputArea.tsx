@@ -2,11 +2,11 @@ import { threadReadOnlyAtom } from '../../runtime/threadProjection';
 import { RECONNECT_HELD_CAPTION, RECONNECT_UNAVAILABLE_TOOLTIP } from '@beaver/agent-core/transport/connectionFailure';
 import { useRunReconnectShown } from '../../hooks/useVisibleReconnect';
 import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
-import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { StopIcon, GlobalSearchIcon, ArrowUpLineIcon } from '../icons/icons';
 import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai';
 import { newThreadAtom, currentThreadIdAtom } from '../../atoms/threads';
-import { currentMessageContentAtom, currentMessagePillsAtom, pendingPillInsertsAtom, composerResetTokenAtom, pendingAttachmentTokensAtom, clearComposerAtom } from '../../atoms/messageComposition';
+import { currentMessageContentAtom, currentMessagePillsAtom, pendingPillInsertsAtom, composerResetTokenAtom, pendingAttachmentTokensAtom, clearComposerAtom, composerSourceSearchTextAtom } from '../../atoms/messageComposition';
 import { sendWSMessageAtom, isWSChatPendingAtom, answerPendingApprovalsAtom, setRunPermissionModeAtom, approvalVerdictInFlightAtom, beginApprovalVerdictAtom, releaseApprovalVerdictAtom, streamingDoneRunIdsAtom, isRunReconnectingAtom, stoppingPreviousRunAtom } from '../../atoms/agentRunAtoms';
 import { pendingApprovalsAtom, agentActionsByRunAtom } from '../../agents/agentActions';
 import { isCoveredByFullAccess, runApprovalPolicyAtom } from '../../atoms/runApprovalPolicy';
@@ -45,6 +45,7 @@ import { useComposerPasteHandlers } from '../../hooks/useComposerPasteHandlers';
 import { useActionPopupResolver } from '../../hooks/useActionPopupResolver';
 import { useStopRun } from '../../hooks/useStopRun';
 import { sendComposedMessageAtom } from '../../atoms/actions';
+import { composerSendBlockAtom } from '../../atoms/featureCredits';
 import { dismissActiveEditNotePreview } from '../../host/zotero/editNotePreviewLifecycle';
 
 const HIGH_INPUT_TOKEN_WARNING_THRESHOLD = 100_000;
@@ -96,8 +97,13 @@ const InputArea: React.FC<InputAreaProps> = ({
     // dequeued (see the claim effect below).
     const pendingPillInsert = useAtomValue(pendingPillInsertsAtom)[0] ?? null;
     const composerResetToken = useAtomValue(composerResetTokenAtom);
+    // Send is held, and its tooltip says what is missing, while a feature
+    // task's setup card has a required step open or a /command pill's action
+    // needs text after it that the message lacks.
+    const sendBlock = useAtomValue(composerSendBlockAtom);
     const store = useStore();
     const webSearchDescriptionId = useId();
+    const requirementHintId = useId();
 
     // Turns a paste carrying files or image bytes into message attachments.
     const pasteHandlers = useComposerPasteHandlers();
@@ -360,6 +366,16 @@ const InputArea: React.FC<InputAreaProps> = ({
         menuRef: addSourcesMenuRef,
     });
 
+    // Publish the `@query` the menu is searching from, so readers of the
+    // message text (the feature-credit setup steps) can leave it out. A layout
+    // effect, so the setup card never paints the query as an instruction.
+    const setSourceSearchText = useSetAtom(composerSourceSearchTextAtom);
+    const sourceSearchText = isAddSourcesMenuOpen && addSourcesQuerySource === 'editor' ? `@${addSourcesSearchQuery}` : null;
+    useLayoutEffect(() => {
+        setSourceSearchText(sourceSearchText);
+    }, [sourceSearchText, setSourceSearchText]);
+    useEffect(() => () => setSourceSearchText(null), [setSourceSearchText]);
+
     useEffect(() => {
         if (isPending && getPref('focusResponseForScreenReaders')) {
             return;
@@ -410,7 +426,21 @@ const InputArea: React.FC<InputAreaProps> = ({
             // Another editor may have claimed this pill already.
             if (queue[0] !== pendingPillInsert) return;
             store.set(pendingPillInsertsAtom, queue.slice(1));
-            editorHandleRef.current?.insertSlashCommand(descriptor, null);
+            const editor = editorHandleRef.current;
+            if (!editor) return;
+            const { argumentText, selectText, replaceActionIds } = pendingPillInsert;
+            // Pills this one takes the place of go first, every one of them,
+            // with their text.
+            for (const actionId of replaceActionIds ?? []) editor.removeCommandsWithArguments(actionId);
+            // Staged with text for after the command (an example the user
+            // picked): reuse a pill of the same action rather than adding a
+            // second one, and replace whatever follows it.
+            if (argumentText !== undefined && editor.setCommandArgument(descriptor.actionId, argumentText, selectText)) return;
+            editor.insertSlashCommand(descriptor, null);
+            if (argumentText !== undefined) {
+                editor.setCommandArgument(descriptor.actionId, argumentText, selectText);
+                return;
+            }
             focusEditor();
         };
         const ownWindow = inputRef.current?.ownerDocument.defaultView ?? null;
@@ -523,6 +553,9 @@ const InputArea: React.FC<InputAreaProps> = ({
         // state before it (see flushPendingText).
         const message = editorHandleRef.current?.flushPendingText() ?? composedMessage;
         if (isPending || message.length === 0) return;
+        // Read from the store, not the render: the flush above may have just
+        // published the text that satisfies the requirement.
+        if (store.get(composerSendBlockAtom)) return;
         // If the message contains /command pills, resolve each back to its
         // action's prompt (and attach its items/collection) before sending.
         const pills = editorHandleRef.current?.getSlashCommands() ?? [];
@@ -828,6 +861,11 @@ const InputArea: React.FC<InputAreaProps> = ({
                     <span id={webSearchDescriptionId} className="sr-only">
                         {webSearchDescription}
                     </span>
+                    {sendBlock && (
+                        <span id={requirementHintId} className="sr-only">
+                            {sendBlock.hint}
+                        </span>
+                    )}
                     {!showVerdictButtons && (
                     <Tooltip
                         key={String(isWebSearchAllowed)}
@@ -911,14 +949,22 @@ const InputArea: React.FC<InputAreaProps> = ({
                             />
                         </Tooltip>
                     ) : (
-                        <IconButton
-                            icon={ArrowUpLineIcon}
-                            variant="solid"
-                            className="composer-send"
-                            ariaLabel="Send message"
-                            onClick={handleSubmit}
-                            disabled={threadReadOnly || messageContent.length === 0 || !selectedModel || isSlashMenuOpen || isAttachingFiles}
-                        />
+                        <Tooltip
+                            content={sendBlock?.hint ?? ''}
+                            disabled={!sendBlock}
+                            showArrow
+                            singleLine
+                        >
+                            <IconButton
+                                icon={ArrowUpLineIcon}
+                                variant="solid"
+                                className="composer-send"
+                                ariaLabel="Send message"
+                                ariaDescribedBy={sendBlock ? requirementHintId : undefined}
+                                onClick={handleSubmit}
+                                disabled={threadReadOnly || messageContent.length === 0 || !selectedModel || isSlashMenuOpen || isAttachingFiles || sendBlock !== null}
+                            />
+                        </Tooltip>
                     )}
                 </div>
 

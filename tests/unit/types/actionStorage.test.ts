@@ -398,4 +398,72 @@ describe('actionStorage', () => {
         expect(review.text).toBe('My own review prompt');
         expect(getActionCommand(review)).toBe('literature-review');
     });
+
+    // ── Required arguments (built-in-only, like `locked`) ───────────────
+
+    it('keeps argumentRequired on a built-in through field overrides', () => {
+        const annotate = BUILTIN_ACTIONS.find(a => a.id === 'builtin-annotate')!;
+        saveActionCustomizations({
+            version: 1,
+            overrides: { [annotate.id]: { title: 'Highlight', text: 'My own prompt', targets: ['attachment'] } },
+            custom: [],
+        });
+        const merged = getMergedActions().find(a => a.id === annotate.id)!;
+        expect(merged.title).toBe('Highlight');
+        expect(merged.argumentRequired).toBe(true);
+        expect(merged.argumentRequiredHint).toBe(annotate.argumentRequiredHint);
+    });
+
+    it('ignores argumentRequired smuggled into a stored override', () => {
+        const annotate = BUILTIN_ACTIONS.find(a => a.id === 'builtin-annotate')!;
+        Prefs.set('extensions.zotero.beaver.actions', JSON.stringify({
+            version: 1,
+            overrides: { [annotate.id]: { argumentRequired: false } },
+            custom: [],
+        }));
+        expect(getMergedActions().find(a => a.id === annotate.id)?.argumentRequired).toBe(true);
+    });
+
+    it('strips argumentRequired from custom actions, read and written', () => {
+        const custom = {
+            id: 'custom-required',
+            title: 'Custom action',
+            text: 'Do the thing',
+            targets: ['global'],
+            argumentRequired: true,
+            argumentRequiredHint: 'Say what',
+        };
+        Prefs.set('extensions.zotero.beaver.actions', JSON.stringify({ version: 1, overrides: {}, custom: [custom] }));
+        const read = getMergedActions().find(a => a.id === 'custom-required')!;
+        expect(read.argumentRequired).toBeUndefined();
+        expect(read.argumentRequiredHint).toBeUndefined();
+
+        saveActionCustomizations({ version: 1, overrides: {}, custom: [custom as any] });
+        const stored = JSON.parse(prefStore.get('extensions.zotero.beaver.actions') as string);
+        expect(stored.custom[0].argumentRequired).toBeUndefined();
+        expect(stored.custom[0].argumentRequiredHint).toBeUndefined();
+    });
+});
+
+describe('built-in action catalog', () => {
+    const byId = (id: string) => BUILTIN_ACTIONS.find(a => a.id === id);
+
+    it('gives every built-in action its own id', () => {
+        const ids = BUILTIN_ACTIONS.map(a => a.id);
+        expect(new Set(ids).size).toBe(ids.length);
+    });
+
+    it('keeps /table optional-argument so it can run on an attached collection or items', () => {
+        const table = byId('builtin-research-table')!;
+        expect(getActionCommand(table)).toBe('table');
+        expect(table.targets).toEqual(expect.arrayContaining(['collection', 'items', 'global']));
+        expect(table.argumentRequired).toBeUndefined();
+    });
+
+    it('requires an argument for /annotate only', () => {
+        const required = BUILTIN_ACTIONS.filter(a => a.argumentRequired).map(a => a.id);
+        expect(required).toEqual(['builtin-annotate']);
+        expect(byId('builtin-annotate')!.argumentRequiredHint).toBeTruthy();
+        expect(byId('builtin-annotate')!.argumentHint).toBeTruthy();
+    });
 });
