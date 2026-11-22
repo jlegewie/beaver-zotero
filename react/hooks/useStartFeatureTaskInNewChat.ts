@@ -5,10 +5,10 @@ import { newThreadAtom } from '../atoms/threads';
 import { eventManager } from '../events/eventManager';
 
 /**
- * Starts a feature-credit task from outside the chat (Plan & Usage, a release
- * note): opens this window's chat on a new thread, whose home screen shows the
- * task's setup card, and stages its action there. Does nothing when the user
- * cancels leaving the current chat.
+ * Starts a feature-credit task from outside the chat (a release note): opens
+ * this window's chat on a new thread, whose home screen shows the task's setup
+ * card, and stages its action there. Does nothing when the user cancels
+ * leaving the current chat.
  */
 export function useStartFeatureTaskInNewChat(): (key: string) => Promise<void> {
     const startTask = useSetAtom(startFeatureTaskAtom);

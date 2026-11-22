@@ -5,6 +5,7 @@ import { ArrowLeftIcon, ArrowRightIcon, CancelIcon, CheckmarkCircleSolidIcon, Ci
 import {
     featureCreditEntriesAtom,
     featureCreditsCardDismissedAtom,
+    featureCreditsCardRequestedAtom,
     featureCreditTotalsAtom,
     featureTaskAttachedPapersAtom,
     featureTaskSetupStepsAtom,
@@ -203,6 +204,7 @@ const FeatureCreditsCard: React.FC<{
     const totals = useAtomValue(featureCreditTotalsAtom);
     const [activeKey, setActiveKey] = useAtom(activeFeatureTaskAtom);
     const setDismissed = useSetAtom(featureCreditsCardDismissedAtom);
+    const requested = useAtomValue(featureCreditsCardRequestedAtom);
     const startTask = useSetAtom(startFeatureTaskAtom);
     const leaveTask = useSetAtom(leaveFeatureTaskAtom);
     const pills = useAtomValue(currentMessagePillsAtom);
@@ -256,8 +258,9 @@ const FeatureCreditsCard: React.FC<{
     }, [activeKey, activeEntry, setActiveKey]);
 
     const showSetup = !!(activeEntry && activeDefinition && !activeEntry.task.completed_at);
-    // A setup someone asked for (Next, Plan & Usage) shows whatever the library size.
-    const shown = !!entries && (showSetup || libraryReady === true);
+    // A setup someone started (Next, a release note) and a list asked for in
+    // Plan & Usage show whatever the library size.
+    const shown = !!entries && (showSetup || requested || libraryReady === true);
     useEffect(() => {
         if (shown) Zotero.Beaver?.account?.markFeatureCreditsCardSeen();
     }, [shown]);

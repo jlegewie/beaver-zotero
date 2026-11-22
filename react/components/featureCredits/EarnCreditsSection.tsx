@@ -1,66 +1,54 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { useAtomValue } from 'jotai';
 import Button from '@beaver/agent-ui/primitives/Button';
 import { SectionLabel, SettingsGroup, SettingsRow } from '../preferences/components/SettingsElements';
-import { CheckmarkCircleSolidIcon, Icon } from '../icons/icons';
 import { featureCreditEntriesAtom, featureCreditTotalsAtom } from '../../atoms/featureCredits';
-import { useStartFeatureTaskInNewChat } from '../../hooks/useStartFeatureTaskInNewChat';
+import { allLibrariesExcludedAtom } from '../../atoms/profile';
+import { useShowFeatureCreditsCard } from '../../hooks/useShowFeatureCreditsCard';
 
 /**
- * "Earn credits" in Plan & Usage: the feature-credit tasks, with what each
- * has earned. Not dismissible; gone once every task is done.
+ * "Earn credits" in Plan & Usage: progress on the feature-credit tasks and a
+ * button that shows them on the chat's home screen. Gone once every task is
+ * done.
  */
 const EarnCreditsSection: React.FC = () => {
     const entries = useAtomValue(featureCreditEntriesAtom);
     const totals = useAtomValue(featureCreditTotalsAtom);
-    // Preferences shares the chat window's store: the task starts in its chat.
-    const start = useStartFeatureTaskInNewChat();
-    const shown = !!entries && totals.done < totals.count;
+    const allLibrariesExcluded = useAtomValue(allLibrariesExcludedAtom);
+    // Preferences shares the chat window's store: the tasks show in its chat.
+    const showCard = useShowFeatureCreditsCard();
 
-    // Seeing the tasks here counts as seeing the offer.
-    useEffect(() => {
-        if (shown) Zotero.Beaver?.account?.markFeatureCreditsCardSeen();
-    }, [shown]);
+    if (!entries || totals.done >= totals.count) return null;
 
-    if (!entries || !shown) return null;
+    const left = totals.count - totals.done;
+    const progress = totals.earned > 0
+        ? `You've earned ${totals.earned} of ${totals.total} free credits. ${left} ${left === 1 ? 'task' : 'tasks'} left.`
+        : `Try Beaver's skills and earn up to ${totals.total} free credits.`;
 
     return (
         <>
             <SectionLabel>Earn credits</SectionLabel>
             <SettingsGroup>
                 <SettingsRow
-                    title={`${totals.earned} of ${totals.total} earned`}
+                    title="Earn free credits"
                     description={
                         <span className="font-color-secondary">
-                            Start a skill here or from the home screen card. Its credits are added as soon as you send it.
+                            {allLibrariesExcluded
+                                ? 'The tasks need a library Beaver can access.'
+                                : progress}
                         </span>
                     }
+                    control={
+                        <Button
+                            variant="outline"
+                            onClick={() => void showCard()}
+                            disabled={allLibrariesExcluded}
+                            style={{ padding: '4px 6px' }}
+                        >
+                            Show tasks
+                        </Button>
+                    }
                 />
-                {entries.map(({ task, definition }) => (
-                    <SettingsRow
-                        key={definition.key}
-                        hasBorder
-                        title={definition.title}
-                        description={<span className="font-color-secondary">{definition.subtitle}</span>}
-                        control={
-                            task.completed_at ? (
-                                <span className="display-flex flex-row items-center gap-1 text-sm font-color-secondary">
-                                    <Icon icon={CheckmarkCircleSolidIcon} className="font-color-green" />
-                                    Earned {new Date(task.completed_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
-                                </span>
-                            ) : (
-                                <Button
-                                    variant="outline"
-                                    onClick={() => void start(definition.key)}
-                                    style={{ padding: '4px 6px' }}
-                                    ariaLabel={`Start ${definition.title} in a chat (+${task.credits} credits)`}
-                                >
-                                    Start (+{task.credits})
-                                </Button>
-                            )
-                        }
-                    />
-                ))}
             </SettingsGroup>
         </>
     );

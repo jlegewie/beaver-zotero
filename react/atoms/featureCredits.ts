@@ -74,23 +74,32 @@ export const featureCreditTotalsAtom = atom((get) => {
     return { earned, total, done, count: entries.length };
 });
 
+/**
+ * Whether the user asked for the home card in this window (Plan & Usage):
+ * it then shows whatever the library size, until dismissed again.
+ */
+export const featureCreditsCardRequestedAtom = atom(false);
+
 /** Whether the user closed the home card on this device. */
 export const featureCreditsCardDismissedAtom = atom(
     (get) => {
         get(preferencesRevisionAtom);
         return getPref('featureCreditsCardDismissed') === true;
     },
-    (_get, _set, dismissed: boolean) => setPref('featureCreditsCardDismissed', dismissed),
+    (_get, set, dismissed: boolean) => {
+        setPref('featureCreditsCardDismissed', dismissed);
+        if (dismissed) set(featureCreditsCardRequestedAtom, false);
+    },
 );
 
 /**
- * Whether the home card shows: after first run, while a task is open, unless
- * dismissed. The card also waits for a library of a useful size (see
- * `FeatureCreditsCard`).
+ * Whether the home card shows: while a task is open, unless dismissed; after
+ * first run, or once the user asked for it. Unless asked for, the card also
+ * waits for a library of a useful size (see `FeatureCreditsCard`).
  */
 export const featureCreditsCardVisibleAtom = atom((get) => {
     const profile = get(profileWithPlanAtom);
-    if (!profile?.first_run_completed_at) return false;
+    if (!profile?.first_run_completed_at && !get(featureCreditsCardRequestedAtom)) return false;
     if (get(featureCreditsCardDismissedAtom)) return false;
     const entries = get(featureCreditEntriesAtom);
     return !!entries?.some(({ task }) => !task.completed_at);
