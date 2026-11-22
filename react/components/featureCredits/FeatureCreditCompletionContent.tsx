@@ -6,7 +6,10 @@ import { getHost } from '@beaver/agent-ui/host';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import type { PendingFeatureCredit } from '../../atoms/featureCreditRuns';
 import { ArrowRightIcon, CancelIcon, CheckmarkCircleSolidIcon, DownloadIcon, Icon } from '../icons/icons';
-import { featureCreditEntriesAtom, featureCreditTotalsAtom, startFeatureTaskAtom } from '../../atoms/featureCredits';
+import { featureCreditEntriesAtom, featureCreditTotalsAtom, featureTaskUnavailableAtom, startFeatureTaskAtom } from '../../atoms/featureCredits';
+import { currentReaderAttachmentAtom } from '../../atoms/messageComposition';
+import { selectedTableTabItemID } from '../../../src/ui/tableTabContextPane';
+import { getContextWindow } from '../../runtime/windowRuntime';
 import { searchableLibraryIdsAtom } from '../../atoms/profile';
 import { newThreadAtom } from '../../atoms/threads';
 import { getFeatureCreditTask } from '../../constants/featureCreditTasks';
@@ -16,6 +19,7 @@ import { collectionCandidates, createdHighlights } from '../../utils/featureCred
 import { getCurrentReader } from '../../utils/readerUtils';
 import { collectionToReference } from '../../utils/zoteroReferences';
 import { resolveLibraryRef } from '../../../src/utils/libraryIdentity';
+import { parseItemReference } from '@beaver/agent-core/identity/libraryRef';
 import { agentActionsForRunsAtom } from '../../agents/agentActions';
 import type { AgentAction } from '@beaver/agent-core/agents/agentActionTypes';
 import type { AgentRun } from '@beaver/agent-core/agents/types';
@@ -75,6 +79,7 @@ const FeatureCreditCompletionContent: React.FC<Props> = ({ data, runs, onDismiss
     const entries = useAtomValue(featureCreditEntriesAtom) ?? [];
     const totals = useAtomValue(featureCreditTotalsAtom);
     const startTask = useSetAtom(startFeatureTaskAtom);
+    const unavailableReason = useAtomValue(featureTaskUnavailableAtom);
     const newThread = useSetAtom(newThreadAtom);
     const actions = useAtomValue(actionsAtom);
     const importAction = useSetAtom(importActionAtom);
@@ -88,6 +93,15 @@ const FeatureCreditCompletionContent: React.FC<Props> = ({ data, runs, onDismiss
         () => (definition?.completion.tableTip ? collectTableArtifacts(runs)[0]?.record.reference.key ?? null : null),
         [definition, runs],
     );
+    // No link to the table while its tab is the selected one. The tab context
+    // changes on every tab switch, which re-renders this card. The key is a
+    // portable item reference.
+    useAtomValue(currentReaderAttachmentAtom);
+    const tableRef = tableKey ? parseItemReference(tableKey) : null;
+    const tableLibraryId = tableRef ? resolveLibraryRef(tableRef) : null;
+    const selectedTableId = selectedTableTabItemID(getContextWindow());
+    const tableOpen = !!tableRef && !!tableLibraryId && selectedTableId !== null
+        && selectedTableId === Zotero.Items.getIDFromLibraryAndKey(tableLibraryId, tableRef.zotero_key);
 
     const highlights = useMemo(() => (definition?.attach === 'pdf' ? createdHighlights(runActions) : []), [definition, runActions]);
     useEffect(() => {
@@ -109,12 +123,12 @@ const FeatureCreditCompletionContent: React.FC<Props> = ({ data, runs, onDismiss
 
     if (!definition) return null;
 
-    // The next open task after this one, in the list's order, where tasks that
+    // The next open task after this one that can start, in the list's order, where tasks that
     // build on each other follow one another; from the last task it wraps
     // around to the first open one.
     const position = entries.findIndex((entry) => entry.definition.key === data.key);
     const next = [...entries.slice(position + 1), ...entries.slice(0, Math.max(position, 0))]
-        .find((entry) => !entry.task.completed_at && entry.definition.key !== data.key);
+        .find((entry) => !entry.task.completed_at && entry.definition.key !== data.key && !unavailableReason(entry.definition));
     const { docsUrl, tip, customAction, noteTip, tableTip } = definition.completion;
     // Updates when the user creates a proposed note.
     const showNoteTip = !!noteTip && noteInLibrary(runActions);
@@ -169,10 +183,15 @@ const FeatureCreditCompletionContent: React.FC<Props> = ({ data, runs, onDismiss
                     </p>
                 ) : tableTip && tableKey ? (
                     <p className="feature-credits-text">
-                        {tableTip.text}{' '}
-                        <a href="#" className="feature-credits-link" onClick={openTable}>
-                            {tableTip.label}
-                        </a>
+                        {tableTip.text}
+                        {!tableOpen && (
+                            <>
+                                {' '}
+                                <a href="#" className="feature-credits-link" onClick={openTable}>
+                                    {tableTip.label}
+                                </a>
+                            </>
+                        )}
                     </p>
                 ) : (
                     <p className="feature-credits-text">
@@ -208,9 +227,9 @@ const FeatureCreditCompletionContent: React.FC<Props> = ({ data, runs, onDismiss
                         <span>Next: {next.definition.title}</span>
                         <Icon icon={ArrowRightIcon} className="font-color-secondary" />
                     </button>
-                ) : (
+                ) : totals.done >= totals.count ? (
                     <p className="feature-credits-text font-color-secondary">All done. You got {totals.earned} credits.</p>
-                )}
+                ) : null}
             </div>
         </div>
     );

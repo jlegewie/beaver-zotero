@@ -328,7 +328,7 @@ export const startSelectedOptionAtom = atom(null, async (get, set) => {
         set(markActionUsedAtom, action.id);
 
         const runId = uuidv4();
-        set(firstRunPreviewAtom, null);
+        set(firstRunPreviewAtom, false);
 
         await set(sendWSMessageAtom, ensurePromptActionTokens(topic, [promptAction]), {
             runIdOverride: runId,
@@ -359,7 +359,7 @@ export const startSelectedOptionAtom = atom(null, async (get, set) => {
 export const skipWhereToStartAtom = atom(null, async (_get, set) => {
     try {
         await set(markFirstRunCompleteAtom, SKIP_COMPLETION_KIND);
-        set(firstRunPreviewAtom, null);
+        set(firstRunPreviewAtom, false);
         set(whereToStartVisibleAtom, false);
         resetSelectionState(set);
     } catch (e) {

@@ -134,6 +134,7 @@ import {
 import { userIdAtom } from './auth';
 import { citationsAtom, processCitationsAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from '@beaver/agent-core/citations/atoms';
 import { maybeShowCitationTipAtom } from './citationTip';
+import { completeCreditsFirstRunAtom } from './firstRun';
 import type { Citation } from '@beaver/agent-core/types/citations';
 import { preloadPageLabelsForCitations } from '../utils/pageLabels';
 import { sanitizeMessageFiltersForSearchableLibraries } from '../utils/messageFilters';
@@ -2954,6 +2955,9 @@ const sendWSMessage = async (
             return;
         }
         if (retryCommitInFlight(get, 'sendWSMessageAtom')) return;
+
+        // A first message ends a feature-credits first run, as picking a task does.
+        void set(completeCreditsFirstRunAtom, featureTask ?? 'chat');
 
         // Dismiss any open diff preview before sending
         dismissDiffPreview();

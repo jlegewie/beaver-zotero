@@ -3,7 +3,7 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import { plusToolsAccessAtom } from '../../../atoms/chatAccess';
 import { openQuickPromptAtom } from '../../../atoms/quickPrompt';
 import { actionsAtom } from '../../../atoms/actions';
-import { featureCreditEntriesAtom } from '../../../atoms/featureCredits';
+import { featureCreditEntriesAtom, featureTaskUnavailableAtom } from '../../../atoms/featureCredits';
 import { useStartFeatureTaskInNewChat } from '../../../hooks/useStartFeatureTaskInNewChat';
 import { requestPlusToolsAtom } from '../../../atoms/ui';
 import { useActionRunner } from '../../../hooks/useActionRunner';
@@ -153,9 +153,13 @@ const FloatingVersionCard: React.FC<{
 }> = ({ version, title, text, subtitle, features, footer, learnMoreUrl, learnMoreLabel, Showcase, alsoNew, primaryAction, onDismiss }) => {
     const access = useAtomValue(plusToolsAccessAtom);
     const featureCreditEntries = useAtomValue(featureCreditEntriesAtom);
+    const featureTaskUnavailable = useAtomValue(featureTaskUnavailableAtom);
+    // Tasks the account can still earn and start now, as the task list shows them.
     const earnableFeatureTasks = useMemo(
-        () => new Set((featureCreditEntries ?? []).filter(({ task }) => !task.completed_at).map(({ task }) => task.key)),
-        [featureCreditEntries],
+        () => new Set((featureCreditEntries ?? [])
+            .filter(({ task, definition }) => !task.completed_at && !featureTaskUnavailable(definition))
+            .map(({ task }) => task.key)),
+        [featureCreditEntries, featureTaskUnavailable],
     );
     const action = resolveVersionUpdateAction(primaryAction, access, earnableFeatureTasks);
     const startFeatureTask = useStartFeatureTaskInNewChat();

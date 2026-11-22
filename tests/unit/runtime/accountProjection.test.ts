@@ -158,8 +158,8 @@ describe("account projection transitions", () => {
     });
     it("closes a first-run preview when the account changes", () => {
         emit({ session: { user: { id: "a" } } });
-        store.set(firstRunPreviewAtom, "feature_credits");
+        store.set(firstRunPreviewAtom, true);
         emit({ generation: 1, session: { user: { id: "b" } } });
-        expect(store.get(firstRunPreviewAtom)).toBeNull();
+        expect(store.get(firstRunPreviewAtom)).toBe(false);
     });
 });

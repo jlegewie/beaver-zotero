@@ -8,7 +8,8 @@
 import { atom } from 'jotai';
 import type { FeatureCreditTask } from '@beaver/agent-core/types/profile';
 import type { CollectionReference } from '@beaver/agent-core/types/zotero';
-import { allLibrariesExcludedAtom, profileWithPlanAtom } from './profile';
+import { profileWithPlanAtom } from './profile';
+import { libraryItemCountAtom, SMALL_LIBRARY_THRESHOLD } from './zoteroContext';
 import { beaverDefaultModelAtom, isUsingBeaverCreditsAtom, updateSelectedModelAtom } from './models';
 import { preferencesRevisionAtom } from './preferences';
 import { getPref, setPref } from '../../src/utils/prefs';
@@ -28,6 +29,7 @@ import {
 import { FeatureTaskDefinition, TOPIC_PLACEHOLDER, getFeatureCreditTask } from '../constants/featureCreditTasks';
 import {
     combineDocumentStatuses,
+    hasOpenFeatureTasks,
     sendHoldHint,
     setupSteps,
     type AttachedPaper,
@@ -39,6 +41,7 @@ import { itemValidationResultsAtom, type ItemValidationState } from './itemValid
 import { getReadableContentKind } from '../../src/services/documentExtraction/attachmentResolution';
 import { isTableAttachment } from '../../src/services/artifacts/tableItemIdentity';
 import { activeFeatureTaskAtom } from './featureCreditRuns';
+import { isCreditsFirstRunAtom } from './firstRun';
 import { getDisplayNameFromItem } from '../utils/sourceUtils';
 
 /** A server task this client can present, with its definition. */
@@ -75,12 +78,6 @@ export const featureCreditTotalsAtom = atom((get) => {
     return { earned, total, done, count: entries.length };
 });
 
-/**
- * Whether the user asked for the home card in this window (Plan & Usage):
- * it then shows whatever the library size, until dismissed again.
- */
-export const featureCreditsCardRequestedAtom = atom(false);
-
 /** Whether the user closed the home card on this device. */
 export const featureCreditsCardDismissedAtom = atom(
     (get) => {
@@ -89,32 +86,30 @@ export const featureCreditsCardDismissedAtom = atom(
     },
     (_get, set, dismissed: boolean) => {
         setPref('featureCreditsCardDismissed', dismissed);
-        if (dismissed) set(featureCreditsCardRequestedAtom, false);
     },
 );
 
 /**
- * Whether the home card shows: while a task is open, unless dismissed; after
- * first run, or once the user asked for it. Unless asked for, the card also
- * waits for a library of a useful size (see `FeatureCreditsCard`).
+ * Whether the home card shows: while a task is open, unless dismissed. In a
+ * feature-credits first run it is the account's first screen and always shows:
+ * a dismissal is kept per device and may come from another account.
  */
 export const featureCreditsCardVisibleAtom = atom((get) => {
-    const profile = get(profileWithPlanAtom);
-    if (!profile?.first_run_completed_at && !get(featureCreditsCardRequestedAtom)) return false;
+    if (get(isCreditsFirstRunAtom)) return true;
     if (get(featureCreditsCardDismissedAtom)) return false;
-    const entries = get(featureCreditEntriesAtom);
-    return !!entries?.some(({ task }) => !task.completed_at);
+    return hasOpenFeatureTasks(get(profileWithPlanAtom)?.feature_credits);
 });
 
 /**
- * The feature-credit tasks for the first-run page, or null when there are none
- * to offer (the feature is off or the user is held out, every library is
- * excluded, or every task is done), so first run shows the launcher instead.
+ * Why a task cannot start yet, or null when it can. The one rule: a task that
+ * works on papers in the library (`needsPapers`) waits until the library has
+ * `SMALL_LIBRARY_THRESHOLD` items.
  */
-export const firstRunFeatureTasksAtom = atom<FeatureCreditEntry[] | null>((get) => {
-    const entries = get(featureCreditEntriesAtom);
-    if (!entries || get(allLibrariesExcludedAtom)) return null;
-    return entries.some(({ task }) => !task.completed_at) ? entries : null;
+export const featureTaskUnavailableAtom = atom((get) => {
+    const count = get(libraryItemCountAtom);
+    const small = count !== null && count < SMALL_LIBRARY_THRESHOLD;
+    return (definition: Pick<FeatureTaskDefinition, 'needsPapers'>): string | null =>
+        small && definition.needsPapers ? `Needs ${SMALL_LIBRARY_THRESHOLD} or more items in your library` : null;
 });
 
 /** Switch the chat input to the Beaver model, as the setup card's link does. */

@@ -135,8 +135,6 @@ export class InstanceAccount {
     private tokenRefresh?: Promise<any>;
     private restoreTimer?: ReturnType<typeof setTimeout>;
     private slowRestoreTimer?: ReturnType<typeof setTimeout>;
-    /** The account generation the feature-credits card was reported seen for. */
-    private featureCardSeenGeneration = -1;
     private restoring?: Promise<void>;
     /** Bumped when restoring ends, so a late attempt result cannot apply. */
     private restoreRun = 0;
@@ -881,24 +879,6 @@ export class InstanceAccount {
             { ...this.snapshot.data.profile, has_search_index_access: false },
             this.snapshot.generation,
         );
-    }
-    /**
-     * Report, once per signed-in account and session, that the
-     * feature-credits card was shown; the server keeps the first time.
-     * Fire-and-forget; a failed report is retried the next time the card shows.
-     */
-    markFeatureCreditsCardSeen(): void {
-        if (this.disposed || !this.snapshot.session) return;
-        const generation = this.snapshot.generation;
-        if (this.featureCardSeenGeneration === generation) return;
-        this.featureCardSeenGeneration = generation;
-        accountService.markFeatureCreditsCardSeen({ timeoutMs: 15_000 }).catch((error) => {
-            if (this.featureCardSeenGeneration === generation) this.featureCardSeenGeneration = -1;
-            logger(
-                `instanceAccount: feature-credits card report failed: ${error instanceof Error ? error.message : String(error)}`,
-                2,
-            );
-        });
     }
     /** Invalidate any older read after a successful account mutation. */
     async invalidateProfile(): Promise<void> {

@@ -4,7 +4,8 @@
 import type { AgentAction } from '@beaver/agent-core/agents/agentActionTypes';
 import type { AgentRun } from '@beaver/agent-core/agents/types';
 import { parseItemReference } from '@beaver/agent-core/identity/libraryRef';
-import { TOPIC_PLACEHOLDER, type FeatureTaskDefinition } from '../constants/featureCreditTasks';
+import type { FeatureCreditsStatus } from '@beaver/agent-core/types/profile';
+import { TOPIC_PLACEHOLDER, getFeatureCreditTask, type FeatureTaskDefinition } from '../constants/featureCreditTasks';
 
 /**
  * Whether an attached paper has a file Beaver can annotate (a PDF, EPUB or
@@ -48,7 +49,7 @@ interface PdfSource {
 /** Papers count only once Beaver can read one of their files. */
 export function pdfSource(papers: AttachedPaper[]): PdfSource {
     if (papers.length === 0) {
-        return { state: 'missing', text: 'Open one in Zotero, type @ to find a paper, or drag one into the prompt.' };
+        return { state: 'missing', text: 'Select or open a PDF, type @ to find one, or drag one into the prompt.' };
     }
     const label = papers.length === 1 ? papers[0].name : plural(papers.length, 'paper');
     const many = papers.length > 1;
@@ -253,11 +254,9 @@ export function createdHighlights(
 }
 
 /**
- * The tasks the first-run page offers: every task in a library of a useful
- * size, otherwise only those that need no papers.
+ * Whether the account has a task this client knows and has not earned yet.
+ * `status` is null for an account that cannot earn credits.
  */
-export function firstRunOfferedTasks<T extends {
-    definition: Pick<FeatureTaskDefinition, 'worksWithoutPapers'>;
-}>(entries: T[], libraryReady: boolean): T[] {
-    return libraryReady ? entries : entries.filter(({ definition }) => definition.worksWithoutPapers);
+export function hasOpenFeatureTasks(status: FeatureCreditsStatus | null | undefined): boolean {
+    return !!status?.tasks?.some((task) => !task.completed_at && !!getFeatureCreditTask(task.key));
 }

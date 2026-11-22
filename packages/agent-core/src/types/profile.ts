@@ -76,9 +76,8 @@ export enum ProcessingMode {
     BACKEND = "backend"
 }
 
-/** The request that earned a feature-credit task. */
+/** The request that earned a feature-credit task: its agent run. */
 export interface FeatureCreditSource {
-    thread_id: string | null;
     run_id: string | null;
 }
 

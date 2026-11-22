@@ -1,7 +1,7 @@
 import { useCallback } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { runsCountAtom } from '@beaver/agent-core/run-state/atoms';
-import { featureCreditsCardDismissedAtom, featureCreditsCardRequestedAtom } from '../atoms/featureCredits';
+import { featureCreditsCardDismissedAtom } from '../atoms/featureCredits';
 import { newThreadAtom } from '../atoms/threads';
 import { eventManager } from '../events/eventManager';
 import { getWindowRuntime } from '../runtime/windowRuntime';
@@ -17,12 +17,10 @@ export function useShowFeatureCreditsCard(): () => Promise<void> {
     const runsCount = useAtomValue(runsCountAtom);
     const newThread = useSetAtom(newThreadAtom);
     const setDismissed = useSetAtom(featureCreditsCardDismissedAtom);
-    const setRequested = useSetAtom(featureCreditsCardRequestedAtom);
     return useCallback(async () => {
         eventManager.dispatch('toggleChat', { forceOpen: true });
         if (runsCount > 0 && (await newThread({ preserveDraft: true })) === undefined) return;
         setDismissed(false);
-        setRequested(true);
         getWindowRuntime().hostWindow.focus();
-    }, [runsCount, newThread, setDismissed, setRequested]);
+    }, [runsCount, newThread, setDismissed]);
 }

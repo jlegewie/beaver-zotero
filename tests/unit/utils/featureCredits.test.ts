@@ -22,7 +22,7 @@ describe('setup card: the PDF to annotate', () => {
     it('asks for a PDF as the missing input', () => {
         expect(pdfSource([])).toEqual({
             state: 'missing',
-            text: 'Open one in Zotero, type @ to find a paper, or drag one into the prompt.',
+            text: 'Select or open a PDF, type @ to find one, or drag one into the prompt.',
         });
     });
 

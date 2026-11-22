@@ -708,12 +708,9 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
         }
     };
 
-    // Preview either first-run page, whichever the account was assigned
-    const handleShowFeatureCreditsFirstRunPage = () => {
-        setFirstRunPreview('feature_credits');
-    };
+    // Preview the first-run page, whatever the account's first run is
     const handleShowWhereToStartPage = () => {
-        setFirstRunPreview('where_to_start');
+        setFirstRunPreview(true);
     };
 
     // Create menu items for dev testing functions
@@ -727,12 +724,6 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
         {
             label: "Test Semantic Search",
             onClick: handleTestSemanticSearch,
-            icon: SearchIcon,
-            disabled: false,
-        },
-        {
-            label: "Show 'Earn credits' First Run Page",
-            onClick: handleShowFeatureCreditsFirstRunPage,
             icon: SearchIcon,
             disabled: false,
         },

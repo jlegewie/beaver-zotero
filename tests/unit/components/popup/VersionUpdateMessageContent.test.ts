@@ -20,6 +20,8 @@ const mocks = vi.hoisted(() => ({
     openPreferences: vi.fn(),
     startFeatureTask: vi.fn(async () => {}),
     featureTasks: null as { key: string; completed_at: string | null }[] | null,
+    /** Tasks the task list shows as unavailable (a small library). */
+    unavailableTasks: [] as string[],
     surfaceWindow: { name: 'surface' },
 }));
 vi.mock('../../../../react/atoms/chatAccess', async () => {
@@ -42,6 +44,8 @@ vi.mock('../../../../react/atoms/featureCredits', async () => {
     const { atom } = await import('jotai');
     return {
         featureCreditEntriesAtom: atom(() => mocks.featureTasks?.map((task) => ({ task, definition: { key: task.key } })) ?? null),
+        featureTaskUnavailableAtom: atom(() => (definition: { key: string }) =>
+            (mocks.unavailableTasks.includes(definition.key) ? 'Needs papers' : null)),
     };
 });
 vi.mock('../../../../react/hooks/useStartFeatureTaskInNewChat', () => ({
@@ -99,6 +103,7 @@ beforeEach(() => {
     mocks.plusToolsPref = false;
     mocks.credits = 10;
     mocks.featureTasks = null;
+    mocks.unavailableTasks = [];
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
     (globalThis as any).Zotero = { launchURL: vi.fn() };
 });
@@ -179,6 +184,15 @@ describe('VersionUpdateMessageContent', () => {
         expect(mocks.startFeatureTask).toHaveBeenCalledWith('research_table');
         expect(mocks.runAction).not.toHaveBeenCalled();
         expect(mocks.openPreferences).not.toHaveBeenCalled();
+    });
+
+    it('keeps the usual button while the task list shows the task as unavailable', () => {
+        mocks.featureTasks = [{ key: 'research_table', completed_at: null }];
+        mocks.unavailableTasks = ['research_table'];
+        render({ primaryAction: taughtAction }, true);
+        clickButton('Try it');
+        expect(mocks.runAction).toHaveBeenCalledOnce();
+        expect(mocks.startFeatureTask).not.toHaveBeenCalled();
     });
 
     it('keeps the usual button once the task is earned', () => {
