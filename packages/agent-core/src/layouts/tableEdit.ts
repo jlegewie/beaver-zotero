@@ -19,6 +19,7 @@ import {
     SELECT_COLORS,
     YEAR_COLUMN_ID,
     TABLE_SPEC_VERSION,
+    researchColumns,
     utf8Length,
     type Cell,
     type CellValue,
@@ -84,9 +85,24 @@ export interface TableUserColumnUpdate extends TableColumnUpdate {
     existing_answers?: "keep" | "refill" | null;
 }
 
-/** One edit from the tab: the model's operations, with user column updates. */
+/**
+ * A question column moved by the user: to just after the question column
+ * `after`, or with `after` null before every other question column. Only the
+ * question columns change places, among the positions they hold.
+ */
+export interface TableColumnMove {
+    id: string;
+    after: string | null;
+}
+
+/**
+ * One edit from the tab: the model's operations, with user column updates
+ * and column moves, which only the user makes. Moves apply after the column
+ * additions and report no change.
+ */
 export interface TableUserEdit extends Omit<TableEditOperations, "update_columns"> {
     update_columns?: TableUserColumnUpdate[] | null;
+    move_columns?: TableColumnMove[] | null;
 }
 
 /** A refusal, with a message that names the parameter and its index. */
@@ -368,11 +384,12 @@ function columnFields(before: Column, after: Column, report: MutationReport): Co
 /**
  * One `edit_table` call against the table as it stands: all of it or none of
  * it. The order is fixed: title and description; removals (rows, columns,
- * sources); column updates; column additions; source additions; refresh. A
- * collection, tag or saved search added by the call leaves out the papers its
- * own `remove_rows` removed (`removed_skipped`); an items source naming one
- * brings it back. An id the table does not have refuses the whole call
- * (`unknown_*`), as does an addition over the row cap (`too_large`).
+ * sources); column updates; column additions; the tab's column moves; source
+ * additions; refresh. A collection, tag or saved search added by the call
+ * leaves out the papers its own `remove_rows` removed (`removed_skipped`);
+ * an items source naming one brings it back. An id the table does not have
+ * refuses the whole call (`unknown_*`), as does an addition over the row cap
+ * (`too_large`).
  */
 export function applyEdit(
     spec: TableSpec,
@@ -482,6 +499,22 @@ export function applyEdit(
         const result = step([{ op: "add_columns", columns: [column], ...(draft.after ? { after: draft.after } : {}) }], `add_columns[${index}]`);
         if (failed(result)) return result;
         changes.push({ op: "add_column", column: column.id, header: column.header });
+    }
+    for (const [index, move] of (operations.move_columns ?? []).entries()) {
+        const questions = researchColumns(current).questions.map((column) => column.id);
+        const unknown = [move.id, move.after].find((id) => id != null && !questions.includes(id));
+        if (unknown != null)
+            return { ok: false, code: "unknown_column", message: `move_columns[${index}]: column ${unknown} is not a question column. Read the table again.` };
+        if (move.after === move.id)
+            return { ok: false, code: "invalid_edit", message: `move_columns[${index}]: a column cannot follow itself` };
+        const order = questions.filter((id) => id !== move.id);
+        order.splice(move.after == null ? 0 : order.indexOf(move.after) + 1, 0, move.id);
+        // The questions take the slots they held, in their new order, so the
+        // paper, the year and every other column keep their places.
+        let next = 0;
+        const columns = current.columns.map((column) => (questions.includes(column.id) ? order[next++] : column.id));
+        const result = step([{ op: "reorder_columns", columns }], `move_columns[${index}]`);
+        if (failed(result)) return result;
     }
 
     // Source additions, then refresh.

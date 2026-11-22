@@ -128,6 +128,16 @@ export interface UpdateColumnMutation {
     existing_answers?: "keep" | "refill" | null;
 }
 
+/**
+ * Puts the columns in a new order. Only the order changes: cells, sort and
+ * anchor stay as they are.
+ */
+export interface ReorderColumnsMutation {
+    op: "reorder_columns";
+    /** Every column id of the table, once, in the new order. */
+    columns: string[];
+}
+
 /** Removes columns and every cell under them. */
 export interface RemoveColumnsMutation {
     op: "remove_columns";
@@ -249,6 +259,7 @@ export interface RemoveSourcesMutation {
 export type TableMutation =
     | AddColumnsMutation
     | UpdateColumnMutation
+    | ReorderColumnsMutation
     | RemoveColumnsMutation
     | AddRowsMutation
     | RemoveRowsMutation
@@ -581,6 +592,8 @@ function applyOne(draft: Draft, mutation: TableMutation): Failure | undefined {
             return addColumns(draft, mutation);
         case "update_column":
             return updateColumn(draft, mutation);
+        case "reorder_columns":
+            return reorderColumns(draft, mutation);
         case "remove_columns":
             return removeColumns(draft, mutation);
         case "add_rows":
@@ -1199,6 +1212,16 @@ function setOptional<T extends object, K extends keyof T>(
     value: unknown,
 ): void {
     (target as Record<string, unknown>)[key as string] = value;
+}
+
+function reorderColumns(draft: Draft, mutation: ReorderColumnsMutation): Failure | undefined {
+    const ids = mutation.columns;
+    if (ids.length !== draft.spec.columns.length || new Set(ids).size !== ids.length || ids.some((id) => !draft.columnIndex.has(id)))
+        return fail("invalid_mutation", "reorder_columns: list every column of the table once");
+    const columns = columnsOf(draft);
+    draft.spec.columns = ids.map((id) => columns[draft.columnIndex.get(id)!]);
+    draft.columnIndex = indexById(draft.spec.columns);
+    return undefined;
 }
 
 function removeColumns(

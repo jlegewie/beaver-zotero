@@ -30,11 +30,13 @@ import {
     sortOrderLabel,
     staleBadgeText,
     type CellFill,
+    type ColumnDrop,
     type ResearchColumns,
     type RowFill,
     type TableDocuments,
 } from "./cellModel";
 import { PaperActions, PaperCell } from "./PaperCell";
+import { useColumnDrag } from "./useColumnDrag";
 
 /** The cell the inspector is open on. */
 export interface CellAddress {
@@ -53,6 +55,11 @@ export interface ResearchGridProps {
     rowMenuItems(row: Row): MenuItem[];
     /** A column's menu (on hover over its header); an empty one shows no button. */
     columnMenuItems?(column: Column): MenuItem[];
+    /**
+     * Moves a question column dragged by its header to before another one in
+     * view, or after the last. Absent, headers cannot be dragged.
+     */
+    onMoveColumn?(columnId: string, drop: ColumnDrop): void;
     /** The (+) after the last column; absent, no add column. */
     onAddColumn?(): void;
     /** Why the (+) is disabled (a read-only library, the table's limits). */
@@ -146,6 +153,7 @@ export function ResearchGrid({
     onSelectCell,
     rowMenuItems,
     columnMenuItems,
+    onMoveColumn,
     onAddColumn,
     addColumnDisabledReason,
     virtualize = false,
@@ -163,6 +171,8 @@ export function ResearchGrid({
 }: ResearchGridProps): React.ReactElement {
     const rootRef = useRef<HTMLDivElement>(null);
     const bodyRef = useRef<HTMLTableSectionElement>(null);
+    const dropIndicatorRef = useRef<HTMLDivElement>(null);
+    const columnDrag = useColumnDrag({ rootRef, indicatorRef: dropIndicatorRef, onMove: onMoveColumn });
     const questions = useMemo(
         () => columns.questions.filter((column) => !state.hiddenColumns.has(column.id)),
         [columns.questions, state.hiddenColumns],
@@ -210,6 +220,7 @@ export function ResearchGrid({
             data-density={state.density}
             data-table-id={table.id}
             data-columns-guide={guide ? "" : undefined}
+            data-column-dragging={columnDrag.dragging ? "" : undefined}
         >
             <table className="bt-table rt-table" style={{ minWidth }}>
                 <colgroup>
@@ -219,13 +230,19 @@ export function ResearchGrid({
                     {questions.map((column) => (
                         <col
                             key={column.id}
-                            className={addedColumns?.has(column.id) ? "rt-col-added" : undefined}
+                            className={
+                                columnDrag.dragging === column.id
+                                    ? "rt-col-dragging"
+                                    : addedColumns?.has(column.id)
+                                      ? "rt-col-added"
+                                      : undefined
+                            }
                             style={{ width: questionWidth(column) }}
                         />
                     ))}
                     {addColumn ? <col style={{ width: flexTail ? undefined : ADD_WIDTH }} /> : null}
                 </colgroup>
-                <thead>
+                <thead onMouseDown={columnDrag.onHeadMouseDown}>
                     <tr className="rt-head-row">
                         <th className="rt-th rt-th-rail" scope="col">
                             {selectable ? (
@@ -267,6 +284,8 @@ export function ResearchGrid({
                                 badges={badges.get(column.id)!}
                                 menuItems={columnMenuItems}
                                 isAdded={!!addedColumns?.has(column.id)}
+                                isDragging={columnDrag.dragging === column.id}
+                                draggable={!!columnDrag.onHeadMouseDown}
                             />
                         ))}
                         {addColumn ? (
@@ -339,6 +358,7 @@ export function ResearchGrid({
                 </div>
             ) : null}
             {cellEditor ? <CellEditorLayer rootRef={rootRef} {...cellEditor} /> : null}
+            {onMoveColumn ? <div ref={dropIndicatorRef} className="rt-drop-indicator" aria-hidden="true" /> : null}
         </div>
     );
 }
@@ -473,10 +493,16 @@ function ColumnHeader({
     badges,
     menuItems,
     isAdded = false,
+    isDragging = false,
+    draggable = false,
 }: {
     column: Column;
     /** Just added by the user: highlighted briefly. */
     isAdded?: boolean;
+    /** Being dragged to another place. */
+    isDragging?: boolean;
+    /** A press on it may start dragging the column (handled by the header row). */
+    draggable?: boolean;
     kind: "paper" | "year" | "question";
     sort: TableSort | undefined;
     badges?: ReturnType<typeof columnBadges>;
@@ -491,9 +517,10 @@ function ColumnHeader({
     const direction = sort?.column_id === column.id ? sort.direction : undefined;
     return (
         <th
-            className={`rt-th rt-th-${kind}${items.length ? " rt-th-has-menu" : ""}${menuOpen ? " rt-th-menu-open" : ""}${isAdded ? " rt-th-added" : ""}`}
+            className={`rt-th rt-th-${kind}${items.length ? " rt-th-has-menu" : ""}${menuOpen ? " rt-th-menu-open" : ""}${isAdded ? " rt-th-added" : ""}${isDragging ? " rt-th-dragging" : ""}`}
             scope="col"
             data-column-id={column.id}
+            data-column-drag={draggable ? "" : undefined}
             aria-sort={direction === "asc" ? "ascending" : direction === "desc" ? "descending" : undefined}
         >
             {items.length ? (

@@ -5,6 +5,8 @@ import { addColumnBlockedReason } from "@beaver/agent-core/layouts/tableMutation
 import type { TableFillCells } from "@beaver/agent-core/protocol/tableFillProtocol";
 import {
     ArrowDownIcon,
+    ArrowLeftIcon,
+    ArrowRightIcon,
     ArrowUpIcon,
     CancelIcon,
     CheckmarkCircleIcon,
@@ -39,7 +41,17 @@ import { renderPlainText, type TableDensity, type TextRenderer } from "../tableV
 import { useTableState } from "../useTableState";
 import { CellEditor, editsAsList, type CellEditInput } from "./CellEditor";
 import { CellInspector, type CellActionControls } from "./CellInspector";
-import { cellFill, isNewRow, PAPER_HEADER, researchColumns, rowFills, sortOrderLabel, type TableDocuments } from "./cellModel";
+import {
+    cellFill,
+    isNewRow,
+    moveAfter,
+    PAPER_HEADER,
+    researchColumns,
+    rowFills,
+    sortOrderLabel,
+    type ColumnDrop,
+    type TableDocuments,
+} from "./cellModel";
 import { EmptyTableGuide } from "./EmptyTableGuide";
 import { ResearchGrid, type CellAddress } from "./ResearchGrid";
 import { AnchoredPopover, InlineText } from "./TableEditing";
@@ -79,6 +91,13 @@ export interface ResearchTableEditing {
     onAddColumn?(): void;
     onChangeType?(column: Column, type: ResearchColumnType): void;
     onRemoveColumn?(column: Column): void;
+    /**
+     * Moves a question column: the column menu's Move left and Move right,
+     * and dragging its header. It goes just after the question column
+     * `after`, or with null before every other question. The paper and the
+     * year keep their places.
+     */
+    onMoveColumn?(column: Column, after: string | null): void;
     /** The sources popover's content, opened from the sources chip. */
     renderSources?(close: () => void): React.ReactNode;
     /** The new-papers notice's Add. */
@@ -520,9 +539,23 @@ export function ResearchTable({
         [state, columns.year],
     );
 
+    // Moves a question column beside another one in view.
+    const moveColumn = useMemo(() => {
+        if (!editing?.onMoveColumn || editing.disabledReason) return undefined;
+        const onMoveColumn = editing.onMoveColumn;
+        return (columnId: string, drop: ColumnDrop) => {
+            const column = columns.questions.find((candidate) => candidate.id === columnId);
+            if (column) onMoveColumn(column, moveAfter(columns.questions, columnId, drop));
+        };
+    }, [editing?.onMoveColumn, editing?.disabledReason, columns.questions]);
+    const shownQuestions = useMemo(
+        () => columns.questions.filter((column) => !state.hiddenColumns.has(column.id)),
+        [columns.questions, state.hiddenColumns],
+    );
+
     // A column's menu. The paper's and the year's offer only the sort; a
     // question's has its edits (when the host makes them), then the view's
-    // own Sort and Hide.
+    // own Sort and Hide, and Move left and right.
     const columnMenu = useCallback(
         (column: Column): MenuItem[] => {
             if (column === columns.paper || column === columns.year) return sortEntries(column);
@@ -542,6 +575,24 @@ export function ResearchTable({
             if (items.length) items.push({ label: "", isDivider: true, onClick: () => {} });
             items.push(...sortEntries(column));
             items.push({ label: "Hide column", icon: ViewIcon, onClick: () => state.toggleColumn(column.id) });
+            if (editing?.onMoveColumn) {
+                // Beside the neighbouring columns in view, past any hidden between.
+                const at = shownQuestions.indexOf(column);
+                items.push(
+                    {
+                        label: "Move left",
+                        icon: ArrowLeftIcon,
+                        disabled: disabled || at <= 0,
+                        onClick: () => moveColumn?.(column.id, { before: shownQuestions[at - 1].id }),
+                    },
+                    {
+                        label: "Move right",
+                        icon: ArrowRightIcon,
+                        disabled: disabled || at === -1 || at >= shownQuestions.length - 1,
+                        onClick: () => moveColumn?.(column.id, { after: shownQuestions[at + 1].id }),
+                    },
+                );
+            }
             if (editing?.onChangeType) {
                 const current = COLUMN_TYPE_LABELS.find((entry) => entry.type === column.type);
                 items.push({
@@ -573,7 +624,7 @@ export function ResearchTable({
             }
             return items;
         },
-        [editing, state, fill, fillable, columns, sortEntries],
+        [editing, state, fill, fillable, columns, sortEntries, moveColumn, shownQuestions],
     );
     const hiddenQuestions = columns.questions.filter((column) => state.hiddenColumns.has(column.id));
 
@@ -1083,6 +1134,7 @@ export function ResearchTable({
                                     onSelectCell={onSelectCell}
                                     rowMenuItems={rowMenu}
                                     columnMenuItems={columnMenu}
+                                    onMoveColumn={moveColumn}
                                     onAddColumn={editing?.onAddColumn}
                                     addColumnDisabledReason={addColumnDisabled}
                                     onEditCell={cellEditing ? openEditor : undefined}

@@ -1477,6 +1477,165 @@ describe('columns the user just added', () => {
     });
 });
 
+describe('moving columns', () => {
+    const openMenu = (label: string) => click(container!.querySelector(`button[aria-label="Column menu: ${label}"]`)!);
+    const entry = (label: string) => document.querySelector<HTMLElement>(`[aria-label="${label}"]`);
+    const header = (id: string) => container!.querySelector<HTMLElement>(`th[data-column-id="${id}"]`)!;
+    const rect = (left: number, right: number) =>
+        ({ left, right, top: 0, bottom: 40, width: right - left, height: 40, x: left, y: 0, toJSON() {} }) as DOMRect;
+    // The questions sit side by side, 100 px each, from 300 px.
+    const original = HTMLElement.prototype.getBoundingClientRect;
+    beforeEach(() => {
+        HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+            // The grid's view: 1000 px wide and 400 px tall.
+            if (this.classList.contains('rt-scroll')) return { ...rect(0, 1000), bottom: 400, height: 400 } as DOMRect;
+            const at = ['effect', 'design', 'amount'].indexOf(this.getAttribute('data-column-id') ?? '');
+            return at === -1 ? rect(0, 0) : rect(300 + 100 * at, 400 + 100 * at);
+        };
+    });
+    afterEach(() => {
+        HTMLElement.prototype.getBoundingClientRect = original;
+    });
+    const mouse = (target: EventTarget, type: string, clientX: number, clientY = 20) =>
+        act(() => {
+            target.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX, clientY }));
+        });
+    /** Presses a header, drags it to `x`, and releases it there. */
+    const drag = (id: string, x: number, release = true) => {
+        const from = header(id).getBoundingClientRect().left + 50;
+        mouse(header(id), 'mousedown', from);
+        mouse(document, 'mousemove', from + (x > from ? 10 : -10));
+        mouse(document, 'mousemove', x);
+        if (release) releaseAt(x);
+    };
+    /** Releases the mouse over `target`, with the click the release fires. */
+    const releaseAt = (x: number, target: EventTarget = document, y = 20) => {
+        mouse(target, 'mouseup', x, y);
+        mouse(target, 'click', x, y);
+    };
+
+    it('moves a column left and right from its menu, past a hidden column, and not past either end', () => {
+        const onMoveColumn = vi.fn();
+        mount({ editing: { onMoveColumn } });
+        openMenu('Headline effect');
+        expect(entry('Move left')!.getAttribute('aria-disabled')).toBe('true');
+        expect(entry('Move right')!.getAttribute('aria-disabled')).toBe('false');
+        click(entry('Move right')!);
+        expect(onMoveColumn).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'effect' }), 'design');
+
+        openMenu('Amount');
+        expect(entry('Move right')!.getAttribute('aria-disabled')).toBe('true');
+        click(entry('Move left')!);
+        expect(onMoveColumn).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'amount' }), 'effect');
+
+        // With Design hidden, Amount's left neighbour in view is Headline effect.
+        openMenu('Design');
+        click(entry('Hide column')!);
+        openMenu('Amount');
+        click(entry('Move left')!);
+        expect(onMoveColumn).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'amount' }), null);
+        expect(onMoveColumn).toHaveBeenCalledTimes(3);
+    });
+
+    it('offers no move on the item and year columns, nor without the host, and disables it in a read-only library', () => {
+        mount({ editing: { onMoveColumn: vi.fn() } });
+        for (const label of ['Item', 'Year']) {
+            openMenu(label);
+            expect(entry('Move left')).toBeNull();
+            act(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+        }
+        expect(header('_reference').hasAttribute('data-column-drag')).toBe(false);
+        expect(header('_year').hasAttribute('data-column-drag')).toBe(false);
+        act(() => root?.unmount());
+        container?.remove();
+
+        mount({ editing: { onEditColumn: vi.fn() } });
+        openMenu('Design');
+        expect(entry('Move left')).toBeNull();
+        expect(header('design').hasAttribute('data-column-drag')).toBe(false);
+        act(() => root?.unmount());
+        container?.remove();
+
+        mount({ editing: { onMoveColumn: vi.fn(), disabledReason: 'This library is read-only.' } });
+        openMenu('Design');
+        expect(entry('Move left')!.getAttribute('aria-disabled')).toBe('true');
+        expect(entry('Move right')!.getAttribute('aria-disabled')).toBe('true');
+        expect(header('design').hasAttribute('data-column-drag')).toBe(false);
+    });
+
+    it('drags a header before another column or past the last one, marking where it lands', () => {
+        const onMoveColumn = vi.fn();
+        mount({ editing: { onMoveColumn } });
+        drag('amount', 320, false);
+        expect(header('amount').classList.contains('rt-th-dragging')).toBe(true);
+        expect(container!.querySelector('col.rt-col-dragging')).not.toBeNull();
+        const line = container!.querySelector<HTMLElement>('.rt-drop-indicator')!;
+        expect(line.style.display).toBe('block');
+        expect(line.style.left).toBe('300px');
+        releaseAt(320);
+        expect(onMoveColumn).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'amount' }), null);
+        expect(header('amount').classList.contains('rt-th-dragging')).toBe(false);
+        expect(line.style.display).toBe('none');
+
+        // Released over a cell, the drop does not also select the cell.
+        drag('effect', 590, false);
+        releaseAt(590, cell('r1', 'amount'));
+        expect(onMoveColumn).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'effect' }), 'amount');
+        expect(inspector()).toBeNull();
+        drag('effect', 480);
+        expect(onMoveColumn).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'effect' }), 'design');
+        expect(onMoveColumn).toHaveBeenCalledTimes(3);
+    });
+
+    it('does not move a column dropped beside itself, released before it moved or outside the grid, or dragged off with Escape', () => {
+        const onMoveColumn = vi.fn();
+        mount({ editing: { onMoveColumn } });
+        drag('design', 480);
+        drag('design', 420);
+        mouse(header('design'), 'mousedown', 450);
+        mouse(document, 'mousemove', 452);
+        releaseAt(452);
+        // Released over the toolbar above the grid.
+        drag('design', 320, false);
+        mouse(document, 'mousemove', 320, -30);
+        expect(container!.querySelector<HTMLElement>('.rt-drop-indicator')!.style.display).toBe('none');
+        releaseAt(320, document, -30);
+        drag('design', 320, false);
+        act(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+        expect(header('design').classList.contains('rt-th-dragging')).toBe(false);
+        releaseAt(320);
+        expect(onMoveColumn).not.toHaveBeenCalled();
+    });
+
+    it('draws the line no further left than a pinned Item column, under which the target scrolled', () => {
+        const onMoveColumn = vi.fn();
+        mount({ editing: { onMoveColumn } });
+        const scroller = container!.querySelector<HTMLElement>('.rt-scroll')!;
+        act(() => scroller.setAttribute('data-pinned', ''));
+        const base = HTMLElement.prototype.getBoundingClientRect;
+        // The pinned Item column ends at 340: Headline effect starts under it.
+        HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+            return this.classList.contains('rt-th-paper') ? rect(40, 340) : base.call(this);
+        };
+        drag('amount', 345, false);
+        const line = container!.querySelector<HTMLElement>('.rt-drop-indicator')!;
+        expect(line.style.left).toBe('340px');
+        releaseAt(345);
+        expect(onMoveColumn).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'amount' }), null);
+    });
+
+    it("does not start a drag from the header's menu button", () => {
+        const onMoveColumn = vi.fn();
+        mount({ editing: { onMoveColumn } });
+        mouse(container!.querySelector('button[aria-label="Column menu: Amount"]')!, 'mousedown', 550);
+        mouse(document, 'mousemove', 320);
+        mouse(document, 'mouseup', 320);
+        expect(header('amount').classList.contains('rt-th-dragging')).toBe(false);
+        expect(onMoveColumn).not.toHaveBeenCalled();
+    });
+
+});
+
 describe('search', () => {
     const shownRows = () =>
         Array.from(container!.querySelectorAll<HTMLElement>('tbody tr[data-row-id]')).map((row) => row.dataset.rowId);

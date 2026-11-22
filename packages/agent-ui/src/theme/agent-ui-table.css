@@ -2290,6 +2290,33 @@
     z-index: 4;
 }
 
+/* Reordering a question column by dragging its header: the column being
+ * dragged is tinted, header and cells, and a line marks where it would land. */
+.beaver-root .rt-grid[data-column-dragging],
+.beaver-root .rt-grid[data-column-dragging] * {
+    cursor: grabbing !important;
+}
+
+.beaver-root .rt-th-dragging {
+    box-shadow: inset 0 0 0 100vmax color-mix(in srgb, var(--accent-blue) 12%, transparent);
+}
+
+.beaver-root .rt-col-dragging {
+    background-color: color-mix(in srgb, var(--accent-blue) 8%, transparent);
+}
+
+.beaver-root .rt-drop-indicator {
+    display: none;
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    z-index: 5;
+    width: 2px;
+    margin-left: -1px;
+    background: var(--accent-blue);
+    pointer-events: none;
+}
+
 .beaver-root .rt-th-add {
     padding: 0.6rem 0 0;
     text-align: center;
