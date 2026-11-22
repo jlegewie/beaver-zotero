@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import { ArrowLeftIcon, ArrowRightIcon, CancelIcon, CheckmarkCircleSolidIcon, CircleIcon, FolderAddIcon, HighlighterIcon, Icon, LayersIcon, QuillWriteIcon, Spinner, TableIcon, TickIcon } from '../icons/icons';
@@ -197,7 +197,7 @@ let lastLibraryCheck: { libraries: string; ready: boolean } | null = null;
  * when the user goes back or removes the /command from the chat input.
  */
 const FeatureCreditsCard: React.FC<{
-    /** Whether the card is on screen; home hides recent chats while it is. */
+    /** Whether the card is on screen; home hides the launcher and recent chats while it is. */
     onShownChange?: (shown: boolean) => void;
 }> = ({ onShownChange }) => {
     const entries = useAtomValue(featureCreditEntriesAtom);
@@ -265,10 +265,11 @@ const FeatureCreditsCard: React.FC<{
         if (shown) Zotero.Beaver?.account?.markFeatureCreditsCardSeen();
     }, [shown]);
     const visible = !!entries && shown;
-    useEffect(() => {
+    // Before paint, so home never flashes the launcher the card replaces.
+    useLayoutEffect(() => {
         onShownChange?.(visible);
     }, [visible, onShownChange]);
-    useEffect(() => () => onShownChange?.(false), [onShownChange]);
+    useLayoutEffect(() => () => onShownChange?.(false), [onShownChange]);
 
     if (!entries || !shown) return null;
 
@@ -279,7 +280,7 @@ const FeatureCreditsCard: React.FC<{
 
     if (showSetup && activeEntry && activeDefinition) {
         return (
-            <section className="feature-credits-card" aria-label={`${activeDefinition.title}: how to start`}>
+            <section className="feature-credits-card feature-credits-home" aria-label={`${activeDefinition.title}: how to start`}>
                 <SetupView definition={activeDefinition} credits={activeEntry.task.credits} onBack={leaveTask} />
             </section>
         );
@@ -290,7 +291,7 @@ const FeatureCreditsCard: React.FC<{
     const perTask = openAmounts.size === 1 ? [...openAmounts][0] : null;
 
     return (
-        <section className="feature-credits-card" aria-labelledby="feature-credits-title">
+        <section className="feature-credits-card feature-credits-home" aria-labelledby="feature-credits-title">
             <div className="feature-credits-header">
                 <h2 id="feature-credits-title" className="feature-credits-title">
                     Try Beaver and earn {totals.total - totals.earned} {totals.earned > 0 ? 'more ' : ''}free credits

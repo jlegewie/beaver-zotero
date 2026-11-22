@@ -43,8 +43,8 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false, inputRef }) => {
     const activeFeatureTask = useAtomValue(activeFeatureTaskAtom);
     // A setup card stays while its task is open, even if the list is dismissed.
     const showFeatureCredits = !allLibrariesExcluded && (featureCreditsVisible || !!activeFeatureTask);
-    // The card takes the place of recent chats while it is on screen; the
-    // header's history button still lists them.
+    // The card takes the place of the launcher and recent chats while it is
+    // on screen; the header's history button still lists them.
     const [featureCreditsShown, setFeatureCreditsShown] = useState(false);
     const cardOnScreen = showFeatureCredits && featureCreditsShown;
     const showRecentChats = !isWindow && !cardOnScreen;
@@ -67,23 +67,25 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false, inputRef }) => {
                     {/* Greeting */}
                     <div className="text-2xl font-semibold text-center p-2">How can I help you?</div>
 
-                    {/* Input area */}
-                    <DragDropWrapper>
-                        <InputArea inputRef={inputRef} verticalPosition="below" />
-                    </DragDropWrapper>
+                    {/* Input area. Feature-credit tasks hang off its bottom
+                        edge, attached to the input their steps fill in, in
+                        place of the launcher. */}
+                    <div className={`feature-credits-dock ${cardOnScreen ? 'is-docked' : ''}`}>
+                        <DragDropWrapper>
+                            <InputArea inputRef={inputRef} verticalPosition="below" />
+                        </DragDropWrapper>
+                        {showFeatureCredits && <FeatureCreditsCard onShownChange={setFeatureCreditsShown} />}
+                    </div>
 
                     {/* Action launcher — category row + expandable panels */}
                     {allLibrariesExcluded ? (
                         <AllLibrariesExcludedMessage />
                     ) : (
-                        <HomeLauncher />
+                        !cardOnScreen && <HomeLauncher />
                     )}
 
                     {/* Bottom spacer */}
                     <div className="flex-1" />
-
-                    {/* Feature-credit tasks, in place of recent chats */}
-                    {showFeatureCredits && <FeatureCreditsCard onShownChange={setFeatureCreditsShown} />}
                 </div>
             </div>
 
