@@ -1649,6 +1649,86 @@ describe('sorting', () => {
     });
 });
 
+describe('filtering', () => {
+    const shownRows = () =>
+        Array.from(container!.querySelectorAll<HTMLElement>('tbody tr[data-row-id]')).map((row) => row.getAttribute('data-row-id'));
+    const header = (columnId: string) => container!.querySelector<HTMLElement>(`th[data-column-id="${columnId}"]`)!;
+    const openColumnMenu = (name: string) => click(container!.querySelector(`button[aria-label="Column menu: ${name}"]`)!);
+    const submenuLabels = () =>
+        Array.from(document.querySelectorAll<HTMLElement>('[role="menu"][aria-label="Filter"] [role="menuitem"]')).map((item) =>
+            item.getAttribute('aria-label'),
+        );
+    const filterItem = () => document.querySelector<HTMLElement>('[role="menuitem"][aria-label="Filter"]');
+    /** The table with a yes/no column, answered Yes for r1 and No for r2. */
+    function withBoolean(): TableSpec {
+        const spec = table();
+        spec.columns = [...spec.columns, { id: 'urban', header: 'Urban', type: 'boolean' }];
+        spec.rows[0].cells.urban = { outcome: 'answered', provenance: 'model', value: { kind: 'boolean', value: true } } as Cell;
+        spec.rows[1].cells.urban = { outcome: 'answered', provenance: 'model', value: { kind: 'boolean', value: false } } as Cell;
+        return spec;
+    }
+
+    it("filters a category column from its own menu, marks its header and clears from the menu", () => {
+        mount();
+        expect(header('design').querySelector('.rt-th-filter')).toBeNull();
+        openColumnMenu('Design');
+        click(filterItem()!);
+        expect(submenuLabels()).toEqual(['RCT']);
+        click(menuEntry('RCT')!);
+        expect(shownRows()).toEqual(['r1']);
+        expect(header('design').querySelector('.rt-th-filter')).not.toBeNull();
+        expect(container!.querySelector('.bt-chip')?.textContent).toBe('Design:RCT');
+
+        openColumnMenu('Design');
+        click(filterItem()!);
+        expect(submenuLabels()).toEqual(['RCT', 'Clear filter']);
+        expect(document.querySelector('[aria-label="RCT"] .bt-menu-check.bt-checked')).not.toBeNull();
+        click(menuEntry('Clear filter')!);
+        expect(shownRows()).toEqual(['r1', 'r2', 'r3']);
+        expect(header('design').querySelector('.rt-th-filter')).toBeNull();
+    });
+
+    it('filters a yes/no column to Yes or No, and picking the active one again clears it', () => {
+        mount({ table: withBoolean() });
+        openColumnMenu('Urban');
+        click(filterItem()!);
+        expect(submenuLabels()).toEqual(['Yes', 'No']);
+        click(menuEntry('No')!);
+        expect(shownRows()).toEqual(['r2']);
+        openColumnMenu('Urban');
+        click(filterItem()!);
+        click(menuEntry('Yes')!);
+        expect(shownRows()).toEqual(['r1']);
+        openColumnMenu('Urban');
+        click(filterItem()!);
+        click(menuEntry('Yes')!);
+        expect(shownRows()).toEqual(['r1', 'r2', 'r3']);
+    });
+
+    it('offers no Filter on a text column', () => {
+        mount();
+        openColumnMenu('Amount');
+        expect(menuEntry('Hide column')).toBeDefined();
+        expect(filterItem()).toBeNull();
+    });
+
+    it('lists only category and yes/no columns in the toolbar Filter menu', () => {
+        mount({ table: withBoolean() });
+        click(container!.querySelector('button[aria-label="Filter rows"]')!);
+        const sections = Array.from(document.querySelectorAll<HTMLElement>('.bt-menu-section')).map((el) => el.textContent);
+        expect(sections).toEqual(['Design', 'Urban']);
+        expect(menuEntry('Has a value')).toBeUndefined();
+        expect(menuEntry('No value')).toBeUndefined();
+    });
+
+    it('shows no Filter button when no column can be filtered by value', () => {
+        const spec = table();
+        spec.columns = spec.columns.filter((column) => column.type !== 'select');
+        mount({ table: spec });
+        expect(container!.querySelector('button[aria-label="Filter rows"]')).toBeNull();
+    });
+});
+
 describe('activity', () => {
     it("reports selecting a cell and changing the search, but not the table's first render", () => {
         const onActivity = vi.fn();
