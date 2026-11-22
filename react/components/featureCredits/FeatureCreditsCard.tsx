@@ -1,14 +1,14 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import { ArrowLeftIcon, ArrowRightIcon, CancelIcon, CheckmarkCircleSolidIcon, CircleIcon, FolderAddIcon, HighlighterIcon, Icon, LayersIcon, QuillWriteIcon, Spinner, TableIcon, TickIcon } from '../icons/icons';
 import {
     featureCreditEntriesAtom,
     featureCreditsCardDismissedAtom,
-    featureCreditsCardRequestedAtom,
     featureCreditTotalsAtom,
     featureTaskAttachedPapersAtom,
     featureTaskSetupStepsAtom,
+    featureTaskUnavailableAtom,
     leaveFeatureTaskAtom,
     lookUpOcrPreparedPdfsAtom,
     selectBeaverModelAtom,
@@ -18,9 +18,10 @@ import {
 import { activeFeatureTaskAtom } from '../../atoms/featureCreditRuns';
 import { currentMessagePillsAtom, pendingPillInsertsAtom } from '../../atoms/messageComposition';
 import { searchableLibraryIdsAtom } from '../../atoms/profile';
-import { examplesForLibrary, getFeatureCreditTask, type FeatureTaskDefinition, type FeatureTaskExample, type LibraryShape } from '../../constants/featureCreditTasks';
+import { completeCreditsFirstRunAtom } from '../../atoms/firstRun';
+import { CREDITS_DOCS_URL, examplesForLibrary, getFeatureCreditTask, type FeatureTaskDefinition, type FeatureTaskExample, type LibraryShape } from '../../constants/featureCreditTasks';
 import type { SetupStep, StepStatus } from '../../utils/featureCredits';
-import { countLibraryItems, readLibraryShape } from '../../utils/libraryShape';
+import { readLibraryShape } from '../../utils/libraryShape';
 import { SMALL_LIBRARY_THRESHOLD } from '../../atoms/zoteroContext';
 
 const TASK_ICONS: Record<string, React.ComponentType<React.SVGProps<SVGSVGElement>>> = {
@@ -32,11 +33,10 @@ const TASK_ICONS: Record<string, React.ComponentType<React.SVGProps<SVGSVGElemen
 };
 
 /** One task in the list: done, or a button that opens its setup card. */
-export const TaskRow: React.FC<{
+const TaskRow: React.FC<{
     entry: FeatureCreditEntry;
     onStart: (key: string, win: Window | null) => void;
-    disabled?: boolean;
-}> = ({ entry, onStart, disabled }) => {
+}> = ({ entry, onStart }) => {
     const { task, definition } = entry;
     const done = !!task.completed_at;
     const body = (
@@ -50,7 +50,6 @@ export const TaskRow: React.FC<{
                 <span className={done ? 'font-color-secondary text-base' : 'font-color-primary font-medium text-base'}>{definition.title}</span>
                 <span className="feature-credits-row-subtitle">{definition.subtitle}</span>
             </span>
-            {/* {!done && <span className="feature-credits-row-credits">+{task.credits}</span>} */}
             {!done && <Icon icon={ArrowRightIcon} className="feature-credits-row-arrow font-color-secondary" />}
         </>
     );
@@ -60,7 +59,6 @@ export const TaskRow: React.FC<{
             <button
                 type="button"
                 className="feature-credits-row feature-credits-row-button"
-                disabled={disabled}
                 onClick={(event) => onStart(definition.key, event.currentTarget.ownerDocument.defaultView)}
             >
                 {body}
@@ -184,15 +182,12 @@ const SetupView: React.FC<{ definition: FeatureTaskDefinition; credits: number; 
                 ))}
             </ol>
             <p className="feature-credits-reward">
-                Send your prompt to earn {credits} free credits.
+                Send to earn {credits} free credits.
                 {definition.footnote && <> {definition.footnote}</>}
             </p>
         </>
     );
 };
-
-/** The last library-size check, so a return to home does not wait for it. */
-let lastLibraryCheck: { libraries: string; ready: boolean } | null = null;
 
 /**
  * "Try Beaver and earn free credits": the feature-credit tasks on the home screen.
@@ -201,39 +196,17 @@ let lastLibraryCheck: { libraries: string; ready: boolean } | null = null;
  * chat input and swaps the list for that task's setup card. The setup ends
  * when the user goes back or removes the /command from the chat input.
  */
-const FeatureCreditsCard: React.FC<{
-    /** Whether the card is on screen; home hides the launcher and recent chats while it is. */
-    onShownChange?: (shown: boolean) => void;
-}> = ({ onShownChange }) => {
+const FeatureCreditsCard: React.FC = () => {
     const entries = useAtomValue(featureCreditEntriesAtom);
     const totals = useAtomValue(featureCreditTotalsAtom);
     const [activeKey, setActiveKey] = useAtom(activeFeatureTaskAtom);
     const setDismissed = useSetAtom(featureCreditsCardDismissedAtom);
-    const requested = useAtomValue(featureCreditsCardRequestedAtom);
+    const isUnavailable = useAtomValue(featureTaskUnavailableAtom);
+    const completeCreditsFirstRun = useSetAtom(completeCreditsFirstRunAtom);
     const startTask = useSetAtom(startFeatureTaskAtom);
     const leaveTask = useSetAtom(leaveFeatureTaskAtom);
     const pills = useAtomValue(currentMessagePillsAtom);
     const pendingPills = useAtomValue(pendingPillInsertsAtom);
-
-    const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
-    // The tasks need papers to work on: the list waits for a library of a
-    // useful size (the threshold first run uses). Checked when the card
-    // mounts, so papers added since show it on the next visit to home.
-    const librariesKey = searchableLibraryIds.join(',');
-    const [libraryReady, setLibraryReady] = useState<boolean | null>(
-        () => (lastLibraryCheck?.libraries === librariesKey ? lastLibraryCheck.ready : null),
-    );
-    useEffect(() => {
-        let cancelled = false;
-        void countLibraryItems(SMALL_LIBRARY_THRESHOLD, searchableLibraryIds).then((count) => {
-            const ready = count !== null && count >= SMALL_LIBRARY_THRESHOLD;
-            lastLibraryCheck = { libraries: searchableLibraryIds.join(','), ready };
-            if (!cancelled) setLibraryReady(ready);
-        });
-        return () => {
-            cancelled = true;
-        };
-    }, [searchableLibraryIds]);
 
     const activeEntry = activeKey ? entries?.find((entry) => entry.definition.key === activeKey) : undefined;
     const activeDefinition = activeKey ? getFeatureCreditTask(activeKey) : undefined;
@@ -263,24 +236,19 @@ const FeatureCreditsCard: React.FC<{
     }, [activeKey, activeEntry, setActiveKey]);
 
     const showSetup = !!(activeEntry && activeDefinition && !activeEntry.task.completed_at);
-    // A setup someone started (Next, a release note) and a list asked for in
-    // Plan & Usage show whatever the library size.
-    const shown = !!entries && (showSetup || requested || libraryReady === true);
-    useEffect(() => {
-        if (shown) Zotero.Beaver?.account?.markFeatureCreditsCardSeen();
-    }, [shown]);
-    const visible = !!entries && shown;
-    // Before paint, so home never flashes the launcher the card replaces.
-    useLayoutEffect(() => {
-        onShownChange?.(visible);
-    }, [visible, onShownChange]);
-    useLayoutEffect(() => () => onShownChange?.(false), [onShownChange]);
 
-    if (!entries || !shown) return null;
+    if (!entries) return null;
 
+    // Picking a task, or closing the list, ends a feature-credits first run.
     const onStart = (key: string, win: Window | null) => {
         pillSeenRef.current = false;
         startTask({ key, targetWindow: win ?? undefined });
+        void completeCreditsFirstRun(key);
+    };
+
+    const dismiss = () => {
+        setDismissed(true);
+        void completeCreditsFirstRun('dismiss');
     };
 
     if (showSetup && activeEntry && activeDefinition) {
@@ -290,6 +258,10 @@ const FeatureCreditsCard: React.FC<{
             </section>
         );
     }
+
+    // Tasks that cannot start yet stay out of the list; a line says how many.
+    const listed = entries.filter((entry) => entry.task.completed_at || !isUnavailable(entry.definition));
+    const locked = entries.length - listed.length;
 
     // What each open task earns, when they all earn the same.
     const openAmounts = new Set(entries.filter((entry) => !entry.task.completed_at).map((entry) => entry.task.credits));
@@ -301,18 +273,32 @@ const FeatureCreditsCard: React.FC<{
                 <h2 id="feature-credits-title" className="feature-credits-title">
                     Try Beaver and earn {totals.total - totals.earned} {totals.earned > 0 ? 'more ' : ''}free credits
                 </h2>
-                <IconButton icon={CancelIcon} variant="ghost-secondary" ariaLabel="Dismiss" onClick={() => setDismissed(true)} />
+                <IconButton icon={CancelIcon} variant="ghost-secondary" ariaLabel="Dismiss" onClick={dismiss} />
             </div>
             <p className="feature-credits-text">
-                {perTask !== null
-                    ? `Choose a task below. Each earns ${perTask} credits the first time you send it.`
-                    : "Choose a task below. You'll earn credits the first time you send it."}
+                {perTask !== null ? `Each task earns ${perTask} credits.` : 'Each task earns credits.'}
+                {' '}Most messages cost 1.{' '}
+                <a
+                    href={CREDITS_DOCS_URL}
+                    className="feature-credits-link"
+                    onClick={(event) => {
+                        event.preventDefault();
+                        Zotero.launchURL(CREDITS_DOCS_URL);
+                    }}
+                >
+                    Learn more
+                </a>
             </p>
             <ul className="feature-credits-list">
-                {entries.map((entry) => (
+                {listed.map((entry) => (
                     <TaskRow key={entry.definition.key} entry={entry} onStart={onStart} />
                 ))}
             </ul>
+            {locked > 0 && (
+                <p className="feature-credits-text font-color-secondary">
+                    {locked === 1 ? '1 more task unlocks' : `${locked} more tasks unlock`} once your library has {SMALL_LIBRARY_THRESHOLD} items.
+                </p>
+            )}
         </section>
     );
 };

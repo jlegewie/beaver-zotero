@@ -55,6 +55,18 @@ vi.mock('../../../src/beaver-extract', () => ({
 
 vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
 
+// Records the choice each send reports to first run.
+const firstRunChoices = vi.hoisted(() => [] as string[]);
+vi.mock('../../../react/atoms/firstRun', async (importOriginal) => {
+    const { atom } = await import('jotai');
+    return {
+        ...(await importOriginal<object>()),
+        completeCreditsFirstRunAtom: atom(null, async (_get, _set, choice: string) => {
+            firstRunChoices.push(choice);
+        }),
+    };
+});
+
 import { store } from '../../../react/store';
 import { isWSChatPendingAtom, sendWSMessageAtom } from '../../../react/atoms/agentRunAtoms';
 import { sessionAtom } from '../../../react/atoms/auth';
@@ -70,6 +82,14 @@ describe('feature credits on the chat request', () => {
         store.set(isWSChatPendingAtom, false);
         store.set(activeRunAtom, null);
         store.set(pendingFeatureCreditsAtom, new Map());
+        firstRunChoices.length = 0;
+    });
+
+    it('reports every message as a first-run choice: its task, or a message of the user\'s own', async () => {
+        await store.set(sendWSMessageAtom, '/annotate the methods', { featureTask: 'annotate' });
+        store.set(isWSChatPendingAtom, false);
+        await store.set(sendWSMessageAtom, 'hello');
+        expect(firstRunChoices).toEqual(['annotate', 'chat']);
     });
 
     it('names the feature task on the message it was sent for, and keeps it with the run', async () => {

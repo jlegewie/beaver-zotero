@@ -108,7 +108,7 @@ export function attachAccountProjection(runtime: WindowRuntime): void {
             if (!snapshot.authenticating || store.get(sessionAtom))
                 resetLoginFormState(store.set);
             store.set(firstRunNextStepsDismissedAtom, new Set());
-            store.set(firstRunPreviewAtom, null);
+            store.set(firstRunPreviewAtom, false);
             store.set(whereToStartVisibleAtom, false);
         }
         generation = snapshot.generation;

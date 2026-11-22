@@ -71,10 +71,10 @@ export interface FeatureTaskDefinition {
     /** The task does not run on the user's own API key. */
     requiresBeaverModel?: boolean;
     /**
-     * The task needs no papers in the library: first run offers only these
-     * when the library is below the small-library threshold.
+     * The task works on papers already in the library, so it cannot start in a
+     * small one (see `featureTaskUnavailableAtom`).
      */
-    worksWithoutPapers?: boolean;
+    needsPapers?: boolean;
     /**
      * The setup card's "what should Beaver do" step. Without it the action
      * runs as is, and the card asks only for what it works on.
@@ -113,6 +113,9 @@ export interface FeatureTaskDefinition {
 
 const DOCS_BASE_URL = 'https://www.beaverapp.ai/docs';
 
+/** What credits are and what they cost. */
+export const CREDITS_DOCS_URL = `${DOCS_BASE_URL}/credits`;
+
 export const FEATURE_CREDIT_TASKS: FeatureTaskDefinition[] = [
     {
         key: 'annotate',
@@ -120,6 +123,7 @@ export const FEATURE_CREDIT_TASKS: FeatureTaskDefinition[] = [
         subtitle: 'Color-coded highlights and comments in your PDF',
         actionId: 'builtin-color-code',
         attach: 'pdf',
+        needsPapers: true,
         examples: [],
         completion: {
             tip: 'To color-code another PDF, open it and type /color-code. For your own colors and categories,',
@@ -143,7 +147,6 @@ export const FEATURE_CREDIT_TASKS: FeatureTaskDefinition[] = [
         subtitle: 'A collection of your papers, plus new ones Beaver finds',
         actionId: 'builtin-start-project',
         attach: 'none',
-        worksWithoutPapers: true,
         prompt: {
             heading: 'What is the project about?',
             hint: 'Type a topic or research question, or send as is and Beaver suggests topics from your library.',
@@ -160,6 +163,7 @@ export const FEATURE_CREDIT_TASKS: FeatureTaskDefinition[] = [
         subtitle: 'Systematic comparison of research papers',
         actionId: 'builtin-research-table',
         attach: 'none',
+        needsPapers: true,
         requiresBeaverModel: true,
         prompt: {
             heading: 'What should the table compare?',
@@ -204,6 +208,7 @@ export const FEATURE_CREDIT_TASKS: FeatureTaskDefinition[] = [
         subtitle: 'Collections, tags, metadata and more',
         actionId: 'builtin-tidy-up',
         attach: 'none',
+        needsPapers: true,
         prompt: {
             heading: 'What should Beaver tidy up?',
             hint: 'Beaver looks over your whole library. Name a focus, or send as is. For example:',

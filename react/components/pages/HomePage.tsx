@@ -1,10 +1,10 @@
-import React, { useState } from "react";
+import React from "react";
 import { useAtomValue } from 'jotai';
 import { allLibrariesExcludedAtom } from "../../atoms/profile";
 import RecentChats from "../RecentChats";
 import HomeLauncher from "../HomeLauncher";
 import FeatureCreditsCard from "../featureCredits/FeatureCreditsCard";
-import { featureCreditsCardVisibleAtom } from "../../atoms/featureCredits";
+import { featureCreditEntriesAtom, featureCreditsCardVisibleAtom } from "../../atoms/featureCredits";
 import { activeFeatureTaskAtom } from "../../atoms/featureCreditRuns";
 import InputArea from "../input/InputArea";
 import DragDropWrapper from "../input/DragDropWrapper";
@@ -40,13 +40,14 @@ const AllLibrariesExcludedMessage = () => (
 const HomePage: React.FC<HomePageProps> = ({ isWindow = false, inputRef }) => {
     const allLibrariesExcluded = useAtomValue(allLibrariesExcludedAtom);
     const featureCreditsVisible = useAtomValue(featureCreditsCardVisibleAtom);
+    const featureCreditEntries = useAtomValue(featureCreditEntriesAtom);
     const activeFeatureTask = useAtomValue(activeFeatureTaskAtom);
     // A setup card stays while its task is open, even if the list is dismissed.
     const showFeatureCredits = !allLibrariesExcluded && (featureCreditsVisible || !!activeFeatureTask);
     // The card takes the place of the launcher and recent chats while it is
-    // on screen; the header's history button still lists them.
-    const [featureCreditsShown, setFeatureCreditsShown] = useState(false);
-    const cardOnScreen = showFeatureCredits && featureCreditsShown;
+    // on screen (it renders nothing without tasks); the header's history
+    // button still lists them.
+    const cardOnScreen = showFeatureCredits && !!featureCreditEntries;
     const showRecentChats = !isWindow && !cardOnScreen;
 
     // Beta versions use a pre-release tag (e.g. "0.20.0-beta.1")
@@ -74,7 +75,7 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false, inputRef }) => {
                         <DragDropWrapper>
                             <InputArea inputRef={inputRef} verticalPosition="below" />
                         </DragDropWrapper>
-                        {showFeatureCredits && <FeatureCreditsCard onShownChange={setFeatureCreditsShown} />}
+                        {showFeatureCredits && <FeatureCreditsCard />}
                     </div>
 
                     {/* Action launcher — category row + expandable panels */}

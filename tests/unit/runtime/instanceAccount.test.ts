@@ -5,14 +5,12 @@ const mocks = vi.hoisted(() => ({
     preference: vi.fn(),
     claim: vi.fn(),
     dispose: vi.fn(),
-    seen: vi.fn(),
 }));
 vi.mock("@beaver/agent-core/transport/clients/accountService", () => ({
     accountService: {
         getProfileWithPlan: mocks.profile,
         updateExcludedLibraries: mocks.exclusion,
         updatePreference: mocks.preference,
-        markFeatureCreditsCardSeen: mocks.seen,
     },
 }));
 vi.mock("@beaver/agent-core/transport/threadService", () => ({
@@ -853,24 +851,6 @@ describe("instance account ownership", () => {
                 .getAuthDiagnostics()
                 .find((entry) => entry.event === "restore_failed");
             expect(failure?.detail).toContain("AuthRetryableFetchError");
-        });
-    });
-
-    describe("feature-credits card report", () => {
-        it("reports the card as shown once per account, and again after a failed report", async () => {
-            mocks.profile.mockResolvedValue(profile());
-            await load();
-            mocks.seen.mockRejectedValueOnce(new Error("offline")).mockResolvedValue(undefined);
-            account.markFeatureCreditsCardSeen();
-            await vi.advanceTimersByTimeAsync(0);
-            account.markFeatureCreditsCardSeen();
-            account.markFeatureCreditsCardSeen();
-            await vi.advanceTimersByTimeAsync(0);
-            expect(mocks.seen).toHaveBeenCalledTimes(2);
-            event("SIGNED_IN", session("b"));
-            await vi.advanceTimersByTimeAsync(0);
-            account.markFeatureCreditsCardSeen();
-            expect(mocks.seen).toHaveBeenCalledTimes(3);
         });
     });
 });
