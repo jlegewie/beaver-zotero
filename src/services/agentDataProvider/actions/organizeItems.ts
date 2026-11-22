@@ -9,6 +9,7 @@ import type { ActionExecuteRequest, ActionValidateRequest } from '../operationCo
 import { TimeoutContext, TimeoutError, checkAborted } from '../timeout';
 import { excludedLibraryMessage, getDeferredToolPreference } from '../utils';
 import { actionError, assertLibraryNotExcluded, toExecuteResponse } from './actionExecution';
+import { similarExistingTags, snapshotSimilarTags } from './similarTags';
 
 
 /**
@@ -391,6 +392,7 @@ async function organizeItems(
     const item_ids = [...new Set(requestedItemIds)];
 
     const hasCollectionChanges = !!(collections && ((collections.add && collections.add.length > 0) || (collections.remove && collections.remove.length > 0)));
+    const itemLibraryIds = new Set<number>();
 
     // TOCTOU guard: never mutate items in a library the user excluded from
     // Beaver or that became read-only, even if validation passed earlier or
@@ -401,6 +403,7 @@ async function organizeItems(
         if (!parsed) continue; // malformed → skipped in the main loop
         const libraryId = resolveLibraryRef(parsed);
         if (libraryId == null) continue; // library not on this device → skipped in the main loop
+        itemLibraryIds.add(libraryId);
         assertLibraryNotExcluded(libraryId);
         assertLibraryWritable(libraryId, { requirePortable: hasCollectionChanges });
     }
@@ -414,6 +417,8 @@ async function organizeItems(
     const unchangedItems: string[] = [];
     // Track actual changes (not just requested changes) for safe undo
     const actualTagsAdded = new Set<string>();
+    // Tags added per library, for the similar-tag check below.
+    const tagsAddedByLibrary = new Map<number, Set<string>>();
     const actualTagsRemoved = new Set<string>();
     const actualCollectionsAdded = new Set<string>();
     const actualCollectionsRemoved = new Set<string>();
@@ -468,6 +473,22 @@ async function organizeItems(
             if (collections?.add) collections.add = [...addCollections.keys()];
             if (collections?.remove) collections.remove = [...removeCollections.keys()];
         }
+    }
+
+    // Which added tags the library already has, and its other spellings of
+    // the new ones, read before the write so "new" means new to the library.
+    // Advisory: a failed lookup only drops the note.
+    const similarSnapshots = new Map<number, Awaited<ReturnType<typeof snapshotSimilarTags>>>();
+    if (tags?.add && tags.add.length > 0) {
+        await ta.track('similar_tags_ms', async () => {
+            for (const libraryId of itemLibraryIds) {
+                try {
+                    similarSnapshots.set(libraryId, await snapshotSimilarTags(libraryId, tags.add!));
+                } catch (error) {
+                    logger(`applyOrganizeItems: similar-tag lookup failed: ${error}`, 1);
+                }
+            }
+        });
     }
 
     try {
@@ -533,6 +554,9 @@ async function organizeItems(
                         if (!existingTags.has(tagName)) {
                             item.addTag(tagName);
                             actualTagsAdded.add(tagName);
+                            const added = tagsAddedByLibrary.get(item.libraryID) ?? new Set<string>();
+                            added.add(tagName);
+                            tagsAddedByLibrary.set(item.libraryID, added);
                             modified = true;
                         }
                     }
@@ -623,6 +647,8 @@ async function organizeItems(
         items_unchanged: unchangedItems.length,
     });
 
+    const similarTags = similarExistingTags(tagsAddedByLibrary, similarSnapshots, tags?.remove ?? []);
+
     return {
         items_modified: itemsModified,
         current_state: Object.fromEntries([...itemSnapshots].map(([id, snapshot]) => [id, {
@@ -638,6 +664,7 @@ async function organizeItems(
         collections_removed: actualCollectionsRemoved.size > 0 ? [...actualCollectionsRemoved] : undefined,
         skipped_items: skippedItems.length > 0 ? skippedItems : undefined,
         unchanged_items: unchangedItems.length > 0 ? unchangedItems : undefined,
+        similar_existing_tags: similarTags.length > 0 ? similarTags : undefined,
     };
 }
 

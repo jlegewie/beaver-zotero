@@ -229,6 +229,11 @@ export interface OrganizeItemsResultData {
     skipped_items?: string[];
     /** Items that already held every requested change so nothing was written for them. */
     unchanged_items?: string[];
+    /**
+     * Tags this write created that differ from tags already in their library
+     * only in case, spacing, hyphens or a plural ending. Advisory.
+     */
+    similar_existing_tags?: Array<{ tag: string; library_ref: string | null; existing: string[] }>;
 }
 
 // =============================================================================
