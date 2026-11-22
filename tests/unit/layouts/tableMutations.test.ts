@@ -560,6 +560,38 @@ describe("applyMutations", () => {
     });
 });
 
+describe("reorder_columns", () => {
+    const spec = (): TableSpec => ({
+        id: "t",
+        anchor_column_id: "paper",
+        columns: [
+            { id: "paper", header: "Paper", type: "reference" },
+            { id: "a", header: "A", type: "text" },
+            { id: "b", header: "B", type: "text" },
+        ],
+        rows: [],
+    });
+    const order = (result: ReturnType<typeof applyMutations>) => (result.ok ? result.spec.columns.map((c) => c.id) : result);
+
+    it("puts the columns in the order given without writing into the spec it was given, and later mutations see it", () => {
+        const frozen = deepFreeze(spec());
+        expect(order(applyMutations(frozen, [{ op: "reorder_columns", columns: ["paper", "b", "a"] }]))).toEqual(["paper", "b", "a"]);
+        expect(
+            order(
+                applyMutations(frozen, [
+                    { op: "reorder_columns", columns: ["paper", "b", "a"] },
+                    { op: "add_columns", columns: [{ id: "c", header: "C", type: "text" }], after: "b" },
+                ]),
+            ),
+        ).toEqual(["paper", "b", "c", "a"]);
+    });
+
+    it("refuses a list that misses, repeats or invents a column", () => {
+        for (const columns of [["paper", "a"], ["paper", "a", "a"], ["paper", "a", "x"], ["paper", "a", "b", "x"]])
+            expect(applyMutations(spec(), [{ op: "reorder_columns", columns }])).toMatchObject({ ok: false, error: { code: "invalid_mutation" } });
+    });
+});
+
 describe("addColumnBlockedReason", () => {
     const sized = (columns: number, rows: number): TableSpec => ({
         id: "t",

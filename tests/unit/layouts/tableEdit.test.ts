@@ -380,3 +380,89 @@ describe("the tab's column edits", () => {
         expect(result.ok && result.changes[0]).toMatchObject({ fields: ["header"], cleared: 0 });
     });
 });
+
+describe("moving question columns", () => {
+    const none = { added: [], refreshed: new Map() };
+    const table = (): TableSpec => ({
+        id: "t",
+        anchor_column_id: "_reference",
+        sort: { column_id: "b", direction: "asc" },
+        columns: [
+            { id: "_reference", header: "Reference", type: "reference", system: true },
+            { id: "_year", header: "Year", type: "date", system: true },
+            { id: "_identifier", header: "Identifier", type: "link", system: true },
+            { id: "a", header: "A", type: "text" },
+            { id: "b", header: "B", type: "text" },
+            { id: "c", header: "C", type: "text" },
+        ],
+        rows: [
+            {
+                id: "r1",
+                cells: {
+                    _reference: { outcome: "answered", provenance: "system", value: { kind: "reference", display_name: "X" } },
+                    c: { outcome: "answered", provenance: "user", value: { kind: "text", text: "mine" } },
+                },
+            },
+        ],
+    });
+    const order = (spec: TableSpec) => spec.columns.map((column) => column.id);
+    const move = (spec: TableSpec, id: string, after: string | null) => applyEdit(spec, { move_columns: [{ id, after }] }, none, NOW);
+
+    it("puts a column after another question, keeping its cells, the sort and the anchor, and reports no change", () => {
+        const before = table();
+        const result = move(before, "c", "a");
+        expect(result.ok).toBe(true);
+        if (!result.ok) return;
+        expect(order(result.spec)).toEqual(["_reference", "_year", "_identifier", "a", "c", "b"]);
+        expect(result.spec.rows[0].cells.c).toEqual(before.rows[0].cells.c);
+        expect(result.spec.sort).toEqual(before.sort);
+        expect(result.spec.anchor_column_id).toBe("_reference");
+        expect(result.changes).toEqual([]);
+        expect(order(before)).toEqual(["_reference", "_year", "_identifier", "a", "b", "c"]);
+    });
+
+    it("puts a column first among the questions, after the system columns", () => {
+        const result = move(table(), "c", null);
+        expect(result.ok && order(result.spec)).toEqual(["_reference", "_year", "_identifier", "c", "a", "b"]);
+    });
+
+    it("keeps the paper and the year in their places when questions sit between or before them", () => {
+        const spec = table();
+        // [A, Reference, B, Year, C]
+        spec.columns = [spec.columns[3], spec.columns[0], spec.columns[4], spec.columns[1], spec.columns[5]];
+        const first = move(spec, "c", null);
+        expect(first.ok && order(first.spec)).toEqual(["c", "_reference", "a", "_year", "b"]);
+        const right = move(spec, "a", "b");
+        expect(right.ok && order(right.spec)).toEqual(["b", "_reference", "a", "_year", "c"]);
+    });
+
+    it("applies several moves in order", () => {
+        const result = applyEdit(table(), { move_columns: [{ id: "a", after: "c" }, { id: "b", after: "a" }] }, none, NOW);
+        expect(result.ok && order(result.spec)).toEqual(["_reference", "_year", "_identifier", "c", "a", "b"]);
+    });
+
+    it("refuses to move a system column or past one, and an unknown column, changing nothing", () => {
+        for (const [id, after] of [["_year", "a"], ["a", "_reference"], ["a", "_identifier"], ["gone", null], ["a", "gone"]] as const) {
+            const result = move(table(), id, after);
+            expect(result).toMatchObject({ ok: false, code: "unknown_column" });
+            expect(!result.ok && result.message).toMatch(/^move_columns\[0\]: column .* is not a question column/);
+        }
+        expect(move(table(), "a", "a")).toMatchObject({ ok: false, code: "invalid_edit" });
+        expect(applyEdit(table(), { move_columns: [{ id: "a", after: "b" }, { id: "x", after: null }] }, none, NOW)).toMatchObject({ ok: false });
+    });
+
+    it("refuses the paper column of a table without a reference column", () => {
+        const spec: TableSpec = {
+            id: "t",
+            columns: [
+                { id: "paper", header: "Paper", type: "text" },
+                { id: "a", header: "A", type: "text" },
+                { id: "b", header: "B", type: "text" },
+            ],
+            rows: [],
+        };
+        expect(move(spec, "paper", "b")).toMatchObject({ ok: false, code: "unknown_column" });
+        const result = move(spec, "b", null);
+        expect(result.ok && order(result.spec)).toEqual(["paper", "b", "a"]);
+    });
+});

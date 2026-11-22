@@ -189,6 +189,26 @@ export function evidenceTagLabel(
 /** The paper column's header, whatever the spec calls it. */
 export const PAPER_HEADER = "Item";
 
+/** Where a dragged or menu-moved column lands: before a column in view, or after one. */
+export type ColumnDrop = { before: string } | { after: string };
+
+/**
+ * Where a question column dropped beside another lands, as the `after` of a
+ * column move: after `drop.after`, or just before `drop.before`, that is,
+ * after the question before it (null when it is the first). `questions` is
+ * the table's order, hidden columns included, which keep their places.
+ */
+export function moveAfter(
+    questions: readonly Column[],
+    columnId: string,
+    drop: ColumnDrop,
+): string | null {
+    if ("after" in drop) return drop.after;
+    const rest = questions.filter((column) => column.id !== columnId);
+    const at = rest.findIndex((column) => column.id === drop.before);
+    return at > 0 ? rest[at - 1].id : null;
+}
+
 /** A sort order in words: "A → Z", or "oldest first" for the year. */
 export function sortOrderLabel(direction: "asc" | "desc", year: boolean): string {
     if (year) return direction === "asc" ? "oldest first" : "newest first";

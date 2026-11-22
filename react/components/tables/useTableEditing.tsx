@@ -423,6 +423,8 @@ export function useTableEditing({
         onAddColumn: () => setEditor({ initial: newColumnDraft() }),
         onChangeType: changeType,
         onRemoveColumn: removeColumn,
+        onMoveColumn: (column, after) =>
+            void run({ move_columns: [{ id: column.id, after }] }, { change: `Moved column “${column.header}”` }),
         renderSources: () => (
             <TableSourcesPopover
                 spec={spec}
