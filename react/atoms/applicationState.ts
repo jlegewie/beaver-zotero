@@ -52,12 +52,13 @@ import { logger } from '@beaver/agent-core/platform/logger';
 
 /**
  * Maximum number of selected library items included in `library_selection`.
- * The selection is low-signal context (users often have items selected without
- * asking about them), so large selections (e.g. select-all) are truncated.
+ * Large enough for selection-scoped tasks (bulk edits, tagging, metadata fixes)
+ * on a typical collection; each id costs a few prompt tokens on every turn, so
+ * very large selections (e.g. select-all) are still truncated.
  * `library_selection_total_count` reports the untruncated size so the model can
  * tell the user what it is missing.
  */
-const MAX_LIBRARY_SELECTION = 30;
+const MAX_LIBRARY_SELECTION = 200;
 
 /**
  * Collections-tree row types reported as `current_special_collections`. Only
