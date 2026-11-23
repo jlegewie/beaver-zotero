@@ -3449,6 +3449,72 @@
     background-color: var(--fill-quarternary);
 }
 
+/* ── Home launcher: category buttons ──
+ * HomeLauncher sets `data-size` from the launcher's width in rem, so the same
+ * rules serve the sidebar, the context pane and the separate window. Text and
+ * icons keep the size of the composer's own controls at every width; only the
+ * spacing and the layout grow, so the row never outweighs the composer. Spacing
+ * is in rem like the thresholds, so each layout still fits where it starts.
+ *   narrow   (< 25.5rem): 2×2 grid; a single row would wrap 3+1
+ *   compact  (default):   one row, 24px tall; needs ~25rem
+ *   wide     (≥ 30rem):   one row, a little more padding; needs ~27rem
+ *   spacious (≥ 44rem):   four equal columns in a capped row */
+[id^="beaver-pane-"] .home-launcher .home-launcher-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 0.3rem;
+}
+
+[id^="beaver-pane-"] .home-launcher .home-launcher-button {
+    gap: 0.45rem;
+    padding: 0.3rem 0.45rem;
+    border-radius: 6px;
+}
+
+[id^="beaver-pane-"] .home-launcher[data-size="wide"] .home-launcher-row {
+    gap: 0.45rem;
+}
+
+[id^="beaver-pane-"] .home-launcher[data-size="wide"] .home-launcher-button {
+    gap: 0.4rem;
+    padding: 0.35rem 0.65rem;
+}
+
+[id^="beaver-pane-"] .home-launcher:is([data-size="narrow"], [data-size="spacious"]) .home-launcher-row {
+    display: grid;
+    width: 100%;
+    margin: 0 auto;
+}
+
+[id^="beaver-pane-"] .home-launcher[data-size="narrow"] .home-launcher-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    max-width: 20rem;
+}
+
+[id^="beaver-pane-"] .home-launcher[data-size="spacious"] .home-launcher-row {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    max-width: 34rem;
+    gap: 0.5rem;
+}
+
+[id^="beaver-pane-"] .home-launcher[data-size="spacious"] .home-launcher-button {
+    gap: 0.4rem;
+    padding: 0.4rem 0.6rem;
+}
+
+/* In a grid each tooltip anchor fills its cell, and its button fills the anchor. */
+[id^="beaver-pane-"] .home-launcher:is([data-size="narrow"], [data-size="spacious"]) .home-launcher-row > span {
+    display: block;
+    min-width: 0;
+}
+
+[id^="beaver-pane-"] .home-launcher:is([data-size="narrow"], [data-size="spacious"]) .home-launcher-button {
+    width: 100%;
+    justify-content: center;
+}
+
 [id^="beaver-pane-"] .card {
     border: 1px solid var(--fill-quinary);
     border-radius: 4px;
