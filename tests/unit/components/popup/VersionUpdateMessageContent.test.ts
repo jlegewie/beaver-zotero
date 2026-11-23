@@ -19,7 +19,7 @@ const mocks = vi.hoisted(() => ({
     setPref: vi.fn(),
     openPreferences: vi.fn(),
     startFeatureTask: vi.fn(async () => {}),
-    featureTasks: null as { key: string; completed_at: string | null }[] | null,
+    featureTasks: null as { key: string; credits: number; completed_at: string | null }[] | null,
     /** Tasks the task list shows as unavailable (a small library). */
     unavailableTasks: [] as string[],
     surfaceWindow: { name: 'surface' },
@@ -176,9 +176,10 @@ describe('VersionUpdateMessageContent', () => {
 
     it('starts the feature-credit task on a new chat while the account can earn it, even without credits', () => {
         mocks.credits = 0;
-        mocks.featureTasks = [{ key: 'research_table', completed_at: null }];
+        mocks.featureTasks = [{ key: 'research_table', credits: 5, completed_at: null }];
         render({ primaryAction: taughtAction }, true);
         expect(container.textContent).not.toContain('you have none left');
+        expect(container.textContent).toContain('Trying it earns 5 free credits.');
         clickButton('Try it for free');
         expect(mocks.dismiss).toHaveBeenCalledOnce();
         expect(mocks.startFeatureTask).toHaveBeenCalledWith('research_table');
@@ -187,7 +188,7 @@ describe('VersionUpdateMessageContent', () => {
     });
 
     it('keeps the usual button while the task list shows the task as unavailable', () => {
-        mocks.featureTasks = [{ key: 'research_table', completed_at: null }];
+        mocks.featureTasks = [{ key: 'research_table', credits: 5, completed_at: null }];
         mocks.unavailableTasks = ['research_table'];
         render({ primaryAction: taughtAction }, true);
         clickButton('Try it');
@@ -196,7 +197,7 @@ describe('VersionUpdateMessageContent', () => {
     });
 
     it('keeps the usual button once the task is earned', () => {
-        mocks.featureTasks = [{ key: 'research_table', completed_at: '2026-11-01T00:00:00Z' }];
+        mocks.featureTasks = [{ key: 'research_table', credits: 5, completed_at: '2026-11-01T00:00:00Z' }];
         render({ primaryAction: taughtAction }, true);
         clickButton('Try it');
         expect(mocks.runAction).toHaveBeenCalledOnce();

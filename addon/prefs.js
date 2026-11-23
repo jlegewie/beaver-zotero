@@ -70,6 +70,9 @@ pref("enableRunStatusPopup", true);
 pref("windowSidebarCollapsed", false);
 // Whether the "Get more out of Beaver" feature-credits card on the home screen was dismissed.
 pref("featureCreditsCardDismissed", false);
+// Whether the one-line "Earn free credits" prompt that leads existing users to the
+// feature-credits card was opened or dismissed; it shows once per device.
+pref("featureCreditsTeaserDone", false);
 // Width of the sidebar in a main window, in CSS pixels; 0 until it is first shown.
 pref("sidebarWidth", 0);
 

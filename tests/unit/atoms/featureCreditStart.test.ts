@@ -22,6 +22,11 @@ vi.mock('../../../react/atoms/models', async () => {
         }),
     };
 });
+const prefs = vi.hoisted(() => new Map<string, unknown>());
+vi.mock('../../../src/utils/prefs', () => ({
+    getPref: (key: string) => prefs.get(key),
+    setPref: (key: string, value: unknown) => prefs.set(key, value),
+}));
 vi.mock('../../../react/utils/sourceUtils', () => ({ getDisplayNameFromItem: () => '' }));
 vi.mock('../../../src/utils/libraryIdentity', () => ({ resolveLibraryRef: () => 1 }));
 vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
@@ -163,6 +168,14 @@ describe('leaveFeatureTaskAtom', () => {
         expect(store.get(activeFeatureTaskAtom)).toBeNull();
         expect(store.get(currentMessageContentAtom)).toBe('');
         expect(store.get(currentMessagePillsAtom)).toEqual([]);
+    });
+
+    it('replaces the one-line prompt with the task list for good', () => {
+        prefs.clear();
+        const store = storeWith('/color-code ', [colorCode]);
+        expect(prefs.has('featureCreditsTeaserDone')).toBe(false);
+        store.set(leaveFeatureTaskAtom);
+        expect(prefs.get('featureCreditsTeaserDone')).toBe(true);
     });
 
     it('leaves the attachments\' reader context and files being attached alone', () => {

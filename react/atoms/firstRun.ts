@@ -3,6 +3,7 @@ import { accountService } from '@beaver/agent-core/transport/clients/accountServ
 import { allLibrariesExcludedAtom, profileWithPlanAtom, isDeviceAuthorizedAtom } from './profile';
 import { hasOpenFeatureTasks } from '../utils/featureCredits';
 import { logger } from '@beaver/agent-core/platform/logger';
+import { setPref } from '../../src/utils/prefs';
 
 /**
  * Session-only preview of the "Where should we start?" first-run page (Dev
@@ -75,14 +76,16 @@ export const markFirstRunCompleteAtom = atom(
  * End a feature-credits first run with the user's first choice: a task key
  * (they picked a task), `chat` (they sent a message of their own) or
  * `dismiss` (they closed the task list). Recorded as `feature_credits_<choice>`.
- * Does nothing outside that first run. Never throws: a failed request leaves
- * first run open, and the next choice records it.
+ * Someone who has seen the task list never gets the one-line prompt that leads
+ * existing users to it. Does nothing outside that first run. Never throws: a
+ * failed request leaves first run open, and the next choice records it.
  */
 export const completeCreditsFirstRunAtom = atom(
     null,
     async (get, set, choice: string) => {
         if (!get(isCreditsFirstRunAtom)) return;
         try {
+            setPref('featureCreditsTeaserDone', true);
             await set(markFirstRunCompleteAtom, `feature_credits_${choice}`);
         } catch (error) {
             logger(`completeCreditsFirstRun: failed to record ${choice}: ${error}`, 1);

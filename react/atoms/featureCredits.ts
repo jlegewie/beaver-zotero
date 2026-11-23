@@ -101,6 +101,32 @@ export const featureCreditsCardVisibleAtom = atom((get) => {
 });
 
 /**
+ * Whether this device is past the one-line prompt ("Earn free credits with 5
+ * tasks") that leads someone who already uses Beaver to the card: they opened
+ * it, or ended a feature-credits first run, or came from Plan & Usage.
+ */
+export const featureCreditsTeaserDoneAtom = atom(
+    (get) => {
+        get(preferencesRevisionAtom);
+        return getPref('featureCreditsTeaserDone') === true;
+    },
+    (_get, _set, done: boolean) => {
+        setPref('featureCreditsTeaserDone', done);
+    },
+);
+
+/**
+ * Whether the home screen shows the one-line prompt in place of the card:
+ * outside a first run, once per device, until it is opened or dismissed. The
+ * launcher and recent chats stay on screen with it.
+ */
+export const featureCreditsTeaserVisibleAtom = atom((get) =>
+    get(featureCreditsCardVisibleAtom)
+    && !get(isCreditsFirstRunAtom)
+    && !get(featureCreditsTeaserDoneAtom),
+);
+
+/**
  * Whether a task cannot start yet. The one rule: a task that works on papers in
  * the library (`needsPapers`) waits until the library has
  * `SMALL_LIBRARY_THRESHOLD` items. Unavailable tasks are left out of the task
@@ -165,13 +191,15 @@ export const startFeatureTaskAtom = atom(
 );
 
 /**
- * Go back from a task's setup to the task list. The task's /command goes too
- * when the chat input holds nothing else: no other /command and no text.
+ * Go back from a task's setup to the task list, which replaces the one-line
+ * prompt for good. The task's /command goes too when the chat input holds
+ * nothing else: no other /command and no text.
  */
 export const leaveFeatureTaskAtom = atom(null, (get, set) => {
     const key = get(activeFeatureTaskAtom);
     const definition = key ? getFeatureCreditTask(key) : undefined;
     set(activeFeatureTaskAtom, null);
+    if (!get(featureCreditsTeaserDoneAtom)) set(featureCreditsTeaserDoneAtom, true);
     if (!definition) return;
     const pills = get(currentMessagePillsAtom);
     if (pills.some((pill) => pill.actionId !== definition.actionId)) return;

@@ -4,6 +4,11 @@ import { createStore } from 'jotai';
 const mocks = vi.hoisted(() => ({
     completeFirstRun: vi.fn(),
     invalidateProfile: vi.fn(),
+    prefs: new Map<string, unknown>(),
+}));
+vi.mock('../../../src/utils/prefs', () => ({
+    getPref: (key: string) => mocks.prefs.get(key),
+    setPref: (key: string, value: unknown) => mocks.prefs.set(key, value),
 }));
 vi.mock('@beaver/agent-core/transport/clients/accountService', () => ({
     accountService: { completeFirstRun: mocks.completeFirstRun },
@@ -47,6 +52,7 @@ const firstRun = (store: ReturnType<typeof createStore>) => ({
 describe('first run', () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        mocks.prefs.clear();
         mocks.completeFirstRun.mockResolvedValue(undefined);
         mocks.invalidateProfile.mockResolvedValue(undefined);
         (globalThis as any).Zotero = { Beaver: { account: { invalidateProfile: mocks.invalidateProfile } } };
@@ -81,6 +87,11 @@ describe('first run', () => {
         expect(mocks.invalidateProfile).toHaveBeenCalledTimes(1);
     });
 
+    it('skips the one-line prompt for existing users once a credits first run ends', async () => {
+        await storeWith([{ key: 'annotate' }]).set(completeCreditsFirstRunAtom, 'dismiss');
+        expect(mocks.prefs.get('featureCreditsTeaserDone')).toBe(true);
+    });
+
     it('keeps the first choice while it is being recorded', async () => {
         let release!: () => void;
         mocks.completeFirstRun.mockReturnValueOnce(new Promise<void>((resolve) => { release = resolve; }));
@@ -97,5 +108,6 @@ describe('first run', () => {
         await storeWith(null).set(completeCreditsFirstRunAtom, 'chat');
         await storeWith([{ key: 'annotate' }], true).set(completeCreditsFirstRunAtom, 'chat');
         expect(mocks.completeFirstRun).not.toHaveBeenCalled();
+        expect(mocks.prefs.has('featureCreditsTeaserDone')).toBe(false);
     });
 });

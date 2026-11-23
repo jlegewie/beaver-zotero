@@ -42,6 +42,7 @@ declare namespace _ZoteroTypes {
       "enableRunStatusPopup": boolean;
       "windowSidebarCollapsed": boolean;
       "featureCreditsCardDismissed": boolean;
+      "featureCreditsTeaserDone": boolean;
       "sidebarWidth": number;
       "deferredToolPreferences": string;
       "customInstructions": string;
