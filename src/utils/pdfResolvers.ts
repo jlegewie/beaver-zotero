@@ -59,19 +59,23 @@ const NO_FILE_HOSTS = ['pubmed.ncbi.nlm.nih.gov', 'doaj.org', 'hdl.handle.net', 
 // (Europe PMC's `?pdf=render`).
 const NO_FILE_LANDING_HOSTS = ['europepmc.org'];
 
-function hostMatches(url: string, hosts: string[]): boolean {
-    let host: string;
-    try {
-        host = new URL(url).hostname.toLowerCase();
-    } catch {
-        return false;
-    }
+function isOnHost(host: string, hosts: string[]): boolean {
     return hosts.some(h => host === h || host.endsWith(`.${h}`));
 }
 
 /** True if Zotero cannot get a file from this link, so trying it only costs time. */
 export function isDeadEndPdfLink(url: string, landingPage: boolean): boolean {
-    return hostMatches(url, NO_FILE_HOSTS) || (landingPage && hostMatches(url, NO_FILE_LANDING_HOSTS));
+    let parsed: URL;
+    try {
+        parsed = new URL(url);
+    } catch {
+        return false;
+    }
+    const host = parsed.hostname.toLowerCase();
+    if (isOnHost(host, NO_FILE_HOSTS)) return true;
+    // Zotero puts an item's URL field in `pageURL` and saves the response when
+    // it is a file, so a direct PDF link there still works.
+    return landingPage && isOnHost(host, NO_FILE_LANDING_HOSTS) && parsed.searchParams.get('pdf') !== 'render';
 }
 
 /** A resolver entry without its dead-end links, or null when nothing usable is left. */

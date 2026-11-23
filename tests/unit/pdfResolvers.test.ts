@@ -179,6 +179,7 @@ describe('isDeadEndPdfLink', () => {
 
     it.each([
         ['https://europepmc.org/articles/pmc6217926?pdf=render', false],
+        ['https://europepmc.org/articles/pmc6217926?pdf=render', true],
         ['https://www.sciencedirect.com/science/article/pii/S1/pdf', false],
         ['https://notdoaj.org/article/1', true],
         ['not a url', true],
@@ -195,12 +196,17 @@ describe('dead-end links', () => {
         ];
 
         const resolvers = buildPdfResolvers(item, {
-            pdfCandidates: [{ page_url: 'https://doaj.org/article/abc' }, { url: 'https://repo.example/1.pdf' }],
+            pdfCandidates: [
+                { page_url: 'https://doaj.org/article/abc' },
+                { url: 'https://europepmc.org/articles/pmc1?pdf=render', page_url: 'https://europepmc.org/article/MED/1' },
+                { url: 'https://repo.example/1.pdf' },
+            ],
         });
 
-        expect(resolvers.map((r: any) => r.url ?? r.pageURL)).toEqual([
-            'https://repo.example/1.pdf',
-            'https://doi.org/10.1234/x',
+        expect(resolvers.map((r: any) => [r.url, r.pageURL])).toEqual([
+            ['https://europepmc.org/articles/pmc1?pdf=render', undefined],
+            ['https://repo.example/1.pdf', undefined],
+            [undefined, 'https://doi.org/10.1234/x'],
         ]);
     });
 
@@ -224,13 +230,5 @@ describe('dead-end links', () => {
         const [wrapped] = buildPdfResolvers(item, {}) as unknown as Array<() => Promise<any[]>>;
 
         await expect(wrapped()).rejects.toThrow('lookup failed');
-    });
-
-    it('keep the direct link of an entry whose landing page is a dead end', () => {
-        const resolvers = buildPdfResolvers(item, {
-            pdfCandidates: [{ url: 'https://europepmc.org/articles/pmc1?pdf=render' }],
-        });
-
-        expect(resolvers[0]).toMatchObject({ url: 'https://europepmc.org/articles/pmc1?pdf=render' });
     });
 });
