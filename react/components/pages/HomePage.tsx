@@ -79,10 +79,10 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false, inputRef }) => {
                         {isCreditsFirstRun ? 'Welcome! Where should we start?' : 'How can I help you?'}
                     </div>
 
-                    {/* Input area. Feature-credit tasks hang off its bottom
-                        edge, attached to the input their steps fill in, in
-                        place of the launcher. */}
-                    <div className={`feature-credits-dock ${trayOnScreen ? 'is-docked' : ''}`}>
+                    {/* Input area. Feature-credit tasks sit in a tray tucked
+                        under the input their steps fill in, in place of the
+                        launcher. */}
+                    <div className="feature-credits-dock">
                         <DragDropWrapper>
                             <InputArea inputRef={inputRef} verticalPosition="below" />
                         </DragDropWrapper>

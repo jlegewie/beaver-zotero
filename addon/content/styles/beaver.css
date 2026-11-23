@@ -6647,24 +6647,26 @@
     background-color: var(--beaver-fill-subtle);
     font-size: 0.95rem;
 }
-/* On home the card is a tray attached under the chat input its steps fill
-   in: the input's bottom corners square off and the tray continues its
-   border, the way docked bars attach to the input's top edge. Its text lines
-   up with the input's. */
+/* On home the card is a tray tucked under the chat input its steps fill in.
+   The input keeps its own shape; the tray is inset from both sides and its
+   top slides up behind the input's bottom edge, so only its sides and
+   rounded bottom show. The inset is at least the input's corner radius, so
+   the tray's top corners stay hidden behind the input's flat bottom. */
 .beaver-root .feature-credits-dock {
+    --feature-credits-tray-inset: 10px;
     display: flex;
     flex-direction: column;
 }
-.beaver-root .feature-credits-dock.is-docked .user-message-display {
-    border-bottom-color: var(--beaver-border-strong);
-    border-bottom-left-radius: 0;
-    border-bottom-right-radius: 0;
+/* Above the tray, so the input's opaque surface covers the tucked-in top. */
+.beaver-root .feature-credits-dock > :first-child {
+    position: relative;
+    z-index: 1;
 }
 .beaver-root .feature-credits-home {
     gap: 6px;
-    padding: 10px calc(var(--beaver-card-pad-x) - 4px) 10px var(--beaver-card-pad-x);
-    border: 0px solid var(--beaver-border-default);
-    border-top: 0;
+    margin: calc(-1 * var(--beaver-radius-card)) var(--feature-credits-tray-inset) 0;
+    padding: calc(10px + var(--beaver-radius-card)) calc(var(--beaver-card-pad-x) - 4px) 10px var(--beaver-card-pad-x);
+    border: 0;
     border-radius: 0 0 var(--beaver-radius-card) var(--beaver-radius-card);
     background-color: var(--beaver-fill-chip);
 }
@@ -6777,7 +6779,7 @@
    its text and arrow, lined up with the card's title. Hovering darkens the
    text and arrow instead of filling the row. */
 .beaver-root .feature-credits-teaser {
-    padding-top: 6px;
+    padding-top: calc(6px + var(--beaver-radius-card));
     padding-bottom: 6px;
 }
 .beaver-root .feature-credits-teaser .feature-credits-row {
