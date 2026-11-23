@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { buildPdfResolvers, toUrlResolver } from '../../react/utils/pdfResolvers';
+import { buildPdfResolvers, isDeadEndPdfLink, toUrlResolver } from '../../react/utils/pdfResolvers';
 
 /** Whatever `getFileResolvers` should return for the item under test. */
 let zoteroResolvers: any[];
@@ -162,5 +162,75 @@ describe('buildPdfResolvers', () => {
         });
 
         expect(resolvers).toHaveLength(1);
+    });
+});
+
+describe('isDeadEndPdfLink', () => {
+    it.each([
+        ['https://pubmed.ncbi.nlm.nih.gov/21119607', true],
+        ['https://doaj.org/article/abc', true],
+        ['http://hdl.handle.net/2123/9947', false],
+        ['https://papers.ssrn.com/sol3/Delivery.cfm?abstractid=1', false],
+        ['https://web.archive.org/web/2020/https://repo.example/a.pdf', false],
+        ['https://europepmc.org/article/MED/1', true],
+    ])('treats %s as a dead end', (url, landingPage) => {
+        expect(isDeadEndPdfLink(url, landingPage)).toBe(true);
+    });
+
+    it.each([
+        ['https://europepmc.org/articles/pmc6217926?pdf=render', false],
+        ['https://www.sciencedirect.com/science/article/pii/S1/pdf', false],
+        ['https://notdoaj.org/article/1', true],
+        ['not a url', true],
+    ])('keeps %s', (url, landingPage) => {
+        expect(isDeadEndPdfLink(url, landingPage)).toBe(false);
+    });
+});
+
+describe('dead-end links', () => {
+    it('are dropped from our candidates and from Zotero static resolvers', () => {
+        zoteroResolvers = [
+            { pageURL: 'https://doi.org/10.1234/x', accessMethod: 'doi' },
+            { pageURL: 'https://pubmed.ncbi.nlm.nih.gov/1', accessMethod: 'url' },
+        ];
+
+        const resolvers = buildPdfResolvers(item, {
+            pdfCandidates: [{ page_url: 'https://doaj.org/article/abc' }, { url: 'https://repo.example/1.pdf' }],
+        });
+
+        expect(resolvers.map((r: any) => r.url ?? r.pageURL)).toEqual([
+            'https://repo.example/1.pdf',
+            'https://doi.org/10.1234/x',
+        ]);
+    });
+
+    it('are pruned from what Zotero open-access lookup returns when Zotero calls it', async () => {
+        const lookup = async () => [
+            { url: 'https://papers.ssrn.com/sol3/Delivery.cfm?abstractid=1', accessMethod: 'oa' },
+            { pageURL: 'https://doaj.org/article/abc', accessMethod: 'oa' },
+            { url: 'https://repo.example/oa.pdf', pageURL: 'https://hdl.handle.net/1/2', accessMethod: 'oa' },
+        ];
+        zoteroResolvers = [lookup];
+
+        const [wrapped] = buildPdfResolvers(item, {}) as unknown as Array<() => Promise<any[]>>;
+        const results = await wrapped();
+
+        expect(results).toEqual([{ url: 'https://repo.example/oa.pdf', pageURL: undefined, accessMethod: 'oa' }]);
+    });
+
+    it('leave a resolver whose lookup throws to Zotero, which logs and skips it', async () => {
+        zoteroResolvers = [async () => { throw new Error('lookup failed'); }];
+
+        const [wrapped] = buildPdfResolvers(item, {}) as unknown as Array<() => Promise<any[]>>;
+
+        await expect(wrapped()).rejects.toThrow('lookup failed');
+    });
+
+    it('keep the direct link of an entry whose landing page is a dead end', () => {
+        const resolvers = buildPdfResolvers(item, {
+            pdfCandidates: [{ url: 'https://europepmc.org/articles/pmc1?pdf=render' }],
+        });
+
+        expect(resolvers[0]).toMatchObject({ url: 'https://europepmc.org/articles/pmc1?pdf=render' });
     });
 });

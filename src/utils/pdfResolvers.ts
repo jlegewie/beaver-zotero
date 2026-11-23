@@ -48,6 +48,62 @@ export function toUrlResolver(candidate: PdfCandidate): Record<string, unknown> 
     };
 }
 
+// Hosts whose links never give Zotero a file: abstract and index pages
+// (PubMed, DOAJ), handle resolvers, hosts that always answer Zotero with a
+// bot challenge (SSRN), and the archive's slow snapshots. Zotero's own
+// open-access lookup sends fetches here too, so the backend's candidate filter
+// alone does not cover them. ScienceDirect is not listed: the CAPTCHA guard
+// refuses it per request, which keeps it visible in the attempt trail.
+const NO_FILE_HOSTS = ['pubmed.ncbi.nlm.nih.gov', 'doaj.org', 'hdl.handle.net', 'ssrn.com', 'web.archive.org'];
+// Landing pages that never yield a file, though their direct PDF links do
+// (Europe PMC's `?pdf=render`).
+const NO_FILE_LANDING_HOSTS = ['europepmc.org'];
+
+function hostMatches(url: string, hosts: string[]): boolean {
+    let host: string;
+    try {
+        host = new URL(url).hostname.toLowerCase();
+    } catch {
+        return false;
+    }
+    return hosts.some(h => host === h || host.endsWith(`.${h}`));
+}
+
+/** True if Zotero cannot get a file from this link, so trying it only costs time. */
+export function isDeadEndPdfLink(url: string, landingPage: boolean): boolean {
+    return hostMatches(url, NO_FILE_HOSTS) || (landingPage && hostMatches(url, NO_FILE_LANDING_HOSTS));
+}
+
+/** A resolver entry without its dead-end links, or null when nothing usable is left. */
+function pruneEntry(entry: unknown): unknown {
+    if (typeof entry === 'string') return isDeadEndPdfLink(entry, false) ? null : entry;
+    if (!entry || typeof entry !== 'object') return entry;
+    const resolver = entry as Record<string, unknown>;
+    const url = typeof resolver.url === 'string' && !isDeadEndPdfLink(resolver.url, false) ? resolver.url : undefined;
+    const pageURL = typeof resolver.pageURL === 'string' && !isDeadEndPdfLink(resolver.pageURL, true)
+        ? resolver.pageURL
+        : undefined;
+    if (!url && !pageURL) return null;
+    return { ...resolver, url, pageURL };
+}
+
+/**
+ * Drop dead-end links from resolvers. A function resolver (Zotero's
+ * open-access lookup, custom resolvers) is wrapped so its results are pruned
+ * when Zotero calls it, before Zotero's own 6-URL cap.
+ */
+export function withoutDeadEndLinks(resolvers: unknown[]): unknown[] {
+    return resolvers
+        .map((entry) => {
+            if (typeof entry !== 'function') return pruneEntry(entry);
+            return async () => {
+                const results = await (entry as () => Promise<unknown>)();
+                return Array.isArray(results) ? results.map(pruneEntry).filter(r => r !== null) : results;
+            };
+        })
+        .filter(entry => entry !== null);
+}
+
 /**
  * The ordered resolver list for one item.
  *
@@ -59,7 +115,8 @@ export function toUrlResolver(candidate: PdfCandidate): Record<string, unknown> 
  *
  * `openAccessUrl` / `fallbackUrl` stand in when the backend sent no candidates,
  * so a client talking to a backend without the feature still gets its two URLs
- * tried first.
+ * tried first. Links that never yield a file are left out of all of them
+ * (`isDeadEndPdfLink`).
  */
 export function buildPdfResolvers(item: Zotero.Item, options: PdfFetchOptions): Record<string, unknown>[] {
     const ours = (options.pdfCandidates ?? [])
@@ -78,6 +135,6 @@ export function buildPdfResolvers(item: Zotero.Item, options: PdfFetchOptions): 
         }
     }
 
-    return [...ours, ...((Zotero.Attachments as any).getFileResolvers(item) ?? [])];
+    return withoutDeadEndLinks([...ours, ...((Zotero.Attachments as any).getFileResolvers(item) ?? [])]) as Record<string, unknown>[];
 }
 
