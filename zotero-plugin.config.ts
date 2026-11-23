@@ -61,6 +61,10 @@ export default defineConfig({
     prefs: {
       prefix: pkg.config.prefsPrefix,
     },
+    // Fluent ids are looked up as plain strings, so no typings file is generated.
+    fluent: {
+      dts: false,
+    },
     esbuildOptions: [
       {
         entryPoints: ["src/index.ts"],
