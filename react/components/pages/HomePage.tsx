@@ -4,7 +4,9 @@ import { allLibrariesExcludedAtom } from "../../atoms/profile";
 import RecentChats from "../RecentChats";
 import HomeLauncher from "../HomeLauncher";
 import FeatureCreditsCard from "../featureCredits/FeatureCreditsCard";
-import { featureCreditEntriesAtom, featureCreditsCardVisibleAtom } from "../../atoms/featureCredits";
+import FeatureCreditsTeaser from "../featureCredits/FeatureCreditsTeaser";
+import { featureCreditEntriesAtom, featureCreditsCardVisibleAtom, featureCreditsTeaserVisibleAtom } from "../../atoms/featureCredits";
+import { isCreditsFirstRunAtom } from "../../atoms/firstRun";
 import { activeFeatureTaskAtom } from "../../atoms/featureCreditRuns";
 import InputArea from "../input/InputArea";
 import DragDropWrapper from "../input/DragDropWrapper";
@@ -42,12 +44,18 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false, inputRef }) => {
     const featureCreditsVisible = useAtomValue(featureCreditsCardVisibleAtom);
     const featureCreditEntries = useAtomValue(featureCreditEntriesAtom);
     const activeFeatureTask = useAtomValue(activeFeatureTaskAtom);
+    const featureCreditsTeaserVisible = useAtomValue(featureCreditsTeaserVisibleAtom);
+    const isCreditsFirstRun = useAtomValue(isCreditsFirstRunAtom);
     // A setup card stays while its task is open, even if the list is dismissed.
     const showFeatureCredits = !allLibrariesExcluded && (featureCreditsVisible || !!activeFeatureTask);
+    // Someone who already uses Beaver first gets one line that leads to the
+    // card, with the launcher and recent chats still on screen.
+    const showTeaser = showFeatureCredits && featureCreditsTeaserVisible && !activeFeatureTask;
     // The card takes the place of the launcher and recent chats while it is
     // on screen (it renders nothing without tasks); the header's history
     // button still lists them.
-    const cardOnScreen = showFeatureCredits && !!featureCreditEntries;
+    const trayOnScreen = showFeatureCredits && !!featureCreditEntries;
+    const cardOnScreen = trayOnScreen && !showTeaser;
     const showRecentChats = !isWindow && !cardOnScreen;
 
     // Beta versions use a pre-release tag (e.g. "0.20.0-beta.1")
@@ -65,17 +73,20 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false, inputRef }) => {
                         greeting lower, where the eye lands first. */}
                     <div className="flex-1" style={{ minHeight: '2vh', maxHeight: isWindow ? '18vh' : '4vh' }} />
 
-                    {/* Greeting */}
-                    <div className="text-2xl font-semibold text-center p-2">How can I help you?</div>
+                    {/* Greeting. A feature-credits first run welcomes the new
+                        user to the task list under the input. */}
+                    <div className="text-2xl font-semibold text-center p-2">
+                        {isCreditsFirstRun ? 'Welcome! Where should we start?' : 'How can I help you?'}
+                    </div>
 
                     {/* Input area. Feature-credit tasks hang off its bottom
                         edge, attached to the input their steps fill in, in
                         place of the launcher. */}
-                    <div className={`feature-credits-dock ${cardOnScreen ? 'is-docked' : ''}`}>
+                    <div className={`feature-credits-dock ${trayOnScreen ? 'is-docked' : ''}`}>
                         <DragDropWrapper>
                             <InputArea inputRef={inputRef} verticalPosition="below" />
                         </DragDropWrapper>
-                        {showFeatureCredits && <FeatureCreditsCard />}
+                        {showFeatureCredits && (showTeaser ? <FeatureCreditsTeaser /> : <FeatureCreditsCard />)}
                     </div>
 
                     {/* Action launcher — category row + expandable panels */}

@@ -6773,6 +6773,33 @@
     cursor: default;
     opacity: 0.6;
 }
+/* The one-line prompt for existing users: a quiet button, only as wide as
+   its text and arrow, lined up with the card's title. Hovering darkens the
+   text and arrow instead of filling the row. */
+.beaver-root .feature-credits-teaser {
+    padding-top: 6px;
+    padding-bottom: 6px;
+}
+.beaver-root .feature-credits-teaser .feature-credits-row {
+    flex: 0 1 auto;
+    width: auto;
+    min-width: 0;
+    gap: 4px;
+    margin: -5px auto -5px -6px;
+}
+.beaver-root .feature-credits-teaser .feature-credits-row-button:hover:not(:disabled) {
+    background-color: transparent;
+}
+.beaver-root .feature-credits-teaser-text,
+.beaver-root .feature-credits-teaser .feature-credits-row-arrow {
+    min-width: 0;
+    color: var(--fill-secondary);
+    transition: color 0.2s ease-in-out;
+}
+.beaver-root .feature-credits-teaser .feature-credits-row:hover .feature-credits-teaser-text,
+.beaver-root .feature-credits-teaser .feature-credits-row:hover .feature-credits-row-arrow {
+    color: var(--fill-primary);
+}
 .beaver-root .feature-credits-row-mark {
     flex: none;
     margin-top: 2px;

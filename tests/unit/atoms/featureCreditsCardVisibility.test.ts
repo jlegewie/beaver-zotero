@@ -23,9 +23,12 @@ vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
 import {
     featureCreditsCardDismissedAtom,
     featureCreditsCardVisibleAtom,
+    featureCreditsTeaserDoneAtom,
+    featureCreditsTeaserVisibleAtom,
     featureTaskUnavailableAtom,
 } from '../../../react/atoms/featureCredits';
 import { profileWithPlanAtom } from '../../../react/atoms/profile';
+import { preferencesRevisionAtom } from '../../../react/atoms/preferences';
 import { libraryItemCountAtom } from '../../../react/atoms/zoteroContext';
 import { getFeatureCreditTask } from '../../../react/constants/featureCreditTasks';
 
@@ -71,6 +74,33 @@ describe('featureCreditsCardVisibleAtom', () => {
         expect(store.get(featureCreditsCardVisibleAtom)).toBe(true);
         store.set(profileWithPlanAtom as never, profile([{ key: 'organize' }], true));
         expect(store.get(featureCreditsCardVisibleAtom)).toBe(false);
+    });
+});
+
+describe('featureCreditsTeaserVisibleAtom', () => {
+    beforeEach(() => prefs.clear());
+
+    it('leads someone who already uses Beaver to the card with one line, once', () => {
+        const store = createStore();
+        store.set(profileWithPlanAtom as never, profile([{ key: 'organize' }], true));
+        expect(store.get(featureCreditsTeaserVisibleAtom)).toBe(true);
+        // Opening it; the preference observer bumps the revision.
+        store.set(featureCreditsTeaserDoneAtom, true);
+        store.set(preferencesRevisionAtom, 1);
+        expect(store.get(featureCreditsTeaserVisibleAtom)).toBe(false);
+        expect(store.get(featureCreditsCardVisibleAtom)).toBe(true);
+    });
+
+    it('never shows in a first run, once dismissed, or without open tasks', () => {
+        const store = createStore();
+        store.set(profileWithPlanAtom as never, profile([{ key: 'organize' }]));
+        expect(store.get(featureCreditsTeaserVisibleAtom)).toBe(false);
+        store.set(profileWithPlanAtom as never, profile([{ key: 'organize', done: true }], true));
+        expect(store.get(featureCreditsTeaserVisibleAtom)).toBe(false);
+        prefs.set('featureCreditsCardDismissed', true);
+        const dismissed = createStore();
+        dismissed.set(profileWithPlanAtom as never, profile([{ key: 'organize' }], true));
+        expect(dismissed.get(featureCreditsTeaserVisibleAtom)).toBe(false);
     });
 });
 

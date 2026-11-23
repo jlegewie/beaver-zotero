@@ -6,7 +6,7 @@
  * needs Plus Tools) on their own model with Plus Tools off or out of credits.
  * The card never offers a button that would lead to a message that cannot run.
  * An action that a feature-credit task teaches opens that task's setup card
- * while the account can still earn it.
+ * while the account can still earn it, and the card says what it earns.
  */
 
 import type { VersionUpdateAction } from '../constants/versionUpdateMessages';
@@ -20,7 +20,7 @@ export type ResolvedVersionAction =
     | { type: 'stage-action'; label: string; actionId: string; enablePlusTools: boolean; note?: string }
     | { type: 'get-credits'; label: string; note: string }
     /** Open Beaver on a new chat with the setup card of this feature-credit task. */
-    | { type: 'feature-task'; label: string; key: string };
+    | { type: 'feature-task'; label: string; key: string; note: string };
 
 const DEFAULT_ACTION: VersionUpdateAction = { type: 'open-beaver', label: 'Open Beaver' };
 
@@ -31,8 +31,8 @@ export const FEATURE_TASK_LABEL = 'Try it for free';
 export function resolveVersionUpdateAction(
     action: VersionUpdateAction | undefined,
     access: PlusToolsAccess,
-    /** Keys of the feature-credit tasks the account can still earn. */
-    earnableFeatureTasks: ReadonlySet<string> = new Set(),
+    /** The feature-credit tasks the account can still earn and start: key to credits. */
+    earnableFeatureTasks: ReadonlyMap<string, number> = new Map(),
 ): ResolvedVersionAction {
     const configured = action ?? DEFAULT_ACTION;
     if (configured.type === 'open-url' || configured.type === 'open-beaver') return configured;
@@ -48,8 +48,10 @@ export function resolveVersionUpdateAction(
     // The server grants a task's credits before the run's credit check, and
     // its setup card says what else the task needs (the Beaver model for
     // tables), so this comes before the Plus Tools and credit checks.
-    if (configured.featureTask && earnableFeatureTasks.has(configured.featureTask)) {
-        return { type: 'feature-task', label: FEATURE_TASK_LABEL, key: configured.featureTask };
+    const credits = configured.featureTask ? earnableFeatureTasks.get(configured.featureTask) : undefined;
+    if (configured.featureTask && credits !== undefined) {
+        const note = `Trying it earns ${credits} free credits.`;
+        return { type: 'feature-task', label: FEATURE_TASK_LABEL, key: configured.featureTask, note };
     }
 
     const staged = { type: 'stage-action', actionId: configured.actionId } as const;

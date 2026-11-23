@@ -154,11 +154,12 @@ const FloatingVersionCard: React.FC<{
     const access = useAtomValue(plusToolsAccessAtom);
     const featureCreditEntries = useAtomValue(featureCreditEntriesAtom);
     const featureTaskUnavailable = useAtomValue(featureTaskUnavailableAtom);
-    // Tasks the account can still earn and start now, as the task list shows them.
+    // Tasks the account can still earn and start now, as the task list shows
+    // them, with what each earns.
     const earnableFeatureTasks = useMemo(
-        () => new Set((featureCreditEntries ?? [])
+        () => new Map((featureCreditEntries ?? [])
             .filter(({ task, definition }) => !task.completed_at && !featureTaskUnavailable(definition))
-            .map(({ task }) => task.key)),
+            .map(({ task }) => [task.key, task.credits] as const)),
         [featureCreditEntries, featureTaskUnavailable],
     );
     const action = resolveVersionUpdateAction(primaryAction, access, earnableFeatureTasks);
@@ -263,7 +264,7 @@ const FloatingVersionCard: React.FC<{
 
             {alsoNew && <AlsoNewRow item={alsoNew} />}
 
-            {/* What the button needs first (Plus Tools, credits) */}
+            {/* What the button needs first (Plus Tools, credits), or what trying it earns */}
             {'note' in action && action.note && (
                 <div className="font-color-secondary text-sm">
                     {action.note}
