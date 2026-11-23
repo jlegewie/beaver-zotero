@@ -36,7 +36,7 @@ const RebuildSearchIndexRow: React.FC<{ hasBorder?: boolean }> = ({ hasBorder = 
                 announceDescription
                 description={
                     <>
-                        Check that the local index used to search by title and abstract matches your Zotero libraries.
+                        Check that the local index used to search by topic matches your Zotero libraries.
                         This happens automatically; run it by hand if search results look out of date.
                         {indexState.failedItems > 0 && (
                             <span className="display-flex font-color-yellow mt-1">

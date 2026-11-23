@@ -11,6 +11,10 @@ vi.mock('../../../src/utils/zoteroUtils', () => ({
     getClientDateModifiedBatch: vi.fn(),
 }));
 
+vi.mock('../../../src/services/documentExtraction/attachmentInfoBatch', () => ({
+    getBestAttachmentBatch: vi.fn(async () => new Map()),
+}));
+
 import { EmbeddingIndexer } from '../../../src/services/embeddingIndexer';
 import { getClientDateModifiedBatch } from '../../../src/utils/zoteroUtils';
 
@@ -66,6 +70,7 @@ describe('EmbeddingIndexer - incomplete batch recovery', () => {
                 .fn()
                 .mockRejectedValue(new Error('hash lookup failed')),
             recordFailedEmbeddingsBatch: vi.fn().mockResolvedValue(undefined),
+            getAttachmentEmbeddingTexts: vi.fn().mockResolvedValue(new Map()),
         };
 
         const indexer = new EmbeddingIndexer(db as any);
