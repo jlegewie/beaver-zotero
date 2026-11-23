@@ -56,7 +56,7 @@ function measureLauncherSize(element: HTMLElement): LauncherSize {
     const width = element.clientWidth / rootFontSize;
     if (width < 25.5) return "narrow";
     if (width >= 44) return "spacious";
-    if (width >= 32.5) return "wide";
+    if (width >= 30) return "wide";
     return "compact";
 }
 
