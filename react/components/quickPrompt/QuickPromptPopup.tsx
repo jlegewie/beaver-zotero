@@ -41,7 +41,7 @@ function openBeaver(): void {
  * an element inside one stays connected while being invisible — focus must not
  * be handed back to it when the popup goes away.
  */
-const SIDEBAR_ROOTS = '#beaver-react-root-library, #beaver-react-root-reader';
+const SIDEBAR_ROOTS = '#beaver-react-root-sidebar';
 
 /**
  * The close control, in the card's top-right corner. Shown only while the
@@ -112,6 +112,10 @@ const BLOCKED_COPY: Record<ChatAccessGate, { title: string; detail: string }> = 
         title: 'Beaver is still loading',
         detail: 'The chat opens here on its own as soon as Beaver is ready.',
     },
+    restoring: {
+        title: 'Beaver is still connecting',
+        detail: 'The chat opens here on its own as soon as Beaver has restored your sign-in.',
+    },
     connecting: {
         title: 'Beaver is still loading',
         detail: 'The chat opens here on its own as soon as Beaver is ready.',
@@ -134,7 +138,7 @@ const BLOCKED_COPY: Record<ChatAccessGate, { title: string; detail: string }> = 
     },
 };
 
-const LOADING_GATES: ReadonlySet<ChatAccessGate> = new Set(['loading', 'connecting']);
+const LOADING_GATES: ReadonlySet<ChatAccessGate> = new Set(['loading', 'restoring', 'connecting']);
 
 /** Shown instead of the composer while the account cannot start a chat. */
 const BlockedNotice: React.FC<{ reason: ChatAccessGate; onClose: () => void }> = ({ reason, onClose }) => {

@@ -189,7 +189,8 @@ function sameItemSet(a: Zotero.Item[], b: Zotero.Item[]): boolean {
 /**
  * Compute grouped action lists for the slash menu.
  * Groups are built in priority order; the same action CAN appear in multiple
- * groups (a multi-target action appears in every group whose kind it accepts).
+ * context groups (a multi-target action appears in every group whose kind it
+ * accepts), but never in the global group once a context group lists it.
  * Manual and selected groups are merged if the underlying item sets are identical.
  */
 export function computeActionGroups(allActions: Action[], ctx: ActionContext): ActionGroup[] {
@@ -317,7 +318,11 @@ export function computeActionGroups(allActions: Action[], ctx: ActionContext): A
     }
 
     // --- 6. Global group ---
-    const globalActions = allActions.filter(a => a.targets.includes('global'));
+    // An action that also accepts a context target is offered only under that
+    // context: the global entry would bind to nothing and silently drop the
+    // selection it was meant to run on.
+    const inContextGroup = new Set(groups.flatMap(g => g.actions));
+    const globalActions = allActions.filter(a => a.targets.includes('global') && !inContextGroup.has(a));
     if (globalActions.length > 0) {
         groups.push({ id: 'global', label: 'Anywhere', actions: globalActions, targetType: 'global' });
     }

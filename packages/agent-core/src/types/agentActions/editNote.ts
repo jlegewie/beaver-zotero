@@ -45,6 +45,21 @@ export interface EditNoteProposedData {
      * Used to disambiguate duplicate raw matches during execution.
      */
     target_after_context?: string;
+    /** The note as the user saw it when proposed; absent on older proposals. */
+    baseline?: EditNoteBaseline | null;
+}
+
+/**
+ * The note as it was when an edit_note or edit_note_batch action was
+ * proposed, compared before a later apply. Not an undo snapshot: undo reads
+ * `result_data` only.
+ */
+export interface EditNoteBaseline {
+    /**
+     * SHA-256 hex of the note's HTML. Checked for `rewrite` and
+     * `append`, which do not anchor on matched text.
+     */
+    content_hash?: string | null;
 }
 
 /**

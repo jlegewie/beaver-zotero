@@ -17,6 +17,11 @@ vi.mock("../../../src/services/agentDataProvider/actions/organizeItems", () => (
 vi.mock("../../../src/services/agentDataProvider/actions/importItems", () => ({ validateImportItemsAction: vi.fn(async () => ({ valid: true })) }));
 const deferredCommits = vi.hoisted(() => ({ wait: vi.fn(async () => true) }));
 vi.mock("../../../src/services/committedTransaction", () => ({ waitForDeferredCommits: deferredCommits.wait }));
+const openTransaction = vi.hoisted(() => ({ wait: vi.fn(async (_ms: number) => true) }));
+vi.mock("../../../src/services/openTransaction", () => ({
+    SNAPSHOT_TRANSACTION_WAIT_MS: 15_000,
+    waitForOpenTransaction: openTransaction.wait,
+}));
 import { duplicateError } from "../../../src/services/duplicates/discovery";
 import { validateMergeItemsAction } from "../../../src/services/duplicates/merge";
 import { validateImportItemsAction } from "../../../src/services/agentDataProvider/actions/importItems";
@@ -48,11 +53,37 @@ it("snapshots items for validation only after earlier deferred writes have settl
     await pending;
     expect(validateMergeItemsAction).toHaveBeenCalledOnce();
 });
+it("snapshots items only after another write's open transaction has ended", async () => {
+    vi.mocked(validateMergeItemsAction).mockClear();
+    let release!: (free: boolean) => void;
+    openTransaction.wait.mockReturnValueOnce(new Promise<boolean>((resolve) => { release = resolve; }));
+    vi.mocked(validateMergeItemsAction).mockResolvedValueOnce({ valid: true } as any);
+    const pending = handleAgentActionValidateRequest({
+        request_id: "validate-merge", action_type: "merge_items", action_data: {},
+    } as any);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(openTransaction.wait).toHaveBeenCalledWith(15_000);
+    expect(validateMergeItemsAction).not.toHaveBeenCalled();
+    release(true);
+    await pending;
+    expect(validateMergeItemsAction).toHaveBeenCalledOnce();
+});
+it("still validates when another write outlasts the wait", async () => {
+    vi.mocked(validateMergeItemsAction).mockClear();
+    openTransaction.wait.mockResolvedValueOnce(false);
+    vi.mocked(validateMergeItemsAction).mockResolvedValueOnce({ valid: true } as any);
+    const response = await handleAgentActionValidateRequest({
+        request_id: "validate-merge", action_type: "merge_items", action_data: {},
+    } as any);
+    expect(response.valid).toBe(true);
+});
 it("validates imports without waiting for deferred writes", async () => {
     deferredCommits.wait.mockClear();
+    openTransaction.wait.mockClear();
     await handleAgentActionValidateRequest({
         request_id: "validate-import", action_type: "import_item", action_data: {},
     } as any);
     expect(validateImportItemsAction).toHaveBeenCalledOnce();
     expect(deferredCommits.wait).not.toHaveBeenCalled();
+    expect(openTransaction.wait).not.toHaveBeenCalled();
 });

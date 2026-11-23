@@ -1,4 +1,4 @@
-import React, { useLayoutEffect, useRef, useState } from 'react';
+import React, { useRef } from 'react';
 import Button from '@beaver/agent-ui/primitives/Button';
 import {
     ArrowRightIcon,
@@ -13,6 +13,7 @@ import {
 } from '../../../icons/icons';
 import { FILE_EXPORT_FORMATS } from '../../../../utils/fileExportFeedback';
 import { useShowcaseTimeline, type ShowcaseBeat } from '../showcases/useShowcaseTimeline';
+import { ShowcasePointer, usePointerPosition } from '../showcases/ShowcasePointer';
 
 /** The note the showcase exports, and how it reads in Word. */
 const NOTE_TITLE = 'Key findings';
@@ -69,65 +70,6 @@ const STILL_TIMELINE: Beat[] = [
     { frame: { scene: 'note', pointer: 'word', menu: true, hovered: true }, holdMs: 3500 },
     { frame: { scene: 'document', pointer: 'citation', field: true }, holdMs: 4500 },
 ];
-
-/**
- * Moves the pointer to the frame's target, measured from the drawn elements
- * (`data-pointer-target`) so it lands on them however wide the tip is. A
- * target that is gone — the menu closed under it — leaves the pointer where
- * it was.
- */
-function usePointerPosition(stageRef: React.RefObject<HTMLElement>, target: PointerTarget, frame: Frame) {
-    const [position, setPosition] = useState<{ x: number; y: number } | null>(null);
-    useLayoutEffect(() => {
-        const stage = stageRef.current;
-        if (!stage) return;
-        const stageRect = stage.getBoundingClientRect();
-        if (target === 'rest') {
-            setPosition({ x: stageRect.width * 0.45, y: stageRect.height * 0.3 });
-            return;
-        }
-        const element = stage.querySelector<HTMLElement>(`[data-pointer-target="${target}"]`);
-        if (!element) return;
-        const rect = element.getBoundingClientRect();
-        // Off-center, the way a hand lands on a control.
-        setPosition({
-            x: rect.left - stageRect.left + Math.min(rect.width * 0.5, 40),
-            y: rect.top - stageRect.top + rect.height * 0.45,
-        });
-    }, [stageRef, target, frame]);
-    return position;
-}
-
-const ArrowPointer: React.FC = () => (
-    <svg width="14" height="20" viewBox="0 0 14 20">
-        <path
-            d="M1 1 L1 16 L4.6 12.6 L7.2 18.6 L9.6 17.6 L7 11.6 L12 11.6 Z"
-            fill="#fff"
-            stroke="#000"
-            strokeWidth="1.1"
-            strokeLinejoin="round"
-        />
-    </svg>
-);
-
-const TextPointer: React.FC = () => (
-    <svg width="10" height="18" viewBox="0 0 10 18">
-        <path
-            d="M2 1.5 H4 Q5 1.5 5 3 V15 Q5 16.5 4 16.5 H2 M8 1.5 H6 Q5 1.5 5 3 M5 15 Q5 16.5 6 16.5 H8"
-            fill="none"
-            stroke="#fff"
-            strokeWidth="3"
-            strokeLinecap="round"
-        />
-        <path
-            d="M2 1.5 H4 Q5 1.5 5 3 V15 Q5 16.5 4 16.5 H2 M8 1.5 H6 Q5 1.5 5 3 M5 15 Q5 16.5 6 16.5 H8"
-            fill="none"
-            stroke="#000"
-            strokeWidth="1.2"
-            strokeLinecap="round"
-        />
-    </svg>
-);
 
 /** A ghost icon button as the chat draws it, inert. */
 const GhostIcon: React.FC<{ icon: React.ComponentType<React.SVGProps<SVGSVGElement>>; className?: string }> = ({ icon, className = '' }) => (
@@ -285,16 +227,12 @@ const NoteExportTipShowcase: React.FC = () => {
                 <div className={`beaver-export-tip__layer beaver-export-tip__layer--document ${isDocument ? '' : 'beaver-export-tip__layer--hidden'}`}>
                     <WordDocument frame={frame} />
                 </div>
-                {position && (
-                    <div
-                        className={`beaver-export-tip__pointer ${frame.pointerHidden ? 'beaver-export-tip__pointer--hidden' : ''}`}
-                        style={{ transform: `translate(${position.x}px, ${position.y}px)` }}
-                    >
-                        <div className={`beaver-export-tip__pointer-glyph ${isDocument ? 'beaver-export-tip__pointer-glyph--text' : ''} ${frame.pressed ? 'beaver-export-tip__pointer-glyph--pressed' : ''}`}>
-                            {isDocument ? <TextPointer /> : <ArrowPointer />}
-                        </div>
-                    </div>
-                )}
+                <ShowcasePointer
+                    position={position}
+                    hidden={frame.pointerHidden}
+                    pressed={frame.pressed}
+                    text={isDocument}
+                />
             </div>
         </div>
     );

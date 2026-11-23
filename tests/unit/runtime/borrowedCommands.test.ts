@@ -17,9 +17,9 @@ beforeEach(() => { vi.clearAllMocks(); state.runtime = undefined; });
 it('passes the renderer context to both window factories', () => {
     const owner = { closed: false };
     state.runtime = { contextWindow: owner, hostWindow: owner };
-    openBeaverWindow({ width: 900 });
+    openBeaverWindow();
     openPreferencesWindow('actions', '', 'action-id');
-    expect(openChat).toHaveBeenCalledWith({ width: 900 }, owner);
+    expect(openChat).toHaveBeenCalledWith(owner);
     expect(openPreferences).toHaveBeenCalledWith('actions', '', 'action-id', owner);
 });
 it.each(['missing', 'closed'])(

@@ -1,4 +1,4 @@
-import { CollectionResolutionError, serializeCollectionIdentity } from '../collections/collectionIdentity';
+import { CollectionResolutionError, serializeCollectionAncestors, serializeCollectionIdentity } from '../collections/collectionIdentity';
 import { cleanMetadataUrl } from '../../utils/metadataUrl';
 /**
  * Agent Data Provider
@@ -27,15 +27,18 @@ import { getCreatorTypeInfo } from '../../utils/zoteroUtils';
 
 /**
  * Enrich an item's collection memberships into {collection_key, name} objects
- * so the agent sees meaningful names instead of opaque keys.
+ * so the agent sees meaningful names instead of opaque keys. Nested
+ * memberships also carry their complete ancestor chain.
  */
 function enrichItemCollections(item: Zotero.Item) {
     return item.getCollections().map((collId: number) => {
         const coll = Zotero.Collections.get(collId);
+        const ancestors = coll ? serializeCollectionAncestors(coll) : undefined;
         return {
             ...(coll ? serializeCollectionIdentity(coll) : {}),
             collection_key: coll ? coll.key : String(collId),
             name: coll ? coll.name : String(collId),
+            ...(ancestors ? { ancestors } : {}),
         };
     });
 }
@@ -261,16 +264,19 @@ export async function handleGetMetadataRequest(
 
             // Enrich collection keys with names for agent readability
             // toJSON() returns collections as plain key strings: ["ABCD1234", ...]
-            // Exclude trash before attaching names and portable identities.
+            // Exclude trash before attaching names, portable identities and
+            // ancestor chains.
             if (Array.isArray(result.collections)) {
                 result.collections = result.collections.flatMap((collKey: string) => {
                     try {
                         const coll = Zotero.Collections.getByLibraryAndKey(libraryId, collKey);
                         if (!coll || coll.deleted) return [];
+                        const ancestors = serializeCollectionAncestors(coll);
                         return {
                             ...serializeCollectionIdentity(coll),
                             collection_key: collKey,
                             name: coll.name,
+                            ...(ancestors ? { ancestors } : {}),
                         };
                     } catch (error) {
                         if (error instanceof CollectionResolutionError) throw error;

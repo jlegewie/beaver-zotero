@@ -3,10 +3,12 @@ import { getMergedItemReference } from '../../../atoms/mergeItemsChoices';
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { AgentRunStatus } from '@beaver/agent-core/agents/types';
+import { toolResultAtom } from '@beaver/agent-core/run-state/atoms';
 import {
     AgentAction,
-    getAgentActionsByToolcallAtom,
-    pendingApprovalsAtom,
+    agentActionsForToolcallAtom,
+    noPendingApprovalsCoveredCountAtom,
+    pendingApprovalsCoveredByFullAccessCountAtom,
     removePendingApprovalAtom,
 } from '../../../agents/agentActions';
 import type { PendingApproval } from '@beaver/agent-ui/host';
@@ -18,8 +20,9 @@ import {
     removeApprovalResponseIntentAtom,
     sendApprovalResponseAtom,
 } from '../../../atoms/agentRunAtoms';
+import { pendingParkedAnswerIdsAtom } from '../../../atoms/parkedRuns';
 import {
-    agentActionItemTitlesAtom,
+    agentActionItemTitleAtom,
     getAgentActionItemTitleKey,
     setAgentActionItemTitleAtom,
     toolExpandedAtom,
@@ -27,6 +30,7 @@ import {
 } from '../../../atoms/messageUIState';
 import {
     applyAgentActionsAtom,
+    refreshMergeProposalsAtom,
     rejectAgentActionsAtom,
     undoAgentActionsAtom,
 } from '../agentActionExecution';
@@ -72,16 +76,21 @@ import {
     PreviewData,
     getCreateAnnotationsDisplayStatus,
     getAgentActionToolIcon,
-    inFlightProgressMessage,
+    actionCardProgressMessage,
+    createdItemsFullText,
+    createItemsFullTextSummary,
     hasFailedUndo,
     getStatusConfig,
+    STALE_APPLY_ANYWAY_TOOLTIP,
+    staleProposalDetail,
+    wasRefusedAsStale,
     unconfirmedCaption,
 } from './agentActionViewHelpers';
+import { StaleProposalNote } from './StaleProposalNote';
 import { isStaleMergeProposal } from './mergeItemsErrors';
 import { ActionPreview } from './ActionPreview';
 import { useApprovalRecovery } from './useApprovalRecovery';
 import {
-    getPendingApprovalIdsCoveredByFullAccess,
     isCoveredByFullAccess,
     isFullAccessGrantedForRun,
     runApprovalPolicyAtom,
@@ -123,8 +132,11 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 }) => {
     const [isHovered, setIsHovered] = useState(false);
 
-    const getAgentActionsByToolcall = useAtomValue(getAgentActionsByToolcallAtom);
-    const actions = getAgentActionsByToolcall(toolcallId, (a) => a.run_id === runId);
+    const toolcallActions = useAtomValue(useMemo(() => agentActionsForToolcallAtom(toolcallId), [toolcallId]));
+    const actions = useMemo(
+        () => toolcallActions.filter((a) => a.run_id === runId),
+        [toolcallActions, runId],
+    );
     const action = actions.length > 0 ? actions[0] : null;
 
     const actionInFinalState = action && action.status !== 'pending';
@@ -150,11 +162,11 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         && runIsStreamable;
 
     const expansionKey = `${runId}:${responseIndex}:${toolcallId}`;
-    const expansionState = useAtomValue(toolExpandedAtom);
+    const storedExpanded = useAtomValue(useMemo(() => toolExpandedAtom(expansionKey), [expansionKey]));
     const setExpanded = useSetAtom(setToolExpandedAtom);
-    const hasExistingState = expansionState[expansionKey] !== undefined;
+    const hasExistingState = storedExpanded !== undefined;
     const neverAutoCollapse = NEVER_AUTO_COLLAPSE_TOOLS.has(toolName);
-    const isExpanded = expansionState[expansionKey] ?? (isAwaitingApproval || neverAutoCollapse);
+    const isExpanded = storedExpanded ?? (isAwaitingApproval || neverAutoCollapse);
 
     // The footer's buttons never wrap; when the row is too narrow for them,
     // the permission trigger drops to its icon.
@@ -185,26 +197,25 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const [isProcessingAction, setIsProcessingAction] = useState(false);
     const [isUndoError, setIsUndoError] = useState(false);
     const [isExternallyProcessing, setIsExternallyProcessing] = useState(false);
-    const [clickedButton, setClickedButton] = useState<'approve' | 'reject' | 'undo' | null>(null);
+    const [clickedButton, setClickedButton] = useState<'approve' | 'applyAnyway' | 'reject' | 'undo' | 'refresh' | null>(null);
     const prevPendingApprovalRef = useRef<PendingApproval | null>(pendingApproval);
 
     const isRunPending = useAtomValue(isWSChatPendingAtom);
-    const approvalResponseIntents = useAtomValue(approvalResponseIntentsAtom);
     const isMultiAction = (toolName === 'create_items' || toolName === 'create_item') && actions.length > 1;
 
     const sendApprovalResponse = useSetAtom(sendApprovalResponseAtom);
     const setRunPermissionMode = useSetAtom(setRunPermissionModeAtom);
     const runApprovalPolicy = useAtomValue(runApprovalPolicyAtom);
     // How many cards a switch to full access would answer at once, so the menu
-    // row can say so before the user reaches for it.
-    const allPendingApprovals = useAtomValue(pendingApprovalsAtom);
-    const pendingCoveredCount = useMemo(
-        () => getPendingApprovalIdsCoveredByFullAccess(allPendingApprovals.values()).length,
-        [allPendingApprovals],
+    // row can say so before the user reaches for it. The row shows only while
+    // this card awaits approval, so only then does the count need following.
+    const pendingCoveredCount = useAtomValue(
+        isAwaitingApproval ? pendingApprovalsCoveredByFullAccessCountAtom : noPendingApprovalsCoveredCountAtom,
     );
     const removeApprovalResponseIntent = useSetAtom(removeApprovalResponseIntentAtom);
     const removePendingApproval = useSetAtom(removePendingApprovalAtom);
     const applyAgentActions = useSetAtom(applyAgentActionsAtom);
+    const refreshMergeProposals = useSetAtom(refreshMergeProposalsAtom);
     const rejectAgentActions = useSetAtom(rejectAgentActionsAtom);
     const surfaceWindow = useSurfaceWindow();
     const undoAgentActions = useSetAtom(undoAgentActionsAtom);
@@ -212,8 +223,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     // Shared with the terminal review row for this tool call. The run belongs
     // in the identity because continuation runs may reuse tool-call ids.
     const itemTitleKey = getAgentActionItemTitleKey(runId, toolcallId);
-    const itemTitleMap = useAtomValue(agentActionItemTitlesAtom);
-    const itemTitle = itemTitleMap[itemTitleKey] ?? null;
+    const itemTitle = useAtomValue(useMemo(() => agentActionItemTitleAtom(itemTitleKey), [itemTitleKey]));
     const setItemTitle = useSetAtom(setAgentActionItemTitleAtom);
 
     const hasAssociatedItem =
@@ -300,9 +310,21 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         const wasAwaiting = previousPendingApproval !== null;
         const isNoLongerAwaiting = pendingApproval === null;
 
+        // Waiting on a decision again: a parked card whose answer did not
+        // reach a run (the resume failed) is answerable once more.
+        if (!wasAwaiting && !isNoLongerAwaiting && (isProcessingApproval || isExternallyProcessing)) {
+            setIsProcessingApproval(false);
+            setIsExternallyProcessing(false);
+            setProcessingApproval(null);
+            setClickedButton(null);
+        }
+
         if (wasAwaiting && isNoLongerAwaiting) {
             const previousActionId = previousPendingApproval.actionId;
-            const previousIntent = approvalResponseIntents.get(previousActionId);
+            // Read when the approval resolves rather than subscribed to: only
+            // this transition consults it, and a subscription would re-render
+            // every card in the thread whenever any approval is answered.
+            const previousIntent = jotaiStore.get(approvalResponseIntentsAtom).get(previousActionId);
 
             if (!isProcessingApproval && isRunPending && !hasToolReturn) {
                 setIsExternallyProcessing(true);
@@ -325,9 +347,10 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     }, [
         pendingApproval,
         isProcessingApproval,
+        isExternallyProcessing,
         isRunPending,
         hasToolReturn,
-        approvalResponseIntents,
+        jotaiStore,
         removeApprovalResponseIntent,
         setProcessingApproval,
     ]);
@@ -346,7 +369,9 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         }
     }, [isProcessingApproval, isExternallyProcessing, action?.status, hasToolReturn, isRunPending, action, setProcessingApproval]);
 
-    const isProcessing = isProcessingApproval || isProcessingAction || isExternallyProcessing;
+    // An answer to this parked card is on its way to the run that resumes it.
+    const isParkedAnswerPending = useAtomValue(pendingParkedAnswerIdsAtom).has(toolcallId);
+    const isProcessing = isProcessingApproval || isProcessingAction || isExternallyProcessing || isParkedAnswerPending;
     const actionDisplayStatus = action ? getCreateAnnotationsDisplayStatus(action) : null;
     const status: ActionStatus | 'awaiting' = (isAwaitingApproval || isProcessing)
         ? 'awaiting'
@@ -358,11 +383,15 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const isConfirmAction = isConfirmExtraction || isConfirmExternalSearch;
     const hasNoActionData = !action && !pendingApproval && !isStreaming;
     const baseConfig = getStatusConfig(status, actions);
+    // A stale merge fails the same way on every retry; Refresh proposes it
+    // again for review instead.
+    const isStaleMerge = actions.some(isStaleMergeProposal);
     const config = (isConfirmAction && status !== 'awaiting')
         ? { ...baseConfig, showApply: false, showReject: false, showUndo: false, showRetry: false }
-        : actions.some(isStaleMergeProposal)
+        : isStaleMerge
             ? { ...baseConfig, showRetry: false }
             : baseConfig;
+    const showRefresh = isStaleMerge && !isConfirmAction && status === 'error';
     // Read off the records, like the Library changes row, so the choice between
     // re-applying and retrying undo survives a remount.
     const isUndoRetry = isUndoError || hasFailedUndo(actions);
@@ -381,16 +410,30 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         status !== 'pending';
 
     // The wait this reports is the backend's, not the user's: an approved edit
-    // whose save is taking Zotero a long time. Suppressed while the card waits
-    // on the user (`isAwaitingApproval`) and once the action has settled, since
-    // the note outlives the request that produced it.
-    const progressMessage = inFlightProgressMessage(
-        progress,
-        runStatus === 'in_progress'
-        && !hasToolReturn
-        && !isAwaitingApproval
-        && (status === 'awaiting' || status === 'pending'),
+    // whose save is taking Zotero a long time, or the items and PDF fetches of
+    // `create_items`. See `actionCardProgressMessage`.
+    const progressMessage = actionCardProgressMessage(toolName, progress, {
+        isCallOpen: runStatus === 'in_progress' && !hasToolReturn,
+        isAwaitingApproval,
+        status,
+    });
+
+    // `create_items`: what full text each created item got, as the call's
+    // return reports it. Fixed once returned; a PDF that lands later is not
+    // followed.
+    const toolResult = useAtomValue(useMemo(() => toolResultAtom(toolcallId), [toolcallId]));
+    const createdFullText = useMemo(
+        () => (toolName === 'create_items' && hasToolReturn ? createdItemsFullText(toolResult) : null),
+        [toolName, hasToolReturn, toolResult],
     );
+    const fullTextSummary = createItemsFullTextSummary(createdFullText, actions.length === 1);
+    const fullTextByKey = useMemo(() => {
+        const byKey = new Map<string, string | null>();
+        for (const item of createdFullText ?? []) {
+            if (item.zoteroKey && item.kind !== undefined) byKey.set(item.zoteroKey, item.kind);
+        }
+        return byKey;
+    }, [createdFullText]);
 
     // While the run reconnects, a card awaiting a decision says when it can be
     // answered, and one already answered says its answer has yet to be sent.
@@ -407,8 +450,12 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         : isAnswerHeld
             ? RECONNECT_HELD_CAPTION
             : isReplyHeld ? RECONNECT_SENDING_CAPTION : null;
+    // A reconnect caption says more than a progress note from before the drop.
+    const headerProgress = reconnectCaption ? null : progressMessage;
     // An unconfirmed action offers nothing to click; this says what to do.
     const unconfirmedNote = !isProcessing && !isConfirmAction ? unconfirmedCaption(actions) : null;
+    // An apply refused because the library changed: what changed, once expanded.
+    const staleDetail = !isProcessing && !isConfirmAction ? staleProposalDetail(actions) : null;
 
     const handleApprove = useCallback(() => {
         if (!pendingApproval) return;
@@ -466,19 +513,27 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         }
     }, [pendingApproval, setRunPermissionMode, runId, setProcessingApproval]);
 
-    const handleApplyPending = useCallback(async () => {
+    // `skipStaleCheck` is "Apply anyway": write a proposal the library has
+    // moved away from, after the user saw what changed.
+    const applyActions = useCallback(async (skipStaleCheck: boolean) => {
         if (actions.length === 0 || isProcessing) return;
 
         setIsUndoError(false);
         setIsProcessingAction(true);
-        setClickedButton('approve');
+        setClickedButton(skipStaleCheck ? 'applyAnyway' : 'approve');
         try {
-            await applyAgentActions({ actions, runId });
+            const result = await applyAgentActions({ actions, runId, skipStaleCheck });
+            // Refused because the library changed: open the card on what changed.
+            if (wasRefusedAsStale(result)) {
+                setExpanded({ key: expansionKey, expanded: true });
+            }
         } finally {
             setIsProcessingAction(false);
             setClickedButton(null);
         }
-    }, [actions, isProcessing, runId, applyAgentActions]);
+    }, [actions, isProcessing, runId, applyAgentActions, setExpanded, expansionKey]);
+    const handleApplyPending = useCallback(() => applyActions(false), [applyActions]);
+    const handleApplyAnyway = useCallback(() => applyActions(true), [applyActions]);
 
     const handleRejectPending = useCallback(() => {
         if (actions.length === 0 || isProcessing) return;
@@ -501,6 +556,19 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
             setClickedButton(null);
         }
     }, [action, actions, isProcessing, undoAgentActions]);
+
+    const handleRefresh = useCallback(async () => {
+        if (actions.length === 0 || isProcessing) return;
+
+        setIsProcessingAction(true);
+        setClickedButton('refresh');
+        try {
+            await refreshMergeProposals({ actions });
+        } finally {
+            setIsProcessingAction(false);
+            setClickedButton(null);
+        }
+    }, [actions, isProcessing, refreshMergeProposals]);
 
     const handleRetry = useCallback(async () => {
         if (isUndoRetry) {
@@ -532,7 +600,9 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     // Reject in its header. Expanded, the footer's labeled buttons decide and
     // the header keeps the open link, so the item can be checked first.
     const isDecisionState = isAwaitingApproval || status === 'pending';
-    const showDecisionButtons = isDecisionState && !isExpanded && !isProcessing && !isConfirmAction && !hasNoActionData;
+    // A refused stale proposal awaits the same decision; its ✓ applies anyway.
+    const isStaleDecision = !isDecisionState && config.showApplyAnyway === true;
+    const showDecisionButtons = (isDecisionState || isStaleDecision) && !isExpanded && !isProcessing && !isConfirmAction && !hasNoActionData;
     const previewData = buildPreviewData(toolName, pendingApproval, action);
     const runPermissionMode: RunPermissionMode =
         isFullAccessGrantedForRun(runApprovalPolicy, runId) ? 'full_access' : 'ask';
@@ -696,15 +766,25 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                     count-carrying label would otherwise read as
                                     singular while an approval is still pending and
                                     no action row exists yet. */}
-                                <span className="font-color-primary font-medium">{getActionLabel(toolName, previewData?.actionData ?? action?.proposed_data)}</span>
-                                {actionTitle && <span className="font-color-secondary ml-15">{actionTitle}</span>}
+                                <span className="font-color-primary font-medium">
+                                    {getActionLabel(toolName, previewData?.actionData ?? action?.proposed_data)}
+                                    {headerProgress ? ':' : ''}
+                                </span>
+                                {/* Progress takes the title's place, as in a passive
+                                    tool row ("Label: progress"), so it stays on the
+                                    header line however long the title is. */}
+                                {headerProgress ? (
+                                    <span className={`font-color-secondary ml-15${isAwaitingToolReturn ? '' : ' shimmer-text'}`}>{headerProgress}</span>
+                                ) : actionTitle && (
+                                    <span className="font-color-secondary ml-15">
+                                        {fullTextSummary ? `${actionTitle} (${fullTextSummary})` : actionTitle}
+                                    </span>
+                                )}
                             </div>
                             {reconnectCaption ? (
                                 <span className="font-color-secondary text-sm" role="status">{reconnectCaption}</span>
-                            ) : unconfirmedNote ? (
+                            ) : unconfirmedNote && (
                                 <span className="font-color-secondary text-sm" role="status">{unconfirmedNote}</span>
-                            ) : progressMessage && (
-                                <span className="font-color-tertiary shimmer-text">{progressMessage}</span>
                             )}
                         </div>
                     </div>
@@ -729,13 +809,13 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                     disabled={isDecisionHeld}
                                 />
                             </Tooltip>
-                            <Tooltip content={heldTooltip ?? 'Apply'} showArrow singleLine>
+                            <Tooltip content={heldTooltip ?? (isStaleDecision ? STALE_APPLY_ANYWAY_TOOLTIP : 'Apply')} showArrow singleLine>
                                 <IconButton
                                     icon={TickIcon}
                                     variant="ghost-secondary"
                                     iconClassName="font-color-green scale-14"
-                                    onClick={isAwaitingApproval ? handleApprove : handleApplyPending}
-                                    ariaLabel="Apply"
+                                    onClick={isAwaitingApproval ? handleApprove : isStaleDecision ? handleApplyAnyway : handleApplyPending}
+                                    ariaLabel={isStaleDecision ? 'Apply anyway' : 'Apply'}
                                     disabled={isDecisionHeld}
                                 />
                             </Tooltip>
@@ -776,6 +856,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
 
             {isExpanded && (
                 <div className="display-flex flex-col">
+                    {staleDetail && <StaleProposalNote detail={staleDetail} />}
                     {previewData ? (
                         <ActionPreview
                             toolName={toolName}
@@ -783,6 +864,8 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                             disabled={isProcessing}
                             status={status}
                             actions={actions}
+                            isCallOpen={runStatus === 'in_progress' && !hasToolReturn}
+                            fullTextByKey={fullTextByKey}
                         />
                     ) : (
                         <div className="text-sm font-color-secondary">
@@ -797,7 +880,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                             control is about this run; once it is not, there is
                             no run left to grant, so it goes back to being the
                             standing per-tool preference. */}
-                        {isAwaitingApproval && !hasNoActionData && !isConfirmAction && (
+                        {isAwaitingApproval && runStatus !== 'parked' && !hasNoActionData && !isConfirmAction && (
                             <div className="flex-none">
                                 <RunPermissionButton
                                     mode={runPermissionMode}
@@ -870,6 +953,33 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                 className="flex-none whitespace-nowrap"
                             >
                                 {isUndoRetry ? 'Retry Undo' : 'Try Again'}
+                            </Button>
+                        )}
+
+                        {showRefresh && (
+                            <Button
+                                variant="outline"
+                                icon={RepeatIcon}
+                                onClick={handleRefresh}
+                                loading={isProcessing && clickedButton === 'refresh'}
+                                disabled={isProcessing}
+                                title="Check the records again and show the current merge for review"
+                                className="flex-none whitespace-nowrap"
+                            >
+                                Refresh
+                            </Button>
+                        )}
+
+                        {((config.showApplyAnyway && !isProcessing) || (isProcessing && clickedButton === 'applyAnyway')) && (
+                            <Button
+                                variant="solid"
+                                onClick={handleApplyAnyway}
+                                loading={isProcessing && clickedButton === 'applyAnyway'}
+                                disabled={isProcessing}
+                                title="Make the change even though the library changed since it was proposed"
+                                className="flex-none whitespace-nowrap"
+                            >
+                                Apply anyway
                             </Button>
                         )}
 

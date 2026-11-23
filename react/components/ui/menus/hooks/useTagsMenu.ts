@@ -1,12 +1,13 @@
 import { ZoteroTag } from '@beaver/agent-core/types/zotero';
 import { SearchMenuItem } from '@beaver/agent-ui/primitives/SearchMenu';
 import { useEffect, useState } from 'react';
-import { getActiveZoteroLibraryId } from '../../../../utils/zoteroTargetContext';
 import { TagMenuItemContext, createTagMenuItem } from '../utils/menuItemFactories';
 
 interface UseTagsMenuOptions {
     isActive: boolean;
     searchQuery: string;
+    /** The library whose tags are listed; a searchable one, or null for none. */
+    libraryId: number | null;
     searchableLibraryIds: number[];
     tagMenuItemContext: TagMenuItemContext;
     verticalPosition?: 'above' | 'below';
@@ -19,28 +20,24 @@ interface UseTagsMenuResult {
 export const useTagsMenu = ({
     isActive,
     searchQuery,
+    libraryId,
     searchableLibraryIds,
     tagMenuItemContext,
     verticalPosition = 'above'
 }: UseTagsMenuOptions): UseTagsMenuResult => {
     const [menuItems, setMenuItems] = useState<SearchMenuItem[]>([]);
     const [tags, setTags] = useState<ZoteroTag[]>([]);
-    const [activeLibraryId, setActiveLibraryId] = useState<number | null>(null);
 
     useEffect(() => {
         if (!isActive) {
             setTags([]);
             setMenuItems([]);
-            setActiveLibraryId(null);
             return;
         }
 
         let isCancelled = false;
 
         const fetchTags = async () => {
-            const libraryId = getActiveZoteroLibraryId();
-            setActiveLibraryId(libraryId);
-
             if (!libraryId || !searchableLibraryIds.includes(libraryId)) {
                 if (!isCancelled) {
                     setTags([]);
@@ -119,7 +116,7 @@ export const useTagsMenu = ({
         return () => {
             isCancelled = true;
         };
-    }, [isActive, searchableLibraryIds, tagMenuItemContext]);
+    }, [isActive, libraryId, searchableLibraryIds, tagMenuItemContext]);
 
     useEffect(() => {
         if (!isActive) {
@@ -135,8 +132,8 @@ export const useTagsMenu = ({
         );
 
         let headerLabel = 'Select Tags';
-        if (activeLibraryId) {
-            const library = Zotero.Libraries.get(activeLibraryId);
+        if (libraryId) {
+            const library = Zotero.Libraries.get(libraryId);
             headerLabel = library ? `Tags in ${library.name}` : headerLabel;
         }
 
@@ -146,7 +143,7 @@ export const useTagsMenu = ({
         } else {
             setMenuItems([header, ...[...items].reverse()]);
         }
-    }, [isActive, searchQuery, tags, tagMenuItemContext, activeLibraryId, verticalPosition]);
+    }, [isActive, searchQuery, tags, tagMenuItemContext, libraryId, verticalPosition]);
 
     return { menuItems };
 };

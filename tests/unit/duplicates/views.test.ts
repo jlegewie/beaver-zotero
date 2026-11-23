@@ -463,7 +463,42 @@ describe("merge card after the merge or its undo fails", () => {
         });
         expect(html).toContain("Record to keep");
         expect(html).toContain(
-            "Not merged. The records changed after this merge was proposed. Ask Beaver to propose it again.",
+            "Not merged. The records changed after this merge was proposed. Refresh to review them again before applying.",
+        );
+    });
+
+    it("names what changed when the refused merge recorded it", () => {
+        const html = render({
+            action: {
+                id: "a",
+                action_type: "merge_items",
+                status: "error",
+                error_message: "Items changed since this merge was proposed (u-BBBB2222: tags, title). Inspect and propose the merge again.",
+                error_details: {
+                    error_code: "stale_snapshot",
+                    stale_changes: [
+                        { item_id: "u-BBBB2222", change: "changed", fields: ["tags", "title"] },
+                        { item_id: "u-NOTE0001", change: "added" },
+                    ],
+                },
+            },
+        });
+        expect(html).toContain(
+            "Not merged. The records changed after this merge was proposed (tags, Title, notes, attachments or links). Refresh to review them again before applying.",
+        );
+    });
+
+    it("explains a merge that waited on another Zotero write", () => {
+        const html = render({
+            action: {
+                id: "a",
+                action_type: "merge_items",
+                status: "error",
+                error_message: "DuplicateError: Zotero is busy saving another change, so this merge did not start and nothing was changed. Try again in a moment.",
+            },
+        });
+        expect(html).toContain(
+            "Not merged. Zotero was busy saving another change, so nothing was changed. Try again in a moment.",
         );
     });
 

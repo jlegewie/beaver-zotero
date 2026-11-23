@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getToolCallLabel } from '@beaver/agent-core/run-state/toolLabels';
+import { getToolCallLabel, toolCallSearchText } from '@beaver/agent-core/run-state/toolLabels';
 import type { ToolCallPart } from '@beaver/agent-core/agents/types';
 
 function toolCall(overrides: Partial<ToolCallPart> = {}): ToolCallPart {
@@ -104,5 +104,160 @@ describe('getToolCallLabel for list_items', () => {
 
     it('ignores an unknown view', () => {
         expect(getToolCallLabel(listCall({ special_collection: 'trash' }), 'completed')).toBe('List items');
+    });
+});
+
+describe('external record tool labels', () => {
+    const searchView = (shown: number, total: number) => ({
+        view_type: 'external_reference_list' as const,
+        tool_name: 'pubmed_search',
+        references: Array.from({ length: shown }, (_, i) => ({ source: 'pubmed', source_id: `pmid:${i}`, library_items: [] })),
+        tool_info: { info_type: 'search' as const, source: 'pubmed', source_label: 'PubMed', total_count: total, returned: shown },
+    });
+
+    it('labels a PubMed search by its query and its page of the hits', () => {
+        const part = toolCall({ tool_name: 'pubmed_search', args: { query: 'semaglutide obesity' } });
+        expect(getToolCallLabel(part, 'in_progress')).toBe('PubMed search: semaglutide obesity');
+        expect(getToolCallLabel(part, 'completed', { view: searchView(20, 155) })).toBe('PubMed search: semaglutide obesity (20 of 155)');
+    });
+
+    it('labels a trial search by its terms and a trial lookup by its id', () => {
+        expect(getToolCallLabel(toolCall({ tool_name: 'search_trials', args: { condition: 'obesity', intervention: 'semaglutide' } }), 'in_progress'))
+            .toBe('ClinicalTrials.gov search: obesity · semaglutide');
+        expect(getToolCallLabel(toolCall({ tool_name: 'get_trial', args: { nct_ids: ['NCT03548935'] } }), 'in_progress'))
+            .toBe('ClinicalTrials.gov record: NCT03548935');
+    });
+
+    it('counts the trials of a trial lookup that also lists their publications', () => {
+        const part = toolCall({ tool_name: 'get_trial', args: { nct_ids: ['NCT03548935'] } });
+        const references = [
+            { source: 'clinicaltrials', source_id: 'NCT03548935', details: { kind: 'trial' as const }, library_items: [] },
+            { source: 'pubmed', source_id: 'pmid:1', details: { kind: 'work' as const }, library_items: [] },
+            { source: 'pubmed', source_id: 'pmid:2', library_items: [] },
+        ];
+        const view = { view_type: 'external_reference_list' as const, tool_name: 'get_trial', references };
+        expect(getToolCallLabel(part, 'completed', { view: { ...view, found_count: 1 } })).toBe('ClinicalTrials.gov record: NCT03548935 (1 found)');
+    });
+});
+
+
+describe('OpenAlex and trial search labels', () => {
+    const openAlexView = (shown: number, total: number | null, filters: Record<string, unknown> = {}) => ({
+        view_type: 'external_reference_list' as const,
+        tool_name: 'openalex_search_by_keywords',
+        references: Array.from({ length: shown }, (_, i) => ({ source: 'openalex', source_id: `W${i}`, library_items: [] })),
+        tool_info: {
+            info_type: 'search' as const, source: 'openalex', source_label: 'OpenAlex',
+            filters, total_count: total, returned: shown,
+        },
+    });
+
+    it('labels a topic search by its query and counts its reranked list, which has no total', () => {
+        const part = toolCall({ tool_name: 'openalex_search_by_topic', args: { query: 'peer effects in classrooms' } });
+        expect(getToolCallLabel(part, 'in_progress')).toBe('Literature search: peer effects in classrooms');
+        expect(getToolCallLabel(part, 'completed', { view: openAlexView(18, null) }))
+            .toBe('Literature search: peer effects in classrooms (18 results)');
+    });
+
+    it('labels a keyword search by its query and its page of the hits', () => {
+        const part = toolCall({ tool_name: 'openalex_search_by_keywords', args: { query: '"growth mindset" AND intervention' } });
+        expect(getToolCallLabel(part, 'completed', { view: openAlexView(20, 1234) }))
+            .toBe('Literature search: "growth mindset" AND intervention (20 of 1234)');
+    });
+
+    it('labels a filter-only listing by the author and venue names passed while it runs', () => {
+        const part = toolCall({
+            tool_name: 'openalex_search_by_keywords',
+            args: { authors: ['Legewie', 'A5036443997'], venues: ['American Sociological Review'], min_year: 2016, max_year: 2016 },
+        });
+        expect(getToolCallLabel(part, 'in_progress'))
+            .toBe('Literature search: Works by Legewie, A5036443997 in American Sociological Review, 2016');
+    });
+
+    it('labels a filter-only listing by the names the view resolved, and by ids while it runs', () => {
+        const part = toolCall({
+            tool_name: 'openalex_search_by_keywords',
+            args: { author_ids: ['A5012345678'], venue_ids: ['S1', 'S2'], min_year: 2020, sort: 'citations' },
+        });
+        expect(getToolCallLabel(part, 'in_progress'))
+            .toBe('Literature search: Works by A5012345678 in S1, S2, since 2020');
+        const view = openAlexView(20, 87, {
+            authors: ['Katrin Wisniewski (A5012345678)'],
+            venues: ['Nature (S1)', 'S2'],
+        });
+        expect(getToolCallLabel(part, 'completed', { view }))
+            .toBe('Literature search: Works by Katrin Wisniewski in Nature, S2, since 2020 (20 of 87)');
+        expect(getToolCallLabel(toolCall({ tool_name: 'openalex_search_by_keywords', args: { min_year: 2021, max_year: 2021 } }), 'in_progress'))
+            .toBe('Literature search: Works 2021');
+        expect(getToolCallLabel(toolCall({
+            tool_name: 'openalex_search_by_keywords',
+            args: { work_types: ['book'], language: 'DE', open_access_only: true, sort: 'newest' },
+        }), 'completed')).toBe('Literature search: Works (book, de, open access)');
+    });
+
+    it('shows the query, not the progress line that repeats it, while a search runs', () => {
+        const part = toolCall({
+            tool_name: 'openalex_search_by_topic',
+            args: { query: 'peer effects' },
+            progress: 'Searching OpenAlex: peer effects',
+        });
+        expect(getToolCallLabel(part, 'in_progress')).toBe('Literature search: peer effects');
+    });
+
+    it('labels a name lookup by its kind and names, and counts candidates or found names', () => {
+        const one = toolCall({ tool_name: 'openalex_resolve_names', args: { names: ['Katrin Wisniewski'], kind: 'author' } });
+        const names = (results: Array<{ query: string; candidates: unknown[] }>) => ({
+            view_type: 'openalex_names' as const, kind: 'author' as const, results: results as any,
+        });
+        expect(getToolCallLabel(one, 'in_progress')).toBe('Author lookup: Katrin Wisniewski');
+        expect(getToolCallLabel(one, 'completed', { view: names([{ query: 'Katrin Wisniewski', candidates: [{}, {}] }]) }))
+            .toBe('Author lookup: Katrin Wisniewski (2 candidates)');
+        expect(getToolCallLabel(one, 'completed', { view: names([{ query: 'Katrin Wisniewski', candidates: [] }]) }))
+            .toBe('Author lookup: Katrin Wisniewski (not found)');
+
+        const three = toolCall({ tool_name: 'openalex_resolve_names', args: { names: ['Nature', 'Science', 'Cell'], kind: 'venue' } });
+        const view = names([
+            { query: 'Nature', candidates: [{}] },
+            { query: 'Science', candidates: [] },
+            { query: 'Cell', candidates: [{}] },
+        ]);
+        expect(getToolCallLabel(three, 'completed', { view })).toBe('Journal lookup: Nature, Science, Cell (2 of 3 found)');
+    });
+
+    it('names the database capabilities a load_capability call loads', () => {
+        const load = (id: string) => getToolCallLabel(toolCall({ tool_name: 'load_capability', args: { id } }), 'completed');
+        expect(load('openalex')).toBe('Loading tools: Literature Search');
+        expect(load('pubmed_search')).toBe('Loading tools: PubMed Search');
+        expect(load('clinical_trials')).toBe('Loading tools: Clinical Trials');
+    });
+
+    it('labels trials_search like the search it replaces, from its terms only', () => {
+        expect(getToolCallLabel(toolCall({ tool_name: 'trials_search', args: { condition: 'obesity', intervention: 'semaglutide' } }), 'in_progress'))
+            .toBe('ClinicalTrials.gov search: obesity · semaglutide');
+        expect(getToolCallLabel(toolCall({ tool_name: 'trials_search', args: { condition: 'obesity', search_label: 'Stale' } }), 'in_progress'))
+            .toBe('ClinicalTrials.gov search: obesity');
+    });
+
+    it('keeps the model-written search_label of searches in older threads', () => {
+        expect(getToolCallLabel(toolCall({ tool_name: 'external_search', args: { query: 'x', search_label: 'Peer effects' } }), 'completed'))
+            .toBe('Web search: Peer effects');
+        expect(getToolCallLabel(toolCall({ tool_name: 'search_trials', args: { condition: 'obesity', search_label: 'Obesity trials' } }), 'completed'))
+            .toBe('ClinicalTrials.gov search: Obesity trials');
+        expect(getToolCallLabel(toolCall({ tool_name: 'external_search', args: { query: 'peer effects' } }), 'completed'))
+            .toBe('Web search: peer effects');
+    });
+});
+
+describe('toolCallSearchText', () => {
+    it('gives the full search the label truncates, and nothing for other tools', () => {
+        const long = 'school desegregation effects on Black student achievement in Southern districts';
+        expect(toolCallSearchText(toolCall({ tool_name: 'openalex_search_by_topic', args: { query: long } }))).toBe(long);
+        expect(toolCallSearchText(toolCall({ tool_name: 'openalex_resolve_names', args: { names: '["A", "B", "C"]', kind: 'author' } })))
+            .toBe('A, B, C');
+        expect(toolCallSearchText(toolCall({ tool_name: 'trials_search', args: { query: 'randomized', condition: 'obesity' } })))
+            .toBe('randomized · obesity');
+        expect(toolCallSearchText(toolCall({ tool_name: 'search_trials', args: { condition: 'obesity', search_label: 'Obesity trials' } })))
+            .toBe('Obesity trials');
+        expect(toolCallSearchText(toolCall({ tool_name: 'item_search_by_topic', args: { query: 'x' } }))).toBeNull();
     });
 });

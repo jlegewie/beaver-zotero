@@ -1,26 +1,23 @@
 import * as operations from '../../src/services/manualActions/importItemActions';
-import { getSelectedCollection } from '../../src/utils/zoteroSelection';
 import { captureAttachmentCompletion } from '../runtime/attachmentCompletion';
 import { captureWindowMutationOptions, runWindowOperation } from '../runtime/libraryMutation';
 import { getContextWindow } from '../runtime/windowRuntime';
-import { getZoteroTargetContext } from './zoteroTargetContext';
+import { getLibraryViewCollection, getZoteroTargetContext } from './zoteroTargetContext';
 export type { ImportBatchExecuteResult, ImportBatchUndoResult } from '../../src/services/manualActions/importItemActions';
 
 type ExecuteOptions = NonNullable<Parameters<typeof operations.executeImportItemActions>[1]>;
 
 /**
  * The UI context's target, for actions that name no library (citation imports):
- * the library being viewed and, outside the reader, the selected collection.
+ * the library being viewed and, in the library tab, the selected collection.
  */
 async function withContextTarget(options: ExecuteOptions): Promise<ExecuteOptions> {
     const win = getContextWindow();
-    const isReader = win?.Zotero_Tabs?.selectedType === 'reader';
     const context = await getZoteroTargetContext(win);
-    const selectedCollection = isReader ? undefined : getSelectedCollection(win?.ZoteroPane);
     return {
         ...options,
         libraryId: options.libraryId ?? context.targetLibraryId ?? Zotero.Libraries.userLibraryID,
-        collectionId: options.collectionId ?? (isReader ? null : (selectedCollection?.id ?? context.collectionToAddTo?.id ?? null)),
+        collectionId: options.collectionId ?? getLibraryViewCollection(win)?.id ?? null,
     };
 }
 
@@ -31,6 +28,20 @@ export async function executeImportItemActions(
     const owner = captureWindowMutationOptions();
     const resolved = await withContextTarget({ ...options, onAttachmentResolved: captureAttachmentCompletion() });
     return runWindowOperation('executeImportItemActions', [actions, resolved], owner);
+}
+
+/**
+ * Import an external record with no pending action (a result row's Import)
+ * into the library and collection being viewed. The backend prepares the
+ * proposal at this click; a failure rejects with a message to retry.
+ */
+export async function importExternalReference(
+    externalId: string,
+    options: ExecuteOptions & { provider?: string } = {},
+): ReturnType<typeof operations.importExternalReference> {
+    const owner = captureWindowMutationOptions();
+    const resolved = await withContextTarget({ ...options, onAttachmentResolved: captureAttachmentCompletion() });
+    return runWindowOperation('importExternalReference', [externalId, resolved], owner);
 }
 
 export function undoImportItemActions(...args: Parameters<typeof operations.undoImportItemActions>): ReturnType<typeof operations.undoImportItemActions> {

@@ -3,26 +3,23 @@
  *
  * ## Why this exists
  *
- * `view/readerTableView.ts` and `src/ui/tableItemPane.ts` keep **module-level
- * state**: the enhanced-reader registry and the registered pane id.
- * `src/hooks.ts` imports them, so esbuild compiles them into `beaver.js`. If
- * anything under `react/` imports them too, webpack compiles a *second* copy
- * into `reactBundle.js` — and the two copies never see each other. CLAUDE.md
- * states the rule this violates: "The two bundles cannot import from each
- * other … cross-bundle communication goes through `__beaver*` properties".
+ * `view/readerTableView.ts` and `src/ui/tableTab.ts` keep **module-level
+ * state**: the reader listener and the open tabs. `src/hooks.ts` imports them, so esbuild compiles them
+ * into `beaver.js`. If anything under `react/` imports them too, webpack
+ * compiles a *second* copy into `reactBundle.js`, and the two copies never see
+ * each other. CLAUDE.md states the rule this violates: "The two bundles cannot
+ * import from each other … cross-bundle communication goes through `__beaver*`
+ * properties".
  *
- * The failure is quiet and specific. The webpack copy's registries stay empty
- * while the esbuild copy does the real work, so a dev endpoint reports an empty
- * view list for readers that are demonstrably enhanced — and a view registered
- * through the webpack copy is invisible to `cleanupReaderTableViews()`, which
- * runs from `hooks.ts` against the esbuild copy, leaking the reader's document
- * and its window.
+ * The failure is quiet and specific: the webpack copy's registries stay empty
+ * while the esbuild copy does the real work, so a dev endpoint reports nothing
+ * for state that demonstrably exists, and anything registered through the
+ * webpack copy is invisible to the cleanup `hooks.ts` runs.
  *
  * ## The seam
  *
  * The **esbuild bundle owns these surfaces**, because that is where `hooks.ts`
- * runs and where the reader integration and the item-pane section actually
- * live. It publishes them here at startup; the webpack side reaches them
+ * runs and where the reader redirect and the tabs actually live. It publishes them here at startup; the webpack side reaches them
  * through {@link getTablesApi} instead of importing the modules.
  *
  * **This module must never gain a value import.** Types are erased, so the
@@ -39,25 +36,36 @@ import type { TableRef } from './tableItemIdentity';
 import type { TableShadowReport, TableShadowObservation } from './recoveryShadow';
 import type { TableSpec } from '@beaver/agent-core/layouts/table';
 import type { Citation } from '@beaver/agent-core/types/citations';
+import type { SkippedCell } from '@beaver/agent-core/layouts/tableMutations';
 import type { TableVersionEntry } from './tableItemIdentity';
-import type { TableWriteResult, TableShadowRestoreResult } from './tableStore';
-import type { TableViewSummary } from './view/enhanceTableDocument';
-import type { ReaderTableDiagnostics } from './view/readerTableView';
-import type { OpenTableOutcome } from '../../ui/openTable';
-import type { TableItemPaneReport } from '../../ui/tableItemPane';
+import type {
+    TableApplyEditResult,
+    TableWriteResult,
+    TableShadowRestoreCheck,
+    TableShadowRestoreResult,
+    TableUndoResult,
+    TableUndoTarget,
+} from './tableStore';
+import type { TableUserEditOptions, TableUserEditResult } from './tableUserEdits';
+import type { TableCellEdit, TableUserEdit } from '@beaver/agent-core/layouts/tableEdit';
+import type { OpenTableOptions, OpenTableOutcome } from '../../ui/openTable';
+import type { TableTabRenderReport } from '../../ui/tableTabTypes';
 
-/** The item-pane section, as the dev endpoint needs to see it. */
-export interface TablesItemPaneApi {
-    /** Whether the section is registered with Zotero right now. */
-    isRegistered(): boolean;
-    /** The namespaced pane id Zotero assigned, or null. */
-    paneID(): string | null;
-    /** What the section would render for one table. */
-    describe(ref: TableRef): Promise<TableItemPaneReport>;
+/** The table tabs, owned by `src/ui/tableTab.ts`. */
+export interface TablesTabsApi {
+    /** The open table tabs, for the dev endpoint. */
+    list(): Array<{
+        tabID: string;
+        libraryID: number;
+        key: string;
+        title: string;
+        mounted: boolean;
+        renders: TableTabRenderReport[];
+    }>;
 }
 
 /**
- * The recovery shadow, as the item-pane section and the dev endpoints need it.
+ * The recovery shadow, as table opens and the dev endpoints need it.
  *
  * The plugin owns both detection and restoration. Restoration enters the
  * instance mutation queue before acquiring the table lock, and remains
@@ -73,6 +81,11 @@ export interface TablesShadowApi {
         ref: TableRef,
         observed?: TableShadowObservation | null
     ): Promise<TableShadowReport>;
+    /**
+     * Whether {@link restore} would write a version back now. Ask this before
+     * offering or mentioning the restore.
+     */
+    check(ref: TableRef): Promise<TableShadowRestoreCheck>;
     /** Writes the retained spec back as a new version. */
     restore(ref: TableRef): Promise<TableShadowRestoreResult | TableShadowUnavailable>;
 }
@@ -85,29 +98,23 @@ export interface TableShadowUnavailable {
 }
 
 export interface TablesApi {
-    /** The single entry point for showing a stored table: the reader. */
-    openTable(ref: TableRef): Promise<OpenTableOutcome>;
-
-    /** Every table document currently enhanced. */
-    listViews(): TableViewSummary[];
-
     /**
-     * Opens a stored table in the reader and reports what the enhancer
-     * attached. {@link openTable} is the product path; this one waits for the
-     * enhancement and describes it, which is what a dev endpoint needs.
+     * The single entry point for showing a stored table: the Beaver tab, in
+     * the main window of `options.window` (the window the interaction came
+     * from). See `src/ui/openTable.ts`.
      */
-    openInReader(
-        item: Zotero.Item,
-        options?: { timeoutMs?: number }
-    ): Promise<ReaderTableDiagnostics>;
+    openTable(ref: TableRef, options?: OpenTableOptions): Promise<OpenTableOutcome>;
+    /**
+     * Whether the table is on screen: in a Beaver tab of a main window other
+     * than `except` (a window about to close), or in its own window.
+     */
+    isShown(ref: TableRef, except?: Window | null): boolean;
 
-    /** Marks open snapshots as outdated after a persisted write. */
-    tableChanged(ref: TableRef): void;
     local: {
         commands(win: Window): TableLocalCommands;
     };
-    itemPane: TablesItemPaneApi;
     shadow: TablesShadowApi;
+    tabs: TablesTabsApi;
 }
 
 /** The plugin-owned recovery operation. */
@@ -194,6 +201,12 @@ export interface TableLocalCommands {
     read(ref: TableRef): Promise<{ spec: TableSpec; version: number; recovered?: { kind: string }[] }>;
     history(ref: TableRef): Promise<TableVersionEntry[]>;
     revert(ref: TableRef, version: number): Promise<TableWriteResult>;
+    /** A structural edit from the tab, resolved and applied in the plugin realm. */
+    edit(ref: TableRef, operations: TableUserEdit, options: TableUserEditOptions): Promise<TableUserEditResult>;
+    /** Cell edits from the tab (the user's answers, a reset, a row's document). */
+    editCells(ref: TableRef, edits: TableCellEdit[], options: { session?: string; change?: string }): Promise<TableApplyEditResult>;
+    /** Takes back one edit while the table is as the edit left it. */
+    undo(ref: TableRef, target: TableUndoTarget): Promise<TableUndoResult>;
     restoreShadow: TableShadowRestore;
     /**
      * Navigates to a cited passage with the renderer's citation activation,

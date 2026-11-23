@@ -355,6 +355,8 @@ export interface AttachmentDataWithStatus {
     status: ZoteroItemStatus;
     /** File availability status (optional but recommended) */
     file_status?: FrontendFileStatus;
+    /** Zotero's primary attachment for its parent; sent at every file status level. */
+    is_primary?: boolean;
 }
 import type {
     AttachmentInfo,

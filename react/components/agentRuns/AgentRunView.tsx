@@ -1,7 +1,7 @@
 import React, { forwardRef, useMemo, useState, useCallback } from 'react';
 import { useAtomValue } from 'jotai';
-import { AgentRun, ToolCallPart, isRunActive } from '@beaver/agent-core/agents/types';
-import { hasInProgressToolCall, shouldShowRunStatus } from '@beaver/agent-core/run-state/runStatusVisibility';
+import { AgentRun, ToolCallPart, isContinuationPrompt, isRunActive, isRunFinished } from '@beaver/agent-core/agents/types';
+import { hasInProgressToolCall, isRunWithNothingToShow, shouldShowRunStatus } from '@beaver/agent-core/run-state/runStatusVisibility';
 import { wasRunContinued } from '@beaver/agent-core/run-state/runResumeHelpers';
 import { PARTIAL_RESPONSE_NOTE } from '@beaver/agent-core/transport/connectionFailure';
 import { UserRequestView } from './UserRequestView';
@@ -17,6 +17,8 @@ import { threadWarningsAtom } from '../../atoms/warnings';
 import { resumeChainAtom, runToolResultsAtom, resumedRunIdsAtom, threadRunsAtom } from '@beaver/agent-core/run-state/atoms';
 import { streamQuietAtom } from '@beaver/agent-core/run-state/streamActivity';
 import { autoReplacementPendingRunIdsAtom, streamingDoneRunIdsAtom } from '../../atoms/agentRunAtoms';
+import { isThreadParkedAtom } from '../../atoms/parkedRuns';
+import { openAnswerRunIdAtom } from '../../atoms/jobWait';
 import { useVisibleReconnect } from '../../hooks/useVisibleReconnect';
 import { getHost } from '@beaver/agent-ui/host';
 import BatchRunReceipt, { hasBatchReceipt } from '@beaver/agent-ui/chat/BatchRunReceipt';
@@ -91,8 +93,13 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
         [run],
     );
 
-    // Don't show user message for resume runs (empty content)
-    const showUserMessage = !run.user_prompt.is_resume || run.user_prompt.content.length > 0;
+    // Don't show the user message of a run that continues another (a resume,
+    // or the answer to a parked card): its content is empty.
+    const showUserMessage = !isContinuationPrompt(run.user_prompt) || run.user_prompt.content.length > 0;
+    // A run whose answer is still going: a card waits for the user, or this
+    // window waits on a fill it started. One whose open calls are only fills
+    // nobody here waits on has ended, though its calls are open.
+    const isOpenParked = useAtomValue(openAnswerRunIdAtom) === run.id;
     
     // The provider can go quiet mid-response — after the sentence of preamble it
     // writes before calling its tools, while it works out what those calls are —
@@ -119,7 +126,11 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
     // mid-answer or waiting on a card, since nothing else on screen moves —
     // once it has lasted longer than a blip.
     const isReconnecting = useVisibleReconnect() !== null && isRunActive(run);
-    const showStatusIndicator = isLastRun && (runHasNothingToShow || autoReplacementPending || isReconnecting);
+    // A resume that waits for the parked run's other cards is not generating:
+    // those cards are what the reader is asked for.
+    const waitsOnParkedCards = useAtomValue(isThreadParkedAtom) && isRunActive(run);
+    const showStatusIndicator = isLastRun
+        && ((runHasNothingToShow && !waitsOnParkedCards) || autoReplacementPending || isReconnecting);
     // A tool call still waiting on its result already spins for the same
     // wait; the reconnect line under it drops its own spinner and only says
     // why.
@@ -135,7 +146,7 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
 
     // Show agent run footer
     const showAgentRunFooter =
-        run.status === 'completed' ||
+        isRunFinished(run) ||
         run.status === 'canceled' ||
         isPostProcessing ||
         (wasResumed &&  run.model_messages.length > 0 && run.model_messages[run.model_messages.length - 1].parts.some(part => part.part_kind === 'text' && part.content.trim() !== '')) ||
@@ -161,15 +172,54 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
     const handleDismissSuggestions = useCallback(() => setSuggestionsDismissed(true), []);
 
     // Terminal statuses: the run is done. `awaiting_deferred` is still live (see isRunActive).
-    const isTerminal = run.status === 'completed' || run.status === 'error' || run.status === 'canceled';
+    const isTerminal = isRunFinished(run) || run.status === 'error' || run.status === 'canceled';
 
     // Held while a failed reattach is resolved: the server may still be
-    // waiting on a pending change, and may replace the run.
-    const showRunOutcomes = isTerminal && !wasResumed && !resolutionView;
+    // waiting on a pending change, and may replace the run. Held too while
+    // the run waits on its cards: their changes are decided there, and
+    // applying one here would bypass the run that is waiting for it.
+    const showRunOutcomes = isTerminal && !wasResumed && !resolutionView && !isOpenParked;
     const showBatchReceipt = showRunOutcomes && hasBatchReceipt(chainRuns);
 
     // Allow editing when run is in a terminal state (not actively streaming or awaiting approval)
     const canEdit = !isStreaming && isTerminal;
+
+    // What the card draws besides the user message and model messages. Each
+    // flag gates its own section below and also decides whether the run is
+    // drawn at all, so the two cannot disagree.
+    const showWarnings = runWarnings.length > 0;
+    const showPartialNotice = isPartialResponse && !wasResumed;
+    const showErrorArea = hasError && !!run.error && !wasResumed && !autoReplacementPending;
+    // A run waiting on its cards has not finished its response: the footer
+    // shows once its last card is answered (on the run that resumes it) or a
+    // new message closes the cards.
+    const showFooter = showAgentRunFooter && !wasResumed && !isOpenParked;
+    const showSuggestions = suggestionParts.length > 0 && !suggestionsDismissed;
+    // Gives way to the run that continued this one, like its error card.
+    const showReplacementNote = !!replacementNote && !wasResumed;
+    // Not for a run that finished: a completed run can now be continued too —
+    // it had work left, not an interruption — and a parked run is continued
+    // by the answers to its cards; this line would call either an
+    // interrupted one.
+    const showResumeLine = wasResumed && !isRunFinished(run);
+
+    // A continuation that left nothing to read. Skipped entirely rather than
+    // drawn empty: the thread spaces its runs with a flex gap, so even an empty
+    // card adds a blank strip.
+    const hasNothingToShow = isRunWithNothingToShow(run, {
+        isLastRun,
+        showsRunSections:
+            showStatusIndicator ||
+            showWarnings ||
+            showPartialNotice ||
+            showErrorArea ||
+            showReplacementNote ||
+            showFooter ||
+            showRunOutcomes ||
+            showSuggestions ||
+            showResumeLine,
+    });
+    if (hasNothingToShow) return null;
 
     const runCard = (
         <div id={`run-${run.id}`} className="display-flex flex-col gap-4" ref={ref}>
@@ -177,7 +227,7 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
             {showUserMessage && <UserRequestView userPrompt={run.user_prompt} runId={run.id} canEdit={canEdit} />}
 
             {/* Warning display (dismissable, non-persistent) */}
-            {runWarnings.length > 0 && (
+            {showWarnings && (
                 <div className="px-5 display-flex flex-col gap-2">
                     {runWarnings.map((warning) => (
                         <RunWarningDisplay key={warning.id} warning={warning} />
@@ -201,19 +251,19 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
                 statusHideIcon={reconnectUnderToolCall}
             />
 
-            {isPartialResponse && !wasResumed && <RunNotice text={PARTIAL_RESPONSE_NOTE} />}
+            {showPartialNotice && <RunNotice text={PARTIAL_RESPONSE_NOTE} />}
 
             {/* Error display (includes retry/resume buttons) - hide if run was resumed */}
-            {hasError && run.error && !wasResumed && !autoReplacementPending && (
+            {showErrorArea && run.error && (
                 resolutionView
                     ? <ReattachResolutionNotice view={resolutionView} />
                     : <RunErrorDisplay runId={run.id} error={run.error} isLastRun={isLastRun} />
             )}
 
-            {replacementNote && <RunNotice text={replacementNote} />}
+            {showReplacementNote && <RunNotice text={replacementNote} />}
 
             {/* Footer with sources and action buttons (only for completed runs, or error runs that were resumed) */}
-            {(showAgentRunFooter && !wasResumed) && (
+            {showFooter && (
                 <AgentRunFooter run={run} />
             )}
 
@@ -231,8 +281,14 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
                 getHost().components?.pendingActionsReview({ runs: chainRuns }) ?? null
             )}
 
+            {/* A client's card for the finished answer (a reward it earned),
+                after what the answer did. */}
+            {showRunOutcomes && (
+                getHost().components?.runEndCard?.({ runs: chainRuns }) ?? null
+            )}
+
             {/* Suggestions (only for the last run, rendered below footer) */}
-            {suggestionParts.length > 0 && !suggestionsDismissed && (
+            {showSuggestions && (
                 <div className="px-4">
                     {suggestionParts.map((part) => (
                         <SuggestionsView
@@ -244,11 +300,8 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
                 </div>
             )}
 
-            {/* Resuming failed request display. Not for a run that finished:
-                a completed run can now be continued too — it had work left,
-                not an interruption — and this line would call an answer that
-                arrived in full an interrupted one. */}
-            {wasResumed && run.status !== 'completed' && <RunResumeDisplay runId={run.id} />}
+            {/* Resuming failed request display */}
+            {showResumeLine && <RunResumeDisplay runId={run.id} />}
 
         </div>
     );

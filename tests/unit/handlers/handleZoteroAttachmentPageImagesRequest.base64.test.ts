@@ -89,7 +89,7 @@ vi.mock('../../../src/services/agentDataProvider/utils', async () => {
 
 import { handleZoteroAttachmentPageImagesRequest } from '../../../src/services/agentDataProvider/handleZoteroAttachmentPageImagesRequest';
 import { resolveToPdfAttachment } from '../../../src/services/agentDataProvider/utils';
-import { MAX_PAGE_IMAGE_DIMENSION } from '../../../src/services/agentDataProvider/imageProcessing';
+import { MAX_PAGE_IMAGE_DIMENSION } from '../../../src/services/images/imageProcessing';
 
 function nodeBase64(bytes: Uint8Array): string {
     return Buffer.from(bytes).toString('base64');

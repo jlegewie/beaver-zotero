@@ -4,7 +4,6 @@ import {
     buildEditedNoteArtifacts,
     buildReviewRows,
     getCreatedNoteExportTarget,
-    getEditedNoteHeading,
     pendingNoteChanges,
     summarizeNoteEdits,
     buildReviewRowsForRunChain,
@@ -254,6 +253,15 @@ describe('getChangesCardHeading trail', () => {
 
         expect(getChangesCardHeading(rows))
             .toEqual({ lead: 'Library changes', trail: '10 edited items' });
+    });
+
+    it('counts a refused stale proposal apart from failures', () => {
+        const rows = rowsOf([
+            action({ toolcall_id: 'call-1', action_type: 'manage_tags', status: 'error', error_details: { error_code: 'stale_proposal' } }),
+            action({ toolcall_id: 'call-2', action_type: 'manage_tags', status: 'error', error_details: { error_code: 'other' } }),
+        ]);
+
+        expect(getChangesCardHeading(rows).trail).toBe('1 changed since proposed, 1 failed');
     });
 
     it('names underlines apart from highlights', () => {
@@ -893,17 +901,6 @@ describe('edited-note artifacts', () => {
         ]]);
 
         expect(pendingNoteChanges(summaries, { library_ref: 'u', library_id: 1, zotero_key: 'NOTE0001' })).toBe(1);
-    });
-
-    it('says what happened to the note', () => {
-        const summary = { runId: 'run-1', toolcallId: 'call-1', note: { zotero_key: 'NOTE0001' } };
-
-        expect(getEditedNoteHeading({ ...summary, appliedChanges: 1, pendingChanges: 0 }))
-            .toEqual({ label: 'Edited Note', detail: '1 change' });
-        expect(getEditedNoteHeading({ ...summary, appliedChanges: 3, pendingChanges: 1 }))
-            .toEqual({ label: 'Edited Note', detail: '3 changes, 1 pending' });
-        expect(getEditedNoteHeading({ ...summary, appliedChanges: 0, pendingChanges: 2 }))
-            .toEqual({ label: 'Note Edits', detail: '2 changes pending' });
     });
 });
 

@@ -1,3 +1,5 @@
+import { batchFindByRecordIdentifiers } from '../../src/utils/batchFindExistingReferences';
+
 /**
  * Data for finding existing references in Zotero library
  */
@@ -12,6 +14,12 @@ export interface FindReferenceData {
     ISBN?: string;
     /** Array of creator last names for fuzzy matching */
     creators?: string[];
+    /** PubMed id, matched against a `PMID: <id>` line in Extra */
+    PMID?: string;
+    /** Record URL; a trial registry URL identifies the trial */
+    url?: string;
+    /** Report number; a trial's NCT id */
+    reportNumber?: string;
 }
 
 /**
@@ -40,7 +48,9 @@ function parseYear(yearStr: string | undefined | null): number | null {
  * Checks if a reference already exists in the Zotero database using Zotero's duplicate detection logic.
  * 
  * Search strategy:
- * 1. First checks for exact ISBN match (if provided)
+ * 0. Checks record identifiers: a PubMed id in Extra, a trial's registry URL
+ *    or report number (if provided)
+ * 1. Then checks for exact ISBN match (if provided)
  * 2. Then checks for exact DOI match (if provided)
  * 3. Finally performs fuzzy metadata matching using title, year (±1 tolerance), and creators
  * 
@@ -49,6 +59,19 @@ function parseYear(yearStr: string | undefined | null): number | null {
  * @returns The existing item or null if no duplicate found
  */
 export const findExistingReference = async (libraryID: number, data: FindReferenceData): Promise<Zotero.Item | null> => {
+
+    // 0. Record identifiers: a PubMed id in Extra, a trial's registry URL or report number
+    if (data.PMID || data.url || data.reportNumber) {
+        const matches = await batchFindByRecordIdentifiers([{ id: 'reference', data }], [libraryID]);
+        const match = matches.get('reference');
+        if (match) {
+            const item = await Zotero.Items.getByLibraryAndKeyAsync(match.library_id, match.zotero_key);
+            if (item) {
+                await Zotero.Items.loadDataTypes([item], ["itemData", "creators", "childItems"]);
+                return item;
+            }
+        }
+    }
 
     // 1. Check by ISBN (Books only)
     // Note: We normalize both the input ISBN and DB values for comparison,

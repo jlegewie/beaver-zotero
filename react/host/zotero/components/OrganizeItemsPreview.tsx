@@ -37,6 +37,8 @@ export const OrganizeItemsPreview: React.FC<OrganizeItemsPreviewProps> = ({
 }) => {
     const [collectionNames, setCollectionNames] = useState<Record<string, string>>({});
     const [resolvedItems, setResolvedItems] = useState<Zotero.Item[]>([]);
+    const notAppliedCount = (resultData?.skipped_items?.length ?? 0)
+        + Object.keys(resultData?.failed_items ?? {}).length;
 
     // Resolve items from item IDs
     useEffect(() => {
@@ -132,8 +134,11 @@ export const OrganizeItemsPreview: React.FC<OrganizeItemsPreviewProps> = ({
         <div className={`organize-items-preview overflow-hidden ${isRejectedOrUndone ? 'opacity-60' : ''}`}>
             <div className="display-flex flex-col px-3 py-1 gap-5">
                 
-                {/* Item display - always shown regardless of status */}
-                <div className="display-flex flex-wrap gap-col-3 gap-row-2 mt-1">
+                {/* Item display - always shown regardless of status. Holds
+                    the height of an item chip while the items load, so the
+                    card does not grow, and a thread pinned to its bottom
+                    jump, when they arrive. */}
+                <div className="display-flex flex-wrap items-center gap-col-3 gap-row-2 mt-1" style={{ minHeight: '22px' }}>
                     {displayedItems.map((item) => (
                         <MessageItemButton
                             key={item.key}
@@ -249,10 +254,10 @@ export const OrganizeItemsPreview: React.FC<OrganizeItemsPreviewProps> = ({
                     </div>
                 )}
 
-                {/* Error info for failed items */}
-                {isApplied && resultData?.failed_items && Object.keys(resultData.failed_items).length > 0 && (
+                {/* Items the apply left alone: not found on this device (or, in older records, failed) */}
+                {isApplied && notAppliedCount > 0 && (
                     <div className="text-sm text-red-600 mt-1">
-                        Failed: {Object.keys(resultData.failed_items).length} item{Object.keys(resultData.failed_items).length !== 1 ? 's' : ''}
+                        Not applied: {notAppliedCount} item{notAppliedCount !== 1 ? 's' : ''}
                     </div>
                 )}
             </div>

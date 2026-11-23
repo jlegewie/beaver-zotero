@@ -1,13 +1,14 @@
 /**
  * Duplicate check for resolved item JSON, scoped to the target library.
  *
- * Bibliographic matching (DOI, ISBN, then title/creators/year) is
+ * Bibliographic matching (DOI, ISBN, a PubMed id in Extra, a trial's registry
+ * URL or report number, then title/creators/year) is
  * `batchFindExistingReferences`. Web content additionally matches an existing
  * item with exactly the same normalized URL, since pages rarely carry an
  * identifier and their titles change.
  */
 
-import type { ZoteroItemJson } from '@beaver/agent-core/types/itemImport';
+import { itemJsonPmid, type ZoteroItemJson } from '@beaver/agent-core/types/itemImport';
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { batchFindExistingReferences } from '../../utils/batchFindExistingReferences';
@@ -88,7 +89,8 @@ export async function findExistingItems(
     // Web pages without an identifier match on their URL only: generic titles
     // ("About us") would otherwise match unrelated pages.
     const bibliographic = entries.filter(({ json }) =>
-        !WEB_CONTENT_ITEM_TYPES.has(json.itemType) || !!field(json, 'DOI') || !!field(json, 'ISBN'));
+        !WEB_CONTENT_ITEM_TYPES.has(json.itemType) || !!field(json, 'DOI') || !!field(json, 'ISBN')
+        || !!itemJsonPmid(json));
     try {
         const batch = await batchFindExistingReferences(
             bibliographic.map(({ key, json }) => ({
@@ -104,6 +106,9 @@ export async function findExistingItems(
                     creators: (json.creators ?? [])
                         .map((creator) => creator.lastName || creator.name)
                         .filter((name): name is string => !!name),
+                    PMID: itemJsonPmid(json),
+                    url: field(json, 'url'),
+                    reportNumber: field(json, 'reportNumber'),
                 },
             })),
             [libraryID],

@@ -122,4 +122,18 @@ describe('findExistingItems identifier matching', () => {
         expect(item.data.DOI).toBe('10.1/ch2');
         expect(item.matchByISBN).toBe(false);
     });
+
+    it('sends the PubMed id from Extra and a trial\'s registry URL and report number', async () => {
+        const work = await sent({ itemType: 'journalArticle', title: 'Paper', extra: 'PMID: 41234567\nPMCID: PMC1' });
+        expect(work.data.PMID).toBe('41234567');
+        vi.mocked(batchFindExistingReferences).mockClear();
+        const zotero11 = await sent({ itemType: 'journalArticle', title: 'Paper', PMID: '33567185' });
+        expect(zotero11.data.PMID).toBe('33567185');
+        vi.mocked(batchFindExistingReferences).mockClear();
+        const report = await sent({
+            itemType: 'report', title: 'Trial', url: 'https://clinicaltrials.gov/study/NCT03548935',
+            reportNumber: 'NCT03548935', institution: 'clinicaltrials.gov',
+        });
+        expect(report.data).toMatchObject({ url: 'https://clinicaltrials.gov/study/NCT03548935', reportNumber: 'NCT03548935' });
+    });
 });

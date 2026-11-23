@@ -37,7 +37,7 @@ import {
 } from '@beaver/agent-core/transport/agentService';
 import { reattachWithRetry } from '@beaver/agent-core/transport/connectWithRetry';
 import { setClientIdentityProvider } from '@beaver/agent-core/transport/clientIdentity';
-import type { AgentDataProviderMap } from '@beaver/agent-core/transport/agentDataDispatch';
+import type { AgentDataProviderMap, AgentDataRequestContext } from '@beaver/agent-core/transport/agentDataDispatch';
 import type { AgentRunRequest, WSCallbacks } from '@beaver/agent-core/protocol/agentProtocol';
 
 class MockWebSocket {
@@ -335,6 +335,132 @@ describe('AgentService run reattach', () => {
         expect(replies[0]).toMatchObject({ request_id: 'req-exec', status: 'applied' });
     });
 
+    it('answers a long fill re-sent after a reattach once, from the handler still running since its first arrival', async () => {
+        let finishFill!: (value: Record<string, unknown>) => void;
+        const contexts: AgentDataRequestContext[] = [];
+        const fill = vi.fn((_event: Record<string, unknown>, context?: AgentDataRequestContext) => {
+            if (context) contexts.push(context);
+            return new Promise<Record<string, unknown>>((resolve) => { finishFill = resolve; });
+        });
+        const provider: AgentDataProviderMap = {
+            artifact_request: { handle: fill, errorResponse: () => ({ type: 'artifact_response', ok: false }) },
+        };
+        const service = new AgentService('https://api.example.com', provider);
+        const first = await startRun(service, createCallbacks());
+        first.emitMessage({ event: 'thread', thread_id: 'thread-1' });
+        const request = { event: 'artifact_request', request_id: 'req-fill', op: 'fill', plan_id: 'plan-1', tool_call_id: 'call-1', wait: true };
+        first.emitMessage(request);
+        await flush();
+        expect(fill).toHaveBeenCalledTimes(1);
+        // The handler's deadline counts from this first arrival.
+        const firstArrival = contexts[0].receivedAt;
+        expect(contexts[0].run).toEqual({ runId: RUN_ID, threadId: 'thread-1' });
+
+        first.emitClose(1006);
+        await vi.advanceTimersByTimeAsync(30_000);
+        const { socket: second } = await reattach(service);
+        second.emitMessage({ event: 'reattached', run_id: RUN_ID, last_seq: 1, replayed: 0 });
+        // The server re-sends the request it still waits on, with its id.
+        second.emitMessage(request);
+        await flush();
+        expect(fill).toHaveBeenCalledTimes(1);
+        expect(contexts).toHaveLength(1);
+        expect(contexts[0].receivedAt).toBe(firstArrival);
+
+        finishFill({ type: 'artifact_response', request_id: 'req-fill', op: 'fill', ok: true, status: 'done' });
+        await flush();
+        const replies = second.sentOfType('artifact_response');
+        expect(replies).toHaveLength(1);
+        expect(replies[0]).toMatchObject({ request_id: 'req-fill', status: 'done' });
+    });
+
+    it('gives a request its run, and aborts the run-stopped signal when the user stops the run', async () => {
+        const contexts: AgentDataRequestContext[] = [];
+        const provider: AgentDataProviderMap = {
+            artifact_request: {
+                handle: (_event, context) => {
+                    if (context) contexts.push(context);
+                    return new Promise(() => {});
+                },
+                errorResponse: () => ({ type: 'artifact_response', ok: false }),
+            },
+        };
+        const service = new AgentService('https://api.example.com', provider);
+        const socket = await startRun(service, createCallbacks());
+        socket.emitMessage({ event: 'thread', thread_id: 'thread-1' });
+        socket.emitMessage({ event: 'artifact_request', request_id: 'req-fill', op: 'fill', plan_id: 'p', tool_call_id: 'c', wait: true });
+        await flush();
+        const signal = contexts[0].runStopped!;
+        expect(signal.aborted).toBe(false);
+        const cancelling = service.cancel();
+        expect(signal.aborted).toBe(true);
+        await vi.advanceTimersByTimeAsync(250);
+        await cancelling;
+    });
+
+    it('does not abort the run-stopped signal when the socket drops', async () => {
+        const contexts: AgentDataRequestContext[] = [];
+        const provider: AgentDataProviderMap = {
+            artifact_request: {
+                handle: (_event, context) => {
+                    if (context) contexts.push(context);
+                    return new Promise(() => {});
+                },
+                errorResponse: () => ({ type: 'artifact_response', ok: false }),
+            },
+        };
+        const service = new AgentService('https://api.example.com', provider);
+        const socket = await startRun(service, createCallbacks());
+        socket.emitMessage({ event: 'artifact_request', request_id: 'req-fill', op: 'fill', plan_id: 'p', tool_call_id: 'c', wait: false });
+        await flush();
+        socket.emitClose(1006);
+        await flush();
+        expect(contexts[0].runStopped!.aborted).toBe(false);
+    });
+
+    it('handles a request whose payload has a field named seq below the run\'s replay position', async () => {
+        const edit = vi.fn(async (event: Record<string, unknown>) => ({
+            type: 'artifact_response',
+            request_id: event.request_id,
+            op: 'edit',
+            ok: true,
+        }));
+        const provider: AgentDataProviderMap = {
+            artifact_request: { handle: edit, errorResponse: () => ({ type: 'artifact_response', ok: false }) },
+        };
+        const service = new AgentService('https://api.example.com', provider);
+        const callbacks = createCallbacks();
+        const first = await startRun(service, callbacks);
+        first.emitMessage(part(2, 'Hello'));
+        await flush();
+
+        // The backend does not number requests, so a `seq` in one is payload,
+        // never a replayed event.
+        for (const seq of [1, 2, 7]) {
+            first.emitMessage({
+                event: 'artifact_request',
+                request_id: `edit-${seq}`,
+                op: 'edit',
+                key: 'u-ABCDEFGH',
+                operation_id: 'session',
+                edit_seq: seq,
+                seq,
+                mutations: [{ op: 'set_cells', cells: [] }],
+                meta: { actor: 'agent', run_id: RUN_ID, thread_id: 't' },
+            });
+        }
+        await flush();
+        expect(edit).toHaveBeenCalledTimes(3);
+        expect(first.sentOfType('artifact_response').map((r) => r.request_id)).toEqual(['edit-1', 'edit-2', 'edit-7']);
+
+        // Nor does it move the run's replay position: the next event is handled.
+        first.emitMessage(part(3, 'Hello again'));
+        await flush();
+        expect(callbacks.onPart).toHaveBeenCalledTimes(2);
+        await vi.advanceTimersByTimeAsync(15_000);
+        expect(first.sentOfType('ping').at(-1)).toEqual({ type: 'ping', last_seq: 3 });
+    });
+
     it('sends the result of an action still running at the reattach once, on the new socket', async () => {
         let finishExecute!: (value: Record<string, unknown>) => void;
         const execute = vi.fn(() => new Promise<Record<string, unknown>>((resolve) => { finishExecute = resolve; }));
@@ -508,6 +634,8 @@ describe('AgentService run reattach', () => {
                 runId: RUN_ID,
                 reason: 'expired',
                 evidence: expect.objectContaining({ stage: 'mid_run', closeCode: 1006 }),
+                attempts: 1,
+                losses: 1,
             }),
         );
         expect(second.close).toHaveBeenCalledWith(1000, 'Reattach failed');
@@ -1132,6 +1260,110 @@ describe('AgentService run reattach', () => {
         expect(callbacks.onClose).not.toHaveBeenCalled();
         expect(callbacks.onReattachFailed).not.toHaveBeenCalled();
         expect(second.sentOfType('reattach')).toHaveLength(1);
+    });
+
+    describe('losing a socket opened to reattach', () => {
+        /** Lose the run's socket, then reattach on a new one that also dies after sending the reattach. */
+        async function loseTheReattachSocket(service: AgentService, callbacks: WSCallbacks): Promise<MockWebSocket> {
+            const first = await startRun(service, callbacks);
+            first.emitMessage(part(2, 'Hello'));
+            await flush();
+            first.emitClose(1006);
+
+            const { socket: second, loop } = await reattach(service);
+            await expect(loop).resolves.toBe('connected');
+            expect(second.sentOfType('reattach')).toHaveLength(1);
+            await vi.advanceTimersByTimeAsync(2_000);
+            second.emitClose(1006);
+            return second;
+        }
+
+        it('reattaches again, and the run goes on once the server confirms', async () => {
+            const service = new AgentService('https://api.example.com', {});
+            const callbacks = createCallbacks();
+            const second = await loseTheReattachSocket(service, callbacks);
+
+            // The same loss goes on: a new reattach starts from the first loss.
+            const reattaching = vi.mocked(callbacks.onReattaching!);
+            expect(reattaching).toHaveBeenCalledTimes(2);
+            expect(reattaching.mock.calls[1][0]).toEqual(reattaching.mock.calls[0][0]);
+            expect(service.isReattaching(RUN_ID)).toBe(true);
+            expect(callbacks.onClose).not.toHaveBeenCalled();
+
+            // The server's answer on the lost socket never counts.
+            second.emitMessage({ event: 'reattached', run_id: RUN_ID, last_seq: 3, replayed: 1 });
+            await flush();
+            expect(callbacks.onReattached).not.toHaveBeenCalled();
+
+            // One attempt fails before its socket opens; the next gets through.
+            const loop = reattachWithRetry({
+                service,
+                runId: RUN_ID,
+                isStillWanted: () => true,
+                sleep: () => Promise.resolve(),
+                random: () => 0,
+            });
+            const count = MockWebSocket.instances.length;
+            for (let i = 0; i < 50 && MockWebSocket.instances.length === count; i++) await Promise.resolve();
+            MockWebSocket.instances[count].emitClose(1006);
+            const third = await acceptNextSocket(READY_WITH_REATTACH);
+            await expect(loop).resolves.toBe('connected');
+            expect(third.sentOfType('reattach')).toEqual([
+                { type: 'reattach', run_id: RUN_ID, reattach_token: TOKEN, last_seq: 2 },
+            ]);
+
+            third.emitMessage({ event: 'reattached', run_id: RUN_ID, last_seq: 3, replayed: 1 });
+            third.emitMessage({ event: 'done', seq: 3 });
+            await flush();
+
+            expect(callbacks.onReattached).toHaveBeenCalledTimes(1);
+            expect(callbacks.onReattached).toHaveBeenCalledWith(
+                expect.objectContaining({ runId: RUN_ID, replayed: 1, attempts: 3, losses: 2 }),
+            );
+            expect(callbacks.onDone).toHaveBeenCalledTimes(1);
+            expect(callbacks.onReattachFailed).not.toHaveBeenCalled();
+            expect(callbacks.onClose).not.toHaveBeenCalled();
+        });
+
+        it('keeps the grace period of the first loss', async () => {
+            const service = new AgentService('https://api.example.com', {});
+            const callbacks = createCallbacks();
+            await loseTheReattachSocket(service, callbacks);
+
+            const { detachedAt, graceMs } = vi.mocked(callbacks.onReattaching!).mock.calls[0][0];
+            expect(Date.now() - detachedAt).toBeGreaterThanOrEqual(2_000);
+            await vi.advanceTimersByTimeAsync(detachedAt + graceMs - Date.now() - 1);
+            expect(callbacks.onReattachFailed).not.toHaveBeenCalled();
+            await vi.advanceTimersByTimeAsync(1);
+
+            expect(callbacks.onReattachFailed).toHaveBeenCalledWith(
+                expect.objectContaining({ runId: RUN_ID, reason: 'gave_up', attempts: 1, losses: 2 }),
+            );
+            expect(service.isReattaching(RUN_ID)).toBe(false);
+        });
+
+        it('counts a later loss of a reattached run from scratch', async () => {
+            const service = new AgentService('https://api.example.com', {});
+            const callbacks = createCallbacks();
+            const first = await startRun(service, callbacks);
+            first.emitClose(1006);
+            const { socket: second } = await reattach(service);
+            second.emitMessage({ event: 'reattached', run_id: RUN_ID, last_seq: 1, replayed: 0 });
+            await flush();
+            expect(callbacks.onReattached).toHaveBeenLastCalledWith(
+                expect.objectContaining({ attempts: 1, losses: 1 }),
+            );
+
+            second.emitClose(1006);
+            const { socket: third } = await reattach(service);
+            third.emitMessage({ event: 'reattached', run_id: RUN_ID, last_seq: 1, replayed: 0 });
+            await flush();
+
+            expect(callbacks.onReattached).toHaveBeenCalledTimes(2);
+            expect(callbacks.onReattached).toHaveBeenLastCalledWith(
+                expect.objectContaining({ attempts: 1, losses: 1 }),
+            );
+        });
     });
 
     describe('reaching the server again after an outage', () => {

@@ -17,6 +17,7 @@ import {
     getActiveTarget,
     isActionVisible,
     computeActionGroups,
+    resolveActionBinding,
     ActionContext,
 } from '../../../react/utils/actionVisibility';
 
@@ -247,5 +248,34 @@ describe('computeActionGroups — collection group', () => {
             ctx(libraryView([collection(1, 'Methods')], 2)),
         );
         expect(groups.find(g => g.id === 'collection')).toBeUndefined();
+    });
+});
+
+describe('actions that accept a selection or no context', () => {
+    const TABLE_ACTION = action('table', ['items', 'collection', 'global']);
+    const GLOBAL_ACTION = action('discover', ['global']);
+
+    it('offers the action only under the selected collection, not again under Anywhere', () => {
+        const groups = computeActionGroups(
+            [TABLE_ACTION, GLOBAL_ACTION],
+            ctx(libraryView([collection(1, 'Methods')])),
+        );
+        expect(groups.find(g => g.id === 'collection')?.actions).toEqual([TABLE_ACTION]);
+        expect(groups.find(g => g.id === 'global')?.actions).toEqual([GLOBAL_ACTION]);
+    });
+
+    it('offers the action under Anywhere when nothing is selected', () => {
+        const groups = computeActionGroups(
+            [TABLE_ACTION, GLOBAL_ACTION],
+            ctx(libraryView([], 1, 'library')),
+        );
+        expect(groups.map(g => g.id)).toEqual(['global']);
+        expect(groups[0].actions).toEqual([TABLE_ACTION, GLOBAL_ACTION]);
+    });
+
+    it('binds to the selected collection, and to no context without one', () => {
+        const selected = getActiveTarget(ctx(libraryView([collection(1, 'Methods')])));
+        expect(resolveActionBinding(TABLE_ACTION, selected)).toBe('collection');
+        expect(resolveActionBinding(TABLE_ACTION, null)).toBe('global');
     });
 });

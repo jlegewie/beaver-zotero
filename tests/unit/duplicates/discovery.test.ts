@@ -3,6 +3,8 @@ import { beforeEach, expect, it, vi } from "vitest";
 const state = vi.hoisted(() => ({
     excluded: false,
     failSearch: false,
+    modified: "2024-01-01 00:00:00",
+    scans: 0,
     groups: [
         [1, 2],
         [3, 4],
@@ -38,6 +40,9 @@ let items: any[];
 beforeEach(() => {
     state.excluded = false;
     state.failSearch = false;
+    // A unique stamp per test keeps module-level cached scans from leaking.
+    state.modified = `${Math.random()}`;
+    state.scans = 0;
     state.groups = [
         [1, 2],
         [3, 4],
@@ -75,6 +80,7 @@ beforeEach(() => {
                         },
                     }),
                     search: async () => {
+                        state.scans++;
                         if (state.failSearch) throw Error("search failed");
                         return state.groups.flat();
                     },
@@ -97,7 +103,15 @@ beforeEach(() => {
                 md5: (s: string) => createHash("md5").update(s).digest("hex"),
             },
         },
-        DB: { queryAsync: vi.fn(async () => {}) },
+        DB: {
+            queryAsync: vi.fn(async (sql: string, _params?: unknown, opts?: any) => {
+                if (sql.includes("clientDateModified"))
+                    opts.onRow({
+                        getResultByIndex: (i: number) =>
+                            i ? state.modified : items.length,
+                    });
+            }),
+        },
         Items: {
             getAsync: async (ids: number[]) =>
                 items.filter((i) => ids.includes(i.id)),
@@ -128,6 +142,7 @@ it("pages whole groups and requires a stable snapshot for continuation", async (
     expect(second.groups[0].members[0].item_id).toBe("u-ITEM0003");
     expect(second.has_more).toBe(false);
     state.groups = [[1, 2]];
+    state.modified = "2024-01-02 00:00:00";
     expect(
         (await find({ offset: 1, snapshot_id: first.snapshot_id })).error_code,
     ).toBe("stale_snapshot");
@@ -163,14 +178,18 @@ it("continues paging when the collection is named one way, then the other", asyn
     expect(second.error).toBeUndefined();
     expect(second.snapshot_id).toBe(first.snapshot_id);
 });
+const drops = () =>
+    vi
+        .mocked(Zotero.DB.queryAsync)
+        .mock.calls.filter(([sql]) => String(sql).startsWith("DROP TABLE"));
 it("releases native temporary tables on success and failure", async () => {
     await find();
     state.failSearch = true;
     expect((await find()).error).toBe("search failed");
-    expect(Zotero.DB.queryAsync).toHaveBeenCalledTimes(2);
-    expect(Zotero.DB.queryAsync).toHaveBeenLastCalledWith(
-        "DROP TABLE IF EXISTS tmpDuplicates_TEST",
-    );
+    expect(drops()).toEqual([
+        ["DROP TABLE IF EXISTS tmpDuplicates_TEST"],
+        ["DROP TABLE IF EXISTS tmpDuplicates_TEST"],
+    ]);
 });
 it("returns complete field comparisons and child inventories from discovery", async () => {
     const result = await find();
@@ -207,4 +226,105 @@ it("keeps required group fields well-formed when the library record is gone", as
         for (const member of group.members)
             expect(typeof member.library_ref).toBe("string");
     }
+});
+
+it("serves continuation pages from the first page's scan", async () => {
+    const first = await find({ limit: 1 });
+    const second = await find({
+        offset: 1,
+        limit: 1,
+        snapshot_id: first.snapshot_id,
+    });
+    expect(state.scans).toBe(1);
+    expect(second.snapshot_id).toBe(first.snapshot_id);
+    expect(second.total_count).toBe(2);
+    expect(second.groups[0].members[0].item_id).toBe("u-ITEM0003");
+});
+it("rescans every first page", async () => {
+    await find({ limit: 1 });
+    await find({ limit: 1 });
+    expect(state.scans).toBe(2);
+});
+it("rescans once a cached scan expires and reports a changed population", async () => {
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+    try {
+        const first = await find({ limit: 1 });
+        state.groups = [[1, 2]];
+        // Still cached: the continuation reads the scan's population.
+        expect(
+            (await find({ offset: 1, limit: 1, snapshot_id: first.snapshot_id }))
+                .error,
+        ).toBeUndefined();
+        clock.mockReturnValue(now + 5 * 60 * 1000);
+        const late = await find({
+            offset: 1,
+            limit: 1,
+            snapshot_id: first.snapshot_id,
+        });
+        expect(state.scans).toBe(2);
+        expect(late.error_code).toBe("stale_snapshot");
+    } finally {
+        clock.mockRestore();
+    }
+});
+it("rescans when a write such as a merge changed the library", async () => {
+    const first = await find({ limit: 1 });
+    // A merge trashes the other members, which stamps clientDateModified.
+    items[3].deleted = true;
+    state.modified = "2024-01-02 00:00:00";
+    const after = await find({
+        offset: 1,
+        limit: 1,
+        snapshot_id: first.snapshot_id,
+    });
+    expect(state.scans).toBe(2);
+    expect(after.error_code).toBe("stale_snapshot");
+});
+it("shares one scan across a parallel burst, first page included", async () => {
+    const first = await find({ limit: 1 });
+    state.scans = 0;
+    const pages = await Promise.all([
+        find({ limit: 1 }),
+        find({ offset: 1, limit: 1, snapshot_id: first.snapshot_id }),
+        find({ offset: 1, limit: 1, snapshot_id: first.snapshot_id }),
+    ]);
+    expect(state.scans).toBe(1);
+    for (const page of pages) {
+        expect(page.error).toBeUndefined();
+        expect(page.snapshot_id).toBe(first.snapshot_id);
+    }
+});
+it("never caches a failed scan", async () => {
+    state.failSearch = true;
+    const failed = await Promise.all([find(), find()]);
+    expect(state.scans).toBe(1);
+    for (const page of failed) expect(page.error).toBe("search failed");
+    state.failSearch = false;
+    expect((await find()).error).toBeUndefined();
+    expect(state.scans).toBe(2);
+});
+it("drops members trashed since the scan from a cached page", async () => {
+    state.groups = [
+        [1, 2],
+        [3, 4],
+        [5, 6, 7],
+    ];
+    for (const id of [5, 6, 7])
+        items.push({ ...items[0], id, key: `ITEM000${id}` });
+    const first = await find({ limit: 1 });
+    // Trashed without a fingerprint change, as by a write in the same second.
+    items[3].deleted = true;
+    items[6].deleted = true;
+    const page = await find({
+        offset: 1,
+        limit: 2,
+        snapshot_id: first.snapshot_id,
+    });
+    expect(state.scans).toBe(1);
+    expect(page.total_count).toBe(3);
+    expect(page.has_more).toBe(false);
+    expect(page.groups.map((g) => g.members.map((m) => m.item_id))).toEqual([
+        ["u-ITEM0005", "u-ITEM0006"],
+    ]);
 });

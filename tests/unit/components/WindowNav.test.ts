@@ -150,3 +150,21 @@ describe('thread row menu', () => {
         expect(menuButton()).toBeNull();
     });
 });
+
+describe('chat waiting on the user', () => {
+    it('marks the row and names what it waits on in the row label', () => {
+        const waiting = { ...thread, awaitingInput: { agent_action_approval: 2 } };
+        mocks.history = makeHistory({ visibleRows: [waiting], groups: [{ label: 'Today', threads: [waiting] }] });
+        render();
+
+        expect(row().querySelector('.thread-awaiting-input')).not.toBeNull();
+        expect(rowButton().getAttribute('aria-label')).toBe('Reading list, waiting for 2 approvals');
+    });
+
+    it('leaves other rows unmarked', () => {
+        render();
+
+        expect(row().querySelector('.thread-awaiting-input')).toBeNull();
+        expect(rowButton().hasAttribute('aria-label')).toBe(false);
+    });
+});

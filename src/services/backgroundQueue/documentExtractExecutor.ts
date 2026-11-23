@@ -22,6 +22,7 @@ import { getFileSignature, getRemoteFileHash } from '../documentFileIdentity';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { UNRESOLVED_LIBRARY_ID } from '../../utils/libraryIdentity';
 import { safeIsInTrash } from '../../utils/zoteroItemUtils';
+import { isTableAttachment } from '../artifacts/tableItemIdentity';
 import { OCR_PRIORITY_BACKFILL } from '../ocr/constants';
 import { enqueueOcrJob } from '../ocr/enqueueOcr';
 import { shouldStopCachePreparation } from '../backgroundProcessing/cachePreparationBudget';
@@ -453,6 +454,11 @@ export class DocumentExtractExecutor implements JobExecutor {
         }
         if (liveKind !== 'pdf' && liveKind !== 'epub' && liveKind !== 'snapshot') {
             return { outcome: { kind: 'complete', reason: 'unsupported_content_kind' } };
+        }
+        // Jobs queued for a Beaver table before tables were excluded; the
+        // reconciler retires the table's processing state.
+        if (isTableAttachment(item)) {
+            return { outcome: { kind: 'complete', reason: 'beaver_table' } };
         }
         return { item, kind: liveKind };
     }

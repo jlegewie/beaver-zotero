@@ -1,8 +1,8 @@
 import { useSurfaceWindow } from '../../../../runtime/SurfaceWindowContext';
-import React, { useCallback, useState } from 'react';
-import { useAtomValue, useSetAtom, useStore } from 'jotai';
+import React, { useCallback, useMemo, useState } from 'react';
+import { useAtomValue, useSetAtom } from 'jotai';
 import {
-    agentActionItemTitlesAtom,
+    agentActionItemTitleAtom,
     getAgentActionItemTitleKey,
     toolExpandedAtom,
     setToolExpandedAtom,
@@ -10,6 +10,7 @@ import {
 import {
     applyAgentActionsAtom,
     inFlightAgentActionIdsAtom,
+    refreshMergeProposalsAtom,
     rejectAgentActionsAtom,
     undoAgentActionsAtom,
 } from '../../agentActionExecution';
@@ -23,10 +24,15 @@ import {
     buildPreviewData,
     getAgentActionToolIcon,
     getStatusConfig,
+    isStaleProposal,
+    STALE_APPLY_ANYWAY_TOOLTIP,
+    staleProposalDetail,
+    wasRefusedAsStale,
     unconfirmedCaption,
 } from '../agentActionViewHelpers';
+import { StaleProposalNote } from '../StaleProposalNote';
 import { ActionPreview } from '../ActionPreview';
-import { getExportNoteTarget, getOpenNoteTarget, type ReviewRow } from '../reviewChangeRows';
+import type { ReviewRow } from '../reviewChangeRows';
 import {
     TickIcon,
     CancelIcon,
@@ -40,22 +46,14 @@ import {
 } from '../../../../components/icons/icons';
 import { getZoteroItemReferenceFromAgentAction, isCreateAnnotationsAgentAction } from '../../../../agents/agentActions';
 import { getCreateAnnotationsOpenLink } from '../createAnnotationsNavigation';
-import { getCurrentCollectionKeyForItem, openNoteByKey, revealSource } from '../../../../utils/sourceUtils';
+import { getCurrentCollectionKeyForItem, revealSource } from '../../../../utils/sourceUtils';
 import { getMergedItemReference } from '../../../../atoms/mergeItemsChoices';
 import { isStaleMergeProposal } from '../mergeItemsErrors';
 import { isStaleNoteEdit } from '../editNoteErrors';
 import { resolveLibraryRef } from '../../../../../src/utils/libraryIdentity';
-import { notifyReferenceUnavailable } from '../../sourceActions';
 import Button from '@beaver/agent-ui/primitives/Button';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
-import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
-import { DownloadIcon } from '@beaver/agent-ui/icons';
-import type { FileExportFormat } from '@beaver/agent-ui/host/types';
-import { exportNoteToFile, openExportedFile, revealExportedFile } from '../../fileExport';
-import { countPendingNoteEdits } from './useRunActionRows';
-import { exportWithFeedback, fileExportFormatMenuItems } from '../../../../utils/fileExportFeedback';
-import { addPopupMessageAtom } from '../../../../utils/popupMessageUtils';
 
 interface ReviewActionRowProps {
     row: ReviewRow;
@@ -81,10 +79,11 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
     const runId = row.runId;
     const [isProcessing, setIsProcessing] = useState(false);
     const [isUndoError, setIsUndoError] = useState(false);
-    const [clickedButton, setClickedButton] = useState<'approve' | 'reject' | 'undo' | null>(null);
+    const [clickedButton, setClickedButton] = useState<'approve' | 'applyAnyway' | 'reject' | 'undo' | 'refresh' | null>(null);
     const [isHovered, setIsHovered] = useState(false);
 
     const applyAgentActions = useSetAtom(applyAgentActionsAtom);
+    const refreshMergeProposals = useSetAtom(refreshMergeProposalsAtom);
     const rejectAgentActions = useSetAtom(rejectAgentActionsAtom);
     const surfaceWindow = useSurfaceWindow();
     const undoAgentActions = useSetAtom(undoAgentActionsAtom);
@@ -94,15 +93,14 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
     // run surfaces so a tool call opened here does not open the in-stream card
     // too; one tool call is never on both of those surfaces, so one scope does.
     const expansionKey = `${runId}:changes:${row.toolcallId}`;
-    const expansionState = useAtomValue(toolExpandedAtom);
+    const isExpanded = useAtomValue(useMemo(() => toolExpandedAtom(expansionKey), [expansionKey])) ?? false;
     const setExpanded = useSetAtom(setToolExpandedAtom);
-    const isExpanded = expansionState[expansionKey] ?? false;
 
     // Read-only: the in-stream card resolves and caches the title under the same
     // run-scoped key, so this surface shares that one fetch without colliding
     // with an identically named tool call from a continuation run.
     const itemTitleKey = getAgentActionItemTitleKey(runId, row.toolcallId);
-    const itemTitle = useAtomValue(agentActionItemTitlesAtom)[itemTitleKey] ?? null;
+    const itemTitle = useAtomValue(useMemo(() => agentActionItemTitleAtom(itemTitleKey), [itemTitleKey]));
 
     // Read the executor's claim rather than a card-local flag: it is the only
     // signal that sees a write started from another surface (the in-stream card),
@@ -131,8 +129,11 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
             : (getCreateAnnotationsDisplayStatus(firstAction) ?? firstAction.status);
     // A merge or note edit refused because its target changed since the
     // proposal fails the same way on every retry; only a new proposal helps.
+    // A merge can be proposed again from here (Refresh).
+    const isStaleMerge = row.actions.some(isStaleMergeProposal);
+    const showRefresh = isStaleMerge && status === 'error';
     const baseConfig = getStatusConfig(status, row.actions);
-    const config = row.actions.some((action) => isStaleMergeProposal(action) || isStaleNoteEdit(action))
+    const config = isStaleMerge || row.actions.some(isStaleNoteEdit)
         ? { ...baseConfig, showRetry: false }
         : baseConfig;
     const headerIcon = isBusy
@@ -147,26 +148,35 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
         .filter((className) => className !== 'scale-11')
         .join(' ');
 
-    const handleApply = useCallback(async () => {
+    // `skipStaleCheck` is "Apply anyway" for a proposal the library has
+    // moved away from.
+    const applyRow = useCallback(async (skipStaleCheck: boolean) => {
         if (isDisabled) return;
 
         setIsUndoError(false);
         setIsProcessing(true);
-        setClickedButton('approve');
+        setClickedButton(skipStaleCheck ? 'applyAnyway' : 'approve');
         try {
-            await applyAgentActions({ actions: row.actions, runId });
+            const result = await applyAgentActions({ actions: row.actions, runId, skipStaleCheck });
+            // Refused because the library changed: open the row on what changed.
+            if (wasRefusedAsStale(result)) {
+                setExpanded({ key: expansionKey, expanded: true });
+            }
         } finally {
             setIsProcessing(false);
             setClickedButton(null);
         }
-    }, [isDisabled, row, runId, applyAgentActions]);
+    }, [isDisabled, row, runId, applyAgentActions, setExpanded, expansionKey]);
+    const handleApply = useCallback(() => applyRow(false), [applyRow]);
+    const handleApplyAnyway = useCallback(() => applyRow(true), [applyRow]);
 
     const handleReject = useCallback(() => {
         if (isDisabled) return;
 
         // A row can mix settled and undecided actions. Reject only the ones
-        // that still await a decision.
-        const pendingActions = row.actions.filter((action) => action.status === 'pending');
+        // that still await a decision, including an apply refused because the
+        // library changed since the proposal.
+        const pendingActions = row.actions.filter((action) => action.status === 'pending' || isStaleProposal(action));
         if (pendingActions.length === 0) return;
 
         setClickedButton('reject');
@@ -188,6 +198,19 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
         }
     }, [isDisabled, row, undoAgentActions]);
 
+    const handleRefresh = useCallback(async () => {
+        if (isDisabled) return;
+
+        setIsProcessing(true);
+        setClickedButton('refresh');
+        try {
+            await refreshMergeProposals({ actions: row.actions });
+        } finally {
+            setIsProcessing(false);
+            setClickedButton(null);
+        }
+    }, [isDisabled, row, refreshMergeProposals]);
+
     const handleRetry = useCallback(async () => {
         if (isUndoRetry) {
             setIsUndoError(false);
@@ -204,48 +227,6 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
         ? getZoteroItemReferenceFromAgentAction(firstAction) ?? getMergedItemReference(firstAction)
         : null;
 
-    // See `getOpenNoteTarget`: a created note is opened, not revealed, on the
-    // same glyph the in-stream card uses for it.
-    const openNoteTarget = getOpenNoteTarget(row);
-
-    const handleOpenNote = useCallback(async () => {
-        if (!openNoteTarget) return;
-        // Resolve through the device-portable library_ref so a note created in a
-        // group library on another computer opens the right local item.
-        const libraryId = resolveLibraryRef(openNoteTarget);
-        if (libraryId) await openNoteByKey(libraryId, openNoteTarget.zotero_key);
-        else notifyReferenceUnavailable('item', 'library_unavailable');
-    }, [openNoteTarget]);
-
-    // A note row is an artifact: exported as the note is now in Zotero, with its
-    // citations, or as the agent wrote it when the note is not in the library.
-    const isNoteArtifact = row.actionType === 'create_note';
-    const [isExporting, setIsExporting] = useState(false);
-    const addPopupMessage = useSetAtom(addPopupMessageAtom);
-    const jotaiStore = useStore();
-
-    const handleExportNote = useCallback(async (format: FileExportFormat) => {
-        if (isExporting) return;
-        setIsExporting(true);
-        try {
-            const note = getExportNoteTarget(row);
-            await exportWithFeedback(
-                format,
-                () => exportNoteToFile({
-                    format,
-                    surface: 'run_artifacts',
-                    note,
-                    createdBy: { runId, toolCallId: row.toolcallId },
-                    pendingChanges: note ? countPendingNoteEdits(jotaiStore, note) : 0,
-                }),
-                addPopupMessage,
-                { reveal: revealExportedFile, open: openExportedFile },
-            );
-        } finally {
-            setIsExporting(false);
-        }
-    }, [isExporting, runId, row, addPopupMessage, jotaiStore]);
-
     const handleReveal = useCallback(async () => {
         if (!revealReference) return;
         // Reveal within the current collection when the item belongs to it,
@@ -258,8 +239,8 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
     }, [revealReference]);
 
     // The row's open link (↗), with the same destination as the action's card
-    // in the response: a note opens, annotations open in the reader, and any
-    // other single item is shown in the library.
+    // in the response: annotations open in the reader, and any other single
+    // item is shown in the library.
     const annotationOpenLink = row.actions.length === 1 && isCreateAnnotationsAgentAction(firstAction)
         ? getCreateAnnotationsOpenLink(
             firstAction.action_type === 'create_highlight_annotations' ? 'highlight' : 'note',
@@ -268,9 +249,7 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
             firstAction.status === 'applied',
         )
         : null;
-    const openLink = openNoteTarget
-        ? { tooltip: 'Open note', onClick: handleOpenNote }
-        : annotationOpenLink ?? (revealReference ? { tooltip: 'Reveal in library', onClick: handleReveal } : null);
+    const openLink = annotationOpenLink ?? (revealReference ? { tooltip: 'Reveal in library', onClick: handleReveal } : null);
 
     const toggleExpanded = useCallback(
         () => setExpanded({ key: expansionKey, expanded: !isExpanded }),
@@ -287,6 +266,7 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
     const previewData = buildPreviewData(row.actionType, null, firstAction);
     // An unconfirmed change offers nothing to click; this says what to do.
     const unconfirmedNote = isBusy ? null : unconfirmedCaption(row.actions);
+    const staleDetail = isBusy ? null : staleProposalDetail(row.actions);
 
     const containerClassName = inGroup
         ? 'display-flex flex-col min-w-0'
@@ -342,29 +322,7 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
                 <div className="flex-1" />
 
                 <div className="display-flex flex-row items-center gap-2 mr-3 mt-010" style={{ flexShrink: 0 }}>
-                    {isNoteArtifact && !isBusy && (isExporting ? (
-                        <IconButton
-                            icon={DownloadIcon}
-                            variant="ghost-secondary"
-                            iconClassName="font-color-secondary scale-10"
-                            onClick={() => {}}
-                            loading
-                            ariaLabel="Exporting"
-                        />
-                    ) : (
-                        <MenuButton
-                            icon={DownloadIcon}
-                            variant="ghost-secondary"
-                            iconClassName="font-color-secondary scale-10"
-                            menuItems={fileExportFormatMenuItems(handleExportNote)}
-                            tooltipContent="Export"
-                            ariaLabel="Export"
-                        />
-                    ))}
-
-                    {/* A note row is an artifact to open or export; deleting it stays
-                        on the note's own card in the response, away from those. */}
-                    {!isNoteArtifact && (config.showUndo || (isBusy && activeButton === 'undo')) && (
+                    {(config.showUndo || (isBusy && activeButton === 'undo')) && (
                         <Tooltip content="Undo" showArrow singleLine>
                             <IconButton
                                 icon={UndoIcon}
@@ -390,6 +348,21 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
                         </Button>
                     )}
 
+                    {showRefresh && (
+                        <Tooltip content="Check the records again and show the current merge for review" showArrow>
+                            <Button
+                                variant="ghost"
+                                icon={RepeatIcon}
+                                onClick={handleRefresh}
+                                disabled={isDisabled}
+                                loading={isBusy && activeButton === 'refresh'}
+                                style={GHOST_BUTTON_STYLE}
+                            >
+                                Refresh
+                            </Button>
+                        </Tooltip>
+                    )}
+
                     {config.showReject && (!isBusy || activeButton === 'reject') && (
                         <Tooltip content="Reject" showArrow singleLine>
                             <IconButton
@@ -399,6 +372,21 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
                                 onClick={handleReject}
                                 disabled={isDisabled}
                                 loading={isBusy && activeButton === 'reject'}
+                            />
+                        </Tooltip>
+                    )}
+
+                    {/* A refused stale proposal: its ✓ applies it anyway. */}
+                    {((config.showApplyAnyway && !isBusy) || (isBusy && activeButton === 'applyAnyway')) && (
+                        <Tooltip content={STALE_APPLY_ANYWAY_TOOLTIP} showArrow singleLine>
+                            <IconButton
+                                icon={TickIcon}
+                                variant="ghost-secondary"
+                                iconClassName={`${isBusy ? 'font-color-secondary' : 'font-color-green'} scale-14`}
+                                onClick={handleApplyAnyway}
+                                disabled={isDisabled}
+                                loading={isBusy && activeButton === 'applyAnyway'}
+                                ariaLabel="Apply anyway"
                             />
                         </Tooltip>
                     )}
@@ -433,6 +421,7 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
                 </div>
             </div>
 
+            {isExpanded && staleDetail && <StaleProposalNote detail={staleDetail} />}
             {isExpanded && previewData && (
                 <ActionPreview
                     toolName={row.actionType}

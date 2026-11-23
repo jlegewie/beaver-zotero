@@ -20,7 +20,8 @@ export function parseArgs(part: ToolCallPart): Record<string, unknown> {
     if (!part.args) return {};
     if (typeof part.args === 'string') {
         try {
-            return JSON.parse(part.args);
+            const parsed = JSON.parse(part.args);
+            return parsed && typeof parsed === 'object' ? parsed : {};
         } catch {
             return {};
         }
@@ -83,11 +84,10 @@ export function extractZoteroReferencesFromToolCall(part: ToolCallPart): ZoteroI
  * Maps tool_name to a human-readable base label.
  */
 export const TOOL_BASE_LABELS: Record<string, string> = {
-    create_table: 'Create table',
+    create_table: 'Create Table',
     read_table: 'Read table',
-    edit_rows: 'Update table rows',
-    edit_table: 'Update table structure',
-    fill_table: 'Extract into table',
+    edit_table: 'Edit Table',
+    fill_table: 'Fill Table',
     // Search tools
     item_search: 'Item search',
     item_search_by_topic: 'Item search',
@@ -170,6 +170,13 @@ export const TOOL_BASE_LABELS: Record<string, string> = {
     lookup_work: 'Lookup work',
     find_related_works: 'Related works',
     find_book_chapters: 'Book chapters',
+    pubmed_search: 'PubMed search',
+    openalex_search_by_topic: 'Literature search',
+    openalex_search_by_keywords: 'Literature search',
+    openalex_resolve_names: 'Name lookup',
+    trials_search: 'ClinicalTrials.gov search',
+    search_trials: 'ClinicalTrials.gov search',
+    get_trial: 'ClinicalTrials.gov record',
 
     // Batch jobs
     batch_start: 'Batch job',

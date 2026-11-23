@@ -8,12 +8,14 @@ import {
     ImageDecodeError,
     ImageProcessingError,
     UnsupportedImageFormatError,
+    isImageDecodeError,
+    isUnsupportedImageFormatError,
     parseImageDimensions,
     processImageBytes,
     sniffImageMimeType,
     uint8ToBase64,
     type ProcessImageOptions,
-} from '../../../src/services/agentDataProvider/imageProcessing';
+} from '../../../src/services/images/imageProcessing';
 
 // ---------------------------------------------------------------------------
 // Header builders — minimal valid headers for each format
@@ -198,8 +200,8 @@ function makeFakeWin(config: {
         return bitmap;
     });
 
-    const win = { createImageBitmap, OffscreenCanvas: FakeOffscreenCanvas };
-    const getMainWindow = vi.fn(() => win);
+    const win = { document: {}, createImageBitmap, OffscreenCanvas: FakeOffscreenCanvas };
+    const getMainWindow = vi.fn<() => typeof win | null>(() => win);
     (globalThis as any).Zotero.getMainWindow = getMainWindow;
     return { win, canvases, blobCalls, bitmap, createImageBitmap, getMainWindow };
 }
@@ -217,6 +219,7 @@ function defaultOptions(overrides: Partial<ProcessImageOptions> = {}): ProcessIm
 
 beforeEach(() => {
     vi.clearAllMocks();
+    delete (globalThis as any).Services;
 });
 
 // ---------------------------------------------------------------------------
@@ -321,6 +324,28 @@ describe('parseImageDimensions', () => {
         expect(parseImageDimensions(gifBytes().slice(0, 8), 'image/gif')).toBeNull();
         expect(parseImageDimensions(avifBytes(), 'image/avif')).toBeNull();
         expect(parseImageDimensions(new Uint8Array([0xff, 0xd8]), 'image/jpeg')).toBeNull();
+    });
+});
+
+describe('image error guards', () => {
+    it('recognize errors by name, as thrown from another bundle', () => {
+        // Another realm's class: same name, different constructor.
+        const foreignUnsupported = Object.assign(new Error('Unsupported image format: image/tiff'), {
+            name: 'UnsupportedImageFormatError',
+            mimeType: 'image/tiff',
+        });
+        const foreignDecode = Object.assign(new Error('bad bytes'), { name: 'ImageDecodeError' });
+        expect(isUnsupportedImageFormatError(foreignUnsupported)).toBe(true);
+        expect(isImageDecodeError(foreignDecode)).toBe(true);
+        expect(isUnsupportedImageFormatError(new UnsupportedImageFormatError('image/heic'))).toBe(true);
+        expect(isImageDecodeError(new ImageDecodeError('x'))).toBe(true);
+    });
+
+    it('reject other errors and non-errors', () => {
+        expect(isUnsupportedImageFormatError(new ImageDecodeError('x'))).toBe(false);
+        expect(isImageDecodeError(new ImageProcessingError('x'))).toBe(false);
+        expect(isImageDecodeError(null)).toBe(false);
+        expect(isUnsupportedImageFormatError(undefined)).toBe(false);
     });
 });
 
@@ -532,6 +557,56 @@ describe('processImageBytes', () => {
         const blob = createImageBitmap.mock.calls[0][0] as Blob;
         expect(blob.size).toBe(png.byteLength);
         expect(new Uint8Array(await blob.arrayBuffer())).toEqual(png);
+    });
+
+    it('decodes in the hidden window even when a main window is open', async () => {
+        const hidden = makeFakeWin();
+        const main = makeFakeWin();
+        (globalThis as any).Services = { appShell: { hiddenDOMWindow: hidden.win } };
+
+        await processImageBytes(pngBytes(100, 80), 'image/png', defaultOptions({ format: 'png' }));
+
+        expect(hidden.createImageBitmap).toHaveBeenCalledTimes(1);
+        expect(main.createImageBitmap).not.toHaveBeenCalled();
+    });
+
+    it('decodes in another open window when there is no main or hidden window', async () => {
+        const { win, getMainWindow, createImageBitmap } = makeFakeWin();
+        getMainWindow.mockReturnValue(null);
+        const getMostRecentWindow = vi.fn(() => win);
+        (globalThis as any).Services = { wm: { getMostRecentWindow }, appShell: {} };
+
+        const result = await processImageBytes(pngBytes(100, 80), 'image/png', defaultOptions({ format: 'png' }));
+
+        expect(getMostRecentWindow).toHaveBeenCalledWith(null);
+        expect(createImageBitmap).toHaveBeenCalledTimes(1);
+        expect(result.format).toBe('png');
+    });
+
+    it('fails with ImageProcessingError when no window is available at all', async () => {
+        const { getMainWindow } = makeFakeWin();
+        getMainWindow.mockReturnValue(null);
+        (globalThis as any).Services = { wm: { getMostRecentWindow: () => null }, appShell: {} };
+
+        await expect(
+            processImageBytes(pngBytes(100, 80), 'image/png', defaultOptions()),
+        ).rejects.toBeInstanceOf(ImageProcessingError);
+    });
+
+    it('routes through the plugin image service when it is registered', async () => {
+        const { createImageBitmap } = makeFakeWin();
+        const processed = { data: new Uint8Array([1]) };
+        const process = vi.fn(async () => processed);
+        (globalThis as any).Zotero.Beaver = { images: { process } };
+        try {
+            const bytes = pngBytes(100, 80);
+            const options = defaultOptions();
+            await expect(processImageBytes(bytes, 'image/png', options)).resolves.toBe(processed);
+            expect(process).toHaveBeenCalledWith(bytes, 'image/png', options);
+            expect(createImageBitmap).not.toHaveBeenCalled();
+        } finally {
+            delete (globalThis as any).Zotero.Beaver;
+        }
     });
 
     it('keeps the byte budget within the base64 5 MB wire limit', () => {

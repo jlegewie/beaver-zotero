@@ -14,6 +14,7 @@ import {
     StartOption,
 } from '../../atoms/whereToStart';
 import { libraryItemCountAtom } from '../../atoms/zoteroContext';
+import { searchableLibraryIdsAtom } from '../../atoms/profile';
 import { OnboardingFooter } from './onboarding';
 import { logger } from '@beaver/agent-core/platform/logger';
 
@@ -127,6 +128,8 @@ const WhereToStartPage: React.FC = () => {
     const start = useSetAtom(startSelectedOptionAtom);
     const skip = useSetAtom(skipWhereToStartAtom);
     const libraryItemCount = useAtomValue(libraryItemCountAtom);
+    // Library exclusions change which paper color-code can offer.
+    const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
     const [isSkipping, setIsSkipping] = useState(false);
     const [footerError, setFooterError] = useState<string | null>(null);
 
@@ -135,7 +138,7 @@ const WhereToStartPage: React.FC = () => {
     // rather than the pending `null` state.
     useEffect(() => {
         void load();
-    }, [load, libraryItemCount]);
+    }, [load, libraryItemCount, searchableLibraryIds]);
 
     const showLoading = isLoading || options === null;
 
@@ -164,44 +167,9 @@ const WhereToStartPage: React.FC = () => {
     };
 
     return (
-        <div className="where-to-start-page display-flex flex-col flex-1 min-h-0 min-w-0">
+        <div className="first-run-page display-flex flex-col flex-1 min-h-0 min-w-0">
             <style>
                 {`
-                .where-to-start-page {
-                    background: var(--material-sidepane);
-                }
-                .where-to-start-scroll {
-                    padding: 18px 18px 12px;
-                }
-                .where-to-start-shell {
-                    width: 100%;
-                    max-width: 560px;
-                    margin: 0 auto;
-                }
-                .where-to-start-heading {
-                    text-align: center;
-                    margin: 4px 0 18px;
-                }
-                .where-to-start-title {
-                    font-size: 2rem;
-                    line-height: 1.08;
-                    font-weight: 700;
-                    letter-spacing: 0;
-                    color: var(--fill-primary);
-                    margin-bottom: 10px;
-                }
-                .where-to-start-subtitle {
-                    font-size: 1.1rem;
-                    line-height: 1.35;
-                    color: var(--fill-secondary);
-                }
-                .where-to-start-card {
-                    background: var(--material-sidepane);
-                    border: 1px solid var(--fill-quarternary);
-                    border-radius: 18px;
-                    box-shadow: 0 10px 24px rgba(0,0,0,0.06);
-                    padding: 16px;
-                }
                 .where-to-start-options {
                     display: flex;
                     flex-direction: column;
@@ -262,31 +230,7 @@ const WhereToStartPage: React.FC = () => {
                 .where-to-start-topic-wrap {
                     margin-top: 10px;
                 }
-                .where-to-start-loader {
-                    display: flex;
-                    flex-direction: column;
-                    gap: 8px;
-                }
-                .where-to-start-loader-row {
-                    height: 56px;
-                    border-radius: 10px;
-                    background: var(--fill-quinary);
-                    opacity: 0.72;
-                }
                 @media (max-width: 520px) {
-                    .where-to-start-scroll {
-                        padding: 16px 14px 10px;
-                    }
-                    .where-to-start-heading {
-                        text-align: left;
-                        margin-bottom: 14px;
-                    }
-                    .where-to-start-title {
-                        font-size: 1.75rem;
-                    }
-                    .where-to-start-card {
-                        padding: 12px;
-                    }
                     .where-to-start-row {
                         padding: 11px 8px;
                     }
@@ -300,24 +244,24 @@ const WhereToStartPage: React.FC = () => {
                 `}
             </style>
 
-            <div className="where-to-start-scroll overflow-y-auto scrollbar flex-1 min-h-0">
-                <div className="where-to-start-shell">
+            <div className="first-run-scroll overflow-y-auto scrollbar flex-1 min-h-0">
+                <div className="first-run-shell">
                     {/* Top spacer */}
                     <div className="flex-1" style={{ minHeight: '4vh', maxHeight: '6vh' }} />
                     
                     {/* Heading */}
-                    <div className="where-to-start-heading">
-                        <div className="where-to-start-title">Let's dig into your library</div>
-                        <div className="where-to-start-subtitle">Here are a few good places to start.</div>
+                    <div className="first-run-heading">
+                        <div className="first-run-title">Let's dig into your library</div>
+                        <div className="first-run-subtitle">Here are a few good places to start.</div>
                     </div>
 
                     {/* Options */}
-                    <div className="where-to-start-card">
+                    <div className="first-run-card">
                         {showLoading ? (
-                            <div className="where-to-start-loader" aria-label="Loading starting points">
-                                <div className="where-to-start-loader-row" />
-                                <div className="where-to-start-loader-row" />
-                                <div className="where-to-start-loader-row" />
+                            <div className="first-run-loader" aria-label="Loading starting points">
+                                <div className="first-run-loader-row" />
+                                <div className="first-run-loader-row" />
+                                <div className="first-run-loader-row" />
                             </div>
                         ) : options.length === 0 ? (
                             <div className="font-color-secondary text-base p-3">

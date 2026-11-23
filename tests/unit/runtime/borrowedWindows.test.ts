@@ -33,7 +33,7 @@ it.each(['preferences'])(
     kind => {
     const borrowed: any = { closed: false, close: vi.fn() };
     a.openDialog.mockReturnValue(borrowed);
-    if (kind === 'chat') BeaverUIFactory.openBeaverWindow(undefined, a);
+    if (kind === 'chat') BeaverUIFactory.openBeaverWindow(a);
     else BeaverUIFactory.openPreferencesWindow('actions', '', 'action', a);
     expect(a.openDialog).toHaveBeenCalledOnce();
     expect(b.openDialog).not.toHaveBeenCalled();
@@ -51,7 +51,7 @@ it.each(['preferences'])(
 it.each(['chat', 'preferences'])('focusing an existing %s retains its original renderer', kind => {
     const borrowed: any = { closed: false, focus: vi.fn(), __beaverOwnerWindowRef: new WeakRef(a) };
     vi.mocked(kind === 'chat' ? BeaverUIFactory.findBeaverWindow : BeaverUIFactory.findPreferencesWindow).mockReturnValue(borrowed);
-    if (kind === 'chat') BeaverUIFactory.openBeaverWindow(undefined, b);
+    if (kind === 'chat') BeaverUIFactory.openBeaverWindow(b);
     else BeaverUIFactory.openPreferencesWindow('billing', undefined, undefined, b);
     expect(borrowed.focus).toHaveBeenCalledOnce();
     expect(borrowed.__beaverOwnerWindowRef.deref()).toBe(a);
@@ -154,7 +154,7 @@ it("opens an independent standalone without borrowing its initiating renderer", 
     const standalone = { closed: false, close: vi.fn() } as any;
     const openWindow = vi.fn(() => standalone);
     vi.stubGlobal("Services", { ww: { openWindow } });
-    BeaverUIFactory.openBeaverWindow(undefined, a);
+    BeaverUIFactory.openBeaverWindow(a);
     expect(openWindow).toHaveBeenCalledWith(
         a,
         "chrome://beaver/content/beaverWindow.xhtml",
@@ -272,9 +272,9 @@ it('pins a newly opened window before the window mediator can enumerate it', asy
         wm: { getEnumerator: () => ({ hasMoreElements: () => false }) },
     });
     await Promise.all([
-        BeaverUIFactory.commandBeaverWindow('show-chat'),
-        BeaverUIFactory.commandBeaverWindow('show-chat'),
+        BeaverUIFactory.commandBeaverWindow('inspect-runtime'),
+        BeaverUIFactory.commandBeaverWindow('inspect-runtime'),
     ]);
     expect(openWindow).toHaveBeenCalledOnce();
-    expect(dispatchWindowCommand).toHaveBeenCalledWith('show-chat', { windowId: 'standalone' });
+    expect(dispatchWindowCommand).toHaveBeenCalledWith('inspect-runtime', { windowId: 'standalone' });
 });

@@ -10,7 +10,8 @@ import type { SymbolicLocation } from "@beaver/agent-core/types/citations";
 import type { ZoteroReader } from "../annotationUtils";
 import { presentTemporaryAnnotations } from "../citationNavigation";
 import { setTemporaryAnnotations } from "../epubVisualizer/epubReaderView";
-import { getCurrentReaderAndWaitForView, waitForReaderForItem } from "../readerUtils";
+import { getCurrentReaderAndWaitForView, readerTargetOptions, waitForReaderForItem } from "../readerUtils";
+import type { CitationReaderTarget } from "@beaver/agent-ui/host/types";
 import { getSnapshotPreBody, type SnapshotPrimaryView } from "./snapshotReaderView";
 import { resolveSnapshotCitationRange } from "./snapshotRangeResolver";
 
@@ -37,6 +38,8 @@ export interface NavigateToSnapshotCitationOptions {
     /** Temporary-annotation mode vs. the reader's native spotlight flash. */
     useTemporaryAnnotations: boolean;
     ownerDocument?: Document;
+    /** Where to open the reader; a window target never reuses the selected tab. */
+    readerTarget?: CitationReaderTarget;
 }
 
 /**
@@ -59,12 +62,14 @@ export async function navigateToSnapshotCitation(
         return "failed";
     }
 
-    let reader = await getCurrentReaderAndWaitForView(undefined, false);
+    let reader = options.readerTarget === "window"
+        ? undefined
+        : await getCurrentReaderAndWaitForView(undefined, false);
     if (!reader || reader.itemID !== attachment.id) {
         logger(`navigateToSnapshotCitation: Opening snapshot ${attachment.id} in reader`);
         let opened: any;
         try {
-            opened = await openReader(attachment.id);
+            opened = await openReader(attachment.id, undefined, readerTargetOptions(options.readerTarget));
         } catch (error) {
             if (error instanceof AttachmentFileUnavailableError) return "failed";
             throw error;

@@ -181,6 +181,28 @@ describe('reportConnectionFailure', () => {
 
         const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
         expect(body.connect_attempts).toBeNull();
+        expect(body.reattach_attempts).toBeNull();
+        expect(body.reattach_losses).toBeNull();
+    });
+
+    it('carries how many sockets a reattach opened and lost', async () => {
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValue(new Response(null, { status: 204 }));
+        vi.stubGlobal('fetch', fetchMock);
+
+        await reportConnectionFailure({
+            evidence,
+            run_id: 'run-4',
+            reattach_outcome: 'reattached',
+            reattach_gap_ms: 13_520,
+            reattach_attempts: 3,
+            reattach_losses: 2,
+        });
+
+        const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+        expect(body.reattach_attempts).toBe(3);
+        expect(body.reattach_losses).toBe(2);
     });
 
     it('attaches the cached session token so the backend can associate the user', async () => {

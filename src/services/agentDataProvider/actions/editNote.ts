@@ -3,18 +3,22 @@ import {
     WSAgentActionExecuteResponse,
     WSAgentActionValidateResponse
 } from '@beaver/agent-core/protocol/agentProtocol';
-import { EditNoteProposedData, type EditNoteOperation } from '@beaver/agent-core/types/agentActions/editNote';
+import { EditNoteProposedData, type EditNoteOperation, type EditNoteResultData } from '@beaver/agent-core/types/agentActions/editNote';
 import {
-    buildAmbiguousMatchError,
     buildInsertDedupWarning,
+    buildUnresolvedTargetError,
     mergeInsertNewString,
 } from '../../../utils/editNoteBatchCore';
 import {
+    buildFallbackMatchWarning,
+    describeRejectedFallback,
     expandBase,
     findBestMatch,
     findMarkdownRenderMatch,
     type BaseExpansion,
+    type MatchDiagnostics,
     type MatchInput,
+    type MatchResult,
 } from '../../../utils/editNoteMatcher';
 import {
     buildExecutionZeroMatchHint,
@@ -69,6 +73,8 @@ import type { ActionExecuteRequest, ActionValidateRequest, OperationContext } fr
 import { TimeoutContext, TimeoutError, checkAborted } from '../timeout';
 import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
 import { getExternalRefContext } from './noteCitationRendering';
+import { actionError, assertLibraryNotExcluded, assertLibraryRefNotExcluded, toExecuteResponse } from './actionExecution';
+import { sha256Hex } from '../../../utils/hash';
 
 export { getExternalRefContext };
 
@@ -252,18 +258,24 @@ function buildValidateSuccess(
     };
 }
 
-function buildAmbiguousMatchResponse(
+function buildUnresolvedTargetResponse(
     requestId: string,
-    matchCount: number,
-    operation?: EditNoteOperation,
+    simplified: string,
+    requestedOldString: string,
+    match: MatchResult,
+    operation: EditNoteOperation | undefined,
 ): WSAgentActionValidateResponse {
+    const unresolved = buildUnresolvedTargetError(simplified, requestedOldString, match, operation);
+    logger(`validateEditNoteAction: ${unresolved.errorCode} via ${match.strategy} strategy`, 1);
     return {
         type: 'agent_action_validate_response',
         request_id: requestId,
         valid: false,
-        error: buildAmbiguousMatchError(matchCount, operation),
-        error_code: 'ambiguous_match',
+        error: unresolved.message,
+        error_code: unresolved.errorCode,
         preference: 'always_ask',
+        ...(unresolved.candidates.length > 0 ? { error_candidates: unresolved.candidates } : {}),
+        match_strategy: match.strategy,
     };
 }
 
@@ -447,6 +459,8 @@ async function validateEditNoteAction(
                 total_lines: totalLines,
                 match_count: 1,
                 old_content: simplified,
+                // Stored with the proposal: a later apply checks the note is unchanged.
+                content_hash: await sha256Hex(rawHtml),
             },
             warnings: collectWarnings(...(externalRefContext.externalFileWarnings ?? [])),
             preference,
@@ -484,6 +498,8 @@ async function validateEditNoteAction(
                 note_title: noteTitle,
                 total_lines: totalLines,
                 match_count: 1,
+                // Stored with the proposal: a later apply checks the note is unchanged.
+                content_hash: await sha256Hex(rawHtml),
             },
             warnings: collectWarnings(...(externalRefContext.externalFileWarnings ?? [])),
             preference,
@@ -598,8 +614,21 @@ async function validateEditNoteAction(
 
     // 13. Run the ranked matcher. The first strategy that produces a match
     //     wins. See editNoteMatcher.ts for the full chain.
+    const diagnostics: MatchDiagnostics = { rejected: [] };
     if (!match && base) {
-        match = findBestMatch(matchInput, base);
+        try {
+            match = findBestMatch(matchInput, base, diagnostics);
+        } catch (error: any) {
+            if (error?.code !== 'ambiguous_match') throw error;
+            return {
+                type: 'agent_action_validate_response',
+                request_id: request.request_id,
+                valid: false,
+                error: error.message,
+                error_code: 'ambiguous_match',
+                preference: 'always_ask',
+            };
+        }
         if (!match) {
             match = await findMarkdownRenderFallbackMatch(
                 matchInput,
@@ -626,7 +655,13 @@ async function validateEditNoteAction(
                 preference: 'always_ask',
             };
         }
-        const hint = buildZeroMatchHint(simplified, old_string ?? '');
+        const rejected = diagnostics.rejected[0];
+        if (rejected) {
+            logger(`validateEditNoteAction: refused ${rejected.strategy} fallback (${rejected.matchCount} matches)`, 1);
+        }
+        const hint = buildZeroMatchHint(simplified, old_string ?? '', {
+            rejectedFallback: describeRejectedFallback(old_string ?? '', diagnostics),
+        });
         return {
             type: 'agent_action_validate_response',
             request_id: request.request_id,
@@ -637,11 +672,15 @@ async function validateEditNoteAction(
             ...(hint.candidates.length > 0
                 ? { error_candidates: hint.candidates }
                 : {}),
+            ...(rejected ? { match_strategy: rejected.strategy } : {}),
         };
     }
 
     logger(`validateEditNoteAction: matched ${noteId} via ${match.strategy} strategy`, 1);
 
+    // The model's own old_string (after ref enrichment): errors and warnings
+    // describe what it wrote, not the matcher's rewrite.
+    const requestedOldString = old_string ?? '';
     // Propagate any matcher rewrite of old_string through the outer binding so
     // buildNormalizedActionData emits the final form for the executor.
     old_string = match.oldString;
@@ -673,7 +712,9 @@ async function validateEditNoteAction(
                 overrides.target_before_context = location.beforeContext;
                 overrides.target_after_context = location.afterContext;
             } else if (location.kind === 'ambiguous') {
-                return buildAmbiguousMatchResponse(request.request_id, match.matchCount, operation);
+                return buildUnresolvedTargetResponse(
+                    request.request_id, simplified, requestedOldString, match, operation,
+                );
             }
             // 'position' — silent success; executor will re-locate via
             // findUniqueRawMatchPosition with no anchors needed.
@@ -690,6 +731,8 @@ async function validateEditNoteAction(
         structuralLocators.missing,
     );
     if (locatorWarning) warnings.push(locatorWarning);
+    const fallbackWarning = buildFallbackMatchWarning(requestedOldString, match);
+    if (fallbackWarning) warnings.push(fallbackWarning);
     if (operation === 'insert_after' || operation === 'insert_before') {
         const dedupWarning = buildInsertDedupWarning(
             operation, match.oldString, match.newString,
@@ -715,7 +758,24 @@ async function validateEditNoteAction(
 
 
 /**
- * Execute an edit_note action.
+ * Refuse an edit whose target turned out not to be a note, or whose library
+ * became read-only after validation, with the same codes validation uses.
+ */
+export function assertEditableNote(item: Zotero.Item, ref: { library_ref?: string | null; zotero_key: string }): void {
+    const itemId = modelObjectIdFromReference({ library_id: item.libraryID, library_ref: ref.library_ref, zotero_key: ref.zotero_key });
+    if (!item.isNote()) {
+        throw actionError('not_a_note', `Item ${itemId} is not a note`);
+    }
+    // Read like checkLibraryExcluded: an unknown library is left to the save.
+    const library = Zotero.Libraries?.get?.(item.libraryID);
+    if (library && !library.editable) {
+        throw actionError('library_not_editable', `Library '${library.name}' is read-only and cannot be edited`);
+    }
+}
+
+/**
+ * Apply an edit_note action to its note and return its `result_data`, with
+ * the exact HTML written and its surrounding context recorded for undo.
  * Performs the string replacement on the note's raw HTML via the simplified format.
  *
  * Concurrency: relies on `AgentService.actionExecutionQueue` (@beaver/agent-core)
@@ -723,65 +783,43 @@ async function validateEditNoteAction(
  * execution is running against the same note. Do not introduce parallel dispatch
  * (e.g. Promise.all) at the caller level without adding a per-note lock here.
  */
-async function executeEditNoteAction(
-    request: ActionExecuteRequest,
+export async function applyEditNote(
+    data: EditNoteProposedData,
     ctx: TimeoutContext,
-): Promise<WSAgentActionExecuteResponse> {
+    operationContext: OperationContext | undefined,
+    hooks: EditNoteApplyHooks = {},
+): Promise<EditNoteResultData> {
     const {
         library_id,
         library_ref,
         zotero_key,
         new_string,
         operation: rawOp,
-    } = request.action_data as EditNoteProposedData;
+    } = data;
     // `old_string` is `let` because step 5b re-runs `applyOldStringEnrichment`
     // as defense-in-depth for skipped/stale validation.
-    let { old_string } = request.action_data as EditNoteProposedData;
+    let { old_string } = data;
     const operation: EditNoteOperation = rawOp ?? 'str_replace';
     let {
         target_before_context,
         target_after_context,
-    } = request.action_data as EditNoteProposedData;
+    } = data;
 
     // TOCTOU guard: never edit a note in a library the user excluded from Beaver,
     // even if validation passed earlier or the execute request skipped it.
     // Resolve and gate the library before resolving/loading the note.
-    const targetLibraryId = resolveLibraryRef({ library_id, library_ref });
-    const targetExcluded = targetLibraryId === null ? null : checkLibraryExcluded(targetLibraryId);
-    if (targetExcluded) {
-        return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: false,
-            error: targetExcluded.message,
-            error_code: 'library_not_searchable',
-        };
-    }
+    assertLibraryRefNotExcluded({ library_id, library_ref });
     const resolved = await resolveItemReference({ library_id, library_ref, zotero_key });
     if (resolved.status !== 'found') {
-        return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: false,
-            error: resolved.status === 'library_unavailable'
-                ? `Library not available for note: ${library_ref || library_id}-${zotero_key}`
-                : `Item not found: ${modelObjectIdFromReference({ library_id, library_ref, zotero_key })}`,
-            error_code: resolved.status === 'library_unavailable' ? 'library_unavailable' : 'item_not_found',
-        };
+        throw resolved.status === 'library_unavailable'
+            ? actionError('library_unavailable', `Library not available for note: ${library_ref || library_id}-${zotero_key}`)
+            : actionError('item_not_found', `Item not found: ${modelObjectIdFromReference({ library_id, library_ref, zotero_key })}`);
     }
     const item = resolved.item;
     const resolvedLibraryId = item.libraryID;
 
-    const excludedLibrary = checkLibraryExcluded(resolvedLibraryId);
-    if (excludedLibrary) {
-        return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: false,
-            error: excludedLibrary.message,
-            error_code: 'library_not_searchable',
-        };
-    }
+    assertLibraryNotExcluded(resolvedLibraryId);
+    assertEditableNote(item, { library_ref, zotero_key });
 
     // 2. Load note
     await item.loadDataType('note');
@@ -814,22 +852,26 @@ async function executeEditNoteAction(
         if (containsPreviewMarkers(persistedHtml)) {
             const repaired = stripPreviewMarkers(persistedHtml);
             if (!containsPreviewMarkers(repaired)) {
-                logger(`executeEditNoteAction: repairing persisted diff-preview markup in ${resolvedLibraryId}-${zotero_key}`, 1);
+                logger(`applyEditNote: repairing persisted diff-preview markup in ${resolvedLibraryId}-${zotero_key}`, 1);
                 item.setNote(repaired);
                 await item.saveTx();
                 await waitForNoteSaveStabilization(item, repaired);
             } else {
-                logger(`executeEditNoteAction: diff-preview markup in ${resolvedLibraryId}-${zotero_key} could not be fully stripped; save will be refused by the preview guard`, 1);
+                logger(`applyEditNote: diff-preview markup in ${resolvedLibraryId}-${zotero_key} could not be fully stripped; save will be refused by the preview guard`, 1);
             }
         }
     }
 
-    const externalRefContext = await getExternalRefContext(new_string, request.operation);
+    // 2d. The caller's drift check sees the note as the user does: after the
+    //     live editor was flushed and any preview markup repaired.
+    await hooks.assertUnchanged?.(item);
+
+    const externalRefContext = await getExternalRefContext(new_string, operationContext);
 
     // Load every library the edit cites: expansion resolves cited items
     // synchronously.
     await ensureCitedLibrariesLoaded([new_string, old_string], [resolvedLibraryId], {
-        externalItemMapping: request.operation?.externalItemMapping,
+        externalItemMapping: operationContext?.externalItemMapping,
     });
 
     // 3. Pre-load page labels so new citations resolve page indices to labels.
@@ -865,13 +907,7 @@ async function executeEditNoteAction(
         try {
             expandedNew = expandToRawHtml(new_string, metadata, 'new', externalRefContext, newPageLabels, resolvedLocatorPages);
         } catch (e: any) {
-            return {
-                type: 'agent_action_execute_response',
-                request_id: request.request_id,
-                success: false,
-                error: e.message || String(e),
-                error_code: 'expansion_failed',
-            };
+            throw actionError('expansion_failed', e.message || String(e));
         }
 
         const normalizedOldHtml = normalizeNoteHtml(oldHtml);
@@ -891,7 +927,7 @@ async function executeEditNoteAction(
         let newHtml = wrapperOpen + expandedNew + wrapperClose;
 
         // Add/update "Edited by Beaver" footer
-        const threadId = request.operation?.threadId ?? null;
+        const threadId = operationContext?.threadId ?? null;
         if (threadId) {
             newHtml = addOrUpdateEditFooter(newHtml, threadId);
         }
@@ -903,13 +939,7 @@ async function executeEditNoteAction(
         // Wrapper div protection
         const hadSchemaVersion = hasSchemaVersionWrapper(strippedHtml);
         if (hadSchemaVersion && !hasSchemaVersionWrapper(newHtml)) {
-            return {
-                type: 'agent_action_execute_response',
-                request_id: request.request_id,
-                success: false,
-                error: 'The note wrapper <div data-schema-version="..."> must not be removed.',
-                error_code: 'wrapper_removed',
-            };
+            throw actionError('wrapper_removed', 'The note wrapper <div data-schema-version="..."> must not be removed.');
         }
 
         // Checkpoint before save
@@ -920,20 +950,14 @@ async function executeEditNoteAction(
             assertNoPreviewMarkers(newHtml, 'editNote:rewrite:apply');
             item.setNote(newHtml);
             await item.saveTx();
-            logger(`executeEditNoteAction: Saved rewrite edit to ${noteId}`, 1);
+            logger(`applyEditNote: Saved rewrite edit to ${noteId}`, 1);
         } catch (error) {
             try {
                 assertNoPreviewMarkers(oldHtml, 'editNote:rewrite:rollback');
                 item.setNote(oldHtml);
             } catch (_) { /* best-effort */ }
             if (error instanceof TimeoutError) throw error;
-            return {
-                type: 'agent_action_execute_response',
-                request_id: request.request_id,
-                success: false,
-                error: `Failed to save note: ${error}`,
-                error_code: 'save_failed',
-            };
+            throw actionError('save_failed', `Failed to save note: ${error}`);
         }
 
         await waitForNoteSaveStabilization(item, newHtml);
@@ -945,17 +969,12 @@ async function executeEditNoteAction(
         const warnings = collectWarnings(duplicateWarning, locatorWarning, ...(externalRefContext.externalFileWarnings ?? []));
 
         return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: true,
-            result_data: {
-                library_id: resolvedLibraryId,
-                zotero_key,
-                library_ref: libraryRefForLibraryID(resolvedLibraryId) ?? undefined,
-                occurrences_replaced: 1,
-                warnings,
-                undo_full_html: strippedHtml,
-            },
+            library_id: resolvedLibraryId,
+            zotero_key,
+            library_ref: libraryRefForLibraryID(resolvedLibraryId) ?? undefined,
+            occurrences_replaced: 1,
+            warnings,
+            undo_full_html: strippedHtml,
         };
     }
 
@@ -965,13 +984,7 @@ async function executeEditNoteAction(
         try {
             expandedNew = expandToRawHtml(new_string, metadata, 'new', externalRefContext, newPageLabels, resolvedLocatorPages);
         } catch (e: any) {
-            return {
-                type: 'agent_action_execute_response',
-                request_id: request.request_id,
-                success: false,
-                error: e.message || String(e),
-                error_code: 'expansion_failed',
-            };
+            throw actionError('expansion_failed', e.message || String(e));
         }
 
         const existingCitationCache = extractDataCitationItems(oldHtml);
@@ -982,7 +995,7 @@ async function executeEditNoteAction(
         let undoAfterContext = strippedHtml.substring(insertAt, insertAt + 200);
         let newHtml = strippedHtml.slice(0, insertAt) + expandedNew + strippedHtml.slice(insertAt);
 
-        const threadId = request.operation?.threadId ?? null;
+        const threadId = operationContext?.threadId ?? null;
         if (threadId) {
             newHtml = addOrUpdateEditFooter(newHtml, threadId);
         }
@@ -991,13 +1004,7 @@ async function executeEditNoteAction(
 
         const hadSchemaVersion = hasSchemaVersionWrapper(strippedHtml);
         if (hadSchemaVersion && !hasSchemaVersionWrapper(newHtml)) {
-            return {
-                type: 'agent_action_execute_response',
-                request_id: request.request_id,
-                success: false,
-                error: 'The note wrapper <div data-schema-version="..."> must not be removed.',
-                error_code: 'wrapper_removed',
-            };
+            throw actionError('wrapper_removed', 'The note wrapper <div data-schema-version="..."> must not be removed.');
         }
 
         const postEditStripped = stripDataCitationItems(newHtml);
@@ -1016,20 +1023,14 @@ async function executeEditNoteAction(
             assertNoPreviewMarkers(newHtml, 'editNote:append:apply');
             item.setNote(newHtml);
             await item.saveTx();
-            logger(`executeEditNoteAction: Saved append edit to ${noteId}`, 1);
+            logger(`applyEditNote: Saved append edit to ${noteId}`, 1);
         } catch (error) {
             try {
                 assertNoPreviewMarkers(oldHtml, 'editNote:append:rollback');
                 item.setNote(oldHtml);
             } catch (_) { /* best-effort */ }
             if (error instanceof TimeoutError) throw error;
-            return {
-                type: 'agent_action_execute_response',
-                request_id: request.request_id,
-                success: false,
-                error: `Failed to save note: ${error}`,
-                error_code: 'save_failed',
-            };
+            throw actionError('save_failed', `Failed to save note: ${error}`);
         }
 
         await waitForNoteSaveStabilization(item, newHtml);
@@ -1047,20 +1048,15 @@ async function executeEditNoteAction(
         await waitForPMNormalization(item, savedStrippedHtml, undoData, strippedHtml);
 
         return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: true,
-            result_data: {
-                library_id: resolvedLibraryId,
-                zotero_key,
-                library_ref: libraryRefForLibraryID(resolvedLibraryId) ?? undefined,
-                occurrences_replaced: 1,
-                warnings,
-                undo_old_html: '',
-                undo_new_html: undoData.undo_new_html,
-                undo_before_context: undoData.undo_before_context,
-                undo_after_context: undoData.undo_after_context,
-            },
+            library_id: resolvedLibraryId,
+            zotero_key,
+            library_ref: libraryRefForLibraryID(resolvedLibraryId) ?? undefined,
+            occurrences_replaced: 1,
+            warnings,
+            undo_old_html: '',
+            undo_new_html: undoData.undo_new_html,
+            undo_before_context: undoData.undo_before_context,
+            undo_after_context: undoData.undo_after_context,
         };
     }
 
@@ -1107,15 +1103,9 @@ async function executeEditNoteAction(
             old_string ?? '',
             new_string,
             operation,
-            resolvedLibraryId, request.operation);
+            resolvedLibraryId, operationContext);
         if (!match) {
-            return {
-                type: 'agent_action_execute_response',
-                request_id: request.request_id,
-                success: false,
-                error: buildExpansionErrorMessage(e, simplified, old_string),
-                error_code: 'expansion_failed',
-            };
+            throw actionError('expansion_failed', buildExpansionErrorMessage(e, simplified, old_string));
         }
     }
 
@@ -1123,15 +1113,21 @@ async function executeEditNoteAction(
     //    normalizes via normalized_action_data, but the note may have drifted
     //    between validation and execution (PM re-normalization, concurrent
     //    edit) so we re-match here against the current HTML.
+    const diagnostics: MatchDiagnostics = { rejected: [] };
     if (!match && base) {
-        match = findBestMatch(matchInput, base);
+        try {
+            match = findBestMatch(matchInput, base, diagnostics);
+        } catch (error: any) {
+            if (error?.code !== 'ambiguous_match') throw error;
+            throw actionError('ambiguous_match', error.message);
+        }
         if (!match) {
             match = await findMarkdownRenderFallbackMatch(
                 matchInput,
                 old_string ?? '',
                 new_string,
                 operation,
-                resolvedLibraryId, request.operation);
+                resolvedLibraryId, operationContext);
         }
     }
     if (!match) {
@@ -1139,28 +1135,19 @@ async function executeEditNoteAction(
         // — the executor may receive un-normalized action_data on stale paths.
         const partial = detectPartialSimplifiedTag(old_string ?? '');
         if (partial) {
-            return {
-                type: 'agent_action_execute_response',
-                request_id: request.request_id,
-                success: false,
-                error: buildPartialSimplifiedTagMessage(partial, operation),
-                error_code: 'partial_simplified_tag',
-            };
+            throw actionError('partial_simplified_tag', buildPartialSimplifiedTagMessage(partial, operation));
         }
-        const hint = buildExecutionZeroMatchHint(simplified, old_string ?? '');
-        return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: false,
-            error: hint.message,
-            error_code: 'old_string_not_found',
-            ...(hint.candidates.length > 0
-                ? { error_candidates: hint.candidates }
-                : {}),
-        };
+        const rejected = diagnostics.rejected[0];
+        if (rejected) {
+            logger(`applyEditNote: refused ${rejected.strategy} fallback (${rejected.matchCount} matches)`, 1);
+        }
+        const hint = buildExecutionZeroMatchHint(simplified, old_string ?? '', {
+            rejectedFallback: describeRejectedFallback(old_string ?? '', diagnostics),
+        });
+        throw actionError('old_string_not_found', hint.message, { errorCandidates: hint.candidates });
     }
 
-    logger(`executeEditNoteAction: matched ${noteId} via ${match.strategy} strategy`, 1);
+    logger(`applyEditNote: matched ${noteId} via ${match.strategy} strategy`, 1);
 
     // 8a. Transform validator-supplied context anchors the same way the
     //     matcher transformed the haystack needle (entity decode/encode, NFKC).
@@ -1221,13 +1208,9 @@ async function executeEditNoteAction(
         // Single raw match or disambiguation succeeded
         if (rawPos === -1) {
             if (matchCount > 1) {
-                return {
-                    type: 'agent_action_execute_response',
-                    request_id: request.request_id,
-                    success: false,
-                    error: buildAmbiguousMatchError(matchCount, operation),
-                    error_code: 'ambiguous_match',
-                };
+                const unresolved = buildUnresolvedTargetError(simplified, old_string ?? '', match, operation);
+                logger(`applyEditNote: ${unresolved.errorCode} via ${match.strategy} strategy`, 1);
+                throw actionError(unresolved.errorCode, unresolved.message, { errorCandidates: unresolved.candidates });
             }
             rawPos = strippedHtml.indexOf(expandedOld);
         }
@@ -1243,7 +1226,7 @@ async function executeEditNoteAction(
     }
 
     // 10b. Add/update "Edited by Beaver" footer
-    const threadId = request.operation?.threadId ?? null;
+    const threadId = operationContext?.threadId ?? null;
     if (threadId) {
         newHtml = addOrUpdateEditFooter(newHtml, threadId);
     }
@@ -1255,13 +1238,7 @@ async function executeEditNoteAction(
     // 12. Wrapper div protection — only error if the edit removed it
     const hadSchemaVersion = hasSchemaVersionWrapper(strippedHtml);
     if (hadSchemaVersion && !hasSchemaVersionWrapper(newHtml)) {
-        return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: false,
-            error: 'The note wrapper <div data-schema-version="..."> must not be removed.',
-            error_code: 'wrapper_removed',
-        };
+        throw actionError('wrapper_removed', 'The note wrapper <div data-schema-version="..."> must not be removed.');
     }
 
     // 12b. Recapture undo contexts from the post-edit, post-footer stripped HTML.
@@ -1286,7 +1263,7 @@ async function executeEditNoteAction(
         assertNoPreviewMarkers(newHtml, 'editNote:strReplace:apply');
         item.setNote(newHtml);
         await item.saveTx();
-        logger(`executeEditNoteAction: Saved note edit to ${noteId} (${replacementCount} occurrence(s) replaced)`, 1);
+        logger(`applyEditNote: Saved note edit to ${noteId} (${replacementCount} occurrence(s) replaced)`, 1);
     } catch (error) {
         // Restore in-memory state on save failure
         try {
@@ -1296,13 +1273,7 @@ async function executeEditNoteAction(
             // Best-effort restoration
         }
         if (error instanceof TimeoutError) throw error;
-        return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: false,
-            error: `Failed to save note: ${error}`,
-            error_code: 'save_failed',
-        };
+        throw actionError('save_failed', `Failed to save note: ${error}`);
     }
 
     // 14b. Wait for the note to stabilize after save.
@@ -1340,22 +1311,35 @@ async function executeEditNoteAction(
     await waitForPMNormalization(item, savedStrippedHtml, undoData, strippedHtml);
 
     return {
-        type: 'agent_action_execute_response',
-        request_id: request.request_id,
-        success: true,
-        result_data: {
-            library_id: resolvedLibraryId,
-            zotero_key,
-            library_ref: libraryRefForLibraryID(resolvedLibraryId) ?? undefined,
-            occurrences_replaced: replacementCount,
-            warnings,
-            undo_old_html: expandedOld,
-            undo_new_html: undoData.undo_new_html,
-            undo_before_context: undoData.undo_before_context,
-            undo_after_context: undoData.undo_after_context,
-            undo_occurrence_contexts: undoOccurrenceContexts,
-        },
+        library_id: resolvedLibraryId,
+        zotero_key,
+        library_ref: libraryRefForLibraryID(resolvedLibraryId) ?? undefined,
+        occurrences_replaced: replacementCount,
+        warnings,
+        undo_old_html: expandedOld,
+        undo_new_html: undoData.undo_new_html,
+        undo_before_context: undoData.undo_before_context,
+        undo_after_context: undoData.undo_after_context,
+        undo_occurrence_contexts: undoOccurrenceContexts,
     };
+}
+
+
+export interface EditNoteApplyHooks {
+    /**
+     * Called with the note after the live editor was flushed and any preview
+     * markup repaired, right before the edit is matched; throws to refuse it.
+     */
+    assertUnchanged?: (item: Zotero.Item) => Promise<void> | void;
+}
+
+/** Edit a note for the backend during a run. */
+async function executeEditNoteAction(
+    request: ActionExecuteRequest,
+    ctx: TimeoutContext,
+): Promise<WSAgentActionExecuteResponse> {
+    return toExecuteResponse(request.request_id, 'executeEditNoteAction',
+        () => applyEditNote(request.action_data as EditNoteProposedData, ctx, request.operation));
 }
 
 export { executeEditNoteAction, validateEditNoteAction };

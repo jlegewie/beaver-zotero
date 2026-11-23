@@ -29,7 +29,9 @@ import {
 } from '@beaver/agent-core/citations/externalReferences';
 import { ButtonVariant } from '@beaver/agent-ui/primitives/Button';
 import { ItemCreatingAgentAction } from '../../../agents/agentActions';
-import type { ExternalReference } from '@beaver/agent-core/types/externalReferences';
+import { trialDetails, workDetails, type ExternalReference } from '@beaver/agent-core/types/externalReferences';
+import { isOpenAlexWorkId } from '@beaver/agent-core/citations/externalRecords';
+import { primaryExternalUrl } from '@beaver/agent-core/citations/externalRecordDisplay';
 import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { resolveSearchableLibraryId } from '../libraryAccess';
 import { searchableLibraryIdsAtom } from '../../../atoms/profile';
@@ -199,8 +201,9 @@ const AgentActionItemButtons: React.FC<AgentActionItemButtonsProps> = ({
         setIsDetailsVisible(true);
     }, [item, setSelectedReference, setIsDetailsVisible]);
 
+    const webUrl = primaryExternalUrl(item);
     const handleOpenWeb = useCallback(() => {
-        const url = item.url || item.publication_url;
+        const url = primaryExternalUrl(item);
         if (url) {
             Zotero.launchURL(url);
         }
@@ -222,8 +225,10 @@ const AgentActionItemButtons: React.FC<AgentActionItemButtonsProps> = ({
 
     const isLoading = isBusy || isCheckingLibrary || isChecking(item);
     const hasPdf = item.open_access_url || bestAttachment;
-    const hasWeb = item.url || item.publication_url;
-    const hasDetails = Boolean(item.abstract);
+    const hasWeb = !!webUrl;
+    const hasDetails = Boolean(item.abstract) || !!trialDetails(item) || !!workDetails(item);
+    // OpenAlex counts citations and lists the citing works only for its own ids.
+    const showCitedBy = item.citation_count !== undefined && item.citation_count !== null && isOpenAlexWorkId(item.source_id);
 
     // Determine which buttons to show based on status
     const showRevealButton = action.status === 'applied' || (action.status === 'pending' && existingItemRef) || !!existingFromError;
@@ -277,17 +282,17 @@ const AgentActionItemButtons: React.FC<AgentActionItemButtonsProps> = ({
             )}
 
             {/* Citation count */}
-            {item.citation_count !== undefined && item.citation_count > 0 && (
+            {showCitedBy && item.citation_count! > 0 && (
                 <a
                     onClick={() => Zotero.launchURL(`${CITED_BY_URL}${item.source_id}`)}
                     className="text-link-muted text-sm"
                 >
-                    Cited by {item.citation_count.toLocaleString()}
+                    Cited by {item.citation_count!.toLocaleString()}
                 </a>
             )}
-            {item.citation_count !== undefined && item.citation_count === 0 && (
+            {showCitedBy && item.citation_count === 0 && (
                 <div className="font-color-tertiary text-sm">
-                    Cited by {item.citation_count.toLocaleString()}
+                    Cited by {item.citation_count!.toLocaleString()}
                 </div>
             )}
 

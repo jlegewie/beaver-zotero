@@ -39,6 +39,14 @@ export interface AgentDataRequestContext {
     receivedAt: number;
     /** Report what the handler is doing; surfaces in keepalives sent to the backend */
     reportPhase: (phase: string) => void;
+    /** The chat run the request arrived on, when this client started it. */
+    run?: { runId: string; threadId: string | null };
+    /**
+     * Aborted when the user stops that run. A handler that keeps working past
+     * its reply (a fill the run waits on) stops its work then; the backend
+     * sends no cancel of its own.
+     */
+    runStopped?: AbortSignal;
 }
 
 /** A single data-request handler plus its error-fallback response. */

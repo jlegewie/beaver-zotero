@@ -5,23 +5,30 @@
  * prompt tells the user which screen that is and opens Beaver to it.
  */
 import { atom } from 'jotai';
-import { isAuthenticatedAtom } from './auth';
+import { authLoadingAtom, isAuthenticatedAtom } from './auth';
 import {
     hasAuthorizedFreeAccessAtom,
     isMigratingDataAtom,
     isProfileLoadedAtom,
     pendingDowngradeAckAtom,
+    remainingBeaverCreditsAtom,
     updateRequiredAtom,
 } from './profile';
 import { isLoadingThreadAtom } from './threads';
+import { isUsingBeaverCreditsAtom } from './models';
+import { requestPlusToolsAtom } from './ui';
+import { getPlusToolsAccess, type PlusToolsAccess } from '../utils/plusToolsAccess';
 
 /**
  * What stands between the user and a chat, in the order the sidebar resolves
  * them. `loading` covers a thread being opened and data being migrated;
- * `connecting` an authenticated account whose profile has not arrived.
+ * `restoring` the saved sign-in still being restored, before Beaver knows
+ * whether the user is signed in; `connecting` an authenticated account whose
+ * profile has not arrived.
  */
 export type ChatAccessGate =
     | 'loading'
+    | 'restoring'
     | 'signed-out'
     | 'connecting'
     | 'update-required'
@@ -30,10 +37,18 @@ export type ChatAccessGate =
 
 export const chatAccessGateAtom = atom<ChatAccessGate | null>((get) => {
     if (get(isLoadingThreadAtom) || get(isMigratingDataAtom)) return 'loading';
-    if (!get(isAuthenticatedAtom)) return 'signed-out';
+    if (!get(isAuthenticatedAtom)) return get(authLoadingAtom) ? 'restoring' : 'signed-out';
     if (!get(isProfileLoadedAtom)) return 'connecting';
     if (get(updateRequiredAtom)) return 'update-required';
     if (get(pendingDowngradeAckAtom)) return 'downgrade-ack';
     if (!get(hasAuthorizedFreeAccessAtom)) return 'onboarding';
     return null;
 });
+
+/** Whether the next message gets Plus Tools, and if not, why (see `getPlusToolsAccess`). */
+export const plusToolsAccessAtom = atom<PlusToolsAccess>((get) => getPlusToolsAccess({
+    gate: get(chatAccessGateAtom),
+    usesBeaverModel: get(isUsingBeaverCreditsAtom),
+    plusToolsPref: get(requestPlusToolsAtom),
+    credits: get(remainingBeaverCreditsAtom),
+}));

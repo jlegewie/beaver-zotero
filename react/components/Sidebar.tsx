@@ -1,12 +1,15 @@
-import React, { useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
+import React, { useCallback, useRef, useState, type ReactNode } from 'react';
 import InputArea from "./input/InputArea"
 import AskUserQuestionPanel from "./input/AskUserQuestionPanel"
 import BatchApprovalPanel from "./input/BatchApprovalPanel"
 import CreditConfirmationPanel from "./input/CreditConfirmationPanel"
+import TableCardPanel from "./tables/card/TableCardPanel"
 import { pendingApprovalsAtom } from '../agents/agentActions';
 import { pendingQuestionsAtom } from '@beaver/agent-core/run-state/pendingQuestions';
+import { isThreadParkedAtom, setAsideParkedCardsAtom } from '../atoms/parkedRuns';
 import { pendingBatchApprovalsAtom } from '@beaver/agent-core/run-state/pendingBatchApprovals';
 import { pendingCreditConfirmationsAtom } from '@beaver/agent-core/run-state/pendingCreditConfirmations';
+import { pendingTableCardsAtom } from '@beaver/agent-core/run-state/pendingTableCards';
 import { selectComposerTakeover } from '@beaver/agent-ui/chat/composerTakeover';
 import Header from "./Header"
 import { useEventSubscription } from '../hooks/useEventSubscription';
@@ -20,6 +23,7 @@ import { isThreadListViewAtom } from '../atoms/ui';
 import HomePage from './pages/HomePage';
 import LoginPage from './pages/LoginPage';
 import ProfileLoadingPage from './pages/ProfileLoadingPage';
+import SessionRestorePage from './pages/SessionRestorePage';
 import FreeOnboardingPage from './pages/FreeOnboardingPage';
 import DragDropWrapper from './input/DragDropWrapper';
 import DialogContainer from './dialog/DialogContainer';
@@ -31,17 +35,12 @@ import { chatAccessGateAtom } from '../atoms/chatAccess';
 import { Spinner } from './icons/icons';
 import { threadWarningsAtom } from '../atoms/warnings';
 import PopupOverlayContainer from './PopupOverlayContainer';
-import {
-    isMigratingDataAtom,
-    profileWithPlanAtom,
-} from '../atoms/profile';
+import { isMigratingDataAtom } from '../atoms/profile';
 import UpdateRequiredPage from './pages/UpdateRequiredPage';
-import FirstRunPage from './pages/FirstRunPage';
-import { firstRunReturnRequestedAtom, isFirstRunVisibleAtom } from '../atoms/firstRun';
+import { isFirstRunVisibleAtom } from '../atoms/firstRun';
 import WhereToStartPage from './pages/WhereToStartPage';
 import { whereToStartVisibleAtom } from '../atoms/whereToStart';
 import ScreenReaderRunAnnouncer from './agentRuns/ScreenReaderRunAnnouncer';
-import { getFirstRunSelectionVariant } from '../utils/firstRunSelection';
 import { FindQueryProvider } from '@beaver/agent-ui/chat/findContext';
 import { FindInChatControlsProvider, useFindInChat } from '../hooks/useFindInChat';
 import FindBar from './ui/FindBar';
@@ -103,6 +102,20 @@ const getFocusableElements = (root: HTMLElement): HTMLElement[] => {
 
     return elements;
 };
+
+/**
+ * The cards of `cards` the user has not set aside. Only a parked run's cards
+ * can be set aside; a live run's always take the composer.
+ */
+function withoutSetAside<T>(
+    cards: ReadonlyMap<string, T>,
+    toolCallIdOf: (card: T) => string,
+    isThreadParked: boolean,
+    setAside: ReadonlySet<string>,
+): ReadonlyMap<string, T> {
+    if (!isThreadParked || setAside.size === 0) return cards;
+    return new Map([...cards].filter(([, card]) => !setAside.has(toolCallIdOf(card))));
+}
 
 const SidebarShell = ({
     children,
@@ -200,17 +213,7 @@ const Sidebar = ({ location, isWindow = false, header: headerOverride }: Sidebar
     const allWarnings = useAtomValue(threadWarningsAtom);
     const creditInfoWarning = allWarnings.findLast((w) => w.type === 'credit_info');
     const isFirstRunVisible = useAtomValue(isFirstRunVisibleAtom);
-    const isFirstRunReturnRequested = useAtomValue(firstRunReturnRequestedAtom);
     const isWhereToStartVisible = useAtomValue(whereToStartVisibleAtom);
-    const profile = useAtomValue(profileWithPlanAtom);
-    const shouldAssignFirstRunVariant = isFirstRunVisible
-        && !isFirstRunReturnRequested
-        && !!profile?.user_id;
-    const firstRunVariant = useMemo(() => {
-        return shouldAssignFirstRunVariant && profile?.user_id
-            ? getFirstRunSelectionVariant(profile.user_id)
-            : 'first_run';
-    }, [profile?.user_id, shouldAssignFirstRunVariant]);
 
     // Composer takeover: while the run blocks on a batch approval, a question
     // or a credit confirmation, that panel replaces the composer entirely (the
@@ -221,11 +224,17 @@ const Sidebar = ({ location, isWindow = false, header: headerOverride }: Sidebar
     const pendingQuestionsMap = useAtomValue(pendingQuestionsAtom);
     const pendingBatchApprovalsMap = useAtomValue(pendingBatchApprovalsAtom);
     const pendingCreditConfirmationsMap = useAtomValue(pendingCreditConfirmationsAtom);
+    const pendingTableCardsMap = useAtomValue(pendingTableCardsAtom);
+    // A parked run's card the user set aside to write a message instead
+    // gives the composer back.
+    const setAsideParkedCards = useAtomValue(setAsideParkedCardsAtom);
+    const isThreadParked = useAtomValue(isThreadParkedAtom);
     const composerTakeover = selectComposerTakeover({
         pendingApprovalCount: pendingApprovalsMap.size,
-        batchApprovals: pendingBatchApprovalsMap,
+        batchApprovals: withoutSetAside(pendingBatchApprovalsMap, (approval) => approval.toolcallId, isThreadParked, setAsideParkedCards),
+        tableCards: withoutSetAside(pendingTableCardsMap, (card) => card.toolcall_id, isThreadParked, setAsideParkedCards),
         creditConfirmations: pendingCreditConfirmationsMap,
-        questions: pendingQuestionsMap,
+        questions: withoutSetAside(pendingQuestionsMap, (question) => question.toolcallId, isThreadParked, setAsideParkedCards),
     });
 
     // Find in chat. Component state, not an atom: one Jotai store is shared by
@@ -278,6 +287,18 @@ const Sidebar = ({ location, isWindow = false, header: headerOverride }: Sidebar
                         </span>
                     </div>
                 </div>
+            </SidebarShell>
+        );
+    }
+
+    {/* Saved sign-in still being restored: Beaver does not know yet whether
+        the user is signed out, so the sign-in form must not show. */}
+    if (chatAccessGate === 'restoring') {
+        return (
+            <SidebarShell isWindow={isWindow}>
+                {header}
+                <SessionRestorePage />
+                <DialogContainer />
             </SidebarShell>
         );
     }
@@ -339,29 +360,22 @@ const Sidebar = ({ location, isWindow = false, header: headerOverride }: Sidebar
         );
     }
 
-    {/* First-run suggestions page (see isFirstRunVisibleAtom in firstRun.ts):
-        - explicit "Try another starting point" return (session atom), or
-        - Free user, device authorized, never completed first-run on this account. */}
+    {/* First-run page (see isFirstRunVisibleAtom in firstRun.ts): a Dev Tools
+        preview, or a Free user in first run who cannot earn feature credits.
+        An account that can starts on the home screen with the task list. */}
     if (isFirstRunVisible) {
-        const showWhereToStart = !isFirstRunReturnRequested
-            && firstRunVariant === 'where_to_start';
         return (
             <SidebarShell isWindow={isWindow}>
                 <ScreenReaderRunAnnouncer inputRef={inputRef} surface={isWindow ? 'window' : 'sidebar'} />
                 {header}
-                {showWhereToStart ? (
-                    <WhereToStartPage />
-                ) : (
-                    <FirstRunPage isWindow={isWindow} inputRef={inputRef} />
-                )}
+                <WhereToStartPage />
                 <DialogContainer />
             </SidebarShell>
         );
     }
 
     {/* "Where should we start?" launcher shown outside the first-run gate:
-        reopened via "Back to starting points" after a launcher follow-up, or
-        from the Dev Tools menu. */}
+        reopened via "Back to starting points" after a launcher follow-up. */}
     if (isWhereToStartVisible) {
         return (
             <SidebarShell isWindow={isWindow}>
@@ -427,6 +441,12 @@ const Sidebar = ({ location, isWindow = false, header: headerOverride }: Sidebar
                                 <BatchApprovalPanel
                                     key={composerTakeover.approval.approvalId}
                                     approval={composerTakeover.approval}
+                                />
+                            ) : composerTakeover.kind === 'table-card' ? (
+                                // key resets the card's draft per request
+                                <TableCardPanel
+                                    key={composerTakeover.card.card_id}
+                                    card={composerTakeover.card}
                                 />
                             ) : composerTakeover.kind === 'credit-confirmation' ? (
                                 // key resets local decision state per confirmation

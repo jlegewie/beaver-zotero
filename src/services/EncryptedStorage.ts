@@ -1,5 +1,16 @@
 import { logger } from '@beaver/agent-core/platform/logger';
 
+/** A storage step that failed and was handled by returning or keeping nothing. */
+export type EncryptedStorageFailure = 'read' | 'decrypt' | 'write' | 'remove' | 'migrate';
+
+export interface EncryptedStorageOptions {
+    /**
+     * Called when a step fails. Reads report failures by returning null, so
+     * without this a caller cannot tell an unreadable value from a missing one.
+     */
+    onFailure?: (operation: EncryptedStorageFailure, error: unknown) => void;
+}
+
 /**
  * Encrypted storage for authentication tokens.
  * Provides obfuscation against casual inspection and accidental exposure.
@@ -11,6 +22,16 @@ export class EncryptedStorage {
     private textEncoder = new TextEncoder();
     private textDecoder = new TextDecoder();
     private cache: Map<string, string> = new Map();
+
+    constructor(private readonly options: EncryptedStorageOptions = {}) {}
+
+    private reportFailure(operation: EncryptedStorageFailure, error: unknown): void {
+        try {
+            this.options.onFailure?.(operation, error);
+        } catch {
+            // Reporting must never change what storage returns.
+        }
+    }
 
     private toArrayBuffer(view: ArrayBufferView): ArrayBuffer {
         const { buffer, byteLength, byteOffset } = view;
@@ -178,6 +199,7 @@ export class EncryptedStorage {
             return null;
         } catch (error) {
             logger(`Error reading encrypted auth token: ${error}`);
+            this.reportFailure('read', error);
             return null;
         }
     }
@@ -206,6 +228,7 @@ export class EncryptedStorage {
                 keyUsed = 'legacy';
             } catch (legacyError) {
                 logger(`Migration from preferences failed with both keys: ${error}, ${legacyError}`);
+                this.reportFailure('migrate', legacyError);
                 // Clean up the preference since we couldn't decrypt it with either key
                 Zotero.Prefs.clear(prefKey);
                 return null;
@@ -221,6 +244,7 @@ export class EncryptedStorage {
                 logger(`Successfully migrated auth token from preferences using ${keyUsed} key`);
             } catch (persistError) {
                 logger(`Failed to persist migrated auth token: ${persistError}`);
+                this.reportFailure('write', persistError);
             }
             return decrypted;
         }
@@ -290,6 +314,7 @@ export class EncryptedStorage {
             this.clearPreferenceKey(key);
         } catch (error) {
             logger(`Encryption/persistence failed: ${error}`);
+            this.reportFailure('write', error);
             throw error;
         }
     }
@@ -318,6 +343,7 @@ export class EncryptedStorage {
             return migrated;
         } catch (error) {
             logger(`Decryption failed: ${error}`);
+            this.reportFailure('decrypt', error);
             return null;
         }
     }
@@ -332,6 +358,7 @@ export class EncryptedStorage {
             this.cache.delete(key);
         } catch (error) {
             logger(`Error removing auth token file: ${error}`);
+            this.reportFailure('remove', error);
         }
 
         this.clearPreferenceKey(key);

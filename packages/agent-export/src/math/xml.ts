@@ -32,22 +32,34 @@ export function decodeXmlEntities(text: string): string {
     });
 }
 
-/** Whether a UTF-16 code unit may appear in an XML 1.0 document. */
-function isXmlChar(code: number): boolean {
+/**
+ * Whether the UTF-16 code unit at `i` may appear in an XML 1.0 document: an
+ * allowed character, or one half of a surrogate pair. A lone surrogate is not.
+ */
+function isXmlCharAt(text: string, i: number): boolean {
+    const code = text.charCodeAt(i);
+    if (code >= 0xD800 && code <= 0xDBFF) {
+        const next = text.charCodeAt(i + 1);
+        return next >= 0xDC00 && next <= 0xDFFF;
+    }
+    if (code >= 0xDC00 && code <= 0xDFFF) {
+        const previous = text.charCodeAt(i - 1);
+        return previous >= 0xD800 && previous <= 0xDBFF;
+    }
     return code === 0x9 || code === 0xA || code === 0xD || (code >= 0x20 && code !== 0xFFFE && code !== 0xFFFF);
 }
 
 /**
  * Remove characters XML 1.0 cannot represent (C0 controls other than tab and
- * line breaks). Text copied from PDFs can carry form feeds or vertical tabs, and
- * a single one makes a written document unreadable.
+ * line breaks, unpaired surrogates). Text copied from PDFs can carry form
+ * feeds or vertical tabs, and a single one makes a written document unreadable.
  */
 export function stripInvalidXmlChars(text: string): string {
     for (let i = 0; i < text.length; i++) {
-        if (!isXmlChar(text.charCodeAt(i))) {
+        if (!isXmlCharAt(text, i)) {
             let out = '';
             for (let j = 0; j < text.length; j++) {
-                if (isXmlChar(text.charCodeAt(j))) out += text[j];
+                if (isXmlCharAt(text, j)) out += text[j];
             }
             return out;
         }

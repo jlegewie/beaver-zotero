@@ -336,6 +336,17 @@ describe('retry via synchronous truncation', () => {
             expect(sentRequest().expected_tail_run_id).toBe("a");
             expect(threadRunIds()).toEqual(["a"]);
         });
+        it("auto-retry resends the feature task the failed run was sent for", async () => {
+            store.set(threadRunsAtom, [makeRun("a")]);
+            store.set(activeRunAtom, makeRun("local", {
+                status: "error",
+                user_prompt: { content: "/review", feature_task: "literature_review" },
+            }));
+            store.set(threadAdmissionAtom, { threadId: "thread-1", tailRunId: "a", activity: { state: "idle", run_id: null } });
+            historyMock.mockResolvedValue({ runs: [makeRun("a")], tail_run_id: "a", activity: { state: "idle", run_id: null } });
+            await store.set(autoRetryErroredRunAtom, "local");
+            expect(sentRequest().user_prompt.feature_task).toBe("literature_review");
+        });
         it.each(["busy", "unseen", "removed", "offline"])("preserves local history when auto-retry history is %s", async (state) => {
             store.set(threadRunsAtom, [makeRun("a"), makeRun("local", { status: "error" })]);
             store.set(activeRunAtom, makeRun("live", { status: "error" }));
@@ -897,6 +908,72 @@ describe('retry via synchronous truncation', () => {
         expect(threadRunIds()).toEqual(['a']);
     });
 
+    describe('table changes', () => {
+        /** A run whose create_table call returned a table record. */
+        function makeTableRun(id: string): AgentRun {
+            return makeRun(id, {
+                model_messages: [
+                    {
+                        kind: 'response',
+                        parts: [{ part_kind: 'tool-call', tool_name: 'create_table', tool_call_id: 'tc-1', args: {} }],
+                    },
+                    {
+                        kind: 'request',
+                        parts: [{
+                            part_kind: 'tool-return',
+                            tool_name: 'create_table',
+                            tool_call_id: 'tc-1',
+                            content: { ok: true },
+                            metadata: {
+                                view: {
+                                    view_type: 'table',
+                                    record: { reference: { kind: 'table', key: 'TABLE001', title: 'Effect sizes' } },
+                                },
+                            },
+                        }],
+                    },
+                ],
+            } as any);
+        }
+
+        const TABLES_NOTE = 'Changes to tables are kept. To go back, use Version history in the table.';
+
+        it('notes that tables are kept when the dialog lists other changes', async () => {
+            store.set(threadRunsAtom, [makeRun('a'), makeTableRun('b')]);
+            store.set(threadAgentActionsAtom, [makeAppliedMetadataEdit('edit-1', 'b')]);
+            truncateMock.mockImplementation(async (_thread, ids) => okReport(ids));
+
+            await store.set(regenerateFromRunAtom, { runId: 'b' });
+
+            expect(promptConfirmMock).toHaveBeenCalledOnce();
+            const text: string = promptConfirmMock.mock.calls[0][0].text;
+            expect(text).toContain('1 metadata edit');
+            expect(text).toContain(TABLES_NOTE);
+        });
+
+        it('leaves the note out when no removed run wrote a table', async () => {
+            // The kept run wrote a table; only the removed runs count.
+            store.set(threadRunsAtom, [makeTableRun('a'), makeRun('b')]);
+            store.set(threadAgentActionsAtom, [makeAppliedMetadataEdit('edit-1', 'b')]);
+            truncateMock.mockImplementation(async (_thread, ids) => okReport(ids));
+
+            await store.set(regenerateFromRunAtom, { runId: 'b' });
+
+            expect(promptConfirmMock.mock.calls[0][0].text).not.toContain('tables');
+        });
+
+        it('retries without a dialog when the only changes are to tables', async () => {
+            store.set(threadRunsAtom, [makeRun('a'), makeTableRun('b')]);
+            truncateMock.mockImplementation(async (_thread, ids) => okReport(ids));
+
+            await store.set(regenerateFromRunAtom, { runId: 'b' });
+
+            expect(promptConfirmMock).not.toHaveBeenCalled();
+            expect(connectMock).toHaveBeenCalled();
+            expect(threadRunIds()).toEqual(['a']);
+        });
+    });
+
     it('undoes a merge in reverse order with the other applied actions', async () => {
         store.set(threadRunsAtom, [makeRun('a'), makeRun('b')]);
         const edit = { ...makeAppliedMetadataEdit('edit-1', 'b'), created_at: '2026-10-02T10:00:01Z' };
@@ -1077,6 +1154,25 @@ describe('retry via synchronous truncation', () => {
             editedPrompt: { content: 'rewritten' },
         });
         expect(sentRequest().retry_trigger).toBeUndefined();
+    });
+
+    it('keeps the feature task a message was sent for across successive retries', async () => {
+        // The task travels on the stored prompt, so every retry that rebuilds
+        // from it, including a retry of a retry, sends it again.
+        const prompt = { content: '/table neighborhood effects', feature_task: 'research_table' };
+        store.set(threadRunsAtom, [makeRun('a'), makeRun('b', { user_prompt: prompt })]);
+        truncateMock.mockResolvedValue(okReport(['b']));
+        await store.set(regenerateFromRunAtom, { runId: 'b' });
+        expect(sentRequest().user_prompt.feature_task).toBe('research_table');
+
+        const replacement = store.get(activeRunAtom)!;
+        expect(replacement.user_prompt.feature_task).toBe('research_table');
+        store.set(activeRunAtom, null);
+        store.set(threadRunsAtom, [makeRun('a'), { ...replacement, status: 'error' }]);
+        store.set(isWSChatPendingAtom, false);
+        truncateMock.mockResolvedValue(okReport([replacement.id]));
+        await store.set(regenerateFromRunAtom, { runId: replacement.id });
+        expect(sentRequest().user_prompt.feature_task).toBe('research_table');
     });
 
     it('folds a terminal active run into the dialog and the POSTed removal', async () => {

@@ -29,6 +29,7 @@
  * (60 s), both in `write.ts`.
  */
 
+import { itemJsonPmid } from '@beaver/agent-core/types/itemImport';
 import type {
     ImportFileRef,
     ImportItemSpec,
@@ -86,7 +87,6 @@ function failed(key: string, code: string, message: string, extra: Partial<Resol
     return { key, status: 'failed', error: { code, message }, ...extra };
 }
 
-/** Fill an empty abstract from fallback metadata (fill-only; identity fields never touched). */
 /** A fallback the model wrote counts as model metadata; a search result's is partial metadata. */
 function fallbackMethod(spec: ImportItemSpec): ResolutionMethod {
     return spec.fallback_source === 'model' ? 'model_metadata' : 'fallback_metadata';
@@ -96,10 +96,61 @@ function fallbackNote(spec: ImportItemSpec): string {
     return spec.fallback_source === 'model' ? 'using the given metadata' : "using the search result's metadata";
 }
 
-function fillFromFallback(item: ZoteroItemJson, fallback: ZoteroItemJson | undefined): void {
-    const abstract = fallback?.abstractNote;
-    if (typeof abstract === 'string' && abstract.trim() && !(typeof item.abstractNote === 'string' && item.abstractNote.trim())) {
-        item.abstractNote = abstract;
+function text(value: unknown): string | undefined {
+    return typeof value === 'string' && value.trim() ? value : undefined;
+}
+
+/** A trial registration: a report the registry numbered (reportNumber NCT…, institution clinicaltrials.gov). */
+function isTrialRecord(json: ZoteroItemJson | undefined): boolean {
+    return !!json && json.itemType === 'report' && /^NCT\d{8}$/i.test(String(json.reportNumber ?? '').trim())
+        && String(json.institution ?? '').trim().toLowerCase() === 'clinicaltrials.gov';
+}
+
+/**
+ * Fill gaps in a resolved item from its fallback item (the record the import
+ * came from). Fill-only: a value the translator or the model set is never
+ * overwritten.
+ *
+ * - an empty abstract or language takes the fallback's (the language may also
+ *   come from the file recognizer);
+ * - a book section without author creators takes the fallback's authors;
+ * - identity is preserved, so duplicate detection finds the item later: a
+ *   missing `PMID:` line in Extra takes the record's PMID, and a trial keeps
+ *   the registry URL and report number.
+ *
+ * The backend's create_items enrichment applies the same rules; both only
+ * fill empty fields, so running them twice changes nothing.
+ */
+export function fillFromFallback(
+    item: ZoteroItemJson,
+    fallback: ZoteroItemJson | undefined,
+    recognizerLanguage?: string,
+): void {
+    const abstract = text(fallback?.abstractNote);
+    if (abstract && !text(item.abstractNote)) item.abstractNote = abstract;
+
+    const language = text(fallback?.language) ?? text(recognizerLanguage);
+    if (language && !text(item.language)) item.language = language;
+
+    if (!fallback) return;
+
+    if (item.itemType === 'bookSection') {
+        const isAuthor = (creator: { creatorType?: string }) => (creator.creatorType || 'author') === 'author';
+        const fallbackAuthors = (fallback.creators ?? []).filter(isAuthor).map((creator) => ({ ...creator }));
+        if (!(item.creators ?? []).some(isAuthor) && fallbackAuthors.length) {
+            item.creators = [...fallbackAuthors, ...(item.creators ?? [])];
+        }
+    }
+
+    const pmid = itemJsonPmid(fallback);
+    if (pmid && !itemJsonPmid(item)) {
+        const extra = text(item.extra);
+        item.extra = extra ? `${extra.trimEnd()}\nPMID: ${pmid}` : `PMID: ${pmid}`;
+    }
+
+    if (isTrialRecord(fallback)) {
+        if (!text(item.url) && text(fallback.url)) item.url = fallback.url;
+        if (item.itemType === 'report' && !text(item.reportNumber)) item.reportNumber = fallback.reportNumber;
     }
 }
 
@@ -184,6 +235,9 @@ async function resolveOne(
         resolution = normalized(spec.fallback_item, libraryID, fallbackMethod(spec), undefined, warnings);
     } else if (located) {
         resolution = await resolveFromFile(spec, located, libraryID, budget(PER_ITEM_MS.file), warnings);
+        if ('item' in resolution && resolution.item) {
+            fillFromFallback(resolution.item, undefined, resolution.recognizer_hints?.language);
+        }
     } else {
         return failed(spec.key, 'invalid_metadata', 'Nothing to resolve: pass an id, metadata or a file.');
     }

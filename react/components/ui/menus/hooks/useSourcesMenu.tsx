@@ -1,17 +1,21 @@
-import { ItemSearchResult } from '@beaver/agent-core/transport/clients/searchService';
 import { SearchMenuItem } from '@beaver/agent-ui/primitives/SearchMenu';
 import React, { useEffect, useState } from 'react';
-import { UNRESOLVED_LIBRARY_ID } from '../../../../../src/utils/libraryIdentity';
 import { getRecentAsync, loadFullItemData } from '../../../../../src/utils/zoteroUtils';
 import { getActiveZoteroLibraryId } from '../../../../utils/zoteroTargetContext';
 import { ArrowRightIcon, CSSIcon, FileLinkIcon, Icon } from '../../../icons/icons';
 import { SourceMenuItemContext, createSourceMenuItem } from '../utils/menuItemFactories';
+import { availableSavedSearches } from './useSavedSearchesMenu';
 
 interface UseSourcesMenuOptions {
     isActive: boolean;
     /** Query typed after the `@` in the chat editor; drives `searchResults`. */
     searchQuery: string;
-    searchResults: ItemSearchResult[];
+    /** The best matches for `searchQuery`, best first, loaded for display. */
+    searchResults: Zotero.Item[];
+    /** How many items matched `searchQuery` in all, of which `searchResults` are the best. */
+    searchMatchCount: number;
+    /** Whether a search for `searchQuery` is still running; the rows are from the previous one. */
+    isSearching: boolean;
     /** What is currently selected in Zotero's items tree. */
     selectedZoteroItems: Zotero.Item[];
     /** How many item rows the menu offers before anything is typed. */
@@ -22,6 +26,11 @@ interface UseSourcesMenuOptions {
     onNavigateToLibraries: () => void;
     onNavigateToCollections: (libraryId: number) => void;
     onNavigateToTags: (libraryId: number) => void;
+    /**
+     * Open the saved-searches submenu. The row is offered only when set: only
+     * a target that can take a saved search passes it.
+     */
+    onNavigateToSavedSearches?: (libraryId: number) => void;
     onNavigateToNotes: () => void;
     /** Open a file picker to attach external files (files from disk). */
     onSelectFiles: () => void;
@@ -29,19 +38,56 @@ interface UseSourcesMenuOptions {
     /** How many recently-modified items to read before filtering them down. */
     recentItemsLimit: number;
     verticalPosition?: 'above' | 'below';
+    /** Which action rows the target offers; every row when absent. */
+    entries?: SourcesMenuEntries;
+}
+
+/**
+ * The action rows a picker target offers. The composer offers all of them; a
+ * target that only takes items and scopes (collections, tags, saved searches:
+ * the table card) hides the rest and names the scope rows for what a pick does.
+ */
+export interface SourcesMenuEntries {
+    libraries: boolean;
+    notes: boolean;
+    files: boolean;
+    /** How scope rows are labelled: "Filter by Collections" or "Add Collection". */
+    scopeVerb: 'filter' | 'add';
 }
 
 interface UseSourcesMenuResult {
     menuItems: SearchMenuItem[];
+    /**
+     * Whether `menuItems` are still being built, for the current
+     * `searchResults` or since the menu opened; until they are, an empty list
+     * is not "no results".
+     */
+    isBuilding: boolean;
 }
 
 const divider = (): SearchMenuItem => ({ label: '', isDivider: true, onClick: () => {} });
 const header = (label: string): SearchMenuItem => ({ label, isGroupHeader: true, onClick: () => {} });
+/** A non-selectable note that more items matched than the menu lists. */
+const moreMatchesHint = (shown: number, total: number): SearchMenuItem => {
+    const label = `Top ${shown} of ${total.toLocaleString()} matches`;
+    return {
+        label,
+        isGroupHeader: true,
+        onClick: () => {},
+        customContent: (
+            <div className="truncate text-sm font-color-tertiary" style={{ fontWeight: 'normal' }}>
+                {label}
+            </div>
+        ),
+    };
+};
 
 export const useSourcesMenu = ({
     isActive,
     searchQuery,
     searchResults,
+    searchMatchCount,
+    isSearching,
     selectedZoteroItems,
     proposedItemsLimit,
     sourceMenuItemContext,
@@ -50,13 +96,19 @@ export const useSourcesMenu = ({
     onNavigateToLibraries,
     onNavigateToCollections,
     onNavigateToTags,
+    onNavigateToSavedSearches,
     onNavigateToNotes,
     onSelectFiles,
     getRecentItems,
     recentItemsLimit,
-    verticalPosition = 'above'
+    verticalPosition = 'above',
+    entries,
 }: UseSourcesMenuOptions): UseSourcesMenuResult => {
+    const collectionsLabel = entries?.scopeVerb === 'add' ? 'Add Collection' : 'Filter by Collections';
+    const tagsLabel = entries?.scopeVerb === 'add' ? 'Add Tag' : 'Filter by Tags';
+    const savedSearchesLabel = entries?.scopeVerb === 'add' ? 'Add Saved Search' : 'Filter by Saved Searches';
     const [menuItems, setMenuItems] = useState<SearchMenuItem[]>([]);
+    const [builtFrom, setBuiltFrom] = useState<Zotero.Item[] | null>(null);
 
     const getEffectiveLibraryId = (libraryId: number | null): number | null => {
         if (libraryId && searchableLibraryIds.includes(libraryId)) {
@@ -71,6 +123,9 @@ export const useSourcesMenu = ({
     useEffect(() => {
         if (!isActive) {
             setMenuItems([]);
+            // Rows built before the menu closed (or entered a submenu) are
+            // gone, so the next open is building again.
+            setBuiltFrom(null);
             return;
         }
 
@@ -86,6 +141,21 @@ export const useSourcesMenu = ({
         // "what's attached" affordance, so the menu lists only addable items.
         const notAlreadyAttached = (item: Zotero.Item) =>
             !sourceMenuItemContext.isAttached(item);
+        // The target may take only some kinds of item (the table card takes papers).
+        const addable = (item: Zotero.Item) =>
+            sourceMenuItemContext.canAdd?.(item) ?? true;
+        // The target may offer another item in a candidate's place (the table
+        // card offers a child attachment as its paper); rows are merged after.
+        const asOffered = (items: Zotero.Item[]): Zotero.Item[] => {
+            const map = sourceMenuItemContext.asSourceItem;
+            if (!map) return items;
+            const offered: Zotero.Item[] = [];
+            for (const item of items) {
+                const mapped = map(item);
+                if (mapped && !offered.some((other) => other.id === mapped.id)) offered.push(mapped);
+            }
+            return offered;
+        };
 
         // A group of item rows, optionally headed. 'above' menus display the
         // array reversed, so the header follows its rows there to land above
@@ -99,19 +169,22 @@ export const useSourcesMenu = ({
         /** The rows for a typed query: matching items, nothing else. */
         const buildSearchSections = async (): Promise<SearchMenuItem[]> => {
             const items: SearchMenuItem[] = [];
+            const seen = new Set<number>();
             for (const result of searchResults) {
-                // A portable library ref that couldn't be resolved on this device
-                // carries library_id 0, which throws synchronously if looked up.
-                if (result.library_id === UNRESOLVED_LIBRARY_ID) {
+                const item = asOffered([result])[0];
+                if (!item || !addable(item) || seen.has(item.id)) {
                     continue;
                 }
-                const item = await Zotero.Items.getByLibraryAndKeyAsync(result.library_id, result.zotero_key);
-                if (!item) {
-                    continue;
-                }
+                seen.add(item.id);
                 items.push(await createSourceMenuItem(item, sourceMenuItemContext, searchQuery));
             }
-            return itemSection('Search Results', items);
+            // The menu lists only the best matches. Say so after the last of
+            // them, so an item that is not listed reads as "narrow the
+            // search" rather than "not in the library".
+            if (items.length > 0 && searchMatchCount > searchResults.length) {
+                items.push(moreMatchesHint(items.length, searchMatchCount));
+            }
+            return itemSection(isSearching ? 'Searching…' : 'Search Results', items);
         };
 
         /**
@@ -123,8 +196,9 @@ export const useSourcesMenu = ({
          * selected the menu falls back to recents, as before.
          */
         const buildDefaultSections = async (): Promise<SearchMenuItem[]> => {
-            const selectedItems = searchableOnly(selectedZoteroItems)
-                .filter((item) => item.isRegularItem() || item.isAttachment() || item.isNote())
+            const selectedItems = asOffered(searchableOnly(selectedZoteroItems)
+                .filter((item) => item.isRegularItem() || item.isAttachment() || item.isNote()))
+                .filter(addable)
                 .filter(notAlreadyAttached)
                 .slice(0, proposedItemsLimit);
             const hasSelection = selectedItems.length > 0;
@@ -143,6 +217,10 @@ export const useSourcesMenu = ({
             let collectionIds: number[] = [];
 
             let hasTagsInLibrary = false;
+            // Read alongside the collections and tags below, not after them.
+            const savedSearchesRead = effectiveLibraryId && onNavigateToSavedSearches
+                ? availableSavedSearches(effectiveLibraryId).then((searches) => searches.length > 0, () => false)
+                : Promise.resolve(false);
 
             if (effectiveLibraryId) {
                 try {
@@ -157,6 +235,7 @@ export const useSourcesMenu = ({
                     hasTagsInLibrary = false;
                 }
             }
+            const hasSavedSearchesInLibrary = await savedSearchesRead;
 
             const canSelectCollections = Boolean(
                 effectiveLibraryId &&
@@ -180,7 +259,7 @@ export const useSourcesMenu = ({
             // below — see the return.
             const filterItems: SearchMenuItem[] = [];
 
-            if (searchableLibraryIds.length > 1) {
+            if (searchableLibraryIds.length > 1 && entries?.libraries !== false) {
                 filterItems.push({
                     label: '"Filter by Library"',
                     onClick: async () => {
@@ -200,7 +279,7 @@ export const useSourcesMenu = ({
             }
 
             filterItems.push({
-                label: '"Filter by Collections"',
+                label: `"${collectionsLabel}"`,
                 onClick: async () => {
                     const latestLibraryIdRaw = getActiveZoteroLibraryId();
                     const latestEffectiveLibraryId = getEffectiveLibraryId(latestLibraryIdRaw);
@@ -215,7 +294,7 @@ export const useSourcesMenu = ({
                         <div className="display-flex flex-col gap-05 min-w-0">
                             <div className="display-flex flex-row gap-2">
                                 <CSSIcon name="collection" className="icon-16 font-color-secondary scale-90" />
-                                <div>Filter by Collections</div>
+                                <div>{collectionsLabel}</div>
                             </div>
                         </div>
                         <div className="flex-1" />
@@ -225,7 +304,7 @@ export const useSourcesMenu = ({
             });
 
             filterItems.push({
-                label: '"Filter by Tags"',
+                label: `"${tagsLabel}"`,
                 onClick: async () => {
                     const latestLibraryIdRaw = getActiveZoteroLibraryId();
                     const latestEffectiveLibraryId = getEffectiveLibraryId(latestLibraryIdRaw);
@@ -243,7 +322,7 @@ export const useSourcesMenu = ({
                                     name="tag"
                                     className="icon-16 font-color-secondary scale-90 icon-tag"
                                 />
-                                <div>Filter by Tags</div>
+                                <div>{tagsLabel}</div>
                             </div>
                         </div>
                         <div className="flex-1" />
@@ -252,7 +331,29 @@ export const useSourcesMenu = ({
                 )
             });
 
-            filterItems.push({
+            if (onNavigateToSavedSearches) filterItems.push({
+                label: `"${savedSearchesLabel}"`,
+                onClick: async () => {
+                    const latestEffectiveLibraryId = getEffectiveLibraryId(getActiveZoteroLibraryId());
+                    if (!latestEffectiveLibraryId) {
+                        return;
+                    }
+                    onNavigateToSavedSearches(latestEffectiveLibraryId);
+                },
+                disabled: !hasSavedSearchesInLibrary,
+                customContent: (
+                    <div className={'display-flex flex-row flex-1 items-start font-color-secondary'}>
+                        <div className="display-flex flex-row gap-2">
+                            <CSSIcon name="search" className="icon-16 font-color-secondary scale-90" />
+                            <div>{savedSearchesLabel}</div>
+                        </div>
+                        <div className="flex-1" />
+                        <Icon icon={ArrowRightIcon} className="scale-12 mt-020" />
+                    </div>
+                )
+            });
+
+            if (entries?.notes !== false) filterItems.push({
                 label: '"Add Note"',
                 onClick: async () => {
                     onNavigateToNotes();
@@ -269,7 +370,7 @@ export const useSourcesMenu = ({
                 )
             });
 
-            filterItems.push({
+            if (entries?.files !== false) filterItems.push({
                 label: '"Add File"',
                 onClick: async () => {
                     onSelectFiles();
@@ -292,11 +393,12 @@ export const useSourcesMenu = ({
                     selectedItems.map((item) => createSourceMenuItem(item, sourceMenuItemContext))
                 ));
             } else {
-                const recentCandidates = [...recentItems, ...recentlyModifiedItems
+                const recentCandidates = asOffered([...recentItems, ...recentlyModifiedItems
                     .map((item) => (item.parentItem ? item.parentItem : item))
                     .filter((item): item is Zotero.Item => Boolean(item))
-                    .filter((item) => item.isRegularItem() || item.isAttachment() || item.isNote())]
+                    .filter((item) => item.isRegularItem() || item.isAttachment() || item.isNote())])
                     .filter((item, index, self) => index === self.findIndex((candidate) => candidate.id === item.id))
+                    .filter(addable)
                     .filter(notAlreadyAttached)
                     .slice(0, proposedItemsLimit);
 
@@ -325,7 +427,10 @@ export const useSourcesMenu = ({
             const sections = searchQuery.trim()
                 ? await buildSearchSections()
                 : await buildDefaultSections();
-            if (!isCancelled) setMenuItems(sections);
+            if (!isCancelled) {
+                setMenuItems(sections);
+                setBuiltFrom(searchResults);
+            }
         };
 
         build();
@@ -337,6 +442,8 @@ export const useSourcesMenu = ({
         isActive,
         searchQuery,
         searchResults,
+        searchMatchCount,
+        isSearching,
         selectedZoteroItems,
         proposedItemsLimit,
         sourceMenuItemContext,
@@ -345,12 +452,17 @@ export const useSourcesMenu = ({
         onNavigateToLibraries,
         onNavigateToCollections,
         onNavigateToTags,
+        onNavigateToSavedSearches,
         onNavigateToNotes,
         onSelectFiles,
         getRecentItems,
         recentItemsLimit,
-        verticalPosition
+        verticalPosition,
+        entries,
+        collectionsLabel,
+        tagsLabel,
+        savedSearchesLabel,
     ]);
 
-    return { menuItems };
+    return { menuItems, isBuilding: builtFrom !== searchResults };
 };

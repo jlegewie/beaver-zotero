@@ -3,17 +3,23 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import { AgentRunStatus, ToolCallPart, isEmptyWriteReturn, isNotFoundWriteReturn, isUnsuccessfulToolReturn } from '@beaver/agent-core/agents/types';
 import { getToolCallStatusFromResult, toolResultAtom } from '@beaver/agent-core/run-state/atoms';
 import { isTableToolName, isTableWriteToolName, tableResultMessages } from '@beaver/agent-core/run-state/tableResults';
-import { getToolCallLabel, type ToolCallLabelEnrich } from '@beaver/agent-core/run-state/toolLabels';
+import { getToolCallLabelParts, type ToolCallLabelEnrich } from '@beaver/agent-core/run-state/toolLabels';
+import { parseArgs } from '@beaver/agent-core/run-state/toolCallRequest';
 import {
+    isExternalReferenceListView,
     isToolResultView,
     getToolResultRenderableCount,
+    searchHasDetails,
+    searchViewInfo,
     type ToolResultView as ToolResultViewModel,
 } from '@beaver/agent-core/run-state/toolResultViews';
+import IconButton from '@beaver/agent-ui/primitives/IconButton';
+import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import { ToolResultView, hasRenderableResult } from './ToolResultView';
-import { TableToolCallView } from './TableToolCallView';
 import { GenericAgentActionView } from './GenericAgentActionView';
+import { TableToolCallView } from './TableToolCallView';
 import { getHost } from '@beaver/agent-ui/host';
-import { getPendingApprovalForToolcallAtom, getAgentActionsByToolcallAtom } from '../../agents/agentActions';
+import { pendingApprovalForToolcallAtom, agentActionsForToolcallAtom } from '../../agents/agentActions';
 import {
     Spinner,
     AlertIcon,
@@ -44,6 +50,9 @@ import {
     TableIcon,
     BookCopyIcon,
     BookSearchIcon,
+    FilterLinesIcon,
+    AuthorIcon,
+    LibraryIcon,
 } from '../icons/icons';
 import { toolExpandedAtom, setToolExpandedAtom } from '../../atoms/messageUIState';
 import { resolveToolCallLabelEnrich } from '../../utils/toolCallLabelEnrich';
@@ -96,7 +105,6 @@ const TOOL_ICONS: Record<string, IconComponent> = {
     // Table tools (the writes render as TableToolCallView; read_table is a plain row)
     create_table: TableIcon,
     read_table: TableIcon,
-    edit_rows: TableIcon,
     edit_table: TableIcon,
     fill_table: TableIcon,
 
@@ -108,6 +116,12 @@ const TOOL_ICONS: Record<string, IconComponent> = {
     lookup_work: GlobalSearchIcon,
     find_related_works: FlowConnectionIcon,
     find_book_chapters: BookSearchIcon,
+    pubmed_search: GlobalSearchIcon,
+    openalex_search_by_topic: GlobalSearchIcon,
+    openalex_search_by_keywords: GlobalSearchIcon,
+    trials_search: GlobalSearchIcon,
+    search_trials: GlobalSearchIcon,
+    get_trial: FileViewIcon,
 
     // Create item tool
     create_zotero_item: DocumentValidationIcon,
@@ -209,15 +223,7 @@ function getToolIcon(part: ToolCallPart): IconComponent {
     
     // Special handling for the file readers - check file type
     if (toolName === 'read_file' || toolName === 'read_documentation') {
-        let args: Record<string, unknown> | undefined;
-        try {
-            args = typeof part.args === 'string'
-                ? JSON.parse(part.args)
-                : (part.args as Record<string, unknown>);
-        } catch {
-            // args may be incomplete while streaming
-        }
-        const path = args?.path as string | undefined;
+        const path = parseArgs(part).path as string | undefined;
         
         if (path) {
             const fileType = detectReadFileType(path);
@@ -227,6 +233,10 @@ function getToolIcon(part: ToolCallPart): IconComponent {
         }
     }
     
+    if (toolName === 'openalex_resolve_names') {
+        return parseArgs(part).kind === 'venue' ? LibraryIcon : AuthorIcon;
+    }
+
     return TOOL_ICONS[toolName] ?? PuzzleIcon;
 }
 
@@ -264,6 +274,10 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
         : result?.part_kind === 'tool-return'
             ? result.metadata?.summary?.result_count ?? null
             : null;
+    // A source search (PubMed, ClinicalTrials.gov) can show what it searched for,
+    // and run the same search on the source's site, from its header.
+    const searchInfo = view && isExternalReferenceListView(view) ? searchViewInfo(view) : null;
+    const hasSearchDetails = !!searchInfo && searchHasDetails(searchInfo);
 
     // Host-resolved request-side display names for the parts the view model does
     // not cover (pending/failed item names, list_* library/collection scope names).
@@ -280,13 +294,15 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
     }, [part.tool_call_id, part.args, view]);
 
     // Check for pending approval for this tool call
-    const getPendingApproval = useAtomValue(getPendingApprovalForToolcallAtom);
-    const pendingApproval = getPendingApproval(part.tool_call_id);
+    const pendingApproval = useAtomValue(
+        useMemo(() => pendingApprovalForToolcallAtom(part.tool_call_id), [part.tool_call_id]),
+    );
     const isAwaitingApproval = pendingApproval !== null;
 
     // Check for agent actions associated with this tool call
-    const getAgentActionsByToolcall = useAtomValue(getAgentActionsByToolcallAtom);
-    const agentActions = getAgentActionsByToolcall(part.tool_call_id);
+    const agentActions = useAtomValue(
+        useMemo(() => agentActionsForToolcallAtom(part.tool_call_id), [part.tool_call_id]),
+    );
     const hasAgentAction = agentActions.length > 0;
 
     // Determine if this tool should use AgentActionView
@@ -341,7 +357,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
         !showAgentActionView &&
         isEmptyWriteReturn(result);
 
-    const label = getToolCallLabel(part, status, {
+    const { main: label, suffix: labelSuffix } = getToolCallLabelParts(part, status, {
         view,
         enrich: labelEnrich,
         noChange: isNoChangeReturn,
@@ -350,12 +366,12 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
 
     // Use global Jotai atom for expansion state (persists across re-renders and syncs between panes)
     const expansionKey = `${runId}:${responseIndex}:${part.tool_call_id}`;
-    const expansionState = useAtomValue(toolExpandedAtom);
+    const storedExpanded = useAtomValue(useMemo(() => toolExpandedAtom(expansionKey), [expansionKey]));
     const setExpanded = useSetAtom(setToolExpandedAtom);
     // A failed table read can still carry recovery status worth opening.
     const hasTableStatus = isTableToolName(part.tool_name) && !!result
-        && tableResultMessages(result.content).length > 0;
-    const isExpanded = expansionState[expansionKey] ?? hasTableStatus;
+        && tableResultMessages(result.content, part.tool_name).length > 0;
+    const isExpanded = storedExpanded ?? hasTableStatus;
     const wasConfirmApprovalRef = useRef(isConfirmApproval);
 
     // When extract/external_search approval resolves, collapse once so the completed result
@@ -381,8 +397,10 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
         // payload. Keep it collapsed so it reads as a failed call, not a result —
         // unless it is a table status the user can act on.
         (!isUnsuccessfulToolReturn(result) || hasTableStatus) &&
-        // If we can compute a count (search-like tools), block expansion for 0 results.
-        (renderableCount === null || renderableCount > 0) &&
+        // If we can compute a count (search-like tools), block expansion for 0
+        // results, unless the search has details: what it ran is most useful
+        // when nothing came back.
+        (renderableCount === null || renderableCount > 0 || hasSearchDetails) &&
         !NON_EXPANDABLE_TOOLS.has(part.tool_name) &&
         // Only a view this client renders is shown; a raw return (unknown tool,
         // missing or unsupported view) stays collapsed.
@@ -394,6 +412,16 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
         !showAgentActionView; // Don't allow expand toggle for agent action tools
 
     const effectiveExpanded = isExpanded && canExpand;
+
+    // The search-details panel: closed by default, open for a search that found
+    // nothing, and reset whenever the card collapses.
+    const [searchDetailsChoice, setSearchDetailsChoice] = useState<boolean | null>(null);
+    useEffect(() => {
+        if (!effectiveExpanded) setSearchDetailsChoice(null);
+    }, [effectiveExpanded]);
+    const searchDetailsOpen = hasSearchDetails && (searchDetailsChoice ?? renderableCount === 0);
+    const searchDetailsId = `search-details-${part.tool_call_id}`;
+    const showSearchActions = effectiveExpanded && hasSearchDetails;
 
     const handleToggleExpanded = () => {
         if (canExpand) {
@@ -419,8 +447,8 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
     const showStreamingPreview = !!streamingArgs && runStatus === 'in_progress'
         && STREAMING_PREVIEW_TOOLS.has(part.tool_name) && !showAgentActionView && !hasError;
 
-    // Table writes are cards like the note actions: the header names the table
-    // and opens it, the body carries the call's summary and recovery notices.
+    // Table writes are timeline lines naming the table, with fill status and
+    // notices; acting on the table belongs to the receipt under the answer.
     if (isTableWriteToolName(part.tool_name)) {
         return (
             <TableToolCallView
@@ -486,14 +514,15 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
             <div
                 className={`
                     display-flex flex-row py-15
-                    ${effectiveExpanded ? 'border-bottom-quinary bg-senary' : ''}
+                    ${effectiveExpanded ? 'bg-senary' : ''}
+                    ${effectiveExpanded && !searchDetailsOpen ? 'border-bottom-quinary' : ''}
                 `}
                 onMouseEnter={() => setIsHovered(true)}
                 onMouseLeave={() => setIsHovered(false)}
             >
                 <button
                     type="button"
-                    className={`variant-ghost-secondary display-flex flex-row py-15 gap-2 w-full text-left min-w-0 ${canExpand ? 'cursor-pointer' : ''}`}
+                    className={`variant-ghost-secondary display-flex flex-row py-15 gap-2 flex-1 text-left min-w-0 ${canExpand ? 'cursor-pointer' : ''}`}
                     style={{ fontSize: '0.95rem', background: 'transparent', border: 0, padding: 0 }}
                     aria-expanded={effectiveExpanded}
                     aria-controls={`tool-result-${part.tool_call_id}`}
@@ -509,18 +538,47 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
                             names/locators get an ellipsis instead of wrapping. Must stay a
                             block (not display-flex) — text-overflow:ellipsis is ignored on
                             flex containers, which clips the text without the "…". */}
-                        <div className={`min-w-0 truncate ${effectiveLabelColor} ${isShimmering ? 'shimmer-text' : ''}`}>
-                            {label}
+                        <div className="display-flex flex-row gap-1 min-w-0">
+                            <div className={`min-w-0 truncate ${effectiveLabelColor} ${isShimmering ? 'shimmer-text' : ''}`}>
+                                {label}
+                            </div>
+                            {/* The count stays whole while the text before it shortens. */}
+                            {labelSuffix && (
+                                <div className={`flex-none ${effectiveLabelColor}`}>{labelSuffix.trim()}</div>
+                            )}
                         </div>
                     </div>
                 </button>
-                <div className="flex-1"/>
+                {/* Siblings of the header button, not children: a control nested
+                    in a native button is neither focusable nor keyboard-activable.
+                    Only an expanded card carries actions; a collapsed read tool
+                    stays a plain line. */}
+                {showSearchActions && (
+                    <div className="display-flex flex-row items-center gap-05 mr-2 flex-none">
+                        <Tooltip content="Search details" showArrow singleLine>
+                            <IconButton
+                                icon={FilterLinesIcon}
+                                variant="ghost-secondary"
+                                iconClassName={`${searchDetailsOpen ? 'font-color-primary' : 'font-color-secondary'} scale-90`}
+                                className="tool-header-toggle"
+                                onClick={() => setSearchDetailsChoice(!searchDetailsOpen)}
+                                ariaLabel="Search details"
+                                ariaExpanded={searchDetailsOpen}
+                                ariaControls={searchDetailsId}
+                                style={{ padding: '3px' }}
+                            />
+                        </Tooltip>
+                    </div>
+                )}
             </div>
 
             {/* Expanded result view */}
             {hasExpandedResult && (
                 <div id={`tool-result-${part.tool_call_id}`}>
-                    <ToolResultView result={result} />
+                    <ToolResultView
+                        result={result}
+                        searchDetails={hasSearchDetails ? { open: searchDetailsOpen, id: searchDetailsId } : undefined}
+                    />
                 </div>
             )}
         </div>

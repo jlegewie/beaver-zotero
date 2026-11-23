@@ -5,8 +5,11 @@
  */
 
 import type { ExternalReference } from '@beaver/agent-core/types/externalReferences';
+import { supplierForExternalId } from '@beaver/agent-core/citations/externalRecords';
+import { externalSourceLabel } from '@beaver/agent-core/citations/externalRecordDisplay';
 import {
     importItemDisplayJson,
+    itemJsonPmid,
     itemJsonDisplay,
     type ImportItemProposedData,
     type ZoteroItemJson,
@@ -25,12 +28,6 @@ const IDENTIFIER_LABEL: Record<string, string> = {
     arxiv: 'arXiv',
     pmid: 'PubMed',
     pmcid: 'PubMed Central',
-};
-
-const PROVIDER_LABEL: Record<string, string> = {
-    openalex: 'OpenAlex',
-    openlibrary: 'Open Library',
-    exa: 'Exa',
 };
 
 const ENRICHMENT_PROVIDER_LABEL: Record<string, string> = {
@@ -62,7 +59,7 @@ export function importSourceBadge(data: ImportItemProposedData | undefined): Sou
     }
     const source = data.source;
     if (source?.kind === 'external' && source.provider) {
-        return { label: `via ${PROVIDER_LABEL[source.provider] ?? source.provider}`, caution: false, tooltip: translatorTip };
+        return { label: `via ${externalSourceLabel(source.provider)}`, caution: false, tooltip: translatorTip };
     }
     const identifierType = source?.identifier?.type ?? data.pending_resolution?.identifier?.type;
     if (identifierType) {
@@ -83,7 +80,7 @@ export function importSourceDetail(data: ImportItemProposedData | undefined): st
     if (identifier) return `${IDENTIFIER_LABEL[identifier.type] ?? identifier.type} ${identifier.value}`;
     if (source?.kind === 'url' && (source.url || data.pending_resolution?.url)) return source.url ?? data.pending_resolution!.url!;
     if (source?.kind === 'external' && source.provider) {
-        const provider = PROVIDER_LABEL[source.provider] ?? source.provider;
+        const provider = externalSourceLabel(source.provider);
         return source.external_id ? `${provider} search result ${source.external_id}` : `${provider} search result`;
     }
     if (data.resolution?.method === 'recognizer') return 'Identified from the attached file';
@@ -121,11 +118,21 @@ export function importActionReference(
     const json = importItemDisplayJson(data);
     const display = json ? itemJsonDisplay(json) : undefined;
     const doi = display?.doi;
+    const sourceId = externalId ?? data.source?.input ?? '';
+    const pmid = itemJsonPmid(json);
+    const fields: Record<string, string> = {};
+    for (const name of ['reportNumber', 'reportType', 'institution']) {
+        const value = json?.[name];
+        if (typeof value === 'string' && value.trim()) fields[name] = value.trim();
+    }
     return {
-        source: 'openalex',
-        source_id: externalId ?? data.source?.input ?? '',
+        source: data.source?.provider ?? supplierForExternalId(sourceId) ?? '',
+        source_id: sourceId,
         title: display?.title,
         authors: creatorNames(json),
+        ...(json?.creators ? { creators: json.creators } : {}),
+        ...(json?.itemType ? { item_type: json.itemType } : {}),
+        ...(Object.keys(fields).length ? { zotero_fields: fields } : {}),
         year: display?.year ? Number(display.year) : undefined,
         venue: display?.venue,
         abstract: display?.abstract,
@@ -133,6 +140,7 @@ export function importActionReference(
         identifiers: {
             ...(doi ? { doi } : {}),
             ...(display?.isbn ? { isbn: display.isbn } : {}),
+            ...(pmid ? { pmid } : {}),
         },
         library_items: [],
     };

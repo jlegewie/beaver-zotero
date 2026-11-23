@@ -14,6 +14,7 @@ import { store } from "../store";
 import {
     sessionAtom,
     authLoadingAtom,
+    sessionRestoreAtom,
     loginLoadingAtom,
     resetLoginFormState,
     isWaitingForProfileAtom,
@@ -43,11 +44,7 @@ import {
 import { agentService } from "@beaver/agent-core/transport/agentService";
 import {
     firstRunNextStepsDismissedAtom,
-    firstRunReturnRequestedAtom,
-    firstRunSuggestionsAtom,
-    firstRunSuggestionsErrorAtom,
-    firstRunSuggestionsLoadingAtom,
-    firstRunSuggestionsModeAtom,
+    firstRunPreviewAtom,
 } from "../atoms/firstRun";
 import { whereToStartVisibleAtom } from "../atoms/whereToStart";
 
@@ -111,11 +108,7 @@ export function attachAccountProjection(runtime: WindowRuntime): void {
             if (!snapshot.authenticating || store.get(sessionAtom))
                 resetLoginFormState(store.set);
             store.set(firstRunNextStepsDismissedAtom, new Set());
-            store.set(firstRunReturnRequestedAtom, false);
-            store.set(firstRunSuggestionsModeAtom, false);
-            store.set(firstRunSuggestionsAtom, null);
-            store.set(firstRunSuggestionsErrorAtom, null);
-            store.set(firstRunSuggestionsLoadingAtom, false);
+            store.set(firstRunPreviewAtom, false);
             store.set(whereToStartVisibleAtom, false);
         }
         generation = snapshot.generation;
@@ -157,6 +150,7 @@ export function attachAccountProjection(runtime: WindowRuntime): void {
         }
         store.set(sessionAtom, snapshot.session);
         store.set(authLoadingAtom, !snapshot.initialized);
+        store.set(sessionRestoreAtom, snapshot.restore);
         store.set(loginLoadingAtom, snapshot.authenticating);
     });
     Zotero.Beaver.runtime.addWindowCleanup(runtime, unsubscribe);

@@ -3,7 +3,7 @@ import { isRunActive } from "@beaver/agent-core/agents/types";
 import { getCredentialGeneration } from "@beaver/agent-core/transport/credentials";
 import { atom, type Getter } from "jotai";
 import { isWSChatPendingAtom } from "../atoms/agentRunAtoms";
-import { accountGenerationAtom } from "../atoms/profile";
+import { accountGenerationAtom, searchableLibraryIdsAtom } from "../atoms/profile";
 import { threadAdmissionAtom, type AdmissionSnapshot } from "./threadAdmission";
 import { threadPresenceAtom } from "./threadProjection";
 import { currentWriter } from "./threadWriter";
@@ -14,21 +14,17 @@ import {
     RESPONSE_FINISH_MESSAGE,
 } from "../../src/services/threads/finishedChat";
 
-import type { TableWindowSurface } from "../atoms/windowSurface";
 import {
     currentThreadIdAtom,
     activeRunAtom,
 } from "@beaver/agent-core/run-state/atoms";
 import {
+    addItemToCurrentMessageItemsAtom,
     composerDraftAtom,
     hasComposerDraftAtom,
 } from "../atoms/messageComposition";
 import { loadThreadAtom, threadNavigationSeqAtom } from "../atoms/threads";
 import { userIdAtom } from "../atoms/auth";
-import {
-    showTableInWindowAtom,
-    showThreadInWindowAtom,
-} from "../atoms/windowSurface";
 import { getHostWindow } from "./windowRuntime";
 import { store } from "../store";
 
@@ -115,18 +111,31 @@ function waitForSurface(win: Window, delay: number): Promise<void> {
     });
 }
 
-/** Commands cross renderer boundaries as persisted ids and plain table data. */
+/** Commands cross renderer boundaries as persisted ids. */
 export const windowCommands = {
-    "show-table": async (request: {
-        surface: Omit<TableWindowSurface, "kind" | "id">;
-    }) => {
-        store.set(showTableInWindowAtom, request.surface);
-        return { ok: true };
+    /**
+     * Opens this window's chat with a stored table attached: "Ask Beaver"
+     * from a table in its own window, which has no chat. A table in an
+     * excluded library opens the chat without it.
+     */
+    "ask-about-table": async (request: { libraryID: number; key: string }) => {
+        const win = getHostWindow();
+        const item = Number.isInteger(request?.libraryID) && request?.key
+            ? await Zotero.Items.getByLibraryAndKeyAsync(request.libraryID, request.key)
+            : false;
+        if (win.closed || win.__beaverRuntime?.status === "closing") return { ok: false, canceled: true };
+        win.focus();
+        // Only the table: the library selection is not part of this question.
+        eventManager.dispatch("toggleChat", { forceOpen: true, skipAutoPopulate: true });
+        // The chat history would cover the chat and its composer.
+        store.set(isThreadListViewAtom, false);
+        const attached = !!item && store.get(searchableLibraryIdsAtom).includes(item.libraryID);
+        if (attached) await store.set(addItemToCurrentMessageItemsAtom, item);
+        // The composer focus handler defers focus until its surface has mounted.
+        win.setTimeout(() => eventManager.dispatch("focusInput", {}), 0);
+        return { ok: true, attached };
     },
-    "show-chat": async () => {
-        store.set(showThreadInWindowAtom);
-        return { ok: true };
-    },
+
     "open-chat": async (request: { threadId: string }) => {
         if (!request.threadId) throw new Error("A persisted chat is required");
         const win = getHostWindow();
@@ -176,9 +185,8 @@ export const windowCommands = {
                 );
 
             win.focus();
-            store.set(showThreadInWindowAtom);
             store.set(isThreadListViewAtom, false);
-            // Let a table surface unmount and reveal the composer before the native prompt.
+            // Let the thread view replace the list and reveal the composer before the native prompt.
             await waitForSurface(win, 0);
             if (!current() || destinationBusy())
                 return { ok: false, canceled: true };

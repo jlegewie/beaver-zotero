@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAtomValue } from 'jotai';
-import { ExternalLinkIcon, FileIcon, Icon, LibraryIcon, PdfIcon } from '../icons';
+import { ArrowUpRightIcon, ExternalLinkIcon, FileIcon, Icon, LibraryIcon, PdfIcon, TableIcon } from '../icons';
 import IconButton from '../primitives/IconButton';
 import {
     CitedSource,
@@ -112,6 +112,8 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                 {validCitations.map((citation, index) => {
                     const isExternal = isExternalCitation(citation);
                     const isExternalFile = isExternalFileCitation(citation);
+                    // A table's cells and rows list as the table.
+                    const table = citation.citation_type === 'table' ? citation.table : undefined;
                     const externalRef = getExternalReference(citation);
                     const mappedZoteroItem = getMappedZoteroItem(citation);
                     const zoteroRef = getZoteroReference(citation);
@@ -163,7 +165,11 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
 
                                     <div className="display-flex flex-1 min-w-0 p-2">
                                         {/* Icon */}
-                                        {iconName && (
+                                        {table ? (
+                                            <span className="mr-2 flex-shrink-0 display-flex items-center font-color-secondary">
+                                                <Icon icon={TableIcon} />
+                                            </span>
+                                        ) : iconName && (
                                             <span className="mr-2 flex-shrink-0" style={{ transform: 'translateY(-2px)' }}>
                                                 {/* The client owns its item-type artwork; the generic
                                                     document glyph is the honest fallback when it has none. */}
@@ -173,7 +179,7 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                                         )}
                                         {/* Author-year heading */}
                                         <span className="truncate">
-                                            {citation.display_name}
+                                            {table ? table.title : citation.display_name}
                                         </span>
                                     </div>
 
@@ -228,7 +234,24 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                                                         disabled={!mappedZoteroItem && !zoteroRef}
                                                     />
                                                 </Tooltip>
-                                                {citation.citation_type !== "note" && (
+                                                {table && zoteroRef && (
+                                                    <Tooltip content="Open table" singleLine>
+                                                        <IconButton
+                                                            icon={ArrowUpRightIcon}
+                                                            variant="ghost-secondary"
+                                                            onClick={(event) => {
+                                                                void getHost().navigation?.openTable?.(
+                                                                    `${zoteroRef.library_ref ?? zoteroRef.library_id}-${zoteroRef.zotero_key}`,
+                                                                    event.currentTarget.ownerDocument.defaultView,
+                                                                );
+                                                            }}
+                                                            ariaLabel="Open table"
+                                                            title="Open table"
+                                                            className="display-flex scale-11"
+                                                        />
+                                                    </Tooltip>
+                                                )}
+                                                {citation.citation_type !== "note" && !table && (
                                                     <Tooltip content="Open PDF" singleLine>
                                                         <IconButton
                                                             icon={PdfIcon}
@@ -254,6 +277,8 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                                                 min-w-0 overflow-hidden text-ellipsis">
                                     {showAsExternal && externalRef
                                         ? formatExternalCitation(externalRef)
+                                        : table
+                                        ? 'Research table'
                                         : stripUrlsFromCitation(citation.formatted_citation)
                                     }
                                 </div>

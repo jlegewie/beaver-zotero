@@ -1,12 +1,48 @@
 import React from "react";
+import type { TableRecordColumn, TableRecordSource } from "@beaver/agent-core/protocol/artifactProtocol";
 import type { TableView } from "@beaver/agent-core/run-state/toolResultViews";
-import { useTableDisplay } from "../../../hooks/useTableDisplay";
+import { tableChangeLines, type TableChangeTone } from "@beaver/agent-core/run-state/tableEditCopy";
+import { ColumnOptionChips, ColumnTypeTag } from "../../tables/columnTypes";
+import { sourceKindIcon } from "../../tables/sourceKinds";
+import { DeleteIcon, EditIcon, Icon, PlusSignIcon } from "../../icons/icons";
+
+/**
+ * A change's mark: additions a green plus, changes an amber pencil, removals
+ * a red bin. The colour stays on the mark; the sentence reads in the text
+ * colours, so a removal is visible without the whole line shouting.
+ */
+const TONE_MARK: Record<TableChangeTone, { icon: React.ComponentType<React.SVGProps<SVGSVGElement>>; className: string; label: string }> = {
+    add: { icon: PlusSignIcon, className: "table-record-mark-add", label: "Added" },
+    change: { icon: EditIcon, className: "table-record-mark-change", label: "Changed" },
+    remove: { icon: DeleteIcon, className: "table-record-mark-remove", label: "Removed" },
+};
+
+/** One change: its mark, what changed, and after it the cells it touched. */
+function ChangeRow({ tone, text }: { tone: TableChangeTone; text: string }) {
+    const mark = TONE_MARK[tone];
+    // The sentence leads; the counts after the first " · " are its effects.
+    const [what, ...effects] = text.split(" · ");
+    return (
+        <div className="table-record-row table-record-change">
+            <span className={`table-record-mark ${mark.className}`} role="img" aria-label={mark.label}>
+                <Icon icon={mark.icon} />
+            </span>
+            <span className="table-record-change-text">
+                <span className="font-color-primary">{what}</span>
+                {effects.length > 0 && <span className="font-color-secondary">{` · ${effects.join(" · ")}`}</span>}
+            </span>
+        </div>
+    );
+}
 
 function plural(count: number, noun: string): string {
     return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }
 
-type SummaryColumn = { system?: boolean; filled?: number };
+/** `answered` in current summaries; `filled` in results recorded before it. */
+type SummaryColumn = { system?: boolean; answered?: number; filled?: number };
+
+type TableRecord = TableView["record"];
 
 /**
  * "3 rows · 2 columns", or null when the record carries no counts.
@@ -37,37 +73,51 @@ export function formatTableCounts(summary: {
 }
 
 /**
- * "2 rows added · 1 column removed" from the record's counter map. Keys are
- * backend-defined `<noun>_<verb>` snake case; the noun is singularized for a
- * count of one so "1 rows added" never appears.
+ * The size line of a record: rows, then the columns the user reads — the
+ * recorded question columns when the record names them, otherwise the content
+ * columns counted from the summary.
  */
+function formatSize(record: TableRecord): string | null {
+    if (!record.columns) return formatTableCounts(record.summary);
+    const parts: string[] = [];
+    if (typeof record.summary.rows === "number") parts.push(plural(record.summary.rows, "row"));
+    parts.push(plural(record.columns.length, "column"));
+    return parts.join(" · ");
+}
+
 /**
- * "33 of 35 cells filled" over the content columns, or null without a
- * per-column summary. The record's own cell counter includes the system
- * columns, so it would not match the rows × columns the card states.
+ * "33 of 35 cells filled" over the content columns, "not filled yet" when
+ * none is, or null without a per-column summary. The record's own cell
+ * counter includes the system columns, so it would not match the rows ×
+ * columns the card states.
  */
-function formatFilledCells(summary: TableView["record"]["summary"]): string | null {
+function formatFilledCells(record: TableRecord): string | null {
+    const { summary } = record;
     if (typeof summary.rows !== "number" || !summary.columns_detail) return null;
-    const visible = Object.values(summary.columns_detail as Record<string, SummaryColumn>).filter(
-        (column) => column && !column.system,
-    );
+    const detail = summary.columns_detail as Record<string, SummaryColumn>;
+    const visible = record.columns
+        ? record.columns.map((column) => detail[column.id] ?? {})
+        : Object.values(detail).filter((column) => column && !column.system);
     if (visible.length === 0) return null;
-    const filled = visible.reduce((sum, column) => sum + (column.filled ?? 0), 0);
+    const filled = visible.reduce((sum, column) => sum + (column.answered ?? column.filled ?? 0), 0);
+    if (filled === 0 && record.columns) return "not filled yet";
     return `${filled} of ${plural(summary.rows * visible.length, "cell")} filled`;
 }
 
-function formatTableChanges(
-    changes: Record<string, number> | undefined,
-    summary: TableView["record"]["summary"],
-): string | null {
+/**
+ * "2 rows added · 1 column removed" from the record's counter map. Keys are
+ * backend-defined `<noun>_<verb>` snake case; the noun is singularized for a
+ * count of one so "1 rows added" never appears. A call that added every row
+ * and column created the table: the size line already says how big it is, so
+ * what it adds is how much of the table is filled.
+ */
+function formatTableChanges(record: TableRecord): string | null {
+    const { changes, summary } = record;
     if (!changes) return null;
-    // A call that added every row and column created the table: the counts
-    // line already says how big it is, and what it adds is how much of the
-    // table the call filled.
     const created =
         changes.rows_added === summary.rows &&
         changes.columns_added === summary.columns;
-    if (created) return formatFilledCells(summary);
+    if (created) return formatFilledCells(record);
     const parts = Object.entries(changes)
         .filter(([, count]) => typeof count === "number" && count > 0)
         .map(([key, count]) => {
@@ -80,53 +130,246 @@ function formatTableChanges(
 }
 
 /**
- * Expanded body of a table tool card: what the call changed and the table's
- * size at that step, then how the table looks now when that differs.
+ * The stage lines of a record that carries stage counts: how much of the
+ * table a partial fill left, the rows that could not be read, the answers
+ * read from the title and abstract only, and the answers that failed. Empty
+ * for records written before stage counts existed.
+ */
+export function formatTableStages(record: TableRecord): string[] {
+    const stages = record.stages;
+    if (!stages) return [];
+    const lines: string[] = [];
+    // Before anything is answered every row remains; the size line says so.
+    if (stages.answered > 0 && stages.remaining_rows > 0)
+        lines.push(`${plural(stages.remaining_rows, "row")} still to fill`);
+    const failedRows = stages.failed_rows ?? 0;
+    if (failedRows > 0) lines.push(`${plural(failedRows, "item")} could not be read`);
+    if (stages.title_abstract_only > 0)
+        lines.push(`${plural(stages.title_abstract_only, "answer")} from title and abstract only`);
+    if (stages.failed > 0) lines.push(`${plural(stages.failed, "cell")} failed`);
+    return lines;
+}
+
+/** Why rows were left unattempted, as the stage card says it. */
+const NOT_STARTED_REASONS: Record<string, string> = {
+    stopped: "the fill was stopped",
+    insufficient_credits: "out of credits",
+    price_changed: "prices changed",
+    account_changed: "the account changed",
+    changed: "they changed while the fill started",
+    unavailable: "Beaver could not reach its server",
+    shutdown: "Zotero was closed",
+    library_excluded: "a library was excluded from Beaver",
+    read_only: "the library became read-only",
+    table_unavailable: "the table is no longer available",
+    // Records of fills that ran inside the chat run.
+    deadline: "the fill ran out of time",
+    credits: "more credits were not approved",
+    cancel: "the run was stopped",
+};
+
+function notStartedReason(reason: string): string {
+    return NOT_STARTED_REASONS[reason] ?? reason;
+}
+
+/** Why cell writes were skipped, as the stage card says it. */
+const SKIP_REASONS: Record<string, string> = {
+    user_cell: "edited by you",
+    question_changed: "question changed during the fill",
+    row_removed: "row removed during the fill",
+    column_removed: "column removed during the fill",
+    column_changed: "column changed during the fill",
+    documents_changed: "document changed during the fill",
+};
+
+/**
+ * What the fill this call started did: rows filled of those planned, rows
+ * failed, rows not started and why, rows without a document or abstract,
+ * answers from title and abstract, and skipped cells. A
+ * fill still running when the call returned says so; its progress is on the
+ * tool call's line. Empty for a call that started no fill.
+ */
+export function formatFillLines(record: TableRecord): string[] {
+    const fill = record.run === "fill" ? record.fill : null;
+    if (!fill) return [];
+    const lines: string[] = [];
+    if (fill.status === "running") {
+        lines.push(`Filling ${plural(fill.rows, "row")} in the background`);
+        return lines;
+    }
+    lines.push(`Filled ${fill.rows_filled} of ${plural(fill.rows, "row")}`);
+    if (fill.rows_failed > 0) lines.push(`${plural(fill.rows_failed, "row")} failed`);
+    for (const [reason, rows] of Object.entries(fill.rows_not_started ?? {})) {
+        if (rows > 0)
+            lines.push(`${plural(rows, "row")} not started: ${notStartedReason(reason)}`);
+    }
+    const unsaved = fill.rows_not_written + (fill.rows_uncertain ?? 0);
+    if (unsaved > 0) lines.push(`${plural(unsaved, "row")} answered but not confirmed saved`);
+    if (fill.rows_without_input > 0)
+        lines.push(`${plural(fill.rows_without_input, "row")} without a document or abstract`);
+    if (fill.from_title_abstract > 0)
+        lines.push(`${plural(fill.from_title_abstract, "answer")} from title and abstract only`);
+    for (const [reason, cells] of Object.entries(fill.skipped ?? {})) {
+        if (cells > 0) lines.push(`${plural(cells, "cell")} skipped: ${SKIP_REASONS[reason] ?? reason}`);
+    }
+    return lines;
+}
+
+/** The name the create card gives a source. */
+function sourceName(source: TableRecordSource): string {
+    if (source.type === "items") return "Selected items";
+    if (source.name) return source.name;
+    return source.kind === "collection" ? "Collection" : source.kind === "tag" ? "Tag" : "Saved search";
+}
+
+/** One source entry: its kind icon, its name, and the rows it added. */
+function SourceRow({ source }: { source: TableRecordSource }) {
+    return (
+        <div className="table-record-row">
+            <div className="display-flex flex-row items-center gap-2 min-w-0">
+                <Icon icon={sourceKindIcon(source.type, source.kind)} className="table-card-source-icon flex-none" />
+                <span className="flex-1 min-w-0 truncate font-medium font-color-primary">
+                    {sourceName(source)}
+                </span>
+                <span className="font-color-secondary flex-none">{plural(source.rows, "row")}</span>
+            </div>
+        </div>
+    );
+}
+
+/** "8/12" when the column has answers, so a partly filled table shows where. */
+function columnProgress(record: TableRecord, column: TableRecordColumn): string | null {
+    const detail = (record.summary.columns_detail as Record<string, SummaryColumn> | undefined)?.[column.id];
+    const answered = detail?.answered ?? detail?.filled ?? 0;
+    const rows = record.summary.rows;
+    return answered > 0 && typeof rows === "number" ? `${answered}/${rows}` : null;
+}
+
+/**
+ * One question column, read like the create card's column summary: the
+ * header with its type tag, the question, and a category column's options.
+ */
+function ColumnRow({ column, progress }: { column: TableRecordColumn; progress: string | null }) {
+    return (
+        <div className="table-record-row">
+            <div className="display-flex flex-row items-center gap-2 min-w-0">
+                <span className="flex-1 min-w-0 truncate font-medium font-color-primary">
+                    {column.header}
+                </span>
+                {progress && <span className="font-color-secondary flex-none">{progress}</span>}
+                <span className="flex-none">
+                    <ColumnTypeTag type={column.type} />
+                </span>
+            </div>
+            {column.description && (
+                <div className="table-card-column-question font-color-secondary" title={column.description}>
+                    {column.description}
+                </div>
+            )}
+            {column.type === "select" && !!column.options?.length && (
+                <ColumnOptionChips options={column.options} />
+            )}
+        </div>
+    );
+}
+
+/**
+ * Expanded body of a table tool card, rendered from the record alone: the
+ * table's description, the sources its rows came from and its question
+ * columns as the call left them, then its size and how much is filled.
  *
- * The historical observation stays as recorded; the current line is the only
- * part that follows the document, so a later rename or edit reads as "now …"
- * rather than rewriting what the call did. The header owns the title and the
- * open affordance.
+ * The record is the call's historical observation, so a later edit to the
+ * table never rewrites what an earlier card says. The header owns the title
+ * and the open affordance. Records written before sources and columns were
+ * recorded show the counts alone.
  */
 export function TableResultView({ view }: { view: TableView }) {
     const { record } = view;
-    const current = useTableDisplay(record.reference.key);
-    const counts = formatTableCounts(record.summary);
-    const changes = formatTableChanges(record.changes, record.summary);
-    // The card's header already names the tool ("Create table"), so a change
-    // line that only restates it is dropped.
-    const change = /^created? (the )?table\.?$/i.test(record.change?.trim() ?? "")
+    // The card's header already names the tool ("Create Table", "Edit
+    // Table"), so a change line that only restates it is dropped.
+    const change = /^(created?|read|edited) (the )?table\.?$/i.test(record.change?.trim() ?? "")
         ? null
         : record.change;
-    const currentDiffers =
-        current?.status === "available" &&
-        (current.title !== record.reference.title ||
-            current.rows !== record.summary.rows ||
-            current.columns !== record.summary.columns);
+    // The sources and columns below already give the table's size: the size
+    // line is for records without them.
+    const showsParts = !!record.sources?.length || !!record.columns?.length;
+    const statusParts = [showsParts ? null : formatSize(record), formatTableChanges(record)].filter(Boolean).join(" · ");
+    const statusLine = statusParts.charAt(0).toUpperCase() + statusParts.slice(1);
+    const fillLines = formatFillLines(record);
+    // A fill's own lines say what it answered from metadata; the table's
+    // stage lines then add what is left and what failed overall.
+    // Each column below shows how many rows it has answered, so a call that
+    // filled nothing does not repeat what is left as a line of its own.
+    const stageLines = formatTableStages(record).filter(
+        (line) =>
+            !(fillLines.length && line.endsWith("from title and abstract only")) &&
+            !(!fillLines.length && record.columns?.length && line.endsWith(" still to fill")),
+    );
+    const sources = record.sources ?? [];
+    const columns = record.columns ?? [];
+    const edits = tableChangeLines(record.edits ?? []);
     return (
-        <div className="display-flex flex-col gap-1 px-3 py-2 text-sm">
-            {change && <div className="font-color-primary">{change}</div>}
-            {(counts || changes) && (
-                <div className="font-color-secondary">
-                    {[counts, changes].filter(Boolean).join(" · ")}
+        <div className="table-record text-sm">
+            {(change || record.description) && (
+                <div className="table-record-section">
+                    {change && <div className="font-color-primary">{change}</div>}
+                    {record.description && (
+                        <div className="font-color-secondary">{record.description}</div>
+                    )}
                 </div>
             )}
-            {currentDiffers && current.status === "available" && (
-                <div className="font-color-secondary">
-                    {`Now ${formatTableCounts(current)}`}
-                    {current.title !== record.reference.title &&
-                        ` · ${current.title}`}
+            {edits.length > 0 && (
+                <div className="table-record-section">
+                    <div className="table-record-label">Changes</div>
+                    <div className="table-record-list">
+                        {edits.map((line, index) => (
+                            <ChangeRow key={index} tone={line.tone} text={line.text} />
+                        ))}
+                    </div>
                 </div>
             )}
-            {current?.status === "unavailable" && (
-                <div role="status" className="font-color-tertiary">
-                    {current.reason}
+            {sources.length > 0 && (
+                <div className="table-record-section">
+                    <div className="table-record-label">Sources</div>
+                    <div className="table-record-list">
+                        {sources.map((source) => (
+                            <SourceRow key={source.id} source={source} />
+                        ))}
+                    </div>
                 </div>
             )}
-            {record.saved === false && (
-                <div role="status" className="font-color-secondary">
-                    Changes are committed. Local bookkeeping needs repair; use
-                    Check / repair table in the item pane.
+            {columns.length > 0 && (
+                <div className="table-record-section">
+                    <div className="table-record-label">Columns</div>
+                    <div className="table-record-list">
+                        {columns.map((column) => (
+                            <ColumnRow
+                                key={column.id}
+                                column={column}
+                                progress={columnProgress(record, column)}
+                            />
+                        ))}
+                    </div>
+                </div>
+            )}
+            {fillLines.length > 0 && (
+                <div className="table-record-section">
+                    <div className="table-record-label">Fill</div>
+                    {fillLines.map((line, index) => (
+                        <div key={line} className={index === 0 ? "font-color-primary" : "font-color-secondary"}>
+                            {line}
+                        </div>
+                    ))}
+                </div>
+            )}
+            {(statusLine || stageLines.length > 0) && (
+                <div className="table-record-section">
+                    {statusLine && <div className="font-color-primary">{statusLine}</div>}
+                    {stageLines.map((line) => (
+                        <div key={line} className="font-color-secondary">
+                            {line}
+                        </div>
+                    ))}
                 </div>
             )}
         </div>

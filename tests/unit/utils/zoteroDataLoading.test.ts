@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
     ensureLibraryItemsLoaded,
+    getAnnotationIDs,
     getParentItemAsync,
     hasUnloadedDisplayData,
     isInTrashAsync,
@@ -194,5 +195,63 @@ describe('hasUnloadedDisplayData / loadItemDisplayData', () => {
         (globalThis as any).Zotero.Items.loadDataTypes.mockRejectedValue(new Error('database locked'));
 
         await expect(loadItemDisplayData([makeItem()])).resolves.toBeUndefined();
+    });
+});
+
+describe('getAnnotationIDs', () => {
+    let library: { getDataLoaded: ReturnType<typeof vi.fn>; waitForDataLoad: ReturnType<typeof vi.fn> };
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        library = { getDataLoaded: vi.fn(() => false), waitForDataLoad: vi.fn().mockResolvedValue(undefined) };
+        (globalThis as any).Zotero.Libraries = {
+            exists: vi.fn(() => true),
+            get: vi.fn(() => library),
+        };
+    });
+
+    it('returns a copy of the ID list on Zotero versions that honor asIDs', async () => {
+        const cached = [101, 102];
+        const attachment = { libraryID: 1, getAnnotations: vi.fn(() => cached) } as any;
+
+        const ids = await getAnnotationIDs(attachment, true);
+
+        expect(ids).toEqual([101, 102]);
+        expect(ids).not.toBe(cached);
+        expect(attachment.getAnnotations).toHaveBeenCalledWith(true, true);
+    });
+
+    it('maps items to IDs on Zotero versions that ignore asIDs', async () => {
+        const attachment = {
+            libraryID: 1,
+            getAnnotations: vi.fn(() => [{ id: 101 }, { id: 102 }]),
+        } as any;
+
+        expect(await getAnnotationIDs(attachment)).toEqual([101, 102]);
+    });
+
+    it('loads the library and retries when the item form finds annotations unloaded', async () => {
+        let loaded = false;
+        library.waitForDataLoad.mockImplementation(async () => { loaded = true; });
+        const attachment = {
+            libraryID: 5,
+            getAnnotations: vi.fn(() => {
+                if (!loaded) throw unloadedDataError('Item 101 not yet loaded');
+                return [{ id: 101 }];
+            }),
+        } as any;
+
+        expect(await getAnnotationIDs(attachment)).toEqual([101]);
+        expect(library.waitForDataLoad).toHaveBeenCalledWith('item');
+    });
+
+    it('rethrows unrelated errors', async () => {
+        const attachment = {
+            libraryID: 1,
+            getAnnotations: vi.fn(() => { throw new Error('not a file attachment'); }),
+        } as any;
+
+        await expect(getAnnotationIDs(attachment)).rejects.toThrow('not a file attachment');
+        expect(library.waitForDataLoad).not.toHaveBeenCalled();
     });
 });

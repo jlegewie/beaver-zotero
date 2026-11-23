@@ -3,10 +3,11 @@
  * from the UI (post-run apply / undo).
  *
  * Design:
- *  - `executeManageCollectionsAction` re-snapshots the pre-apply state at
- *    execute time (collection name, parent) and returns it in
- *    ManageCollectionsResultData. This snapshot is what rename/move undo
- *    consume. A re-apply after manual library edits overwrites it.
+ *  - `executeManageCollectionsAction` runs the shared executor
+ *    (`applyManageCollections`), refusing the write when the collection
+ *    changed since the proposal. The executor re-snapshots the pre-apply
+ *    state (collection name, parent) into ManageCollectionsResultData; that
+ *    snapshot is what rename/move undo consume.
  *  - Delete uses Zotero's soft delete (`collection.deleted = true; saveTx()`).
  *    This keeps the key stable, and `collectionItems` rows are preserved.
  *    Undo is a one-line restore-from-trash.
@@ -25,96 +26,54 @@
  *     `deleted` property to detect trash state.
  */
 import { readCollectionActionData } from '@beaver/agent-core/identity/collectionActionData';
-import { CollectionResolutionError, formatCollectionId } from '../collections/collectionIdentity';
-import { assertLibraryWritable, recheckCollectionForUndo, recheckCollectionIfPresent, recheckCollectionParent } from '../collections/collectionMutations';
+import { assertLibraryWritable, recheckCollectionForUndo, recheckCollectionParent } from '../collections/collectionMutations';
 import { AgentAction, ManageCollectionsAgentAction } from '@beaver/agent-core/agents/agentActionTypes';
 import { logger } from '@beaver/agent-core/platform/logger';
 import type { ManageCollectionsProposedData, ManageCollectionsResultData } from '@beaver/agent-core/types/agentActions/base';
-import { libraryRefForLibraryID, resolveWriteTargetLibrary } from '../../utils/libraryIdentity';
+import { resolveWriteTargetLibrary } from '../../utils/libraryIdentity';
+import { unboundedExecutionContext } from '../agentDataProvider/actions/actionExecution';
+import { applyManageCollections } from '../agentDataProvider/actions/manageCollections';
+import { itemCountPhrase, joinList, ManualApplyOptions, staleProposalError } from './staleProposal';
 
-export async function executeManageCollectionsAction(
-    action: AgentAction
-): Promise<ManageCollectionsResultData> {
-    const raw = action.proposed_data;
-    const data = readCollectionActionData(raw) as ManageCollectionsProposedData;
-    const { action: op, collection_key, new_name, new_parent_key, library_id, library_ref } = data;
-    // A destructive write must carry an explicit target. Reject a
-    // stale/malformed action (e.g. library_id: 0 with no library_ref) instead
-    // of letting resolveWriteTargetLibrary fall back to its personal-library
-    // default, which could rename/move/delete a same-key collection in the
-    // wrong library. Mirrors the backend execute guard.
-    if ((!library_id || typeof library_id !== 'number') && !library_ref) {
-        throw new Error('manage_collections action is missing a target library');
+/**
+ * Throw `stale_proposal` when the collection changed since the proposal
+ * (`proposed_data.baseline`): its name, its parent, or (delete) the number of
+ * items in it. A proposal without a baseline is not checked. A null
+ * `parent_key` means top-level, unless nothing else was recorded either.
+ */
+function assertCollectionUnchanged(data: ManageCollectionsProposedData, collection: Zotero.Collection): void {
+    const baseline = data.baseline;
+    if (!baseline) return;
+    const hasName = typeof baseline.name === 'string';
+    const hasItemCount = typeof baseline.item_count === 'number';
+    if (!hasName && !hasItemCount && baseline.parent_key == null) return;
+    const label = hasName ? baseline.name : collection.name;
+    const changes: string[] = [];
+    if (hasName && collection.name !== baseline.name) {
+        changes.push(`was renamed to '${collection.name}'`);
     }
-    // Writes resolve strictly (a present-but-invalid library_ref fails rather
-    // than falling back to a stale device-local library_id); legacy data with
-    // no library_ref still falls back to library_id.
-    const resolution = resolveWriteTargetLibrary(data);
-    if (!resolution.ok) throw new Error(resolution.message);
-    const resolvedLibraryID = resolution.libraryID;
-
-    // Keep the typed code, but restate the message: the resolver's text is
-    // model-facing recovery guidance, and this one is read on an apply card.
-    const lookup = recheckCollectionIfPresent(collection_key, resolvedLibraryID);
-    if (!lookup) throw new CollectionResolutionError('collection_not_found', `Collection not found: ${collection_key}`);
-    const collection = lookup.collection;
-
-    // Snapshot the authoritative pre-apply state RIGHT BEFORE the op.
-    const oldName: string = collection.name;
-    const oldParentKey: string | null = collection.parentKey ? String(collection.parentKey) : null;
-    let itemsAffected: number | null = null;
-    if (op === 'delete') {
-        // Mirror the validator: refuse delete when subcollections exist. With
-        // soft-delete the subtree would cascade into trash, but each descendant
-        // would have its own `deletedCollections` row — restoring only the
-        // parent wouldn't bring them back. Force the agent to walk leaves first.
-        if (collection.hasChildCollections(false)) {
-            const subs: any[] = collection.getChildCollections(false, false);
-            const list = subs
-                .map((c: any) => {
-                    const items = (c.getChildItems(true, false) as number[]).length;
-                    return `  - '${c.name}' (key=${c.key}, ${items} item${items === 1 ? '' : 's'})`;
-                })
-                .join('\n');
-            throw new Error(
-                `Cannot delete collection '${oldName}' because it contains ${subs.length} subcollection${subs.length === 1 ? '' : 's'}. Delete or move each subcollection first:\n${list}`
-            );
+    const parentKey = collection.parentKey ? String(collection.parentKey) : null;
+    if (parentKey !== (baseline.parent_key ?? null)) {
+        changes.push('was moved');
+    }
+    if (hasItemCount) {
+        const count = (collection.getChildItems(true, false) as number[]).length;
+        if (count !== baseline.item_count) {
+            changes.push(`now has ${itemCountPhrase(count)}, not ${baseline.item_count}`);
         }
-        itemsAffected = (collection.getChildItems(true, false) as number[]).length;
     }
-
-    if (op === 'rename') {
-        const target = (new_name ?? '').trim();
-        if (!target) throw new Error('new_name required for rename');
-        collection.name = target;
-        await collection.saveTx();
-        logger(`executeManageCollectionsAction: Renamed collection ${resolvedLibraryID}-${collection_key}`, 1);
-    } else if (op === 'move') {
-        (collection as any).parentKey = recheckCollectionParent(collection, new_parent_key) || false;
-        await collection.saveTx();
-        logger(`executeManageCollectionsAction: Moved collection ${resolvedLibraryID}-${collection_key}`, 1);
-    } else if (op === 'delete') {
-        (collection as any).deleted = true;
-        await collection.saveTx();
-        logger(`executeManageCollectionsAction: Trashed collection ${resolvedLibraryID}-${collection_key}`, 1);
-    } else {
-        throw new Error(`Unsupported manage_collections action: ${op}`);
+    if (changes.length > 0) {
+        throw staleProposalError(`The collection '${label}' changed after this was proposed: it ${joinList(changes)}.`);
     }
-
-    return {
-        library_id: resolvedLibraryID,
-        library_ref: libraryRefForLibraryID(resolvedLibraryID) ?? undefined,
-        action: op,
-        collection_key: collection.key,
-        collection_id: lookup.collectionId,
-        new_name: new_name ?? null,
-        new_parent_key: new_parent_key ? collection.parentKey || null : null,
-        new_parent_collection_id: new_parent_key && collection.parentKey ? formatCollectionId(resolvedLibraryID, collection.parentKey) : null,
-        items_affected: itemsAffected,
-        old_name: oldName,
-        old_parent_collection_id: oldParentKey ? formatCollectionId(resolvedLibraryID, oldParentKey) : null,
-        old_parent_key: oldParentKey,
-    };
+}
+export async function executeManageCollectionsAction(
+    action: AgentAction,
+    options: ManualApplyOptions = {},
+): Promise<ManageCollectionsResultData> {
+    const data = readCollectionActionData(action.proposed_data) as ManageCollectionsProposedData;
+    return applyManageCollections(action.proposed_data, unboundedExecutionContext(), {
+        assertUnchanged: options.skipStaleCheck ? undefined : (collection) => assertCollectionUnchanged(data, collection),
+    });
 }
 
 /**

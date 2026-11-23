@@ -82,7 +82,7 @@ function makeWindow(closeAgentConnection: unknown = vi.fn()) {
         addEventListener: vi.fn(),
         removeEventListener: vi.fn(),
         closed: false,
-        document: { getElementById: vi.fn().mockReturnValue(null) },
+        document: { getElementById: vi.fn().mockReturnValue(null), querySelector: vi.fn().mockReturnValue(null) },
         BeaverReact: { closeAgentConnection },
     } as unknown as Window & Record<string, any>;
     (globalThis as any).addon.runtime.attachWindow(win);
@@ -121,8 +121,10 @@ function setupGlobals({ appShuttingDown }: { appShuttingDown: boolean }) {
         runtime: new BeaverInstance(),
         mutations: { cancelOwner: vi.fn(), dispose: vi.fn().mockResolvedValue(undefined) },
         itemImport: { dispose: vi.fn() },
+        images: { dispose: vi.fn() },
         notePreviews: { detachOwner: vi.fn().mockResolvedValue(undefined) },
         syncPause: { releaseWindow: vi.fn(), scheduleResumeAfterRun: vi.fn(), resumeSyncNow: vi.fn() },
+        transactionWatch: { start: vi.fn(), stop: vi.fn(), openAgeMs: vi.fn(() => 0) },
         data: {
             alive: true,
             config: {
@@ -208,6 +210,36 @@ describe('closing the agent connection on window unload', () => {
         vi.mocked(Zotero.getMainWindows).mockReturnValue([win]);
 
         await hooks.onMainWindowUnload(win);
+
+        expect(close).toHaveBeenCalledExactlyOnceWith('Main window closed', {
+            rememberInterruptedThread: true,
+        });
+    });
+
+    it("keeps a window open after its last Zotero 11 library view closes", async () => {
+        setupGlobals({ appShuttingDown: false });
+        const hooks = await loadHooks();
+        const close = vi.fn();
+        const win = makeWindow(close);
+        // Zotero 11 reports the unload while the window's readers stay open.
+        win.ZoteroPane = { libraryViews: [] };
+        vi.mocked(Zotero.getMainWindows).mockReturnValue([win]);
+
+        await hooks.onMainWindowUnload(win);
+
+        expect(close).not.toHaveBeenCalled();
+        expect((globalThis as any).addon.runtime.getWindow(win)).toBeDefined();
+    });
+
+    it("cleans up when a window without library views itself unloads", async () => {
+        setupGlobals({ appShuttingDown: false });
+        const hooks = await loadHooks();
+        const close = vi.fn();
+        const win = makeWindow(close);
+        win.ZoteroPane = { libraryViews: [] };
+        vi.mocked(Zotero.getMainWindows).mockReturnValue([win]);
+
+        await hooks.onMainWindowUnload(win, { windowUnloading: true });
 
         expect(close).toHaveBeenCalledExactlyOnceWith('Main window closed', {
             rememberInterruptedThread: true,
@@ -382,5 +414,66 @@ describe('late application shutdown', () => {
         expect(closeDatabase).toHaveBeenCalledOnce();
         expect(instance.db.closeDatabase).toBe(closeDatabase);
         expect(dispose).toHaveBeenCalledOnce();
+    });
+});
+
+describe('quitting with several windows', () => {
+    beforeEach(() => {
+        vi.resetModules();
+        vi.clearAllMocks();
+        mockDisposeMuPDFWorker.mockResolvedValue(undefined);
+        setupGlobals({ appShuttingDown: true });
+    });
+
+    it('runs the app-wide cleanup once when every window reads as closed', async () => {
+        const hooks = await loadHooks();
+        const instance = (globalThis as any).addon;
+        const closeDatabase = vi.fn().mockResolvedValue(undefined);
+        instance.db = { closeDatabase };
+        const disposeRuntime = vi.spyOn(instance.runtime, 'disposeInstance');
+        const first = makeWindow();
+        const second = makeWindow();
+        // During a quit the other windows already read as closed, so each
+        // unload takes itself for the last window.
+        (first as any).closed = true;
+        (second as any).closed = true;
+        vi.mocked(Zotero.getMainWindows).mockReturnValue([first, second]);
+
+        await hooks.onMainWindowUnload(first);
+        // The registry is still live for the window that has yet to unload.
+        expect(closeDatabase).not.toHaveBeenCalled();
+        expect(disposeRuntime).not.toHaveBeenCalled();
+        await hooks.onMainWindowUnload(second);
+
+        expect(closeDatabase).toHaveBeenCalledOnce();
+        expect(disposeRuntime).toHaveBeenCalledOnce();
+        expect(mockUnregisterShortcuts).toHaveBeenCalledOnce();
+        // Each window still tears down its own UI and closes its own socket.
+        expect(mockRemoveChatPanel).toHaveBeenCalledWith(first);
+        expect(mockRemoveChatPanel).toHaveBeenCalledWith(second);
+        expect(first.BeaverReact.closeAgentConnection).toHaveBeenCalledOnce();
+        expect(second.BeaverReact.closeAgentConnection).toHaveBeenCalledOnce();
+    });
+
+    it('shares the database close between overlapping shutdown paths', async () => {
+        const hooks = await loadHooks();
+        const instance = (globalThis as any).addon;
+        let finishClose!: () => void;
+        const closeDatabase = vi.fn(() => new Promise<void>(resolve => { finishClose = resolve; }));
+        instance.db = { closeDatabase };
+        const win = makeWindow();
+        vi.mocked(Zotero.getMainWindows).mockReturnValue([win]);
+
+        const unload = hooks.onMainWindowUnload(win);
+        await vi.waitFor(() => expect(closeDatabase).toHaveBeenCalledOnce());
+        // APP_SHUTDOWN arrives while the window's cleanup is still closing it.
+        const appShutdown = hooks.onAppShutdown();
+        // Let APP_SHUTDOWN reach its own database step before the close settles.
+        await new Promise(resolve => setTimeout(resolve, 20));
+        finishClose();
+        await Promise.all([unload, appShutdown]);
+
+        expect(closeDatabase).toHaveBeenCalledOnce();
+        expect(instance.db).toBeUndefined();
     });
 });

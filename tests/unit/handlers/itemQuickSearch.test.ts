@@ -71,8 +71,9 @@ vi.mock('../../../src/services/librarySearch/quickSearch', () => ({
     quickSearchItems: mocks.quickSearchItems,
 }));
 
-vi.mock('../../../src/services/librarySearch/ranking', () => ({
+vi.mock('../../../src/services/librarySearch/ranking', async () => ({
     scoreSearchResult: mocks.scoreSearchResult,
+    compareRankedResults: (await vi.importActual<any>('../../../src/services/librarySearch/ranking')).compareRankedResults,
 }));
 
 vi.mock('../../../src/services/agentDataProvider/utils', () => ({

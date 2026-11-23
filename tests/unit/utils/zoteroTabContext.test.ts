@@ -85,6 +85,20 @@ describe('getReaderOrNoteContextItem', () => {
         },
     );
 
+    it('resolves a Beaver table tab to its table, as a reader stands for its file', () => {
+        const table = createMockItem({ id: 7, key: 'TABLE777', libraryID: 1 });
+        (globalThis as any).Zotero.getMainWindow = vi.fn(() => ({
+            Zotero_Tabs: { _tabs: [{ id: 'tab-4', type: 'beaver-table', data: { itemID: 7 } }] },
+        }));
+        (globalThis as any).Zotero.Items.get = vi.fn((id: number) => (id === 7 ? table : null));
+
+        expect(getReaderOrNoteContextItem('tab-4')).toMatchObject({
+            item: table,
+            keys: ['TABLE777'],
+            source: 'reader',
+        });
+    });
+
     it('returns null when the tab is neither a reader nor a note tab', () => {
         (globalThis as any).Zotero.getMainWindow = vi.fn(() => ({
             Zotero_Tabs: { _tabs: [{ id: 'tab-3', type: 'library', data: {} }] },

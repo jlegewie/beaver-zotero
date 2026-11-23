@@ -143,6 +143,13 @@ export function renderToMarkdown(
             return page ? ` (${name}, p. ${page})` : ` (${name})`;
         }
 
+        // 2c. A table's cell or row: the row's paper, as the chip shows it.
+        // The table item is not a source to list.
+        if (ref.loc?.kind === 'cell' || ref.loc?.kind === 'row') {
+            const label = citationByKey[requestedCitationKey(ref)]?.display_name;
+            return label ? ` (${label})` : '';
+        }
+
         // 3. Zotero item ---------------------------------------------------
         if (ref.kind !== 'zotero') {
             // Unknown/future ref kind (e.g. another connected app's resource):

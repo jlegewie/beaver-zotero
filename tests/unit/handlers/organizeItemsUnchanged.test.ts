@@ -230,7 +230,7 @@ describe('executeOrganizeItemsAction unchanged_items', () => {
                 : null);
         await expect(executeOrganizeItemsAction(buildRequest({
             item_ids: ['1-AAAAAAAA'], tags: { add: ['new'] }, collections: { add: [COLLECTION_KEY] },
-        }), timeoutCtx())).rejects.toMatchObject({ code: 'collection_not_found' });
+        }), timeoutCtx())).resolves.toMatchObject({ success: false, error_code: 'collection_not_found' });
         expect(items.AAAAAAAA.save).not.toHaveBeenCalled();
         expect(items.AAAAAAAA.state.tags).toEqual([]);
     });
@@ -246,7 +246,7 @@ describe('executeOrganizeItemsAction unchanged_items', () => {
                 collections: { add: [COLLECTION_KEY, 'DELETED12'] },
             }),
             timeoutCtx()
-        )).rejects.toMatchObject({ code: 'collection_not_found' });
+        )).resolves.toMatchObject({ success: false, error_code: 'collection_not_found' });
 
         expect(items.AAAAAAAA.save).not.toHaveBeenCalled();
     });

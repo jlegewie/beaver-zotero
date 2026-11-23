@@ -26,6 +26,12 @@ it('passes A to native reader and note opening while B is active', async () => {
     expect((Zotero as any).Notes.open).toHaveBeenCalledWith(17, undefined, { window: a });
     expect(b.focus).not.toHaveBeenCalled();
 });
+it('raises the reader window it opens or reuses', async () => {
+    const readerWindow = { focus: vi.fn() };
+    vi.mocked(Zotero.Reader.open).mockResolvedValue({ itemID: 42, _window: readerWindow } as any);
+    await openReader(42, { pageIndex: 3 }, { openInWindow: true, allowDuplicate: true }, a);
+    expect(readerWindow.focus).toHaveBeenCalledOnce();
+});
 it('uses the local copy of a PDF under legacy global duplicate detection', async () => {
     delete a.Zotero_Tabs.isOwnTabEvent;
     a.Zotero_Tabs._tabs = [{ id: 'local', data: { itemID: 42 } }];

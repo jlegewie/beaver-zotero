@@ -2,8 +2,8 @@ import { ToolCallStatus } from './atoms';
 import { ToolCallPart } from '../agents/types';
 import { getToolBaseLabel, parseArgs } from './toolCallRequest';
 import { textAnnotationStyle } from '../types/agentActions/createAnnotations';
-import { isExternalReferenceListView, isItemRow, type ToolResultView } from './toolResultViews';
-import { extractAuthorLastName, type ExternalReference } from '../types/externalReferences';
+import { isExternalReferenceListView, isItemRow, openAlexFilterName, relatedWorksViewInfo, searchViewInfo, type ToolResultView } from './toolResultViews';
+import { authorLastNames, type ExternalReference } from '../types/externalReferences';
 import { LISTABLE_SPECIAL_COLLECTION_NAMES } from '../protocol/agentProtocol';
 
 // The request-side reference extraction lives in `toolCallRequest`; re-exported
@@ -47,6 +47,9 @@ const CAPABILITY_LABELS: Record<string, string> = {
     external_literature: 'External Literature',
     beaver_help: 'Beaver Help',
     citation_graph: 'Citation Graph',
+    openalex: 'Literature Search',
+    pubmed_search: 'PubMed Search',
+    clinical_trials: 'Clinical Trials',
 };
 
 function humanizeCapabilityId(id: string): string {
@@ -164,7 +167,7 @@ export function getToolResultLabelSuffix(
             return n ? ` (${plural(n, 'annotation')})` : null;
         }
         case 'external_reference_list': {
-            if (toolName === 'lookup_work') {
+            if (toolName === 'lookup_work' || toolName === 'get_trial') {
                 const n = view.found_count ?? view.references.length;
                 return n != null ? ` (${n} found)` : null;
             }
@@ -172,16 +175,22 @@ export function getToolResultLabelSuffix(
                 const n = view.found_count ?? view.references.length;
                 return n ? ` (${plural(n, 'chapter')})` : null;
             }
-            // find_related_works: the page is a window into a larger set.
-            if (view.tool_info) {
-                const shown = view.references.length;
-                const total = view.tool_info.total_count;
-                // Empty pages (not_found, page beyond the end) get no count.
-                if (!total || !shown) return null;
-                return total > shown ? ` (${shown} of ${total})` : ` (${plural(total, 'result')})`;
+            // find_related_works and source searches: the page is a window
+            // into a larger set. Empty pages (not_found, page beyond the end)
+            // get no count; a reranked list (OpenAlex topic search) has no total.
+            const shown = view.references.length;
+            if (!shown) return null;
+            const total = (relatedWorksViewInfo(view) ?? searchViewInfo(view))?.total_count || shown;
+            return total > shown ? ` (${shown} of ${total})` : ` (${plural(total, 'result')})`;
+        }
+        case 'openalex_names': {
+            const results = view.results;
+            if (results.length === 1) {
+                const n = results[0].candidates?.length ?? 0;
+                return n ? ` (${plural(n, 'candidate')})` : ' (not found)';
             }
-            const n = view.references.length;
-            return n ? ` (${plural(n, 'result')})` : null;
+            const found = results.filter((result) => (result.candidates?.length ?? 0) > 0).length;
+            return results.length ? ` (${found} of ${results.length} found)` : null;
         }
         case 'batch_operation': {
             // A batch that has ended says how; one still running says how big
@@ -295,11 +304,110 @@ function skillNameFromPath(path: string): string {
  */
 /** Compact citation-style label for a work: "Vaswani et al. 2017". */
 function relatedWorkShortLabel(work: ExternalReference): string {
-    const first = work.authors?.[0] ? extractAuthorLastName(work.authors[0]) : undefined;
-    const name = first ? ((work.authors?.length ?? 0) > 1 ? `${first} et al.` : first) : null;
+    const lastNames = authorLastNames(work);
+    const first = lastNames[0];
+    const name = first ? (lastNames.length > 1 ? `${first} et al.` : first) : null;
     if (name) return work.year ? `${name} ${work.year}` : name;
     if (work.title) return truncate(work.title, 40);
     return 'work';
+}
+
+/**
+ * Search tools whose in-progress label comes from their arguments: their
+ * progress line repeats the source and the query.
+ */
+const ARG_LABELED_SEARCH_TOOLS = new Set([
+    'openalex_search_by_topic',
+    'openalex_search_by_keywords',
+    'openalex_resolve_names',
+    'pubmed_search',
+    'trials_search',
+]);
+
+/** Search tools whose calls in older threads carry a model-written `search_label`. */
+const LEGACY_SEARCH_LABEL_TOOLS = new Set(['external_search', 'pubmed_search', 'search_trials']);
+
+/**
+ * The progress label the model wrote for a search in threads from before
+ * search tools dropped `search_label`; null for every other tool. Current
+ * tools are labelled from their query.
+ */
+function legacySearchLabel(toolName: string, args: Record<string, unknown>): string | null {
+    const label = LEGACY_SEARCH_LABEL_TOOLS.has(toolName) ? args.search_label : null;
+    return typeof label === 'string' && label.trim() ? label.trim() : null;
+}
+
+/**
+ * Label for an OpenAlex keyword search without a query, which lists works by
+ * its filters: "Works by Katrin Wisniewski in Nature, 2020–2024". Names come
+ * from the completed view, which resolves the ids; until then (or when the
+ * call failed) the label shows the arguments: names, or ids (`author_ids` /
+ * `venue_ids` in older calls).
+ */
+function openAlexListingLabel(args: Record<string, unknown>, view: ToolResultView | null): string | null {
+    const info = view && isExternalReferenceListView(view) ? searchViewInfo(view) : null;
+    const filters = info?.filters ?? null;
+    const entities = (resolved: unknown, ids: unknown): string | null => {
+        const names = (Array.isArray(resolved) ? resolved : normalizeListParam(ids) ?? [])
+            .map(openAlexFilterName)
+            .filter((name): name is string => !!name);
+        return names.length ? names.join(', ') : null;
+    };
+    const authors = entities(filters?.authors, args.authors ?? args.author_ids);
+    const venues = entities(filters?.venues, args.venues ?? args.venue_ids);
+    const minYear = typeof args.min_year === 'number' ? args.min_year : null;
+    const maxYear = typeof args.max_year === 'number' ? args.max_year : null;
+    const years = minYear !== null && maxYear !== null
+        ? (minYear === maxYear ? String(minYear) : `${minYear}–${maxYear}`)
+        : minYear !== null ? `since ${minYear}` : maxYear !== null ? `until ${maxYear}` : null;
+    const other = [
+        ...(normalizeListParam(args.work_types) ?? []),
+        typeof args.language === 'string' && args.language.trim() ? args.language.trim().toLowerCase() : null,
+        args.open_access_only === true ? 'open access' : null,
+    ].filter(Boolean);
+    if (!authors && !venues && !years && !other.length) return null;
+    let label = 'Works';
+    if (authors) label += ` by ${authors}`;
+    if (venues) label += ` in ${venues}`;
+    if (years) label += authors || venues ? `, ${years}` : ` ${years}`;
+    if (other.length) label += ` (${other.join(', ')})`;
+    return label;
+}
+
+const TRIAL_TERM_KEYS = ['query', 'condition', 'intervention', 'sponsor', 'location'] as const;
+
+function resolveNamesArg(args: Record<string, unknown>): string[] {
+    return (normalizeListParam(args.names) ?? []).map((name) => name.trim()).filter(Boolean);
+}
+
+/**
+ * The full search a database search or name lookup ran, as its label shows
+ * it before truncation: an old thread's `search_label`, else the query (trial
+ * searches join their terms with " · "), a filter-only OpenAlex listing
+ * ("Works by …"), or a lookup's names. Null for every other tool. Copied
+ * text uses it whole where the label is cut.
+ */
+export function toolCallSearchText(part: ToolCallPart, view?: ToolResultView | null): string | null {
+    const args = parseArgs(part);
+    const toolName = part.tool_name;
+    const legacy = legacySearchLabel(toolName, args);
+    if (legacy) return legacy;
+    const text = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
+    switch (toolName) {
+        case 'search_trials':
+        case 'trials_search':
+            return TRIAL_TERM_KEYS.map((key) => text(args[key])).filter(Boolean).join(' · ') || null;
+        case 'pubmed_search':
+        case 'external_search':
+            return text(args.query) || null;
+        case 'openalex_search_by_topic':
+        case 'openalex_search_by_keywords':
+            return text(args.query) || openAlexListingLabel(args, view ?? null);
+        case 'openalex_resolve_names':
+            return resolveNamesArg(args).join(', ') || null;
+        default:
+            return null;
+    }
 }
 
 function truncate(str: string, maxLength: number): string {
@@ -402,9 +510,23 @@ export function getToolCallLabel(
     status: ToolCallStatus,
     opts?: ToolCallLabelOptions,
 ): string {
-    const main = computeMainLabel(part, status, opts);
-    const suffix = getToolResultLabelSuffix(opts?.view ?? null, part.tool_name);
+    const { main, suffix } = getToolCallLabelParts(part, status, opts);
     return suffix ? `${main}${suffix}` : main;
+}
+
+/**
+ * The label in two parts: the text, and the count suffix (" (3 of 24)") or
+ * null. A one-line header shortens the text and keeps the count whole.
+ */
+export function getToolCallLabelParts(
+    part: ToolCallPart,
+    status: ToolCallStatus,
+    opts?: ToolCallLabelOptions,
+): { main: string; suffix: string | null } {
+    return {
+        main: computeMainLabel(part, status, opts),
+        suffix: getToolResultLabelSuffix(opts?.view ?? null, part.tool_name),
+    };
 }
 
 /**
@@ -424,8 +546,10 @@ function computeMainLabel(
         ? 'Creating underline annotations'
         : getToolBaseLabel(toolName);
 
-    // Progress messages take precedence when present
-    if (status === 'in_progress' && part.progress) {
+    // Progress messages take precedence when present, except where the
+    // backend's progress line only repeats the query the label already
+    // shows ("Searching OpenAlex: …").
+    if (status === 'in_progress' && part.progress && !ARG_LABELED_SEARCH_TOOLS.has(toolName)) {
         return `${baseLabel}: ${part.progress}`;
     }
 
@@ -723,7 +847,7 @@ function computeMainLabel(
         case 'find_related_works': {
             const relation = args.relation as string | undefined;
             const work =
-                view && isExternalReferenceListView(view) ? (view.tool_info?.work ?? null) : null;
+                view && isExternalReferenceListView(view) ? (relatedWorksViewInfo(view)?.work ?? null) : null;
             const workLabel = work ? relatedWorkShortLabel(work) : null;
             if (relation === 'references') {
                 if (workLabel) return `References in ${workLabel}`;
@@ -737,13 +861,29 @@ function computeMainLabel(
         }
 
         // === External search tools ===
-        case 'external_search': {
-            const searchLabel = args.search_label as string | undefined;
-            const query = args.query as string | undefined;
-            const label = searchLabel || (query ? truncate(query, 60) : null);
-            if (label) {
-                return `${baseLabel}: ${label}`;
-            }
+        case 'pubmed_search':
+        case 'search_trials':
+        case 'trials_search':
+        case 'external_search':
+        case 'openalex_search_by_topic':
+        case 'openalex_search_by_keywords': {
+            // Not cut here: the header shortens it to its width, and copied text keeps it whole.
+            const text = toolCallSearchText(part, view);
+            return text ? `${baseLabel}: ${text}` : baseLabel;
+        }
+
+        case 'openalex_resolve_names': {
+            const kindLabel = args.kind === 'author'
+                ? 'Author lookup'
+                : args.kind === 'venue' ? 'Journal lookup' : baseLabel;
+            const text = toolCallSearchText(part, view);
+            return text ? `${kindLabel}: ${text}` : kindLabel;
+        }
+
+        case 'get_trial': {
+            const ids = normalizeListParam(args.nct_ids) ?? [];
+            if (ids.length === 1) return `${baseLabel}: ${truncate(ids[0], 40)}`;
+            if (ids.length > 1 && status !== 'completed') return `${baseLabel}: ${ids.length} trials`;
             return baseLabel;
         }
 

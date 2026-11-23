@@ -13,8 +13,10 @@ vi.mock('../../../src/utils/libraryIdentity', () => ({
 }));
 vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     checkLibraryExcluded: vi.fn((id: number) => (mocks.excluded.has(id) ? { message: `Library ${id} is excluded` } : null)),
-    excludedLibraryUserMessage: vi.fn(() => 'This library is excluded from Beaver.'),
     getAttachmentFileStatus: vi.fn(),
+}));
+vi.mock('../../../src/utils/libraryMessages', () => ({
+    excludedLibraryUserMessage: vi.fn(() => 'This library is excluded from Beaver.'),
 }));
 vi.mock('../../../src/services/annotations/createAnnotation', () => ({
     createEpubHighlightAnnotation: vi.fn(),

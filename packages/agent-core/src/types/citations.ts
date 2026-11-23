@@ -149,7 +149,25 @@ export type CitationType =
     | "annotation"
     | "collection"
     | "external_reference"
-    | "external_file";
+    | "external_file"
+    | "table";
+
+/**
+ * What a cell or row citation shows, as the table was when it was cited.
+ * Renderers use this alone, never the table, which may have changed since.
+ */
+export interface TableCitation {
+    /** The table's title. */
+    title: string;
+    /** The row's paper, as its reference cell names it ("Smith et al. 2023"). */
+    row_label?: string;
+    /** The cited column's header; absent for a row citation. */
+    column_header?: string;
+    /** The cell's answer as text ("Not reported" for that outcome), shortened. */
+    value?: string;
+    /** Who wrote the cell. */
+    provenance?: "model" | "user" | "system";
+}
 
 /**
  * V2 self-contained citation (mirrors the backend Citation model).
@@ -194,6 +212,8 @@ export interface Citation {
     /** True when the citation could not be resolved. */
     invalid?: boolean;
     invalid_reason?: string;
+    /** A cell or row citation's preview (`citation_type` "table"). */
+    table?: TableCitation;
 
     /** The agent run ID of the citation (stamped client-side). */
     run_id?: string;

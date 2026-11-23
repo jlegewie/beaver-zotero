@@ -1,10 +1,16 @@
 import React from 'react';
 
+/**
+ * The `spin` keyframes come from the shared sheet (agent-ui-components.css),
+ * not from a `<style>` in the SVG: every `<style>` element mounted or removed
+ * adds or drops a document stylesheet, and the browser then restyles the whole
+ * document — the full chat on each streamed update while a spinner moves.
+ */
 const Spinner = ({ size = 16, className = '', style = {} }) => {
     const spinnerStyle = {
         animation: 'spin 1s linear infinite',
     };
-    
+
     return (
         <svg
             style={{ ...spinnerStyle, ...style }}
@@ -15,18 +21,6 @@ const Spinner = ({ size = 16, className = '', style = {} }) => {
             xmlns="http://www.w3.org/2000/svg"
             aria-hidden="true"
         >
-            <style>
-                {`
-                @keyframes spin {
-                    from {
-                    transform: rotate(0deg);
-                    }
-                    to {
-                    transform: rotate(360deg);
-                    }
-                }
-                `}
-            </style>
             <circle
                 style={{ opacity: 0.25 }}
                 cx="12"

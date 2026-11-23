@@ -21,9 +21,10 @@ import { getOrSimplify } from '../../../utils/noteHtmlSimplifier';
 import { getBeaverNoteFooterHTML } from '../../../utils/noteProvenance';
 import { TimingAccumulator } from '../../../utils/timing';
 import { lookupZoteroReferences, LookupZoteroReferencesResult } from '../lookupZoteroReferences';
-import type { ActionExecuteRequest, ActionValidateRequest } from '../operationContext';
-import { checkAborted, TimeoutContext } from '../timeout';
-import { checkLibraryExcluded, excludedLibraryMessage, getCollectionByIdOrName, getDeferredToolPreference, getLibraryByIdOrName } from '../utils';
+import type { ActionExecuteRequest, ActionValidateRequest, OperationContext } from '../operationContext';
+import { checkAborted, TimeoutContext, TimeoutError } from '../timeout';
+import { excludedLibraryMessage, getCollectionByIdOrName, getDeferredToolPreference, getLibraryByIdOrName } from '../utils';
+import { ActionExecutionError, actionError, assertLibraryNotExcluded, toExecuteResponse } from './actionExecution';
 import { extractCitationReferences } from './extractCitationReferences';
 import { checkNoteMarkdownCitations, INVALID_NOTE_CITATION_CODE, renderNoteMarkdown, wrapNewNoteHtml } from './noteCitationRendering';
 import { resolveCreateNoteParent } from './resolveCreateNoteParent';
@@ -54,7 +55,7 @@ interface CreateNoteActionData {
  * Citation resolution data included in result_data.
  * Mirrors the WSZoteroDataResponse shape plus invalid_keys.
  */
-interface CitedItemsData {
+export interface CitedItemsData {
     items: ItemDataWithStatus[];
     attachments: AttachmentDataWithStatus[];
     notes?: NoteResultItem[];
@@ -65,9 +66,9 @@ interface CitedItemsData {
 
 
 /**
- * Typed shape of result_data returned by executeCreateNoteAction.
+ * Typed shape of the result_data a create_note apply records.
  */
-interface CreateNoteResultData {
+export interface CreateNoteResultData {
     library_id: number;
     zotero_key: string;
     library_ref?: string;
@@ -529,35 +530,64 @@ async function validateCreateNoteAction(
 
 
 /**
- * Execute a create_note action.
- * Creates a new Zotero note item with the specified content.
+ * The data a create_note apply works from: the original arguments merged
+ * with the target, parent and collections validation resolved.
  */
-async function executeCreateNoteAction(
-    request: ActionExecuteRequest,
+export interface CreateNoteApplyData {
+    title: string;
+    content: string;
+    library_id?: number | null;
+    library_ref?: string | null;
+    /** Library name, for proposals stored before validation resolved an id. */
+    library?: string | null;
+    parent_key?: string | null;
+    collection_key?: string | null;
+    collection_ids?: string[] | null;
+    collection_keys?: string[] | null;
+    tags?: string[] | null;
+    /** Set by validation when falling back to a standalone note related to this item. */
+    related_item_key?: string | null;
+    /** Surfaced to the agent after creation. */
+    warning?: string | null;
+}
+
+export interface CreateNoteApplyOptions {
+    /** The run the note is created for; linked from the note's Beaver footer. */
+    runId?: string;
+    /** Filled with per-phase durations for the execute response. */
+    timing?: Record<string, number>;
+}
+
+/**
+ * Create the note of a create_note action and return its `result_data`: the
+ * new note's identity, the collections and tags it got, its content read back
+ * as read_note shows it, and the lookups of the items it cites.
+ *
+ * Collections deleted since validation and tags Zotero refuses are skipped;
+ * the note is still created.
+ */
+export async function applyCreateNote(
+    actionData: CreateNoteApplyData,
     ctx: TimeoutContext,
-): Promise<WSAgentActionExecuteResponse> {
+    operationContext: OperationContext | undefined,
+    options: CreateNoteApplyOptions = {},
+): Promise<CreateNoteResultData> {
     const start = Date.now();
     const ta = new TimingAccumulator();
-    const buildTiming = (): Record<string, number> => ({
-        total_ms: Date.now() - start,
-        ...ta.getAll(),
-    });
+    try {
+        return await createNote(actionData, ctx, operationContext, options.runId, ta);
+    } finally {
+        if (options.timing) Object.assign(options.timing, { total_ms: Date.now() - start, ...ta.getAll() });
+    }
+}
 
-    // action_data is the merged original + normalized_action_data from validation
-    const actionData = request.action_data as {
-        title: string;
-        content: string;
-        library_id?: number | null;  // resolved by validation
-        library_ref?: string | null;  // resolved by validation
-        parent_key?: string | null;  // resolved by validation
-        collection_key?: string | null;  // resolved by validation
-        collection_ids?: string[] | null;
-        collection_keys?: string[] | null;  // resolved by validation (create_note_tags_collections)
-        tags?: string[] | null;  // create_note_tags_collections
-        related_item_key?: string | null;  // set by validation when falling back to standalone
-        warning?: string | null;  // surfaced to the agent after creation
-    };
-
+async function createNote(
+    actionData: CreateNoteApplyData,
+    ctx: TimeoutContext,
+    operationContext: OperationContext | undefined,
+    runId: string | undefined,
+    ta: TimingAccumulator,
+): Promise<CreateNoteResultData> {
     const {
         title,
         content,
@@ -572,58 +602,33 @@ async function executeCreateNoteAction(
     } = actionData;
 
     if (!title || !content) {
-        return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: false,
-            error: 'Title and content are required',
-            error_code: 'missing_data',
-            timing: buildTiming(),
-        };
+        throw actionError('missing_data', 'Title and content are required');
     }
 
     const targetResolution = resolveWriteTargetLibrary({
         library_ref: libraryRef,
         library_id: resolvedLibraryId,
-        library_name: null,
+        library_name: actionData.library ?? null,
     });
     if (!targetResolution.ok) {
-        return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: false,
-            ...writeTargetLibraryError(targetResolution),
-            timing: buildTiming(),
-        };
+        const { error, error_code } = writeTargetLibraryError(targetResolution);
+        throw actionError(error_code, error);
     }
     const targetLibraryId = targetResolution.libraryID;
 
     // TOCTOU guard: never create in a library the user excluded from Beaver,
-    // even if validation passed earlier or the execute request skipped it.
-    const excludedLibrary = checkLibraryExcluded(targetLibraryId);
-    if (excludedLibrary) {
-        return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: false,
-            error: excludedLibrary.message,
-            error_code: 'library_not_searchable',
-            timing: buildTiming(),
-        };
-    }
+    // even if validation passed earlier or the action waited for approval.
+    assertLibraryNotExcluded(targetLibraryId);
 
     try {
         const markdownContent = `<h1>${title}</h1>\n\n${content}`;
         const renderStart = Date.now();
-        const rendered = await renderNoteMarkdown(markdownContent.trim(), request.operation);
+        const rendered = await renderNoteMarkdown(markdownContent.trim(), operationContext);
         let htmlContent = rendered.html;
         ta.record('render_html_ms', Date.now() - renderStart);
 
         // Add Beaver footer with thread/run link
-        const threadId = request.operation?.threadId ?? null;
-        // Only the execute request can authoritatively associate this mutation
-        // with a run. MCP/HTTP executions intentionally omit run_id.
-        const runId = request.run_id;
+        const threadId = operationContext?.threadId ?? null;
         if (threadId) {
             htmlContent += getBeaverNoteFooterHTML(threadId, runId);
         }
@@ -650,7 +655,7 @@ async function executeCreateNoteAction(
                     zoteroNote.addRelatedItem(found);
                 }
             } catch (relationError: any) {
-                logger(`executeCreateNoteAction: Failed to add relation to standalone parent: ${relationError.message}`, 1);
+                logger(`applyCreateNote: Failed to add relation to standalone parent: ${relationError.message}`, 1);
             }
         }
 
@@ -660,9 +665,23 @@ async function executeCreateNoteAction(
         // Child notes (with parentKey) cannot be in collections — Zotero's
         // fki_collectionItems_itemID_parentItemID trigger aborts saveTx if we try.
         // Validation should already have dropped the keys in that case; guard anyway.
-        const collectionKeysToApply = actionData.collection_ids ?? ((collectionKeys && collectionKeys.length > 0)
+        const collectionKeysToApply = [...actionData.collection_ids ?? ((collectionKeys && collectionKeys.length > 0)
             ? collectionKeys
-            : (collectionKey ? [collectionKey] : []));
+            : (collectionKey ? [collectionKey] : []))];
+        // A standalone fallback note joins its related item's first collection
+        // when none was requested. Validation records that choice in
+        // collection_keys, so this applies only to proposals stored before it did.
+        if (relatedItem && collectionKeysToApply.length === 0 && !parentKey
+            && !Object.prototype.hasOwnProperty.call(actionData, 'collection_keys')
+            && !Object.prototype.hasOwnProperty.call(actionData, 'collection_ids')) {
+            try {
+                await Zotero.Items.loadDataTypes([relatedItem], ['collections']);
+                const firstCollection = Zotero.Collections.get(relatedItem.getCollections()[0]);
+                if (firstCollection) collectionKeysToApply.push(firstCollection.key);
+            } catch (error: any) {
+                logger(`applyCreateNote: Failed to inherit collection from standalone parent: ${error.message}`, 1);
+            }
+        }
         const appliedCollectionKeys: string[] = [];
         // Collections deleted since validation are skipped; the note is still created.
         const memberships = recheckExistingCollections(parentKey ? [] : collectionKeysToApply, targetLibraryId);
@@ -672,7 +691,7 @@ async function executeCreateNoteAction(
                 appliedCollectionKeys.push(entry.key);
             }
         } else if (collectionKeysToApply.length > 0 && parentKey) {
-            logger(`executeCreateNoteAction: Skipping addToCollection(${collectionKeysToApply.join(', ')}) because note has parent_key ${parentKey} (child notes cannot be in collections directly)`, 1);
+            logger(`applyCreateNote: Skipping addToCollection(${collectionKeysToApply.join(', ')}) because note has parent_key ${parentKey} (child notes cannot be in collections directly)`, 1);
         }
 
         // Stage tags (create_note_tags_collections). Tags are valid on child
@@ -686,18 +705,18 @@ async function executeCreateNoteAction(
                 zoteroNote.addTag(trimmed);
                 appliedTags.push(trimmed);
             } catch (tagError: any) {
-                logger(`executeCreateNoteAction: Failed to stage tag "${trimmed}": ${tagError.message}`, 1);
+                logger(`applyCreateNote: Failed to stage tag "${trimmed}": ${tagError.message}`, 1);
             }
         }
 
         await ta.track('save_tx_ms', () => zoteroNote.saveTx());
 
-        logger(`executeCreateNoteAction: Created note "${title}" with key ${zoteroNote.key} in library ${targetLibraryId}`, 1);
+        logger(`applyCreateNote: Created note "${title}" with key ${zoteroNote.key} in library ${targetLibraryId}`, 1);
 
         // A note created by the agent is a safe, narrow continuation target:
         // allow only edits to this exact note for the remainder of this run.
-        if (runId && request.operation?.runId === runId) {
-            request.operation.grantCreatedNote?.(zoteroNote.libraryID, zoteroNote.key);
+        if (runId && operationContext?.runId === runId) {
+            operationContext.grantCreatedNote?.(zoteroNote.libraryID, zoteroNote.key);
         }
 
         // Mirror the relation on the related item so the "Related" pane shows
@@ -708,7 +727,7 @@ async function executeCreateNoteAction(
                     await relatedItem.saveTx({ skipDateModifiedUpdate: true });
                 }
             } catch (reverseErr: any) {
-                logger(`executeCreateNoteAction: Failed to mirror relation on related item: ${reverseErr.message}`, 1);
+                logger(`applyCreateNote: Failed to mirror relation on related item: ${reverseErr.message}`, 1);
             }
         }
 
@@ -725,7 +744,7 @@ async function executeCreateNoteAction(
                 noteContent = simplified;
             }
         } catch (simplifyError: any) {
-            logger(`executeCreateNoteAction: Failed to simplify note content (non-fatal): ${simplifyError.message}`, 1);
+            logger(`applyCreateNote: Failed to simplify note content (non-fatal): ${simplifyError.message}`, 1);
         }
 
         // Resolve citation references for backend validation
@@ -735,7 +754,7 @@ async function executeCreateNoteAction(
             const { references: citationRefs, invalidKeys } = extractCitationReferences(content);
             invalidCitationKeys = invalidKeys;
             if (citationRefs.length > 0) {
-                logger(`executeCreateNoteAction: Resolving ${citationRefs.length} citation reference(s)`, 1);
+                logger(`applyCreateNote: Resolving ${citationRefs.length} citation reference(s)`, 1);
                 citedItemsData = await ta.track('lookup_references_ms', () =>
                     lookupZoteroReferences(citationRefs, {
                         include_attachments: true,
@@ -745,10 +764,10 @@ async function executeCreateNoteAction(
                 );
             }
             if (invalidKeys.length > 0) {
-                logger(`executeCreateNoteAction: Found ${invalidKeys.length} invalid citation key(s): ${invalidKeys.join(', ')}`, 1);
+                logger(`applyCreateNote: Found ${invalidKeys.length} invalid citation key(s): ${invalidKeys.join(', ')}`, 1);
             }
         } catch (citationError: any) {
-            logger(`executeCreateNoteAction: Citation resolution failed (non-fatal): ${citationError.message}`, 1);
+            logger(`applyCreateNote: Citation resolution failed (non-fatal): ${citationError.message}`, 1);
             // Citation resolution failure is non-fatal — note was created successfully
         }
 
@@ -778,29 +797,26 @@ async function executeCreateNoteAction(
             resultData.cited_items_data = cited;
         }
 
-        return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: true,
-            result_data: resultData,
-            timing: buildTiming(),
-        };
+        return resultData;
     } catch (error: any) {
-        // Re-throw TimeoutError so it propagates to the main handler
-        const { TimeoutError } = await import('../timeout');
-        if (error instanceof TimeoutError) throw error;
-
+        if (error instanceof TimeoutError || error instanceof ActionExecutionError) throw error;
         const errorMsg = error?.message || String(error) || 'Failed to create note';
-        logger(`executeCreateNoteAction: Failed to create note: ${errorMsg}`, 1);
-        return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: false,
-            error: errorMsg,
-            error_code: error?.code ?? 'create_failed',
-            timing: buildTiming(),
-        };
+        logger(`applyCreateNote: Failed to create note: ${errorMsg}`, 1);
+        throw actionError(error?.code ?? 'create_failed', errorMsg);
     }
+}
+
+/** Create a note for the backend during a run. */
+async function executeCreateNoteAction(
+    request: ActionExecuteRequest,
+    ctx: TimeoutContext,
+): Promise<WSAgentActionExecuteResponse> {
+    const timing: Record<string, number> = {};
+    // Only the execute request can authoritatively associate this mutation
+    // with a run. MCP/HTTP executions intentionally omit run_id.
+    return toExecuteResponse(request.request_id, 'executeCreateNoteAction',
+        () => applyCreateNote(request.action_data as CreateNoteApplyData, ctx, request.operation, { runId: request.run_id, timing }),
+        () => timing);
 }
 
 

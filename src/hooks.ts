@@ -10,14 +10,14 @@ import { cleanupReaderIntegration, initReaderIntegration } from "./modules/reade
 import { cleanupReaderToolbarMenu, initReaderToolbarMenu } from "./modules/readerToolbarMenu";
 import { cleanupNoteEditorExportMenu, initNoteEditorExportMenu } from "./modules/noteEditorExportMenu";
 import { cleanupContextMenus, initContextMenus } from "./modules/zoteroContextMenu";
+import { attachTableOpenLabels, detachTableOpenLabels } from "./modules/tableOpenMenuLabel";
 import {
     registerTablesApi,
     unregisterTablesApi
 } from "./services/artifacts/tablesApiHost";
 import {
-    cleanupReaderTableViews,
-    cleanupReaderTableViewsForWindow,
-    initReaderTableViews,
+    cleanupTableReaderRedirect,
+    initTableReaderRedirect,
 } from "./services/artifacts/view/readerTableView";
 import { BackgroundExtractor } from "./services/backgroundExtractor";
 import { NewItemWatcher } from "./services/backgroundProcessing/newItemWatcher";
@@ -26,17 +26,24 @@ import { CitationService } from "./services/CitationService";
 import { BeaverDB } from "./services/database";
 import { DocumentCache } from "./services/documentCache";
 import { createInstanceAccount } from './services/instanceAccount';
+import { createInstanceTableFills } from './services/tableFills';
 import { InstancePreferences } from './services/instancePreferences';
 import { registerBeaverProtocolHandler, unregisterBeaverProtocolHandler } from "./services/protocolHandler";
-import { DevelopmentVoiceHarness } from "./services/voice/developmentHarness";
-import { NativeVoice } from "./services/voice/nativeVoice";
-import { productVoiceAdapters } from "./services/voice/productVoice";
-import { createVoiceService } from "./services/voice/voiceService";
-import {
-    cleanupTableItemPane,
-    initTableItemPane,
-} from "./ui/tableItemPane";
 import { BeaverUIFactory } from "./ui/ui";
+import { openTable } from "./ui/openTable";
+import { prepareRendererBundle } from "./ui/rendererBundle";
+import { cleanupBeaverTabs, initBeaverTabs, recoverTabsAfterBeaverTabs, restoreBeaverTabs } from "./ui/beaverTabs";
+import { cleanupTableTabs, initTableTabs } from "./ui/tableTab";
+import {
+    cleanupTableWindows,
+    initTableWindows,
+    onTableWindowCommand,
+    onTableWindowLoad,
+    onTableWindowMenuShowing,
+    onTableWindowUnload,
+    restoreTableWindows,
+} from "./ui/tableWindow";
+import { stopTableTabProbe } from "./ui/tableTabProbe";
 import { cancelAllActiveTasks } from "./utils/backgroundTasks";
 import { compareVersions } from "./utils/compareVersions";
 import { configurePDFForBeaver } from "./utils/configurePDFForBeaver";
@@ -75,6 +82,33 @@ function ensureDocumentRuntime(): void {
     configurePDFForBeaver({ onWorkerStartFailure: info => addon.runtime.publish('document-worker:failure', info) });
 }
 
+/**
+ * Stops the fill jobs and flushes their last commits. Runs before the
+ * mutation queue and the document services are disposed, which those commits
+ * and reads need.
+ */
+let tableFillsDisposal: Promise<void> | undefined;
+
+/** Whether the fill service is up, or its disposal has started and may still be flushing. */
+function tableFillsPending(): boolean {
+    return !!addon.tableFills || !!tableFillsDisposal;
+}
+
+async function disposeTableFills(): Promise<void> {
+    // Shared by every shutdown path: a second window unloading during a quit
+    // waits for the first one's flush instead of closing the queue under it.
+    if (!tableFillsDisposal) {
+        const fills = addon.tableFills;
+        addon.tableFills = undefined;
+        // `dispose` bounds itself (`shutdownFlushMs`): the last commit
+        // renders the snapshot, which a generic shutdown timeout would cut.
+        tableFillsDisposal = fills
+            ? fills.dispose().catch((error) => ztoolkit.log(`disposeTableFills: ${error}`))
+            : Promise.resolve();
+    }
+    await tableFillsDisposal;
+}
+
 function stopLocalIngress(): void {
     const endpoints = addon.localEndpoints;
     addon.localEndpoints = undefined;
@@ -93,6 +127,22 @@ async function disposeAccountServices(): Promise<void> {
     try { addon.preferences?.dispose(); } catch (error) { ztoolkit.log(`disposePreferences: ${error}`); }
     try { if (addon.account) await withShutdownTimeout(addon.account.dispose(), 'disposeAccount'); }
     catch (error) { ztoolkit.log(`disposeAccount: ${error}`); }
+}
+
+let pluginDatabaseClose: Promise<void> | undefined;
+
+/**
+ * Close beaver.sqlite. Shutdown paths overlap at a quit (each window's unload,
+ * the quit observer, APP_SHUTDOWN), so callers share a close in flight rather
+ * than closing a connection that is already closing. A failed close leaves the
+ * connection on `addon` for a later path to retry.
+ */
+function closePluginDatabase(): Promise<void> {
+    const db = addon.db;
+    if (!db) return Promise.resolve();
+    return pluginDatabaseClose ??= db.closeDatabase()
+        .then(() => { if (addon.db === db) addon.db = undefined; })
+        .finally(() => { pluginDatabaseClose = undefined; });
 }
 
 /**
@@ -130,7 +180,18 @@ async function cleanupDevTemporaryAnnotations(
 }
 
 let isAppQuitting = false;
+/** Set once a quit's app-wide cleanup has started in a window's unload. */
+let globalCleanupStarted = false;
 let quitObserverRegistered = false;
+
+/**
+ * Holds Zotero's quit until running table fills have flushed their last
+ * commits: a blocker of the `quit-application` phase, which Gecko waits for
+ * before tearing down the profile. The quit observer disposes the account
+ * and closes the plugin database only after the same flush.
+ */
+const tableFillsQuitBlocker = (): Promise<void> => (tableFillsPending() ? disposeTableFills() : Promise.resolve());
+let quitPhase: { addBlocker(name: string, blocker: () => Promise<void>): void; removeBlocker(blocker: () => Promise<void>): void } | undefined;
 const quitObserver = {
     observe(_subject: any, topic: string) {
         if (topic === "quit-application-granted" || topic === "quit-application") {
@@ -140,19 +201,24 @@ const quitObserver = {
         }
         // Close beaver.sqlite on quit-application, BEFORE the
         // profile-before-change barrier where Sqlite.sys.mjs waits for all
-        // connections.
+        // connections. A running table fill flushes first: its last commit
+        // needs the account and the plugin realm's services, and the quit
+        // blocker holds this phase until it has.
         if (topic === "quit-application") {
-            void disposeAccountServices();
-            try {
-                if (addon?.db) {
-                    addon.db.closeDatabase().catch((error: unknown) => {
-                        Zotero.logError(error as Error);
-                    });
-                    addon.db = undefined;
+            const teardown = () => {
+                void disposeAccountServices();
+                try {
+                    if (addon) {
+                        closePluginDatabase().catch((error: unknown) => {
+                            Zotero.logError(error as Error);
+                        });
+                    }
+                } catch (_) {
+                    // Best-effort — process is dying
                 }
-            } catch (_) {
-                // Best-effort — process is dying
-            }
+            };
+            if (tableFillsPending()) void disposeTableFills().finally(teardown);
+            else teardown();
         }
     },
 };
@@ -166,9 +232,28 @@ function registerQuitObserver(): void {
     } catch (error) {
         ztoolkit.log(`registerQuitObserver: Failed to register quit observer: ${error}`);
     }
+    try {
+        const { AsyncShutdown } = ChromeUtils.importESModule('resource://gre/modules/AsyncShutdown.sys.mjs') as {
+            AsyncShutdown: { appShutdownConfirmed?: NonNullable<typeof quitPhase>; quitApplicationGranted?: NonNullable<typeof quitPhase> };
+        };
+        // The `quit-application` phase; older platforms only have the
+        // earlier `quitApplicationGranted`.
+        quitPhase = AsyncShutdown.appShutdownConfirmed ?? AsyncShutdown.quitApplicationGranted;
+        if (!quitPhase) throw new Error('no quit-granted shutdown phase');
+        quitPhase.addBlocker('Beaver: flush table fills', tableFillsQuitBlocker);
+    } catch (error) {
+        quitPhase = undefined;
+        ztoolkit.log(`registerQuitObserver: Failed to register the table fill quit blocker: ${error}`);
+    }
 }
 
 function unregisterQuitObserver(): void {
+    try {
+        quitPhase?.removeBlocker(tableFillsQuitBlocker);
+    } catch (error) {
+        ztoolkit.log(`unregisterQuitObserver: Failed to remove the table fill quit blocker: ${error}`);
+    }
+    quitPhase = undefined;
     if (!quitObserverRegistered) return;
     try {
         Services.obs.removeObserver(quitObserver, "quit-application-granted");
@@ -242,6 +327,18 @@ async function openPluginDatabase(dbConnection: _ZoteroTypes.DB): Promise<void> 
 }
 
 async function onStartup() {
+    // -------- Beaver tabs: Zotero tab hooks, before any await --------
+    // A main window restores its tabs as it loads, and a saved Beaver tab
+    // without its `restoreState` hook costs every tab after it. The earlier the
+    // hooks are in, the fewer windows can restore without them; the first
+    // window of a cold start is repaired in `onMainWindowLoad`.
+    initBeaverTabs();
+    initTableTabs((ref, options) => openTable(ref, options));
+    initTableWindows((ref) => openTable(ref, { openIn: 'window' }));
+    // The first window's renderer waits for Zotero's UI; compiling its bundle
+    // now, off the main thread, overlaps the two.
+    void prepareRendererBundle();
+
     await Promise.all([
         Zotero.initializationPromise,
         Zotero.unlockPromise,
@@ -257,6 +354,8 @@ async function onStartup() {
     }
 
     registerQuitObserver();
+    // Times the open Zotero transaction for the busy diagnostics.
+    addon.transactionWatch.start();
     // Capture staging diagnostics without changing the profile's logging preferences.
     if (process.env.BUILD_ENV === 'staging' && !Zotero.Debug.storing) {
         Zotero.Debug.setStore(true);
@@ -286,6 +385,10 @@ async function onStartup() {
     addon.account.start();
     addon.localEndpoints ??= new InstanceLocalEndpoints();
     addon.localEndpoints.start(addon.account, addon.preferences);
+    if (!addon.tableFills) {
+        tableFillsDisposal = undefined;
+        addon.tableFills = createInstanceTableFills();
+    }
     ztoolkit.log(`Plugin version: ${version}`);
 
     // -------- Initialize database --------
@@ -351,20 +454,6 @@ async function onStartup() {
         addon.citationService = citationService;
         ztoolkit.log("CitationService initialized successfully");
 
-        // Voice is optional: its initialization must not prevent the rest of Beaver loading.
-        try {
-            if (Zotero.isMac) addon.voiceNative = new NativeVoice();
-            if (__env__ === 'development') {
-                addon.voiceHarness = new DevelopmentVoiceHarness(undefined, addon.voiceNative, productVoiceAdapters(addon.voiceNative, () => addon.voice?.uploadContext));
-                addon.voice = addon.voiceHarness.service;
-            } else {
-                addon.voice = createVoiceService(productVoiceAdapters(addon.voiceNative, () => addon.voice?.uploadContext));
-            }
-        } catch {
-            disposeVoice();
-            ztoolkit.log('Voice initialization failed; continuing without voice');
-        }
-
         // -------- Register keyboard shortcuts --------
         BeaverUIFactory.registerShortcuts();
 
@@ -383,20 +472,14 @@ async function onStartup() {
         // -------- "Export with Beaver" in the note editor's More menu --------
         initNoteEditorExportMenu();
 
-        // -------- Enhance stored tables opened in the reader --------
-        // The reader is the only surface a stored table has, so every way of
-        // opening one — double-click, `zotero://open`, the item pane — arrives
-        // here and needs no interception anywhere.
-        initReaderTableViews();
-
-        // -------- Describe a stored table in the item pane --------
-        // Registered once, globally: Zotero re-creates the section in every
-        // window's item pane from the same registration.
-        initTableItemPane();
+        // -------- Readers on a stored table go to the Beaver tab --------
+        // A reader tab is replaced when it is added (`initTableTabs`); this
+        // catches restored reader tabs and reader windows as they load.
+        initTableReaderRedirect();
 
         // -------- Publish the table surfaces to the other bundle --------
-        // The reader views and the item-pane registration keep module state, so
-        // they live in this bundle only. Anything on the webpack side reaches
+        // The reader redirect and the table tabs keep module state, so they
+        // live in this bundle only. Anything on the webpack side reaches
         // them through `Zotero.__beaverTables` rather than importing them,
         // which would give it a second, permanently empty copy.
         registerTablesApi();
@@ -412,6 +495,7 @@ async function onStartup() {
         });
 
         // -------- Load UI for all windows --------
+        watchMainWindows();
         const mainWindows = Zotero.getMainWindows();
         if (mainWindows.length > 0) {
             await Promise.all(
@@ -437,10 +521,7 @@ async function onStartup() {
             ztoolkit.log(`Failed to stop backgroundExtractor during startup error recovery: ${stopError}`);
         }
         try {
-            if (addon.db) {
-                await addon.db.closeDatabase();
-                addon.db = undefined;
-            }
+            await closePluginDatabase();
         } catch (closeError) {
             ztoolkit.log(`Failed to close database during startup error recovery: ${closeError}`);
         }
@@ -455,12 +536,17 @@ function onStandaloneWindowLoad(win: Window): void {
     BeaverUIFactory.registerChatPanel(win);
 }
 
+/** A table window loaded: its table (`tableWindow.ts`), and Beaver's shortcuts. */
+function onTableWindowLoaded(win: Window): void {
+    onTableWindowLoad(win);
+    BeaverUIFactory.attachShortcuts(win);
+}
+
 function onStandaloneWindowUnload(win: Window): void {
     const runtime = addon.runtime.getWindow(win);
     if (!runtime || !addon.runtime.markClosing(win)) return;
     addon.mutations.cancelOwner(runtime.id);
     void addon.notePreviews.detachOwner(runtime.id).catch(Zotero.logError);
-    addon.voice?.windowUnloaded(win);
     closeAgentConnection(win, "Beaver window closed", {
         rememberInterruptedThread: true,
     });
@@ -472,8 +558,21 @@ function onStandaloneWindowUnload(win: Window): void {
 }
 
 async function onMainWindowLoad(win: Window): Promise<void> {
+    // Zotero 11 calls this again for a window Beaver attached at startup
+    // without a library view, once its first one loads. The renderer adds the
+    // library sidebar itself when that view's tab is selected.
     if (win.closed || addon.runtime.getWindow(win)) return;
     const runtime = addon.runtime.attachWindow(win);
+
+    // Zotero 11 reports main windows to plugins by their library views: a
+    // window without a loaded one never reports its unload. Follow the
+    // window's own unload as well; the second call is a no-op. Earlier
+    // versions report every main window's close themselves.
+    if (Array.isArray((win as any).ZoteroPane?.libraryViews)) {
+        const onWindowUnload = () => { void onMainWindowUnload(win, { windowUnloading: true }); };
+        win.addEventListener("unload", onWindowUnload);
+        addon.runtime.addWindowCleanup(runtime, () => win.removeEventListener("unload", onWindowUnload));
+    }
 
     // Create ztoolkit for every window
     addon.data.ztoolkit = createZToolkit();
@@ -501,6 +600,19 @@ async function onMainWindowLoad(win: Window): Promise<void> {
     }
 
     BeaverUIFactory.registerChatPanel(win);
+    attachTableOpenLabels(win, (ref) => openTable(ref, { openIn: 'window' }));
+
+    // Tabs a cold start's session restore lost to a saved Beaver tab, then
+    // the Beaver tabs a quit, plugin reload or last-window close left for this
+    // window (once its renderer can host them).
+    void recoverTabsAfterBeaverTabs(win)
+        .catch((error) => ztoolkit.log(`recoverTabsAfterBeaverTabs: ${error}`))
+        .then(() => restoreBeaverTabs(win))
+        .catch((error) => ztoolkit.log(`restoreBeaverTabs: ${error}`));
+    // Table windows a quit or a Beaver shutdown left open. They need no main
+    // window's renderer; the record is consumed, so only the first window to
+    // load reopens them.
+    void restoreTableWindows().catch((error) => ztoolkit.log(`restoreTableWindows: ${error}`));
 
     ztoolkit.log("UI ready");
     
@@ -508,6 +620,58 @@ async function onMainWindowLoad(win: Window): Promise<void> {
     loadStylesheet();
     loadKatexStylesheet(win);
     ztoolkit.log("Styles loaded for window");
+}
+
+const MAIN_WINDOW_URL = "chrome://zotero/content/zoteroPane.xhtml";
+type WindowMediatorListener = { onOpenWindow(xulWindow: any): void; onCloseWindow(xulWindow: any): void };
+let mainWindowListener: WindowMediatorListener | null = null;
+
+/**
+ * Attach to main windows as they open. Zotero 11 reports a main window to
+ * plugins only once a library view in it has loaded, so a window opened on a
+ * reader (a tab moved to a new window) would otherwise have no Beaver until
+ * its library tab is shown. Zotero 7–10 report every main window themselves.
+ */
+function watchMainWindows(): void {
+    if (mainWindowListener) return;
+    const listener: WindowMediatorListener = {
+        onOpenWindow(xulWindow: any) {
+            const win = xulWindow?.docShell?.domWindow as Window | undefined;
+            win?.addEventListener("load", () => {
+                const pane = (win as any).ZoteroPane;
+                if (win.location?.href !== MAIN_WINDOW_URL || !Array.isArray(pane?.libraryViews)) return;
+                // Resolves once the window has its tabs, context pane and the
+                // tab it was opened for.
+                Promise.resolve(pane.loadedPromise)
+                    .then(() => {
+                        if (mainWindowListener !== listener || win.closed || !addon.data.alive) return;
+                        return onMainWindowLoad(win);
+                    })
+                    .catch((error: unknown) => Zotero.logError(error as Error));
+            }, { once: true });
+        },
+        onCloseWindow() {},
+    };
+    mainWindowListener = listener;
+    Services.wm.addListener(listener as any);
+}
+
+function unwatchMainWindows(): void {
+    if (!mainWindowListener) return;
+    Services.wm.removeListener(mainWindowListener as any);
+    mainWindowListener = null;
+}
+
+/**
+ * Whether Zotero reported a window unloaded only because its last library
+ * view closed. Zotero 11 does that while the window and its reader tabs stay
+ * open; Beaver keeps serving them and cleans up on the window's own unload.
+ * When the window itself closes, its library views are still registered.
+ */
+function onlyLibraryViewsClosed(win: Window): boolean {
+    if (win.closed || isAppQuitting || (Services?.startup?.shuttingDown ?? false)) return false;
+    const views = (win as any).ZoteroPane?.libraryViews;
+    return Array.isArray(views) && views.length === 0;
 }
 
 /**
@@ -525,7 +689,14 @@ async function onMainWindowLoad(win: Window): Promise<void> {
  * 4. Unmount React components
  * 5. Unload stylesheets
  */
-async function onMainWindowUnload(win: Window): Promise<void> {
+async function onMainWindowUnload(
+    win: Window,
+    { windowUnloading = false }: { windowUnloading?: boolean } = {},
+): Promise<void> {
+    if (!windowUnloading && onlyLibraryViewsClosed(win)) {
+        ztoolkit.log("onMainWindowUnload: last library view closed, keeping the open window");
+        return;
+    }
     const runtime = addon.runtime.getWindow(win);
     if (!addon.runtime.markClosing(win)) return;
     if (runtime) {
@@ -537,16 +708,14 @@ async function onMainWindowUnload(win: Window): Promise<void> {
     ztoolkit.log("onMainWindowUnload: Starting cleanup");
 
     try {
-        try {
-            addon.voice?.windowUnloaded(win);
-        } catch {
-            ztoolkit.log('Voice window cleanup failed; continuing cleanup');
-        }
         // Close first: later steps can await, and the window may be gone when
         // this handler returns. Read quitting and the window count here — the
         // later scope check runs after those awaits.
         const appGoingAway = isAppQuitting || (Services?.startup?.shuttingDown ?? false);
-        if (appGoingAway) await addon.mutations.dispose();
+        if (appGoingAway) {
+            if (tableFillsPending()) await disposeTableFills();
+            await addon.mutations.dispose();
+        }
         const isLastMainWindow = Zotero.getMainWindows()
             .filter(w => w !== win && !w.closed).length === 0;
         // Record only when Beaver itself is going away. Closing one of several
@@ -623,19 +792,13 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         // flag and skip any fire-and-forget DB/network operations.
         BeaverUIFactory.removeChatPanel(win);
         addon.runtime.detachWindow(win);
+        detachTableOpenLabels(win);
 
         // Remove the <link rel="localization"> we added in onMainWindowLoad.
         // Leaving it behind after disable causes the locale bundle to log
         // "Missing resource" and emits an uncaught promise rejection on the
         // next popup translation, breaking Zotero's right-click menu.
         unregisterMainWindowFtl(win);
-
-        // Release this window's table views. Window-specific, so it runs on
-        // every unload and not only during global cleanup: a reader-hosted
-        // table left behind holds the closed window's iframe and its rendered
-        // document — a dead realm kept alive, which on macOS (close the last
-        // window, app keeps running) survives indefinitely.
-        cleanupReaderTableViewsForWindow(win);
 
         if (!isLastWindow) {
             ztoolkit.log("onMainWindowUnload: Other windows remain, skipping global cleanup");
@@ -648,6 +811,16 @@ async function onMainWindowUnload(win: Window): Promise<void> {
             return;
         }
 
+        // At a quit every window can read as closed, so each unload can take
+        // itself for the last one. The app-wide cleanup disposes the window
+        // registry, which would cut short the unload of a window still
+        // attached, so it runs once, in the last window to finish its own.
+        if (addon.runtime.getSnapshot().some((other) => other.kind === "main")) {
+            ztoolkit.log("onMainWindowUnload: Other windows still closing, skipping global cleanup");
+            return;
+        }
+        if (globalCleanupStarted) return;
+        globalCleanupStarted = true;
         ztoolkit.log("onMainWindowUnload: Last window closing, running global cleanup");
 
         // Global cleanup - only run when last window closes
@@ -679,10 +852,7 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         addon.documentCache = undefined;
 
         // 4. Close database connection
-        if (addon.db) {
-            await withShutdownTimeout(addon.db.closeDatabase(), "closeDatabase");
-            addon.db = undefined;
-        }
+        await withShutdownTimeout(closePluginDatabase(), "closeDatabase");
 
         // 4. Dispose CitationService
         if (addon.citationService) {
@@ -709,19 +879,22 @@ async function onMainWindowUnload(win: Window): Promise<void> {
         BeaverUIFactory.closeBeaverWindow();
         BeaverUIFactory.closePreferencesWindow();
 
-        // 10. Unregister quit observer
+        // 10. Unregister quit observer and the main window watcher
         unregisterQuitObserver();
+        unwatchMainWindows();
 
         // 11. Unregister context menus
         cleanupContextMenus();
 
-        // 12. Unregister reader integration listeners, and release the table
-        //     views: one left behind holds its reader, that reader's document
-        //     and the window both live in.
+        // 12. Unregister reader integration listeners, including the redirect
+        //     of readers on a table.
         cleanupReaderIntegration();
+        // The tabs close (and are remembered) while their kinds are still registered.
+        cleanupBeaverTabs();
+        cleanupTableTabs();
+        stopTableTabProbe();
         unregisterTablesApi();
-        cleanupReaderTableViews();
-        cleanupTableItemPane();
+        cleanupTableReaderRedirect();
 
         // 13. Unregister reader toolbar menu and the note editor export entry
         cleanupReaderToolbarMenu();
@@ -877,14 +1050,6 @@ function unregisterMainWindowFtl(win: Window): void {
     if (link) link.remove();
 }
 
-function disposeVoice(): void {
-    try { addon.voice?.dispose(); } catch { ztoolkit.log('Voice disposal failed'); }
-    try { addon.voiceNative?.dispose(); } catch { ztoolkit.log('Native voice disposal failed'); }
-    addon.voiceNative = undefined;
-    addon.voice = undefined;
-    addon.voiceHarness = undefined;
-}
-
 let appShutdownDisposal: Promise<void> | undefined;
 
 /** APP_SHUTDOWN runs too late to access windows, React, or reader UI. */
@@ -903,8 +1068,10 @@ async function disposeAppServices(): Promise<void> {
             ztoolkit.log(`onAppShutdown: ${label} failed:`, error);
         }
     };
+    if (tableFillsPending()) await disposeTableFills();
     await addon.mutations.dispose();
     addon.syncPause.resumeSyncNow();
+    addon.transactionWatch.stop();
     await attempt('disposeAccount', disposeAccountServices);
     await attempt('cancelAllActiveTasks', () => cancelAllActiveTasks());
     await attempt('newItemWatcher.stop', () => addon.newItemWatcher?.stop());
@@ -916,15 +1083,11 @@ async function disposeAppServices(): Promise<void> {
     await attempt('disposeMuPDFWorker', () => disposeMuPDFWorker(undefined, { force: true }));
     addon.documentCache = undefined;
     // Keep a failed connection available to bootstrap's independent DB fallback.
-    await attempt('closeDatabase', async () => {
-        if (addon.db) {
-            await addon.db.closeDatabase();
-            addon.db = undefined;
-        }
-    });
+    await attempt('closeDatabase', closePluginDatabase);
     await attempt('citationService.dispose', () => addon.citationService?.dispose());
     addon.citationService = undefined;
     await attempt('exporter.dispose', () => addon.exporter.dispose());
+    await attempt('images.dispose', () => addon.images.dispose());
 }
 
 let instanceDisposal: Promise<void> | undefined;
@@ -936,9 +1099,13 @@ function onShutdown(): Promise<void> {
 
 async function disposePlugin(): Promise<void> {
     stopLocalIngress();
+    unwatchMainWindows();
     addon.itemImport.dispose();
+    addon.images.dispose();
+    if (tableFillsPending()) await disposeTableFills();
     await addon.mutations.dispose();
     addon.syncPause.resumeSyncNow();
+    addon.transactionWatch.stop();
     Zotero.__beaverShuttingDown = true;
     addon.data.alive = false;
     cancelAllActiveTasks();
@@ -946,7 +1113,8 @@ async function disposePlugin(): Promise<void> {
 
     try {
         BeaverUIFactory.closeBeaverWindow();
-        disposeVoice();
+        // Recorded first, so the next start reopens them.
+        cleanupTableWindows();
         const openWindows = Zotero.getMainWindows?.().filter(w => w && !w.closed) ?? [];
         for (const win of openWindows) addon.runtime.markClosing(win);
         for (const win of openWindows) {
@@ -974,10 +1142,7 @@ async function disposePlugin(): Promise<void> {
         addon.documentCache = undefined;
         await disposeAccountServices();
 
-        if (addon.db) {
-            await addon.db.closeDatabase();
-            addon.db = undefined;
-        }
+        await closePluginDatabase();
 
         if (addon.citationService) {
             addon.citationService.dispose();
@@ -1004,9 +1169,15 @@ async function disposePlugin(): Promise<void> {
         unregisterQuitObserver();
         cleanupContextMenus();
         cleanupReaderIntegration();
+        // Rewrites the session without Beaver tabs: once Beaver is gone,
+        // nothing could restore one. Beaver reopens them itself when it
+        // starts again (`restoreBeaverTabs`). The tabs close while their
+        // kinds are still registered.
+        cleanupBeaverTabs({ saveSession: true });
+        cleanupTableTabs();
+        stopTableTabProbe();
         unregisterTablesApi();
-        cleanupReaderTableViews();
-        cleanupTableItemPane();
+        cleanupTableReaderRedirect();
         cleanupReaderToolbarMenu();
         cleanupNoteEditorExportMenu();
         unregisterBeaverProtocolHandler();
@@ -1042,6 +1213,10 @@ export default {
     onAppShutdown,
     onStandaloneWindowLoad,
     onStandaloneWindowUnload,
+    onTableWindowLoad: onTableWindowLoaded,
+    onTableWindowUnload,
+    onTableWindowCommand,
+    onTableWindowMenuShowing,
     onMainWindowLoad,
     onMainWindowUnload,
 };

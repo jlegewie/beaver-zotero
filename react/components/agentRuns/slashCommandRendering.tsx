@@ -15,7 +15,7 @@ import { splitContentBySlashTokens } from '@beaver/agent-ui/composer/slashComman
 import { ChipWithPopup } from '@beaver/agent-ui/chat/ChipPopup';
 import { buildActionPopup } from '@beaver/agent-ui/chat/actionPopup';
 import { highlightText } from '@beaver/agent-ui/chat/highlightText';
-import { findMatchRanges } from '@beaver/agent-ui/chat/findContext';
+import { findMatchRanges, type FindQuery } from '@beaver/agent-ui/chat/findContext';
 import { getHost } from '@beaver/agent-ui/host';
 
 /**
@@ -39,7 +39,7 @@ import { getHost } from '@beaver/agent-ui/host';
 export function renderContentWithSlashPills(
     content: string,
     actions: PromptAction[],
-    findQuery: string = '',
+    findQuery: FindQuery = '',
 ): React.ReactNode[] {
     const canEditActions = Boolean(getHost().navigation?.openActionSettings);
     return splitContentBySlashTokens(content, actions).map((segment, i) => {
@@ -84,9 +84,9 @@ export function renderContentWithSlashPills(
 export function hasProseFindMatch(
     content: string,
     actions: PromptAction[],
-    findQuery: string,
+    findQuery: FindQuery,
 ): boolean {
-    if (!findQuery) return false;
+    if (findQuery.length === 0) return false;
     if (actions.length === 0) return findMatchRanges(content, findQuery).length > 0;
     return splitContentBySlashTokens(content, actions).some(
         segment => !segment.action && findMatchRanges(segment.text, findQuery).length > 0,

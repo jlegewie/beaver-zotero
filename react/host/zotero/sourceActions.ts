@@ -21,7 +21,7 @@ function notifyExternalFileUnavailable(): void {
  * object an in-prose link names) that was rendered from persisted run history
  * but does not exist on this computer.
  */
-export type UnavailableReferenceKind = 'item' | 'collection' | 'search' | 'view' | 'annotation' | 'action' | 'tag' | 'link';
+export type UnavailableReferenceKind = 'item' | 'collection' | 'search' | 'view' | 'annotation' | 'action' | 'tag' | 'link' | 'table' | 'table_cell';
 export type UnavailableReferenceCause = 'missing' | 'library_unavailable';
 
 const UNAVAILABLE_REFERENCE_COPY: Record<UnavailableReferenceKind, { title: string; text: string }> = {
@@ -53,6 +53,14 @@ const UNAVAILABLE_REFERENCE_COPY: Record<UnavailableReferenceKind, { title: stri
         title: 'Tag Not Available',
         text: 'This tag is no longer on any item in your Zotero libraries. It may have been renamed or removed.',
     },
+    table: {
+        title: 'Table Not Available',
+        text: 'This table is no longer in your Zotero library. It may have been deleted.',
+    },
+    table_cell: {
+        title: 'Cell Not Available',
+        text: 'This item or question is no longer in the table. It may have been removed.',
+    },
     // The link was written by the model, so unlike the other kinds the target
     // may never have existed.
     link: {
@@ -61,7 +69,7 @@ const UNAVAILABLE_REFERENCE_COPY: Record<UnavailableReferenceKind, { title: stri
     },
 };
 
-const LIBRARY_UNAVAILABLE_COPY: Record<Exclude<UnavailableReferenceKind, 'action'>, { title: string; text: string }> = {
+const LIBRARY_UNAVAILABLE_COPY: Record<Exclude<UnavailableReferenceKind, 'action' | 'table_cell'>, { title: string; text: string }> = {
     item: {
         title: 'Item Not Available',
         text: "This item is in a library that isn't available on this computer. It may be a group library you haven't joined on this device.",
@@ -81,6 +89,10 @@ const LIBRARY_UNAVAILABLE_COPY: Record<Exclude<UnavailableReferenceKind, 'action
     annotation: {
         title: 'Annotation Not Available',
         text: "This annotation is in a library that isn't available on this computer. It may be a group library you haven't joined on this device.",
+    },
+    table: {
+        title: 'Table Not Available',
+        text: "This table is in a library that isn't available on this computer. It may be a group library you haven't joined on this device.",
     },
     tag: {
         title: 'Tag Not Available',
@@ -103,7 +115,7 @@ export function notifyReferenceUnavailable(
     kind: UnavailableReferenceKind,
     cause: UnavailableReferenceCause = 'missing',
 ): void {
-    const copy = cause === 'library_unavailable' && kind !== 'action'
+    const copy = cause === 'library_unavailable' && kind !== 'action' && kind !== 'table_cell'
         ? LIBRARY_UNAVAILABLE_COPY[kind]
         : UNAVAILABLE_REFERENCE_COPY[kind];
     const { title, text } = copy;
@@ -116,6 +128,20 @@ export function notifyReferenceUnavailable(
         });
     } catch (e) {
         logger(`notifyReferenceUnavailable: failed to surface popup: ${e}`, 2);
+    }
+}
+
+/** Say why a table that exists could not be opened (no file, unreadable, no window). */
+export function notifyTableOpenFailed(message: string): void {
+    try {
+        store.set(addPopupMessageAtom, {
+            id: 'table-open-failed',
+            type: 'warning',
+            title: 'Table Not Available',
+            text: message,
+        });
+    } catch (e) {
+        logger(`notifyTableOpenFailed: failed to surface popup: ${e}`, 2);
     }
 }
 

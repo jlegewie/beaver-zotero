@@ -1,9 +1,9 @@
 import { handleDuplicatesRequest } from '../duplicates/discovery';
 import { handleTestProtectedCacheHttpRequest } from './handlers/testProtectedCacheHandlers';
-import { handleTestVoiceHttpRequest } from './handlers/testVoiceHandlers';
 import { handleTestExportHttpRequest, handleTestExportNoteHttpRequest } from './handlers/testExportHandlers';
 import { handleTestNoteCreateHttpRequest, handleTestNoteDeleteHttpRequest, handleTestNoteReadHttpRequest } from './handlers/testNoteHandlers';
-import { handleTestTableCreateHttpRequest, handleTestTableReadHttpRequest, handleTestTableListHttpRequest, handleTestTableWriteHttpRequest, handleTestTableEditHttpRequest, handleTestTableVersionsHttpRequest, handleTestTableRevertHttpRequest, handleTestTableDeleteHttpRequest, handleTestTableOpenHttpRequest, handleTestTableCorruptHttpRequest, handleTestTableShadowHttpRequest, handleTestTableRestoreShadowHttpRequest, handleTestTableTrimHttpRequest, handleTestTableViewStateHttpRequest, handleTestTableItemPaneHttpRequest } from './handlers/testTableHandlers';
+import { handleTestTableFillHttpRequest, handleTestTablePendingHttpRequest } from './handlers/testTableFillHandlers';
+import { handleTestTableCreateHttpRequest, handleTestTableReadHttpRequest, handleTestTableListHttpRequest, handleTestTableWriteHttpRequest, handleTestTableEditHttpRequest, handleTestTableVersionsHttpRequest, handleTestTableRevertHttpRequest, handleTestTableDeleteHttpRequest, handleTestTableOpenHttpRequest, handleTestTableCorruptHttpRequest, handleTestTableShadowHttpRequest, handleTestTableRestoreShadowHttpRequest, handleTestTableTrimHttpRequest } from './handlers/testTableHandlers';
 import {
     handleTestAttachmentImageHttpRequest,
     handleTestExcludedLibrariesHttpRequest,
@@ -36,6 +36,7 @@ import {
 import { captureInstanceOperation } from './operation';
 import { createEndpoint, registerEndpoint } from './registration';
 import { handleArtifactRequest } from '../artifacts/artifactProvider';
+import { handleTableTabProbe } from '../../ui/tableTabProbe';
 /** Local HTTP routes, owned by the plugin instance. */
 
 import { logger } from '@beaver/agent-core/platform/logger';
@@ -446,11 +447,15 @@ async function handleLibraryListHttpRequest(request: any) {
         special_collection: request.special_collection,
         tag: request.tag,
         item_category: request.item_category ?? 'regular',
+        include_children: request.include_children ?? false,
+        nest_children: request.nest_children ?? false,
+        include_abstract: request.include_abstract ?? false,
         recursive: request.recursive ?? true,
         sort_by: request.sort_by || 'dateModified',
         sort_order: request.sort_order || 'desc',
         limit: request.limit ?? 20,
         offset: request.offset ?? 0,
+        has_attachments: request.has_attachments ?? null,
     };
     
     const response = await handleListItemsRequest(wsRequest);
@@ -485,6 +490,7 @@ async function handleResolvePopulationHttpRequest(request: any) {
         any_conditions: request.any_conditions || [],
         item_category: request.item_category === 'attachment' ? 'attachment' : 'regular',
         include_standalone_attachments: request.include_standalone_attachments ?? false,
+        skip_sibling_snapshots: request.skip_sibling_snapshots ?? false,
         has_attachments: request.has_attachments ?? null,
         max_items: request.max_items ?? 1000,
         exclude_item_ids: request.exclude_item_ids ?? [],
@@ -520,6 +526,7 @@ async function handleResolvePopulationHttpRequest(request: any) {
         // WIDER population than the caller described.
         any_conditions_applied: response.any_conditions_applied,
         standalone_attachments_included: response.standalone_attachments_included,
+        sibling_snapshots_skipped: response.sibling_snapshots_skipped,
         // A dropped condition widens the population; the caller must not act on
         // ids that came back with a warning.
         warnings: response.warnings,
@@ -695,6 +702,7 @@ async function handleAgentActionValidateHttpRequest(request: any) {
         collection_names: response.collection_names,
         preference: response.preference,
         warnings: response.warnings,
+        match_strategy: response.match_strategy,
     };
 }
 
@@ -861,10 +869,6 @@ export function registerEndpoints(): (() => void) | undefined {
 
     // Diagnostics and test commands are available in development and staging.
     if (process.env.NODE_ENV === 'development' || process.env.BUILD_ENV === 'staging') {
-        // Fake voice sessions require the development-only voice harness.
-        if (process.env.NODE_ENV === 'development') {
-            endpoints['/beaver/test/voice'] = createEndpoint(handleTestVoiceHttpRequest);
-        }
         endpoints['/beaver/test/ping'] =
             createEndpoint(handleTestPingHttpRequest);
 
@@ -1141,6 +1145,10 @@ export function registerEndpoints(): (() => void) | undefined {
         endpoints['/beaver/test/list-actions'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/list-actions', request));
         endpoints['/beaver/test/approve-action'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/approve-action', request));
         endpoints['/beaver/test/confirm-credits'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/confirm-credits', request));
+        endpoints['/beaver/test/table-card'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/table-card', request));
+        endpoints['/beaver/test/answer-question'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/answer-question', request));
+        endpoints['/beaver/test/batch-approval'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/batch-approval', request));
+        endpoints['/beaver/test/table-fill-progress'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/table-fill-progress', request));
         endpoints['/beaver/test/undo-action'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/undo-action', request));
         endpoints['/beaver/test/chat-drop-connection'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/chat-drop-connection', request));
         endpoints['/beaver/test/run-snapshot'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/run-snapshot', request));
@@ -1151,11 +1159,7 @@ export function registerEndpoints(): (() => void) | undefined {
 
         endpoints['/beaver/test/beaver-window'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/beaver-window', request));
 
-        endpoints['/beaver/test/open-table'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/open-table', request));
-
-        endpoints['/beaver/test/close-table'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/close-table', request));
-
-        // `openTable` itself — the product path the item-pane button takes.
+        // `openTable` itself — the product path chat cards and links take.
         endpoints['/beaver/test/open-stored-table'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/open-stored-table', request));
 
         // Stored tables (dev-only): create the real snapshot attachment, read
@@ -1166,6 +1170,10 @@ export function registerEndpoints(): (() => void) | undefined {
 
         endpoints['/beaver/test/table-list'] = createEndpoint(handleTestTableListHttpRequest);
 
+        // The Beaver tab (dev-only): fixed commands that open, close and time
+        // it through the product paths, and report its tabs and the session.
+        endpoints['/beaver/test/table-tab'] = createEndpoint(handleTableTabProbe);
+
         // The versioned store (dev-only): the write protocol, the version log,
         // revert, trash/restore, and the crash recovery `open` performs.
         // `table-corrupt` damages the storage directory on purpose so that
@@ -1173,6 +1181,10 @@ export function registerEndpoints(): (() => void) | undefined {
         endpoints['/beaver/test/table-write'] = createEndpoint(handleTestTableWriteHttpRequest);
 
         endpoints['/beaver/test/table-edit'] = createEndpoint(handleTestTableEditHttpRequest);
+        // Table fills (dev-only): plan, start, wait for, stop and inspect the
+        // plugin's fill jobs, and read a table's pending work.
+        endpoints['/beaver/test/table-fill'] = createEndpoint(handleTestTableFillHttpRequest);
+        endpoints['/beaver/test/table-pending'] = createEndpoint(handleTestTablePendingHttpRequest);
 
         endpoints['/beaver/test/table-versions'] = createEndpoint(handleTestTableVersionsHttpRequest);
 
@@ -1193,20 +1205,12 @@ export function registerEndpoints(): (() => void) | undefined {
 
         endpoints['/beaver/test/table-restore-shadow'] = createEndpoint(handleTestTableRestoreShadowHttpRequest);
 
-        // The reader host (dev-only): open a stored table in the reader and
-        // report which of the enhancer's seams attached, and list every table
-        // document currently enhanced in either host.
-        endpoints['/beaver/test/table-open-reader'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/table-open-reader', request));
-
-        endpoints['/beaver/test/table-view-state'] = createEndpoint(handleTestTableViewStateHttpRequest);
-
-        // The item-pane section (dev-only): whether it is registered, and the
-        // fields it would render for one table.
-        endpoints['/beaver/test/table-item-pane'] = createEndpoint(handleTestTableItemPaneHttpRequest);
-
         endpoints['/beaver/test/beaver-sidebar'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/beaver-sidebar', request));
 
         endpoints['/beaver/test/select-tab'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/select-tab', request));
+
+        // The pane holding the main-window sidebar, measured while Zotero sizes it.
+        endpoints['/beaver/test/sidebar-pane-width'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/sidebar-pane-width', request));
 
         endpoints['/beaver/test/run-status-popup'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/run-status-popup', request));
 

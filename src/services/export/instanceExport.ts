@@ -11,6 +11,7 @@
 
 import type { ExportDoc, ExportImage, ExportSource, ExportWarning, FormattedCitations, LatexCitationPackage } from '@beaver/agent-export/types';
 import type { WriteDocxResult, WriteHtmlResult, WriteLatexResult, WriteMarkdownResult } from '@beaver/agent-export/runtime';
+import type { Row, TableSpec } from '@beaver/agent-core/layouts/table';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { loadExportRuntime, type ExportRuntime } from './exportRuntime';
 import { formatExportCitations } from './exportCitations';
@@ -677,6 +678,15 @@ export class InstanceExport {
                 return { files: [path], warnings: result.warnings, stats: result.stats };
             }
         }
+    }
+
+    /**
+     * Write a research table to `path` as an Excel workbook, its rows in the
+     * given order. The caller chooses the path and reads the table.
+     */
+    async writeTableWorkbook(path: string, spec: TableSpec, rows?: Row[]): Promise<void> {
+        const result = await this.getRuntime().writeXlsx({ spec, rows });
+        await IOUtils.write(path, result.bytes);
     }
 
     /** Show an exported file in the system file manager. */

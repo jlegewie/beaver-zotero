@@ -79,6 +79,12 @@ export interface SearchMenuProps {
     onSearch: (query: string) => void;
     /** Text to display when no results are found */
     noResultsText: string;
+    /**
+     * Whether the items are still being prepared. An empty list then reads
+     * "Searching…" for a typed query and stays blank otherwise, rather than
+     * claiming there is nothing to show.
+     */
+    isLoading?: boolean;
     /** Placeholder text for the search input */
     placeholder: string;
     /** Whether to close the menu when an item is selected */
@@ -103,6 +109,24 @@ export interface SearchMenuProps {
 /**
 * A search menu component with filterable items
 */
+/**
+ * The side of its trigger a menu opens on: the preferred side when the menu
+ * fits there, otherwise the other side if that has more room. A trigger near
+ * the top of a short window has no room for a menu above it.
+ */
+export function menuSideWithRoom(
+    preferred: 'above' | 'below',
+    trigger: { top: number; bottom: number },
+    viewportHeight: number,
+    menuHeight: number,
+    margin = 8,
+): 'above' | 'below' {
+    const roomAbove = trigger.top - margin;
+    const roomBelow = viewportHeight - trigger.bottom - margin;
+    if (preferred === 'above') return roomAbove < menuHeight && roomBelow > roomAbove ? 'below' : 'above';
+    return roomBelow < menuHeight && roomAbove > roomBelow ? 'above' : 'below';
+}
+
 const SearchMenu: React.FC<SearchMenuProps> = ({ 
     menuItems, 
     isOpen, 
@@ -117,6 +141,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
     verticalPosition = 'below',
     onSearch,
     noResultsText,
+    isLoading = false,
     placeholder,
     closeOnSelect = true,
     searchQuery,
@@ -232,6 +257,16 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
         } else {
             // Place menu below the anchor with a gap
             adjustedY = anchorY + gap;
+        }
+
+        // Keep the whole menu on screen: a menu with too little room on its
+        // side would otherwise put its first or last rows out of reach. The
+        // caller chooses the side; this only nudges it back inside.
+        if (adjustedY + menuHeight > viewportHeight - 8) {
+            adjustedY = viewportHeight - menuHeight - 8;
+        }
+        if (adjustedY < 8) {
+            adjustedY = 8;
         }
         
         // Only update position if it's actually different to prevent infinite loops
@@ -511,6 +546,9 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
         );
     };
 
+    // While loading, the empty list says so instead of "no results".
+    const emptyStateText = isLoading ? (searchQuery.trim() ? 'Searching…' : '') : null;
+
     const textInput = (
         <div 
             className={`display-flex flex-row items-center gap-05 p-1 px-2 ${
@@ -566,7 +604,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                             displayOrderMenuItems.map((item, index) => renderMenuItem(item, index))
                         ) : (
                             <div className="px-2 p-1 py-2 text-sm font-color-tertiary text-center">
-                                {searchQuery.trim() ? "No results found" : "Start typing to search"}
+                                {emptyStateText ?? (searchQuery.trim() ? noResultsText : "Start typing to search")}
                             </div>
                         )}
                     </div>
@@ -593,7 +631,7 @@ const SearchMenu: React.FC<SearchMenuProps> = ({
                             displayOrderMenuItems.map((item, index) => renderMenuItem(item, index))
                         ) : (
                             <div className="px-2 py-1 text-sm font-color-tertiary text-center">
-                                {noResultsText}
+                                {emptyStateText ?? noResultsText}
                             </div>
                         )}
                     </div>

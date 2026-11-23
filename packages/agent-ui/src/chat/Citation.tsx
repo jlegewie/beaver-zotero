@@ -5,6 +5,7 @@ import {
     getCitationBoundingBoxes,
     getContentKind,
     getSymbolicLocation,
+    type Citation as CitationMetadata,
 } from '@beaver/agent-core/types/citations';
 import {
     externalReferenceMappingAtom,
@@ -14,10 +15,10 @@ import {
 import { pageLabelsByAttachmentIdAtom, externalFileLocalPathsAtom } from '@beaver/agent-core/citations/atoms';
 import { useCitationMarker } from './useCitationMarker';
 import { getHost } from '../host';
-import type { CitationExportRender } from '../host/types';
-import { useCitationViewModel } from './useCitationViewModel';
+import type { CitationExportRender, CitationReaderTarget } from '../host/types';
+import { useCitationViewModel, type CitationViewModel } from './useCitationViewModel';
 import { hasAlternateModifier, useAlternateActivation } from './useAlternateActivation';
-import { Icon, LibraryIcon, PdfIcon, FileIcon, GlobalSearchIcon, NoteIcon, HighlighterIcon, TextAlignLeftIcon, ExternalLinkIcon } from '../icons';
+import { Icon, LibraryIcon, PdfIcon, FileIcon, GlobalSearchIcon, NoteIcon, HighlighterIcon, TextAlignLeftIcon, ExternalLinkIcon, TableIcon, ArrowUpRightIcon } from '../icons';
 const TOOLTIP_WIDTH = '250px';
 
 /**
@@ -58,6 +59,12 @@ interface CitationProps {
     // Rendering options
     exportRendering?: boolean;
     children?: React.ReactNode;
+    /**
+     * An assembled citation, rendered without a tag or the thread's store, and
+     * the numeric marker its caller numbered it with.
+     */
+    citation?: CitationMetadata;
+    marker?: string;
 }
 
 /**
@@ -78,6 +85,155 @@ function renderExportedCitation(exported: CitationExportRender): React.ReactElem
     );
 }
 
+/**
+ * What a citation is and where its click leads, derived from its view model.
+ * Shared by the citation marker and by callers that draw their own anchor for
+ * an assembled citation (a table's page tags), so both navigate alike.
+ */
+export interface CitationTargetFlags {
+    isNoteCitation: boolean;
+    isAnnotationCitation: boolean;
+    isEpubCitation: boolean;
+    hasEpubSymbolicLocator: boolean;
+    isTextCitation: boolean;
+    isSnapshotCitation: boolean;
+    hasSnapshotSymbolicLocator: boolean;
+    hasBoundingBoxes: boolean;
+    /** A research table's cell or row: the click opens the table at it. */
+    isTableCitation: boolean;
+    /** A PDF or EPUB page-or-box locator: the click lands inside the document. */
+    hasLocator: boolean;
+    /** Whether alternate activation (reveal the cited work) changes anything. */
+    canRevealItem: boolean;
+}
+
+export function citationTargetFlags(vm: CitationViewModel): CitationTargetFlags {
+    const metadata = vm.metadata;
+    const isNoteCitation = metadata?.citation_type === 'note';
+    const isTableCitation = !!vm.table;
+    const isAnnotationCitation = metadata?.citation_type === 'annotation';
+    const contentKind = getContentKind(metadata);
+    const symbolic = getSymbolicLocation(metadata);
+    const isEpubCitation = contentKind === 'epub';
+    const hasEpubSymbolicLocator = isEpubCitation && symbolic?.content_kind === 'epub';
+    const isTextCitation = contentKind === 'text';
+    const isSnapshotCitation = contentKind === 'snapshot';
+    // Snapshots resolve a cited passage from the symbolic anchor/text, not pages
+    // (the reader is a continuous scroll view); any synthetic page on the wire is
+    // a coarse navigation hint only and is never shown.
+    const hasSnapshotSymbolicLocator = isSnapshotCitation && symbolic?.content_kind === 'snapshot';
+    const hasBoundingBoxes = !isNoteCitation && !isAnnotationCitation && !!metadata && getCitationBoundingBoxes(metadata).length > 0;
+    // PDF/EPUB page-or-box locator. Snapshots are excluded here: they carry a
+    // synthetic page that must not be presented as a PDF page locator.
+    const hasLocator = !isNoteCitation && !isAnnotationCitation && !isSnapshotCitation
+        && (vm.pages.length > 0 || hasBoundingBoxes || hasEpubSymbolicLocator);
+    // Alternate activation acts on the cited work rather than the cited passage.
+    // It stays inert wherever it would change nothing: an unmapped external
+    // reference and an external file have no library item behind them; a
+    // streaming or invalid citation has no click at all; and a plain
+    // locator-less item is already revealed in the library by an ordinary
+    // click. What is left is exactly the set whose click it redirects.
+    const defaultRevealsItem = !hasLocator
+        && !isTableCitation
+        && !isSnapshotCitation
+        && !isTextCitation
+        && !isNoteCitation
+        && !isAnnotationCitation;
+    const canRevealItem = !vm.isExternalFile
+        && (!vm.isExternal || !!vm.mappedZoteroItem)
+        && !!vm.effectiveItemKey
+        && !vm.isStreaming
+        && !vm.isInvalid
+        && !defaultRevealsItem;
+    return {
+        isNoteCitation,
+        isAnnotationCitation,
+        isEpubCitation,
+        hasEpubSymbolicLocator,
+        isTextCitation,
+        isSnapshotCitation,
+        hasSnapshotSymbolicLocator,
+        hasBoundingBoxes,
+        isTableCitation,
+        hasLocator,
+        canRevealItem,
+    };
+}
+
+/**
+ * Where citations rendered below open the cited document. A surface that lives
+ * in a tab provides `window`, so a click does not replace the surface itself;
+ * unset, the host decides.
+ */
+export const CitationReaderTargetContext = React.createContext<CitationReaderTarget | undefined>(undefined);
+
+/**
+ * Hand a ready citation to the host's activation: the cited passage, or the
+ * cited work when `alternate` asks for it and that changes anything.
+ */
+function activateCitationViewModel(
+    vm: CitationViewModel,
+    flags: CitationTargetFlags,
+    ownerDocument: Document,
+    alternate: boolean,
+    readerTarget: CitationReaderTarget | undefined,
+): void {
+    if (!vm.metadata || vm.isStreaming || vm.isInvalid) return;
+    void getHost().navigation?.activateCitation({
+        metadata: vm.metadata,
+        intent: flags.canRevealItem && alternate ? 'item' : 'passage',
+        ...(readerTarget ? { readerTarget } : {}),
+        isExternal: vm.isExternal,
+        isExternalFile: vm.isExternalFile,
+        externalFileKey: vm.externalFileKey,
+        externalSourceId: vm.externalSourceId,
+        hasMappedItem: !!vm.mappedZoteroItem,
+        effectiveLibraryID: vm.effectiveLibraryID,
+        effectiveItemKey: vm.effectiveItemKey,
+        effectiveLibraryRef: vm.effectiveLibraryRef,
+        previewText: vm.previewText,
+        ownerDocument,
+    });
+}
+
+/** An assembled citation's view model and its activation, for a caller-drawn anchor. */
+export interface CitationActivationHandle {
+    vm: CitationViewModel;
+    flags: CitationTargetFlags;
+    /** Whether the citation can be activated at all (ready, not invalid). */
+    ready: boolean;
+    /**
+     * Activate as the citation marker's own click does. Pass the click so the
+     * alternate-activation modifier is honoured; anything with an
+     * `ownerDocument` (an element) activates the passage.
+     */
+    activate(source: React.MouseEvent | { ownerDocument: Document }): void;
+}
+
+/**
+ * The click of the chat's `Citation` for an assembled citation whose anchor
+ * the caller draws itself: the same view model and the same host activation,
+ * so a table's page tag opens the passage exactly as a marker would.
+ */
+export function useCitationActivation(citation: CitationMetadata): CitationActivationHandle {
+    const props = React.useMemo(() => ({ citation }), [citation]);
+    const vm = useCitationViewModel(props);
+    const flags = citationTargetFlags(vm);
+    const ready = !!vm.metadata && !vm.isStreaming && !vm.isInvalid;
+    const readerTarget = React.useContext(CitationReaderTargetContext);
+    const activate = (source: React.MouseEvent | { ownerDocument: Document }) => {
+        if ('currentTarget' in source) {
+            source.preventDefault();
+            const target = source.currentTarget as Element;
+            const doc = target.ownerDocument;
+            activateCitationViewModel(vm, flags, doc, hasAlternateModifier(source, doc.defaultView?.navigator), readerTarget);
+            return;
+        }
+        activateCitationViewModel(vm, flags, source.ownerDocument, false, readerTarget);
+    };
+    return { vm, flags, ready, activate };
+}
+
 const Citation: React.FC<CitationProps> = (props) => {
     const { exportRendering = false } = props;
 
@@ -87,6 +243,7 @@ const Citation: React.FC<CitationProps> = (props) => {
     // citation host. Zotero data access below is confined to the click/export
     // paths, which are inherently host-specific.
     const vm = useCitationViewModel(props as Record<string, unknown>);
+    const readerTarget = React.useContext(CitationReaderTargetContext);
     const {
         metadata: citationMetadata,
         isExternal,
@@ -128,7 +285,10 @@ const Citation: React.FC<CitationProps> = (props) => {
 
     // Get or assign numeric marker using base key (same item = same marker)
     // Uses markerKey (without sid/page) so all citations to the same item share a marker
-    const numericMarker = useCitationMarker(markerKey, exportRendering);
+    // A direct citation belongs to its caller (a table's evidence), which numbers
+    // it; it never takes a number from the thread's marker map.
+    const direct = props.citation !== undefined;
+    const numericMarker = useCitationMarker(direct ? '' : markerKey, exportRendering);
 
     // Whether the alternate-activation modifier is being held. Document-wide, so
     // every citation flips together and the hold reads as a mode.
@@ -153,7 +313,7 @@ const Citation: React.FC<CitationProps> = (props) => {
     } else {
         // Numeric markers should be stable and independent of citationMetadata.
         // If key is missing (invalid/malformed citation) or invalid, show placeholder.
-        displayText = (markerKey && !isInvalid) ? numericMarker : '?';
+        displayText = (markerKey && !isInvalid) ? (direct ? props.marker ?? '?' : numericMarker) : '?';
     }
 
     // Rendering for export to Zotero note (using CSL JSON for citations)
@@ -216,6 +376,12 @@ const Citation: React.FC<CitationProps> = (props) => {
             return (<span>{`(${fileLabel}${locatorSuffix})`}</span>);
         }
 
+        // A table cell names no work a bibliography could format: it exports
+        // as its row's paper.
+        if (citationMetadata?.citation_type === 'table') {
+            return (<span>{` (${citation})`}</span>);
+        }
+
         // For library citations, delegate host-native formatting (CSL for
         // Zotero) to the host. The host returns formatted HTML; the wrapping
         // element shape stays here so this component owns all the JSX.
@@ -232,44 +398,23 @@ const Citation: React.FC<CitationProps> = (props) => {
     }
 
     // Determine the CSS class based on citation type and state
-    const isNoteCitation = citationMetadata?.citation_type === 'note';
-    const isAnnotationCitation = citationMetadata?.citation_type === 'annotation';
-    const isEpubCitation = getContentKind(citationMetadata) === 'epub';
-    const hasEpubSymbolicLocator = isEpubCitation
-        && getSymbolicLocation(citationMetadata)?.content_kind === 'epub';
-    const isTextCitation = getContentKind(citationMetadata) === 'text';
-    const isSnapshotCitation = getContentKind(citationMetadata) === 'snapshot';
+    const flags = citationTargetFlags(vm);
+    const {
+        isNoteCitation,
+        isAnnotationCitation,
+        isEpubCitation,
+        isTextCitation,
+        isSnapshotCitation,
+        hasSnapshotSymbolicLocator,
+        hasBoundingBoxes,
+        isTableCitation,
+        hasLocator,
+        canRevealItem,
+    } = flags;
     const symbolicLocationForDisplay = getSymbolicLocation(citationMetadata);
     const textLineLocation = isTextCitation && symbolicLocationForDisplay?.content_kind === 'text'
         ? symbolicLocationForDisplay
         : undefined;
-    // Snapshots resolve a cited passage from the symbolic anchor/text, not pages
-    // (the reader is a continuous scroll view); any synthetic page on the wire is
-    // a coarse navigation hint only and is never shown.
-    const hasSnapshotSymbolicLocator = isSnapshotCitation
-        && symbolicLocationForDisplay?.content_kind === 'snapshot';
-    const hasBoundingBoxes = !isNoteCitation && !isAnnotationCitation && !!citationMetadata && getCitationBoundingBoxes(citationMetadata).length > 0;
-    // PDF/EPUB page-or-box locator. Snapshots are excluded here: they carry a
-    // synthetic page that must not be presented as a PDF page locator.
-    const hasLocator = !isNoteCitation && !isAnnotationCitation && !isSnapshotCitation
-        && (pages.length > 0 || hasBoundingBoxes || hasEpubSymbolicLocator);
-    // Alternate activation acts on the cited work rather than the cited passage.
-    // It stays inert wherever it would change nothing: an unmapped external
-    // reference and an external file have no library item behind them; a
-    // streaming or invalid citation has no click at all; and a plain
-    // locator-less item is already revealed in the library by an ordinary
-    // click. What is left is exactly the set whose click it redirects.
-    const defaultRevealsItem = !hasLocator
-        && !isSnapshotCitation
-        && !isTextCitation
-        && !isNoteCitation
-        && !isAnnotationCitation;
-    const canRevealItem = !isExternalFile
-        && (!isExternal || !!mappedZoteroItem)
-        && !!effectiveItemKey
-        && !isStreaming
-        && !isInvalid
-        && !defaultRevealsItem;
     const showItemInfo = isAlternate && canRevealItem;
 
     // Click handler — delegates all client-specific navigation to the host.
@@ -277,25 +422,15 @@ const Citation: React.FC<CitationProps> = (props) => {
     // only runs for "ready" citations where metadata is present.
     const handleClick = (e: React.MouseEvent) => {
         e.preventDefault();
-        if (!citationMetadata) return;
-        getHost().navigation?.activateCitation({
-            metadata: citationMetadata,
-            // Read the modifier off the click rather than the hover state, so
-            // the action always matches the key that was actually held down.
-            intent: (canRevealItem && hasAlternateModifier(e, e.currentTarget.ownerDocument.defaultView?.navigator))
-                ? 'item'
-                : 'passage',
-            isExternal,
-            isExternalFile,
-            externalFileKey,
-            externalSourceId,
-            hasMappedItem: !!mappedZoteroItem,
-            effectiveLibraryID,
-            effectiveItemKey,
-            effectiveLibraryRef,
-            previewText,
-            ownerDocument: e.currentTarget.ownerDocument,
-        });
+        // Read the modifier off the click rather than the hover state, so the
+        // action always matches the key that was actually held down.
+        activateCitationViewModel(
+            vm,
+            flags,
+            e.currentTarget.ownerDocument,
+            hasAlternateModifier(e, e.currentTarget.ownerDocument.defaultView?.navigator),
+            readerTarget,
+        );
     };
 
     // The locator style promises navigation to a place inside the document.
@@ -304,7 +439,7 @@ const Citation: React.FC<CitationProps> = (props) => {
     // whose click reveals its item is drawn.
     const citationClassBase = isExternal && !mappedZoteroItem
         ? "zotero-citation external-citation"
-        : (hasLocator || isAnnotationCitation || hasSnapshotSymbolicLocator) && !isExternalFile && !showItemInfo
+        : (hasLocator || isAnnotationCitation || hasSnapshotSymbolicLocator || isTableCitation) && !isExternalFile && !showItemInfo
         ? "zotero-citation with-locator"
         : "zotero-citation";
     const citationClass = isStreaming
@@ -449,7 +584,7 @@ const Citation: React.FC<CitationProps> = (props) => {
                         </span>
                     </span>
                 )}
-                {!hasLocator && !isSnapshotCitation && !isExternalFile && !isTextCitation && !isNoteCitation && !isAnnotationCitation && (!isExternal || !!mappedZoteroItem) && (
+                {!hasLocator && !isTableCitation && !isSnapshotCitation && !isExternalFile && !isTextCitation && !isNoteCitation && !isAnnotationCitation && (!isExternal || !!mappedZoteroItem) && (
                     <span className={`px-3 py-15 block ${showPreviewText ? 'border-top-quinary' : ''}`}>
                         <span className="display-flex flex-row items-center gap-15">
                             <Icon icon={LibraryIcon} className="font-color-secondary" />
@@ -463,6 +598,53 @@ const Citation: React.FC<CitationProps> = (props) => {
             )}
         </span>
     )
+
+    // A table citation's tooltip: the table in the header, the cell's answer
+    // as it was when cited, and the paper and column it belongs to. From the
+    // citation alone.
+    const table = vm.table;
+    const tableCell = !!table?.column_header;
+    const tableText = !table
+        ? ''
+        : !tableCell
+        ? citation
+        : table.value ?? (table.provenance === 'user' ? 'Cleared by you' : 'No answer yet');
+    const tableSource = table && tableCell
+        ? [citation, table.column_header, table.value && table.provenance === 'user' ? 'Edited by you' : '']
+            .filter(Boolean)
+            .join(' · ')
+        : '';
+    const tablePreview = table ? (
+        <span className="block" style={{ overflow: 'hidden' }}>
+            <span className="px-3 py-15 display-flex flex-row items-center border-bottom-quinary gap-15">
+                <Icon icon={TableIcon} className="font-color-secondary" style={{ flexShrink: 0 }} />
+                <span className="font-color-primary text-sm" style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {table.title}
+                </span>
+            </span>
+            <span className="px-3 py-15 block">
+                <span
+                    className="font-color-primary text-sm"
+                    style={{ display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 6, overflow: 'hidden', wordBreak: 'break-word', overflowWrap: 'anywhere' }}
+                >
+                    {tableText}
+                </span>
+                {tableSource && (
+                    <span className="block font-color-secondary text-xs mt-1" style={{ wordBreak: 'break-word' }}>
+                        {tableSource}
+                    </span>
+                )}
+            </span>
+            <span className="px-3 py-15 block border-top-quinary">
+                <span className="display-flex flex-row items-center gap-15">
+                    <Icon icon={ArrowUpRightIcon} className="font-color-secondary" />
+                    <span className="text-sm font-color-secondary">
+                        {tableCell ? 'Opens cell in table' : 'Opens row in table'}
+                    </span>
+                </span>
+            </span>
+        </span>
+    ) : null;
 
     // Return the citation with tooltip and click handler
     // - Streaming state: no tooltip (metadata not available yet)
@@ -487,7 +669,7 @@ const Citation: React.FC<CitationProps> = (props) => {
                 :
                     <Tooltip
                         content={previewText}
-                        customContent={citationPreview}
+                        customContent={tablePreview && !showItemInfo ? tablePreview : citationPreview}
                         contentKey={showItemInfo ? 'item' : 'passage'}
                         width={TOOLTIP_WIDTH}
                         padding={false}

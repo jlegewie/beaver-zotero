@@ -20,6 +20,14 @@ export interface AckActionsRequest {
      * overwritten. Ignored by servers that predate it.
      */
     only_undecided?: boolean;
+    /**
+     * Record an action only while it has no change of its own in the library:
+     * `pending`, `rejected`, `undone`, a failed apply (`error` without
+     * `result_data`) or unconfirmed. A user's apply sets this, so an apply from
+     * a stale view never replaces the result of one already applied. Ignored by
+     * servers that predate it; `only_undecided` wins when both are set.
+     */
+    only_unapplied?: boolean;
 }
 
 export interface AckActionError {
@@ -28,7 +36,7 @@ export interface AckActionError {
     detail: string;
 }
 
-/** An action an `only_undecided` acknowledgement left alone, as it stands. */
+/** An action a guarded acknowledgement left alone, as it stands. */
 export interface AckSkippedAction {
     action_id: string;
     /** Null when the action was not found. */
@@ -43,7 +51,7 @@ export interface AckActionsResponse {
     run_id: string;
     updated: number;
     errors: AckActionError[];
-    /** With `only_undecided`: actions left alone, missing or decided since. */
+    /** With `only_undecided` or `only_unapplied`: actions left alone, as they stand. */
     skipped?: AckSkippedAction[];
 }
 
@@ -64,7 +72,9 @@ export interface ActionResponse {
     action_type: string;
     status: string;
     proposed_data: Record<string, any>;
-    result_data?: Record<string, any>;
+    result_data?: Record<string, any> | null;
+    error_message?: string | null;
+    error_details?: Record<string, any> | null;
     created_at: string;
     updated_at: string;
 }
@@ -290,7 +300,7 @@ export class AgentActionsService extends ApiService {
     async acknowledgeActions(
         runId: string,
         links: AckActionLink[],
-        options?: RequestOptions & { onlyUndecided?: boolean },
+        options?: RequestOptions & { onlyUndecided?: boolean; onlyUnapplied?: boolean },
     ): Promise<AckActionsResponse> {
         logger(`acknowledgeActions: Acknowledging ${links.length} actions for run ${runId}`);
 
@@ -298,6 +308,7 @@ export class AgentActionsService extends ApiService {
             run_id: runId,
             links,
             ...(options?.onlyUndecided ? { only_undecided: true } : {}),
+            ...(options?.onlyUnapplied ? { only_unapplied: true } : {}),
         };
 
         return this.post<AckActionsResponse>('/api/v1/agent-actions/ack', request, options);

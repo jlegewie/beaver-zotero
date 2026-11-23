@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "docx": "^9.8.1",
+    "jszip": "^3.10.1",
     "katex": "^0.16.47",
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",

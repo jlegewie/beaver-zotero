@@ -1,5 +1,4 @@
 import type { AgentAction } from "@beaver/agent-core/agents/agentActionTypes";
-import type { WSAgentActionExecuteRequest } from "@beaver/agent-core/protocol/agentProtocol";
 import type {
     AnnotationBeforeSnapshot,
     AnnotationPlacementSnapshot,
@@ -12,61 +11,65 @@ import { createAbortController } from "../../utils/abortController";
 import {
     modelObjectId,
     resolveItemReference,
-    resolveLibraryRef,
 } from "../../utils/libraryIdentity";
 import {
-    executeEditAnnotationsAction as executeHandler,
+    ANNOTATION_STATE_CHANGED,
+    applyEditAnnotations,
     loadAnnotationEditData,
 } from "../agentDataProvider/actions/editAnnotations";
-import {
-    checkLibraryExcluded,
-    excludedLibraryUserMessage,
-} from "../agentDataProvider/utils";
+import { assertLibraryRefNotExcluded } from "../agentDataProvider/actions/actionExecution";
 import {
     applyAnnotationPlacement,
     type AnnotationPlacement,
 } from "../annotations/createAnnotation";
 import { refreshMovedAnnotationsInOpenReaders } from "../annotations/readerSync";
 import type { UndoResult } from "./editMetadataActions";
+import { type ManualApplyOptions, staleProposalError } from "./staleProposal";
 
 /** Undo errors carry a separate user-facing message for the sidebar. */
-type UndoUserFacingError = Error & { userMessage?: string };
 
 /** Deadline for a locally applied edit, matching the backend-driven default. */
 const LOCAL_EXECUTE_TIMEOUT_SECONDS = 25;
 
+/**
+ * Apply a stored edit_annotations action through the shared executor.
+ *
+ * An edit that would now overwrite content the user wrote, when it did not at
+ * proposal time, is refused as `stale_proposal`, unless the user chose to
+ * apply it anyway (`options.skipStaleCheck`).
+ */
 export async function executeEditAnnotationsAction(
     action: AgentAction,
+    options: ManualApplyOptions = {},
 ): Promise<EditAnnotationsResultData> {
     // The signal has to fire on its own: preparing a move can read an
     // attachment and analyze a page, and those waits are interruptible only by
-    // the signal — the handler's elapsed-time checkpoints run after they return.
+    // the signal — the executor's elapsed-time checkpoints run after they return.
     const controller = createAbortController();
     const timer = setTimeout(
         () => controller.abort(),
         LOCAL_EXECUTE_TIMEOUT_SECONDS * 1000,
     );
-    let response;
     try {
-        response = await executeHandler(
-            {
-                event: "agent_action_execute",
-                request_id: action.id,
-                action_type: "edit_annotations",
-                action_data: action.proposed_data,
-            } as WSAgentActionExecuteRequest,
+        return await applyEditAnnotations(
+            action.proposed_data,
             {
                 signal: controller.signal,
                 timeoutSeconds: LOCAL_EXECUTE_TIMEOUT_SECONDS,
                 startTime: Date.now(),
             },
+            { skipDriftCheck: options.skipStaleCheck },
         );
+    } catch (error) {
+        if ((error as { code?: string })?.code === ANNOTATION_STATE_CHANGED) {
+            throw staleProposalError(
+                "These annotations changed after this edit was proposed, and it would now overwrite content you wrote.",
+            );
+        }
+        throw error;
     } finally {
         clearTimeout(timer);
     }
-    if (!response.success)
-        throw new Error(response.error ?? "Failed to edit annotations");
-    return response.result_data as unknown as EditAnnotationsResultData;
 }
 
 type AnnotationTag = string | { tag: string; type?: number };
@@ -255,27 +258,6 @@ function appliedValues(
 }
 
 /**
- * Reject an annotation mutation before any item lookup crosses the privacy
- * boundary.
- *
- * A library can be excluded AFTER an action was applied; undo still writes to
- * the annotations it touched, so the boundary has to be re-checked here rather
- * than trusted from execution time.
- */
-function assertAnnotationLibraryNotExcluded(ref: {
-    library_id?: number | null;
-    library_ref?: string | null;
-}): void {
-    const libraryId = resolveLibraryRef(ref);
-    if (libraryId === null) return;
-    const exclusion = checkLibraryExcluded(libraryId);
-    if (!exclusion) return;
-    const error: UndoUserFacingError = new Error(exclusion.message);
-    error.userMessage = excludedLibraryUserMessage(libraryId);
-    throw error;
-}
-
-/**
  * Identity key for an annotation reference.
  *
  * MUST match how `before[].annotation_id` is built when the action is
@@ -414,7 +396,7 @@ export async function undoEditAnnotationsAction(
 
     const resolved: ResolvedAnnotation[] = [];
     for (const snapshot of before) {
-        assertAnnotationLibraryNotExcluded(snapshot);
+        assertLibraryRefNotExcluded(snapshot);
         const found = await resolveItemReference(snapshot);
         if (found.status !== "found" || !found.item.isAnnotation()) {
             throw new Error(
@@ -430,7 +412,7 @@ export async function undoEditAnnotationsAction(
 
     const legacyReplacements = new Map<string, Zotero.Item>();
     for (const mapping of result?.relocated ?? []) {
-        assertAnnotationLibraryNotExcluded(mapping.new_ref);
+        assertLibraryRefNotExcluded(mapping.new_ref);
         const found = await resolveItemReference(mapping.new_ref);
         if (found.status !== "found" || !found.item.isAnnotation()) {
             throw new Error(

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../../react/agents/agentActions', () => ({
-    getAgentActionsByRunAtom: {},
+    agentActionsForRunsAtom: () => ({}),
     pendingApprovalsAtom: {},
     threadAgentActionsAtom: { label: 'threadAgentActions' },
 }));

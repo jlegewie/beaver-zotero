@@ -205,14 +205,20 @@ describe('a run reattaching after its connection dropped', () => {
         const runId = store.get(activeRunAtom)!.id;
         dropConnection(callbacks);
 
-        callbacks.onReattached?.({ runId, evidence: DROP, gapMs: 1200, replayed: 4 });
+        callbacks.onReattached?.({ runId, evidence: DROP, gapMs: 1200, replayed: 4, attempts: 3, losses: 2 });
 
         expect(store.get(wsReconnectingAtom)).toBeNull();
         expect(store.get(isWSReadyAtom)).toBe(true);
         expect(store.get(activeRunAtom)).toMatchObject({ id: runId, status: 'in_progress' });
         expect(store.get(pendingApprovalsAtom).has('action-1')).toBe(true);
         expect(reportConnectionFailureMock).toHaveBeenCalledWith(
-            expect.objectContaining({ run_id: runId, reattach_outcome: 'reattached', reattach_gap_ms: 1200 }),
+            expect.objectContaining({
+                run_id: runId,
+                reattach_outcome: 'reattached',
+                reattach_gap_ms: 1200,
+                reattach_attempts: 3,
+                reattach_losses: 2,
+            }),
         );
     });
 
@@ -221,7 +227,7 @@ describe('a run reattaching after its connection dropped', () => {
         const runId = store.get(activeRunAtom)!.id;
         dropConnection(callbacks);
 
-        callbacks.onReattachFailed?.({ runId, reason: 'expired', evidence: DROP, gapMs: 3000 });
+        callbacks.onReattachFailed?.({ runId, reason: 'expired', evidence: DROP, gapMs: 3000, attempts: 1, losses: 1 });
 
         expect(store.get(wsReconnectingAtom)).toBeNull();
         expect(store.get(isWSChatPendingAtom)).toBe(false);
@@ -232,7 +238,13 @@ describe('a run reattaching after its connection dropped', () => {
             error: { type: 'connection_error', is_retryable: true, is_resumable: true },
         });
         expect(reportConnectionFailureMock).toHaveBeenCalledWith(
-            expect.objectContaining({ run_id: runId, reattach_outcome: 'fallback:expired', reattach_gap_ms: 3000 }),
+            expect.objectContaining({
+                run_id: runId,
+                reattach_outcome: 'fallback:expired',
+                reattach_gap_ms: 3000,
+                reattach_attempts: 1,
+                reattach_losses: 1,
+            }),
         );
     });
 

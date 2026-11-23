@@ -1,0 +1,73 @@
+{
+    "name": "a row without a document is answered from its title and abstract: no documents, no evidence, the smaller price",
+    "request": {
+        "job_id": "job-1",
+        "row_id": "r3",
+        "price": 0.05,
+        "table": {
+            "title": "School meal trials",
+            "description": "Sample sizes and designs of school meal studies."
+        },
+        "columns": [
+            {
+                "id": "n",
+                "header": "Sample size",
+                "type": "text",
+                "description": "How many participants were analysed?",
+                "question_hash": "43a016f79f162aaa"
+            },
+            {
+                "id": "costs",
+                "header": "Costs",
+                "type": "boolean",
+                "description": "Does the study report monetary costs?",
+                "question_hash": "a9179a6cdd9877ac"
+            }
+        ],
+        "row": {
+            "reference": {
+                "title": "School meals and attendance",
+                "authors": "Okafor and Reyes",
+                "year": "2021",
+                "venue": "Journal of Development Studies",
+                "item_type": "journalArticle"
+            },
+            "abstract": "We study 120 pupils in a randomised trial of school meals in Kenya."
+        }
+    },
+    "model": [
+        {
+            "c1": {
+                "value": "120",
+                "confidence": "high",
+                "reasoning": null
+            },
+            "c2": {
+                "value": null,
+                "confidence": "low",
+                "reasoning": "The abstract does not mention costs."
+            }
+        }
+    ],
+    "response": {
+        "cells": {
+            "n": {
+                "outcome": "answered",
+                "value": {
+                    "kind": "text",
+                    "text": "120"
+                },
+                "provenance": "model",
+                "confidence": "high"
+            },
+            "costs": {
+                "outcome": "not_reported",
+                "provenance": "model",
+                "confidence": "low",
+                "reasoning": "The abstract does not mention costs."
+            }
+        },
+        "row_failure": null,
+        "charged": 0.05
+    }
+}

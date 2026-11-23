@@ -1,14 +1,11 @@
 /**
- * Library-suggestions payload assembly helpers.
+ * Local library signals: recently active and recently added items.
  */
 import { serializeItemSummary } from "./zoteroSerializers";
-import { logger } from "@beaver/agent-core/platform/logger";
 import { hasAgentSupportedAttachment } from "./agentItemSupport";
-import { libraryRefForLibraryID } from "./libraryIdentity";
 import {
     ActiveItem,
     ActiveItemKind,
-    CollectionSignal,
     RecentItem,
     SignalItem,
 } from "@beaver/agent-core/types/librarySuggestions";
@@ -16,8 +13,6 @@ import {
 const ABSTRACT_MAX_CHARS = 500;
 const ACTIVE_LOOKBACK_DAYS = 30;
 const ACTIVE_ITEMS_CAP = 15;
-const TOP_COLLECTIONS_CAP = 10;
-const COLLECTION_SAMPLE_CAP = 10;
 const RECENT_ITEMS_CAP = 10;
 
 const REGULAR_ITEM_TYPE_EXCLUSION = `(
@@ -216,133 +211,6 @@ async function queryReadActivity(
 
 
 // ---------------------------------------------------------------------------
-// Top collections (with sample_items + item_refs) and lightweight all-list
-// ---------------------------------------------------------------------------
-
-interface CollectionRow {
-    collectionID: number;
-    key: string;
-    name: string;
-    parentKey: string | null;
-    itemCount: number;
-}
-
-/** Return the largest collections (by item count) with item refs and a sampled subset of items; always includes the current collection if set. */
-export async function getTopCollections(
-    libraryID: number,
-    currentCollectionKey: string | null,
-    cap: number = TOP_COLLECTIONS_CAP,
-): Promise<CollectionSignal[]> {
-    const all = await queryCollectionsWithCounts(libraryID);
-    if (all.length === 0) return [];
-
-    const ranked = [...all].sort((a, b) => b.itemCount - a.itemCount);
-    const picked: CollectionRow[] = ranked.slice(0, cap);
-    const pickedKeys = new Set(picked.map((c) => c.key));
-
-    if (currentCollectionKey && !pickedKeys.has(currentCollectionKey)) {
-        const current = all.find((c) => c.key === currentCollectionKey);
-        if (current) picked.push(current);
-    }
-
-    const out: CollectionSignal[] = [];
-    const libraryRef = libraryRefForLibraryID(libraryID) ?? undefined;
-    for (const row of picked) {
-        const itemRefs = await getRegularItemKeysInCollection(row.collectionID);
-        const sampleIDs = pickEvenly(itemRefs.itemIDs, COLLECTION_SAMPLE_CAP);
-        const sampleItems = await hydrateSignalItems(sampleIDs);
-        out.push({
-            library_id: libraryID,
-            zotero_key: row.key,
-            library_ref: libraryRef,
-            name: row.name,
-            parent_key: row.parentKey,
-            item_count: row.itemCount,
-            date_added: null,                 // collections have no dateAdded in Zotero
-            is_current_view: row.key === currentCollectionKey,
-            item_refs: itemRefs.keys.map((zotero_key) => ({
-                library_id: libraryID,
-                zotero_key,
-                library_ref: libraryRef,
-            })),
-            sample_items: sampleItems,
-        });
-    }
-    return out;
-}
-
-/** Return all collections in the library as lightweight signals (no item refs or sample items). */
-export async function getAllCollections(libraryID: number): Promise<CollectionSignal[]> {
-    const all = await queryCollectionsWithCounts(libraryID);
-    const libraryRef = libraryRefForLibraryID(libraryID) ?? undefined;
-    return all.map((row) => ({
-        library_id: libraryID,
-        zotero_key: row.key,
-        library_ref: libraryRef,
-        name: row.name,
-        parent_key: row.parentKey,
-        item_count: row.itemCount,
-        date_added: null,
-        is_current_view: false,
-    }));
-}
-
-async function queryCollectionsWithCounts(libraryID: number): Promise<CollectionRow[]> {
-    const sql = `
-        SELECT c.collectionID, c.key, c.collectionName, parent.key AS parentKey,
-               (
-                   SELECT COUNT(*)
-                   FROM collectionItems ci
-                   JOIN items i ON i.itemID = ci.itemID
-                   WHERE ci.collectionID = c.collectionID
-                     AND i.itemTypeID NOT IN ${REGULAR_ITEM_TYPE_EXCLUSION}
-                     AND i.itemID NOT IN (SELECT itemID FROM deletedItems)
-               ) AS itemCount
-        FROM collections c
-        LEFT JOIN collections parent ON parent.collectionID = c.parentCollectionID
-        WHERE c.libraryID = ?
-          AND c.collectionID NOT IN (SELECT collectionID FROM deletedCollections)
-    `;
-    const rows: CollectionRow[] = [];
-    await Zotero.DB.queryAsync(sql, [libraryID], {
-        onRow: (row: any) => {
-            rows.push({
-                collectionID: row.getResultByIndex(0),
-                key: row.getResultByIndex(1),
-                name: row.getResultByIndex(2),
-                parentKey: row.getResultByIndex(3) ?? null,
-                itemCount: row.getResultByIndex(4) ?? 0,
-            });
-        },
-    });
-    return rows;
-}
-
-async function getRegularItemKeysInCollection(
-    collectionID: number,
-): Promise<{ itemIDs: number[]; keys: string[] }> {
-    const sql = `
-        SELECT i.itemID, i.key
-        FROM collectionItems ci
-        JOIN items i ON i.itemID = ci.itemID
-        WHERE ci.collectionID = ?
-          AND i.itemTypeID NOT IN ${REGULAR_ITEM_TYPE_EXCLUSION}
-          AND i.itemID NOT IN (SELECT itemID FROM deletedItems)
-        ORDER BY ci.orderIndex
-    `;
-    const itemIDs: number[] = [];
-    const keys: string[] = [];
-    await Zotero.DB.queryAsync(sql, [collectionID], {
-        onRow: (row: any) => {
-            itemIDs.push(row.getResultByIndex(0));
-            keys.push(row.getResultByIndex(1));
-        },
-    });
-    return { itemIDs, keys };
-}
-
-
-// ---------------------------------------------------------------------------
 // Recent items (most recently added regular items)
 // ---------------------------------------------------------------------------
 
@@ -390,71 +258,8 @@ export async function getRecentItems(
 
 
 // ---------------------------------------------------------------------------
-// Library shape (counts)
-// ---------------------------------------------------------------------------
-
-/** Return aggregate counts describing the library: regular item count, tag count, and unfiled item count. */
-export async function getLibraryShape(libraryID: number): Promise<{
-    library_size: number;
-    total_tag_count: number;
-    unfiled_item_count: number;
-}> {
-    const librarySizeSQL = `
-        SELECT COUNT(*) FROM items
-        WHERE libraryID = ?
-          AND itemTypeID NOT IN ${REGULAR_ITEM_TYPE_EXCLUSION}
-          AND itemID NOT IN (SELECT itemID FROM deletedItems)
-    `;
-    const unfiledSQL = `
-        SELECT COUNT(*) FROM items
-        WHERE libraryID = ?
-          AND itemTypeID NOT IN ${REGULAR_ITEM_TYPE_EXCLUSION}
-          AND itemID NOT IN (SELECT itemID FROM deletedItems)
-          AND itemID NOT IN (SELECT itemID FROM collectionItems)
-    `;
-
-    const [librarySize, unfiledCount, tags] = await Promise.all([
-        Zotero.DB.valueQueryAsync(librarySizeSQL, [libraryID]),
-        Zotero.DB.valueQueryAsync(unfiledSQL, [libraryID]),
-        Promise.resolve(Zotero.Tags.getAll(libraryID)),
-    ]);
-
-    return {
-        library_size: Number(librarySize) || 0,
-        total_tag_count: Array.isArray(tags) ? tags.length : 0,
-        unfiled_item_count: Number(unfiledCount) || 0,
-    };
-}
-
-
-// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-async function hydrateSignalItems(itemIDs: number[]): Promise<SignalItem[]> {
-    if (itemIDs.length === 0) return [];
-    const items = await Zotero.Items.getAsync(itemIDs);
-    await Zotero.Items.loadDataTypes(items, ["itemData", "creators", "tags", "collections", "childItems"]);
-    const out: SignalItem[] = [];
-    for (const item of items) {
-        try {
-            out.push(await toSignalItem(item));
-        } catch (e) {
-            logger(`librarySignals: failed to serialize item ${item.id}: ${e}`, 1);
-        }
-    }
-    return out;
-}
-
-function pickEvenly<T>(arr: T[], cap: number): T[] {
-    if (arr.length <= cap) return arr.slice();
-    const out: T[] = [];
-    const step = (arr.length - 1) / (cap - 1);
-    for (let i = 0; i < cap; i++) {
-        out.push(arr[Math.round(i * step)]);
-    }
-    return out;
-}
 
 function truncate(s: string, max: number): string {
     if (s.length <= max) return s;

@@ -50,8 +50,8 @@ declare namespace Zotero {
     let __beaverWrittenAnnotationKeys: Map<string, number> | undefined;
     /**
      * The stored-table surfaces, published by the esbuild bundle at startup.
-     * The reader-view registry and the item-pane registration keep module
-     * state, so they must exist in one bundle only; the webpack side reaches
+     * The reader-view registry and the table tabs keep module state, so they
+     * must exist in one bundle only; the webpack side reaches
      * them through here. See src/services/artifacts/tablesApi.ts.
      */
     let __beaverTables:
@@ -60,8 +60,8 @@ declare namespace Zotero {
     /**
      * The write half of the stored-table recovery shadow, published by the
      * *webpack* bundle. Restoring goes through `tableStore.ts`, which is
-     * webpack-only (it imports the library-exclusion check), so the
-     * esbuild-side item pane reaches it through here.
+     * webpack-only (it imports the library-exclusion check), so esbuild-side
+     * callers reach it through here.
      */
     let __beaverTableLocalCommands:
         | Map<Window, import("../src/services/artifacts/tablesApi").TableLocalCommands>
@@ -75,6 +75,18 @@ declare namespace Zotero {
      * See `src/services/artifacts/tablesApi.ts`.
      */
     let __beaverTableWriteLocks: Map<string, Promise<unknown>> | undefined;
+    /**
+     * Identifies this run of Zotero. Set once per process and kept across
+     * plugin reloads, so a saved record can tell a reload from a restart.
+     * See `src/ui/tableTab.ts`.
+     */
+    let __beaverAppSessionID: string | undefined;
+    /**
+     * The Beaver tabs (every kind), published by the esbuild bundle while it
+     * runs. A window renderer closes its window's tabs through this before it
+     * goes away. See `src/ui/beaverTabs.ts`.
+     */
+    let __beaverTabs: { closeForWindow(win: Window): number } | undefined;
 
     namespace Beaver {
         let localEndpoints: import("../src/services/instanceLocalEndpoints").InstanceLocalEndpoints | undefined;
@@ -85,17 +97,19 @@ declare namespace Zotero {
         let notePreviews: import("../src/services/notePreviews").NotePreviews;
         let libraryOperations: import("../src/services/libraryOperations").LibraryOperations;
         const deferredCommits: import("../src/services/committedTransaction").DeferredCommits | undefined;
+        const transactionWatch: import("../src/services/openTransaction").OpenTransactionWatch | undefined;
         let itemImport: import("../src/services/itemImport/service").ItemImportService;
         let exporter: import("../src/services/export/instanceExport").InstanceExport;
+        /** Image decoding and re-encoding; plugin realm, reached from renderers through this slot. */
+        let images: import("../src/services/images/instanceImages").InstanceImages;
         let backgroundTasks: import("../src/utils/backgroundTasks").BackgroundTaskSource;
         let mutations: import("../src/services/libraryMutations").LibraryMutations;
         let syncPause: ReturnType<typeof import("../src/services/syncPause").createSyncPauseService>;
         const preferences: import("../src/services/instancePreferences").InstancePreferences | undefined;
         const account: import("../src/services/instanceAccount").InstanceAccount | undefined;
+        /** Table fill plans and jobs; plugin realm, reached from renderers through this slot. */
+        const tableFills: import("../src/services/tableFills/service").InstanceTableFills | undefined;
         const runtime: import("../src/runtime/instance").BeaverInstance;
-        const voiceNative: import("../src/services/voice/nativeVoice").NativeVoice | undefined;
-        const voice: import("../src/services/voice/voiceService").VoiceService | undefined;
-        const voiceHarness: import("../src/services/voice/developmentHarness").DevelopmentVoiceHarness | undefined;
         const pluginVersion: string;
 
         const data: {
@@ -648,13 +662,15 @@ declare namespace Zotero {
         isInTrash(): boolean;
 
         /**
-         * Returns child annotation IDs for a file attachment. Requires the
-         * attachment's `childItems` data, but unlike the item-returning form it
-         * does not look the annotations up in the object cache, so it works in
-         * libraries whose items have not been loaded yet. The array is Zotero's
-         * internal cache: copy it before mutating.
+         * Zotero 9+ returns child annotation IDs for a file attachment without
+         * consulting the object cache; the array is Zotero's internal cache.
+         * Zotero 7 and 8 ignore `asIDs` and return items. Use
+         * `getAnnotationIDs()` from `src/utils/zoteroDataLoading.ts` instead.
          */
-        getAnnotations(includeTrashed: boolean | undefined, asIDs: true): readonly number[];
+        getAnnotations(
+            includeTrashed: boolean | undefined,
+            asIDs: true,
+        ): readonly number[] | Zotero.Item[];
     }
 
     interface Utilities {

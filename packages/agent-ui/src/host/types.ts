@@ -11,6 +11,7 @@ import type { MenuItem } from '../primitives/ContextMenu';
 import type { AddSourcesMenuHandle, AddSourcesQuerySource } from '../composer/useAddSourcesMenu';
 import type { AgentActionType } from '@beaver/agent-core/protocol/agentProtocol';
 import type { BatchOutcomeTarget } from '@beaver/agent-core/run-state/batchProgress';
+import type { TableFillViewRequest } from '@beaver/agent-core/protocol/tableFillProtocol';
 
 /**
  * What a citation click should act on.
@@ -22,6 +23,13 @@ import type { BatchOutcomeTarget } from '@beaver/agent-core/run-state/batchProgr
  *   locator. Selected by holding the platform accelerator (Cmd / Ctrl).
  */
 export type CitationActivationIntent = 'passage' | 'item';
+
+/**
+ * Where a citation opens the document it cites: `tab` in the client's main
+ * view (switching to it), `window` in a separate reader window, leaving the
+ * main view where it is.
+ */
+export type CitationReaderTarget = 'tab' | 'window';
 
 /**
  * Everything the host needs to activate (navigate to / open) a cited location.
@@ -41,6 +49,8 @@ export interface CitationActivation {
      * before the alternate activation existed.
      */
     intent?: CitationActivationIntent;
+    /** Where to open the cited document. Omitted: the host's default (for Zotero, its "Open PDFs in a new window" setting). */
+    readerTarget?: CitationReaderTarget;
     isExternal: boolean;
     isExternalFile: boolean;
     externalFileKey: string | null;
@@ -101,7 +111,37 @@ export interface AttachmentMatchNavigation {
  * components consume the same slice.
  */
 export interface NavigationHost {
-    openTable?(key: string): Promise<{ ok: true; warning?: string } | { error: string }>;
+    /**
+     * Opens a stored table in the client's table view. `origin` is the window
+     * the interaction happened in — derive it from the clicked element's
+     * `ownerDocument` — so the table opens beside the surface the user is
+     * looking at rather than in whichever window is newest. `onDownload`
+     * fires when the table's files must be downloaded before it can open.
+     * `focus` brings a row (and a cell, with a column) into view; the result's
+     * `focus` is `missing` when the table no longer has it. `request` asks the
+     * table's view to show a fill's failed rows. The host tells the user when
+     * the table cannot be opened, so the `error` is not for display.
+     */
+    openTable?(
+        key: string,
+        origin?: Window | null,
+        options?: {
+            onDownload?: () => void;
+            focus?: { rowId: string; columnId?: string };
+            request?: TableFillViewRequest;
+        },
+    ): Promise<{ ok: true; warning?: string; focus?: 'found' | 'missing' } | { error: string }>;
+    /**
+     * Takes back one model edit of a stored table (the `edit_table` tool
+     * display's Undo): restores the version before it, only while the table
+     * is exactly as that edit left it. `version` is the version the edit
+     * committed, `runId` the run that made it.
+     */
+    undoTableEdit?(
+        key: string,
+        edit: { version: number; runId: string },
+        origin?: Window | null,
+    ): Promise<{ ok: true } | { error: string }>;
     /** Reveal/select the referenced item in the library view. */
     revealInLibrary(ref: ZoteroItemReference): void;
     /** Reveal/select the referenced library in the library view. */
@@ -549,6 +589,11 @@ export interface ExternalReferenceActionsProps {
     pdfButtonMode?: ExternalReferenceActionMode;
     /** Whether to show the citation count. */
     showCitationCount?: boolean;
+    /**
+     * The link the Web button opens. Defaults to the record's primary link
+     * from its identifiers; a results view passes the link for its source.
+     */
+    webUrl?: string;
 }
 
 /**
@@ -711,6 +756,13 @@ export interface ComponentsHost {
      */
     pendingActionsReview(props: { runs: AgentRun[] }): ReactNode;
     /**
+     * Render a card the client shows at the end of a finished answer, below
+     * its review block (a reward the answer earned). Gets the answer's complete
+     * run chain, like {@link pendingActionsReview}. Optional; return null when
+     * there is nothing to show.
+     */
+    runEndCard?(props: { runs: AgentRun[] }): ReactNode;
+    /**
      * Render the icon that stands for a bibliographic item of the given type.
      *
      * `itemType` is the client-agnostic icon name produced by
@@ -801,7 +853,12 @@ export type TableDisplay =
           /** Content columns: every column except system metadata (year, DOI, row type). */
           contentColumns?: number;
       }
-    | { status: 'unavailable'; reason: string };
+    | {
+          status: 'unavailable';
+          reason: string;
+          /** The files are not here yet, and opening the table downloads them. */
+          openable?: boolean;
+      };
 
 export interface ClientHost {
     navigation?: NavigationHost;

@@ -1,0 +1,354 @@
+{
+  "description": "Cell and row citations of a research table: the tag the model writes, the locator both parsers read from it, and the citation the backend resolves it to against `table.spec` (`unreadable`: the provider cannot read the table). `citation` lists only the fields that matter; a case without one is not a table citation.",
+  "table": {
+    "key": "u-TABLEKEY",
+    "spec": {
+      "id": "t1",
+      "spec_version": 2,
+      "title": "Study designs",
+      "anchor_column_id": "_reference",
+      "columns": [
+        {
+          "id": "_reference",
+          "header": "Reference",
+          "type": "reference",
+          "system": true
+        },
+        {
+          "id": "design",
+          "header": "Design",
+          "type": "select",
+          "description": "What is the study design?",
+          "options": [
+            {
+              "label": "Survey"
+            },
+            {
+              "label": "Experiment"
+            }
+          ]
+        },
+        {
+          "id": "sample",
+          "header": "Sample",
+          "type": "text",
+          "description": "How many participants?"
+        },
+        {
+          "id": "costs",
+          "header": "Costs",
+          "type": "boolean",
+          "description": "Does the study report monetary costs?"
+        }
+      ],
+      "rows": [
+        {
+          "id": "r0a1b2c3d4",
+          "ref": {
+            "kind": "item",
+            "library_ref": "u",
+            "zotero_key": "PAPERAAA"
+          },
+          "cells": {
+            "_reference": {
+              "outcome": "answered",
+              "provenance": "system",
+              "value": {
+                "kind": "reference",
+                "display_name": "Smith et al. 2021"
+              }
+            },
+            "design": {
+              "outcome": "answered",
+              "provenance": "model",
+              "value": {
+                "kind": "select",
+                "label": "Survey"
+              }
+            },
+            "sample": {
+              "outcome": "not_reported",
+              "provenance": "model"
+            },
+            "costs": {
+              "outcome": "answered",
+              "provenance": "user",
+              "value": {
+                "kind": "boolean",
+                "value": true
+              }
+            }
+          }
+        },
+        {
+          "id": "r5e6f7a8b9",
+          "ref": {
+            "kind": "item",
+            "library_ref": "u",
+            "zotero_key": "PAPERBBB"
+          },
+          "cells": {
+            "_reference": {
+              "outcome": "answered",
+              "provenance": "system",
+              "value": {
+                "kind": "reference",
+                "display_name": "Lee 2019"
+              }
+            },
+            "design": {
+              "outcome": "answered",
+              "provenance": "model",
+              "value": {
+                "kind": "select",
+                "label": "Experiment"
+              }
+            }
+          }
+        },
+        {
+          "id": "rc0d1e2f3a4",
+          "ref": {
+            "kind": "external",
+            "source": "openalex",
+            "source_id": "W2741809807"
+          },
+          "cells": {
+            "_reference": {
+              "outcome": "answered",
+              "provenance": "system",
+              "value": {
+                "kind": "reference",
+                "display_name": "Garcia & Chen 2020"
+              }
+            },
+            "sample": {
+              "outcome": "answered",
+              "provenance": "model",
+              "value": {
+                "kind": "text",
+                "text": "412 adults"
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "cases": [
+    {
+      "name": "a cell cited by its row's item id",
+      "tag": "<citation id=\"u-TABLEKEY\" loc=\"cell:u-PAPERAAA/design\"/>",
+      "locator": {
+        "kind": "cell",
+        "value": "u-PAPERAAA/design",
+        "raw": "cell:u-PAPERAAA/design"
+      },
+      "citation": {
+        "loc": {
+          "kind": "cell",
+          "value": "r0a1b2c3d4/design",
+          "raw": "cell:r0a1b2c3d4/design"
+        },
+        "display_name": "Smith et al. 2021",
+        "preview": "Design: Survey",
+        "table": {
+          "title": "Study designs",
+          "row_label": "Smith et al. 2021",
+          "column_header": "Design",
+          "value": "Survey",
+          "provenance": "model"
+        }
+      }
+    },
+    {
+      "name": "a cell cited by its stored row id",
+      "tag": "<citation id=\"u-TABLEKEY\" loc=\"cell:r0a1b2c3d4/design\"/>",
+      "locator": {
+        "kind": "cell",
+        "value": "r0a1b2c3d4/design",
+        "raw": "cell:r0a1b2c3d4/design"
+      },
+      "citation": {
+        "loc": {
+          "kind": "cell",
+          "value": "r0a1b2c3d4/design",
+          "raw": "cell:r0a1b2c3d4/design"
+        },
+        "display_name": "Smith et al. 2021",
+        "preview": "Design: Survey",
+        "table": {
+          "title": "Study designs",
+          "row_label": "Smith et al. 2021",
+          "column_header": "Design",
+          "value": "Survey",
+          "provenance": "model"
+        }
+      }
+    },
+    {
+      "name": "a whole row",
+      "tag": "<citation id=\"u-TABLEKEY\" loc=\"row:u-PAPERBBB\"/>",
+      "locator": {
+        "kind": "row",
+        "value": "u-PAPERBBB",
+        "raw": "row:u-PAPERBBB"
+      },
+      "citation": {
+        "loc": {
+          "kind": "row",
+          "value": "r5e6f7a8b9",
+          "raw": "row:r5e6f7a8b9"
+        },
+        "display_name": "Lee 2019",
+        "table": {
+          "title": "Study designs",
+          "row_label": "Lee 2019"
+        }
+      }
+    },
+    {
+      "name": "the user's own answer",
+      "tag": "<citation id=\"u-TABLEKEY\" loc=\"cell:u-PAPERAAA/costs\"/>",
+      "locator": {
+        "kind": "cell",
+        "value": "u-PAPERAAA/costs",
+        "raw": "cell:u-PAPERAAA/costs"
+      },
+      "citation": {
+        "loc": {
+          "kind": "cell",
+          "value": "r0a1b2c3d4/costs",
+          "raw": "cell:r0a1b2c3d4/costs"
+        },
+        "display_name": "Smith et al. 2021",
+        "preview": "Costs: Yes",
+        "table": {
+          "title": "Study designs",
+          "row_label": "Smith et al. 2021",
+          "column_header": "Costs",
+          "value": "Yes",
+          "provenance": "user"
+        }
+      }
+    },
+    {
+      "name": "a cell the paper does not report",
+      "tag": "<citation id=\"u-TABLEKEY\" loc=\"cell:u-PAPERAAA/sample\"/>",
+      "locator": {
+        "kind": "cell",
+        "value": "u-PAPERAAA/sample",
+        "raw": "cell:u-PAPERAAA/sample"
+      },
+      "citation": {
+        "loc": {
+          "kind": "cell",
+          "value": "r0a1b2c3d4/sample",
+          "raw": "cell:r0a1b2c3d4/sample"
+        },
+        "display_name": "Smith et al. 2021",
+        "preview": "Sample: Not reported",
+        "table": {
+          "title": "Study designs",
+          "row_label": "Smith et al. 2021",
+          "column_header": "Sample",
+          "value": "Not reported",
+          "provenance": "model"
+        }
+      }
+    },
+    {
+      "name": "a cell not filled yet",
+      "tag": "<citation id=\"u-TABLEKEY\" loc=\"cell:u-PAPERBBB/sample\"/>",
+      "locator": {
+        "kind": "cell",
+        "value": "u-PAPERBBB/sample",
+        "raw": "cell:u-PAPERBBB/sample"
+      },
+      "citation": {
+        "loc": {
+          "kind": "cell",
+          "value": "r5e6f7a8b9/sample",
+          "raw": "cell:r5e6f7a8b9/sample"
+        },
+        "display_name": "Lee 2019",
+        "table": {
+          "title": "Study designs",
+          "row_label": "Lee 2019",
+          "column_header": "Sample"
+        }
+      }
+    },
+    {
+      "name": "an external work's row, by its row id",
+      "tag": "<citation id=\"u-TABLEKEY\" loc=\"cell:rc0d1e2f3a4/sample\"/>",
+      "locator": {
+        "kind": "cell",
+        "value": "rc0d1e2f3a4/sample",
+        "raw": "cell:rc0d1e2f3a4/sample"
+      },
+      "citation": {
+        "loc": {
+          "kind": "cell",
+          "value": "rc0d1e2f3a4/sample",
+          "raw": "cell:rc0d1e2f3a4/sample"
+        },
+        "display_name": "Garcia & Chen 2020",
+        "preview": "Sample: 412 adults",
+        "table": {
+          "title": "Study designs",
+          "row_label": "Garcia & Chen 2020",
+          "column_header": "Sample",
+          "value": "412 adults",
+          "provenance": "model"
+        }
+      }
+    },
+    {
+      "name": "a row the table does not have",
+      "tag": "<citation id=\"u-TABLEKEY\" loc=\"cell:u-PAPERZZZ/design\"/>",
+      "locator": {
+        "kind": "cell",
+        "value": "u-PAPERZZZ/design",
+        "raw": "cell:u-PAPERZZZ/design"
+      },
+      "citation": {
+        "invalid_reason": "table_row_not_found"
+      }
+    },
+    {
+      "name": "a column the table does not have",
+      "tag": "<citation id=\"u-TABLEKEY\" loc=\"cell:u-PAPERAAA/country\"/>",
+      "locator": {
+        "kind": "cell",
+        "value": "u-PAPERAAA/country",
+        "raw": "cell:u-PAPERAAA/country"
+      },
+      "citation": {
+        "invalid_reason": "table_column_not_found"
+      }
+    },
+    {
+      "name": "a table that cannot be read",
+      "tag": "<citation id=\"u-TABLEKEY\" loc=\"cell:u-PAPERAAA/design\"/>",
+      "locator": {
+        "kind": "cell",
+        "value": "u-PAPERAAA/design",
+        "raw": "cell:u-PAPERAAA/design"
+      },
+      "unreadable": true,
+      "citation": {
+        "invalid_reason": "table_not_found"
+      }
+    },
+    {
+      "name": "a cell locator without a column is not a table citation",
+      "tag": "<citation id=\"u-TABLEKEY\" loc=\"cell:u-PAPERAAA\"/>",
+      "locator": {
+        "kind": "unknown",
+        "value": "cell:u-PAPERAAA",
+        "raw": "cell:u-PAPERAAA"
+      }
+    }
+  ]
+}

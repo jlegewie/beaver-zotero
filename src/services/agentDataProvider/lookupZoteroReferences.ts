@@ -377,18 +377,16 @@ export async function lookupZoteroReferences(
     // Phase 5: Determine file status level and pre-compute primary attachments if needed
     const fileStatusLevel = options.file_status_level ?? 'lightweight';
 
-    // Pre-compute primary attachments per parent (single batch SQL query)
-    // Skip when file_status_level is 'none' since isPrimary is only used for file status
+    // Pre-compute primary attachments per parent (single batch SQL query). Done at
+    // every level: a lookup without file checks still reports which one is primary.
     let bestAttachmentMap = new Map<number, number>();
-    if (fileStatusLevel !== 'none') {
-        const parentIdsForPrimaryCheck = [...new Set(
-            attachmentsToSerialize
-                .filter(att => att.parentID)
-                .map(att => att.parentID as number)
-        )];
-        if (parentIdsForPrimaryCheck.length > 0) {
-            bestAttachmentMap = await getBestAttachmentBatch(parentIdsForPrimaryCheck);
-        }
+    const parentIdsForPrimaryCheck = [...new Set(
+        attachmentsToSerialize
+            .filter(att => att.parentID)
+            .map(att => att.parentID as number)
+    )];
+    if (parentIdsForPrimaryCheck.length > 0) {
+        bestAttachmentMap = await getBestAttachmentBatch(parentIdsForPrimaryCheck);
     }
 
     // Pre-fetch sync dates for all libraries (1 query per unique library instead of per item)
@@ -461,7 +459,7 @@ export async function lookupZoteroReferences(
                     { syncDateCache },
                 );
 
-                return { attachment: serialized, status, file_status: fileStatus };
+                return { attachment: serialized, status, file_status: fileStatus, is_primary: isPrimary };
             } catch (error: any) {
                 logger(`lookupZoteroReferences: Failed to serialize attachment ${attachment.libraryID}/${attachment.key}: ${error}`, 1);
                 errors.push({

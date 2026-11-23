@@ -2,6 +2,7 @@ import { viewAttachment } from '../../runtime/navigation';
 import { isTableAttachment } from '../../../src/services/artifacts/tableItemIdentity';
 import { getTablesApi } from '../../../src/services/artifacts/tablesApi';
 import { getContextWindow } from '../../runtime/windowRuntime';
+import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
 import React, { forwardRef } from 'react';
 import { CSSItemTypeIcon, CSSIcon, Spinner, Icon, ArrowUpRightIcon, LibraryIcon, NoteIcon, FileViewIcon } from "../icons/icons";
 import { useAtomValue } from 'jotai';
@@ -150,6 +151,7 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
         // yet; the composer loads it and bumps the revision, which re-renders
         // the chip and rebuilds its popup.
         const itemDataRevision = useAtomValue(messageItemDataRevisionAtom);
+        const surfaceWindow = useSurfaceWindow();
         const displayName = isAnnotation && annotation
             ? ANNOTATION_TEXT_BY_TYPE[annotation.annotation_type] || 'Annotation'
             : readOrFallback(
@@ -184,7 +186,7 @@ export const MessageItemButton = forwardRef<HTMLButtonElement, MessageItemButton
         // Open the attachment file in the reader (or its external app).
         const openAttachment = () => {
             if (isTableAttachment(item)) {
-                void getTablesApi()?.openTable({ libraryID: item.libraryID, key: item.key });
+                void getTablesApi()?.openTable({ libraryID: item.libraryID, key: item.key }, { window: surfaceWindow });
                 return;
             }
             viewAttachment(item.id);

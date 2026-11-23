@@ -18,7 +18,6 @@ import { atom, useAtomValue, useSetAtom } from 'jotai';
 import { activeRunAtom, currentThreadIdAtom, isStreamingAtom } from '@beaver/agent-core/run-state/atoms';
 import { threadAgentActionsAtom } from '../agents/agentActions';
 import { isBeaverWindowOpenAtom, isSidebarVisibleAtom } from '../atoms/ui';
-import { windowSurfaceAtom } from '../atoms/windowSurface';
 import { showFeatureTipAtom } from '../atoms/featureTips';
 
 /** Long enough for the finished run to settle on screen. */
@@ -34,8 +33,7 @@ export function useNoteExportTip(): void {
     const threadId = useAtomValue(currentThreadIdAtom);
     const isSidebarVisible = useAtomValue(isSidebarVisibleAtom);
     const isBeaverWindowOpen = useAtomValue(isBeaverWindowOpenAtom);
-    const windowSurface = useAtomValue(windowSurfaceAtom);
-    const isChatVisible = isSidebarVisible || (isBeaverWindowOpen && windowSurface.kind === 'thread');
+    const isChatVisible = isSidebarVisible || isBeaverWindowOpen;
     const showFeatureTip = useSetAtom(showFeatureTipAtom);
 
     const liveRunIdsRef = useRef(new Set<string>());

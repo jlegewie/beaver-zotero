@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useAtomValue } from 'jotai';
 import { activeRunAtom, threadRunsAtom } from '@beaver/agent-core/run-state/atoms';
-import { AgentRun } from '@beaver/agent-core/agents/types';
+import { AgentRun, isRunFinished } from '@beaver/agent-core/agents/types';
 import { buildRunCompletionAnnouncement, extractAssistantResponseText } from '../../utils/screenReaderAnnouncements';
 import { getPref } from '../../../src/utils/prefs';
 
@@ -17,7 +17,7 @@ type ReaderFocusTarget =
     | { kind: 'run-error-action'; runId: string };
 
 function isTerminalRun(run: AgentRun): boolean {
-    return run.status === 'completed' || run.status === 'error' || run.status === 'canceled';
+    return isRunFinished(run) || run.status === 'error' || run.status === 'canceled';
 }
 
 // Module-level so the library, reader, and window surfaces coordinate
@@ -206,7 +206,7 @@ export const ScreenReaderRunAnnouncer: React.FC<ScreenReaderRunAnnouncerProps> =
             return;
         }
 
-        const responseText = run.status === 'completed' ? extractAssistantResponseText(run) : '';
+        const responseText = isRunFinished(run) ? extractAssistantResponseText(run) : '';
         const message = responseText
             ? `Beaver response: ${responseText} End of response. Press Enter to message Beaver.`
             : buildRunCompletionAnnouncement(run);

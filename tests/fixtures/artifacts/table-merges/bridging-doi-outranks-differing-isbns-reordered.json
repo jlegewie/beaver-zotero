@@ -1,0 +1,185 @@
+{
+    "name": "the same three rows with the DOI rows first",
+    "existing": [],
+    "incoming": [
+        {
+            "row": {
+                "id": "r2",
+                "ref": {
+                    "kind": "external",
+                    "source": "openalex",
+                    "source_id": "W2",
+                    "reference": {
+                        "source": "openalex",
+                        "source_id": "W2",
+                        "title": "Survey methods handbook, paperback",
+                        "identifiers": {
+                            "doi": "10.1000/book",
+                            "isbn": "9780131103627"
+                        }
+                    }
+                },
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Survey methods handbook, paperback",
+                            "title": "Survey methods handbook, paperback",
+                            "item_type": "journalArticle"
+                        }
+                    },
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "date",
+                            "value": "2020"
+                        }
+                    }
+                },
+                "in_library": false,
+                "origin": [
+                    {
+                        "source": "s2",
+                        "date": "2026-10-21"
+                    }
+                ]
+            }
+        },
+        {
+            "row": {
+                "id": "r3",
+                "ref": {
+                    "kind": "external",
+                    "source": "openalex",
+                    "source_id": "W3",
+                    "reference": {
+                        "source": "openalex",
+                        "source_id": "W3",
+                        "title": "Survey methods handbook, hardcover",
+                        "identifiers": {
+                            "doi": "10.1000/book",
+                            "isbn": "9780262033848"
+                        }
+                    }
+                },
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Survey methods handbook, hardcover",
+                            "title": "Survey methods handbook, hardcover",
+                            "item_type": "journalArticle"
+                        }
+                    },
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "date",
+                            "value": "2020"
+                        }
+                    }
+                },
+                "in_library": false,
+                "origin": [
+                    {
+                        "source": "s2",
+                        "date": "2026-10-21"
+                    }
+                ]
+            }
+        },
+        {
+            "row": {
+                "id": "r1",
+                "ref": {
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "AAA"
+                },
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Survey methods handbook",
+                            "title": "Survey methods handbook",
+                            "item_type": "book"
+                        }
+                    },
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "date",
+                            "value": "2020"
+                        }
+                    }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
+            },
+            "identifiers": {
+                "isbn": "9780262033848"
+            }
+        }
+    ],
+    "after": {
+        "rows": [
+            {
+                "id": "r2",
+                "ref": {
+                    "library_ref": "u",
+                    "zotero_key": "AAA",
+                    "kind": "item"
+                },
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Survey methods handbook",
+                            "title": "Survey methods handbook",
+                            "item_type": "book"
+                        }
+                    },
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "date",
+                            "value": "2020"
+                        }
+                    }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s2",
+                        "date": "2026-10-21"
+                    },
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
+            }
+        ],
+        "added": [
+            "r2"
+        ],
+        "merged": 2
+    }
+}

@@ -17,7 +17,7 @@ import { CreateAnnotationsPreview } from './CreateAnnotationsPreview';
 import { EditAnnotationsPreview } from './EditAnnotationsPreview';
 import { DeleteAnnotationsPreview } from './DeleteAnnotationsPreview';
 import { resolveLibraryRef } from '../../../../src/utils/libraryIdentity';
-import type { ActionStatus, PreviewData } from './agentActionViewHelpers';
+import { isStaleProposal, type ActionStatus, type PreviewData } from './agentActionViewHelpers';
 import {
     getBatchRewriteOldContent,
     getEditNotePreviewKind,
@@ -83,7 +83,11 @@ export const ActionPreview: React.FC<{
     /** Use the compact presentation intended for the end-of-run review card. */
     compact?: boolean;
     disabled?: boolean;
-}> = ({ toolName, previewData, status, actions, isStreaming, compact = false, disabled = false }) => {
+    /** `create_items` only: whether the call is still open (see `ImportItemsPreview`). */
+    isCallOpen?: boolean;
+    /** `create_items` only: each created item's full text, from the call's return. */
+    fullTextByKey?: ReadonlyMap<string, string | null>;
+}> = ({ toolName, previewData, status, actions, isStreaming, compact = false, disabled = false, isCallOpen, fullTextByKey }) => {
     if (toolName === 'merge_items') {
         // A failed undo leaves the merge in place, and the action keeps its
         // result: show it as merged, not as the proposal.
@@ -100,6 +104,9 @@ export const ActionPreview: React.FC<{
         );
     }
     const editNotePreviewKind = getEditNotePreviewKind(toolName, previewData.actionType);
+    // A refused stale proposal wrote nothing and still awaits a decision; the
+    // card header says what changed, so the preview shows it as a proposal.
+    const tagOrCollectionStatus = actions?.some(isStaleProposal) ? 'pending' : status;
     if (toolName === 'edit_metadata' || previewData.actionType === 'edit_metadata') {
         const edits = previewData.actionData.edits || [];
 
@@ -117,6 +124,8 @@ export const ActionPreview: React.FC<{
 
         // For applied actions, show the applied values if available
         const appliedEdits = previewData.resultData?.applied_edits;
+        // Fields an apply could not set, while the rest of the edit was saved.
+        const failedEdits = previewData.resultData?.failed_edits;
 
         // Creator data: old from resultData, proposed_data, or currentValue
         const oldCreators = previewData.resultData?.old_creators
@@ -150,6 +159,7 @@ export const ActionPreview: React.FC<{
                 edits={edits}
                 currentValues={currentValues}
                 appliedEdits={appliedEdits}
+                failedEdits={failedEdits}
                 status={status}
                 oldCreators={oldCreators}
                 newCreators={newCreators}
@@ -212,7 +222,7 @@ export const ActionPreview: React.FC<{
             <ManageTagsPreview
                 actionData={previewData.actionData}
                 currentValue={previewData.currentValue}
-                status={status}
+                status={tagOrCollectionStatus}
                 resultData={previewData.resultData as any}
                 errorMessage={previewData.errorMessage}
             />
@@ -224,7 +234,7 @@ export const ActionPreview: React.FC<{
             <ManageCollectionsPreview
                 actionData={previewData.actionData}
                 currentValue={previewData.currentValue}
-                status={status}
+                status={tagOrCollectionStatus}
                 resultData={previewData.resultData as any}
                 errorMessage={previewData.errorMessage}
             />
@@ -304,7 +314,7 @@ export const ActionPreview: React.FC<{
 
     if (toolName === 'create_items' || toolName === 'create_item' || previewData.actionType === 'create_item' || previewData.actionType === 'import_item') {
         if (actions && actions.length > 0 && actions[0].action_type === 'import_item') {
-            return <ImportItemsPreview actions={actions} status={status} />;
+            return <ImportItemsPreview actions={actions} status={status} isCallOpen={isCallOpen} fullTextByKey={fullTextByKey} />;
         }
         // If no actions array provided, return fallback
         if (!actions || actions.length === 0) {

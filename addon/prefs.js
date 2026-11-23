@@ -8,12 +8,6 @@ pref("installedVersion", "");
 pref("showHighTokenUsageWarningMessage", true);
 pref("authMethod", "otp");
 
-// Microphone helper explanation
-pref("voice.helperExplained", false);
-pref("voice.nativeEnabled", false);
-pref("voice.enabled", false);
-pref("voice.language", "en");
-
 // App settings
 pref("keyboardShortcut", "j");
 pref("statefulChat", true);
@@ -74,6 +68,13 @@ pref("enableResponseCompleteNotifications", true);
 pref("enableRunStatusPopup", true);
 // Separate Beaver window: whether the chat history sidebar is collapsed.
 pref("windowSidebarCollapsed", false);
+// Whether the "Get more out of Beaver" feature-credits card on the home screen was dismissed.
+pref("featureCreditsCardDismissed", false);
+// Whether the one-line "Earn free credits" prompt that leads existing users to the
+// feature-credits card was opened or dismissed; it shows once per device.
+pref("featureCreditsTeaserDone", false);
+// Width of the sidebar in a main window, in CSS pixels; 0 until it is first shown.
+pref("sidebarWidth", 0);
 
 // Deferred tool preferences: maps tool group to preference (always_ask, always_apply, continue_without_applying)
 // Defaults are defined in react/atoms/deferredToolPreferences.ts and merged at load time.
@@ -135,11 +136,24 @@ pref("onboardingWelcomeShownAt", "");
 pref("versionUpdatePopupShownAt", "");
 pref("onboardingSignInTextShown", false);
 
+// The table tab's notice that filling needs Beaver credits, dismissed for good.
+pref("tableNoCreditsNoticeDismissed", false);
+
 // Thread whose agent run was cut off when Beaver's WebSocket was closed at
 // shutdown (JSON: threadId/userId/threadName/closedAt; userId is the Beaver
 // account, so a record is never offered to a different one). Consumed and
 // cleared by the "chat interrupted" popup on the next start.
 pref("interruptedThread", "");
+
+// Beaver tabs open when Beaver last closed them for a restart, a plugin
+// reload or the last main window closing (JSON). Reopened and cleared when a
+// main window that can host them next loads; never written to Zotero's
+// session.
+pref("beaverTabsToRestore", "");
+
+// Table windows open when Zotero quit or Beaver shut down, reopened by the
+// first main window that loads afterwards.
+pref("tableWindowsToRestore", "");
 
 // Throttle for the automatic pre-sync thread claim: the
 // `${beaverUserId}:${zoteroUserId}:${localUserKey}` combination that was
@@ -155,6 +169,9 @@ pref("mcpCreateNoteToolEnabled", false);
 
 // Background extractor kill-switch (drains the background_jobs queue)
 pref("backgroundExtractorEnabled", true);
+// Kill switch: a PDF request that would queue behind the busy interactive
+// MuPDF worker may run on the idle background worker instead.
+pref("pdf.backgroundOverflow", true);
 // Whole-library producers are an explicit opt-in. The dispatcher above remains
 // enabled so user-initiated extraction jobs still work when this is off.
 pref("backgroundProcessingEnabled", false);
@@ -165,13 +182,6 @@ pref("backgroundProcessingWelcomeDeferred", false);
 // Upgrade flags and pending version notifications
 pref("runEmbeddingFullDiff", false);
 pref("pendingVersionNotifications", "[]");
-
-// Library suggestions cache (JSON-encoded LibrarySuggestionsResponse + ISO timestamp)
-pref("librarySuggestions", "");
-pref("librarySuggestionsGeneratedAt", "");
-
-// Account-scoped first-run assignment map, keyed by Beaver user id.
-pref("firstRunAssignments", "{}");
 
 // Size budget for the local document-extraction cache
 // (profile/beaver/document-cache). When the total compressed payload size
@@ -191,5 +201,11 @@ pref("maxAttachmentFileSizeMB", 100);
 // the user library. Never overrides a library the user excluded in Beaver
 // preferences — see resolveTableLibrary().
 pref("tables.defaultLibraryID", 0);
+// Switch to a new research table after confirming its creation in chat.
+pref("tables.openAfterCreate", true);
+// How long a chat's `fill_table` waits for a small fill before answering that
+// it runs on in the background, in seconds; stays under the backend's
+// ten-minute ceiling on a request.
+pref("tables.fillWaitSeconds", 480);
 
 pref("cloudPreparationConsent", "");

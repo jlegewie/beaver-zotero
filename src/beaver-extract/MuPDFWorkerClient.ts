@@ -769,6 +769,22 @@ export class MuPDFWorkerClient {
         return this.worker !== null;
     }
 
+    /**
+     * Whether the next extraction would run on a live, started worker that is
+     * `warm` or `warmed` (see `WorkerState`): configured, not warming up,
+     * already warmed up or extracted, and not due for a recycle that would
+     * replace it with a cold worker. Says nothing about whether it is busy.
+     */
+    isWarm(): boolean {
+        const worker = this.worker;
+        if (this.disposed || !worker) return false;
+        const startup = this.startup;
+        if (startup && startup.worker === worker && !startup.configured) return false;
+        if (this.warmup?.worker === worker) return false;
+        if (this.proactiveRecycleReason !== null) return false;
+        return this.warmedUp.has(worker) || (this.extractionDispatches.get(worker) ?? 0) > 0;
+    }
+
     /** Cumulative worker spawns since this client was created. O(1) read. */
     get totalSpawnCount(): number {
         return this.spawnCount;
@@ -1080,6 +1096,13 @@ export class MuPDFWorkerClient {
      */
     async prewarm(): Promise<void> {
         if (this.disposed) return;
+        // A worker due for retirement would skip its warm-up and then be
+        // replaced by a cold one. Retire it now if it is idle, so the
+        // replacement is the worker that gets warmed.
+        if (this.worker && this.proactiveRecycleReason !== null) {
+            this.clearProactiveRecycleTimer();
+            this.performProactiveRecycle(this.worker);
+        }
         const worker = this.ensureWorker();
         const warmup = this.warmUpWorker(worker);
         // An idle worker that needs no warm-up restarts its idle timeout, so a

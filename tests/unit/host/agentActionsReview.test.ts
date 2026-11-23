@@ -13,12 +13,15 @@ const mocks = vi.hoisted(() => ({
     changesCard: vi.fn(),
 }));
 
-vi.mock('jotai', () => ({
-    useAtomValue: () => () => [],
+vi.mock('jotai', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('jotai')>()),
+    // Each run's agent actions (none), and the reference mapping, which no
+    // action reaches here.
+    useAtomValue: () => [[], []],
 }));
 
 vi.mock('../../../react/agents/agentActions', () => ({
-    getAgentActionsByRunAtom: {},
+    agentActionsForRunsAtom: () => ({}),
     isCreateItemAgentAction: () => false,
 }));
 

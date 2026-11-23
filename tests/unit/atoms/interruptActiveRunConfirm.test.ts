@@ -10,6 +10,8 @@ const attachCollectionsMock = vi.fn();
 const cancelMock = vi.fn();
 const leaveRunMock = vi.fn(() => false);
 const canLeaveReconnectingRunMock = vi.fn(() => false);
+const parkableRunIdMock = vi.fn((): string | null => null);
+const parkRunMock = vi.fn(async () => 'ended');
 const getThreadRunsMock = vi.fn();
 const getThreadMock = vi.fn();
 vi.mock('@beaver/agent-core/transport/agentService', () => ({
@@ -22,7 +24,14 @@ vi.mock('@beaver/agent-core/transport/agentService', () => ({
             return { tail_run_id: history.tail_run_id, activity: history.activity };
         },
     },
-    agentService: { cancel: (...args: unknown[]) => cancelMock(...args), cancelHandoff: () => null, canLeaveRun: () => false, leaveRun: (...args: unknown[]) => leaveRunMock(...(args as [])), isReattaching: () => false },
+    agentService: {
+        cancel: (...args: unknown[]) => cancelMock(...args),
+        cancelHandoff: () => null,
+        canLeaveRun: () => false,
+        leaveRun: (...args: unknown[]) => leaveRunMock(...(args as [])),
+        isReattaching: () => false,
+        parkRun: (...args: unknown[]) => parkRunMock(...(args as [])),
+    },
 }));
 
 vi.mock('@beaver/agent-core/transport/threadService', () => ({
@@ -140,6 +149,15 @@ vi.mock('../../../react/atoms/agentRunAtoms', async () => {
         isWSChatPendingAtom: atom(false),
         isWSConnectedAtom: atom(false),
         isWSReadyAtom: atom(false),
+        parkableRunId: () => parkableRunIdMock(),
+    };
+});
+
+vi.mock('../../../react/atoms/parkedRuns', async () => {
+    const { atom } = await import('jotai');
+    return {
+        clearParkedAnswersAtom: atom(null, () => {}),
+        syncParkedCardsAtom: atom(null, () => {}),
     };
 });
 
@@ -151,6 +169,7 @@ vi.mock('../../../react/agents/agentActions', async () => {
         validateAppliedAgentAction: vi.fn(async () => 'valid' as const),
         undoAgentActionAtom: atom(null, () => {}),
         clearAllPendingApprovalsAtom: atom(null, () => {}),
+        resetAgentActionSelectorCaches: vi.fn(),
     };
 });
 
@@ -196,6 +215,9 @@ import {
 import { isLibraryTabAtom } from '../../../react/atoms/ui';
 import { activeRunAtom } from '@beaver/agent-core/run-state/atoms';
 import { isWSChatPendingAtom } from '../../../react/atoms/agentRunAtoms';
+import { jobWaitAtom } from '../../../react/atoms/jobWait';
+import { chatFillsAtom, recordChatFill } from '@beaver/agent-core/run-state/tableChatFills';
+import type { TableFillJobSnapshot } from '@beaver/agent-core/protocol/tableFillProtocol';
 
 const run = (status: string) => ({ id: 'run-1', status });
 
@@ -220,6 +242,7 @@ describe('interrupt-active-run confirm', () => {
         confirmMock.mockReturnValue(true);
         leaveRunMock.mockReturnValue(false);
         canLeaveReconnectingRunMock.mockReturnValue(false);
+        parkableRunIdMock.mockReturnValue(null);
         getThreadRunsMock.mockResolvedValue({ runs: [], agent_actions: [] });
         getThreadMock.mockResolvedValue({ name: 'Thread', zotero_user_id: '111', zotero_local_id: 'CURKEY' });
     });
@@ -311,6 +334,51 @@ describe('interrupt-active-run confirm', () => {
         });
     });
 
+    /** A live run waits on a fill whose table is not open: one question, naming the fill. */
+    describe('while the run waits on a fill', () => {
+        const fill = {
+            job_id: 'job-1',
+            plan_id: 'plan-1',
+            table: { libraryID: 1, key: 'TABLE001', title: 'Trials' },
+            origin: { kind: 'agent', run: { run_id: 'run-1', thread_id: 'thread-0', tool_call_id: 'call-1' } },
+            state: 'running',
+            rows_total: 10,
+            rows_done: 2,
+            rows_failed: 0,
+            in_flight: 2,
+            credits_charged: 0,
+            credits_planned: 1,
+            balance: null,
+            started_at: 1,
+            seconds_left: null,
+        } as TableFillJobSnapshot;
+
+        beforeEach(() => {
+            store.set(currentThreadIdAtom, 'thread-0');
+            store.set(activeRunAtom, run('in_progress'));
+            store.set(chatFillsAtom, recordChatFill(new Map(), fill));
+            store.set(jobWaitAtom, { threadId: 'thread-0', runId: 'run-1', toolCallId: 'call-1', jobId: 'job-1' });
+        });
+
+        it('asks once, about the fill, before a new chat, then stops the run', async () => {
+            await store.set(newThreadAtom, { skipAutoPopulate: true });
+            expect(confirmMock).toHaveBeenCalledTimes(1);
+            expect(confirmMock.mock.calls[0][0]).toMatchObject({ title: 'Start new chat?', confirmLabel: 'Start New Chat' });
+            expect(confirmMock.mock.calls[0][0].text).toContain('the fill of “Trials”');
+            expect(cancelMock).toHaveBeenCalledTimes(1);
+        });
+
+        it('asks once, about the fill, before another chat', async () => {
+            confirmMock.mockReturnValue(false);
+            const loaded = await store.set(loadThreadAtom, loadArgs);
+            expect(loaded).toBe(false);
+            expect(confirmMock).toHaveBeenCalledTimes(1);
+            expect(confirmMock.mock.calls[0][0]).toMatchObject({ title: 'Switch chat?', confirmLabel: 'Switch Chat' });
+            expect(confirmMock.mock.calls[0][0].text).toContain('the fill of “Trials”');
+            expect(store.get(currentThreadIdAtom)).toBe('thread-0');
+        });
+    });
+
     /**
      * Work started in one chat asks this counter whether it has been left
      * behind. The thread id cannot answer: a new chat opened from an unnamed
@@ -399,6 +467,51 @@ describe('interrupt-active-run confirm', () => {
             // Already incremented by the time the id is written, so nothing can
             // observe the new chat under the old count.
             expect(seenWhenIdChanged).toContain(before + 1);
+        });
+    });
+
+    describe('leaving a run that waits only on cards', () => {
+        beforeEach(() => {
+            parkableRunIdMock.mockReturnValue('run-1');
+        });
+
+        it('starts a new chat without asking, parking the run instead of stopping it', async () => {
+            store.set(activeRunAtom, run('in_progress'));
+            store.set(isWSChatPendingAtom, true);
+
+            await store.set(newThreadAtom, { skipAutoPopulate: true });
+
+            expect(confirmMock).not.toHaveBeenCalled();
+            expect(parkRunMock).toHaveBeenCalledWith('run-1');
+            expect(cancelMock).not.toHaveBeenCalled();
+            expect(store.get(activeRunAtom)).toBeNull();
+        });
+
+        it('opens another chat without asking, parking the run instead of stopping it', async () => {
+            store.set(activeRunAtom, run('in_progress'));
+            store.set(isWSChatPendingAtom, true);
+
+            await store.set(loadThreadAtom, loadArgs);
+
+            expect(confirmMock).not.toHaveBeenCalled();
+            expect(parkRunMock).toHaveBeenCalledWith('run-1');
+            expect(cancelMock).not.toHaveBeenCalled();
+            expect(store.get(currentThreadIdAtom)).toBe('thread-1');
+        });
+
+        it('refetches thread lists once the run parks, so they show the chat as waiting', async () => {
+            const invalidateViews = vi.fn();
+            (Zotero as any).Beaver = { ...(Zotero as any).Beaver, threads: { invalidateViews } };
+            store.set(activeRunAtom, run('in_progress'));
+            store.set(isWSChatPendingAtom, true);
+            parkRunMock.mockResolvedValueOnce('refused');
+            await store.set(newThreadAtom, { skipAutoPopulate: true });
+            expect(invalidateViews).not.toHaveBeenCalled();
+
+            store.set(activeRunAtom, run('in_progress'));
+            store.set(isWSChatPendingAtom, true);
+            await store.set(newThreadAtom, { skipAutoPopulate: true });
+            expect(invalidateViews).toHaveBeenCalledTimes(1);
         });
     });
 

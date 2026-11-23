@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { STATUS_CONFIGS, getStatusConfig, unconfirmedCaption } from '../../../react/host/zotero/components/agentActionViewHelpers';
+import { STATUS_CONFIGS, getStatusConfig, staleProposalDetail, unconfirmedCaption } from '../../../react/host/zotero/components/agentActionViewHelpers';
 import type { AgentAction } from '@beaver/agent-core/agents/agentActionTypes';
 
 const action = (status: AgentAction['status'], error_details?: Record<string, any>): AgentAction => ({
@@ -67,5 +67,28 @@ describe('unconfirmedCaption', () => {
 
     it('says nothing for a card without unconfirmed actions', () => {
         expect(unconfirmedCaption([action('error'), action('applied')])).toBeNull();
+    });
+});
+
+describe('a proposal refused because the library changed', () => {
+    const stale = (overrides: Partial<AgentAction> = {}): AgentAction => ({
+        ...action('error', { error_code: 'stale_proposal' }),
+        error_message: 'Title changed in Zotero after this edit was proposed.',
+        ...overrides,
+    } as AgentAction);
+
+    it('offers Apply anyway and Reject instead of Retry', () => {
+        expect(getStatusConfig('error', [stale()])).toMatchObject({
+            showApply: false, showReject: true, showUndo: false, showRetry: false, showApplyAnyway: true,
+        });
+    });
+
+    it('keeps the undo retry for a failed undo, which holds its result', () => {
+        expect(getStatusConfig('error', [stale({ result_data: { library_id: 1 } })])).toBe(STATUS_CONFIGS.error);
+    });
+
+    it('says what changed', () => {
+        expect(staleProposalDetail([stale()])).toBe('Title changed in Zotero after this edit was proposed.');
+        expect(staleProposalDetail([action('error')])).toBeNull();
     });
 });

@@ -1,18 +1,21 @@
 import { atom } from 'jotai/vanilla';
-import { ExternalReference, extractAuthorLastName } from '../types/externalReferences';
+import { ExternalReference, authorCreators, authorLastNames } from '../types/externalReferences';
 import { ZoteroItemReference } from '../types/zotero';
 import { logger } from '../platform/logger';
+import { combineSnapshots, ingestSnapshot, type SnapshotsBySource } from './externalRecords';
+import { primaryExternalUrl } from './externalRecordDisplay';
 
 /**
  * External-reference mapping state: the client-agnostic half of the external
  * reference cache.
  *
- * An "external reference" is a work found through a literature search
- * (Semantic Scholar, OpenAlex) that may or may not already exist in the user's
- * library. Two maps describe it, both keyed by `source_id`:
+ * An "external reference" is a work or record found in an external source
+ * (OpenAlex, PubMed, ClinicalTrials.gov, ...) that may or may not already
+ * exist in the user's library. Two maps describe it, both keyed by `source_id`:
  *
  * - {@link externalReferenceMappingAtom} — the reference metadata itself, so a
- *   citation or source row can be rendered without re-fetching it.
+ *   citation or source row can be rendered without re-fetching it. Each entry
+ *   is the combination of the latest snapshot per source of that id.
  * - {@link externalReferenceItemMappingAtom} — which library item the reference
  *   resolves to, if any.
  *
@@ -27,9 +30,17 @@ import { logger } from '../platform/logger';
 /**
  * Cache mapping external reference source IDs to ExternalReference objects
  * Format: { sourceId: ExternalReference }
- * Key is the source_id (e.g., Semantic Scholar ID, OpenAlex ID)
+ * Key is the source_id (e.g., OpenAlex W-id, pmid:N, NCT id). Each value is
+ * the combined record of that id's snapshots; ingest through
+ * {@link addExternalReferencesToMappingAtom}.
  */
 export const externalReferenceMappingAtom = atom<Record<string, ExternalReference>>({});
+
+/**
+ * The snapshots behind {@link externalReferenceMappingAtom}: the latest
+ * snapshot per source of each id. Only the ingest atom reads or writes it.
+ */
+const externalReferenceSnapshotsAtom = atom<Record<string, SnapshotsBySource>>({});
 
 /**
  * Cache mapping external reference source IDs to Zotero item references
@@ -54,6 +65,7 @@ export const clearExternalReferenceCacheAtom = atom(
     null,
     (get, set) => {
         set(externalReferenceMappingAtom, {});
+        set(externalReferenceSnapshotsAtom, {});
         set(externalReferenceItemMappingAtom, {});
         set(checkingExternalReferencesAtom, new Set());
         logger('clearExternalReferenceCache: all mappings cleared', 1);
@@ -61,26 +73,39 @@ export const clearExternalReferenceCacheAtom = atom(
 );
 
 /**
- * Add external references to the mapping cache
- * Used during streaming and when loading threads
+ * Ingest external reference snapshots: a tool view's `references` and its
+ * `extra_snapshots`, or records restored from history.
+ *
+ * Keeps the latest snapshot per source of each id (a timestamped snapshot
+ * beats an untimestamped one, a strictly newer one wins, an equal one keeps
+ * the stored snapshot, and between untimestamped ones the later arrival wins)
+ * and recomputes the combined record of every id that changed. A newer
+ * library check survives whichever snapshot carried it.
  */
 export const addExternalReferencesToMappingAtom = atom(
     null,
     (get, set, references: ExternalReference[]) => {
         if (!references || references.length === 0) return;
 
-        const currentMapping = get(externalReferenceMappingAtom);
-        const newMapping = { ...currentMapping };
-
+        const snapshots = { ...get(externalReferenceSnapshotsAtom) };
+        const changed = new Set<string>();
         for (const ref of references) {
-            const sourceId = ref.source_id;
-            if (sourceId && !newMapping[sourceId]) {
-                newMapping[sourceId] = ref;
-            }
+            const sourceId = ref?.source_id;
+            if (!sourceId) continue;
+            const updated = ingestSnapshot(snapshots[sourceId], ref);
+            if (!updated) continue;
+            snapshots[sourceId] = updated;
+            changed.add(sourceId);
         }
+        if (changed.size === 0) return;
 
-        set(externalReferenceMappingAtom, newMapping);
-        logger(`addExternalReferencesToMapping: Added ${references.length} references`, 1);
+        const mapping = { ...get(externalReferenceMappingAtom) };
+        for (const sourceId of changed) {
+            mapping[sourceId] = combineSnapshots(Object.values(snapshots[sourceId]));
+        }
+        set(externalReferenceSnapshotsAtom, snapshots);
+        set(externalReferenceMappingAtom, mapping);
+        logger(`addExternalReferencesToMapping: Ingested ${references.length} snapshots (${changed.size} ids changed)`, 1);
     }
 );
 
@@ -135,10 +160,9 @@ export const getCachedReferenceForObjectAtom = atom(
  * requiring every renderer to reconstruct an author/year label independently.
  */
 export function formatExternalReferenceLabel(ref: ExternalReference): string {
-    const firstAuthor = ref.authors?.[0];
-    const lastName = firstAuthor ? extractAuthorLastName(firstAuthor) : undefined;
-    const author = lastName
-        ? `${lastName}${(ref.authors?.length ?? 0) > 1 ? ' et al.' : ''}`
+    const lastNames = authorLastNames(ref);
+    const author = lastNames.length
+        ? `${lastNames[0]}${lastNames.length > 1 ? ' et al.' : ''}`
         : '';
     const year = ref.year != null
         ? String(ref.year)
@@ -150,10 +174,7 @@ export function formatExternalReferenceLabel(ref: ExternalReference): string {
 
 /** Pick the most useful stable link available for an external work. */
 export function getExternalReferenceUrl(ref: ExternalReference): string | undefined {
-    const doi = ref.identifiers?.doi;
-    return doi
-        ? `https://doi.org/${doi}`
-        : ref.publication_url || ref.url || ref.open_access_url || undefined;
+    return primaryExternalUrl(ref);
 }
 
 /**
@@ -229,28 +250,38 @@ function formatAuthorName(author: string, isFirst: boolean): string {
 export function formatExternalCitation(ref: ExternalReference): string {
     const parts: string[] = [];
 
-    // Authors
-    if (ref.authors && ref.authors.length > 0) {
+    // Authors: author-role creators when the record has them (organizations
+    // kept whole), otherwise parsed from the display names.
+    const creators = authorCreators(ref);
+    const names: string[] = creators
+        ? creators.map((creator, index) => creator.lastName
+            ? (index === 0
+                ? [creator.lastName, creator.firstName].filter(Boolean).join(', ')
+                : [creator.firstName, creator.lastName].filter(Boolean).join(' '))
+            : (creator.name ?? '').trim())
+        : (ref.authors ?? []).map((author, index) => formatAuthorName(author, index === 0));
+    const authors = names.filter((name) => !!name);
+    if (authors.length > 0) {
         let authorStr: string;
 
-        if (ref.authors.length > 3) {
+        if (authors.length > 3) {
             // More than 3 authors: first author + et al.
-            authorStr = formatAuthorName(ref.authors[0], true) + ' et al.';
-        } else if (ref.authors.length === 1) {
-            authorStr = formatAuthorName(ref.authors[0], true);
+            authorStr = authors[0] + ' et al.';
+        } else if (authors.length === 1) {
+            authorStr = authors[0];
         } else {
             // 2-3 authors: "lastName, firstName, firstName lastName and firstName lastName"
-            const formattedAuthors = ref.authors.map((a, i) => formatAuthorName(a, i === 0));
-            const lastAuthor = formattedAuthors.pop();
-            authorStr = formattedAuthors.join(', ') + ' and ' + lastAuthor;
+            const lastAuthor = authors[authors.length - 1];
+            authorStr = authors.slice(0, -1).join(', ') + ' and ' + lastAuthor;
         }
 
-        parts.push(authorStr + '.');
+        parts.push(authorStr.endsWith('.') ? authorStr : authorStr + '.');
     }
 
     // Year
-    if (ref.year) {
-        parts.push(`${ref.year}.`);
+    const year = ref.year ?? ref.publication_date?.match(/^\d{4}/)?.[0];
+    if (year) {
+        parts.push(`${year}.`);
     }
 
     // Title (in quotes)

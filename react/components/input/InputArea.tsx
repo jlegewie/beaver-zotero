@@ -2,12 +2,11 @@ import { threadReadOnlyAtom } from '../../runtime/threadProjection';
 import { RECONNECT_HELD_CAPTION, RECONNECT_UNAVAILABLE_TOOLTIP } from '@beaver/agent-core/transport/connectionFailure';
 import { useRunReconnectShown } from '../../hooks/useVisibleReconnect';
 import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
-import { useComposerVoice } from "../../hooks/useComposerVoice";
-import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { MicIcon, StopIcon, GlobalSearchIcon, ArrowUpLineIcon } from '../icons/icons';
+import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { StopIcon, GlobalSearchIcon, ArrowUpLineIcon } from '../icons/icons';
 import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai';
 import { newThreadAtom, currentThreadIdAtom } from '../../atoms/threads';
-import { currentMessageContentAtom, currentMessagePillsAtom, pendingPillInsertsAtom, composerResetTokenAtom, pendingAttachmentTokensAtom, clearComposerAtom } from '../../atoms/messageComposition';
+import { currentMessageContentAtom, currentMessagePillsAtom, pendingPillInsertsAtom, composerResetTokenAtom, pendingAttachmentTokensAtom, clearComposerAtom, composerSourceSearchTextAtom } from '../../atoms/messageComposition';
 import { sendWSMessageAtom, isWSChatPendingAtom, answerPendingApprovalsAtom, setRunPermissionModeAtom, approvalVerdictInFlightAtom, beginApprovalVerdictAtom, releaseApprovalVerdictAtom, streamingDoneRunIdsAtom, isRunReconnectingAtom, stoppingPreviousRunAtom } from '../../atoms/agentRunAtoms';
 import { pendingApprovalsAtom, agentActionsByRunAtom } from '../../agents/agentActions';
 import { isCoveredByFullAccess, runApprovalPolicyAtom } from '../../atoms/runApprovalPolicy';
@@ -29,9 +28,11 @@ import BatchProgressPanel from './BatchProgressPanel';
 import HighTokenUsageWarningBar from './HighTokenUsageWarningBar';
 import NextStepsPanel from '../pages/firstRun/NextStepsPanel';
 import RunContinueDisplay from '../agentRuns/RunContinueDisplay';
-import BackToSuggestions, { FirstRunBackTarget } from '../pages/firstRun/BackToSuggestions';
+import BackToSuggestions from '../pages/firstRun/BackToSuggestions';
 import { continuationOfferAtom, hasWhereToStartRunAtom, lastRunSummaryAtom, threadRunIdsAtom } from '@beaver/agent-core/run-state/atoms';
-import { PromptOrigin } from '@beaver/agent-core/agents/types';
+import { runningChatJobsAtom, stopChatJobsAtom } from '../../atoms/jobCalls';
+import { PromptOrigin, isRunFinished } from '@beaver/agent-core/agents/types';
+import { isThreadParkedAtom } from '../../atoms/parkedRuns';
 import { firstRunNextStepsDismissedAtom } from '../../atoms/firstRun';
 import { dismissHighTokenWarningForThreadAtom, dismissedHighTokenWarningByThreadAtom, backendHighTokenUsageRunsAtom } from '../../atoms/messageUIState';
 import { getLastRequestInputTokens } from '../../utils/runUsage';
@@ -44,6 +45,7 @@ import { useComposerPasteHandlers } from '../../hooks/useComposerPasteHandlers';
 import { useActionPopupResolver } from '../../hooks/useActionPopupResolver';
 import { useStopRun } from '../../hooks/useStopRun';
 import { sendComposedMessageAtom } from '../../atoms/actions';
+import { composerSendBlockAtom } from '../../atoms/featureCredits';
 import { dismissActiveEditNotePreview } from '../../host/zotero/editNotePreviewLifecycle';
 
 const HIGH_INPUT_TOKEN_WARNING_THRESHOLD = 100_000;
@@ -95,8 +97,13 @@ const InputArea: React.FC<InputAreaProps> = ({
     // dequeued (see the claim effect below).
     const pendingPillInsert = useAtomValue(pendingPillInsertsAtom)[0] ?? null;
     const composerResetToken = useAtomValue(composerResetTokenAtom);
+    // Send is held, and its tooltip says what is missing, while a feature
+    // task's setup card has a required step open or a /command pill's action
+    // needs text after it that the message lacks.
+    const sendBlock = useAtomValue(composerSendBlockAtom);
     const store = useStore();
     const webSearchDescriptionId = useId();
+    const requirementHintId = useId();
 
     // Turns a paste carrying files or image bytes into message attachments.
     const pasteHandlers = useComposerPasteHandlers();
@@ -106,7 +113,6 @@ const InputArea: React.FC<InputAreaProps> = ({
 
     // Imperative handle exposed by the Lexical editor (focus / clear).
     const editorHandleRef = useRef<LexicalEditorInputHandle | null>(null);
-    const voice = useComposerVoice(inputRef, editorHandleRef);
     const pendingSelectionRestoreRef = useRef<{ offset: number; skipFocus: boolean } | null>(null);
     const focusEditor = useCallback(() => {
         editorHandleRef.current?.focus();
@@ -135,7 +141,22 @@ const InputArea: React.FC<InputAreaProps> = ({
     const sendWSMessage = useSetAtom(sendWSMessageAtom);
     const sendComposedMessage = useSetAtom(sendComposedMessageAtom);
     const stopRun = useStopRun('InputArea');
-    const isPending = useAtomValue(isWSChatPendingAtom);
+    // Cards of a parked run do not block the composer: a message instead of
+    // an answer moves on without them. The approvals bar still offers to
+    // answer them. A resume that waits for the rest of the cards looks the
+    // same: sending a message parks it first.
+    const isParked = useAtomValue(isThreadParkedAtom);
+    // Fills this window waits on. While one goes, the chat is busy as during
+    // any other tool call, parked or not: the composer shows Stop, which
+    // stops the fill and ends the response.
+    const chatJobs = useAtomValue(runningChatJobsAtom);
+    const stopChatJobs = useSetAtom(stopChatJobsAtom);
+    const jobsBusy = isParked && chatJobs.length > 0;
+    const isPending = (useAtomValue(isWSChatPendingAtom) && !isParked) || jobsBusy;
+    // The fill was stopped in its table: it winds down, then the response
+    // continues with how far it got.
+    const isStoppingJobs = chatJobs.length > 0 && chatJobs.every((job) => job.stopping);
+    const waitsOnJob = isPending && chatJobs.length > 0;
 
     // A file staged for THIS composition is still being attached, so sending is
     // held until it lands. Work left over from a composition the user has since
@@ -149,7 +170,8 @@ const InputArea: React.FC<InputAreaProps> = ({
     const pendingApprovalsMap = useAtomValue(pendingApprovalsAtom);
     const answerPendingApprovals = useSetAtom(answerPendingApprovalsAtom);
     const clearComposer = useSetAtom(clearComposerAtom);
-    const isAwaitingApproval = pendingApprovalsMap.size > 0;
+    const hasPendingApprovals = pendingApprovalsMap.size > 0;
+    const isAwaitingApproval = hasPendingApprovals && !isParked;
     // The run holding a full-access grant, if one does. The policy is cleared at
     // every run boundary, so holding it means the grant is live right now — and
     // once it is, no further card is raised, so this bar is the only place left
@@ -250,23 +272,26 @@ const InputArea: React.FC<InputAreaProps> = ({
         ? streamingDoneRunIds.has(continuation.runId)
         : false;
 
-    // Guided next steps surface after a suggestion-card run or a "Where should
-    // we start?" launcher run — both carry the context NextStepsPanel needs.
+    // Guided next steps surface after a "Where should we start?" launcher run,
+    // which carries the context NextStepsPanel needs. Not while that run waits
+    // on its cards: it has not finished yet.
     const lastRunOriginKind = lastRun?.origin?.kind;
     const canShowNextSteps = Boolean(
         lastRun &&
-        (lastRunOriginKind === 'first_run_card' || lastRunOriginKind === 'where_to_start') &&
-        lastRun.status === 'completed' &&
+        lastRunOriginKind === 'where_to_start' &&
+        isRunFinished(lastRun) &&
+        !isParked &&
         !nextStepsDismissedRunIds.has(lastRun.id)
     );
+    // After a launcher follow-up, the way back to the launcher.
     const canShowBackToSuggestions = Boolean(
         lastRun &&
         lastRunOriginKind === 'first_run_followup' &&
-        lastRun.status === 'completed' &&
+        hasWhereToStartRun &&
+        isRunFinished(lastRun) &&
+        !isParked &&
         !nextStepsDismissedRunIds.has(lastRun.id)
     );
-    // The follow-up run's origin
-    const firstRunBackTarget: FirstRunBackTarget = hasWhereToStartRun ? 'launcher' : 'suggestions';
 
     // Counted labels, so the destructive verdict states its blast radius where
     // the decision is actually taken rather than only in the bar above.
@@ -286,7 +311,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     const composerBand: 'high-token' | 'next-steps' | 'back-to-suggestions' | 'continue' | 'approvals' | 'full-access' | 'thread-presence' | null =
         threadReadOnly || stoppingPreviousRun
             ? 'thread-presence'
-            : isAwaitingApproval
+            : hasPendingApprovals
                 ? 'approvals'
                 : fullAccessRunId
                     ? 'full-access'
@@ -341,6 +366,16 @@ const InputArea: React.FC<InputAreaProps> = ({
         menuRef: addSourcesMenuRef,
     });
 
+    // Publish the `@query` the menu is searching from, so readers of the
+    // message text (the feature-credit setup steps) can leave it out. A layout
+    // effect, so the setup card never paints the query as an instruction.
+    const setSourceSearchText = useSetAtom(composerSourceSearchTextAtom);
+    const sourceSearchText = isAddSourcesMenuOpen && addSourcesQuerySource === 'editor' ? `@${addSourcesSearchQuery}` : null;
+    useLayoutEffect(() => {
+        setSourceSearchText(sourceSearchText);
+    }, [sourceSearchText, setSourceSearchText]);
+    useEffect(() => () => setSourceSearchText(null), [setSourceSearchText]);
+
     useEffect(() => {
         if (isPending && getPref('focusResponseForScreenReaders')) {
             return;
@@ -391,7 +426,21 @@ const InputArea: React.FC<InputAreaProps> = ({
             // Another editor may have claimed this pill already.
             if (queue[0] !== pendingPillInsert) return;
             store.set(pendingPillInsertsAtom, queue.slice(1));
-            editorHandleRef.current?.insertSlashCommand(descriptor, null);
+            const editor = editorHandleRef.current;
+            if (!editor) return;
+            const { argumentText, selectText, replaceActionIds } = pendingPillInsert;
+            // Pills this one takes the place of go first, every one of them,
+            // with their text.
+            for (const actionId of replaceActionIds ?? []) editor.removeCommandsWithArguments(actionId);
+            // Staged with text for after the command (an example the user
+            // picked): reuse a pill of the same action rather than adding a
+            // second one, and replace whatever follows it.
+            if (argumentText !== undefined && editor.setCommandArgument(descriptor.actionId, argumentText, selectText)) return;
+            editor.insertSlashCommand(descriptor, null);
+            if (argumentText !== undefined) {
+                editor.setCommandArgument(descriptor.actionId, argumentText, selectText);
+                return;
+            }
             focusEditor();
         };
         const ownWindow = inputRef.current?.ownerDocument.defaultView ?? null;
@@ -497,7 +546,6 @@ const InputArea: React.FC<InputAreaProps> = ({
     };
 
     const sendMessage = (composedMessage: string) => {
-        if (!voice.canSend()) return;
         // Text typed with an input method reaches `messageContent` one
         // composition at a time, and the last one lands shortly after the user
         // commits it. Publish anything still withheld so a send that follows
@@ -505,6 +553,9 @@ const InputArea: React.FC<InputAreaProps> = ({
         // state before it (see flushPendingText).
         const message = editorHandleRef.current?.flushPendingText() ?? composedMessage;
         if (isPending || message.length === 0) return;
+        // Read from the store, not the render: the flush above may have just
+        // published the text that satisfies the requirement.
+        if (store.get(composerSendBlockAtom)) return;
         // If the message contains /command pills, resolve each back to its
         // action's prompt (and attach its items/collection) before sending.
         const pills = editorHandleRef.current?.getSlashCommands() ?? [];
@@ -522,6 +573,10 @@ const InputArea: React.FC<InputAreaProps> = ({
             e.preventDefault();
             e.stopPropagation();
         }
+        if (isStoppingJobs) return;
+        // A parked chat stops the fills it waits on; a live run stops as any
+        // run does, and its fills with it.
+        if (stopChatJobs()) return;
         stopRun();
     };
 
@@ -573,7 +628,6 @@ const InputArea: React.FC<InputAreaProps> = ({
 
     // Handle the editor's submit signal (Enter without Shift).
     const handleEditorSubmit = useCallback(() => {
-        if (!voice.canSend()) return;
         if (isPending) {
             logger('handleEditorSubmit: Blocked - request already in progress');
             return;
@@ -588,7 +642,7 @@ const InputArea: React.FC<InputAreaProps> = ({
         if (isAddSourcesMenuOpen) return;
         if (isAttachingFiles) return;
         sendMessage(messageContent);
-    }, [isPending, isAwaitingApproval, isSlashMenuOpen, isAddSourcesMenuOpen, isAttachingFiles, messageContent, voice.busy]);
+    }, [isPending, isAwaitingApproval, isSlashMenuOpen, isAddSourcesMenuOpen, isAttachingFiles, messageContent]);
 
     const handleDismissHighTokenWarning = (e: React.MouseEvent) => {
         e.preventDefault();
@@ -605,6 +659,8 @@ const InputArea: React.FC<InputAreaProps> = ({
     const getPlaceholderText = () => {
         if (placeholder !== undefined) return placeholder;
         if (isAwaitingApproval) return "Optional instructions, then approve or reject";
+        // The window waits on a fill: the response continues once it is done.
+        if (waitsOnJob) return isStoppingJobs ? "Stopping the table fill…" : "Beaver continues once the table is filled";
         if (isLibraryTab) return "@ to add a source, / for actions";
         if (currentNoteItem) return "@ to add a source, / for actions";
         return "@ to add a source, / for actions, drag to add annotations";
@@ -643,19 +699,18 @@ const InputArea: React.FC<InputAreaProps> = ({
             )}
 
             {/* First-run "Next steps" panel — shown after a run that originated
-                from a first-run suggestion card. Auto-dismisses on type. */}
+                from the launcher. Auto-dismisses on type. */}
             {composerBand === 'next-steps' && lastRun && (
                 <NextStepsPanel
-                    origin={lastRun.origin as Extract<PromptOrigin, { kind: 'first_run_card' | 'where_to_start' }>}
+                    origin={lastRun.origin as Extract<PromptOrigin, { kind: 'where_to_start' }>}
                     onDismiss={handleDismissNextSteps}
                 />
             )}
 
-            {/* After a first-run follow-up run, offer a path back to the
-                originating surface (suggestion grid or launcher). */}
+            {/* After a launcher follow-up run, offer a path back to the launcher. */}
             {composerBand === 'back-to-suggestions' && (
                 <div className="composer-docked-bar next-steps-panel px-3 py-2">
-                    <BackToSuggestions onDismiss={handleDismissNextSteps} backTarget={firstRunBackTarget} />
+                    <BackToSuggestions onDismiss={handleDismissNextSteps} />
                 </div>
             )}
 
@@ -794,25 +849,23 @@ const InputArea: React.FC<InputAreaProps> = ({
                             onCommit={commitAddSourcesMenu}
                             onResetQuery={resetAddSourcesQuery}
                             menuPortalContainer={menuPortalContainer}
-                            disabled={isAwaitingApproval || voice.busy}
+                            disabled={isAwaitingApproval}
                             verticalPosition={verticalPosition}
                         />
                     )}
-                    {!hideModelSelector && !voice.listening && (
+                    {!hideModelSelector && (
                         <ModelSelectionButton inputRef={inputRef} focusInput={focusEditor} disabled={isAwaitingApproval} />
                     )}
-                    {voice.listening ? (
-                        <div className="composer-voice-meter" role="img" aria-label={voice.clipping ? 'Microphone clipping' : voice.lowSignal ? 'Microphone signal is low' : 'Microphone level'}>
-                            <div className="composer-voice-bars">
-                                {voice.levels.map((level, index) => <span key={index} style={{ height: `${Math.max(2, Math.min(24, level * 90))}px` }} />)}
-                            </div>
-                            <span className="composer-voice-time">{Math.floor(voice.seconds / 60)}:{String(voice.seconds % 60).padStart(2, '0')}</span>
-                        </div>
-                    ) : <div className="flex-1" />}
+                    <div className="flex-1" />
                     <span id={webSearchDescriptionId} className="sr-only">
                         {webSearchDescription}
                     </span>
-                    {!showVerdictButtons && !voice.listening && (
+                    {sendBlock && (
+                        <span id={requirementHintId} className="sr-only">
+                            {sendBlock.hint}
+                        </span>
+                    )}
+                    {!showVerdictButtons && (
                     <Tooltip
                         key={String(isWebSearchAllowed)}
                         content={webSearchTooltipContent}
@@ -851,16 +904,6 @@ const InputArea: React.FC<InputAreaProps> = ({
                     </Tooltip>
                     )}
 
-                    {process.env.NODE_ENV === 'development' && voice.enabled && <IconButton
-                        icon={voice.listening ? StopIcon : MicIcon}
-                        className="composer-icons"
-                        loading={voice.processing}
-                        ariaLabel={voice.listening ? 'Stop dictation and transcribe' : voice.processing ? 'Preparing or transcribing dictation' : 'Dictate message'}
-                        ariaPressed={voice.listening}
-                        title="Dictation uses Beaver credits. Audio and selected source terms are sent to Beaver for transcription and correction. Escape cancels."
-                        disabled={voice.processing || (voice.busy && !voice.listening) || (!voice.listening && (!voice.canStart || isAwaitingApproval || isPending))}
-                        onClick={() => { void voice.toggle(); }}
-                    />}
                     {/* Send, and the two things that take its place: Stop while
                         a run is live, and the pair of verdict buttons once
                         there are instructions for a pending approval. */}
@@ -890,22 +933,37 @@ const InputArea: React.FC<InputAreaProps> = ({
                             </Button>
                         </>
                     ) : isPending ? (
-                        <IconButton
-                            icon={StopIcon}
-                            variant="surface"
-                            className="composer-send composer-send-stop"
-                            ariaLabel="Stop generating"
-                            onClick={handleStop}
-                        />
+                        <Tooltip
+                            content={isStoppingJobs ? 'Stopping…' : waitsOnJob ? 'Stop' : 'Stop response'}
+                            showArrow
+                            singleLine
+                        >
+                            <IconButton
+                                icon={StopIcon}
+                                variant="surface"
+                                className="composer-send composer-send-stop"
+                                ariaLabel={isStoppingJobs ? 'Stopping' : waitsOnJob ? 'Stop' : 'Stop generating'}
+                                disabled={isStoppingJobs}
+                                onClick={handleStop}
+                            />
+                        </Tooltip>
                     ) : (
-                        <IconButton
-                            icon={ArrowUpLineIcon}
-                            variant="solid"
-                            className="composer-send"
-                            ariaLabel="Send message"
-                            onClick={handleSubmit}
-                            disabled={threadReadOnly || voice.busy || messageContent.length === 0 || !selectedModel || isSlashMenuOpen || isAttachingFiles}
-                        />
+                        <Tooltip
+                            content={sendBlock?.hint ?? ''}
+                            disabled={!sendBlock}
+                            showArrow
+                            singleLine
+                        >
+                            <IconButton
+                                icon={ArrowUpLineIcon}
+                                variant="solid"
+                                className="composer-send"
+                                ariaLabel="Send message"
+                                ariaDescribedBy={sendBlock ? requirementHintId : undefined}
+                                onClick={handleSubmit}
+                                disabled={threadReadOnly || messageContent.length === 0 || !selectedModel || isSlashMenuOpen || isAttachingFiles || sendBlock !== null}
+                            />
+                        </Tooltip>
                     )}
                 </div>
 

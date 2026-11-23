@@ -1,11 +1,14 @@
-import { isTableItemError } from '../../artifacts/tableItemIdentity';
+import { isTableItemError, tableFilePath } from '../../artifacts/tableItemIdentity';
 import type { Cell, Column, Row, TableSpec } from '@beaver/agent-core/layouts/table';
-import { rowIdFor, validateTableSpec, type RowRef } from '@beaver/agent-core/layouts/table';
+import { allocateRowId, validateTableSpec, IDENTIFIER_COLUMN_ID, REFERENCE_COLUMN_ID, TABLE_SPEC_VERSION, YEAR_COLUMN_ID, type Evidence, type RowRef } from '@beaver/agent-core/layouts/table';
+import { systemColumns } from '@beaver/agent-core/layouts/tableEdit';
+import { identifierCell, normalizeIdentifiers } from '@beaver/agent-core/layouts/tableMerge';
 import { zoteroLinkScope, zoteroLinksFor } from '../../artifacts/view/tableLinks';
 import type { TableMutation } from '@beaver/agent-core/layouts/tableMutations';
 import { summarize } from '@beaver/agent-core/layouts/tableMutations';
 import { getSearchableLibraryIds } from '../../agentDataProvider/utils';
 import { inspectTableShadow, TABLE_SHADOW_MAX_PAYLOAD_BYTES, TABLE_SHADOW_RETENTION } from '../../artifacts/recoveryShadow';
+import { TABLE_BOOKKEEPING_FILE } from '../../artifacts/tableRenderer';
 import { buildTableDocument } from '../../artifacts/tableDocument';
 import { isTableItem, loadTableItemFields, readTableItemSpec, TABLE_TAG, tableHistoryPath, tableSidecarDirectory, tableStorageDirectory, tableVersionPath } from '../../artifacts/tableItem';
 import { getTablesApi, TABLES_API_UNAVAILABLE } from '../../artifacts/tablesApi';
@@ -21,18 +24,6 @@ export const TABLES_API_MISSING = {
     code: 'tables_api_unavailable',
     error: TABLES_API_UNAVAILABLE,
 };
-
-export interface OpenTableRequest {
-    variant?: 'search' | 'extraction';
-    /** A spec to render as-is. Omit it and one is built from the library. */
-    table?: TableSpec;
-    title?: string;
-    subtitle?: string;
-    /** How many library items the built spec should cover. */
-    limit?: number;
-    /** Pass false to leave the window closed and only set the surface. */
-    open?: boolean;
-}
 
 export interface DemoItem {
     libraryID: number;
@@ -103,8 +94,15 @@ export function yearOf(item: Zotero.Item): string {
     return parsed?.year ? String(parsed.year) : '';
 }
 
-export function citationTag(item: DemoItem, index: number): string {
-    return `<citation id="${item.libraryID}-${item.key}" loc="page${index + 1}"/>`;
+/** The portable id of the item's PDF, the document its row is filled from. */
+export function documentIdFor(item: DemoItem): string | undefined {
+    return item.attachmentKey ? `${item.libraryRef ?? 'u'}-${item.attachmentKey}` : undefined;
+}
+
+/** Evidence for a demo answer: the quoted sentence on a page of the item's attachment. */
+export function evidenceFor(item: DemoItem, quote: string, index: number): Evidence[] {
+    const document = documentIdFor(item);
+    return document && quote ? [{ document, locator: `s${index + 1}`, quote, page: index }] : [];
 }
 
 export function sentence(text: string, index: number): string {
@@ -113,32 +111,21 @@ export function sentence(text: string, index: number): string {
     return picked.length > 150 ? `${picked.slice(0, 147)}…` : picked;
 }
 
-export function textCell(text: string): Cell {
-    return text ? { value: { kind: 'text', text }, provenance: 'asserted' } : {};
+/**
+ * A filler answer: read from the documents its evidence names, or from the
+ * title and abstract (no documents) when it has none.
+ */
+export function textCell(text: string, evidence: Evidence[] = []): Cell | undefined {
+    if (!text) return undefined;
+    const documents = [...new Set(evidence.map((entry) => entry.document))];
+    return documents.length
+        ? { outcome: 'answered', value: { kind: 'text', text }, provenance: 'model', documents, confidence: 'high', evidence }
+        : { outcome: 'answered', value: { kind: 'text', text }, provenance: 'model', confidence: 'high' };
 }
 
-export function typeColumn(items: DemoItem[]): Column {
-    const labels = [...new Set(items.map((item) => typeLabelFor(item)))];
-    return {
-        id: '_type',
-        header: 'Type',
-        type: 'select',
-        role: 'row_type',
-        system: true,
-        priority: 'secondary',
-        options: labels.map((label) => ({ label, color: 'gray' })),
-    };
-}
-
-export function typeLabelFor(item: DemoItem): string {
-    return Zotero.ItemTypes.getLocalizedString(item.itemType) || item.itemType;
-}
-
-export function typeCell(item: DemoItem): Cell {
-    return {
-        value: { kind: 'select', label: typeLabelFor(item) },
-        provenance: 'imported',
-    };
+/** Sets a cell, leaving it unattempted when there is nothing to write. */
+function put(row: Row, columnId: string, cell: Cell | undefined): void {
+    if (cell) row.cells[columnId] = cell;
 }
 
 export async function buildDemoTable(
@@ -151,45 +138,45 @@ export async function buildDemoTable(
         : buildSearchDemo(items);
 }
 
-export function referenceRow(item: DemoItem, index: number, withAbstract = true): Row {
+/** A demo row for an item, with the system cells (reference, year, identifier) a real table's row gets. */
+export function referenceRow(item: DemoItem): Row {
     const ref: RowRef = {
         kind: 'item',
         library_id: item.libraryID,
         zotero_key: item.key,
-        library_ref: item.libraryRef,
-        attachment: item.attachmentKey
-            ? { library_id: item.libraryID, zotero_key: item.attachmentKey, library_ref: item.libraryRef }
-            : undefined,
+        library_ref: item.libraryRef ?? 'u',
     };
+    const document = documentIdFor(item);
+    const identifier = identifierCell(normalizeIdentifiers({ doi: item.doi }));
     return {
-        id: rowIdFor(ref),
+        id: allocateRowId(),
         ref,
+        ...(document ? { documents: [document] } : {}),
         cells: {
-            ref: {
+            [REFERENCE_COLUMN_ID]: {
+                outcome: 'answered',
                 value: {
                     kind: 'reference',
                     display_name: item.title,
+                    title: item.title,
                     subtitle: item.creators,
                     venue: item.venue || undefined,
                     item_type: item.itemType,
                 },
-                provenance: 'asserted',
-                details:
-                    withAbstract && item.abstract
-                        ? { kind: 'text', label: 'Abstract', text: item.abstract }
-                        : undefined,
+                provenance: 'system',
             },
-            _type: typeCell(item),
+            ...(item.year
+                ? { [YEAR_COLUMN_ID]: { outcome: 'answered', value: { kind: 'date', value: item.year }, provenance: 'system' } as Cell }
+                : {}),
+            ...(identifier ? { [IDENTIFIER_COLUMN_ID]: identifier } : {}),
         },
     };
 }
 
 export function buildSearchDemo(items: DemoItem[]): TableSpec {
     const columns: Column[] = [
-        { id: 'ref', header: 'Item', type: 'reference', priority: 'primary' },
-        typeColumn(items),
-        { id: 'year', header: 'Year', type: 'date', priority: 'primary' },
-        { id: 'cites', header: 'Citations', type: 'number', priority: 'primary' },
+        ...systemColumns(),
+        { id: 'cites', header: 'Citations', type: 'text' },
         {
             id: 'type',
             header: 'Type',
@@ -203,68 +190,56 @@ export function buildSearchDemo(items: DemoItem[]): TableSpec {
         },
         { id: 'oa', header: 'OA', type: 'boolean' },
         { id: 'abstract', header: 'Abstract', type: 'text' },
-        { id: 'doi', header: 'DOI', type: 'link' },
     ];
 
     const rows: Row[] = items.map((item, i) => {
-        // No abstract on the reference cell: this table has a column for it,
-        // and carrying both prints it twice in the expanded row.
-        const row = referenceRow(item, i, false);
-        row.cells.year = item.year
-            ? { value: { kind: 'date', value: item.year }, provenance: 'asserted' }
-            : {};
+        const row = referenceRow(item);
         // Stand-in metrics: the demo is about the rendering, not the numbers.
         row.cells.cites = {
-            value: { kind: 'number', value: (i + 1) * 137 },
-            provenance: 'asserted',
+            outcome: 'answered',
+            value: { kind: 'text', text: String((i + 1) * 137) },
+            provenance: 'system',
         };
         row.cells.type = {
+            outcome: 'answered',
             value: { kind: 'select', label: selectLabelFor(item.itemType) },
-            provenance: 'asserted',
+            provenance: 'system',
         };
         row.cells.oa = {
+            outcome: 'answered',
             value: { kind: 'boolean', value: i % 3 !== 0 },
-            provenance: 'asserted',
+            provenance: 'system',
         };
-        row.cells.abstract = textCell(item.abstract);
-        row.cells.doi = item.doi
-            ? {
-                  value: {
-                      kind: 'link',
-                      url: `https://doi.org/${item.doi}`,
-                      label: item.doi,
-                  },
-                  provenance: 'asserted',
-              }
-            : {};
+        put(row, 'abstract', textCell(item.abstract));
         return row;
     });
 
-    // One row that could not be resolved, so the failed-row treatment is visible.
+    // One row that could not be read, so the failed-row treatment is visible.
+    // Its question cells stay unattempted: the failure is on the row.
     rows.push({
         id: 'ext:openalex:demo-failed',
         ref: { kind: 'external', source: 'openalex', source_id: 'demo-failed' },
-        status: 'error',
-        error: 'Metadata could not be retrieved from the source',
+        failure: { code: 'download_failed', message: 'The file could not be downloaded from the source.' },
         cells: {
-            ref: {
+            [REFERENCE_COLUMN_ID]: {
+                outcome: 'answered',
                 value: {
                     kind: 'reference',
                     display_name: 'A result whose metadata failed to load',
                     subtitle: 'openalex',
                     venue: 'demo-failed',
                 },
-                provenance: 'asserted',
+                provenance: 'system',
             },
-            abstract: { status: 'error', error: 'No abstract available' },
         },
     });
 
     return {
         id: 'demo-search',
+        spec_version: TABLE_SPEC_VERSION,
         title: 'External search — demo',
-        caption: 'Built from your library. Citation counts and OA flags are stand-ins.',
-        anchor_column_id: 'ref',
+        description: 'Built from your library. Citation counts and OA flags are stand-ins.',
+        anchor_column_id: REFERENCE_COLUMN_ID,
         columns,
         rows,
         sort: { column_id: 'cites', direction: 'desc' },
@@ -274,21 +249,12 @@ export function buildSearchDemo(items: DemoItem[]): TableSpec {
 
 export function buildExtractionDemo(items: DemoItem[]): TableSpec {
     const columns: Column[] = [
-        { id: 'ref', header: 'Item', type: 'reference', priority: 'primary' },
-        typeColumn(items),
-        { id: 'year', header: 'Year', type: 'date', priority: 'primary' },
+        ...systemColumns(),
         {
             id: 'sample',
             header: 'Sample & setting',
             type: 'text',
             description: 'What was the sample and the setting? Report N and the population studied.',
-            details: {
-                kind: 'list',
-                items: [
-                    'Report the analytic N, not the recruited N.',
-                    'Name the country and the years covered.',
-                ],
-            },
         },
         {
             id: 'design',
@@ -313,91 +279,67 @@ export function buildExtractionDemo(items: DemoItem[]): TableSpec {
             header: 'Attrition & retention',
             type: 'text',
             description: 'Any reported effect on quitting, attrition or retention.',
-            status: 'filling',
-            progress: { done: Math.min(3, items.length), total: items.length || 1 },
         },
     ];
 
     const designs = ['RCT', 'Quasi-experiment', 'Observational', 'Unclear'];
 
     const rows: Row[] = items.map((item, i) => {
-        const row = referenceRow(item, i);
-        row.cells.year = item.year
-            ? { value: { kind: 'date', value: item.year }, provenance: 'asserted' }
-            : {};
-        // A citation tag per cell, so the marker, its tooltip and the source
-        // list all have something real to resolve against.
-        const cite = citationTag(item, i);
-        // Short, the way a real extracted field is: the citation marker rides
-        // at the end of the claim, and a paragraph long enough to be clamped
-        // would hide it.
-        row.cells.sample = {
-            ...textCell(
-                item.abstract ? `${sentence(item.abstract, 0)} ${cite}` : ''
-            ),
-            // One hand-edited cell, so a second provenance shows up.
-            provenance: i === 1 ? 'user' : 'asserted',
+        const row = referenceRow(item);
+        // Short, the way a real extracted field is, each with its evidence so
+        // the marker, its tooltip and the source list have something real to
+        // resolve against.
+        const answer = (index: number) => {
+            const text = item.abstract ? sentence(item.abstract, index) : '';
+            return textCell(text, evidenceFor(item, text, i));
         };
+        // A row with neither a document nor an abstract cannot be filled: the
+        // failure goes on the row and its question cells stay unattempted.
+        if (!item.attachmentKey && !item.abstract) {
+            row.failure = { code: 'no_source', message: 'This item has no document or abstract.' };
+            return row;
+        }
+        const documents = row.documents;
+        const sample = answer(0);
+        // One hand-edited cell, so a second provenance shows up.
+        put(row, 'sample', sample?.outcome === 'answered' && i === 1
+            ? { outcome: 'answered', value: sample.value, provenance: 'user' }
+            : sample);
         row.cells.design = {
+            outcome: 'answered',
             value: { kind: 'select', label: designs[i % designs.length] },
-            provenance: 'asserted',
+            provenance: 'model',
+            ...(documents ? { documents } : {}),
+            // Stored for evaluation; no surface shows it.
+            confidence: i % 4 === 1 ? 'low' : 'high',
+            reasoning: 'Stand-in judgment for the demo.',
         };
-        // A cell the producer reports nothing for is a finding, not a gap.
-        row.cells.effect =
+        // A cell the paper reports nothing for is a finding, not a gap.
+        put(row, 'effect',
             i === 2
-                ? {}
+                ? {
+                      outcome: 'not_reported',
+                      provenance: 'model',
+                      ...(documents ? { documents } : {}),
+                      reasoning: 'The paper reports no effect size.',
+                  }
                 : i === 3
-                  ? { status: 'error', error: 'The PDF has no extractable text layer' }
-                  : textCell(`${sentence(item.abstract, 1)} ${cite}`);
-        // The filling column: the first few are done, the rest are pending.
-        row.cells.retention =
-            i < 3
-                ? textCell(`${sentence(item.abstract, 2)} ${cite}`)
-                : { status: 'pending' };
+                  ? { outcome: 'failed', provenance: 'model', error_code: 'no_locator', error: 'The answer cited no passage.' }
+                  : answer(1));
+        // A column still to fill: the first few are done, the rest unattempted.
+        if (i < 3) put(row, 'retention', answer(2));
         return row;
     });
 
     return {
         id: 'demo-extraction',
+        spec_version: TABLE_SPEC_VERSION,
         title: 'Extraction — demo',
-        caption: 'Built from your library. Cell contents are excerpts, not real extractions.',
-        anchor_column_id: 'ref',
+        description: 'Built from your library. Cell contents are excerpts, not real extractions.',
+        anchor_column_id: REFERENCE_COLUMN_ID,
         columns,
         rows,
-        capabilities: {
-            row_actions: ['reveal'],
-            allow_add_column: true,
-            allow_add_row: true,
-        },
-        cost_estimate: { per_row_credits: 1, estimated_seconds: 40 },
-        citations: items.map((item, i) => ({
-            citation_id: `${item.key}-${i}`,
-            // The tag exactly as the cells carry it, so the key the renderer
-            // derives from the text is one this citation answers to.
-            raw_tag: citationTag(item, i),
-            requested_ref: {
-                kind: 'zotero' as const,
-                library_id: item.libraryID,
-                zotero_key: item.key,
-                loc: {
-                    kind: 'page' as const,
-                    value: String(i + 1),
-                    raw: `page${i + 1}`,
-                },
-            },
-            resolved_ref: {
-                kind: 'zotero' as const,
-                library_id: item.libraryID,
-                zotero_key: item.key,
-            },
-            citation_type: 'attachment' as const,
-            display_name: `${item.creators.split(',')[0]} ${item.year}`.trim(),
-            formatted_citation: [item.creators, item.year, item.title, item.venue]
-                .filter(Boolean)
-                .join('. '),
-            preview: item.abstract.slice(0, 180),
-            pages: [i + 1],
-        })),
+        capabilities: { row_actions: ['reveal'] },
     };
 }
 
@@ -408,10 +350,17 @@ export function selectLabelFor(itemType: string): string {
     return 'Other';
 }
 
-export interface TableCreateRequest extends OpenTableRequest {
+export interface TableCreateRequest {
     operation_id?: string;
     /** The spec to store. Omit it and a demo spec is built from the library. */
     spec?: TableSpec;
+    /** Alias of `spec`. */
+    table?: TableSpec;
+    /** Which demo to build when no spec is given. */
+    variant?: 'search' | 'extraction';
+    /** How many library items the demo should cover. */
+    limit?: number;
+    title?: string;
     libraryID?: number;
     collectionID?: number;
     actor?: string;
@@ -446,7 +395,6 @@ export async function handleTestTableCreateHttpRequest(
             key: created.key,
             sha256: created.sha256 ?? created.entry.sha256,
             replayed: created.replayed,
-            operation: created.operation,
             item_id: created.itemID,
             library_id: created.libraryID,
             title: created.title,
@@ -613,8 +561,6 @@ export function writeResponse(
         ok: true,
         version: result.version,
         sha256: result.sha256,
-        replayed: result.replayed,
-        operation: result.operation,
         // False here after a second write in the same run means the collapse
         // rule did not fire when it should have.
         collapsed: result.collapsed,
@@ -632,8 +578,6 @@ export function writeResponse(
 export interface TableWriteRequest extends TableStoreRequest {
     spec?: TableSpec;
     expectedVersion?: number;
-    expected_sha256?: string;
-    operation_id?: string;
 }
 
 export async function handleTestTableWriteHttpRequest(
@@ -650,13 +594,7 @@ export async function handleTestTableWriteHttpRequest(
                 ref,
                 request.spec,
                 writeMetaFrom(request),
-                request.expectedVersion,
-                request.operation_id !== undefined || request.expected_sha256 !== undefined
-                    ? {
-                          operation_id: request.operation_id ?? '',
-                          expected_sha256: request.expected_sha256 ?? '',
-                      }
-                    : undefined
+                request.expectedVersion
             )
         );
     } catch (error) {
@@ -907,7 +845,28 @@ export async function rollBackWholeDirectory(
     const sha256 = await sha256Hex(serialized);
 
     await IOUtils.makeDirectory(sidecar, { createAncestors: true, ignoreExisting: true });
-    await IOUtils.writeUTF8(targetPath, serialized);
+
+    // The other device's `table.json`, which is the table: a download replaces
+    // the whole directory, so the table itself goes back to the target too. It
+    // keeps the creation marker.
+    const filePath = tableFilePath(item);
+    let fileSha256: string | undefined;
+    if (filePath) {
+        const file = JSON.parse(await IOUtils.readUTF8(filePath).catch(() => '{}')) as {
+            creation?: unknown;
+        };
+        const downloaded = {
+            spec,
+            ...(file.creation ? { creation: file.creation } : {}),
+        };
+        await IOUtils.writeUTF8(filePath, JSON.stringify(downloaded));
+        fileSha256 = await sha256Hex(JSON.stringify(downloaded));
+        // The other device rendered its snapshot, so it arrives complete.
+        await IOUtils.writeUTF8(
+            PathUtils.join(sidecar, TABLE_BOOKKEEPING_FILE),
+            JSON.stringify({ sha256, file_sha256: fileSha256 }),
+        );
+    }
 
     // The log the other device would have shipped: everything up to the target,
     // with the target's entry describing the bytes just written.
@@ -931,7 +890,8 @@ export async function rollBackWholeDirectory(
     const removed: number[] = [];
     for (const child of await IOUtils.getChildren(sidecar).catch(() => [])) {
         const match = /^v(\d+)\.json$/.exec(PathUtils.filename(child));
-        if (match && Number(match[1]) > target) {
+        // The target is the other device's tip, which its `table.json` carries.
+        if (match && Number(match[1]) >= target) {
             await IOUtils.remove(child, { ignoreAbsent: true });
             removed.push(Number(match[1]));
         }
@@ -940,6 +900,8 @@ export async function rollBackWholeDirectory(
     await Zotero.File.putContentsAsync(
         htmlPath,
         buildTableDocument(spec, {
+            specSha256: sha256,
+            ...(fileSha256 ? { fileSha256 } : {}),
             linksFor: zoteroLinksFor,
             citationScopeFor: zoteroLinkScope,
         }).html
@@ -1007,37 +969,6 @@ export async function handleTestTableRestoreShadowHttpRequest(
     } catch (error) {
         return errorResponse(error);
     }
-}
-
-export async function handleTestTableViewStateHttpRequest(): Promise<any> {
-    const api = getTablesApi();
-    if (!api) return TABLES_API_MISSING;
-    return { ok: true, views: api.listViews() };
-}
-
-export async function handleTestTableItemPaneHttpRequest(
-    request: { key?: string; libraryID?: number } = {}
-): Promise<any> {
-    if (!request.key) return MISSING_KEY;
-    const api = getTablesApi();
-    if (!api) return TABLES_API_MISSING;
-
-    const ref: TableRef = {
-        libraryID: request.libraryID ?? Zotero.Libraries.userLibraryID,
-        key: request.key,
-    };
-    const report = await api.itemPane.describe(ref);
-    return {
-        ok: report.applies,
-        registered: report.registered,
-        pane_id: report.paneID,
-        key: report.key,
-        library_id: report.libraryID,
-        applies: report.applies,
-        reason: report.reason,
-        fields: report.fields,
-        actions: report.actions,
-    };
 }
 
 export async function handleTestTableTrimHttpRequest(

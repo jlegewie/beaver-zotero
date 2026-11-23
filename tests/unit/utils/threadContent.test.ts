@@ -78,3 +78,63 @@ describe('getToolCallDetails', () => {
         expect(details).not.toContain('results');
     });
 });
+
+describe('getToolCallDetails for database searches', () => {
+    it('does not repeat a query the label already shows', () => {
+        const details = getToolCallDetails(tc('openalex_search_by_topic', { query: 'peer effects' }), new Map());
+        expect(details).toBe('[Literature search: peer effects]');
+    });
+
+    it('labels a name lookup by all its names', () => {
+        const details = getToolCallDetails(tc('openalex_resolve_names', { names: ['Katrin Wisniewski'], kind: 'author' }), new Map());
+        expect(details).toBe('[Author lookup: Katrin Wisniewski]');
+        expect(getToolCallDetails(tc('openalex_resolve_names', { names: ['Nature', 'Science', 'Cell'], kind: 'venue' }), new Map()))
+            .toBe('[Journal lookup: Nature, Science, Cell]');
+        const names = ['Katrin Wisniewski', 'Esther Duflo', 'Abhijit Banerjee', 'Michael Kremer'];
+        expect(getToolCallDetails(tc('openalex_resolve_names', { names, kind: 'author' }), new Map()))
+            .toBe(`[Author lookup: ${names.join(', ')}]`);
+    });
+
+    it('reads names the model sent as a JSON-encoded list', () => {
+        expect(getToolCallDetails(tc('openalex_resolve_names', { names: '["Alice Smith", "Bob Jones", "Carol Gray"]', kind: 'author' }), new Map()))
+            .toBe('[Author lookup: Alice Smith, Bob Jones, Carol Gray]');
+    });
+
+    it('keeps the full terms of a long trial search, once', () => {
+        const condition = 'type 2 diabetes mellitus with obesity and chronic kidney disease stage 3';
+        const details = getToolCallDetails(tc('trials_search', { condition, intervention: 'tirzepatide' }), new Map());
+        expect(details).toBe(`[ClinicalTrials.gov search: ${condition} · tirzepatide]`);
+        const mixed = getToolCallDetails(tc('trials_search', { query: 'randomized', condition, intervention: 'tirzepatide' }), new Map());
+        expect(mixed).toBe(`[ClinicalTrials.gov search: randomized · ${condition} · tirzepatide]`);
+    });
+
+    it('keeps every author id of a filter-only listing', () => {
+        expect(getToolCallDetails(tc('openalex_search_by_keywords', { author_ids: ['A101', 'A102', 'A103'] }), new Map()))
+            .toBe('[Literature search: Works by A101, A102, A103]');
+    });
+
+    it('keeps a keyword list argument of other tools', () => {
+        expect(getToolCallDetails(tc('some_tool', { keywords: ['peer', 'effects'] }), new Map())).toBe('[Some tool: "peer, effects"]');
+    });
+
+    it('copies a call whose arguments were stored as null', () => {
+        expect(getToolCallDetails({ part_kind: 'tool-call', tool_name: 'external_search', args: 'null', tool_call_id: 't1' }, new Map()))
+            .toBe('[Web search]');
+    });
+
+    it('ignores a search_label on tools that never had one', () => {
+        expect(getToolCallDetails(tc('trials_search', { condition: 'obesity', search_label: 'Stale' }), new Map()))
+            .toBe('[ClinicalTrials.gov search: obesity]');
+    });
+
+    it('keeps the full text of a long query, once', () => {
+        const query = 'Research on how classmates or school peers influence student achievement and test scores';
+        const details = getToolCallDetails(tc('openalex_search_by_topic', { query }), new Map());
+        expect(details).toBe(`[Literature search: ${query}]`);
+    });
+
+    it('still reads the search_label of an older thread', () => {
+        const details = getToolCallDetails(tc('external_search', { query: 'q', search_label: 'Peer effects' }), new Map());
+        expect(details).toBe('[Web search: Peer effects]');
+    });
+});

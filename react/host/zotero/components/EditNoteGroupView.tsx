@@ -1,11 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { AgentRunStatus, ToolCallPart } from '@beaver/agent-core/agents/types';
-import { getToolCallStatus, runToolResultsAtom } from '@beaver/agent-core/run-state/atoms';
+import { getToolCallStatus, toolResultsForCallsAtom } from '@beaver/agent-core/run-state/atoms';
 import {
     AgentAction,
-    agentActionsByToolcallAtom,
+    agentActionsForToolcallsAtom,
+    noPendingApprovalsCoveredCountAtom,
     pendingApprovalsAtom,
+    pendingApprovalsCoveredByFullAccessCountAtom,
+    pendingApprovalsForToolcallsAtom,
 } from '../../../agents/agentActions';
 import type { EditNoteResolvedTarget, PendingApproval } from '@beaver/agent-ui/host';
 import {
@@ -14,15 +17,15 @@ import {
     sendApprovalResponseAtom,
     staleApprovalActionIdsAtom,
 } from '../../../atoms/agentRunAtoms';
+import { pendingParkedAnswerIdsAtom } from '../../../atoms/parkedRuns';
 import {
-    agentActionItemTitlesAtom,
+    agentActionItemTitleAtom,
     getAgentActionItemTitleKey,
     setAgentActionItemTitleAtom,
     toolExpandedAtom,
     setToolExpandedAtom,
 } from '../../../atoms/messageUIState';
 import {
-    getPendingApprovalIdsCoveredByFullAccess,
     isFullAccessGrantedForRun,
     runApprovalPolicyAtom,
 } from '../../../atoms/runApprovalPolicy';
@@ -65,6 +68,8 @@ import { buildPreviewableEditOperations } from '../../../utils/editNotePreviewOp
 import { getEditNoteRetryOrder } from './editNoteRetryOrder';
 import { isStaleNoteEdit, STALE_NOTE_EDIT_MESSAGE } from './editNoteErrors';
 import { isUnconfirmedAction } from './reviewChangeRows';
+import { isStaleProposal, STALE_APPLY_ANYWAY_TOOLTIP, staleProposalDetail, wasRefusedAsStale } from './agentActionViewHelpers';
+import { StaleProposalNote } from './StaleProposalNote';
 import {
     applyAgentActionsAtom,
     inFlightAgentActionIdsAtom,
@@ -74,7 +79,6 @@ import {
 import {
     deriveEditNoteRows,
     type EditNoteRowDescriptor,
-    findPendingApprovalForToolcall,
     getEditNoteDisplayStatus,
     getEffectiveEditNotePendingApproval,
     getEditNoteGroupExpansionKey,
@@ -107,15 +111,19 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
     const isRunStreaming = runStatus === 'in_progress';
     const [isHovered, setIsHovered] = useState(false);
 
-    // Scoped to this run: every call in the group belongs to it, and a
-    // thread-wide subscription would re-render the group on every streamed frame.
-    const resultsMap = useAtomValue(useMemo(() => runToolResultsAtom(runId), [runId]));
-    // Subscribe to the grouped-actions map itself (not the stable getter atom)
-    // so partStates re-derives whenever any agent action changes — the getter's
-    // identity never changes, which would leave memoized rows showing stale
-    // action state after a local apply/retry.
-    const actionsByToolcall = useAtomValue(agentActionsByToolcallAtom);
-    const allPendingApprovals = useAtomValue(pendingApprovalsAtom);
+    // The actions and live approvals of this group's calls only, one entry per
+    // part: partStates re-derives when one of them changes, and an action or
+    // approval elsewhere in the thread leaves the group alone.
+    const toolcallIds = useMemo(() => parts.map((part) => part.tool_call_id), [parts]);
+    // Scoped to the group's calls, wherever in the thread they returned: the
+    // result of a parked run's call arrives with the run that answered it.
+    const resultsMap = useAtomValue(useMemo(() => toolResultsForCallsAtom(toolcallIds), [toolcallIds]));
+    const groupActions = useAtomValue(
+        useMemo(() => agentActionsForToolcallsAtom(toolcallIds), [toolcallIds]),
+    );
+    const groupPendingApprovals = useAtomValue(
+        useMemo(() => pendingApprovalsForToolcallsAtom(toolcallIds), [toolcallIds]),
+    );
     const setPendingApprovals = useSetAtom(pendingApprovalsAtom);
     const sendApprovalResponse = useSetAtom(sendApprovalResponseAtom);
     const isRunPending = useAtomValue(isWSChatPendingAtom);
@@ -127,15 +135,12 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
     const runApprovalPolicy = useAtomValue(runApprovalPolicyAtom);
 
     const partStates = useMemo(() => {
-        return parts.map((part) => {
-            const actions = (actionsByToolcall.get(part.tool_call_id) ?? []).filter((a) => a.run_id === runId);
+        return parts.map((part, index) => {
+            const actions = groupActions[index].filter((a) => a.run_id === runId);
             // A single tool call always produces exactly one AgentAction, even for
             // an edit_note_batch call (the whole batch is one action).
             const action = actions.length > 0 ? actions[0] : null;
-            const rawPendingApproval = findPendingApprovalForToolcall(
-                part.tool_call_id,
-                allPendingApprovals.values(),
-            );
+            const rawPendingApproval = groupPendingApprovals[index];
             const pendingApproval = getEffectiveEditNotePendingApproval(action, rawPendingApproval);
             const toolCallStatus = getToolCallStatus(part.tool_call_id, resultsMap, runStatus);
             const effectiveStatus = getEditNoteDisplayStatus({
@@ -173,7 +178,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                 undoByIndex,
             };
         });
-    }, [parts, runId, actionsByToolcall, allPendingApprovals, resultsMap, runStatus]);
+    }, [parts, runId, groupActions, groupPendingApprovals, resultsMap, runStatus]);
 
     const allActions: AgentAction[] = useMemo(
         () => partStates.flatMap((state) => state.actions),
@@ -226,8 +231,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
     const itemTitleKey = resolvedTarget
         ? `${runId}:${responseIndex}:group:${resolvedTarget.libraryId}-${resolvedTarget.zoteroKey}`
         : null;
-    const itemTitleMap = useAtomValue(agentActionItemTitlesAtom);
-    const noteTitle = itemTitleKey ? (itemTitleMap[itemTitleKey] ?? null) : null;
+    const noteTitle = useAtomValue(useMemo(() => agentActionItemTitleAtom(itemTitleKey), [itemTitleKey]));
     const setItemTitle = useSetAtom(setAgentActionItemTitleAtom);
 
     const pendingApprovalCount = pendingApprovalsForGroup.length;
@@ -240,18 +244,28 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         [partStates],
     );
 
+    // A call whose parked card was answered is decided by the run that
+    // resumes it: its action is not applied or rejected here meanwhile. Each
+    // row also shows its own answer as being applied.
+    const pendingParkedAnswerIds = useAtomValue(pendingParkedAnswerIdsAtom);
     const reapplicableActions = useMemo(
-        () => allActions.filter((a) => a.status === 'pending' || a.status === 'rejected' || a.status === 'undone'),
-        [allActions],
+        () => allActions.filter((a) =>
+            (a.status === 'pending' || a.status === 'rejected' || a.status === 'undone')
+            && !(a.toolcall_id && pendingParkedAnswerIds.has(a.toolcall_id))),
+        [allActions, pendingParkedAnswerIds],
     );
     // An edit whose target is gone from the note fails the same way on every
     // retry, so it is reported instead of offered for Retry. So is one whose
     // outcome is unknown: it may already be in the note.
+    // An edit refused because the note changed since the proposal is offered
+    // "Apply anyway" instead: a retry would be refused the same way.
     const errorActions = useMemo(
-        () => allActions.filter((a) => a.status === 'error' && !isStaleNoteEdit(a) && !isUnconfirmedAction(a)),
+        () => allActions.filter((a) => a.status === 'error' && !isStaleNoteEdit(a) && !isUnconfirmedAction(a) && !isStaleProposal(a)),
         [allActions],
     );
     const hasStaleEdit = useMemo(() => allActions.some(isStaleNoteEdit), [allActions]);
+    const staleProposalActions = useMemo(() => allActions.filter(isStaleProposal), [allActions]);
+    const staleProposalNote = staleProposalDetail(staleProposalActions);
     const rowStatuses = useMemo(
         () => partStates.map((state) => state.effectiveStatus),
         [partStates],
@@ -286,12 +300,12 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
     const aggregateStatus: ActionStatus | 'awaiting' = getOverallEditNoteDisplayStatus(rowStatuses);
 
     const expansionKey = getEditNoteGroupExpansionKey(runId, responseIndex, parts);
-    const expansionState = useAtomValue(toolExpandedAtom);
+    const storedExpanded = useAtomValue(useMemo(() => toolExpandedAtom(expansionKey), [expansionKey]));
     const setExpanded = useSetAtom(setToolExpandedAtom);
-    const hasExistingExpandState = expansionState[expansionKey] !== undefined;
+    const hasExistingExpandState = storedExpanded !== undefined;
     const isExpanded = hasStreamingChild
         ? false
-        : (expansionState[expansionKey]
+        : (storedExpanded
             ?? (hasPendingApprovals || (errorCount > 0 && reapplicableActions.length === 0 && appliedCount === 0)));
 
     const prevHasPendingApprovalsRef = useRef(hasPendingApprovals);
@@ -359,7 +373,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
 
     const [isLocallyProcessing, setIsLocallyProcessing] = useState(false);
     const [isExternallyProcessing, setIsExternallyProcessing] = useState(false);
-    const [clickedButton, setClickedButton] = useState<'approve' | 'reject' | 'undo' | 'retry' | null>(null);
+    const [clickedButton, setClickedButton] = useState<'approve' | 'applyAnyway' | 'reject' | 'undo' | 'retry' | null>(null);
     const [perEditUndoErrors, setPerEditUndoErrors] = useState<Record<string, string>>({});
     const isWriting = allActions.some((action) => inFlightActionIds.has(action.id));
     const isProcessing = isLocallyProcessing || isExternallyProcessing || isWriting;
@@ -404,12 +418,16 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
             if (reapplicableActions.length === 0) return;
             await dismissActiveEditNotePreview();
 
+            let refusedAsStale = false;
             for (const action of reapplicableActions) {
                 const result = await applyAgentActions({ actions: [action], runId });
                 if (result.applied.includes(action.id)) {
                     logger(`EditNoteGroupView: Applied ${action.action_type} action ${action.id}`, 1);
                 }
+                refusedAsStale ||= wasRefusedAsStale(result);
             }
+            // Refused because the note changed: open the card on what changed.
+            if (refusedAsStale) setExpanded({ key: expansionKey, expanded: true });
         } finally {
             setIsLocallyProcessing(false);
             if (!shouldWaitForExternalProcessing) {
@@ -427,6 +445,8 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         setPendingApprovals,
         applyAgentActions,
         runId,
+        setExpanded,
+        expansionKey,
     ]);
 
     // Switching to full access answers every pending card in this group too, so
@@ -492,8 +512,9 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         } else {
             // The shared atom checks every action against the in-flight claim
             // before rejecting and dismisses any active note-edit preview.
-            rejectAgentActions({ actions: reapplicableActions });
-            logger(`EditNoteGroupView: Rejected ${reapplicableActions.length} edit_note actions for ${noteKeyLabel}`, 1);
+            const toReject = [...reapplicableActions, ...staleProposalActions];
+            rejectAgentActions({ actions: toReject });
+            logger(`EditNoteGroupView: Rejected ${toReject.length} edit_note actions for ${noteKeyLabel}`, 1);
         }
         setTimeout(() => setClickedButton(null), 100);
     }, [
@@ -504,8 +525,29 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         sendApprovalResponse,
         setPendingApprovals,
         reapplicableActions,
+        staleProposalActions,
         rejectAgentActions,
     ]);
+
+    // Applies the edits refused because the note changed since they were
+    // proposed, after the user saw that it did.
+    const handleApplyAnyway = useCallback(async () => {
+        if (isProcessing || staleProposalActions.length === 0) return;
+        setIsLocallyProcessing(true);
+        setClickedButton('applyAnyway');
+        try {
+            await dismissActiveEditNotePreview();
+            for (const action of staleProposalActions) {
+                const result = await applyAgentActions({ actions: [action], runId, skipStaleCheck: true });
+                if (result.applied.includes(action.id)) {
+                    logger(`EditNoteGroupView: Applied ${action.action_type} action ${action.id} despite note changes`, 1);
+                }
+            }
+        } finally {
+            setIsLocallyProcessing(false);
+            setClickedButton(null);
+        }
+    }, [isProcessing, staleProposalActions, applyAgentActions, runId]);
 
     const handleUndoAll = useCallback(async () => {
         if (isProcessing) return;
@@ -726,16 +768,22 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
     const runPermissionMode: RunPermissionMode =
         isFullAccessGrantedForRun(runApprovalPolicy, runId) ? 'full_access' : 'ask';
     // Every card a switch to full access would answer, not only this group's,
-    // so the menu row can say how far the switch reaches.
-    const pendingCoveredCount = useMemo(
-        () => getPendingApprovalIdsCoveredByFullAccess(allPendingApprovals.values()).length,
-        [allPendingApprovals],
+    // so the menu row can say how far the switch reaches. The row shows only
+    // while this group awaits approval, so only then does the count need
+    // following.
+    const pendingCoveredCount = useAtomValue(
+        hasPendingApprovals ? pendingApprovalsCoveredByFullAccessCountAtom : noPendingApprovalsCoveredCountAtom,
     );
+    // Only refused stale edits left to decide: the collapsed ✓ applies them anyway.
+    const isStaleOnlyDecision = staleProposalActions.length > 0 && reapplicableActions.length === 0 && !hasPendingApprovals;
     const showCollapsedHeaderActions =
-        !isProcessing && !hasStreamingChild && (aggregateStatus === 'awaiting' || aggregateStatus === 'pending') && !isExpanded;
+        !isProcessing && !hasStreamingChild && !isExpanded
+        && (aggregateStatus === 'awaiting' || aggregateStatus === 'pending' || isStaleOnlyDecision);
     const rejectableActionCount = useMemo(
-        () => pendingApprovalsForGroup.length + allActions.filter((a) => a.status === 'pending').length,
-        [pendingApprovalsForGroup, allActions],
+        () => pendingApprovalsForGroup.length
+            + allActions.filter((a) =>
+                (a.status === 'pending' || isStaleProposal(a)) && !(a.toolcall_id && pendingParkedAnswerIds.has(a.toolcall_id))).length,
+        [pendingApprovalsForGroup, allActions, pendingParkedAnswerIds],
     );
 
     const showFooterApply =
@@ -746,6 +794,8 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         appliedCount > 0 || (isProcessing && clickedButton === 'undo');
     const showFooterRetry =
         errorActions.length > 0 || (isProcessing && clickedButton === 'retry');
+    const showFooterApplyAnyway =
+        (staleProposalActions.length > 0 && !isProcessing) || (isProcessing && clickedButton === 'applyAnyway');
     // Gate on both the global kill switch and the runtime Zotero capability
     // check so the button is hidden on Zotero 7 (where showDiffPreview would
     // silently no-op) without requiring a version bump of strict_min_version.
@@ -767,7 +817,8 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
         );
 
     const showFooter =
-        showFooterApply || showFooterReject || showFooterUndo || showFooterRetry || canShowPreview || hasPendingApprovals;
+        showFooterApply || showFooterReject || showFooterUndo || showFooterRetry || showFooterApplyAnyway
+        || canShowPreview || hasPendingApprovals;
 
     return (
         <div
@@ -803,11 +854,11 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                         </div>
                         <div className="display-flex flex-col min-w-0 gap-1">
                             <div className="two-line-header">
-                                <span className="font-color-primary font-medium">{groupLabel}</span>
-                                {noteTitle && <span className="font-color-secondary ml-15">{noteTitle}</span>}
-                                {progressMessage && (
-                                    <span className="font-color-tertiary ml-15 shimmer-text">{progressMessage}</span>
-                                )}
+                                <span className="font-color-primary font-medium">{groupLabel}{progressMessage ? ':' : ''}</span>
+                                {/* Progress takes the title's place, as on the other action cards. */}
+                                {progressMessage ? (
+                                    <span className="font-color-secondary ml-15 shimmer-text">{progressMessage}</span>
+                                ) : noteTitle && <span className="font-color-secondary ml-15">{noteTitle}</span>}
                             </div>
                             {unconfirmedNote && (
                                 <span className="font-color-secondary text-sm" role="status">{unconfirmedNote}</span>
@@ -833,13 +884,13 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                                     ariaLabel="Reject all"
                                 />
                             </Tooltip>
-                            <Tooltip content="Apply all" showArrow singleLine>
+                            <Tooltip content={isStaleOnlyDecision ? STALE_APPLY_ANYWAY_TOOLTIP : 'Apply all'} showArrow singleLine>
                                 <IconButton
                                     icon={TickIcon}
                                     variant="ghost-secondary"
                                     iconClassName="font-color-green scale-14"
-                                    onClick={handleApplyAll}
-                                    ariaLabel="Apply all"
+                                    onClick={isStaleOnlyDecision ? handleApplyAnyway : handleApplyAll}
+                                    ariaLabel={isStaleOnlyDecision ? 'Apply anyway' : 'Apply all'}
                                 />
                             </Tooltip>
                         </>
@@ -900,11 +951,15 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                         </div>
                     )}
 
+                    {staleProposalNote && (
+                        <StaleProposalNote detail={staleProposalNote} className={`px-3 pt-2${showFooter ? '' : ' pb-2'}`} />
+                    )}
+
                     {showFooter && (
                         <div ref={footer.ref} className="display-flex flex-row items-center gap-2 px-2 py-2">
                             {/* Only while the run is waiting on this card: once
                                 it is not, there is no run left to grant. */}
-                            {hasPendingApprovals && (
+                            {hasPendingApprovals && runStatus !== 'parked' && (
                                 <div className="flex-none">
                                     <RunPermissionButton
                                         mode={runPermissionMode}
@@ -975,6 +1030,19 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                                     className="flex-none whitespace-nowrap"
                                 >
                                     Retry All
+                                </Button>
+                            )}
+
+                            {showFooterApplyAnyway && (
+                                <Button
+                                    variant="outline"
+                                    onClick={handleApplyAnyway}
+                                    loading={isProcessing && clickedButton === 'applyAnyway'}
+                                    disabled={isProcessing}
+                                    title="Make the edit even though the note changed since it was proposed"
+                                    className="flex-none whitespace-nowrap"
+                                >
+                                    Apply anyway
                                 </Button>
                             )}
 

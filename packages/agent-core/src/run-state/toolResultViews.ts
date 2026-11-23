@@ -190,8 +190,11 @@ export interface AnnotationListView {
 
 /** find_related_works view data */
 export interface RelatedWorksViewInfo {
-    /** Discriminator for tool-specific view data. */
-    info_type: "related_works";
+    /**
+     * Discriminator for tool-specific view data. Rows stored before the
+     * discriminator existed lack it; read them with {@link relatedWorksViewInfo}.
+     */
+    info_type?: "related_works";
     /** "references" = works the work cites; "cited_by" = works citing it. */
     relation: "references" | "cited_by";
     /** Full result count across all pages (after filters). */
@@ -200,19 +203,93 @@ export interface RelatedWorksViewInfo {
     work?: ExternalReference | null;
 }
 
+/**
+ * Search-tool view data (the OpenAlex searches, pubmed_search, trials_search):
+ * the searched source,
+ * the executed query or filters, counts, and a link that reproduces the
+ * search on the source's own site.
+ */
+export interface SearchViewInfo {
+    info_type: "search";
+    /** Searched source, e.g. "pubmed", "clinicaltrials". */
+    source: string;
+    source_label: string;
+    query?: string | null;
+    /** The query as the source executed it (PubMed "Search details"). */
+    query_translation?: string | null;
+    filters?: Record<string, unknown> | null;
+    total_count?: number | null;
+    returned?: number;
+    offset?: number | null;
+    /** Source data timestamp, in the source's terms. */
+    data_as_of?: string | null;
+    /** e.g. "Source: ClinicalTrials.gov". */
+    attribution?: string | null;
+    search_url?: string | null;
+}
+
+/** View data of an `info_type` this client does not know; never rendered. */
+export interface UnknownViewInfo {
+    info_type?: string | null;
+    [field: string]: unknown;
+}
+
+export type ExternalReferenceViewInfo = RelatedWorksViewInfo | SearchViewInfo | UnknownViewInfo;
+
 export interface ExternalReferenceListView {
     view_type: "external_reference_list";
     tool_name: string;
-    /** Already fully hydrated. */
+    /** Already fully hydrated; one row each, in result order. */
     references: ExternalReference[];
+    /**
+     * Other-source snapshots for ids in `references` (PubMed's OpenAlex
+     * enrichment). Never rendered as rows: a row renders its reference
+     * combined with the snapshots that share its id.
+     */
+    extra_snapshots?: ExternalReference[];
     // lookup_work-only extras (absent/empty for external_search):
     found_count?: number | null;
     not_found_queries?: string[];
     /** temporarily_unchecked_queries */
     unavailable_queries?: string[];
     message?: string | null;
-    /** Optional tool-specific extension */
-    tool_info?: RelatedWorksViewInfo | null;
+    /** Optional tool-specific extension; render per `info_type`. */
+    tool_info?: ExternalReferenceViewInfo | null;
+}
+
+/** The related-works info of a view (rows without `info_type` predate the discriminator). */
+export function relatedWorksViewInfo(view: Pick<ExternalReferenceListView, "tool_info">): RelatedWorksViewInfo | null {
+    const info = view.tool_info;
+    if (!info || typeof info !== "object") return null;
+    if (info.info_type === "related_works") return info as RelatedWorksViewInfo;
+    if (info.info_type === undefined || info.info_type === null) {
+        return "relation" in info || "total_count" in info ? info as RelatedWorksViewInfo : null;
+    }
+    return null;
+}
+
+/**
+ * Whether a search carries details worth showing: its query, filters, the
+ * query as the source ran it, or a link that runs it on the source's site.
+ */
+export function searchHasDetails(info: SearchViewInfo): boolean {
+    const hasFilters = !!info.filters && Object.values(info.filters).some((value) =>
+        value !== null && value !== undefined && value !== '' && !(Array.isArray(value) && value.length === 0));
+    return !!info.query?.trim() || hasFilters || !!info.query_translation?.trim() || !!info.search_url;
+}
+
+/** "Open in PubMed", "Open on ClinicalTrials.gov": the link that runs a search on the source's site. */
+export function searchSiteLabel(info: SearchViewInfo): string {
+    const label = info.source_label || info.source;
+    return info.source === 'pubmed' ? `Open in ${label}` : `Open on ${label}`;
+}
+
+/** The search info of a view, or null for any other kind. */
+export function searchViewInfo(view: Pick<ExternalReferenceListView, "tool_info">): SearchViewInfo | null {
+    const info = view.tool_info;
+    return info && typeof info === "object" && info.info_type === "search" && typeof info.source === "string"
+        ? info as SearchViewInfo
+        : null;
 }
 
 export interface CollectionListView {
@@ -320,6 +397,60 @@ export interface TableView {
     record: TableRecord;
 }
 
+/** An OpenAlex author found for a name. The backend omits empty fields. */
+export interface OpenAlexAuthorCandidate {
+    /** OpenAlex author id ("A5012345678"), the value of the search tools' `author_ids`. */
+    id: string;
+    name: string;
+    alternative_names?: string[];
+    /** Last known institutions. */
+    institutions?: string[];
+    /** "2012–2024", or one year. */
+    active_years?: string | null;
+    works_count?: number | null;
+    cited_by_count?: number | null;
+    h_index?: number | null;
+    topics?: string[];
+    orcid?: string | null;
+}
+
+/** An OpenAlex venue (journal, conference, repository, book series) found for a name. */
+export interface OpenAlexVenueCandidate {
+    /** OpenAlex source id ("S137773608"), the value of the search tools' `venue_ids`. */
+    id: string;
+    name: string;
+    abbreviation?: string | null;
+    type?: string | null;
+    publisher?: string | null;
+    issn_l?: string | null;
+    works_count?: number | null;
+}
+
+/** The candidates found for one name; an empty list means not found. */
+export interface OpenAlexNameResult {
+    query: string;
+    candidates: Array<OpenAlexAuthorCandidate | OpenAlexVenueCandidate>;
+    /** Set when the lookup for this name failed. */
+    error?: string | null;
+}
+
+/**
+ * The name in an OpenAlex search's resolved `authors` / `venues` filter:
+ * "Katrin Wisniewski (A5012345678)" → "Katrin Wisniewski". An id the backend
+ * could not name stays as it is.
+ */
+export function openAlexFilterName(value: unknown): string | null {
+    if (typeof value !== "string" || !value.trim()) return null;
+    return value.replace(/\s*\([AS]\d+\)$/i, "").trim();
+}
+
+/** openalex_resolve_names: the author or venue candidates for each name, in input order. */
+export interface OpenAlexNamesView {
+    view_type: "openalex_names";
+    kind: "author" | "venue";
+    results: OpenAlexNameResult[];
+}
+
 export type ToolResultView =
     | DuplicatesResultView
     | TableView
@@ -330,7 +461,8 @@ export type ToolResultView =
     | TagListView
     | AttachmentSearchView
     | UserQuestionView
-    | BatchJobView;
+    | BatchJobView
+    | OpenAlexNamesView;
 
 // ---------------------------------------------------------------------------
 // Type guards
@@ -348,6 +480,9 @@ export function isToolResultView(value: unknown): value is ToolResultView {
             && typeof record.reference.title === 'string'
             && typeof record.change === 'string'
             && !!record.summary && typeof record.summary === 'object';
+    }
+    if (viewType === 'openalex_names') {
+        return Array.isArray((value as OpenAlexNamesView).results);
     }
     return (
         viewType === "duplicates" ||
@@ -428,6 +563,9 @@ export function getToolResultRenderableCount(view: ToolResultView): number | nul
             return view.found_count ?? view.references.length;
         case "user_question":
             return view.answers.length;
+        case "openalex_names":
+            // A name without candidates still shows its "not found" line.
+            return view.results.length;
         case "batch_operation":
             // A batch card always has something to show (goal + population),
             // so it must not be gated on a count.

@@ -14,15 +14,14 @@ import { DocumentCache } from "./services/documentCache";
 import { LibraryMutations } from './services/libraryMutations';
 import { LibraryOperations } from './services/libraryOperations';
 import { DeferredCommits } from './services/committedTransaction';
+import { OpenTransactionWatch } from './services/openTransaction';
 import { ItemImportService } from './services/itemImport/service';
 import { InstanceExport } from './services/export/instanceExport';
+import { InstanceImages } from './services/images/instanceImages';
 import { NotePreviews } from './services/notePreviews';
 import { AIProvider } from "./services/OpenAIProvider";
 import { createSyncPauseService } from './services/syncPause';
 import { createZToolkit } from "./utils/ztoolkit";
-
-import type { DevelopmentVoiceHarness } from './services/voice/developmentHarness';
-import type { VoiceService } from './services/voice/voiceService';
 
 class Addon {
     public localEndpoints?: import("./services/instanceLocalEndpoints").InstanceLocalEndpoints;
@@ -33,6 +32,7 @@ class Addon {
     public backgroundTasks = createBackgroundTaskSource();
     public preferences?: import("./services/instancePreferences").InstancePreferences;
     public account?: import("./services/instanceAccount").InstanceAccount;
+    public tableFills?: import("./services/tableFills/service").InstanceTableFills;
     public notePreviews = new NotePreviews();
     public syncPause = createSyncPauseService();
     public mutations = new LibraryMutations(
@@ -47,12 +47,11 @@ class Addon {
     );
     public libraryOperations = new LibraryOperations();
     public deferredCommits = new DeferredCommits();
+    public transactionWatch = new OpenTransactionWatch();
     public itemImport = new ItemImportService();
     public exporter = new InstanceExport();
+    public images = new InstanceImages();
     public runtime = new BeaverInstance();
-    public voiceNative?: import("./services/voice/nativeVoice").NativeVoice;
-    public voice?: VoiceService;
-    public voiceHarness?: DevelopmentVoiceHarness;
     public data: {
         alive: boolean;
         config: typeof config;

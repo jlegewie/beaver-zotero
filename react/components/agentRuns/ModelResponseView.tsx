@@ -4,7 +4,7 @@ import { TextPartView } from './TextPartView';
 import { ThinkingPartView } from './ThinkingPartView';
 import { ToolCallPartView } from './ToolCallPartView';
 import { isAnnotationToolResult } from '@beaver/agent-core/run-state/toolResultTypes';
-import { isAutoLoadingToolCall, isThinkingInProgress } from '@beaver/agent-core/agents/messageVisibility';
+import { hasDrawnContent, isThinkingInProgress } from '@beaver/agent-core/agents/messageVisibility';
 import ContextMenu from '@beaver/agent-ui/primitives/ContextMenu';
 import useSelectionContextMenu from '../../hooks/useSelectionContextMenu';
 import { buildEditNoteRenderItems, getEditNoteGroupInstanceId } from './editNoteShared';
@@ -68,19 +68,8 @@ export const ModelResponseView: React.FC<ModelResponseViewProps> = React.memo(fu
         [toolCallParts],
     );
 
-    // Check if we have any visible content
-    const hasContent =
-        thinkingParts.length > 0 ||
-        textParts.length > 0 ||
-        toolCallParts.length > 0;
-
-    // Model response that is auto-loading a search capability
-    const isAutoLoadingResponse =
-        toolCallParts.length > 0 &&
-        textParts.length === 0 &&
-        toolCallParts.every(isAutoLoadingToolCall);
-
-    if (!hasContent || isAutoLoadingResponse) {
+    // Nothing visible: no parts, or only an auto-loading capability call.
+    if (!hasDrawnContent(message)) {
         return null;
     }
 

@@ -3,9 +3,15 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { defineConfig } from "zotero-plugin-scaffold";
 import pkg from "./package.json";
-import { checkVoicePackage } from "./native/voice/macos/check-package.mjs";
 
 const { mode, definitions } = loadBuildEnvironment();
+
+// On Ctrl-C, `zotero-plugin serve` runs ZOTERO_PLUGIN_KILL_COMMAND, whose macOS
+// default (`kill -9 $(ps -x | grep zotero)`) kills every Zotero on the machine,
+// including other worktrees' instances. Limit it to this checkout's profile.
+// The shell expands the profile path when the command runs, after .env is loaded.
+process.env.ZOTERO_PLUGIN_KILL_COMMAND ??=
+  '[ -z "$ZOTERO_PLUGIN_PROFILE_PATH" ] || pkill -f -- "-profile $ZOTERO_PLUGIN_PROFILE_PATH( |\\$)" || true';
 
 // Zotero UI locales (mirrors chrome/locale/* in the Zotero source tree)
 const ZOTERO_LOCALES = [
@@ -55,6 +61,10 @@ export default defineConfig({
     prefs: {
       prefix: pkg.config.prefsPrefix,
     },
+    // Fluent ids are looked up as plain strings, so no typings file is generated.
+    fluent: {
+      dts: false,
+    },
     esbuildOptions: [
       {
         entryPoints: ["src/index.ts"],
@@ -88,14 +98,18 @@ export default defineConfig({
       },
       {
         // Export runtime: the parser and writers of @beaver/agent-export with
-        // remark, KaTeX and docx. Loaded on first export into its own script
-        // scope (src/services/export/exportRuntime.ts), so the main bundle does
-        // not carry it. `neutral` keeps esbuild off the packages' `browser`
-        // builds, which assume a DOM the plugin realm does not have.
+        // remark, KaTeX, docx and JSZip. Loaded on first export into its own
+        // script scope (src/services/export/exportRuntime.ts), so the main
+        // bundle does not carry it. `neutral` keeps esbuild off the packages'
+        // `browser` builds, which assume a DOM the plugin realm does not have.
         entryPoints: ["packages/agent-export/src/runtime.ts"],
         define: {
           "process.env.NODE_ENV": JSON.stringify(mode),
         },
+        // JSZip's Node stream support. It requires the module inside a
+        // try/catch and only uses it when that succeeds, so left unresolved
+        // the require fails and JSZip writes without Node streams.
+        external: ["readable-stream"],
         bundle: true,
         format: "iife",
         globalName: "BeaverExportRuntime",
@@ -107,9 +121,6 @@ export default defineConfig({
       },
     ],
     hooks: {
-      "build:copyAssets": async (ctx) => {
-        checkVoicePackage(join(ctx.dist, "addon"), process.env.NODE_ENV === "development", process.env.VOICE_PACKAGE_REQUIRED === "1");
-      },
       "build:fluent": async (ctx) => {
         const enUsDir = join(ctx.dist, "addon/locale/en-US");
         if (!existsSync(enUsDir)) return;

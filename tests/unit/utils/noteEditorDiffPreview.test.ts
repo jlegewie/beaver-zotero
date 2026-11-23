@@ -377,6 +377,106 @@ describe('showDiffPreview approveAll revision-guard flow', () => {
         }
     });
 
+    describe('dollar-delimited math anchors (legacy read_note output)', () => {
+        const DEL_STYLE = 'background-color:rgba(210,40,40,0.28);text-decoration:line-through;border-radius:2px;padding:0 1px';
+        const ADD_STYLE = 'background-color:rgba(16,150,72,0.28);border-radius:2px;padding:0 1px';
+        const MATH_NOTE = '<div data-schema-version="9">'
+            + '<p>Energy <span class="math">$E = mc^2$</span> and a $5 fee.</p>'
+            + '<pre class="math">$$a + b$$</pre></div>';
+
+        /** LaTeX each math element would contribute to its ProseMirror atom. */
+        function mathElementTexts(html: string): string[] {
+            return [...html.matchAll(/<(span|pre)\b[^>]*class="math"[^>]*>([\s\S]*?)<\/\1>/g)]
+                .map(match => match[2].replace(/<[^>]+>/g, ''));
+        }
+
+        /** The diff markup the preview injects. */
+        async function previewHtml(edit: any): Promise<string> {
+            vi.useFakeTimers();
+            const h = makeHarness(MATH_NOTE);
+            const shown = await showDiffPreview(1, 'NOTE0001', [edit]);
+            expect(shown, JSON.stringify(vi.mocked(logger).mock.calls)).toBe(true);
+            return String(h.applyIncrementalUpdate.mock.calls[0][0].html);
+        }
+
+        it('targets the whole math element for a legacy dollar anchor', async () => {
+            const html = await previewHtml({
+                operation: 'str_replace', oldString: '$E = mc^2$', newString: '$E = mc^{2}$',
+            });
+            // Old and new each occupy their own wrapper: no nested math element
+            // and no single node holding both formulas.
+            expect(html).toContain(`<span class="math"><span style="${DEL_STYLE}">$E = mc^2$</span></span>`);
+            expect(html).toContain(`<span class="math"><span style="${ADD_STYLE}">$E = mc^{2}$</span></span>`);
+            expect(html).not.toContain('<span class="math"><span class="math">');
+            // Each wrapper carries exactly one version of the formula. A split
+            // boundary would leave one node holding both ("$E = mc^2{2}$"),
+            // since the math nodes are atoms parsed from their textContent.
+            expect(mathElementTexts(html)).toEqual(['$E = mc^2$', '$E = mc^{2}$', '$$a + b$$']);
+        });
+
+        it('removes the whole math element when a formula becomes prose', async () => {
+            const html = await previewHtml({
+                operation: 'str_replace', oldString: '$E = mc^2$', newString: 'mass-energy equivalence',
+            });
+            expect(html).toContain(`<span class="math"><span style="${DEL_STYLE}">$E = mc^2$</span></span>`);
+            expect(html).toContain(`<span style="${ADD_STYLE}">mass-energy equivalence</span>`);
+            // The replacement is prose, so it must not land inside a wrapper.
+            expect(html).not.toContain('<span class="math"><span style="background-color:rgba(16,150,72');
+        });
+
+        it('keeps display math intact when it becomes prose', async () => {
+            const html = await previewHtml({
+                operation: 'str_replace', oldString: '$$a + b$$', newString: 'the sum',
+            });
+            expect(html).toContain(`<pre class="math"><span style="${DEL_STYLE}">$$a + b$$</span></pre>`);
+            expect(html).toContain(`<span style="${ADD_STYLE}">the sum</span>`);
+        });
+
+        it('renders an anchor that mixes prose and inline math', async () => {
+            const html = await previewHtml({
+                operation: 'str_replace',
+                oldString: '<p>Energy $E = mc^2$ and a $5 fee.</p>',
+                newString: '<p>Replaced.</p>',
+            });
+            expect(html).toContain('Replaced');
+            expect(html).toContain(`<span class="math"><span style="${DEL_STYLE}">$E = mc^2$</span></span>`);
+            expect(html).not.toContain('<span class="math"><span class="math">');
+        });
+
+        it('shows only the injection for insert_after on a math anchor', async () => {
+            // Validation merges old into new for insert_after, so the anchor is
+            // the diff's common prefix and only the injected text is added.
+            const html = await previewHtml({
+                operation: 'insert_after',
+                oldString: '$E = mc^2$',
+                newString: '$E = mc^2$ (Einstein)',
+            });
+            expect(html).toContain('<span class="math">$E = mc^2$</span>');
+            expect(html).toContain(`<span style="${ADD_STYLE}"> (Einstein)</span>`);
+            expect(mathElementTexts(html)).toEqual(['$E = mc^2$', '$$a + b$$']);
+        });
+
+        it('does not pair an anchor dollar with an injected one for insert_after', async () => {
+            const html = await previewHtml({
+                operation: 'insert_after',
+                oldString: 'Energy $E = mc^2$ and a $5 fee.',
+                newString: 'Energy $E = mc^2$ and a $5 fee. In CAD: 7$.',
+            });
+            expect(html).toContain(`<span style="${ADD_STYLE}"> In CAD: 7$.</span>`);
+            expect(mathElementTexts(html)).toEqual(['$E = mc^2$', '$$a + b$$']);
+        });
+
+        it('leaves a literal prose dollar anchor unwrapped', async () => {
+            const html = await previewHtml({
+                operation: 'str_replace', oldString: 'a $5 fee', newString: 'a $6 fee',
+            });
+            expect(html).toContain(`<span style="${DEL_STYLE}">5</span>`);
+            expect(html).toContain(`<span style="${ADD_STYLE}">6</span>`);
+            // The prose dollars stay literal — no new math element appears.
+            expect(html.match(/class="math"/g)?.length).toBe(2);
+        });
+    });
+
     it('previews a preloaded external-file filename and link', async () => {
         vi.useFakeTimers();
         const h = makeHarness(NOTE);

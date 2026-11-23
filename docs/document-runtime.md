@@ -38,6 +38,16 @@ Debounced embedding events stay with the instance across generation changes;
 the next generation drains them using its current searchable-library scope.
 Upgrade flags are set before background initialization.
 
+The agent's PDF requests (document reads, page images, views and searches) are
+routed per request between the two workers. A request uses the hot worker when it
+is idle and otherwise the background worker, if that worker is warm and no
+background job is using it. When neither can take it, the request waits in a
+first-in-first-out queue that the workers claim from as they free up; the first
+request that finds the background worker cold starts its warm-up. Every operation
+of a request stays on one worker. While interactive requests run or wait, new
+background jobs are not claimed; running jobs are never interrupted. The
+`pdf.backgroundOverflow` preference turns the background worker's share off.
+
 `Start now` opens the dispatcher’s idle gate for pending work. It does not force
 a library-wide source recheck or retry settled failures; those are handled by
 explicit problem retries, source-change notifications, and scheduled safety checks.

@@ -89,7 +89,7 @@ export async function getSearchIndexState(): Promise<SearchIndexState | undefine
              FROM items i JOIN itemAttachments a USING (itemID)
              WHERE i.libraryID IN (${libraryIds.map(() => '?').join(',')})
                AND a.linkMode != ?
-               AND ${processableAttachmentSql('a.contentType', 'a.path')}
+               AND ${processableAttachmentSql('a')}
                AND NOT EXISTS (SELECT 1 FROM deletedItems d WHERE d.itemID = i.itemID)
                AND NOT EXISTS (SELECT 1 FROM deletedItems d WHERE d.itemID = a.parentItemID)`,
             [...libraryIds, Zotero.Attachments.LINK_MODE_LINKED_URL],

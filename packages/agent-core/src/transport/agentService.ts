@@ -10,7 +10,7 @@
 import { credentials, getCredentialGeneration, assertCredentialGeneration } from './credentials';
 import { getApiBaseUrl } from './config';
 import { logger } from '../platform/logger';
-import { AgentRun } from '../agents/types';
+import { AgentRun, type ParkedCardAnswer } from '../agents/types';
 import type { AgentAction } from '../agents/agentActionTypes';
 import { toAgentAction } from '../agents/agentActionTypes';
 import { ApiService } from './apiService';
@@ -26,7 +26,14 @@ import {
     type AgentDataRequestContext,
     type RequestKeepalive,
 } from './agentDataDispatch';
-import { AgentRunRequest, ExtractSchemaVersionsWire, ZoteroInstanceWire } from '../protocol/agentProtocol';
+import {
+    AgentRunRequest,
+    ExtractSchemaVersionsWire,
+    ZoteroInstanceWire,
+    askUserQuestionResponse,
+    batchApprovalResponse,
+    deferredApprovalResponse,
+} from '../protocol/agentProtocol';
 import {
     WSEvent,
     WSErrorEvent,
@@ -47,6 +54,7 @@ import {
     isReattachRequest,
 } from '../protocol/agentProtocol';
 import { REATTACH_CLOSE_CODES, RunLink, RunReply, answeredPromptKey, executedAction, promptKey } from './runLink';
+import type { WSTableCardResponse } from '../protocol/tableCardProtocol';
 import { resolveBusyContext } from './busyContextProvider';
 import {
     isPreparedJsonMessage,
@@ -171,6 +179,24 @@ export const HEARTBEAT_TIMEOUT_CLOSE_CODE = 4000;
  */
 const LEFT_RUN_CLOSE_CODE = HEARTBEAT_TIMEOUT_CLOSE_CODE;
 
+/** How long `parkRun` waits for the server to settle a parked run. */
+const PARK_SETTLE_WAIT_MS = 1500;
+
+/**
+ * How a `parkRun` ended: the run ended on the server (`ended`), the frame
+ * went out without an answer in time (`sent`), the server refused and the run
+ * was stopped (`refused`), or there was no live run to park (`unavailable`).
+ */
+export type ParkOutcome = 'ended' | 'sent' | 'refused' | 'unavailable';
+
+/** A run of this client that started waiting live for a job (`job_wait_request`). */
+export interface LiveJobWait {
+    runId: string;
+    threadId: string | null;
+    toolCallId: string;
+    jobId: string;
+}
+
 interface ConnectionAttemptState {
     stage: ConnectionFailureStage;
     socketOpened: boolean;
@@ -246,6 +272,8 @@ export class AgentService {
     private actionExecutionQueue: Promise<void> = Promise.resolve();
     /** Monotonic counter incremented on close to invalidate stale queued messages */
     private connectionId: number = 0;
+    /** Resolves the `parkRun` waiting on the server's answer, if one is. */
+    private pendingPark: ((outcome: ParkOutcome) => void) | null = null;
     /** Whether the connected backend understands `request_received` acks (from the ready event) */
     private serverSupportsRequestAcks: boolean = false;
     /** Whether the connected backend understands `request_keepalive` messages (from the ready event) */
@@ -285,6 +313,7 @@ export class AgentService {
      * hung handler cannot keep sending keepalives on a replacement socket.
      */
     private pendingKeepalives: Map<string, RequestKeepalive> = new Map();
+    private jobWaitListeners = new Set<(wait: LiveJobWait) => void>();
     private activeKeepalives: Set<RequestKeepalive> = new Set();
     /**
      * Map of backend data-request event -> handler. Injectable so a non-Zotero
@@ -509,8 +538,10 @@ export class AgentService {
             if (!run || run.runId !== request.run_id || run.state !== 'reattaching') {
                 throw new Error(`Run ${request.run_id} is not waiting to be reattached`);
             }
+            run.reattachAttempts++;
         } else {
             this.run = new RunLink(request.run_id, callbacks);
+            this.run.threadId = (request as AgentRunRequest).thread_id ?? null;
             // The run this one waited for is gone now, and its stop with it
             // unless that was settled in time.
             if (stopping && !stopping.stopSettled) {
@@ -807,8 +838,11 @@ export class AgentService {
                 // A replayed event this run has already handled. Checked again
                 // when the event's turn comes: one handled on the lost socket
                 // may still be finishing when its replay arrives.
+                // The backend numbers only events that ask for no answer, so a
+                // `seq` on a request would be its payload, never a replay
+                // position.
                 const rawSeq = (parsed as { seq?: unknown }).seq;
-                const seq = typeof rawSeq === 'number' ? rawSeq : null;
+                const seq = typeof rawSeq === 'number' && !isBackendRequestEvent(parsed.event) ? rawSeq : null;
                 const run = seq !== null ? this.reattachableRun() : null;
                 if (run && seq !== null && seq <= run.lastSeq) {
                     logger(`AgentService: Ignoring "${parsed.event}" seq ${seq}, already handled`, 1);
@@ -1007,6 +1041,8 @@ export class AgentService {
             run.state = 'reattaching';
             run.detachedAt = now;
             run.dropEvidence = evidence;
+            run.losses = 0;
+            run.reattachAttempts = 0;
             run.deadline = now + graceMs;
             run.deadlineTimer = setTimeout(() => {
                 if (this.run === run && run.state === 'reattaching') {
@@ -1017,7 +1053,10 @@ export class AgentService {
         } else if (run.deadline !== null && now >= run.deadline) {
             return false;
         }
-        logger(`AgentService: Run ${run.runId} lost its connection (code ${code}); reattaching from seq ${run.lastSeq}`, 1);
+        // Counted for every loss: a socket opened to reattach can reach
+        // `ready` and be lost before the server's confirmation arrives.
+        run.losses++;
+        logger(`AgentService: Run ${run.runId} lost its connection (code ${code}, loss ${run.losses}); reattaching from seq ${run.lastSeq}`, 1);
         // Reset before notifying: the callback starts the reattach, which must
         // find this socket's state already gone.
         this.resetConnectionState({ keepRunQueues: true });
@@ -1105,6 +1144,72 @@ export class AgentService {
     }
 
     /**
+     * Ask the server to park `runId`, which is waiting only on cards the user
+     * can answer later, instead of stopping it. Waits briefly for the server
+     * to settle the run; a refusal (the run also waits on something that
+     * cannot park) stops it as `cancel()` would. Either way the socket is
+     * closed without notifying the run's callbacks.
+     *
+     * Once the server has the frame it keeps the park even if the socket
+     * closes before the run has ended, so the wait only bounds how long a
+     * refusal can take to arrive.
+     */
+    async parkRun(runId: string, waitMs: number = PARK_SETTLE_WAIT_MS): Promise<ParkOutcome> {
+        const run = this.run;
+        if (!run || run.runId !== runId || run.terminal || run.cancelRequested || run.state !== 'live') {
+            return 'unavailable';
+        }
+        const connectionId = this.connectionId;
+        const settled = new Promise<ParkOutcome>((resolve) => {
+            this.pendingPark?.('ended');
+            this.pendingPark = resolve;
+        });
+        if (!this.sendPark(runId)) {
+            this.settlePark('unavailable');
+            return 'unavailable';
+        }
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const outcome = await Promise.race([
+            settled,
+            new Promise<ParkOutcome>((resolve) => { timer = setTimeout(() => resolve('sent'), waitMs); }),
+        ]).finally(() => clearTimeout(timer));
+        if (this.pendingPark) this.settlePark(outcome);
+        if (outcome === 'refused') {
+            if (connectionId === this.connectionId) await this.cancel();
+            return outcome;
+        }
+        this.closeSocket(1000, 'Run parked', { notifyClose: false, onlyIfConnectionId: connectionId });
+        return outcome;
+    }
+
+    /**
+     * Follow the job waits this client's runs start (`job_wait_request`), so
+     * the window can wait on the job past the live wait. Returns the
+     * unsubscribe.
+     */
+    onJobWait(listener: (wait: LiveJobWait) => void): () => void {
+        this.jobWaitListeners.add(listener);
+        return () => this.jobWaitListeners.delete(listener);
+    }
+
+    /**
+     * Send the `park` frame for `runId` without waiting for an answer, for a
+     * client that is going away. Returns false when it could not be sent.
+     */
+    sendPark(runId: string): boolean {
+        const run = this.run;
+        if (!run || run.runId !== runId || run.terminal || run.state !== 'live') return false;
+        logger(`AgentService: Parking run ${runId}`, 1);
+        return this.send({ type: 'park', run_id: runId });
+    }
+
+    private settlePark(outcome: ParkOutcome): void {
+        const resolve = this.pendingPark;
+        this.pendingPark = null;
+        resolve?.(outcome);
+    }
+
+    /**
      * While a run stopped during a reconnect is still being reached to deliver
      * its cancel, a new run waits for it. Resolves once that run has ended or
      * `CANCEL_HANDOFF_WAIT_MS` has passed; null when nothing is waited for.
@@ -1153,6 +1258,8 @@ export class AgentService {
             reason,
             evidence: run.dropEvidence ?? baselineConnectionEvidence('mid_run'),
             gapMs: run.detachedAt !== null ? Math.max(0, Date.now() - run.detachedAt) : 0,
+            attempts: run.reattachAttempts,
+            losses: run.losses,
         });
     }
 
@@ -1165,7 +1272,7 @@ export class AgentService {
         run.detachedAt = null;
         run.deadline = null;
         run.clearDeadline();
-        logger(`AgentService: Reattached run ${run.runId} after ${gapMs}ms; ${event.replayed} event(s) replayed`, 1);
+        logger(`AgentService: Reattached run ${run.runId} after ${gapMs}ms on socket ${run.reattachAttempts} (${run.losses} lost); ${event.replayed} event(s) replayed`, 1);
         this.noteRunEvent(run.runId, 'reattached', `${event.replayed} replayed`);
         if (run.cancelRequested) {
             // Stopped while reconnecting. The user has already left the run,
@@ -1184,6 +1291,8 @@ export class AgentService {
             evidence: run.dropEvidence ?? baselineConnectionEvidence('mid_run'),
             gapMs,
             replayed: event.replayed,
+            attempts: run.reattachAttempts,
+            losses: run.losses,
         });
     }
 
@@ -1574,6 +1683,7 @@ export class AgentService {
                         modelId: event.model_id,
                         modelName: event.model_name,
                         chargeType: event.charge_type,
+                        ...(event.feature_credit ? { featureCredit: event.feature_credit } : {}),
                     };
                     this.callbacks.onRequestAck?.(ackData);
                     break;
@@ -1609,6 +1719,7 @@ export class AgentService {
 
                 case 'done':
                     if (this.run) this.run.terminal = true;
+                    this.settlePark('ended');
                     this.callbacks.onDone();
                     break;
 
@@ -1625,6 +1736,7 @@ export class AgentService {
                     break;
 
                 case 'thread':
+                    if (this.run) this.run.threadId = event.thread_id;
                     this.callbacks.onThread(event.thread_id, event.retry_truncation);
                     break;
 
@@ -1750,6 +1862,33 @@ export class AgentService {
                     this.callbacks?.onBatchApprovalStale?.(event);
                     break;
 
+                case 'table_card_request':
+                    logger("AgentService: Received table_card_request", { card_id: event.card_id, sources: event.sources.length }, 1);
+                    if (this.callbacks?.onTableCardRequest) {
+                        this.callbacks.onTableCardRequest(event);
+                    } else {
+                        // A client that cannot show the card declines: nothing
+                        // is created, and the run is not stalled for the card's
+                        // whole timeout.
+                        logger("AgentService: No table card handler, declining", 1);
+                        this.sendDecision({
+                            type: 'table_card_response',
+                            card_id: event.card_id,
+                            approved: false,
+                        });
+                    }
+                    break;
+
+                case 'table_card_stale':
+                    logger("AgentService: Received table_card_stale", event, 1);
+                    this.callbacks?.onTableCardStale?.(event);
+                    break;
+
+                case 'park_refused':
+                    logger(`AgentService: Park of run ${event.run_id ?? '(unknown)'} refused (${event.reason})`, 1);
+                    this.settlePark('refused');
+                    break;
+
                 case 'ask_user_question_request':
                     logger("AgentService: Received ask_user_question_request", event, 1);
                     // This event is handled by the UI via callback
@@ -1815,6 +1954,7 @@ export class AgentService {
                         run
                             ? this.run === run && !run.cancelRequested
                             : this.connectionId === requestConnectionId;
+                    const owner = this.run;
                     const context: AgentDataRequestContext = {
                         assertCurrent: () => {
                             if (!isCurrent()) {
@@ -1823,10 +1963,31 @@ export class AgentService {
                         },
                         receivedAt,
                         reportPhase: (phase) => keepalive.setPhase(phase),
+                        ...(owner ? {
+                            run: { runId: owner.runId, threadId: owner.threadId },
+                            runStopped: owner.stopSignal,
+                        } : {}),
                     };
                     const tracked = run && requestId !== null
                         ? run.trackReply(requestId, executedAction(eventName, dataEvent))
                         : null;
+                    // A job the run waits for live: the window follows it past
+                    // the live wait (`onJobWait`).
+                    if (eventName === 'job_wait_request' && requestId !== null && owner) {
+                        const wait: LiveJobWait = {
+                            runId: owner.runId,
+                            threadId: owner.threadId ?? null,
+                            toolCallId: String(dataEvent?.tool_call_id ?? ''),
+                            jobId: String(dataEvent?.job_id ?? ''),
+                        };
+                        for (const listener of this.jobWaitListeners) {
+                            try {
+                                listener(wait);
+                            } catch (error) {
+                                logger(`AgentService: job wait listener failed: ${String(error)}`, 1);
+                            }
+                        }
+                    }
                     const respond = (response: Record<string, any> | PreparedJsonMessage) => {
                         keepalive.stop();
                         if (run && tracked) {
@@ -1967,6 +2128,7 @@ export class AgentService {
         if (this.run?.state === 'reattaching') {
             logger(`AgentService: Run ${this.run.runId} is reattaching; cancelling it once reattached`, 1);
             this.run.cancelRequested = true;
+            this.run.markStopped();
             return;
         }
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
@@ -1975,8 +2137,12 @@ export class AgentService {
             return;
         }
 
-        // Nothing queued for the run starts while the cancel is flushed.
-        if (this.run) this.run.cancelRequested = true;
+        // Nothing queued for the run starts while the cancel is flushed, and
+        // work its requests started stops.
+        if (this.run) {
+            this.run.cancelRequested = true;
+            this.run.markStopped();
+        }
 
         // Capture the generation being cancelled: if a new run connects
         // during the flush wait below, the deferred close must not tear it down.
@@ -2006,13 +2172,7 @@ export class AgentService {
      */
     sendApprovalResponse(actionId: string, approved: boolean, userInstructions?: string | null, actionChanges?: import('../protocol/duplicates').MergeItemsChoices): boolean {
         logger(`AgentService: Sending approval response for ${actionId}: ${approved}${userInstructions ? ' (with instructions)' : ''}`, 1);
-        return this.sendDecision({
-            type: 'deferred_approval_response',
-            action_changes: actionChanges,
-            action_id: actionId,
-            approved,
-            user_instructions: userInstructions,
-        });
+        return this.sendDecision(deferredApprovalResponse(actionId, approved, userInstructions, actionChanges));
     }
 
     /**
@@ -2057,17 +2217,29 @@ export class AgentService {
         approved: boolean,
         mode: BatchApprovalMode,
         userInstructions?: string | null,
-        table?: import('../protocol/artifactProtocol').TableApprovalIdentity,
     ): boolean {
         logger(`AgentService: Sending batch approval response for ${approvalId}: ${approved} (${mode})${userInstructions ? ' (with instructions)' : ''}`, 1);
-        return this.sendDecision({
-            type: 'batch_approval_response',
-            ...(table ? { table } : {}),
-            approval_id: approvalId,
-            approved,
-            mode,
-            user_instructions: userInstructions,
-        });
+        return this.sendDecision(batchApprovalResponse(approvalId, approved, mode, userInstructions));
+    }
+
+    /**
+     * Send the answer to a table card: the edited input on an approval, or a
+     * decline with optional instructions. Correlated by `card_id`.
+     * @returns false if the socket was not open, so the answer never left the
+     *   client.
+     */
+    sendTableCardResponse(response: WSTableCardResponse): boolean {
+        logger(`AgentService: Sending table card response for ${response.card_id}: ${response.approved ? response.choice ?? 'create' : 'declined'}`, 1);
+        return this.sendDecision(response);
+    }
+
+    /**
+     * Send an answer built for a parked card as the live response it is:
+     * the card was shown again by the run on this socket.
+     */
+    sendCardAnswer(answer: ParkedCardAnswer): boolean {
+        logger(`AgentService: Sending "${answer.type}" to a card shown again`, 1);
+        return this.sendDecision(answer as unknown as Record<string, any>);
     }
 
     /**
@@ -2088,12 +2260,7 @@ export class AgentService {
         cancelled: boolean = false,
     ): boolean {
         logger(`AgentService: Sending ask_user_question response for ${questionId}: ${cancelled ? 'cancelled' : `${answers.length} answer(s)`}`, 1);
-        return this.sendDecision({
-            type: 'ask_user_question_response',
-            question_id: questionId,
-            answers,
-            cancelled,
-        });
+        return this.sendDecision(askUserQuestionResponse(questionId, answers, cancelled));
     }
 
 }

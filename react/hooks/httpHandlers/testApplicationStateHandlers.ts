@@ -21,10 +21,15 @@
  * before returning, so callers can read `/beaver/test/application-state`
  * immediately after without racing React.
  *
+ * `/beaver/test/sidebar-pane-width` checks that the pane holding the sidebar
+ * keeps its width while Zotero sizes that pane itself.
+ *
  * Wired to their paths in `useHttpEndpoints.ts`.
  */
 
 import { getContextWindow, getHostWindow } from '../../runtime/windowRuntime';
+import { SIDEBAR_MOUNT_ID } from '../../../src/ui/libraryPane';
+import { isStackedLayout, widthAttribute } from '../../utils/zoteroLayout';
 
 import { BeaverUIFactory } from '../../../src/ui/ui';
 import { eventManager } from '../../events/eventManager';
@@ -37,6 +42,7 @@ import {
 } from '../../atoms/messageComposition';
 import { searchableLibraryIdsAtom } from '../../atoms/profile';
 import { getCurrentReader } from '../../utils/readerUtils';
+import { selectedTableTabItemID } from '../../../src/ui/tableTabContextPane';
 import { currentNoteItemAtom } from '../../atoms/zoteroContext';
 import {
     isBeaverUIVisibleAtom,
@@ -92,6 +98,13 @@ async function holdsFor(condition: () => boolean, durationMs: number): Promise<b
  */
 function expectedReaderAttachment(): { libraryID: number; key: string } | null {
     if (!store.get(isBeaverUIVisibleAtom)) return null;
+    // A selected Beaver tab makes its table the context, as a reader's file is.
+    const tableItemID = selectedTableTabItemID(getContextWindow());
+    if (tableItemID) {
+        const table = Zotero.Items.getLibraryAndKeyFromID(tableItemID);
+        if (!table || !store.get(searchableLibraryIdsAtom).includes(table.libraryID)) return null;
+        return { libraryID: table.libraryID, key: table.key };
+    }
     const reader = getCurrentReader();
     if (!reader) return null;
     if (!isReaderLibrarySearchable(store.get(searchableLibraryIdsAtom), reader)) return null;
@@ -180,6 +193,54 @@ export async function handleTestBeaverSidebarHttpRequest(request: any): Promise<
         reader_context_settled: readerContextSettled,
         surfaces: getSurfaces(),
     };
+}
+
+/** How far the Zotero width given to the sidebar's pane is from the width it is shown at. */
+const PANE_WIDTH_OFFSET = 60;
+
+/**
+ * Make Zotero size the pane holding the main-window sidebar to a width of its
+ * own, and measure the pane in the same task, before Beaver can react.
+ *
+ * Zotero writes the pane's inline width from its `width` attribute and lays the
+ * window out at once: on a reader tab in `ZoteroContextPane.update()`, which
+ * runs on every window resize, and on a library tab in the item pane's reaction
+ * to its attribute. A pane that changes width in between makes the reader or
+ * items list beside it resize, which on a reader tab sets off the next update.
+ * Zotero's own values are put back afterwards.
+ */
+export async function handleTestSidebarPaneWidthHttpRequest(): Promise<any> {
+    const win = getHostWindow() as any;
+    const mount = win.document.getElementById(SIDEBAR_MOUNT_ID) as HTMLElement | null;
+    const pane = mount?.parentElement;
+    if (!mount || !pane || mount.style.display === 'none') return { ok: false, error: 'sidebar_hidden' };
+    if (isStackedLayout()) return { ok: false, error: 'stacked_layout' };
+    const location = pane.id === 'zotero-context-pane' ? 'reader' : 'library';
+
+    const widthBefore = Math.round(pane.getBoundingClientRect().width);
+    // Narrower where there is room, so the window never limits the change.
+    const zoteroWidth = widthBefore - PANE_WIDTH_OFFSET >= 360
+        ? widthBefore - PANE_WIDTH_OFFSET
+        : widthBefore + PANE_WIDTH_OFFSET;
+    const attr = widthAttribute(pane);
+    const styleWidth = pane.style.width;
+    try {
+        pane.setAttribute('width', String(zoteroWidth));
+        // The item pane writes its inline width from the attribute itself.
+        if (location === 'reader') win.ZoteroContextPane.update();
+        return {
+            ok: true,
+            location,
+            zotero_width: zoteroWidth,
+            inline_width_during: pane.style.width,
+            width_before: widthBefore,
+            width_during: Math.round(pane.getBoundingClientRect().width),
+        };
+    } finally {
+        if (attr === null) pane.removeAttribute('width');
+        else pane.setAttribute('width', attr);
+        pane.style.width = styleWidth;
+    }
 }
 
 /**

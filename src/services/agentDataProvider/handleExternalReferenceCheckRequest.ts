@@ -52,7 +52,10 @@ export async function handleExternalReferenceCheckRequest(request: WSExternalRef
             date: item.date,
             DOI: item.doi,
             ISBN: item.isbn,
-            creators: item.creators
+            creators: item.creators,
+            PMID: item.pmid ?? undefined,
+            url: item.url ?? undefined,
+            reportNumber: item.report_number ?? undefined,
         }
     }));
 

@@ -1,31 +1,41 @@
 import { logger } from '@beaver/agent-core/platform/logger';
-import { ItemSearchResult } from '@beaver/agent-core/transport/clients/searchService';
+import { messageAttachmentKey } from '@beaver/agent-core/types/attachments/apiTypes';
 import { ZoteroTag } from '@beaver/agent-core/types/zotero';
 import { AddSourcesMenuHandle, AddSourcesQuerySource } from '@beaver/agent-ui/composer/useAddSourcesMenu';
-import SearchMenu, { MenuPosition, SearchMenuCloseReason } from '@beaver/agent-ui/primitives/SearchMenu';
+import SearchMenu, { MenuPosition, SearchMenuCloseReason, menuSideWithRoom } from '@beaver/agent-ui/primitives/SearchMenu';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import { useAtomValue, useSetAtom } from 'jotai';
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { EXTERNAL_FILE_PICKER_EXTENSIONS } from '../../../../src/services/externalFiles';
 import { libraryRefForLibraryID, UNRESOLVED_LIBRARY_ID } from '../../../../src/utils/libraryIdentity';
 import { getPref, setPref } from '../../../../src/utils/prefs';
-import { itemSearchResultFromZoteroItem } from '../../../../src/utils/zoteroSerializers';
-import { loadFullItemData } from '../../../../src/utils/zoteroUtils';
-import { addItemToCurrentMessageItemsAtom, currentMessageFiltersAtom, currentMessageItemsAtom, removeItemFromMessageAtom, type MessageFiltersState } from '../../../atoms/messageComposition';
+import { addItemToCurrentMessageItemsAtom, currentMessageFiltersAtom, currentMessageItemsAtom, currentMessageViewsAtom, removeItemFromMessageAtom, type MessageFiltersState } from '../../../atoms/messageComposition';
 import { searchableLibraryIdsAtom } from '../../../atoms/profile';
 import { selectedZoteroItemsAtom } from '../../../atoms/zoteroContext';
 import { useAttachExternalFiles } from '../../../hooks/useAttachExternalFiles';
 import { useSurfaceWindow } from '../../../runtime/SurfaceWindowContext';
 import { store } from '../../../store';
-import { scoreSearchResult, searchTitleCreatorYear } from '../../../utils/search';
+import { searchSourceItems } from '../../../utils/search';
+import { savedSearchAttachment, savedSearchId } from '../../../utils/zoteroReferences';
 import { getActiveZoteroLibraryId } from '../../../utils/zoteroTargetContext';
 import { Icon, PlusSignIcon } from '../../icons/icons';
 import { useCollectionsMenu } from './hooks/useCollectionsMenu';
 import { useLibrariesMenu } from './hooks/useLibrariesMenu';
 import { useNotesMenu } from './hooks/useNotesMenu';
-import { useSourcesMenu } from './hooks/useSourcesMenu';
+import { useSavedSearchesMenu } from './hooks/useSavedSearchesMenu';
+import { useSourcesMenu, type SourcesMenuEntries } from './hooks/useSourcesMenu';
 import { useTagsMenu } from './hooks/useTagsMenu';
-import { CollectionMenuItemContext, LibraryMenuItemContext, SourceMenuItemContext, TagMenuItemContext } from './utils/menuItemFactories';
+import { CollectionMenuItemContext, LibraryMenuItemContext, SavedSearchMenuItemContext, SourceMenuItemContext, TagMenuItemContext } from './utils/menuItemFactories';
+
+/** The menu's width, which an end-aligned menu needs to place itself. */
+const MENU_WIDTH = 250;
+/** The menu's tallest, which decides whether it fits on the preferred side of its button. */
+const MENU_MAX_HEIGHT = 300;
+/** Space kept between the menu and the window edge. */
+const VIEWPORT_MARGIN = 8;
+
+/** The checkmark predicate for a target that does not say what it has. */
+const NEVER_PICKED = () => false;
 
 /** How many recent items are carried in the `recentItems` preference. */
 const RECENT_ITEMS_LIMIT = 5;
@@ -34,8 +44,22 @@ const RECENT_ITEMS_LIMIT = 5;
  * the Zotero selection, or the recently used items when nothing is selected.
  */
 const PROPOSED_ITEMS_LIMIT = 3;
+/** How many search results the menu lists for a typed query. */
+const SEARCH_RESULTS_LIMIT = 10;
+/**
+ * How long typing must pause before the item search runs. Each search scans
+ * every searchable library, so running one per keystroke stacks up in a large
+ * library and delays the result the user is actually waiting for.
+ */
+const SEARCH_DEBOUNCE_MS = 150;
 
-type MenuMode = 'sources' | 'libraries' | 'collections' | 'tags' | 'notes';
+type MenuMode = 'sources' | 'libraries' | 'collections' | 'tags' | 'savedSearches' | 'notes';
+
+interface SearchState {
+    items: Zotero.Item[];
+    matchCount: number;
+}
+const NO_SEARCH: SearchState = { items: [], matchCount: 0 };
 
 interface RecentItem {
     zotero_key: string;
@@ -115,11 +139,40 @@ const getRecentItems = async (): Promise<Zotero.Item[]> => {
  */
 export interface AddSourcesTarget {
     isAttached: (item: Zotero.Item) => boolean;
+    /**
+     * Whether `addItem` can take the item. Rows it refuses are not offered;
+     * every item when absent. Keep it referentially stable, like `isAttached`.
+     */
+    canAdd?: (item: Zotero.Item) => boolean;
+    /**
+     * The item a row offers in a candidate's place, or null to leave the
+     * candidate out: the table card offers a child attachment as its paper, so
+     * the row names what a pick adds. Rows that map to the same item are
+     * merged. Candidates are offered as they are when absent. Keep it stable.
+     */
+    asSourceItem?: (item: Zotero.Item) => Zotero.Item | null;
     addItem: (item: Zotero.Item) => void;
     removeItem: (item: Zotero.Item) => void;
     filters: MessageFiltersState;
     setFilters: (updater: (prev: MessageFiltersState) => MessageFiltersState) => void;
     attachFiles: (paths: string[]) => void;
+    /** Which action rows the menu offers for this target; all when absent. Keep it stable. */
+    entries?: SourcesMenuEntries;
+    /**
+     * Take a picked collection or tag directly instead of through `setFilters`.
+     * The composer's filters are exclusive (a collection pick clears tags), so
+     * a target that keeps several kinds side by side needs to know which pick
+     * the user made.
+     */
+    pickCollection?: (collectionId: number) => void;
+    pickTag?: (tag: ZoteroTag) => void;
+    /**
+     * Take a picked saved search. The menu offers saved searches only to a
+     * target that sets this; the composer attaches them to the message.
+     */
+    pickSavedSearch?: (search: Zotero.Search) => void;
+    /** Whether the target already has a saved search, for its checkmark. Keep it stable. */
+    isSavedSearchPicked?: (search: Zotero.Search) => boolean;
 }
 
 export interface AddSourcesMenuProps {
@@ -147,6 +200,22 @@ export interface AddSourcesMenuProps {
     verticalPosition?: 'above' | 'below';
     /** Write picks somewhere other than the composer (see {@link AddSourcesTarget}). */
     target?: AddSourcesTarget;
+    /** A text label for the trigger button instead of the composer's "+" icon. */
+    triggerLabel?: string;
+    /**
+     * The trigger's own look: its class and content replace the default ones
+     * (and its tooltip, which a labelled trigger does not need). `triggerLabel`
+     * stays its accessible name.
+     */
+    triggerClassName?: string;
+    triggerContent?: React.ReactNode;
+    /** A tooltip for a trigger with its own content. */
+    triggerTooltip?: string;
+    /**
+     * Which edge of the trigger the menu lines up with: its start (the
+     * default), or its end for a trigger at the right edge of a panel.
+     */
+    menuAlign?: 'start' | 'end';
 }
 
 const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(function AddSourcesMenu({
@@ -163,12 +232,26 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
     disabled = false,
     verticalPosition = 'above',
     target,
+    triggerLabel,
+    triggerClassName,
+    triggerContent,
+    triggerTooltip,
+    menuAlign = 'start',
 }, ref) {
     const surfaceWindow = useSurfaceWindow();
-    const [isLoading, setIsLoading] = useState(false);
-    const [searchResults, setSearchResults] = useState<ItemSearchResult[]>([]);
+    const [isSearching, setIsSearching] = useState(false);
+    /** The best matches for the last search, and how many items matched in all. */
+    const [search, setSearch] = useState<SearchState>(NO_SEARCH);
     const [menuMode, setMenuMode] = useState<MenuMode>('sources');
+    // The side a menu opened from the button chose for the room it has; a
+    // menu following a typed `@` keeps the caller's side.
+    const [buttonDirection, setButtonDirection] = useState<'above' | 'below' | null>(null);
+    const openDirection = querySource === 'menu' && buttonDirection ? buttonDirection : verticalPosition;
     const [activeZoteroLibraryId, setActiveZoteroLibraryId] = useState<number | null>(null);
+    // The searchable library the tags or saved-searches row resolved; kept
+    // apart from the active library, which the effect below resets to the raw
+    // (possibly excluded) one whenever the menu mode changes.
+    const [submenuLibraryId, setSubmenuLibraryId] = useState<number | null>(null);
     const buttonRef = useRef<HTMLButtonElement | null>(null);
     const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
     const selectedZoteroItems = useAtomValue(selectedZoteroItemsAtom);
@@ -178,16 +261,13 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
     const attachExternalFiles = useAttachExternalFiles();
     const currentMessageItems = useAtomValue(currentMessageItemsAtom);
     const removeItemFromMessage = useSetAtom(removeItemFromMessageAtom);
+    const composerViews = useAtomValue(currentMessageViewsAtom);
+    const setComposerViews = useSetAtom(currentMessageViewsAtom);
 
     // Resolve through `target` so the same picker serves composer and edit overlay.
     const currentMessageFilters = target ? target.filters : composerFilters;
     const { libraryIds: currentLibraryIds, collectionIds: currentCollectionIds, tagSelections: currentTagSelections } = currentMessageFilters;
     const setCurrentMessageFilters = target ? target.setFilters : setComposerFilters;
-    // The item search scopes itself to the active filters, and runs from an
-    // effect that must not re-subscribe on every filter change; a ref keeps it
-    // reading the current ones without becoming a dependency.
-    const filtersRef = useRef(currentMessageFilters);
-    filtersRef.current = currentMessageFilters;
     const composerIsAttached = useCallback(
         (item: Zotero.Item) => currentMessageItems.some((i) => i.id === item.id),
         [currentMessageItems],
@@ -209,7 +289,8 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
     // handled by the caller (left alone on dismiss, consumed on commit).
     const resetMenuState = useCallback(() => {
         currentSearchRef.current = 0;
-        setSearchResults([]);
+        setSearch(NO_SEARCH);
+        setIsSearching(false);
         setMenuMode('sources');
     }, []);
 
@@ -231,74 +312,24 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
         },
     }), [menuMode]);
 
-    // Improved search function with debouncing and cancellation
-    const handleSearch = useCallback(async (query: string, limit: number = 10) => {
-        if (!query.trim()) return [];
-        
-        const searchId = ++searchSequenceRef.current;
-        currentSearchRef.current = searchId;
-        
+    /**
+     * Search every searchable library for `query` and publish the best
+     * `SEARCH_RESULTS_LIMIT` matches. Library, collection and tag filters on
+     * the message do not narrow it: they scope what the agent searches, while
+     * this search picks items to attach, which can come from anywhere.
+     */
+    const handleSearch = useCallback(async (searchId: number, query: string) => {
+        const isCurrent = () => searchId === currentSearchRef.current;
         try {
-            setIsLoading(true);
-
-            // Query formatting
-            query = query.replace(/ (?:&|and) /g, " ");
-            query = query.replace(/,/, ' ');
-            query = query.replace(/&/, ' ');
-            query = query.replace(/ ?(\d{1,4})$/, ' $1');
-            query = query.trim();
-            
-            // Search Zotero items
-            const { libraryIds, tagSelections } = filtersRef.current;
-            const searchLibraryIds = libraryIds.length > 0
-                ? libraryIds
-                : tagSelections.length > 0
-                    ? Array.from(new Set(tagSelections.map((tag: ZoteroTag) => tag.libraryId)))
-                    : searchableLibraryIds;
-            const searchTags = tagSelections.length > 0 ? tagSelections : undefined;
-            logger(`AddSourcesMenu.handleSearch: Searching for '${query}' in libraries: ${searchLibraryIds.join(', ')}${searchTags ? `, tags: ${searchTags.map((tag: ZoteroTag) => `${tag.tag} (lib ${tag.libraryId})`).join('; ')}` : ''}`)
-            const resultsItems = await searchTitleCreatorYear(query, searchLibraryIds, undefined, searchTags);
-
-            // Ensure item data is loaded
-            await loadFullItemData(resultsItems);
-            
-            // Check if this search was cancelled
-            if (searchId !== currentSearchRef.current) {
-                return [];
-            }
-            
-            // Score and sort results
-            const scoredResults = resultsItems
-                .map(item => ({
-                    item,
-                    score: scoreSearchResult(item, query)
-                }))
-                .filter(result => result.score > 0)
-                .sort((a, b) => b.score - a.score)
-                .slice(0, limit)
-                .map(result => result.item);
-            
-            // Final check if search was cancelled
-            if (searchId !== currentSearchRef.current) {
-                return [];
-            }
-            
-            const results = scoredResults.map(itemSearchResultFromZoteroItem).filter(Boolean) as ItemSearchResult[];
-            
-            // Update the search results only if this is still the current search
-            if (searchId === currentSearchRef.current) {
-                setSearchResults(results);
-            }
+            const result = await searchSourceItems(query, searchableLibraryIds, SEARCH_RESULTS_LIMIT, { isCurrent });
+            if (result && isCurrent()) setSearch(result);
         } catch (error) {
-            console.error('Error searching Zotero items:', error);
-            return [];
+            logger(`AddSourcesMenu.handleSearch: ${error}`, 1);
+            if (isCurrent()) setSearch(NO_SEARCH);
         } finally {
-            // Only update loading state if this is still the current search
-            if (searchId === currentSearchRef.current) {
-                setIsLoading(false);
-            }
+            if (isCurrent()) setIsSearching(false);
         }
-    }, [scoreSearchResult, searchableLibraryIds]);
+    }, [searchableLibraryIds]);
 
     const handleNavigateToLibraries = useCallback(() => {
         onResetQuery();
@@ -312,9 +343,15 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
     }, [onResetQuery]);
 
     const handleNavigateToTags = useCallback((libraryId: number) => {
-        setActiveZoteroLibraryId(libraryId);
+        setSubmenuLibraryId(libraryId);
         onResetQuery();
         setMenuMode('tags');
+    }, [onResetQuery]);
+
+    const handleNavigateToSavedSearches = useCallback((libraryId: number) => {
+        setSubmenuLibraryId(libraryId);
+        onResetQuery();
+        setMenuMode('savedSearches');
     }, [onResetQuery]);
 
     const handleNavigateToNotes = useCallback(() => {
@@ -384,6 +421,11 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
     }, [setCurrentMessageFilters, handleCommit]);
 
     const handleSelectCollection = useCallback((collectionId: number) => {
+        if (target?.pickCollection) {
+            target.pickCollection(collectionId);
+            handleCommit();
+            return;
+        }
         setCurrentMessageFilters((prev) => {
             const exists = prev.collectionIds.includes(collectionId);
             return {
@@ -396,9 +438,14 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
             };
         });
         handleCommit();
-    }, [setCurrentMessageFilters, handleCommit]);
+    }, [setCurrentMessageFilters, handleCommit, target]);
 
     const handleSelectTag = useCallback((tag: ZoteroTag) => {
+        if (target?.pickTag) {
+            target.pickTag(tag);
+            handleCommit();
+            return;
+        }
         setCurrentMessageFilters((prev) => {
             const exists = prev.tagSelections.some((selected) => selected.id === tag.id);
             return {
@@ -411,17 +458,48 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
             };
         });
         handleCommit();
-    }, [setCurrentMessageFilters, handleCommit]);
+    }, [setCurrentMessageFilters, handleCommit, target]);
+
+    // The composer attaches a picked saved search to the message, as dragging
+    // it onto the composer does; picking it again detaches it.
+    const composerSavedSearchIds = useMemo(
+        () => new Set(composerViews.filter((view) => view.type === 'saved_search').map(messageAttachmentKey)),
+        [composerViews],
+    );
+    const composerIsSavedSearchPicked = useCallback((search: Zotero.Search) => {
+        const id = savedSearchId(search);
+        return !!id && composerSavedSearchIds.has(id);
+    }, [composerSavedSearchIds]);
+    const composerPickSavedSearch = useCallback((search: Zotero.Search) => {
+        if (!searchableLibraryIds.includes(search.libraryID)) return;
+        const view = savedSearchAttachment(search);
+        if (!view) return;
+        const key = messageAttachmentKey(view);
+        setComposerViews((prev) => prev.some((existing) => messageAttachmentKey(existing) === key)
+            ? prev.filter((existing) => messageAttachmentKey(existing) !== key)
+            : [...prev, view]);
+    }, [searchableLibraryIds, setComposerViews]);
+    const pickSavedSearch = target ? target.pickSavedSearch : composerPickSavedSearch;
+    const isSavedSearchPicked = (target ? target.isSavedSearchPicked : composerIsSavedSearchPicked) ?? NEVER_PICKED;
+
+    const handleSelectSavedSearch = useCallback((search: Zotero.Search) => {
+        pickSavedSearch?.(search);
+        handleCommit();
+    }, [pickSavedSearch, handleCommit]);
 
     // These contexts stay identity-stable across keystrokes: menu hooks feed
     // them to their fetch effects, so churning them would re-read tags,
     // collections and libraries on every character typed. The search query
     // reaches the rows as a separate argument to the item factories.
+    const canAdd = target?.canAdd;
+    const asSourceItem = target?.asSourceItem;
     const sourceMenuItemContext = useMemo<SourceMenuItemContext>(() => ({
         isAttached,
+        canAdd,
+        asSourceItem,
         onAdd: handleAddSourceItem,
         onRemove: handleRemoveSourceItem
-    }), [isAttached, handleAddSourceItem, handleRemoveSourceItem]);
+    }), [isAttached, canAdd, asSourceItem, handleAddSourceItem, handleRemoveSourceItem]);
 
     const libraryMenuItemContext = useMemo<LibraryMenuItemContext>(() => ({
         currentLibraryIds,
@@ -438,6 +516,11 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
         onSelect: handleSelectTag
     }), [currentTagSelections, handleSelectTag]);
 
+    const savedSearchMenuItemContext = useMemo<SavedSearchMenuItemContext>(() => ({
+        isPicked: isSavedSearchPicked,
+        onSelect: handleSelectSavedSearch,
+    }), [isSavedSearchPicked, handleSelectSavedSearch]);
+
     // The query lives in the chat editor, so nothing calls back into this
     // component when it changes — run the item search from the query itself.
     // Previous results are left in place until the new ones land, so the list
@@ -446,17 +529,27 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
         if (!isMenuOpen || menuMode !== 'sources') return;
         if (!searchQuery.trim()) {
             currentSearchRef.current = 0;
-            setSearchResults([]);
-            setIsLoading(false);
+            setSearch(NO_SEARCH);
+            setIsSearching(false);
             return;
         }
-        handleSearch(searchQuery);
+        // Claim the search now, so results from an earlier query that land
+        // during the pause are dropped rather than shown for this one.
+        const searchId = ++searchSequenceRef.current;
+        currentSearchRef.current = searchId;
+        setIsSearching(true);
+        const timer = setTimeout(() => {
+            void handleSearch(searchId, searchQuery);
+        }, SEARCH_DEBOUNCE_MS);
+        return () => clearTimeout(timer);
     }, [isMenuOpen, menuMode, searchQuery, handleSearch]);
 
     const sourcesMenu = useSourcesMenu({
         isActive: isMenuOpen && menuMode === 'sources',
         searchQuery,
-        searchResults,
+        searchResults: search.items,
+        searchMatchCount: search.matchCount,
+        isSearching,
         selectedZoteroItems,
         proposedItemsLimit: PROPOSED_ITEMS_LIMIT,
         sourceMenuItemContext,
@@ -465,11 +558,13 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
         onNavigateToLibraries: handleNavigateToLibraries,
         onNavigateToCollections: handleNavigateToCollections,
         onNavigateToTags: handleNavigateToTags,
+        onNavigateToSavedSearches: pickSavedSearch ? handleNavigateToSavedSearches : undefined,
         onNavigateToNotes: handleNavigateToNotes,
         onSelectFiles: handleSelectFiles,
         getRecentItems,
         recentItemsLimit: RECENT_ITEMS_LIMIT,
-        verticalPosition
+        verticalPosition: openDirection,
+        entries: target?.entries,
     });
 
     const librariesMenu = useLibrariesMenu({
@@ -477,7 +572,7 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
         searchQuery,
         searchableLibraryIds,
         libraryMenuItemContext,
-        verticalPosition
+        verticalPosition: openDirection
     });
 
     const collectionsMenu = useCollectionsMenu({
@@ -485,15 +580,24 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
         searchQuery,
         searchableLibraryIds,
         collectionMenuItemContext,
-        verticalPosition
+        verticalPosition: openDirection
     });
 
     const tagsMenu = useTagsMenu({
         isActive: isMenuOpen && menuMode === 'tags',
         searchQuery,
+        libraryId: submenuLibraryId,
         searchableLibraryIds,
         tagMenuItemContext,
-        verticalPosition
+        verticalPosition: openDirection
+    });
+
+    const savedSearchesMenu = useSavedSearchesMenu({
+        isActive: isMenuOpen && menuMode === 'savedSearches',
+        searchQuery,
+        libraryId: submenuLibraryId,
+        savedSearchMenuItemContext,
+        verticalPosition: openDirection
     });
 
     const notesMenu = useNotesMenu({
@@ -501,7 +605,7 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
         searchQuery,
         searchableLibraryIds,
         sourceMenuItemContext,
-        verticalPosition
+        verticalPosition: openDirection
     });
 
     const menuItems = menuMode === 'sources'
@@ -512,7 +616,9 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
                 ? collectionsMenu.menuItems
                 : menuMode === 'tags'
                     ? tagsMenu.menuItems
-                    : notesMenu.menuItems;
+                    : menuMode === 'savedSearches'
+                        ? savedSearchesMenu.menuItems
+                        : notesMenu.menuItems;
 
     const handleButtonClick = (e: React.MouseEvent) => {
         e.stopPropagation();
@@ -520,9 +626,13 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
         // Get button position
         if (buttonRef.current) {
             const rect = buttonRef.current.getBoundingClientRect();
-            const y = verticalPosition === 'above' ? rect.top - 5 : rect.bottom;
+            // Open on the side with room for the menu (see menuSideWithRoom).
+            const viewportHeight = buttonRef.current.ownerDocument.defaultView?.innerHeight ?? Infinity;
+            const direction = menuSideWithRoom(verticalPosition, rect, viewportHeight, MENU_MAX_HEIGHT + 8, VIEWPORT_MARGIN);
+            setButtonDirection(direction);
+            const y = direction === 'above' ? rect.top - 5 : rect.bottom;
             setMenuMode('sources');
-            onOpen({ x: rect.left, y });
+            onOpen({ x: menuAlign === 'end' ? rect.right - MENU_WIDTH : rect.left, y });
 
             // Remove focus from the button after opening the menu
             buttonRef.current.blur();
@@ -542,7 +652,9 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
                 ? "No collections found"
                 : menuMode === 'tags'
                     ? "No tags found"
-                    : "No notes found";
+                    : menuMode === 'savedSearches'
+                        ? "No saved searches found"
+                        : "No notes found";
 
     // The chat editor is the search box for a typed `@` — the caret stays there
     // and whatever follows the `@` is the query. A menu opened from the "+"
@@ -558,7 +670,9 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
                 ? "Search collections"
                 : menuMode === 'tags'
                     ? "Search tags"
-                    : "Search notes";
+                    : menuMode === 'savedSearches'
+                        ? "Search saved searches"
+                        : "Search notes";
 
     // Backspace on an empty search field steps back out of a submenu, and
     // closes the menu at the top level. (The editor-driven menu gets the same
@@ -573,36 +687,55 @@ const AddSourcesMenu = forwardRef<AddSourcesMenuHandle, AddSourcesMenuProps>(fun
 
     return (
         <>
+            {triggerContent !== undefined ? (
+                <Tooltip content={triggerTooltip ?? ''} showArrow disabled={!triggerTooltip}>
+                    <button
+                        type="button"
+                        className={triggerClassName}
+                        ref={buttonRef}
+                        onClick={handleButtonClick}
+                        aria-label={triggerLabel ?? "Add Sources"}
+                        aria-haspopup="menu"
+                        aria-expanded={isMenuOpen}
+                        disabled={disabled}
+                    >
+                        {triggerContent}
+                    </button>
+                </Tooltip>
+            ) : (
             <Tooltip content="Add Sources" showArrow singleLine>
                 <button
                     // The control row lives inside the composer's <form>, so a
                     // button with no type would default to submit and send the
                     // message on the way to opening the menu.
                     type="button"
-                    className="variant-ghost composer-add-sources"
+                    className={triggerLabel ? "variant-ghost display-flex flex-row items-center gap-1" : "variant-ghost composer-add-sources"}
                     ref={buttonRef}
                     onClick={handleButtonClick}
-                    aria-label="Add Sources"
+                    aria-label={triggerLabel ?? "Add Sources"}
                     aria-haspopup="menu"
                     aria-expanded={isMenuOpen}
                     disabled={disabled}
                 >
-                    <Icon icon={PlusSignIcon} size={18} className="scale-13" />
+                    <Icon icon={PlusSignIcon} size={triggerLabel ? 14 : 18} className={triggerLabel ? undefined : "scale-13"} />
+                    {triggerLabel}
                 </button>
             </Tooltip>
+            )}
             <SearchMenu
                 menuItems={menuItems}
                 isOpen={isMenuOpen}
                 onClose={handleDismiss}
                 position={menuPosition}
                 useFixedPosition={true}
-                verticalPosition={verticalPosition}
-                width="250px"
-                maxHeight="300px"
+                verticalPosition={openDirection}
+                width={`${MENU_WIDTH}px`}
+                maxHeight={`${MENU_MAX_HEIGHT}px`}
                 // The query drives an effect above, so the menu's own field
                 // needs no separate search callback.
                 onSearch={() => {}}
                 noResultsText={noResultsText}
+                isLoading={menuMode === 'sources' && (isSearching || sourcesMenu.isBuilding)}
                 placeholder={ownsSearchField ? placeholderText : ''}
                 closeOnSelect={false}
                 searchQuery={searchQuery}

@@ -1,5 +1,5 @@
 import React from 'react';
-import type { MetadataEdit, AppliedMetadataEdit, CreatorJSON } from '@beaver/agent-core/types/agentActions/base';
+import type { MetadataEdit, AppliedMetadataEdit, CreatorJSON, FailedMetadataEdit } from '@beaver/agent-core/types/agentActions/base';
 import { resolveFieldForItemType } from '../../../../src/utils/zoteroUtils';
 import { formatFieldName } from '../../../utils/fieldLabels';
 
@@ -12,6 +12,8 @@ interface EditMetadataPreviewProps {
     currentValues: Record<string, string | null>;
     /** Applied edits from result_data (when status is 'applied') */
     appliedEdits?: AppliedMetadataEdit[];
+    /** Edits the apply could not set, from result_data; the rest were saved. */
+    failedEdits?: FailedMetadataEdit[];
     /** Current status of the action */
     status?: ActionStatus;
     /** Old creators (before edit) */
@@ -37,6 +39,7 @@ export const EditMetadataPreview: React.FC<EditMetadataPreviewProps> = ({
     edits,
     currentValues,
     appliedEdits,
+    failedEdits,
     status = 'pending',
     oldCreators,
     newCreators,
@@ -47,6 +50,12 @@ export const EditMetadataPreview: React.FC<EditMetadataPreviewProps> = ({
     const isError = status === 'error';
 
     const hasCreatorChanges = newCreators && newCreators.length > 0;
+    const failureFor = (field: string) => failedEdits?.find((failed) => failed.field === field);
+    const failedCount = failedEdits?.length ?? 0;
+    /** The diff style of a proposed value, by the action's status and whether its field failed. */
+    const newValueClass = (failed: boolean) => failed
+        ? 'diff-error'
+        : isApplied ? 'diff-addition-applied' : isRejectedOrUndone ? 'diff-ghosted' : isError ? 'diff-error' : 'diff-addition';
 
     return (
         <div className="edit-metadata-preview">
@@ -54,6 +63,7 @@ export const EditMetadataPreview: React.FC<EditMetadataPreviewProps> = ({
                 {edits.map((edit, index) => {
                     const currentValue = currentValues[edit.field];
                     const appliedEdit = appliedEdits?.find(ae => ae.field === edit.field);
+                    const failure = failureFor(edit.field);
                     const displayValue = appliedEdit?.applied_value ?? edit.new_value;
                     // Show the field that will actually change. The edit handler
                     // remaps a wrong-type label to the type's equivalent field;
@@ -79,12 +89,15 @@ export const EditMetadataPreview: React.FC<EditMetadataPreviewProps> = ({
                                     </span>
                                 </div>
                                 {/* New value - addition style (highlighted for applied, ghosted for rejected) */}
-                                <div className={`diff-line ${isApplied ? 'diff-addition-applied' : isRejectedOrUndone ? 'diff-ghosted' : isError ? 'diff-error' : 'diff-addition'}`}>
+                                <div className={`diff-line ${newValueClass(!!failure && isApplied)}`}>
                                     <span className="diff-content">
                                         {displayValue ? truncateValue(displayValue) : <span className="italic opacity-60">(empty)</span>}
                                     </span>
                                 </div>
                             </div>
+                            {failure && isApplied && (
+                                <div className="text-sm font-color-red px-3">Not changed: {truncateValue(failureText(failure.error), 120)}</div>
+                            )}
                         </div>
                     );
                 })}
@@ -105,12 +118,21 @@ export const EditMetadataPreview: React.FC<EditMetadataPreviewProps> = ({
                                 </span>
                             </div>
                             {/* New creators */}
-                            <div className={`diff-line ${isApplied ? 'diff-addition-applied' : isRejectedOrUndone ? 'diff-ghosted' : isError ? 'diff-error' : 'diff-addition'}`}>
+                            <div className={`diff-line ${newValueClass(!!failureFor('creators') && isApplied)}`}>
                                 <span className="diff-content">
                                     {truncateValue(formatCreatorList(newCreators))}
                                 </span>
                             </div>
                         </div>
+                        {failureFor('creators') && isApplied && (
+                            <div className="text-sm font-color-red px-3">Not changed: {truncateValue(failureText(failureFor('creators')!.error), 120)}</div>
+                        )}
+                    </div>
+                )}
+
+                {isApplied && failedCount > 0 && (
+                    <div className="text-sm font-color-secondary px-3">
+                        {`${failedCount} of ${edits.length + (hasCreatorChanges ? 1 : 0)} changes could not be made; the others were saved.`}
                     </div>
                 )}
             </div>
@@ -121,6 +143,11 @@ export const EditMetadataPreview: React.FC<EditMetadataPreviewProps> = ({
 /**
  * Truncate long values for display
  */
+/** A field's failure as stored (`String(error)`), without the "Error: " prefix. */
+function failureText(error: string): string {
+    return error.replace(/^\w*Error:\s*/, '');
+}
+
 function truncateValue(value: string, maxLength: number = 150): string {
     if (value.length <= maxLength) {
         return value;

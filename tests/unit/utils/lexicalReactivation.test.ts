@@ -135,21 +135,6 @@ describe('Lexical selection stability', () => {
         expect(nativeSelection.focusOffset).toBe(offset);
     };
 
-
-    it('appends dictation after current text without replacing a selection or command nodes', async () => {
-        const { editable, editorHandle } = await mountEmptyEditor();
-        await act(async () => editorHandle.current!.setText('Typed while recording'));
-        await act(async () => editorHandle.current!.selectRange(0, 5));
-        await act(async () => expect(editorHandle.current!.appendText('Corrected dictation.')).toBe(true));
-        expect(editable.textContent).toBe('Typed while recording Corrected dictation.');
-        await act(async () => editorHandle.current!.insertSlashCommand({ actionId: 'action', label: 'Review', command: 'review' } as any, null));
-        const pill = editable.querySelector('.beaver-slash-command');
-        expect(pill).not.toBeNull();
-        await act(async () => editorHandle.current!.appendText('Another sentence.'));
-        expect(editable.querySelector('.beaver-slash-command')).toBe(pill);
-        expect(editable.textContent?.endsWith('Another sentence.')).toBe(true);
-    });
-
     it('replaces a /query typed in front of other text with a pill in place', async () => {
         const { editable, editorHandle } = await mountEmptyEditor();
         await act(async () => editorHandle.current!.setText('/rev\nthe rest'));

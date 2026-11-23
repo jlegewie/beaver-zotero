@@ -15,6 +15,7 @@ function fakeRuntime() {
         writeHtml: vi.fn(),
         writeMarkdown: vi.fn(),
         writeLatex: vi.fn(),
+        writeXlsx: vi.fn(),
         setObjectIdResolver: vi.fn(),
         setLibraryRefResolver: vi.fn(),
     };

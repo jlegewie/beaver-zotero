@@ -64,6 +64,9 @@ vi.mock(
 
 const unsetTrashedAnnotationsInOpenReaders = vi.fn();
 const refreshMovedAnnotationsInOpenReaders = vi.fn(async () => {});
+vi.mock("../../../src/utils/libraryMessages", () => ({
+    excludedLibraryUserMessage: () => "This library is excluded from Beaver.",
+}));
 vi.mock("../../../src/services/annotations/readerSync", () => ({
     unsetTrashedAnnotationsInOpenReaders: (...args: any[]) =>
         (unsetTrashedAnnotationsInOpenReaders as any)(...args),
@@ -92,6 +95,7 @@ import {
     executeEditAnnotationsAction,
     validateEditAnnotationsAction,
 } from "../../../src/services/agentDataProvider/actions/editAnnotations";
+import { executeEditAnnotationsAction as applyStoredEditAnnotations } from "../../../src/services/manualActions/editAnnotationsActions";
 
 /**
  * A Zotero.DB stub that enforces the real transaction contract:
@@ -891,6 +895,44 @@ describe("edit_annotations execution", () => {
         expect(response.error_code).toBe("annotation_state_changed");
         expect(items.get("AAA").annotationComment).toBe("comment-AAA");
         expect(items.get("AAA").save).not.toHaveBeenCalled();
+    });
+
+    it("offers a stored edit that turned destructive for Apply anyway, and writes it when chosen", async () => {
+        const proposed = {
+            edits: [
+                {
+                    annotation_refs: refs("AAA"),
+                    changes: { comment: "model comment" },
+                },
+            ],
+            annotation_previews: [preview("AAA", { comment: "" })],
+        };
+        const stored = { id: "e1", action_type: "edit_annotations", proposed_data: proposed } as any;
+
+        await expect(applyStoredEditAnnotations(stored)).rejects.toMatchObject({
+            code: "stale_proposal",
+        });
+        expect(items.get("AAA").annotationComment).toBe("comment-AAA");
+
+        const result = await applyStoredEditAnnotations(stored, { skipStaleCheck: true });
+        expect(items.get("AAA").annotationComment).toBe("model comment");
+        expect(result.applied_refs).toHaveLength(1);
+    });
+
+    it("keeps the code of a refused stored edit, with wording for the card", async () => {
+        excludedLibraryId = 1;
+        try {
+            await expect(applyStoredEditAnnotations({
+                id: "e1",
+                action_type: "edit_annotations",
+                proposed_data: { edits: [{ annotation_refs: refs("AAA"), changes: { color: "red" } }] },
+            } as any)).rejects.toMatchObject({
+                code: "library_not_searchable",
+                userMessage: "This library is excluded from Beaver.",
+            });
+        } finally {
+            excludedLibraryId = null;
+        }
     });
 
     it("refuses when one target in an approved group turns destructive", async () => {

@@ -11,6 +11,7 @@ const {
     isConnectedMock,
     reportConnectionFailureMock,
     saveInterruptedThreadMock,
+    sendParkMock,
 } = vi.hoisted(() => ({
     cancelMock: vi.fn().mockResolvedValue(undefined),
     closeMock: vi.fn(),
@@ -18,6 +19,7 @@ const {
     isConnectedMock: vi.fn(() => true),
     reportConnectionFailureMock: vi.fn().mockResolvedValue(undefined),
     saveInterruptedThreadMock: vi.fn(),
+    sendParkMock: vi.fn(() => true),
 }));
 
 vi.mock('@beaver/agent-core/transport/agentService', () => ({
@@ -30,6 +32,7 @@ vi.mock('@beaver/agent-core/transport/agentService', () => ({
         canLeaveRun: () => false,
         leaveRun: () => false,
         isReattaching: () => false,
+        sendPark: sendParkMock,
     },
     AgentConnectionError: class AgentConnectionError extends Error {
         evidence: any;
@@ -79,6 +82,7 @@ import type { AgentRun } from '@beaver/agent-core/agents/types';
 import { pendingApprovalsAtom } from '../../../react/agents/agentActions';
 import { runApprovalPolicyAtom } from '../../../react/atoms/runApprovalPolicy';
 import { store } from '../../../react/store';
+import { jobWaitAtom } from '../../../react/atoms/jobWait';
 import { sessionAtom } from '../../../react/atoms/auth';
 import { AgentConnectionError } from '@beaver/agent-core/transport/agentService';
 import {
@@ -239,6 +243,15 @@ describe('closing the connection from the stop button', () => {
         expect(store.get(isWSChatPendingAtom)).toBe(false);
         expect(store.get(isWSConnectedAtom)).toBe(false);
         expect(store.get(isWSReadyAtom)).toBe(false);
+    });
+
+    it('ends the window wait on the fill the stopped run waited on', async () => {
+        store.set(activeRunAtom, makeRun());
+        store.set(jobWaitAtom, { threadId: 'thread-1', runId: 'run-1', toolCallId: 'call-1', jobId: 'job-1' });
+
+        await store.set(closeWSConnectionAtom);
+
+        expect(store.get(jobWaitAtom)).toBeNull();
     });
 });
 
@@ -414,6 +427,20 @@ describe('remembering the chat a shutdown interrupted', () => {
             threadName: 'Protein folding',
             runId: 'run-1',
         });
+    });
+
+    it('does not record a run it parked: its card is waiting in the chat', () => {
+        store.set(activeRunAtom, makeRun());
+        store.set(currentThreadIdAtom, 'thread-1');
+        store.set(pendingApprovalsAtom, new Map([['action-1', {
+            actionId: 'action-1', toolcallId: 'call-1', actionType: 'edit_metadata', actionData: {},
+        } as any]]));
+
+        store.set(closeWSConnectionForShutdownAtom, 'Zotero quitting', REMEMBER);
+
+        expect(sendParkMock).toHaveBeenCalledWith('run-1');
+        expect(saveInterruptedThreadMock).not.toHaveBeenCalled();
+        store.set(pendingApprovalsAtom, new Map());
     });
 
     it('falls back to the run\'s thread when the store has no current thread', () => {

@@ -33,6 +33,12 @@ export type BusyContext = {
     busy_sync: number;
     /** 1 if a Zotero DB transaction is open right now (queries queue behind it) */
     busy_db_tx: number;
+    /**
+     * Age in ms of the open Zotero DB transaction, or 0 when none is open. Tells
+     * a write stalled behind another one (Zotero, another plugin, a bulk edit)
+     * from one that is slow itself.
+     */
+    busy_db_tx_ms: number;
     /** 1 if Zotero holds its global data lock */
     busy_zotero_locked: number;
     /** 1 if Zotero full-text indexing fired recently (within `INDEXING_RECENCY_MS`) */
@@ -174,6 +180,7 @@ export function getBusyContext(): BusyContext {
 
     let busySync = 0;
     let busyDbTx = 0;
+    let busyDbTxMs = 0;
     let busyLocked = 0;
     let busyExtracting = 0;
     let extractingHotPending = 0;
@@ -199,6 +206,7 @@ export function getBusyContext(): BusyContext {
         const Z = Zotero as any;
         busySync = Z.Sync?.Runner?.syncInProgress ? 1 : 0;
         busyDbTx = Z.DB?.inTransaction?.() ? 1 : 0;
+        busyDbTxMs = Zotero.Beaver?.transactionWatch?.openAgeMs(now) ?? 0;
         busyLocked = Z.locked ? 1 : 0;
         // Beaver's own PDF extraction: in-flight ops on either MuPDF worker
         // slot (exposed cross-bundle via these globals).
@@ -260,6 +268,7 @@ export function getBusyContext(): BusyContext {
     return {
         busy_sync: busySync,
         busy_db_tx: busyDbTx,
+        busy_db_tx_ms: busyDbTxMs,
         busy_zotero_locked: busyLocked,
         busy_indexing: busyIndexing,
         busy_extracting: busyExtracting,

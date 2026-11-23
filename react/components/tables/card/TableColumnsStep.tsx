@@ -1,0 +1,312 @@
+import React, { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
+import type { TableCardColumn } from '@beaver/agent-core/protocol/tableCardProtocol';
+import type { DraftColumn } from '@beaver/agent-core/run-state/tableCardDraft';
+import { columnProblem } from '@beaver/agent-core/run-state/tableCardDraft';
+import Button from '@beaver/agent-ui/primitives/Button';
+import { isImeKeyEvent } from '@beaver/agent-ui/primitives/ime';
+import { DeleteIcon } from '../../icons/icons';
+import { ColumnOptionChips, ColumnTypeTag } from '../columnTypes';
+import { ColumnFields, focusAtEnd } from '../ColumnEditorFields';
+
+export interface TableColumnsStepProps {
+    columns: DraftColumn[];
+    disabled: boolean;
+    onAdd: () => void;
+    onUpdate: (key: string, patch: Partial<Omit<DraftColumn, 'key'>>) => void;
+    onRemove: (key: string) => void;
+}
+
+interface ColumnCardProps {
+    column: DraftColumn;
+    index: number;
+    disabled: boolean;
+    editing: boolean;
+    /** The field the editor focuses when it opens. */
+    focusField: ColumnField;
+    /**
+     * Counts requests to open this editor. A request for an editor that is
+     * already open (the footer's "Show") still moves the focus to its field.
+     */
+    focusRequest: number;
+    onEdit: (field: ColumnField) => void;
+    onClose: () => void;
+    onUpdate: (patch: Partial<Omit<DraftColumn, 'key'>>) => void;
+    onRemove: () => void;
+}
+
+/** The editor's text fields, in order. */
+type ColumnField = 'header' | 'question' | 'options';
+
+/** The field a click on the collapsed card points at: the part of the summary it hit. */
+function fieldAt(target: EventTarget | null, column: DraftColumn): ColumnField {
+    const el = target instanceof Element ? target : null;
+    if (el?.closest('.table-card-column-question')) return 'question';
+    if (el?.closest('.table-card-options') && column.type === 'select') return 'options';
+    return 'header';
+}
+
+/**
+ * A column at rest: its header and type tag, the question clamped to two
+ * lines, and a category's first options as chips. The create card wraps it in
+ * a button that opens the editor. The read-only fill card has no editor to
+ * reveal the rest, so it passes `full`: the whole question and every option.
+ */
+export const ColumnSummary: React.FC<{ column: Readonly<TableCardColumn>; incomplete?: boolean; full?: boolean }> = ({
+    column,
+    incomplete = false,
+    full = false,
+}) => {
+    const header = column.header.trim();
+    const question = (column.description ?? '').trim();
+    const options = (column.options ?? [])
+        .map((option) => ({ label: option.label.trim(), description: (option.description ?? '').trim() }))
+        .filter((option) => option.label);
+    return (
+        <>
+            <div className="display-flex flex-row items-center gap-2 min-w-0">
+                <span className={`flex-1 min-w-0 truncate font-medium ${header ? 'font-color-primary' : 'font-color-secondary'}`}>
+                    {header || 'Untitled column'}
+                </span>
+                {incomplete && <span className="table-card-badge-warning flex-none">Incomplete</span>}
+                <span className="flex-none">
+                    <ColumnTypeTag type={column.type} />
+                </span>
+            </div>
+            <div
+                className={`table-card-column-question text-sm font-color-secondary ${full ? 'table-card-column-question-full' : ''} ${question ? '' : 'table-card-empty'}`}
+            >
+                {question || 'No question yet'}
+            </div>
+            {column.type === 'select' && options.length > 0 && <ColumnOptionChips options={options} all={full} />}
+        </>
+    );
+};
+
+/**
+ * One question column. At rest it reads as a summary (header, type, the
+ * question clamped to two lines, a category's options); clicking it opens the
+ * editor in place, focused on the part that was clicked. A click outside the
+ * card, Escape, or Done closes it again. Removing a column is an action of
+ * the editor, so the summary keeps its type tag at the right edge.
+ */
+const ColumnCard: React.FC<ColumnCardProps> = ({
+    column,
+    index,
+    disabled,
+    editing,
+    focusField,
+    focusRequest,
+    onEdit,
+    onClose,
+    onUpdate,
+    onRemove,
+}) => {
+    const cardRef = useRef<HTMLDivElement | null>(null);
+    const headerRef = useRef<HTMLInputElement | null>(null);
+    const questionRef = useRef<HTMLTextAreaElement | null>(null);
+    const optionsRef = useRef<HTMLInputElement | null>(null);
+    const problem = columnProblem(column);
+    const name = column.header.trim() || `Column ${index + 1}`;
+
+    useLayoutEffect(() => {
+        if (!editing) return;
+        const fields = { header: headerRef.current, question: questionRef.current, options: optionsRef.current };
+        focusAtEnd(fields[focusField] ?? headerRef.current);
+        // The editor is taller than the summary, and a column added from the
+        // step heading opens at the end of the list: bring all of it into view.
+        cardRef.current?.scrollIntoView?.({ block: 'nearest' });
+        // Only on opening, or on a new request to open: otherwise the focus
+        // is the user's.
+    }, [editing, focusRequest]);
+
+    // A click outside the card closes the editor. It closes on the completed
+    // click, not on the press: collapsing shifts everything below the card,
+    // and a collapse at mousedown would move the pressed control (Create, Add
+    // column, the next column) out from under the pointer before its click.
+    // The press must also start outside, so a text selection dragged out of a
+    // field keeps the editor open. The type menu renders inside the card, so
+    // choosing a type keeps it open too.
+    useEffect(() => {
+        if (!editing || !cardRef.current) return;
+        const card = cardRef.current;
+        const doc = card.ownerDocument;
+        const outside = (event: Event) => {
+            const target = event.target as Node | null;
+            return !!target && !card.contains(target);
+        };
+        let pressedOutside = false;
+        const onMouseDown = (event: Event) => {
+            pressedOutside = outside(event);
+        };
+        const onClick = (event: Event) => {
+            if (pressedOutside && outside(event)) onClose();
+            pressedOutside = false;
+        };
+        doc.addEventListener('mousedown', onMouseDown, true);
+        doc.addEventListener('click', onClick, true);
+        return () => {
+            doc.removeEventListener('mousedown', onMouseDown, true);
+            doc.removeEventListener('click', onClick, true);
+        };
+    }, [editing, onClose]);
+
+    if (!editing) {
+        return (
+            <div
+                ref={cardRef}
+                className={`table-card-column ${disabled ? 'table-card-column-disabled' : ''}`}
+                role="button"
+                tabIndex={disabled ? -1 : 0}
+                aria-label={`Edit column ${name}`}
+                aria-disabled={disabled || undefined}
+                onClick={(e) => !disabled && onEdit(fieldAt(e.target, column))}
+                onKeyDown={(e) => {
+                    if (disabled || e.target !== e.currentTarget) return;
+                    if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        onEdit('header');
+                    }
+                }}
+            >
+                <ColumnSummary column={column} incomplete={!!problem} />
+            </div>
+        );
+    }
+
+    return (
+        <div
+            ref={cardRef}
+            className="table-card-column table-card-column-editing"
+            role="group"
+            aria-label={`Column ${index + 1}`}
+            onKeyDown={(e) => {
+                // Escape inside a field may be cancelling an IME candidate.
+                if (e.key === 'Escape' && !isImeKeyEvent(e.nativeEvent)) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onClose();
+                }
+            }}
+        >
+            <ColumnFields
+                column={column}
+                label={`Column ${index + 1}`}
+                disabled={disabled}
+                refs={{ header: headerRef, question: questionRef, options: optionsRef }}
+                onUpdate={onUpdate}
+            />
+            {problem && (column.header || column.description) && (
+                <div className="text-sm table-card-problem">{problem}</div>
+            )}
+            <div className="display-flex flex-row items-center gap-2 min-w-0">
+                <Button
+                    variant="ghost-secondary"
+                    icon={DeleteIcon}
+                    onClick={onRemove}
+                    disabled={disabled}
+                    ariaLabel={`Remove column ${name}`}
+                    style={{ marginLeft: '-6px' }}
+                >
+                    Remove
+                </Button>
+                <div className="flex-1" />
+                <Button variant="outline" onClick={onClose} style={{ padding: '2px 8px' }}>
+                    Done
+                </Button>
+            </div>
+        </div>
+    );
+};
+
+/** What the card reaches the list through: the heading's "Add column", the blocker's "Show". */
+export interface TableColumnsStepHandle {
+    /** Add an empty column and open it for editing. */
+    add: () => void;
+    /** Open the first column that is not complete, on the field it needs. */
+    openFirstIncomplete: () => void;
+}
+
+/**
+ * The Columns step: the proposed questions as summary cards, one open for
+ * editing at a time, with remove; "Add column" lives in the step heading and
+ * reaches the list through {@link TableColumnsStepHandle}. A column has no
+ * basis of its own: the filler reads the paper when there is one.
+ */
+export const TableColumnsStep = React.forwardRef<TableColumnsStepHandle, TableColumnsStepProps>(function TableColumnsStep({
+    columns,
+    disabled,
+    onAdd,
+    onUpdate,
+    onRemove,
+}, ref) {
+    // `request` counts every request to open a column, so asking for the
+    // column that is already open still focuses the field asked for.
+    const [editing, setEditingState] = useState<{ key: string; field: ColumnField; request: number } | null>(null);
+    const requests = useRef(0);
+    const setEditing = React.useCallback((next: { key: string; field: ColumnField } | null) => {
+        setEditingState(next ? { ...next, request: ++requests.current } : null);
+    }, []);
+    const knownKeys = useRef(new Set(columns.map((column) => column.key)));
+    const addRequested = useRef(false);
+
+    // A column added from "Add column" opens with its name focused.
+    useEffect(() => {
+        const added = columns.find((column) => !knownKeys.current.has(column.key));
+        for (const column of columns) knownKeys.current.add(column.key);
+        if (added && addRequested.current) {
+            addRequested.current = false;
+            setEditing({ key: added.key, field: 'header' });
+        }
+    }, [columns]);
+
+    useEffect(() => {
+        if (disabled) setEditing(null);
+    }, [disabled]);
+
+    const close = React.useCallback(() => setEditing(null), []);
+
+    useImperativeHandle(ref, () => ({
+        add: () => {
+            addRequested.current = true;
+            onAdd();
+        },
+        openFirstIncomplete: () => {
+            const column = columns.find((c) => columnProblem(c));
+            if (!column) return;
+            // Open it on the field that needs the fix.
+            const field: ColumnField = !column.header.trim() ? 'header' : !column.description.trim() ? 'question' : 'options';
+            setEditing({ key: column.key, field });
+        },
+    }), [columns, onAdd]);
+
+    return (
+        <div className="display-flex flex-col min-w-0" style={{ gap: '0.45rem' }}>
+            {columns.length === 0 && (
+                <div className="text-sm font-color-secondary">
+                    No columns yet. Use Add column to ask a question of every item.
+                </div>
+            )}
+            {columns.map((column, index) => (
+                <ColumnCard
+                    key={column.key}
+                    column={column}
+                    index={index}
+                    disabled={disabled}
+                    editing={editing?.key === column.key}
+                    focusField={editing?.key === column.key ? editing.field : 'header'}
+                    focusRequest={editing?.key === column.key ? editing.request : 0}
+                    onEdit={(field) => setEditing({ key: column.key, field })}
+                    onClose={close}
+                    onUpdate={(patch) => onUpdate(column.key, patch)}
+                    onRemove={() => {
+                        if (editing?.key === column.key) close();
+                        onRemove(column.key);
+                    }}
+                />
+            ))}
+        </div>
+    );
+});
+
+export default TableColumnsStep;

@@ -18,6 +18,15 @@ const mockState = {
     extractCalls: [] as any[],
     nextResult: { kind: 'ok' } as any,
     hotPendingCount: 0,
+    hotQueuedCount: 0,
+    /** The background worker client, or null before it was created. */
+    background: null as null | {
+        inFlight: number;
+        queued: number;
+        warm: boolean;
+        prewarm: ReturnType<typeof vi.fn>;
+        isWarm: () => boolean;
+    },
     mainWindow: null as any,
     extractResolve: null as null | ((value: any) => void),
     disposeCalls: [] as Array<string | undefined>,
@@ -40,12 +49,32 @@ vi.mock('../../../src/beaver-extract', () => ({
     disposeMuPDFWorker: vi.fn(async (name?: string) => {
         mockState.disposeCalls.push(name);
     }),
-    getExistingMuPDFWorkerClient: vi.fn((_name: string) => {
+    getExistingMuPDFWorkerClient: vi.fn((name: string = 'hot') => {
+        if (name === 'background') return mockState.background;
         return {
-            getStats: () => ({ pendingCount: mockState.hotPendingCount }),
+            get inFlight() { return mockState.hotPendingCount; },
+            get queued() { return mockState.hotQueuedCount; },
+            getStats: () => ({ pendingCount: mockState.hotPendingCount, queuedCount: mockState.hotQueuedCount }),
         };
     }),
+    getMuPDFWorkerClient: vi.fn((name: string = 'hot') => {
+        if (name !== 'background') throw new Error('hot client is not mocked');
+        mockState.background ??= backgroundClient(false);
+        return mockState.background;
+    }),
 }));
+
+/** A background worker client stub; `prewarm` resolves when the test says so. */
+function backgroundClient(warm: boolean) {
+    const client = {
+        inFlight: 0,
+        queued: 0,
+        warm,
+        prewarm: vi.fn(() => Promise.resolve()),
+        isWarm: () => client.warm,
+    };
+    return client;
+}
 
 // `backgroundExtractor.ts` imports `safeIsInTrash` from `zoteroItemUtils`
 // (the react-free helper module), not `zoteroUtils`.
@@ -154,6 +183,8 @@ describe('BackgroundExtractor', () => {
         mockState.extractCalls = [];
         mockState.nextResult = { kind: 'ok' };
         mockState.hotPendingCount = 0;
+        mockState.hotQueuedCount = 0;
+        mockState.background = null;
         mockState.disposeCalls = [];
         mockState.extractResolve = null;
         setupZoteroGlobal();
@@ -325,6 +356,257 @@ describe('BackgroundExtractor', () => {
         expect(result.processed).toBe(false);
         expect(result.reason).toBe('hot_busy');
         expect(mockState.extractCalls).toHaveLength(0);
+    });
+
+    describe('interactive overflow', () => {
+        const enqueueExtract = (zoteroKey = 'AAAAAAAA') => db.enqueueBackgroundJob({
+            jobType: 'document_extract',
+            libraryId: 1,
+            zoteroKey,
+            contentKind: 'pdf',
+            payloadKind: 'structured',
+            payload: payload(),
+            now: 0,
+        });
+
+        it('does not claim jobs while hot has queued work but nothing pending', async () => {
+            mockState.hotQueuedCount = 1;
+            await enqueueExtract();
+            const { BackgroundExtractor } = await loadProcessor();
+            const proc = new BackgroundExtractor();
+
+            expect(await proc.processOnce()).toEqual({ processed: false, reason: 'hot_busy' });
+            expect(mockState.extractCalls).toHaveLength(0);
+        });
+
+        it('holds new claims while an overflow request holds the lane and resumes when it is released', async () => {
+            await enqueueExtract();
+            const { BackgroundExtractor } = await loadProcessor();
+            const proc = new BackgroundExtractor();
+            proc.start();
+            try {
+                mockState.background = backgroundClient(true);
+                mockState.hotPendingCount = 1;
+                const route = await proc.interactiveOverflow.acquire();
+                expect(route.slot).toBe('background');
+                // Hot drained, but the overflow request still owns the background worker.
+                mockState.hotPendingCount = 0;
+                expect(await proc.processOnce()).toEqual({ processed: false, reason: 'hot_busy' });
+                expect(mockState.extractCalls).toHaveLength(0);
+
+                const notify = vi.spyOn(proc, 'notify');
+                route.release();
+                expect(notify).toHaveBeenCalled();
+                expect(await proc.processOnce()).toMatchObject({ processed: true });
+                expect(mockState.extractCalls).toHaveLength(1);
+            } finally {
+                await proc.stop();
+            }
+        });
+
+        it('releases a job claimed while an overflow request took the background worker', async () => {
+            await enqueueExtract();
+            const { BackgroundExtractor } = await loadProcessor();
+            const proc = new BackgroundExtractor();
+            proc.start();
+            try {
+                mockState.background = backgroundClient(true);
+                let route: { slot: string; release(): void } | undefined;
+                const claim = db.claimNextBackgroundJob.bind(db);
+                vi.spyOn(db, 'claimNextBackgroundJob').mockImplementation(async (...args) => {
+                    const record = await claim(...args);
+                    // Interactive work arrives while the claim is in flight.
+                    mockState.hotPendingCount = 1;
+                    route ??= await proc.interactiveOverflow.acquire();
+                    mockState.hotPendingCount = 0;
+                    return record;
+                });
+
+                await proc.processOnce();
+
+                expect(route?.slot).toBe('background');
+                expect(mockState.extractCalls).toHaveLength(0);
+                const [job] = await db.peekBackgroundJobs();
+                expect(job.availableAt).toBeLessThanOrEqual(Date.now());
+                route!.release();
+                expect(await proc.processOnce()).toMatchObject({ processed: true });
+                expect(mockState.extractCalls).toHaveLength(1);
+            } finally {
+                await proc.stop();
+            }
+        });
+
+        it('holds new claims while the background worker warms up for overflow', async () => {
+            await enqueueExtract();
+            const { BackgroundExtractor } = await loadProcessor();
+            const proc = new BackgroundExtractor();
+            proc.start();
+            try {
+                let finishWarmup!: () => void;
+                mockState.background = backgroundClient(false);
+                mockState.background.prewarm.mockImplementation(() => new Promise<void>((resolve) => {
+                    finishWarmup = resolve;
+                }));
+                mockState.hotPendingCount = 1;
+                const route = await proc.interactiveOverflow.acquire();
+                expect(route).toMatchObject({ slot: 'hot', overflowSkip: 'bg_not_warm' });
+                expect(mockState.background.prewarm).toHaveBeenCalledTimes(1);
+
+                // The waiting request finished on hot; the warm-up still runs.
+                mockState.hotPendingCount = 0;
+                route.release();
+                expect(await proc.processOnce()).toEqual({ processed: false, reason: 'hot_busy' });
+
+                const notify = vi.spyOn(proc, 'notify');
+                mockState.background.warm = true;
+                finishWarmup();
+                await vi.waitFor(() => expect(notify).toHaveBeenCalled());
+                expect(await proc.processOnce()).toMatchObject({ processed: true });
+                expect(mockState.extractCalls).toHaveLength(1);
+            } finally {
+                await proc.stop();
+            }
+        });
+
+        it('never overflows onto a running OCR job and leaves it running', async () => {
+            await db.enqueueBackgroundJob({
+                jobType: 'document_ocr',
+                libraryId: 1,
+                zoteroKey: 'BBBBBBBB',
+                contentKind: 'pdf',
+                payloadKind: 'structured',
+                payload: payload(),
+                now: 0,
+            });
+            const { BackgroundExtractor } = await loadProcessor();
+            const proc = new BackgroundExtractor();
+            proc.start();
+            try {
+                let finishOcr!: () => void;
+                let ocrSignal: AbortSignal | undefined;
+                let inLane = false;
+                proc.registerExecutor(
+                    ocrExecutor(async (_record, ctx: JobExecutionContext) => {
+                        ocrSignal = ctx.externalAbortSignal;
+                        // Remote work outside the lane, then the local re-extraction in it.
+                        await new Promise<void>((resolve) => {
+                            finishOcr = resolve;
+                        });
+                        return await ctx.runOnMuPDFWorker(async () => {
+                            inLane = true;
+                            await new Promise<void>((resolve) => {
+                                finishOcr = resolve;
+                            });
+                            return { kind: 'complete', reason: 'ocr_ok' };
+                        });
+                    }),
+                    { maxInFlight: 1 },
+                );
+                const pass = proc.processOnce({ awaitLaunchedJobs: true });
+                await vi.waitFor(() => expect(finishOcr).toBeDefined());
+
+                mockState.background = backgroundClient(true);
+                mockState.hotPendingCount = 1;
+                // Between lane uses: the lane is free, but the job is still running.
+                const between = await proc.interactiveOverflow.acquire();
+                expect(between).toMatchObject({ slot: 'hot', overflowSkip: 'lane_busy' });
+                between.release();
+
+                finishOcr();
+                await vi.waitFor(() => expect(inLane).toBe(true));
+                const inside = await proc.interactiveOverflow.acquire();
+                expect(inside).toMatchObject({ slot: 'hot', overflowSkip: 'lane_busy' });
+                inside.release();
+                expect(mockState.background.prewarm).not.toHaveBeenCalled();
+                expect(ocrSignal?.aborted).toBe(false);
+
+                finishOcr();
+                await pass;
+                expect(await db.peekBackgroundJobs()).toEqual([]);
+            } finally {
+                await proc.stop();
+            }
+        });
+
+        it('hands the background worker to a waiting request when the running job settles, before new jobs', async () => {
+            await db.enqueueBackgroundJob({
+                jobType: 'document_ocr',
+                libraryId: 1,
+                zoteroKey: 'BBBBBBBB',
+                contentKind: 'pdf',
+                payloadKind: 'structured',
+                payload: payload(),
+                now: 0,
+            });
+            const { BackgroundExtractor } = await loadProcessor();
+            const proc = new BackgroundExtractor();
+            proc.start();
+            try {
+                let finishOcr: (() => void) | undefined;
+                proc.registerExecutor(
+                    ocrExecutor(async (_record, ctx: JobExecutionContext) => ctx.runOnMuPDFWorker(async () => {
+                        await new Promise<void>((resolve) => {
+                            finishOcr = resolve;
+                        });
+                        return { kind: 'complete', reason: 'ocr_ok' };
+                    })),
+                    { maxInFlight: 1 },
+                );
+                const pass = proc.processOnce({ awaitLaunchedJobs: true });
+                await vi.waitFor(() => expect(finishOcr).toBeDefined());
+
+                mockState.background = backgroundClient(true);
+                const hot = await proc.interactiveOverflow.acquire();
+                expect(hot.slot).toBe('hot');
+                let claimed: { slot: string; release(): void } | undefined;
+                const waiting = proc.interactiveOverflow.acquire().then((route) => {
+                    claimed = route;
+                    return route;
+                });
+                await new Promise((resolve) => setTimeout(resolve, 0));
+                expect(claimed).toBeUndefined();
+                await enqueueExtract();
+
+                finishOcr!();
+                await pass;
+                expect((await waiting).slot).toBe('background');
+                // Interactive work still holds both workers; the queued job waits.
+                expect(await proc.processOnce()).toEqual({ processed: false, reason: 'hot_busy' });
+                expect(mockState.extractCalls).toHaveLength(0);
+
+                claimed!.release();
+                hot.release();
+                expect(await proc.processOnce()).toMatchObject({ processed: true });
+                expect(mockState.extractCalls).toHaveLength(1);
+            } finally {
+                await proc.stop();
+            }
+        });
+
+        it('lets maintenance wait for an overflow request before disposing the background worker', async () => {
+            const { BackgroundExtractor } = await loadProcessor();
+            const proc = new BackgroundExtractor();
+            proc.start();
+            mockState.background = backgroundClient(true);
+            mockState.hotPendingCount = 1;
+            const route = await proc.interactiveOverflow.acquire();
+            expect(route.slot).toBe('background');
+
+            let suspended = false;
+            const suspension = proc.suspendForMaintenance().then((resume) => {
+                suspended = true;
+                return resume;
+            });
+            await new Promise((resolve) => setTimeout(resolve, 0));
+            expect(suspended).toBe(false);
+            expect(mockState.disposeCalls).toEqual([]);
+            // No new overflow while suspending.
+            expect(await proc.interactiveOverflow.acquire()).toMatchObject({ slot: 'hot', overflowSkip: 'disabled' });
+
+            route.release();
+            await suspension;
+            expect(mockState.disposeCalls).toEqual(['background']);
+        });
     });
 
     it('waits for a dispatcher pass to finish before allowing cache maintenance', async () => {

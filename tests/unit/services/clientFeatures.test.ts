@@ -1,10 +1,11 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { version as CURRENT_VERSION } from '../../../package.json';
 import {
     CLIENT_FEATURES,
     ZOTERO_PLUGIN_CLIENT_TYPE,
     ZOTERO_PLUGIN_FEATURES,
 } from '@beaver/agent-core/protocol/agentProtocol';
+import { isExternalRecordsEnabled } from '../../../src/services/externalRecordsCapability';
 
 // Guards the client-feature handshake (Lane C).
 type Op = 'gt' | 'gte';
@@ -54,9 +55,9 @@ const VERSION_GATES: { feature: string; minVersion: string; op: Op }[] = [
 // event a client only answers if it has the handler: a build that predates it
 // drops the unknown event silently, so the backend refuses the op up front
 // rather than letting the caller wait out the request timeout.
-// list_items_special_collections, list_collections_recursive,
-// list_tags_name_query and list_tags_types are declaration-only for the same
-// reason as list_items_include_children: they
+// list_items_nested_children, list_items_special_collections,
+// list_collections_recursive, list_tags_name_query and list_tags_types are
+// declaration-only for the same reason as list_items_include_children: they
 // gate request fields a client only honors if its handler implements them, and
 // a build that predates them drops the field and answers a narrower question
 // without saying so.
@@ -109,6 +110,18 @@ const VERSION_GATES: { feature: string; minVersion: string; op: Op }[] = [
 // undelivered_action_ack is declaration-only because it makes the backend store
 // actions as unconfirmed before executing them: a build that predates it never
 // completes those records and would offer to retry a change already made.
+// parked_runs is declaration-only because a run then parks on an unanswered
+// card instead of giving up on it: a build that predates it never shows the
+// stored cards again and leaves the run's calls open.
+// external_records is declaration-only because it gates record shapes (details,
+// search headers, combined snapshots) and import behavior (click-time
+// proposals, fill-only rules, ordered attachments) a build must implement; the
+// PubMed and trial capabilities are offered only to declaring clients.
+// tables is declaration-only because the client serves the table data and runs
+// fills itself; the backend never infers it from a version.
+// background_jobs is declaration-only because it commits the client to answering
+// `job_wait_request`, storing parked fill results and resuming without
+// answers.
 const DECLARATION_ONLY_FEATURES = [
     'external_files',
     'pdf_candidates',
@@ -116,6 +129,7 @@ const DECLARATION_ONLY_FEATURES = [
     'portable_ids',
     'collection_ids',
     'list_items_include_children',
+    'list_items_nested_children',
     'list_items_special_collections',
     'create_note_tags_collections',
     'edit_note_batch',
@@ -140,6 +154,10 @@ const DECLARATION_ONLY_FEATURES = [
     'book_chapters',
     'run_reattach',
     'undelivered_action_ack',
+    'parked_runs',
+    'external_records',
+    'tables',
+    'background_jobs',
 ];
 
 // The full backend feature vocabulary (ALL_FEATURES in version_gates.py): every
@@ -278,5 +296,30 @@ describe('version-gate mirror integrity', () => {
         expect(compareVersions('0.22.0-beta.1', '0.22.0b1')).toBe(0);
         expect(compareVersions('0.22.0-beta.1', '0.22.0')).toBe(-1);
         expect(compareVersions('0.22.0-beta.2', '0.22.0-beta.1')).toBe(1);
+    });
+});
+
+// The external-records declaration is withheld from the handshake on release
+// builds (`zoteroClientIdentity.ts` filters it out), while the feature stays in
+// the vocabulary above: the build gate decides what is declared, not what this
+// build knows how to do.
+describe('external records build gate', () => {
+    afterEach(() => vi.unstubAllEnvs());
+
+    it('enables external records only on development and staging builds', () => {
+        vi.stubEnv('NODE_ENV', 'production');
+        vi.stubEnv('BUILD_ENV', '');
+        expect(isExternalRecordsEnabled()).toBe(false);
+
+        vi.stubEnv('NODE_ENV', 'development');
+        expect(isExternalRecordsEnabled()).toBe(true);
+
+        vi.stubEnv('NODE_ENV', 'production');
+        vi.stubEnv('BUILD_ENV', 'staging');
+        expect(isExternalRecordsEnabled()).toBe(true);
+    });
+
+    it('keeps external_records in the declared vocabulary this build implements', () => {
+        expect(ZOTERO_PLUGIN_FEATURES).toContain(CLIENT_FEATURES.EXTERNAL_RECORDS);
     });
 });

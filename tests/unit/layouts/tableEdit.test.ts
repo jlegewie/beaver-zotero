@@ -1,0 +1,468 @@
+/**
+ * One `edit_table` call through the engine (`applyEdit`) and a new table from
+ * resolved sources (`buildTable`, `previewFacts`), pure: no Zotero.
+ */
+import { describe, expect, it } from "vitest";
+import contract from "../../fixtures/artifacts/provider-contract.json";
+import { applyEdit, buildTable, previewFacts, type ResolvedSource } from "@beaver/agent-core/layouts/tableEdit";
+import type { Row, TableSpec } from "@beaver/agent-core/layouts/table";
+
+type Case = { name: string; before?: TableSpec; request: any; response: any };
+const NOW = "2026-10-31T12:00:00.000Z";
+
+/** The spec as the store returns it, without its stamped key and version. */
+function content(spec: TableSpec): TableSpec {
+    const { key: _k, version: _v, ...rest } = spec;
+    return rest as TableSpec;
+}
+
+describe("the provider-contract apply_edit cases", () => {
+    // The cases that need no source resolution replay exactly.
+    for (const name of ["apply-edit-title-description", "apply-edit-columns", "apply-edit-remove-rows"]) {
+        it(name, () => {
+            const fixture = (contract as Case[]).find((c) => c.name === name)!;
+            const result = applyEdit(fixture.before!, fixture.request.operations, { added: [], refreshed: new Map() }, NOW);
+            expect(result.ok).toBe(true);
+            if (!result.ok) return;
+            expect(content(result.spec)).toEqual(content(fixture.response.spec));
+            expect(result.changes).toEqual(fixture.response.changes);
+        });
+    }
+});
+
+function paper(key: string, opts: { doc?: boolean; doi?: string; title?: string } = {}): ResolvedSource["papers"][number] {
+    const row: Row = {
+        id: `r-${key}`,
+        ref: { kind: "item", library_ref: "u", zotero_key: key },
+        ...(opts.doc ? { documents: [`u-${key.slice(0, 5)}PDF`] } : {}),
+        cells: {
+            _reference: {
+                outcome: "answered",
+                provenance: "system",
+                value: { kind: "reference", display_name: key, title: opts.title ?? `A study called ${key} of things` },
+            },
+        },
+        in_library: true,
+    };
+    return { row, identifiers: opts.doi ? { doi: opts.doi } : null, mode: opts.doc ? "document" : "title_abstract" };
+}
+
+function source(id: string, papers: ResolvedSource["papers"], extra: Partial<ResolvedSource> = {}): ResolvedSource {
+    return {
+        entry: id === "s1" ? { id, type: "items", ids: papers.map((p) => `u-${(p.row.ref as any).zotero_key}`) } : { id, type: "library", scope: { kind: "collection", library_ref: "u", key: "CASHTRN2", name: "Cash" } },
+        papers,
+        total: papers.length,
+        truncated: false,
+        rejected: [],
+        ...extra,
+    };
+}
+
+describe("creating a table", () => {
+    it("merges papers across sources, unions their origins and reports the duplicates", () => {
+        const resolved = [source("s1", [paper("AAAAAAAA", { doc: true })]), source("s2", [paper("AAAAAAAA", { doc: true }), paper("BBBBBBBB")])];
+        const facts = previewFacts(resolved);
+        expect(facts).toMatchObject({ rows: 2, duplicates: 1, total: 3, documents: 1, title_abstract: 1, no_input: 0 });
+        const result = buildTable(
+            { id: "t", title: "T", columns: [{ header: "Design", type: "select", options: [{ label: "RCT" }, { label: "Other" }] }] },
+            resolved,
+            "2026-10-31",
+        );
+        expect(result.ok).toBe(true);
+        if (!result.ok) return;
+        expect(result.spec.columns.map((c) => c.id)).toEqual(["_reference", "_year", "_identifier", "design"]);
+        expect(result.spec.columns[3].options).toEqual([{ label: "RCT", color: "blue" }, { label: "Other", color: "green" }]);
+        expect(result.spec.rows.map((r) => r.origin?.map((o) => o.source))).toEqual([["s1", "s2"], ["s2"]]);
+        expect(result.changes).toEqual([
+            { op: "add_source", source: "s1", type: "items", rows_added: 1, rows_restored: 0, duplicates: 0, rejected: [] },
+            { op: "add_source", source: "s2", type: "library", kind: "collection", name: "Cash", library_ref: "u", rows_added: 1, rows_restored: 0, duplicates: 1, rejected: [] },
+            { op: "add_column", column: "design", header: "Design" },
+        ]);
+    });
+    it("refuses a source cut short, no rows and an unusable source", () => {
+        expect(buildTable({ id: "t", title: "T" }, [source("s2", [paper("AAAAAAAA")], { truncated: true, total: 1800 })], "d")).toMatchObject({ ok: false, code: "too_large" });
+        expect(buildTable({ id: "t", title: "T" }, [source("s2", [])], "d")).toMatchObject({ ok: false, code: "no_rows" });
+        expect(buildTable({ id: "t", title: "T" }, [source("s2", [], { error: "Gone." })], "d")).toMatchObject({ ok: false, code: "source_unavailable", message: "sources[0]: Gone." });
+        expect(buildTable({ id: "t", title: "T" }, [source("s1", [paper("AAAAAAAA"), paper("BBBBBBBB")])], "d", 1)).toMatchObject({ ok: false, code: "too_large" });
+    });
+    it("builds a table the user starts empty, keeping a source that has no items yet", () => {
+        const empty = buildTable({ id: "t", title: "T" }, [], "d", undefined, { allowEmpty: true });
+        expect(empty.ok && empty.spec.columns.map((c) => c.id)).toEqual(["_reference", "_year", "_identifier"]);
+        expect(empty.ok && empty.spec.rows).toEqual([]);
+        const fromEmptySource = buildTable({ id: "t", title: "T" }, [source("s1", [])], "d", undefined, { allowEmpty: true });
+        expect(fromEmptySource.ok && fromEmptySource.spec.sources?.map((entry) => entry.id)).toEqual(["s1"]);
+        expect(fromEmptySource.ok && fromEmptySource.spec.rows).toEqual([]);
+        // Still refused: a source cut short or one that cannot be used.
+        expect(buildTable({ id: "t", title: "T" }, [source("s2", [paper("AAAAAAAA")], { truncated: true, total: 1800 })], "d", undefined, { allowEmpty: true })).toMatchObject({ ok: false, code: "too_large" });
+        expect(buildTable({ id: "t", title: "T" }, [source("s2", [], { error: "Gone." })], "d", undefined, { allowEmpty: true })).toMatchObject({ ok: false, code: "source_unavailable" });
+    });
+    it("derives unique column ids from headers, a generic one for a header without letters", () => {
+        const result = buildTable(
+            { id: "t", title: "T", columns: [{ header: "Sample size", type: "text" }, { header: "Sample size", type: "text" }, { header: "研究", type: "text" }] },
+            [source("s1", [paper("AAAAAAAA")])],
+            "d",
+        );
+        expect(result.ok && result.spec.columns.slice(3).map((c) => c.id)).toEqual(["sample_size", "sample_size_2", "column"]);
+    });
+});
+
+describe("editing a table", () => {
+    const base = (): TableSpec => {
+        const built = buildTable(
+            { id: "t", title: "T", columns: [{ header: "N", type: "text", description: "How many?" }] },
+            [source("s1", [paper("AAAAAAAA", { doc: true })]), source("s2", [paper("BBBBBBBB"), paper("CCCCCCCC")])],
+            "2026-10-30",
+        );
+        if (!built.ok) throw new Error(built.message);
+        const spec = built.spec;
+        for (const row of spec.rows)
+            row.cells.n = { outcome: "answered", provenance: "model", value: { kind: "text", text: "1" }, ...(row.documents ? { documents: row.documents } : {}) };
+        return spec;
+    };
+    it("adds papers to the items entry, restores a removed paper and merges a known one", () => {
+        const removed = applyEdit(base(), { remove_rows: ["r-BBBBBBBB"] }, { added: [], refreshed: new Map() }, NOW);
+        if (!removed.ok) throw new Error(removed.message);
+        expect(removed.spec.removed).toEqual([{ ref: { kind: "item", library_ref: "u", zotero_key: "BBBBBBBB" }, removed_at: NOW }]);
+        const added = source("s1", [paper("BBBBBBBB"), paper("DDDDDDDD"), paper("AAAAAAAA", { doc: true })]);
+        const result = applyEdit(removed.spec, { add_sources: [{ type: "items", ids: ["u-BBBBBBBB", "u-DDDDDDDD", "u-AAAAAAAA"] }] }, { added: [added], refreshed: new Map() }, NOW);
+        if (!result.ok) throw new Error(result.message);
+        expect(result.changes).toEqual([{ op: "add_source", source: "s1", type: "items", rows_added: 1, rows_restored: 1, duplicates: 1, rejected: [] }]);
+        expect(result.spec.removed).toBeUndefined();
+        expect(result.spec.sources![0].ids).toEqual(["u-AAAAAAAA", "u-BBBBBBBB", "u-DDDDDDDD"]);
+        // The stored row kept its answer.
+        expect(result.spec.rows[0].cells.n).toBeDefined();
+    });
+    const collection = (key: string, papers: ResolvedSource["papers"]): ResolvedSource => ({
+        ...source("s9", papers),
+        entry: { id: "s9", type: "library", scope: { kind: "collection", library_ref: "u", key, name: "Labor" } },
+    });
+    it("keeps papers removed in the same call out of a collection it adds", () => {
+        const labor = collection("LABORCOL", [paper("BBBBBBBB"), paper("CCCCCCCC"), paper("DDDDDDDD")]);
+        const result = applyEdit(
+            base(),
+            { add_sources: [{ type: "library", scope: labor.entry.scope! }], remove_rows: ["r-BBBBBBBB", "r-CCCCCCCC"] },
+            { added: [labor], refreshed: new Map() },
+            NOW,
+        );
+        if (!result.ok) throw new Error(result.message);
+        expect(result.changes).toEqual([
+            { op: "remove_rows", rows: 2 },
+            { op: "add_source", source: "s3", type: "library", kind: "collection", name: "Labor", library_ref: "u", rows_added: 1, rows_restored: 0, removed_skipped: 2, duplicates: 0, rejected: [] },
+        ]);
+        expect(result.spec.rows.map((row) => row.id)).toEqual(["r-AAAAAAAA", "r-DDDDDDDD"]);
+        expect(result.spec.removed!.map((paper) => (paper.ref as any).zotero_key)).toEqual(["BBBBBBBB", "CCCCCCCC"]);
+        // Refreshing the collection later leaves them out too.
+        const refreshed = applyEdit(result.spec, { refresh_sources: ["s3"] }, { added: [], refreshed: new Map([["s3", labor]]) }, NOW);
+        expect(refreshed.ok && refreshed.changes[0]).toMatchObject({ op: "refresh_source", rows_added: 0, removed_skipped: 2 });
+    });
+    it("brings back a paper an items source names, even one the same call removes", () => {
+        const items = source("s1", [paper("BBBBBBBB")]);
+        const result = applyEdit(base(), { remove_rows: ["r-BBBBBBBB"], add_sources: [{ type: "items", ids: ["u-BBBBBBBB"] }] }, { added: [items], refreshed: new Map() }, NOW);
+        if (!result.ok) throw new Error(result.message);
+        expect(result.changes[1]).toEqual({ op: "add_source", source: "s1", type: "items", rows_added: 0, rows_restored: 1, duplicates: 0, rejected: [] });
+        expect(result.spec.removed).toBeUndefined();
+    });
+    it("restores a paper removed by an earlier call when a collection holding it is added", () => {
+        const removed = applyEdit(base(), { remove_rows: ["r-BBBBBBBB"] }, { added: [], refreshed: new Map() }, NOW);
+        if (!removed.ok) throw new Error(removed.message);
+        const labor = collection("LABORCOL", [paper("BBBBBBBB")]);
+        const result = applyEdit(removed.spec, { add_sources: [{ type: "library", scope: labor.entry.scope! }] }, { added: [labor], refreshed: new Map() }, NOW);
+        expect(result.ok && result.changes[0]).toMatchObject({ rows_added: 0, rows_restored: 1 });
+        expect(result.ok && result.changes[0]).not.toHaveProperty("removed_skipped");
+    });
+    it("refresh skips removed papers, adds new ones and reports rows no longer found, keeping staleness", () => {
+        let spec = base();
+        const stale = applyEdit(spec, { update_columns: [{ id: "n", description: "How many people?" }] }, { added: [], refreshed: new Map() }, NOW);
+        if (!stale.ok) throw new Error(stale.message);
+        const removed = applyEdit(stale.spec, { remove_rows: ["r-CCCCCCCC"] }, { added: [], refreshed: new Map() }, NOW);
+        if (!removed.ok) throw new Error(removed.message);
+        spec = removed.spec;
+        const refreshed = new Map([["s2", source("s2", [paper("CCCCCCCC"), paper("EEEEEEEE")])]]);
+        const result = applyEdit(spec, { refresh_sources: true }, { added: [], refreshed }, NOW);
+        if (!result.ok) throw new Error(result.message);
+        expect(result.changes).toEqual([{ op: "refresh_source", source: "s2", kind: "collection", name: "Cash", library_ref: "u", rows_added: 1, removed_skipped: 1, no_longer_found: 1 }]);
+        expect(result.spec.rows.find((r) => r.id === "r-BBBBBBBB")!.cells.n.stale).toBe(true);
+    });
+    it("is all or nothing: a bad entry late in the call changes nothing", () => {
+        const spec = base();
+        const result = applyEdit(spec, { title: "New", remove_columns: ["n", "missing"] }, { added: [], refreshed: new Map() }, NOW);
+        expect(result).toMatchObject({ ok: false, code: "unknown_column" });
+        expect((result as any).message).toContain("remove_columns[1]");
+        expect(spec.title).toBe("T");
+    });
+    it("refuses an addition over the row cap", () => {
+        const result = applyEdit(base(), { add_sources: [{ type: "items", ids: ["u-DDDDDDDD"] }] }, { added: [source("s1", [paper("DDDDDDDD")])], refreshed: new Map() }, NOW, 3);
+        expect(result).toMatchObject({ ok: false, code: "too_large" });
+    });
+    it("refuses a library source the table already has, and a source that cannot be resolved", () => {
+        const again = source("s2", [paper("BBBBBBBB")]);
+        expect(applyEdit(base(), { add_sources: [{ type: "library", scope: again.entry.scope! }] }, { added: [again], refreshed: new Map() }, NOW)).toMatchObject({ ok: false, code: "invalid_edit" });
+        const broken = source("s2", [], { error: "Gone." });
+        expect(applyEdit(base(), { add_sources: [{ type: "library", scope: { kind: "tag", library_ref: "u", tag: "x" } }] }, { added: [broken], refreshed: new Map() }, NOW)).toMatchObject({ ok: false, code: "source_unavailable", message: "add_sources[0]: Gone." });
+    });
+});
+
+describe("review fixes", () => {
+    it("creates the rows the preview showed when identifiers bridge papers across sources", () => {
+        const both = paper("AAAAAAAA", { title: "A long study title here" });
+        both.identifiers = { doi: "10.1/x", pmid: "77" };
+        const pmidOnly = paper("BBBBBBBB", { title: "Another title entirely different" });
+        pmidOnly.identifiers = { pmid: "77" };
+        const resolved = [source("s1", [both]), source("s2", [pmidOnly])];
+        expect(previewFacts(resolved).rows).toBe(1);
+        const result = buildTable({ id: "t", title: "T" }, resolved, "2026-10-31");
+        expect(result.ok && result.spec.rows).toHaveLength(1);
+        expect(result.ok && result.changes).toEqual([
+            { op: "add_source", source: "s1", type: "items", rows_added: 1, rows_restored: 0, duplicates: 0, rejected: [] },
+            { op: "add_source", source: "s2", type: "library", kind: "collection", name: "Cash", library_ref: "u", rows_added: 0, rows_restored: 0, duplicates: 1, rejected: [] },
+        ]);
+    });
+    it("refuses to refresh from a source cut short by the row cap", () => {
+        const built = buildTable({ id: "t", title: "T" }, [source("s2", [paper("BBBBBBBB")])], "2026-10-30");
+        if (!built.ok) throw new Error(built.message);
+        const refreshed = new Map([["s2", source("s2", [paper("BBBBBBBB")], { truncated: true, total: 1500 })]]);
+        expect(applyEdit(built.spec, { refresh_sources: true }, { added: [], refreshed }, NOW)).toMatchObject({ ok: false, code: "too_large" });
+    });
+    it("refreshes only the sources the table had, alongside a source it adds", () => {
+        const built = buildTable({ id: "t", title: "T" }, [source("s2", [paper("BBBBBBBB")])], "2026-10-30");
+        if (!built.ok) throw new Error(built.message);
+        const tag: ResolvedSource = { ...source("s9", [paper("CCCCCCCC")]), entry: { id: "new", type: "library", scope: { kind: "tag", library_ref: "u", tag: "t" } } };
+        const refreshed = new Map([["s2", source("s2", [paper("BBBBBBBB"), paper("DDDDDDDD")])]]);
+        const result = applyEdit(built.spec, { add_sources: [{ type: "library", scope: tag.entry.scope! }], refresh_sources: true }, { added: [tag], refreshed }, NOW);
+        expect(result.ok && result.changes.map((c) => c.op)).toEqual(["add_source", "refresh_source"]);
+    });
+});
+
+describe("review fixes, refresh", () => {
+    it("merges papers refreshed from two sources with their full identifiers", () => {
+        const tag: ResolvedSource = { ...source("s3", []), entry: { id: "s3", type: "library", scope: { kind: "tag", library_ref: "u", tag: "t" } } };
+        const built = buildTable({ id: "t", title: "T" }, [source("s2", [paper("AAAAAAAA")]), tag], "2026-10-30");
+        if (!built.ok) throw new Error(built.message);
+        const both = paper("BBBBBBBB", { title: "First title words here" });
+        both.identifiers = { doi: "10.1/x", pmid: "77" };
+        const pmid = paper("CCCCCCCC", { title: "Other title words here" });
+        pmid.identifiers = { pmid: "77" };
+        const refreshed = new Map([
+            ["s2", source("s2", [paper("AAAAAAAA"), both])],
+            ["s3", { ...tag, papers: [pmid] }],
+        ]);
+        const result = applyEdit(built.spec, { refresh_sources: true }, { added: [], refreshed }, NOW);
+        if (!result.ok) throw new Error(result.message);
+        expect(result.spec.rows).toHaveLength(2);
+        expect(result.changes.map((c) => (c as any).rows_added)).toEqual([1, 0]);
+    });
+});
+
+describe("option edits in the change list", () => {
+    const withDesign = (): TableSpec => {
+        const built = buildTable(
+            {
+                id: "t",
+                title: "T",
+                columns: [
+                    {
+                        header: "Design",
+                        type: "select",
+                        description: "What is the design?",
+                        options: [{ label: "RCT", description: "Randomized" }, { label: "Cohort" }, { label: "Other" }],
+                    },
+                ],
+            },
+            [source("s1", [paper("AAAAAAAA"), paper("BBBBBBBB"), paper("CCCCCCCC")])],
+            "2026-10-30",
+        );
+        if (!built.ok) throw new Error(built.message);
+        const [a, b, c] = built.spec.rows;
+        a.cells.design = { outcome: "answered", provenance: "model", value: { kind: "select", label: "Other" } };
+        b.cells.design = { outcome: "answered", provenance: "user", value: { kind: "select", label: "Other" } };
+        c.cells.design = { outcome: "answered", provenance: "model", value: { kind: "select", label: "RCT" } };
+        return built.spec;
+    };
+    const edit = (spec: TableSpec, options: any[]) =>
+        applyEdit(spec, { update_columns: [{ id: "design", options }] }, { added: [], refreshed: new Map() }, NOW);
+
+    it("counts the user's answers a removed option clears, and does not call it a new question", () => {
+        const result = edit(withDesign(), [{ label: "RCT" }, { label: "Cohort" }]);
+        if (!result.ok) throw new Error(result.message);
+        expect(result.changes).toEqual([
+            { op: "update_column", column: "design", header: "Design", fields: ["options"], stale: 0, cleared: 2, user_cleared: 1, relabelled: 0 },
+        ]);
+    });
+    it("reads a rename that keeps its definition as an options change only", () => {
+        const result = edit(withDesign(), [{ label: "Randomized trial", previous_label: "RCT" }, { label: "Cohort" }, { label: "Other" }]);
+        if (!result.ok) throw new Error(result.message);
+        expect(result.changes[0]).toMatchObject({ fields: ["options"], stale: 0, relabelled: 1 });
+    });
+    it("pairs a re-spelled option as the engine does: its definition decides the question", () => {
+        const kept = edit(withDesign(), [{ label: "rct" }, { label: "Cohort" }, { label: "Other" }]);
+        expect(kept.ok && kept.changes[0]).toMatchObject({ fields: ["options"], stale: 0 });
+        const cleared = edit(withDesign(), [{ label: "rct", description: null }, { label: "Cohort" }, { label: "Other" }]);
+        expect(cleared.ok && cleared.changes[0]).toMatchObject({ fields: ["question", "options"], stale: 3 });
+    });
+    it("reads removing an option with a definition as an options change only, keeping the other answers fresh", () => {
+        const result = edit(withDesign(), [{ label: "Cohort" }, { label: "Other" }]);
+        expect(result.ok && result.changes[0]).toMatchObject({ fields: ["options"], cleared: 1, stale: 0 });
+        expect(result.ok && result.spec.rows.some((row) => row.cells.design?.stale)).toBe(false);
+    });
+    it("reads renaming one defined option and dropping another as an options change only", () => {
+        const spec = withDesign();
+        const column = spec.columns.find((c) => c.id === "design")!;
+        column.options = [...column.options!, { label: "Review", color: "red", description: "Summarizes other studies" }];
+        // The definition is sent again unchanged, as the model sends the full list.
+        const result = edit(spec, [
+            { label: "Randomized trial", previous_label: "RCT", description: "Randomized" },
+            { label: "Cohort" },
+            { label: "Other" },
+        ]);
+        expect(result.ok && result.changes[0]).toMatchObject({ fields: ["options"], stale: 0, cleared: 0, relabelled: 1 });
+    });
+    it("still marks the answers out of date when a rename also rewords the definition", () => {
+        const result = edit(withDesign(), [{ label: "Randomized trial", previous_label: "RCT", description: "Assigned by lottery" }, { label: "Cohort" }, { label: "Other" }]);
+        expect(result.ok && result.changes[0]).toMatchObject({ fields: ["question", "options"], stale: 3, relabelled: 1 });
+    });
+    it("reads an added option without a definition as a new question too", () => {
+        const added = edit(withDesign(), [{ label: "RCT" }, { label: "Cohort" }, { label: "Other" }, { label: "Case study" }]);
+        expect(added.ok && added.changes[0]).toMatchObject({ fields: ["question", "options"], stale: 3 });
+    });
+    it("reads a new definition, on a kept or an added option, as a new question", () => {
+        const defined = edit(withDesign(), [{ label: "RCT" }, { label: "Cohort", description: "Followed over time" }, { label: "Other" }]);
+        expect(defined.ok && defined.changes[0]).toMatchObject({ fields: ["question"], stale: 3 });
+        const added = edit(withDesign(), [{ label: "RCT" }, { label: "Cohort" }, { label: "Other" }, { label: "Case study", description: "One case" }]);
+        expect(added.ok && added.changes[0]).toMatchObject({ fields: ["question", "options"] });
+    });
+});
+
+describe("the tab's column edits", () => {
+    const withDesign = (): TableSpec => {
+        const built = buildTable(
+            {
+                id: "t",
+                title: "T",
+                columns: [{ header: "Design", type: "select", description: "What is the design?", options: [{ label: "RCT" }, { label: "Other" }] }],
+            },
+            [source("s1", [paper("AAAAAAAA"), paper("BBBBBBBB")])],
+            "2026-10-30",
+        );
+        if (!built.ok) throw new Error(built.message);
+        const [a, b] = built.spec.rows;
+        a.cells.design = { outcome: "answered", provenance: "model", value: { kind: "select", label: "RCT" } };
+        b.cells.design = { outcome: "answered", provenance: "user", value: { kind: "select", label: "Other" } };
+        return built.spec;
+    };
+    const none = { added: [], refreshed: new Map() };
+
+    it("changes a type, clearing every answer and naming the type in the change", () => {
+        const result = applyEdit(withDesign(), { update_columns: [{ id: "design", type: "boolean" }] }, none, NOW);
+        if (!result.ok) throw new Error(result.message);
+        expect(result.changes[0]).toMatchObject({ op: "update_column", fields: ["type"], cleared: 2, user_cleared: 1 });
+        const column = result.spec.columns.find((c) => c.id === "design")!;
+        expect(column.type).toBe("boolean");
+        expect(column.options).toBeUndefined();
+        expect(result.spec.rows.every((row) => !row.cells.design)).toBe(true);
+    });
+
+    it("keeps the answers fresh when the user keeps them through a new question", () => {
+        const kept = applyEdit(
+            withDesign(),
+            { update_columns: [{ id: "design", description: "Which design was used?", existing_answers: "keep" }] },
+            none,
+            NOW,
+        );
+        if (!kept.ok) throw new Error(kept.message);
+        expect(kept.changes[0]).toMatchObject({ fields: ["question"], stale: 0 });
+        expect(kept.spec.rows.some((row) => row.cells.design?.stale)).toBe(false);
+        const marked = applyEdit(withDesign(), { update_columns: [{ id: "design", description: "Which design was used?" }] }, none, NOW);
+        expect(marked.ok && marked.changes[0]).toMatchObject({ fields: ["question"], stale: 2 });
+    });
+
+    it("ignores a type equal to the column's own", () => {
+        const result = applyEdit(withDesign(), { update_columns: [{ id: "design", type: "select", header: "Study design" }] }, none, NOW);
+        expect(result.ok && result.changes[0]).toMatchObject({ fields: ["header"], cleared: 0 });
+    });
+});
+
+describe("moving question columns", () => {
+    const none = { added: [], refreshed: new Map() };
+    const table = (): TableSpec => ({
+        id: "t",
+        anchor_column_id: "_reference",
+        sort: { column_id: "b", direction: "asc" },
+        columns: [
+            { id: "_reference", header: "Reference", type: "reference", system: true },
+            { id: "_year", header: "Year", type: "date", system: true },
+            { id: "_identifier", header: "Identifier", type: "link", system: true },
+            { id: "a", header: "A", type: "text" },
+            { id: "b", header: "B", type: "text" },
+            { id: "c", header: "C", type: "text" },
+        ],
+        rows: [
+            {
+                id: "r1",
+                cells: {
+                    _reference: { outcome: "answered", provenance: "system", value: { kind: "reference", display_name: "X" } },
+                    c: { outcome: "answered", provenance: "user", value: { kind: "text", text: "mine" } },
+                },
+            },
+        ],
+    });
+    const order = (spec: TableSpec) => spec.columns.map((column) => column.id);
+    const move = (spec: TableSpec, id: string, after: string | null) => applyEdit(spec, { move_columns: [{ id, after }] }, none, NOW);
+
+    it("puts a column after another question, keeping its cells, the sort and the anchor, and reports no change", () => {
+        const before = table();
+        const result = move(before, "c", "a");
+        expect(result.ok).toBe(true);
+        if (!result.ok) return;
+        expect(order(result.spec)).toEqual(["_reference", "_year", "_identifier", "a", "c", "b"]);
+        expect(result.spec.rows[0].cells.c).toEqual(before.rows[0].cells.c);
+        expect(result.spec.sort).toEqual(before.sort);
+        expect(result.spec.anchor_column_id).toBe("_reference");
+        expect(result.changes).toEqual([]);
+        expect(order(before)).toEqual(["_reference", "_year", "_identifier", "a", "b", "c"]);
+    });
+
+    it("puts a column first among the questions, after the system columns", () => {
+        const result = move(table(), "c", null);
+        expect(result.ok && order(result.spec)).toEqual(["_reference", "_year", "_identifier", "c", "a", "b"]);
+    });
+
+    it("keeps the paper and the year in their places when questions sit between or before them", () => {
+        const spec = table();
+        // [A, Reference, B, Year, C]
+        spec.columns = [spec.columns[3], spec.columns[0], spec.columns[4], spec.columns[1], spec.columns[5]];
+        const first = move(spec, "c", null);
+        expect(first.ok && order(first.spec)).toEqual(["c", "_reference", "a", "_year", "b"]);
+        const right = move(spec, "a", "b");
+        expect(right.ok && order(right.spec)).toEqual(["b", "_reference", "a", "_year", "c"]);
+    });
+
+    it("applies several moves in order", () => {
+        const result = applyEdit(table(), { move_columns: [{ id: "a", after: "c" }, { id: "b", after: "a" }] }, none, NOW);
+        expect(result.ok && order(result.spec)).toEqual(["_reference", "_year", "_identifier", "c", "a", "b"]);
+    });
+
+    it("refuses to move a system column or past one, and an unknown column, changing nothing", () => {
+        for (const [id, after] of [["_year", "a"], ["a", "_reference"], ["a", "_identifier"], ["gone", null], ["a", "gone"]] as const) {
+            const result = move(table(), id, after);
+            expect(result).toMatchObject({ ok: false, code: "unknown_column" });
+            expect(!result.ok && result.message).toMatch(/^move_columns\[0\]: column .* is not a question column/);
+        }
+        expect(move(table(), "a", "a")).toMatchObject({ ok: false, code: "invalid_edit" });
+        expect(applyEdit(table(), { move_columns: [{ id: "a", after: "b" }, { id: "x", after: null }] }, none, NOW)).toMatchObject({ ok: false });
+    });
+
+    it("refuses the paper column of a table without a reference column", () => {
+        const spec: TableSpec = {
+            id: "t",
+            columns: [
+                { id: "paper", header: "Paper", type: "text" },
+                { id: "a", header: "A", type: "text" },
+                { id: "b", header: "B", type: "text" },
+            ],
+            rows: [],
+        };
+        expect(move(spec, "paper", "b")).toMatchObject({ ok: false, code: "unknown_column" });
+        const result = move(spec, "b", null);
+        expect(result.ok && order(result.spec)).toEqual(["paper", "b", "a"]);
+    });
+});

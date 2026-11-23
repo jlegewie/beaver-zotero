@@ -15,10 +15,6 @@ vi.mock("../../../react/atoms/agentRunAtoms", async () => {
         abandonActiveRunLocallyAtom: atom(null, () => {}),
     };
 });
-vi.mock("../../../src/services/librarySuggestionsService", () => ({
-    librarySuggestionsService: { getSuggestions: vi.fn() },
-}));
-import { librarySuggestionsService } from "../../../src/services/librarySuggestionsService";
 import { setCredentialAdapter } from "@beaver/agent-core/transport/credentials";
 import * as prefs from "../../../src/utils/prefs";
 import {
@@ -26,13 +22,7 @@ import {
     openAiApiKeyAtom,
     anthropicApiKeyAtom,
 } from "../../../react/atoms/models";
-import {
-    firstRunSuggestionsAtom,
-    firstRunSuggestionsLoadingAtom,
-    firstRunSuggestionsErrorAtom,
-    loadFirstRunSuggestionsAtom,
-} from "../../../react/atoms/firstRun";
-import { libraryItemCountAtom } from "../../../react/atoms/zoteroContext";
+import { firstRunPreviewAtom } from "../../../react/atoms/firstRun";
 import { store } from "../../../react/store";
 import { recentThreadsAtom } from "../../../react/atoms/threads";
 import { threadEntitiesAtom, pinsPendingAtom } from "../../../react/atoms/threadList";
@@ -166,52 +156,10 @@ describe("account projection transitions", () => {
         emit({ session: { user: { id: "b" } }, authenticating: false });
         expect(store.get(openAiApiKeyAtom)).toBe("");
     });
-    it.each(["resolve", "reject"])(
-        "allows the next account to load suggestions while a stale request may %s",
-        async (completion) => {
-            store.set(libraryItemCountAtom, 20);
-            let resolveOld!: (value: any) => void;
-            let rejectOld!: (error: Error) => void;
-            let resolveNew!: (value: any) => void;
-            vi.mocked(librarySuggestionsService.getSuggestions)
-                .mockImplementationOnce(
-                    () =>
-                        new Promise((resolve, reject) => {
-                            resolveOld = resolve;
-                            rejectOld = reject;
-                        }),
-                )
-                .mockImplementationOnce(
-                    () =>
-                        new Promise((resolve) => {
-                            resolveNew = resolve;
-                        }),
-                );
-            const oldRequest = store.set(loadFirstRunSuggestionsAtom);
-            expect(store.get(firstRunSuggestionsLoadingAtom)).toBe(true);
-            emit({ generation: 1 });
-            expect(store.get(firstRunSuggestionsLoadingAtom)).toBe(false);
-            const newRequest = store.set(loadFirstRunSuggestionsAtom);
-            expect(
-                librarySuggestionsService.getSuggestions,
-            ).toHaveBeenCalledTimes(2);
-            const response = {
-                cards: [],
-                facts: { library_size: 20 },
-                generated_at: new Date().toISOString(),
-            } as any;
-            if (completion === "resolve") resolveOld(response);
-            else rejectOld(new Error("Old account request failed"));
-            await oldRequest;
-            expect(store.get(firstRunSuggestionsLoadingAtom)).toBe(true);
-            expect(store.get(firstRunSuggestionsAtom)).toBeNull();
-            expect(store.get(firstRunSuggestionsErrorAtom)).toBeNull();
-            expect(savedPrefs.has("librarySuggestions")).toBe(false);
-            resolveNew(response);
-            await newRequest;
-            expect(store.get(firstRunSuggestionsLoadingAtom)).toBe(false);
-            expect(store.get(firstRunSuggestionsAtom)).toEqual(response);
-            expect(savedPrefs.has("librarySuggestions")).toBe(true);
-        },
-    );
+    it("closes a first-run preview when the account changes", () => {
+        emit({ session: { user: { id: "a" } } });
+        store.set(firstRunPreviewAtom, true);
+        emit({ generation: 1, session: { user: { id: "b" } } });
+        expect(store.get(firstRunPreviewAtom)).toBe(false);
+    });
 });

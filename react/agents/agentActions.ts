@@ -1,4 +1,5 @@
-import { atom, type Getter, type Setter } from 'jotai';
+import { atom, type Atom, type Getter, type Setter } from 'jotai';
+import { selectAtom } from 'jotai/utils';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { isLibraryReferencePortable, resolveItemReference, resolveLibraryRef } from '../../src/utils/libraryIdentity';
 import { checkLibraryExcluded, getLibraryRevocations } from '../../src/services/agentDataProvider/utils';
@@ -30,6 +31,9 @@ import {
     isUnconfirmedAction,
 } from '@beaver/agent-core/agents/agentActionTypes';
 import { activeRunAtom, threadRunsAtom } from '@beaver/agent-core/run-state/atoms';
+import { getPendingApprovalIdsCoveredByFullAccess } from '../atoms/runApprovalPolicy';
+import { findPendingApprovalForToolcall } from '../components/agentRuns/editNoteShared';
+import { markExternalReferenceImportedAtom } from '../atoms/externalReferences';
 
 export * from '@beaver/agent-core/agents/agentActionTypes';
 
@@ -166,11 +170,6 @@ export const agentActionsByToolcallAtom = atom<Map<string, AgentAction[]>>((get)
     return groupActionsByToolcall(actions);
 });
 
-export const getAgentActionsByToolcallAtom = atom(
-    (get) => (toolcallId: string, filter: (action: AgentAction) => boolean = () => true) => 
-        get(agentActionsByToolcallAtom).get(toolcallId)?.filter(filter) || []
-);
-
 // =============================================================================
 // Derived Atoms - Group by run_id
 // =============================================================================
@@ -193,10 +192,135 @@ export const agentActionsByRunAtom = atom<Map<string, AgentAction[]>>((get) => {
     return groupActionsByRun(actions);
 });
 
-export const getAgentActionsByRunAtom = atom(
-    (get) => (runId: string, filter: (action: AgentAction) => boolean = () => true) => 
-        get(agentActionsByRunAtom).get(runId)?.filter(filter) || []
-);
+// =============================================================================
+// Scoped selectors
+// =============================================================================
+//
+// A long thread mounts hundreds of cards, and every agent action written —
+// streamed, applied, undone — replaces the thread's action list, as every
+// pending approval added or answered replaces the approval map. A card that
+// subscribes to the whole list or map re-renders on each of those writes. The
+// selectors below narrow a subscription to what one card or one run renders and
+// hold their previous value while it is unchanged, so jotai skips the update.
+//
+// The comparisons rely on unchanged entries keeping their object identity: every
+// action and approval write replaces only the entries it changes. Selectors are
+// cached per key; the caches are dropped with the run selectors when the open
+// thread changes (`resetAgentActionSelectorCaches`).
+
+const EMPTY_ACTIONS: AgentAction[] = [];
+
+function sameItems<T>(left: readonly T[], right: readonly T[]): boolean {
+    return left === right
+        || (left.length === right.length && left.every((item, index) => item === right[index]));
+}
+
+function sameMembers<T>(left: ReadonlySet<T>, right: ReadonlySet<T>): boolean {
+    if (left === right) return true;
+    if (left.size !== right.size) return false;
+    for (const item of left) if (!right.has(item)) return false;
+    return true;
+}
+
+function sameNestedItems<T>(left: readonly (readonly T[])[], right: readonly (readonly T[])[]): boolean {
+    return left === right
+        || (left.length === right.length && left.every((items, index) => sameItems(items, right[index])));
+}
+
+const toolcallActionsAtoms = new Map<string, Atom<AgentAction[]>>();
+const toolcallsActionsAtoms = new Map<string, Atom<AgentAction[][]>>();
+const runsActionsAtoms = new Map<string, Atom<AgentAction[][]>>();
+const toolcallApprovalAtoms = new Map<string, Atom<PendingApproval | null>>();
+const toolcallsApprovalAtoms = new Map<string, Atom<(PendingApproval | null)[]>>();
+const runsLiveApprovalAtoms = new Map<string, Atom<ReadonlySet<string>>>();
+
+function cached<T>(cache: Map<string, Atom<T>>, key: string, create: () => Atom<T>): Atom<T> {
+    let value = cache.get(key);
+    if (!value) {
+        value = create();
+        cache.set(key, value);
+    }
+    return value;
+}
+
+/** The agent actions of one tool call, in thread order. */
+export function agentActionsForToolcallAtom(toolcallId: string): Atom<AgentAction[]> {
+    return cached(toolcallActionsAtoms, toolcallId, () => selectAtom(
+        agentActionsByToolcallAtom,
+        (byToolcall) => byToolcall.get(toolcallId) ?? EMPTY_ACTIONS,
+        sameItems,
+    ));
+}
+
+/** The agent actions of several tool calls, one array per id, in the order given. */
+export function agentActionsForToolcallsAtom(toolcallIds: readonly string[]): Atom<AgentAction[][]> {
+    const ids = [...toolcallIds];
+    return cached(toolcallsActionsAtoms, ids.join('\n'), () => selectAtom(
+        agentActionsByToolcallAtom,
+        (byToolcall) => ids.map((id) => byToolcall.get(id) ?? EMPTY_ACTIONS),
+        sameNestedItems,
+    ));
+}
+
+/** The agent actions of several runs, one array per id, in the order given. */
+export function agentActionsForRunsAtom(runIds: readonly string[]): Atom<AgentAction[][]> {
+    const ids = [...runIds];
+    return cached(runsActionsAtoms, ids.join('\n'), () => selectAtom(
+        agentActionsByRunAtom,
+        (byRun) => ids.map((id) => byRun.get(id) ?? EMPTY_ACTIONS),
+        sameNestedItems,
+    ));
+}
+
+/** The live approval awaiting a decision on one tool call, or null. */
+export function pendingApprovalForToolcallAtom(toolcallId: string): Atom<PendingApproval | null> {
+    return cached(toolcallApprovalAtoms, toolcallId, () => atom(
+        (get) => findPendingApprovalForToolcall(toolcallId, get(pendingApprovalsAtom).values()),
+    ));
+}
+
+/** The live approvals of several tool calls, one entry per id, in the order given. */
+export function pendingApprovalsForToolcallsAtom(toolcallIds: readonly string[]): Atom<(PendingApproval | null)[]> {
+    const ids = [...toolcallIds];
+    return cached(toolcallsApprovalAtoms, ids.join('\n'), () => selectAtom(
+        pendingApprovalsAtom,
+        (pending) => ids.map((id) => findPendingApprovalForToolcall(id, pending.values())),
+        sameItems,
+    ));
+}
+
+/** The ids of these runs' actions that a live approval is waiting on. */
+export function liveApprovalActionIdsForRunsAtom(runIds: readonly string[]): Atom<ReadonlySet<string>> {
+    const ids = [...runIds];
+    return cached(runsLiveApprovalAtoms, ids.join('\n'), () => selectAtom(
+        atom((get) => {
+            const pending = get(pendingApprovalsAtom);
+            const live = new Set<string>();
+            for (const actions of get(agentActionsForRunsAtom(ids))) {
+                for (const action of actions) {
+                    if (pending.has(action.id)) live.add(action.id);
+                }
+            }
+            return live as ReadonlySet<string>;
+        }),
+        (live) => live,
+        sameMembers,
+    ));
+}
+
+/**
+ * Drop the scoped selector caches. Call when the open thread changes, with
+ * `resetRunSelectorCaches`: the cached atoms are keyed by that thread's ids and
+ * hold their last value. Readers still holding a dropped atom keep working.
+ */
+export function resetAgentActionSelectorCaches(): void {
+    toolcallActionsAtoms.clear();
+    toolcallsActionsAtoms.clear();
+    runsActionsAtoms.clear();
+    toolcallApprovalAtoms.clear();
+    toolcallsApprovalAtoms.clear();
+    runsLiveApprovalAtoms.clear();
+}
 
 export const getAgentActionByIdAtom = atom(
     (get) => (actionId: string): AgentAction | null => {
@@ -289,8 +413,46 @@ export const updateAgentActionsAtom = atom(
 );
 
 /**
- * Acknowledge agent actions as applied with result data.
- * Updates both UI state and backend.
+ * Whether the server's record of an action holds a change of its own in the
+ * library, which a new apply must not replace: an applied action, or a failed
+ * undo (an error that kept its result). Mirrors the server's `only_unapplied`
+ * guard, which also lets an unconfirmed action through.
+ */
+export function hasLiveResult(action: Pick<AgentAction, 'status' | 'result_data' | 'error_details'>): boolean {
+    if (action.status === 'applied') return true;
+    return action.status === 'error'
+        && action.result_data != null
+        && !isUnconfirmedAction(action as AgentAction);
+}
+
+/** Show actions the way the server has them. */
+function showServerStates(
+    set: Setter,
+    states: Array<{
+        action_id: string;
+        status: ActionStatus;
+        result_data?: Record<string, any> | null;
+        error_message?: string | null;
+        error_details?: Record<string, any> | null;
+    }>,
+): void {
+    if (states.length === 0) return;
+    set(updateAgentActionsAtom, states.map((state) => ({
+        id: state.action_id,
+        status: state.status,
+        result_data: state.result_data ?? undefined,
+        error_message: state.error_message ?? undefined,
+        error_details: state.error_details ?? undefined,
+    })));
+}
+
+/**
+ * Acknowledge a user's apply with its result data, in UI state and on the
+ * backend.
+ *
+ * Sent with `onlyUnapplied`, so the server keeps the result of an action
+ * already applied elsewhere (another window or device) instead of replacing
+ * it. Each action it left alone is then shown the way the server has it.
  */
 export const ackAgentActionsAtom = atom(
     null,
@@ -315,13 +477,78 @@ export const ackAgentActionsAtom = atom(
         // Backend: Acknowledge actions
         const response = await agentActionsService.acknowledgeActions(
             runId,
-            actionResultData
+            actionResultData,
+            { onlyUnapplied: true },
         );
         if (!response.success) {
             logger(`ackAgentActionsAtom: failed to acknowledge actions for run ${runId}: ${response.errors.map((error) => error.detail).join(', ')}`, 1);
             return;
         }
+        const skipped = response.skipped ?? [];
+        if (skipped.length > 0) {
+            // The write in Zotero went through, but the server already had a
+            // result for these actions: its record is the one undo reads.
+            for (const entry of skipped) {
+                logger(`ackAgentActionsAtom: action ${entry.action_id} was not recorded; the server has it as ${entry.status ?? 'missing'}`, 1);
+            }
+            showServerStates(set, skipped.flatMap((entry) => entry.status ? [{ ...entry, status: entry.status }] : []));
+        }
         return response;
+    }
+);
+
+/**
+ * The actions still free to apply, by the server's current record. One that
+ * was applied elsewhere since this window loaded it (another window or
+ * device) is left out and shown the way the server has it, so applying from a
+ * stale view does not write the change a second time.
+ *
+ * A failed read keeps every action: the acknowledgement's own guard still
+ * keeps the server's record intact.
+ */
+export const withoutActionsAppliedElsewhereAtom = atom(
+    null,
+    async (_, set, runId: string, actions: AgentAction[]): Promise<AgentAction[]> => {
+        if (actions.length === 0) return actions;
+        let serverActions: Awaited<ReturnType<typeof agentActionsService.getActionsForRun>>;
+        try {
+            serverActions = await agentActionsService.getActionsForRun(runId);
+        } catch (error) {
+            logger(`withoutActionsAppliedElsewhereAtom: could not read run ${runId}: ${error}`, 1);
+            return actions;
+        }
+        const byId = new Map(serverActions.map((serverAction) => [String(serverAction.id), serverAction]));
+        const appliedElsewhere = actions.flatMap((action) => {
+            const serverAction = byId.get(action.id);
+            if (!serverAction || !hasLiveResult(serverAction as Pick<AgentAction, 'status' | 'result_data' | 'error_details'>)) return [];
+            return [{ action, serverAction }];
+        });
+        if (appliedElsewhere.length === 0) return actions;
+        for (const { action, serverAction } of appliedElsewhere) {
+            logger(`withoutActionsAppliedElsewhereAtom: action ${action.id} is already ${serverAction.status} on the server; not applying it again`, 1);
+        }
+        showServerStates(set, appliedElsewhere.map(({ action, serverAction }) => ({
+            action_id: action.id,
+            status: serverAction.status as ActionStatus,
+            result_data: serverAction.result_data,
+            error_message: serverAction.error_message,
+            error_details: serverAction.error_details,
+        })));
+        // An imported reference also shows as in the library wherever it is
+        // listed, so no other button offers to import it again.
+        for (const { action, serverAction } of appliedElsewhere) {
+            const externalId = itemActionExternalId(action);
+            const result = serverAction.result_data;
+            if (externalId && typeof result?.zotero_key === 'string') {
+                set(markExternalReferenceImportedAtom, externalId, {
+                    library_id: result.library_id,
+                    zotero_key: result.zotero_key,
+                    library_ref: result.library_ref,
+                });
+            }
+        }
+        const skippedIds = new Set(appliedElsewhere.map(({ action }) => action.id));
+        return actions.filter((action) => !skippedIds.has(action.id));
     }
 );
 
@@ -874,12 +1101,15 @@ export const clearAgentActionsAtom = atom(
 export const pendingApprovalsAtom = atom<Map<string, PendingApproval>>(new Map());
 
 /**
- * Add a pending approval from a WS event.
- * Supports multiple concurrent approvals for parallel tool calls.
+ * Add a pending approval from a WS event, or from the stored card of a parked
+ * run. Supports multiple concurrent approvals for parallel tool calls.
+ *
+ * `silent` skips the OS notification: a parked card restored on load is not
+ * news to the user.
  */
 export const addPendingApprovalAtom = atom(
     null,
-    (_, set, event: WSDeferredApprovalRequest) => {
+    (_, set, event: WSDeferredApprovalRequest, options?: { silent?: boolean }) => {
         set(pendingApprovalsAtom, (prev) => {
             const next = new Map(prev);
             next.set(event.action_id, {
@@ -905,7 +1135,7 @@ export const addPendingApprovalAtom = atom(
 
         // Surface an OS-native notification if the user can't currently see
         // the approval UI (e.g. working in another app).
-        notifyApprovalRequest(event);
+        if (!options?.silent) notifyApprovalRequest(event);
     }
 );
 
@@ -968,20 +1198,15 @@ export const clearAllPendingApprovalsAtom = atom(
 // deliberately NOT agent actions (no apply/undo/validate lifecycle).
 
 /**
- * Get pending approval for a specific toolcall_id.
- * Searches the map for an approval matching the toolcall_id.
+ * How many pending approvals a switch to full access would answer at once. A
+ * number, so its readers re-render only when the count changes.
  */
-export const getPendingApprovalForToolcallAtom = atom(
-    (get) => (toolcallId: string): PendingApproval | null => {
-        const pendingMap = get(pendingApprovalsAtom);
-        for (const pending of pendingMap.values()) {
-            if (pending.toolcallId === toolcallId) {
-                return pending;
-            }
-        }
-        return null;
-    }
+export const pendingApprovalsCoveredByFullAccessCountAtom = atom(
+    (get) => getPendingApprovalIdsCoveredByFullAccess(get(pendingApprovalsAtom).values()).length
 );
+
+/** Stands in for the count above on surfaces that show it only while awaiting. */
+export const noPendingApprovalsCoveredCountAtom: Atom<number> = atom(() => 0);
 
 /**
  * Check if there are any pending approvals.
@@ -990,10 +1215,11 @@ export const hasPendingApprovalsAtom = atom(
     (get) => get(pendingApprovalsAtom).size > 0
 );
 
-// Note: `pendingApprovalsAtom` means "the backend is blocked waiting on this
-// decision". Do not rebuild entries from stored pending actions — an action left
-// pending by a timeout has no waiter, so a re-added entry would show an
-// "awaiting approval" card whose Approve button sends into the void. Such
-// actions are applied locally through the `status === 'pending'` controls
-// instead, and `staleApprovalActionIdsAtom` marks approvals whose channel has
-// closed.
+// Note: `pendingApprovalsAtom` means "a run is waiting on this decision".
+// Do not rebuild entries from stored pending actions — an action left pending
+// by a timeout has no waiter, so a re-added entry would show an "awaiting
+// approval" card whose Approve button sends into the void. Such actions are
+// applied locally through the `status === 'pending'` controls instead, and
+// `staleApprovalActionIdsAtom` marks approvals whose channel has closed. The
+// one exception is the open parked run: its stored cards are restored by
+// `syncParkedCardsAtom`, and an answer to one resumes that run.

@@ -1,0 +1,63 @@
+import React from 'react';
+import type { TableCardColumnType } from '@beaver/agent-core/protocol/tableCardProtocol';
+import {
+    CheckmarkCircleIcon,
+    Icon,
+    ListBulletIcon,
+    TextIcon,
+} from '../icons/icons';
+
+type IconComponent = React.ComponentType<React.SVGProps<SVGSVGElement>>;
+
+/** Question column types in menu order, with the names the table view uses. */
+export const COLUMN_TYPES: { value: TableCardColumnType; label: string; icon: IconComponent }[] = [
+    { value: 'text', label: 'Text', icon: TextIcon },
+    { value: 'boolean', label: 'Yes / no', icon: CheckmarkCircleIcon },
+    { value: 'select', label: 'Category', icon: ListBulletIcon },
+];
+
+/** The type entry for a column type; an unknown type reads as text. */
+export const columnTypeOf = (type: string) =>
+    COLUMN_TYPES.find((entry) => entry.value === type) ?? COLUMN_TYPES[0];
+
+/** The column's type as a small tag: its icon and name, the same width for every column of a type. */
+export const ColumnTypeTag: React.FC<{ type: string }> = ({ type }) => {
+    const entry = columnTypeOf(type);
+    return (
+        <span className="table-card-type-tag">
+            <Icon icon={entry.icon} />
+            <span className="table-card-type-tag-label">{entry.label}</span>
+        </span>
+    );
+};
+
+/** Options a category column shows before "+N". */
+export const PREVIEW_OPTIONS = 4;
+
+/** A category column's options as chips: the first few then "+N", or with `all`, every one, wrapping. */
+export const ColumnOptionChips: React.FC<{
+    /** Labels, or options with a definition; a chip's tooltip is its label and definition. */
+    options: ReadonlyArray<string | { label: string; description?: string | null }>;
+    all?: boolean;
+}> = ({ options, all = false }) => (
+    <div className={`table-card-options ${all ? 'table-card-options-all' : ''}`} aria-label="Options">
+        {(all ? options : options.slice(0, PREVIEW_OPTIONS)).map((option, i) => {
+            const label = typeof option === 'string' ? option : option.label;
+            const definition = typeof option === 'string' ? null : option.description || null;
+            return (
+                <span
+                    key={`${label}-${i}`}
+                    className="table-card-option"
+                    title={definition ? `${label}: ${definition}` : label}
+                >
+                    {label}
+                </span>
+            );
+        })}
+        {!all && options.length > PREVIEW_OPTIONS && (
+            <span className="text-sm font-color-secondary flex-none">
+                {`+${options.length - PREVIEW_OPTIONS}`}
+            </span>
+        )}
+    </div>
+);

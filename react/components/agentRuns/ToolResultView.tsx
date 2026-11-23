@@ -11,11 +11,20 @@ import { AttachmentSearchResultView } from './toolResultViews/AttachmentSearchRe
 import { UserQuestionResultView } from './toolResultViews/UserQuestionResultView';
 import { BatchJobResultView } from './toolResultViews/BatchJobResultView';
 import { TableResultView } from './toolResultViews/TableResultView';
+import { OpenAlexNamesResultView } from './toolResultViews/OpenAlexNamesResultView';
 import { tableResultMessages } from '@beaver/agent-core/run-state/toolResultViews';
 import { isTableToolName, tableResultBody } from '@beaver/agent-core/run-state/tableResults';
 
+/** The search-details panel a source search shows at the top of its results, opened from the card header. */
+export interface SearchDetailsDisclosure {
+    open: boolean;
+    /** Element id of the panel, for the header button's aria-controls. */
+    id: string;
+}
+
 interface ToolResultViewProps {
     result: ToolReturnPart;
+    searchDetails?: SearchDetailsDisclosure;
 }
 
 /**
@@ -23,7 +32,7 @@ interface ToolResultViewProps {
  *
  * Returns null for view types this client does not render.
  */
-function renderFromView(view: ToolResultViewModel): React.ReactNode | null {
+function renderFromView(view: ToolResultViewModel, searchDetails?: SearchDetailsDisclosure): React.ReactNode | null {
     switch (view.view_type) {
         case 'duplicates': return <DuplicatesResultView view={view} />;
         case 'table':
@@ -31,7 +40,7 @@ function renderFromView(view: ToolResultViewModel): React.ReactNode | null {
         case 'item_list':
             return <ItemListResultView view={view} />;
         case 'external_reference_list':
-            return <ExternalReferenceListResultView view={view} />;
+            return <ExternalReferenceListResultView view={view} searchDetails={searchDetails} />;
         case 'collection_list':
             return <CollectionListResultView view={view} />;
         case 'tag_list':
@@ -44,21 +53,17 @@ function renderFromView(view: ToolResultViewModel): React.ReactNode | null {
             return <UserQuestionResultView view={view} />;
         case 'batch_operation':
             return <BatchJobResultView view={view} />;
+        case 'openalex_names':
+            return <OpenAlexNamesResultView view={view} />;
         default:
             return null;
     }
 }
 
 /** Table status messages shown with (or instead of) a table tool's result. */
-function tableMessages(result: ToolReturnPart, view: unknown): string[] {
+export function tableMessages(result: ToolReturnPart): string[] {
     if (!isTableToolName(result.tool_name)) return [];
-    const body = { ...tableResultBody(result.content) };
-    if (isToolResultView(view) && view.view_type === 'table') {
-        // The card retains repair status even after its body is dehydrated.
-        delete body.repair_warning;
-        delete body.saved;
-    }
-    return tableResultMessages(body);
+    return tableResultMessages(tableResultBody(result.content), result.tool_name);
 }
 
 /**
@@ -70,7 +75,7 @@ function tableMessages(result: ToolReturnPart, view: unknown): string[] {
 export function hasRenderableResult(result: ToolReturnPart): boolean {
     const view = result.metadata?.view;
     if (isToolResultView(view) && renderFromView(view) !== null) return true;
-    return tableMessages(result, view).length > 0;
+    return tableMessages(result).length > 0;
 }
 
 /**
@@ -84,12 +89,12 @@ export function hasRenderableResult(result: ToolReturnPart): boolean {
  * Note: Annotation tools are handled separately by AnnotationToolCallView
  * and don't go through this dispatcher.
  */
-export const ToolResultView: React.FC<ToolResultViewProps> = ({ result }) => {
+export const ToolResultView: React.FC<ToolResultViewProps> = ({ result, searchDetails }) => {
     const view = result.metadata?.view;
-    const notices = tableMessages(result, view).map((message, index) => (
+    const notices = tableMessages(result).map((message, index) => (
         <div key={index} role="status" className="px-3 py-2 text-sm font-color-secondary">{message}</div>
     ));
-    const fromView = isToolResultView(view) ? renderFromView(view) : null;
+    const fromView = isToolResultView(view) ? renderFromView(view, searchDetails) : null;
     if (!fromView && notices.length === 0) return null;
     return <>{fromView}{notices}</>;
 };

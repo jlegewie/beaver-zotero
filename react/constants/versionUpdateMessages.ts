@@ -7,7 +7,7 @@ import type { FeatureTipId } from './featureTips';
  * draws for the id. An id rather than the component: this list is read by the
  * plugin bundle at startup, which has no React.
  */
-export type VersionShowcaseId = 'quick-prompt';
+export type VersionShowcaseId = 'quick-prompt' | 'research-table';
 
 /** A chord a release note can draw as keycaps; the label comes from `react/utils/quickPromptShortcut.ts`. */
 export type VersionShortcutId = 'quick-prompt' | 'beaver-window';
@@ -24,11 +24,23 @@ export interface VersionAlsoNew {
     shortcut?: VersionShortcutId;
 }
 
-/** Declarative actions keep release configuration safe for the plugin bundle. */
+/**
+ * Declarative actions keep release configuration safe for the plugin bundle.
+ * The card adapts the button to the account (signed out, out of credits, ...);
+ * see `react/utils/versionUpdateAction.ts`.
+ */
 export type VersionUpdateAction =
     | { type: 'open-beaver'; label: string }
     | { type: 'quick-prompt'; label: string }
-    | { type: 'open-url'; label: string; url: string };
+    | { type: 'open-url'; label: string; url: string }
+    /** Open Beaver with an action's /command in the chat input, bound to the
+     *  current selection like the home launcher. `requiresPlusTools`: the
+     *  feature runs only with Plus Tools (Beaver model, or own model with Plus
+     *  Tools on), so the card says what is missing instead. `featureTask`:
+     *  the feature-credit task (`react/constants/featureCreditTasks.ts`) that
+     *  teaches the action; while the account can still earn it, the button
+     *  opens its setup card instead. */
+    | { type: 'stage-action'; label: string; actionId: string; requiresPlusTools?: boolean; featureTask?: string };
 
 /**
  * Example prompt shown as a chat bubble in the feature tour
@@ -644,6 +656,16 @@ const versionUpdateMessageList: VersionUpdateMessageConfig[] = [
             },
         ],
         footer: `<a href="https://github.com/jlegewie/beaver-zotero/releases/tag/v0.26.0" target='_blank'>Full changelog</a>`,
+    },
+    {
+        version: "0.27.0",
+        title: "Extract data from every paper. Compare them side by side",
+        text: "Introducing research tables in Zotero. Beaver reads each paper, fills in every answer and links it to the page it came from. Export the table to Excel or CSV.",
+        showcase: 'research-table',
+        primaryAction: { type: 'stage-action', label: 'Try it', actionId: 'builtin-research-table', requiresPlusTools: true, featureTask: 'research_table' },
+        inPanel: false,
+        learnMoreUrl: "https://www.beaverapp.ai/docs/research-tables",
+        learnMoreLabel: "Learn more",
     },
 ];
 

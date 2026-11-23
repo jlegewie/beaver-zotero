@@ -24,7 +24,7 @@ Notes:
   typechecks `tests/`**. A broken test contract passes typecheck; run the suites. A
   `vi.mock()` path that no longer resolves is a silent no-op, not an error.
 - Every `build*` script starts with `copy:agent-ui-css` and ends with both package gates.
-  `npm start` runs the copy step too, once, before the watcher.
+  `npm start` runs the copy step before the watchers, then keeps it watching.
 - **Never create commits** unless explicitly asked.
 
 ### Build vs. watch — do not mix them
@@ -51,10 +51,14 @@ Consequences:
 - **Don't edit source while a live/integration run is extracting.**
 - Hot reload only refreshes the bundles and UI, not global state that survives a window
   reload (DB, Supabase, services). Startup-only wiring needs a full plugin reload.
-- **`@beaver/agent-ui`'s stylesheets are not watched.** `copy:agent-ui-css` runs once per
-  `npm start`. Saving one *does* trigger a scaffold rebuild + reload, but that copies the
-  stale generated file, so it looks like the edit did nothing. Re-run
-  `npm run copy:agent-ui-css` after editing a shared sheet.
+- **`@beaver/agent-ui`'s stylesheets ship as generated copies.** `npm start` runs
+  `watch:agent-ui-css`, which re-copies a sheet into `addon/content/styles/` whenever its
+  source changes (an edit, a merge, a checkout), so every rebuild ships the current
+  rules. A watcher started before this script existed never re-copies: restart it, or
+  run `npm run copy:agent-ui-css`. Even with a current copy, a hot reload often keeps
+  applying the previous version of a global sheet (Gecko caches it), so new markup can
+  render against old rules. Reload once more or restart Zotero before treating a layout
+  bug as real.
 
 ## Source layout: four roots, two bundles
 
@@ -65,9 +69,10 @@ Consequences:
 | `packages/agent-core/` | both (compiled from source) | consumed as `@beaver/agent-core/<subpath>` |
 | `packages/agent-ui/` | webpack only (compiled from source) | consumed as `@beaver/agent-ui/<subpath>`; its `src/theme/*.css` is copied into `addon/content/styles/` by `scripts/copy-agent-ui-css.mjs` |
 
-**The two bundles cannot import from each other.** The webpack bundle is loaded via a
-`<script>` tag into the window; cross-bundle communication goes through `__beaver*`
-properties on `Window`/`Zotero` (e.g. `__beaverEventBus`, `__beaverJotaiStore`).
+**The two bundles cannot import from each other.** The plugin compiles the webpack bundle
+once and runs it in each renderer window (`src/ui/rendererBundle.ts`, with a `<script>` tag
+as fallback); cross-bundle communication goes through `__beaver*` properties on
+`Window`/`Zotero` (e.g. `__beaverEventBus`, `__beaverJotaiStore`).
 
 ### `addon` global vs `Zotero.Beaver`
 
@@ -96,7 +101,7 @@ webpack-side caller via a callback or wrapper.
 ## `packages/agent-core` — the client-agnostic core
 
 The wire protocol and its type closure (`protocol/`, `transport/`, `run-state/`, `types/`,
-`agents/`, `citations/`, `identity/`, `platform/`, `extract/`, `voice/`) live here and are imported as
+`agents/`, `citations/`, `identity/`, `platform/`, `extract/`) live here and are imported as
 `@beaver/agent-core/<subpath>` from `src/`, `react/`, and `tests/`.
 
 - **Import by package specifier, never by relative path**, and never re-add a copy of a
@@ -118,9 +123,6 @@ The wire protocol and its type closure (`protocol/`, `transport/`, `run-state/`,
 - MuPDF worker code (`src/beaver-extract/worker/**`) may import **only**
   `@beaver/agent-core/extract/*`, and may not otherwise leave `src/beaver-extract`
   (lint-enforced).
-
-Voice contracts, ownership rules, and the fake-session verification recipe are documented in
-[`docs/voice-protocol.md`](docs/voice-protocol.md).
 
 ## `packages/agent-ui` — the shared React layer
 
@@ -195,21 +197,29 @@ originless user commands resolve a destination once with `resolveChatWindow()`. 
 
 | Mount point | Location | Component |
 |-------------|----------|-----------|
-| `#beaver-react-root-library` | `#zotero-item-pane` (main window) | `<LibrarySidebar />` |
-| `#beaver-react-root-reader` | `#zotero-context-pane` (main window) | `<ReaderSidebar />` |
+| `#beaver-react-root-sidebar` | active `#zotero-item-pane` on a library tab, `#zotero-context-pane` on any other (main window) | `<MainSidebar />` |
 | `#beaver-pane-window` | separate Beaver window | `<WindowSidebar />` (`isWindow={true}`) |
+
+A main window renders **one** sidebar. On a tab switch `react/ui/UIManager.ts` moves its
+element (`#beaver-pane-sidebar`) to the other pane instead of rendering a second copy, so the
+switch re-renders nothing and component state survives. Moving an element resets the scroll
+offsets inside it; the UI manager saves and restores them. In the standard layout the pane it
+occupies takes the `sidebarWidth` pref as its inline width and flex-basis; a splitter drag
+updates the pref, and the pane's `width` attribute (which Zotero persists as its own width) is
+put back. The flex-basis keeps Zotero's own width writes, which it lays out at once on every
+window resize, from resizing the pane (they made the reader resize in a loop). The inline width
+is where a splitter drag starts from.
 
 A hidden `#beaver-global-initializer-root` mounts `<GlobalContextInitializer />` for global
 hooks (auth, tab tracking, …).
 
 - **Each main-window renderer owns its Jotai store and atom identities** (`react/store.ts`).
-  Its library/reader sidebars and borrowed preferences surface share that store. The
+  Its sidebar and borrowed preferences surface share that store. The
   standalone owns another store and may also host preferences.
   `win.__beaverJotaiStore` is a lifetime-bounded diagnostic handle, never a cross-window API.
-  **Scroll state belongs to the renderer**: library/reader sidebars share it; the
-  standalone store isolates its scroll state. `isWindow` selects presentation.
-- `addon.runtime` owns stable runtime ids, the window registry, instance notifications and
-  one reader-width dispatcher. Attach installs a targeted UI bus on each chat window;
+  **Scroll state belongs to the renderer**: the standalone store isolates its scroll state. `isWindow` selects presentation.
+- `addon.runtime` owns stable runtime ids, the window registry and instance notifications.
+  Attach installs a targeted UI bus on each chat window;
   `BeaverReact.initializeRuntime` binds the renderer before any React roots mount. Renderer
   code uses `getHostWindow()` / `getContextWindow()` from `react/runtime/windowRuntime.ts`.
 - UI events target the owning renderer's bus (`react/events/eventManager.ts`). Background
@@ -271,8 +281,8 @@ quitting (full global cleanup behind the `isAppQuitting || isAppShuttingDown` gu
 `onStartup()` just ran.
 
 During cleanup, unmount React roots **before** removing DOM (stale `Zotero.Notifier` observers
-otherwise cause SIGSEGV), and unsubscribe its UI manager from reader-width updates. The plugin-owned dispatcher
-restores `Zotero.Reader.onChangeSidebarWidth` on instance disposal.
+otherwise cause SIGSEGV). The UI manager's cleanup gives the occupied pane back its own
+content, width and collapsed state, and unregisters its `layout` pref observer.
 
 ### Cross-window state: `Zotero` global vs `window`
 
@@ -297,7 +307,7 @@ scheduled from a closed window never fires — and the reference pins the dead w
   status reads and notification claims. Renderers only subscribe or issue commands.
   See [document and background runtime](docs/document-runtime.md).
 - Same rule for callbacks handed to app-lifetime Zotero registries (`Zotero.Notifier` observers,
-  `Zotero.Reader.onChangeSidebarWidth`): unregister them on their window's unload.
+  `Zotero.Prefs` observers): unregister them on their window's unload.
 
 ## Zotero API conventions
 
@@ -432,7 +442,7 @@ curl -sS -X POST http://127.0.0.1:<port>/beaver/test/<name> \
 
 Staging builds also enable in-memory Zotero debug capture at plugin startup, without
 changing the profile's logging preferences. Production builds do not enable these
-diagnostics. The fake voice-session endpoint remains development-only.
+diagnostics.
 
 The endpoints are registered by `addon.localEndpoints` and gated on authentication, so **they exist
 only once Beaver is logged in on that instance**, including with zero windows. UI commands
@@ -586,6 +596,12 @@ source Zotero). `fix-db` applies the same treatment to an already-created clone.
   compare against previous versions of the code ("pre-refactor, this used to…"), or mention
   internal planning documents. This repository is public — comments must not leak internal or
   development-only details.
+- **Keyboard handlers in text fields**: a custom `onKeyDown` that acts on Enter, Escape, Tab or
+  arrow keys must first return when `isImeKeyEvent(e.nativeEvent)`
+  (`@beaver/agent-ui/primitives/ime`). While an IME composes text (Chinese, Japanese, Korean),
+  it owns those keys; acting on them or calling `preventDefault()` cancels the composition or
+  closes the field mid-word. Cover it with a test that dispatches the key with
+  `isComposing: true`.
 
 ## Deprecated — do not build on
 
@@ -599,8 +615,8 @@ source Zotero). `fix-db` applies the same treatment to an already-created clone.
 The standalone survives main-window closure. Its context follows activation of a live main
 window and becomes empty when none remain. Rebinding replaces context observers, preserving
 its chat and explicit attachments. Preferences borrows the actual initiating renderer and
-closes with it. Use `BeaverUIFactory.commandBeaverWindow` with `open-chat`, `show-table`, or
-`show-chat`; commands pass persisted thread ids or plain table data, never stores or atoms.
+closes with it. Use `BeaverUIFactory.commandBeaverWindow` with `open-chat`; commands pass
+persisted thread ids, never stores or atoms.
 Ordinary window opening only focuses it. Explicit chat opening requires settled history,
 preserves a same-chat draft, and confirms replacement of user-authored drafts. It never
 stops a response in the destination; guarded loads commit only while the destination and

@@ -50,6 +50,20 @@ vi.mock('../../../src/services/agentDataProvider/actions/resolveCreateNoteParent
 // out of this suite's import graph.
 vi.mock('../../../src/services/agentDataProvider/utils', () => ({
     getCollectionByIdOrName: vi.fn(),
+    checkLibraryExcluded: vi.fn(() => null),
+}));
+
+vi.mock('../../../src/utils/noteEditorIO', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('../../../src/utils/noteEditorIO')>()),
+    getLatestNoteHtml: vi.fn(() => '<div data-schema-version="9"><h1>Title</h1><p>Body</p></div>'),
+}));
+vi.mock('../../../src/utils/noteHtmlSimplifier', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('../../../src/utils/noteHtmlSimplifier')>()),
+    getOrSimplify: vi.fn(() => ({ simplified: '<h1>Title</h1>\n<p>Body</p>', metadata: { elements: new Map() }, isStale: false })),
+}));
+vi.mock('../../../src/utils/noteCitationExpand', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('../../../src/utils/noteCitationExpand')>()),
+    preloadNotePageLabels: vi.fn().mockResolvedValue({}),
 }));
 
 import { executeCreateNoteAction } from '../../../react/utils/createNoteActions';
@@ -158,6 +172,20 @@ describe('executeCreateNoteAction', () => {
             related_item_key: 'RELKEY',
             warning: 'fallback warning',
         });
+    });
+
+    it('records the note as read_note shows it, as the socket path does', async () => {
+        const result = await executeCreateNoteAction({
+            proposed_data: {
+                title: 'Title',
+                content: 'Body',
+                library_id: 1,
+                parent_key: null,
+                collection_keys: [],
+            },
+        } as any, 'run-1');
+
+        expect(result).toMatchObject({ note_content: '<h1>Title</h1>\n<p>Body</p>' });
     });
 
     it('stages relation pre-save and mirrors it with skipDateModifiedUpdate', async () => {

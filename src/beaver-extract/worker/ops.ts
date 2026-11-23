@@ -1098,7 +1098,13 @@ export async function opSearch(
     const doc = await acquireDoc(args.pdfData);
     let docFailed = false;
     try {
-        const totalPages = doc.countPages();
+        // `resolveTruePageCount` (not `doc.countPages()`), like extraction and
+        // rendering: a corrupt PDF can advertise a page count its page tree
+        // does not resolve to. The advertised count would also only hold on a
+        // fresh open; a document reopened from the worker's cache has already
+        // had its tree walked and reports the corrected count. A page-less
+        // document stays at 0 (the probe would throw on it).
+        const totalPages = doc.countPages() > 0 ? resolveTruePageCount(doc) : 0;
 
         // Page-count gate: lets cold-cache search drop the upfront getPageCount call.
         // Returns a flagged result (NOT an error) so the handler can map it to

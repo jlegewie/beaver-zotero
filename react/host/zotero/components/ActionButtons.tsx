@@ -1,7 +1,7 @@
 import { viewAttachment } from '../../../runtime/navigation';
 import { tryGetWindowRuntime } from '../../../runtime/windowRuntime';
 import React, { useEffect, useState, useCallback } from 'react';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import {
     ArrowUpRightIcon,
     DownloadIcon,
@@ -37,10 +37,15 @@ import {
     ackAgentActionsAtom,
     isImportItemAgentAction,
     setAgentActionsToErrorAtom,
+    withoutActionsAppliedElsewhereAtom,
 } from '../../../agents/agentActions';
-import { executeImportItemActions } from '../../../utils/importItemActions';
+import { executeImportItemActions, importExternalReference } from '../../../utils/importItemActions';
+import { isOpenAlexWorkId } from '@beaver/agent-core/citations/externalRecords';
+import { primaryExternalUrl } from '@beaver/agent-core/citations/externalRecordDisplay';
+import { trialDetails, workDetails } from '@beaver/agent-core/types/externalReferences';
 import { CreateItemResultData } from '@beaver/agent-core/types/agentActions/items';
 import { currentThreadIdAtom } from '../../../atoms/threads';
+import { getThreadIdForRun } from '../agentActionExecution';
 import { searchableLibraryIdsAtom } from '../../../atoms/profile';
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import type { ExternalReferenceActionMode, ExternalReferenceActionsProps } from '@beaver/agent-ui/host/types';
@@ -58,6 +63,7 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
     webButtonMode = 'full',
     pdfButtonMode = 'icon-only',
     showCitationCount = true,
+    webUrl,
 }) => {
     const setIsDetailsVisible = useSetAtom(isExternalReferenceDetailsDialogVisibleAtom);
     const setSelectedReference = useSetAtom(selectedExternalReferenceAtom);
@@ -68,10 +74,9 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
     const getPendingCreateItemAction = useAtomValue(getPendingCreateItemActionBySourceIdAtom);
     const ackAgentActions = useSetAtom(ackAgentActionsAtom);
     const setAgentActionsToError = useSetAtom(setAgentActionsToErrorAtom);
-    // Active thread ID — used to stamp the background PDF fetch so the
-    // attachment_resolved ws event can route back to the live agent run.
-    const threadId = useAtomValue(currentThreadIdAtom);
+    const store = useStore();
     const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
+    const websiteUrl = webUrl ?? primaryExternalUrl(item);
 
     // Get cached reference directly from the cache for this item's source_id
     const sourceId = item.source_id;
@@ -92,6 +97,14 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
     );
     const [isLoading, setIsLoading] = useState(false);
     const [isImporting, setIsImporting] = useState(false);
+    // Shown under the buttons, so it is visible wherever they render (a row,
+    // the details dialog, a table) rather than behind a modal.
+    const [importError, setImportError] = useState<string | null>(null);
+    // An import that succeeds anywhere (another row, the details dialog)
+    // makes an earlier failure here moot.
+    useEffect(() => {
+        if (itemExists) setImportError(null);
+    }, [itemExists]);
     const [bestAttachment, setBestAttachment] = useState<Zotero.Item | null>(null);
 
     /**
@@ -102,6 +115,7 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
         if (isImporting || isLoading) return;
 
         setIsImporting(true);
+        setImportError(null);
         try {
             logger(`ActionButtons: Importing item "${item.title}"`, 1);
 
@@ -110,13 +124,27 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
             // fetch correlate its attachment_resolved ws event back to the right
             // action server-side.
             const matchingAction = item.source_id ? getPendingCreateItemAction(item.source_id) : null;
+            // Scopes import paths, routes the background PDF fetch's
+            // attachment_resolved event, and goes into the provenance note:
+            // the thread that owns the action's run, else the thread this
+            // reference is shown in.
+            const threadId = matchingAction
+                ? getThreadIdForRun(store.get, matchingAction.run_id)
+                : store.get(currentThreadIdAtom) ?? undefined;
+
+            // Applied in another window or on another device since this one
+            // loaded it: shown as the server has it instead of imported twice.
+            if (matchingAction) {
+                const [current] = await store.set(withoutActionsAppliedElsewhereAtom, matchingAction.run_id, [matchingAction]);
+                if (!current) return;
+            }
 
             // A v2 proposal for this reference is written through its own action,
             // so its resolved metadata, library, collections and tags apply.
             if (matchingAction && isImportItemAgentAction(matchingAction)) {
                 const batch = await executeImportItemActions([matchingAction], {
                     runId: matchingAction.run_id,
-                    threadId: threadId ?? undefined,
+                    threadId,
                 });
                 const failure = batch.failures[0];
                 if (failure) {
@@ -125,6 +153,8 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
                         markExternalReferenceImported(item.source_id!, existing);
                         setZoteroItemRef(existing);
                         setItemExists(true);
+                    } else {
+                        setImportError(failure.error);
                     }
                     setAgentActionsToError([matchingAction.id], failure.error, failure.errorDetails);
                     return;
@@ -138,13 +168,45 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
                 return;
             }
 
-            // createZoteroItem handles library/collection resolution internally
-            // and (since skipBackgroundPdfFetch defaults to false) schedules its
-            // own PDF fetch.
+            // No pending action: the backend prepares the proposal at this
+            // click, and it is written to the library and collection being viewed.
+            if (!matchingAction && item.source_id) {
+                let result;
+                try {
+                    result = await importExternalReference(item.source_id, { threadId });
+                } catch (error: any) {
+                    const existing = error?.details?.existing_item as ZoteroItemReference | undefined;
+                    if (error?.code === 'already_in_library' && existing) {
+                        markExternalReferenceImported(item.source_id, existing);
+                        setZoteroItemRef(existing);
+                        setItemExists(true);
+                        return;
+                    }
+                    setImportError(error?.message || 'The item could not be imported. Try again.');
+                    throw error;
+                }
+                const ref = { library_id: result.library_id, zotero_key: result.zotero_key, library_ref: result.library_ref };
+                markExternalReferenceImported(item.source_id, ref);
+                setZoteroItemRef(ref);
+                setItemExists(true);
+                const imported = await Zotero.Items.getByLibraryAndKeyAsync(result.library_id, result.zotero_key);
+                if (imported) {
+                    const contextWindow = tryGetWindowRuntime()?.contextWindow;
+                    const ZoteroPane = contextWindow && !contextWindow.closed ? contextWindow.ZoteroPane : undefined;
+                    ZoteroPane?.selectItem(imported.id);
+                }
+                return;
+            }
+
+            // A legacy create_item action (threads from older versions) is
+            // written with the plugin's own mapping. createZoteroItem handles
+            // library/collection resolution internally and (since
+            // skipBackgroundPdfFetch defaults to false) schedules its own PDF
+            // fetch.
             const newItem = await createZoteroItem(item, {
                 actionId: matchingAction?.id,
                 runId: matchingAction?.run_id,
-                threadId: threadId ?? undefined,
+                threadId,
             });
 
             // Use the item's actual library ID (may differ from user library if in group)
@@ -165,7 +227,7 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
                     newZoteroRef,
                     {
                         reason: provenanceReason,
-                        threadId: threadId ?? undefined,
+                        threadId,
                         runId: matchingAction?.run_id,
                     },
                 );
@@ -229,10 +291,11 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
             logger(`ActionButtons: Successfully imported "${item.title}" (key: ${newItem.key})`, 1);
         } catch (error) {
             logger(`ActionButtons: Failed to import "${item.title}": ${error}`, 1);
+            setImportError((current) => current ?? 'The item could not be imported. Try again.');
         } finally {
             setIsImporting(false);
         }
-    }, [item, isImporting, isLoading, threadId, markExternalReferenceImported, getPendingCreateItemAction, ackAgentActions, setAgentActionsToError]);
+    }, [item, isImporting, isLoading, store, markExternalReferenceImported, getPendingCreateItemAction, ackAgentActions, setAgentActionsToError]);
 
     // React to cache changes (e.g., when item is deleted and cache is invalidated)
     useEffect(() => {
@@ -381,8 +444,9 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
     };
 
     const hasPdf = item.open_access_url || (itemExists && zoteroItemRef && bestAttachment);
+    const showCitedBy = showCitationCount && item.citation_count != null && isOpenAlexWorkId(item.source_id);
 
-    return (
+    const buttons = (
         <div className="display-flex flex-row items-center gap-3">
             {/* Details button */}
             {renderButton(
@@ -394,7 +458,7 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
                     setSelectedReference(item);
                     setIsDetailsVisible(true);
                 },
-                !item.abstract,
+                !item.abstract && !trialDetails(item) && !workDetails(item),
                 'Show details',
                 detailsButtonMode=='icon-only' ? 'scale-90' : undefined
             )}
@@ -405,8 +469,8 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
                 'Open website',
                 'Web',
                 ArrowUpRightIcon,
-                () => (item.publication_url || item.url) ? Zotero.launchURL(item.url || item.publication_url!) : undefined,
-                !item.publication_url && !item.url,
+                () => websiteUrl ? Zotero.launchURL(websiteUrl) : undefined,
+                !websiteUrl,
                 'Open website'
             )}
 
@@ -427,16 +491,16 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
                 'Open PDF'
             )}
 
-            {/* Citation count */}
-            {showCitationCount && item.citation_count !== undefined && item.citation_count > 0 && (
+            {/* Citation count: OpenAlex lists the citing works only for its own ids */}
+            {showCitedBy && item.citation_count! > 0 && (
                 <a
                     onClick={() => Zotero.launchURL(`${CITED_BY_URL}${item.source_id}`)}
                     className="text-link-muted text-sm"
                 >
-                    Cited by {item.citation_count.toLocaleString()}
+                    Cited by {item.citation_count!.toLocaleString()}
                 </a>
             )}
-            {showCitationCount && item.citation_count !== undefined && item.citation_count === 0 && (
+            {showCitedBy && item.citation_count === 0 && (
                 <div className="font-color-tertiary text-sm">
                     Cited by {item.citation_count.toLocaleString()}
                 </div>
@@ -469,6 +533,14 @@ const ActionButtons: React.FC<ExternalReferenceActionsProps> = ({
                 isLoading || isImporting,
                 'Import to Zotero'
             )}
+        </div>
+    );
+
+    if (!importError) return buttons;
+    return (
+        <div className="display-flex flex-col gap-2">
+            {buttons}
+            <div className="text-sm font-color-red" role="alert">{importError}</div>
         </div>
     );
 };

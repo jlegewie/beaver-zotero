@@ -13,6 +13,7 @@ import type { AttachmentResolvedPayload } from '../attachmentResolved';
 import { filterPdfAttachments, schedulePdfFetchTask } from './pdfFetch';
 import { stampBeaverProvenanceExtra } from './provenance';
 import { assertTagsSaved, withTagCacheRepair } from '../tagCache';
+import { loadWebTranslationModules } from './zoteroApis';
 
 const SAVE_ATTACHMENTS_WITH_TRANSLATORS = false;
 
@@ -163,11 +164,9 @@ async function tryImportFromIdentifiers(identifiers: any, libraryId: number): Pr
 async function importFromUrl(url: string, libraryId: number): Promise<Zotero.Item | null> {
     if (!url) return null;
 
-    // Dynamic import for Zotero modules
-    // const { RemoteTranslate } = ChromeUtils.import_("chrome://zotero/content/RemoteTranslate.jsm");
-    // const { HiddenBrowser } = ChromeUtils.import_("chrome://zotero/content/HiddenBrowser.jsm");
-    const { RemoteTranslate } = ChromeUtils.importESModule("chrome://zotero/content/RemoteTranslate.mjs");
-    const { HiddenBrowser } = ChromeUtils.importESModule("chrome://zotero/content/HiddenBrowser.mjs");
+    const modules = loadWebTranslationModules();
+    if (!modules) return null;
+    const { RemoteTranslate, HiddenBrowser } = modules;
 
     const browser = new HiddenBrowser();
     const translate = new RemoteTranslate();

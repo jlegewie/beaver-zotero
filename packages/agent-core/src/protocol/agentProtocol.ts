@@ -5,7 +5,7 @@ import { SubscriptionStatus, ProcessingMode, ChargeType } from '../types/profile
 import { TextPart, ThinkingPart, ToolCallPart, ToolReturnPart, RetryPromptPart, RunUsage } from '../agents/types';
 import { ZoteroItemReference } from '../types/zotero';
 import { ItemDataWithStatus, AttachmentDataWithStatus, ItemStub, ItemSummary, AttachmentInfo, AttachmentStub } from '../types/zotero';
-import { ReaderState, NoteState } from '../types/attachments/apiTypes';
+import { ReaderState, NoteState, TableState } from '../types/attachments/apiTypes';
 import { BeaverAgentPrompt } from '../agents/types';
 import type { RetryTrigger } from '../agents/types';
 import type { CustomChatModel } from '../types/customChatModel';
@@ -161,6 +161,18 @@ export interface WSRequestAckEvent extends WSBaseEvent {
      * losing its socket. Only for runs the backend lets outlive their socket.
      */
     reattach_token?: string;
+    /**
+     * Feature credits this request granted (see `BeaverAgentPrompt.feature_task`).
+     * Present only on the request that earned them.
+     */
+    feature_credit?: FeatureCreditGrant;
+}
+
+/** Credits granted for starting a feature-credit task. */
+export interface FeatureCreditGrant {
+    /** The task key, e.g. `annotate`. */
+    key: string;
+    credits: number;
 }
 
 /** Part event for streaming content (text, thinking, tool calls) */
@@ -253,6 +265,22 @@ export interface WSRunCompleteEvent extends WSBaseEvent {
      * the wire for clients released before that change.
      */
     soft_cap_triggered?: boolean;
+    /**
+     * Set when the run ended waiting on the user: its open cards, which stay
+     * answerable. Each answer resumes the run. Absent otherwise.
+     */
+    parked?: import('../agents/types').ParkedRun | null;
+}
+
+/**
+ * The backend refused a `park` frame: the run waits on something that cannot
+ * park (a credit confirmation, say), so it keeps running. The client stops it
+ * as it would without parking.
+ */
+export interface WSParkRefusedEvent extends WSBaseEvent {
+    event: 'park_refused';
+    run_id?: string | null;
+    reason: 'not_parkable' | string;
 }
 
 /**
@@ -562,6 +590,12 @@ export interface ExternalReferenceCheckItem {
     isbn?: string;
     /** Array of creator last names for fuzzy matching */
     creators?: string[];
+    /** PubMed id, matched against a `PMID: <id>` line in Extra */
+    pmid?: string | null;
+    /** Record URL (e.g. a trial's registry page) */
+    url?: string | null;
+    /** Report number (e.g. a trial's NCT id) */
+    report_number?: string | null;
 }
 
 /** Request from backend to check if references exist in Zotero library */
@@ -1161,6 +1195,18 @@ export interface WSDocumentTimings {
      * or `warm`.
      */
     worker_state?: 'starting' | 'first_extract' | 'warmed' | 'warm';
+    /**
+     * The worker slot the request's operations ran on: `hot`, or `background`
+     * when the hot worker was busy and the request ran on the idle background
+     * worker instead.
+     */
+    worker_slot?: 'hot' | 'background';
+    /**
+     * Set when the hot worker was busy but the request still queued on it:
+     * `lane_busy` (the background worker was in use), `bg_not_warm` (it was
+     * not started and warmed up yet), or `disabled`.
+     */
+    overflow_skip?: 'lane_busy' | 'bg_not_warm' | 'disabled';
     /** The worker's WASM heap after the request's last worker operation, MB. */
     worker_heap_mb?: number;
     /** The largest WASM heap a worker of this slot has reported so far, MB. */
@@ -1666,6 +1712,14 @@ export interface WSListItemsRequest extends WSBaseEvent {
     tag?: string | null;
     item_category: ZoteroItemCategory;
     include_children?: boolean;
+    /**
+     * With `include_children`: sort and page top-level items only and nest each
+     * item's children on its row (`attachments` / `notes`). Sent only to
+     * clients that declare `list_items_nested_children`.
+     */
+    nest_children?: boolean;
+    /** Add `abstract` to every regular row. */
+    include_abstract?: boolean;
     recursive: boolean;
     sort_by: string;
     sort_order: string;
@@ -1687,6 +1741,19 @@ export interface RegularListResultItem {
     year?: number | null;
     date_added?: string | null;
     date_modified?: string | null;
+    /**
+     * Set only for an `include_abstract` request: "" when the item has no
+     * abstract. Left out when it could not be read, which tells the backend to
+     * look it up another way.
+     */
+    abstract?: string;
+    /**
+     * Set only for a `nest_children` request: the item's attachments, primary
+     * first, then by title. Left out when its children could not be read.
+     */
+    attachments?: AttachmentRowResult[];
+    /** Set with `attachments`: the item's child notes, by title. */
+    notes?: NoteResultItem[];
 }
 
 /** Response to list_items request */
@@ -1774,6 +1841,15 @@ export interface WSResolvePopulationRequest extends WSBaseEvent {
     item_category: 'regular' | 'attachment';
     /** Include matching standalone attachments before exclusions and truncation. */
     include_standalone_attachments?: boolean;
+    /**
+     * Attachment populations only: leave out a web snapshot (`text/html`)
+     * whose parent item also has a PDF or EPUB attachment in the population.
+     * Applied before exclusions and truncation, so every tranche of a
+     * continued job sees the same population.
+     *
+     * A handler that applies this MUST set `sibling_snapshots_skipped`.
+     */
+    skip_sibling_snapshots?: boolean;
     /** Filter regular items by attachment presence; null = no filter. */
     has_attachments?: boolean | null;
     /**
@@ -1884,6 +1960,12 @@ export interface WSResolvePopulationResponse {
     any_conditions_applied?: boolean | null;
     /** Confirms standalone attachments were included in resolution. */
     standalone_attachments_included?: boolean | null;
+    /**
+     * How many web snapshots `skip_sibling_snapshots` left out, counted before
+     * exclusions and truncation. Set (including 0) on every successful
+     * resolution of a request that asked for it; absent otherwise.
+     */
+    sibling_snapshots_skipped?: number | null;
     error?: string | null;
     error_code?: string | null;
     /** Available libraries (only included when error_code is 'library_not_found' or 'library_unavailable') */
@@ -1919,6 +2001,13 @@ export interface WSItemDisplayRequest extends WSBaseEvent {
      * most 1,000 items.
      */
     item_ids: string[];
+    /**
+     * Also report whether each regular item has a document a table row
+     * reads — a PDF, EPUB or HTML snapshot outside the trash (`has_pdf`).
+     * Attachment presence only; no file is opened. Asked by the table card's
+     * local lookups; the backend does not send it.
+     */
+    include_pdf?: boolean;
 }
 
 /** One item as a list draws it, computed by the client that owns the library. */
@@ -1937,6 +2026,8 @@ export interface ItemDisplayRow {
     subtitle?: string | null;
     /** Attachments only: the broad content kind, for the icon. */
     content_kind?: string | null;
+    /** Regular items, when the request asked: whether a PDF, EPUB or snapshot attachment exists. */
+    has_pdf?: boolean;
 }
 
 /**
@@ -2312,7 +2403,8 @@ export interface ErrorCandidate {
         | 'word_overlap'
         | 'inline_tag_drift'
         | 'structural_anchor'
-        | 'fuzzy_window';
+        | 'fuzzy_window'
+        | 'ambiguous_occurrence';
     score: number;
 }
 
@@ -2323,6 +2415,8 @@ export interface EditValidationError {
     error: string;
     error_code?: string | null;
     error_candidates?: ErrorCandidate[];
+    /** Diagnostic matcher strategy; see `WSAgentActionValidateResponse.match_strategy`. */
+    match_strategy?: string;
 }
 
 /** Response to agent action validation request */
@@ -2336,10 +2430,18 @@ export interface WSAgentActionValidateResponse {
     errors?: FieldValidationErrorInfo[];
     /**
      * Ranked alternative snippets when an edit_note old_string lookup fails.
-     * Present only with `error_code === 'old_string_not_found'`. Already
-     * truncated — do not re-truncate.
+     * Present with `error_code === 'old_string_not_found'` or
+     * `'ambiguous_match'`. Already truncated — do not re-truncate.
      */
     error_candidates?: ErrorCandidate[];
+    /**
+     * Diagnostic for edit_note match failures, for logging only. With
+     * `ambiguous_match`, the matcher strategy whose needle matched several
+     * times (`exact` when old_string itself did); with `old_string_not_found`,
+     * a fallback that matched but was refused because it could not pick one
+     * target.
+     */
+    match_strategy?: string;
     /**
      * Per-edit validation failures for batch actions (e.g. edit_note_batch).
      * Present only when validating a multi-edit payload and one or more edits
@@ -2434,7 +2536,9 @@ export interface WSDeferredApprovalResponse {
  * processed, and would show the card as "awaiting approval" indefinitely.
  *
  * The proposal itself is unaffected — it is still stored and still applicable —
- * so the client should restore the card's local apply/reject controls.
+ * so the client should restore the card's local apply/reject controls. For
+ * reason `parking` it keeps the answer instead and resumes the parked run with
+ * it once the run has parked.
  */
 export interface WSDeferredApprovalStale extends WSBaseEvent {
     event: 'deferred_approval_stale';
@@ -2442,9 +2546,10 @@ export interface WSDeferredApprovalStale extends WSBaseEvent {
     action_id: string;
     /**
      * `timed_out`: the backend was waiting and gave up.
+     * `parking`: the card parks with its run; the answer resumes the parked run.
      * `unknown`: no record of this action on this connection.
      */
-    reason: 'timed_out' | 'unknown';
+    reason: 'timed_out' | 'parking' | 'unknown';
 }
 
 /**
@@ -2551,7 +2656,6 @@ export type BatchApprovalMode = 'full_access' | 'ask_each_time';
  * nothing destructive, and the block is then hidden.
  */
 export interface WSBatchApprovalRequest extends WSBaseEvent {
-    table?: import('./artifactProtocol').TableBatchApproval | null;
     event: 'batch_approval_request';
     /** Correlation id for the response */
     approval_id: string;
@@ -2640,7 +2744,6 @@ export interface WSBatchApprovalRequest extends WSBaseEvent {
  * batch runs, on a decline they say what to do instead.
  */
 export interface WSBatchApprovalResponse {
-    table?: import('./artifactProtocol').TableApprovalIdentity;
     type: 'batch_approval_response';
     approval_id: string;
     /** Whether the user approved the batch */
@@ -2668,9 +2771,10 @@ export interface WSBatchApprovalStale extends WSBaseEvent {
     approval_id: string;
     /**
      * `timed_out`: the backend was waiting and gave up.
+     * `parking`: the card parks with its run; the answer resumes the parked run.
      * `unknown`: no record of this approval on this connection.
      */
-    reason: 'timed_out' | 'unknown';
+    reason: 'timed_out' | 'parking' | 'unknown';
 }
 
 /** One selectable option of an ask_user_question item (ids are server-assigned) */
@@ -2738,6 +2842,52 @@ export interface WSAskUserQuestionResponse {
     cancelled: boolean;
 }
 
+// The response objects below are what each card sends live. A parked card's
+// answer is the same object, carried in `BeaverAgentPrompt.deferred_results`.
+
+export function deferredApprovalResponse(
+    actionId: string,
+    approved: boolean,
+    userInstructions?: string | null,
+    actionChanges?: import('./duplicates').MergeItemsChoices,
+): WSDeferredApprovalResponse {
+    return {
+        type: 'deferred_approval_response',
+        action_changes: actionChanges,
+        action_id: actionId,
+        approved,
+        user_instructions: userInstructions,
+    };
+}
+
+export function batchApprovalResponse(
+    approvalId: string,
+    approved: boolean,
+    mode: BatchApprovalMode,
+    userInstructions?: string | null,
+): WSBatchApprovalResponse {
+    return {
+        type: 'batch_approval_response',
+        approval_id: approvalId,
+        approved,
+        mode,
+        user_instructions: userInstructions,
+    };
+}
+
+export function askUserQuestionResponse(
+    questionId: string,
+    answers: AskUserQuestionAnswer[],
+    cancelled: boolean = false,
+): WSAskUserQuestionResponse {
+    return {
+        type: 'ask_user_question_response',
+        question_id: questionId,
+        answers,
+        cancelled,
+    };
+}
+
 /** Union type for all WebSocket events */
 export type WSEvent =
     | WSReadyEvent
@@ -2797,8 +2947,12 @@ export type WSEvent =
     // Run-level batch approval
     | WSBatchApprovalRequest
     | WSBatchApprovalStale
+    // Table card
+    | import('./tableCardProtocol').WSTableCardRequest
+    | import('./tableCardProtocol').WSTableCardStale
     // User interaction events
-    | WSAskUserQuestionRequest;
+    | WSAskUserQuestionRequest
+    | WSParkRefusedEvent;
 
 // =============================================================================
 // Client Message Types (sent from frontend to backend)
@@ -2923,6 +3077,13 @@ export const CLIENT_FEATURES = {
     COLLECTION_IDS: 'collection_ids',
     LIST_ITEMS_INCLUDE_CHILDREN: 'list_items_include_children',
     /**
+     * `list_items` honors `nest_children`: an `include_children` listing pages
+     * top-level items only and nests their children on each row. A client
+     * without it returns children as rows of their own, sorted and paged with
+     * their parents.
+     */
+    LIST_ITEMS_NESTED_CHILDREN: 'list_items_nested_children',
+    /**
      * `list_items` honors `special_collection`, listing a built-in view
      * (Unfiled Items, My Publications, Retracted Items) instead of a
      * collection. A client without it drops the field and lists the whole
@@ -2992,6 +3153,17 @@ export const CLIENT_FEATURES = {
     CONTINUATION_NEW_RUN: 'continuation_new_run',
     /** `citation_graph` capability (`find_related_works`). */
     CITATION_GRAPH: 'citation_graph',
+    /**
+     * External records from several sources (PubMed, ClinicalTrials.gov, ...):
+     * the client renders `item_type` / `creators` / `details` / `is_retracted`
+     * and `tool_info.info_type === 'search'`, combines per-source snapshots of
+     * one id, prepares unresolved imports through the import-proposals
+     * endpoint, applies the fill-only rules when resolving, and attaches a
+     * proposal's `attachments` in order, and renders the OpenAlex tools and
+     * their `openalex_names` view. Gates the `openalex`, `pubmed_search` and
+     * `clinical_trials` capabilities; `openalex` replaces `external_sources`.
+     */
+    EXTERNAL_RECORDS: 'external_records',
     /**
      * `resolve_population` honors `any_conditions`: a second condition list,
      * ORed among itself and ANDed with `conditions`. Without it the backend
@@ -3063,6 +3235,28 @@ export const CLIENT_FEATURES = {
      * its execute, so a lost result leaves a record to complete.
      */
     UNDELIVERED_ACTION_ACK: 'undelivered_action_ack',
+    /**
+     * A run whose card goes unanswered parks instead of giving up: it ends
+     * with its open cards stored (`run_complete.parked`, `AgentRun.parked`),
+     * the client keeps them answerable, and each answer resumes the run
+     * (`deferred_results` on the prompt). The client also sends a `park` frame
+     * when it leaves a run that is waiting only on such cards.
+     */
+    PARKED_RUNS: 'parked_runs',
+    /**
+     * A table fill is a job call: a tool call that waits for the fill live
+     * and parks when the wait ends first. The client starts the fill without
+     * waiting, answers `job_wait_request`, and the window that waited resumes
+     * the parked run once the fill ends, answering the call with the same
+     * `job_wait_response`. Used only together with `parked_runs`.
+     */
+    BACKGROUND_JOBS: 'background_jobs',
+    /**
+     * Research tables: the client serves `artifact_request` for table
+     * attachments, runs table fills and renders table tool results. Gates the
+     * `tables` capability.
+     */
+    TABLES: 'tables',
 } as const;
 
 /** Client type identifier for the Zotero plugin. */
@@ -3213,12 +3407,14 @@ export interface CurrentSpecialCollection {
  * Contains current view state and reader state if in reader view.
  */
 export interface ApplicationStateInput {
-    /** Current application view ('library', 'file_reader', or 'note_editor') */
-    current_view: 'library' | 'file_reader' | 'note_editor';
+    /** Current application view ('library', 'file_reader', 'note_editor', or 'table') */
+    current_view: 'library' | 'file_reader' | 'note_editor' | 'table';
     /** Reader state when in reader view */
     reader_state?: ReaderState;
     /** Note state when in note editor view */
     note_state?: NoteState;
+    /** The stored table open in its Beaver tab (`current_view: 'table'`) */
+    table_state?: TableState;
     /** Current library context */
     current_library?: CurrentLibrary;
     /**
@@ -3413,6 +3609,8 @@ export interface WSRequestAckData {
     modelId: string | null;
     modelName: string | null;
     chargeType: ChargeType;
+    /** Feature credits this request granted; absent otherwise. */
+    featureCredit?: FeatureCreditGrant;
 }
 
 /** A run lost its socket and is waiting on the server to be reattached. */
@@ -3439,6 +3637,13 @@ export interface WSReattachedInfo {
     gapMs: number;
     /** Events the server is replaying. */
     replayed: number;
+    /** Sockets opened to reattach the run since the loss. */
+    attempts: number;
+    /**
+     * Sockets the run lost since it was last live, the first loss included.
+     * More than one means a socket opened to reattach was lost as well.
+     */
+    losses: number;
 }
 
 /**
@@ -3460,6 +3665,10 @@ export interface WSReattachFailedInfo {
     evidence: ConnectionFailureEvidence;
     /** Milliseconds spent trying. */
     gapMs: number;
+    /** Sockets opened to reattach the run since the loss. */
+    attempts: number;
+    /** Sockets the run lost since it was last live, the first loss included. */
+    losses: number;
 }
 
 /** The action an `agent_action_execute` request applies, as the request describes it. */
@@ -3648,6 +3857,16 @@ export interface WSCallbacks {
      * @param event The stale-approval notice, keyed by approval id
      */
     onBatchApprovalStale?: (event: WSBatchApprovalStale) => void;
+
+    /**
+     * Called when the backend shows the table card for a proposed table. The
+     * frontend renders the card and sends one WSTableCardResponse with the
+     * edited input or a decline.
+     */
+    onTableCardRequest?: (event: import('./tableCardProtocol').WSTableCardRequest) => void;
+
+    /** Called when a table card answer arrived after the backend stopped waiting. */
+    onTableCardStale?: (event: import('./tableCardProtocol').WSTableCardStale) => void;
 
     /**
      * Called when the backend asks the user structured multiple-choice

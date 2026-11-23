@@ -1,4 +1,3 @@
-import { usePreference } from '../../hooks/usePreference';
 import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import Button from "@beaver/agent-ui/primitives/Button";
@@ -9,9 +8,8 @@ import { currentMessageExternalFilesAtom } from "../../atoms/messageComposition"
 import { ensureMcpBridgeScript } from "../../hooks/useMcpServer";
 import { copyToClipboard } from "../../utils/clipboard";
 import { logger } from "@beaver/agent-core/platform/logger";
-import { getPref, setPref } from "../../../src/utils/prefs";
+import { setPref } from "../../../src/utils/prefs";
 import { TickIcon, CopyIcon } from "../icons/icons";
-import { normalizeVoiceLanguage, voiceLanguages } from "../../voice/languages";
 import CustomInstructionsSection from "./CustomInstructionsSection";
 import LocalDocumentCacheRow from "./LocalDocumentCacheRow";
 import RebuildSearchIndexRow from "./RebuildSearchIndexRow";
@@ -33,8 +31,6 @@ function formatStorageStats(count: number, totalBytes: number): string {
 
 const AdvancedSection: React.FC = () => {
     const surfaceWindow = useSurfaceWindow();
-
-    const [voiceLanguage, setVoiceLanguage] = usePreference(() => normalizeVoiceLanguage(getPref("voice.language")));
 
     // --- Storage: external files + document cache ---
     const setCurrentMessageExternalFiles = useSetAtom(currentMessageExternalFilesAtom);
@@ -167,18 +163,6 @@ const AdvancedSection: React.FC = () => {
 
     return (
         <>
-            {process.env.NODE_ENV === 'development' && Zotero.isMac && getPref('voice.enabled') && getPref('voice.nativeEnabled') && <SettingsGroup>
-                <SettingsRow title="Dictation language" description="Dictation uses Beaver credits separately from chat. Audio and selected source terms are sent to Beaver for transcription and correction. Recordings are not saved or automatically retried." control={
-                    <select aria-label="Dictation language" value={voiceLanguage}
-                        onChange={event => {
-                            const language = normalizeVoiceLanguage(event.target.value);
-                            setVoiceLanguage(language);
-                            setPref('voice.language', language);
-                        }}>
-                        {voiceLanguages.map(language => <option key={language.code} value={language.code}>{language.label}</option>)}
-                    </select>
-                } />
-            </SettingsGroup>}
             {/* ===== CUSTOM INSTRUCTIONS ===== */}
             <CustomInstructionsSection />
 

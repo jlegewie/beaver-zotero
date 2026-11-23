@@ -3,7 +3,9 @@ import { getContextWindow, tryGetWindowRuntime } from '../runtime/windowRuntime'
 import { getSelectedCollections } from '../../src/utils/zoteroSelection';
 import { collectionToReference } from '../utils/zoteroReferences';
 import { atom, type Getter, type Setter } from "jotai";
-import { isTableAttachment } from '../../src/services/artifacts/tableItemIdentity';
+import { isTableAttachment, loadTableItemFields } from '../../src/services/artifacts/tableItemIdentity';
+import { selectedTableTabItemID } from '../../src/ui/tableTabContextPane';
+import { toValidatedMessageAttachment } from '../types/attachments/converters';
 import { truncateText } from "@beaver/agent-ui/utils/stringUtils";
 import { allUserAttachmentKeysAtom } from "@beaver/agent-core/run-state/atoms";
 import { createElement } from 'react';
@@ -17,7 +19,7 @@ import { InvalidItemsMessageContent } from '../components/ui/popup/InvalidItemsM
 import { agentItemFilter } from "../../src/utils/agentItemSupport";
 import { getCurrentReader } from "../utils/readerUtils";
 import { TextSelection, zoteroReferenceLookupKeys, messageAttachmentKey, type ViewAttachment } from "@beaver/agent-core/types/attachments/apiTypes";
-import { ZoteroTag, CollectionReference } from "@beaver/agent-core/types/zotero";
+import { ZoteroTag, CollectionReference, collectionReferenceKey } from "@beaver/agent-core/types/zotero";
 import type { ExternalFileRecord } from "../../src/services/database";
 import { currentNoteItemAtom } from "./zoteroContext";
 import type { SlashCommandDescriptor } from "@beaver/agent-ui/composer/slashCommands";
@@ -100,6 +102,13 @@ export const validateFiltersAtom = atom((get) => {
 export const currentMessageContentAtom = atom<string>('');
 
 /**
+ * The `@query` text the composer holds while its Add Sources menu searches
+ * from it, or null. It is a search in progress, not part of the message: the
+ * menu deletes it when an item is picked.
+ */
+export const composerSourceSearchTextAtom = atom<string | null>(null);
+
+/**
 * Current message items
 * Items that are currently being added to the message
 */
@@ -145,6 +154,14 @@ export const currentMessageItemsAtom = atom(
  * Cleared after the message is sent.
  */
 export const currentMessageCollectionsAtom = atom<CollectionReference[]>([]);
+
+/** Attach collections to the current message, keeping those it already carries. */
+export const addCollectionsToCurrentMessageAtom = atom(null, (get, set, collections: CollectionReference[]) => {
+    const current = get(currentMessageCollectionsAtom);
+    const existingKeys = new Set(current.map(collectionReferenceKey));
+    const added = collections.filter((collection) => !existingKeys.has(collectionReferenceKey(collection)));
+    if (added.length > 0) set(currentMessageCollectionsAtom, [...current, ...added]);
+});
 
 /**
  * Saved searches and built-in views (Unfiled Items, …) attached to the current
@@ -212,6 +229,14 @@ export interface PendingPillInsert {
      *  InputAreas are mounted (main-window sidebar + separate Beaver window)
      *  the pill deterministically lands in the right editor. */
     targetWindow?: Window;
+    /** Text to set right after the pill, replacing anything already after it
+     *  (see `stageActionPillAtom`). Absent → the pill is inserted as is. */
+    argumentText?: string;
+    /** A part of `argumentText` selected once it is placed, so typing replaces it. */
+    selectText?: string;
+    /** Actions whose pills this one replaces: every pill of each is removed,
+     *  with its text, before this pill is placed. */
+    replaceActionIds?: string[];
 }
 
 /**
@@ -444,6 +469,23 @@ export const removeItemFromMessageAtom = atom(
         set(removePopupMessageAtom, item.key);
     }
 );
+
+/**
+ * Remove the items and collections the chat input took from the Zotero
+ * selection, keeping those the user added.
+ */
+export const removeAutomaticAttachmentsAtom = atom(null, (get, set) => {
+    const automaticItemKeys = get(automaticMessageItemKeysAtom);
+    for (const item of get(currentMessageItemsAtom)) {
+        if (automaticItemKeys.has(messageItemKey(item))) set(removeItemFromMessageAtom, item);
+    }
+    const automaticCollections = get(automaticMessageCollectionsAtom);
+    if (automaticCollections.length > 0) {
+        const keys = new Set(automaticCollections.map(collectionReferenceKey));
+        set(currentMessageCollectionsAtom, (collections) => collections.filter((collection) => !keys.has(collectionReferenceKey(collection))));
+        set(automaticMessageCollectionsAtom, []);
+    }
+});
 
 /**
 * Remove all editable context from the current message at once.
@@ -867,6 +909,13 @@ export const updateReaderAttachmentAtom = atom(
         // Get current reader
         reader = reader || getCurrentReader();
         if (!reader) {
+            // A selected Beaver tab makes its table the context, as a reader's
+            // file is (a new chat refreshes the context through here).
+            const tableItemID = selectedTableTabItemID(getContextWindow());
+            if (tableItemID) {
+                await set(updateTableTabContextAtom, tableItemID);
+                return;
+            }
             set(currentReaderAttachmentAtom, null);
             return;
         }
@@ -895,6 +944,48 @@ export const updateReaderAttachmentAtom = atom(
             set(currentReaderAttachmentAtom, item);
             validateItemsInBackground(get, set, [item], true);
         }
+    }
+);
+
+/**
+ * Make the table open in a Beaver tab the current context, the way a reader
+ * tab makes its document the current context: it shows as the composer's
+ * context chip, is attached to a message when the thread does not have it
+ * yet, and is reported as the open table in application state. A table in a
+ * library the user excluded is never tracked.
+ */
+export const updateTableTabContextAtom = atom(
+    null,
+    async (get, set, itemID: number) => {
+        const generation = ++readerAttachmentGeneration;
+        set(removePopupMessageAtom, EXCLUDED_LIBRARY_READER_POPUP_ID);
+        const item = await Zotero.Items.getAsync(itemID);
+        if (generation !== readerAttachmentGeneration) return;
+        if (!item || !get(searchableLibraryIdsAtom).includes(item.libraryID)) {
+            set(currentReaderAttachmentAtom, null);
+            return;
+        }
+        await loadTableItemFields([item]);
+        if (generation !== readerAttachmentGeneration) return;
+        if (!isTableAttachment(item) || !get(searchableLibraryIdsAtom).includes(item.libraryID)) {
+            set(currentReaderAttachmentAtom, null);
+            return;
+        }
+        // Only a table that can be submitted becomes the context: the provider
+        // refuses a table that is corrupt, pending a write, or cites an
+        // excluded library.
+        let sendable = false;
+        try {
+            sendable = (await toValidatedMessageAttachment(item)) !== null;
+        } catch (error: any) {
+            logger(`updateTableTabContextAtom: table ${item.key} is not sendable: ${error?.message ?? error}`, 2);
+        }
+        if (generation !== readerAttachmentGeneration) return;
+        if (!sendable || !get(searchableLibraryIdsAtom).includes(item.libraryID)) {
+            set(currentReaderAttachmentAtom, null);
+            return;
+        }
+        set(currentReaderAttachmentAtom, item);
     }
 );
 

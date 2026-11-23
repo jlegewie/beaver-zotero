@@ -53,6 +53,7 @@
     "./src/markdown/writeMarkdown.ts",
     "./src/latex/writeLatex.ts",
     "./src/latex/escape.ts",
+    "./src/xlsx/writeXlsx.ts",
     "./src/page.ts",
     "./src/links.ts",
     "./src/note/parseNoteDoc.ts",

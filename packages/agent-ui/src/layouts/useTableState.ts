@@ -5,7 +5,7 @@ import {
     filterRows,
     isColumnFilterable,
     sortRows,
-    toCsv,
+    type CellValue,
     type Filter,
     type Row,
     type TableSort,
@@ -14,29 +14,32 @@ import {
 import type { TableDensity } from "./tableView";
 
 /**
- * View state of a rendered table: sort, filters, density, and what is expanded
- * or selected.
+ * View state of a rendered table: sort, filters, density, hidden columns and
+ * selected rows.
  *
  * All of it is ephemeral and local to the component — the spec is never
- * mutated, and nothing here reads a global store, so the same hook serves the
- * sidebar, the window and an isolated render root alike. The grid and the
- * chrome around it share one instance, which is why this is a hook the surface
- * owns rather than state hidden inside `DataTable`.
+ * mutated, and nothing here reads a global store. The grid and the toolbar
+ * around it share one instance, owned by the table component.
  */
 export interface TableState {
     sort: TableSort | undefined;
-    /** asc → desc → none on repeated calls for the same column. */
-    toggleSort(columnId: string): void;
+    /** Replaces the sort; `undefined` restores the table's own order. */
+    setSort(sort: TableSort | undefined): void;
 
     density: TableDensity;
     setDensity(density: TableDensity): void;
 
-    /** Substring match across every filterable column (OR), case-insensitive. */
+    /** The search box's text, as typed. */
     quickFilter: string;
     setQuickFilter(text: string): void;
+    /**
+     * The search's terms ({@link searchTerms}): a row is shown when each
+     * appears, case-insensitively, in one of its visible, filterable columns.
+     * Stable while the query's terms are unchanged.
+     */
+    searchTerms: readonly string[];
     /** Per-column filters (AND). Setting a filter replaces the column's previous one. */
     filters: Filter[];
-    setFilter(filter: Filter): void;
     clearFilter(columnId: string): void;
     clearFilters(): void;
     /** Toggle membership of one select label in the column's `in` filter. */
@@ -55,10 +58,7 @@ export interface TableState {
      */
     hiddenColumns: ReadonlySet<string>;
     toggleColumn(columnId: string): void;
-    showAllColumns(): void;
 
-    expandedRows: ReadonlySet<string>;
-    toggleRow(rowId: string): void;
 
     /**
      * Selected row ids. Selection drives bulk verbs in the chrome (import the
@@ -75,6 +75,16 @@ export interface TableState {
 export interface UseTableStateOptions {
     /** Initial density. The chrome's density control moves it from there. */
     density?: TableDensity;
+    /**
+     * Show only these rows, on top of the viewer's own filters — a surface
+     * pointing at a set of rows ("Show" the rows a fill could not read).
+     */
+    onlyRows?: ReadonlySet<string> | null;
+    /**
+     * Columns the surface always draws, so they are never hidden by default —
+     * system columns included — and the sort and filter menus offer them.
+     */
+    alwaysShown?: readonly string[];
 }
 
 /** The table a hidden-column set was seeded for. */
@@ -88,10 +98,6 @@ interface TableIdentity {
  * table gaining its first key (an unsaved table just persisted) is still the
  * table it was, so a missing previous key defers to the render id.
  *
- * Two *unstored* tables sharing a render id cannot be told apart from their
- * specs at all. A surface that shows unstored tables in turn must remount for
- * each (a React `key` on the showing, as the Beaver window does), which resets
- * every part of this state and not just the columns.
  */
 function isSameTable(a: TableIdentity, b: TableIdentity): boolean {
     if (a.key !== undefined && b.key !== undefined) return a.key === b.key;
@@ -106,33 +112,37 @@ function toggleInSet(set: ReadonlySet<string>, id: string): Set<string> {
     return next;
 }
 
-function matchesQuickFilter(spec: TableSpec, row: Row, query: string): boolean {
-    const needle = query.toLocaleLowerCase();
-    return spec.columns.some((column) => {
-        if (!isColumnFilterable(column)) return false;
-        return cellValueText(row.cells[column.id]?.value)
-            .toLocaleLowerCase()
-            .includes(needle);
-    });
+/**
+ * A search query's terms: its words, and each double-quoted phrase as one term,
+ * as Zotero's quick search reads a query. Lower-cased, without duplicates.
+ */
+export function searchTerms(query: string): string[] {
+    const terms = new Set<string>();
+    for (const [, phrase, word] of query.matchAll(/"([^"]*)"?|(\S+)/g)) {
+        const term = (phrase ?? word).trim().toLowerCase();
+        if (term) terms.add(term);
+    }
+    return [...terms];
 }
 
-/** Stands in for the spec when the caller owns the state — see {@link useOptionalTableState}. */
-const EMPTY_TABLE: TableSpec = { id: "", columns: [], rows: [] };
-
 /**
- * {@link useTableState}, or the caller's instance when one was passed.
- *
- * Hooks cannot be conditional, so the spare {@link useTableState} still runs.
- * Running it against the real spec would repeat the filter and sort passes on
- * every render, so it runs against an empty spec instead.
+ * A value as the table shows it, which is what the search matches: Yes / No
+ * for a boolean, and a paper's title, authors and venue.
  */
-export function useOptionalTableState(
-    spec: TableSpec,
-    external: TableState | undefined,
-    options: UseTableStateOptions = {},
-): TableState {
-    const internal = useTableState(external ? EMPTY_TABLE : spec, options);
-    return external ?? internal;
+function searchText(value: CellValue | undefined): string {
+    if (value?.kind === "boolean") return value.value ? "Yes" : "No";
+    if (value?.kind === "reference")
+        return [value.title ?? value.display_name, value.subtitle, value.venue].filter(Boolean).join("\n");
+    return cellValueText(value);
+}
+
+/** The row's searched columns as one lower-cased string, one line per column. */
+function rowSearchText(row: Row, columns: readonly string[]): string {
+    // One line per column, so a quoted phrase cannot span two cells.
+    return columns
+        .map((id) => searchText(row.cells[id]?.value))
+        .join("\n")
+        .toLowerCase();
 }
 
 export function useTableState(
@@ -145,18 +155,13 @@ export function useTableState(
     );
     const [quickFilter, setQuickFilter] = useState("");
     const [filters, setFilters] = useState<Filter[]>([]);
-    const [expandedRows, setExpandedRows] = useState<ReadonlySet<string>>(
-        () => new Set(),
-    );
     const [selectedRows, setSelectedRows] = useState<ReadonlySet<string>>(
         () => new Set(),
     );
     // Which columns are hidden is derived, not stored: the spec's defaults
-    // (system columns hidden, the row-type column shown once the table mixes
-    // kinds) overlaid with the columns the viewer has explicitly toggled. So a
-    // table that gains its first annotation row shows its type column at once,
-    // while a column the viewer hid stays hidden. The overrides last as long
-    // as the table does; a different table starts with none.
+    // (system columns hidden) overlaid with the columns the viewer has
+    // explicitly toggled. The overrides last as long as the table does; a
+    // different table starts with none.
     const [columnOverrides, setColumnOverrides] = useState<
         ReadonlyMap<string, boolean>
     >(() => new Map());
@@ -170,31 +175,16 @@ export function useTableState(
         // same render id is not mistaken for it.
         setHiddenFor(identity);
     }
+    const alwaysShown = options.alwaysShown;
     const hiddenColumns = useMemo<ReadonlySet<string>>(() => {
         const hidden = new Set(defaultHiddenColumnIds(spec));
         for (const [id, isHidden] of columnOverrides) {
             if (isHidden) hidden.add(id);
             else hidden.delete(id);
         }
+        for (const id of alwaysShown ?? []) hidden.delete(id);
         return hidden;
-    }, [spec, columnOverrides]);
-
-    const toggleSort = useCallback((columnId: string) => {
-        setSort((current) => {
-            if (current?.column_id !== columnId)
-                return { column_id: columnId, direction: "asc" };
-            if (current.direction === "asc")
-                return { column_id: columnId, direction: "desc" };
-            return undefined;
-        });
-    }, []);
-
-    const setFilter = useCallback((filter: Filter) => {
-        setFilters((current) => [
-            ...current.filter((f) => f.column_id !== filter.column_id),
-            filter,
-        ]);
-    }, []);
+    }, [spec, columnOverrides, alwaysShown]);
 
     const clearFilter = useCallback((columnId: string) => {
         setFilters((current) =>
@@ -245,19 +235,44 @@ export function useTableState(
         [],
     );
 
+    // Kept while the terms are the same (a trailing space, a changed case),
+    // so the rows and every highlighting cell stay as they are. A term never
+    // holds a newline: the search box is one line.
+    const termsKey = searchTerms(quickFilter).join("\n");
+    const terms = useMemo<readonly string[]>(() => (termsKey ? termsKey.split("\n") : []), [termsKey]);
+
+    // The search reads only what the viewer can see: a match in a hidden
+    // column would show a row with nothing in it highlighted.
+    const searchedColumns = useMemo(
+        () =>
+            spec.columns
+                .filter((column) => isColumnFilterable(column) && !hiddenColumns.has(column.id))
+                .map((column) => column.id),
+        [spec, hiddenColumns],
+    );
+    // Each row's text, built once per table and column set while searching,
+    // so a keystroke only runs the substring checks.
+    const searching = terms.length > 0;
+    const rowTexts = useMemo(
+        () => (searching ? new Map(spec.rows.map((row) => [row.id, rowSearchText(row, searchedColumns)])) : null),
+        [spec, searchedColumns, searching],
+    );
+
+    const onlyRows = options.onlyRows ?? null;
     const rows = useMemo(() => {
-        const filtered = filterRows(spec, filters);
-        const quick = quickFilter.trim();
-        const searched = quick
-            ? filtered.filter((row) => matchesQuickFilter(spec, row, quick))
+        const narrowed = onlyRows
+            ? { ...spec, rows: spec.rows.filter((row) => onlyRows.has(row.id)) }
+            : spec;
+        const filtered = filterRows(narrowed, filters);
+        const searched = rowTexts
+            ? filtered.filter((row) => {
+                  const text = rowTexts.get(row.id) ?? "";
+                  return terms.every((term) => text.includes(term));
+              })
             : filtered;
         return sortRows({ ...spec, rows: searched }, sort);
-    }, [spec, filters, quickFilter, sort]);
+    }, [spec, filters, terms, rowTexts, sort, onlyRows]);
 
-    const toggleRow = useCallback(
-        (rowId: string) => setExpandedRows((s) => toggleInSet(s, rowId)),
-        [],
-    );
     const toggleRowSelection = useCallback(
         (rowId: string) => setSelectedRows((s) => toggleInSet(s, rowId)),
         [],
@@ -269,13 +284,6 @@ export function useTableState(
                 new Map(current).set(columnId, !hiddenColumns.has(columnId)),
             ),
         [hiddenColumns],
-    );
-    const showAllColumns = useCallback(
-        () =>
-            setColumnOverrides(
-                new Map(spec.columns.map((column) => [column.id, false])),
-            ),
-        [spec.columns],
     );
 
     const allInViewSelected =
@@ -291,37 +299,25 @@ export function useTableState(
 
     return {
         sort,
-        toggleSort,
+        setSort,
         density,
         setDensity,
         quickFilter,
         setQuickFilter,
+        searchTerms: terms,
         filters,
-        setFilter,
         clearFilter,
         clearFilters,
         toggleSelectFilter,
         toggleBooleanFilter,
-        hasFilters: filters.length > 0 || quickFilter.trim().length > 0,
+        hasFilters: filters.length > 0 || terms.length > 0,
         rows,
         hiddenColumns,
         toggleColumn,
-        showAllColumns,
-        expandedRows,
-        toggleRow,
         selectedRows,
         toggleRowSelection,
         toggleSelectAll,
         clearSelection,
         allInViewSelected,
     };
-}
-
-/**
- * CSV of the current view — filtered and sorted, not the whole spec.
- * Exporting the unfiltered table after the viewer narrowed it hands them the
- * wrong file.
- */
-export function csvForCurrentView(table: TableSpec, state: TableState): string {
-    return toCsv(table, state.rows);
 }

@@ -279,7 +279,7 @@ import {
     captureValidatedEditTargetContext,
     findTargetRawMatchPosition,
 } from '../../../src/utils/editNoteRawPosition';
-import { stripPartialSimplifiedElements } from '../../../src/utils/editNoteStrippers';
+import { stripPartialSimplifiedElements, stripSpuriousWrappingTags } from '../../../src/utils/editNoteStrippers';
 import {
     stripDataCitationItems,
     rebuildDataCitationItems,
@@ -478,6 +478,9 @@ describe('validateEditNoteAction — success', () => {
             note_title: 'My Note',
             total_lines: 1,
             match_count: 1,
+            // An append does not anchor on note text, so a later apply
+            // compares the note with this fingerprint.
+            content_hash: expect.stringMatching(/^[0-9a-f]{64}$/),
         });
     });
 
@@ -1731,6 +1734,62 @@ describe('trailing whitespace normalization in matching', () => {
     });
 });
 
+describe('fallback matches are reported in terms of the model\'s old_string', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        installMutationInstance();
+    });
+
+    function useNote(inner: string) {
+        const noteHtml = `<div data-schema-version="9">${inner}</div>`;
+        const item = makeMockItem({ getNote: vi.fn(() => noteHtml) });
+        vi.mocked((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(item);
+        vi.mocked(getLatestNoteHtml).mockReturnValue(noteHtml);
+    }
+
+    function validate(old_string: string, new_string: string) {
+        return handleAgentActionValidateRequest(makeValidateRequest({
+            action_data: { library_id: 1, zotero_key: 'NOTE0001', old_string, new_string, operation: 'str_replace' },
+        }));
+    }
+
+    const LEADING = { strippedOld: 'Shared</p>', strippedNew: 'Changed</p>' };
+    const TRAILING = { strippedOld: '<p>Shared', strippedNew: '<p>Changed' };
+
+    it('skips a strip matching several places, applies one matching once, and warns', async () => {
+        useNote('<p>Shared one</p>\n<p>Two Shared</p>\n<p>Three Shared</p>');
+        vi.mocked(stripSpuriousWrappingTags).mockReturnValueOnce([LEADING, TRAILING]);
+
+        const response = await validate('<p>Shared</p>', '<p>Changed</p>');
+        expect(response.valid).toBe(true);
+        expect(response.normalized_action_data!.old_string).toBe('<p>Shared');
+        expect(response.warnings).toContainEqual(expect.stringContaining(
+            'old_string "<p>Shared</p>" was not found exactly as written; it matched after removing `</p>` from its end',
+        ));
+    });
+
+    it('reports not-found with the refused match and its strategy', async () => {
+        useNote('<p>Two Shared</p>\n<p>Three Shared</p>');
+        vi.mocked(stripSpuriousWrappingTags).mockReturnValueOnce([LEADING]);
+
+        const response = await validate('<p>Shared</p>', '<p>Changed</p>');
+        expect(response.valid).toBe(false);
+        expect(response.error_code).toBe('old_string_not_found');
+        expect(response.error).toContain(
+            'not found in the note as written. After removing `<p>` from its start, it would match 2 places',
+        );
+        expect(response.match_strategy).toBe('spurious_wrap_strip');
+    });
+
+    it('tags an ambiguous exact match with its strategy', async () => {
+        useNote('<p>NA</p>\n<p>NA</p>');
+        const response = await validate('NA', 'Yes');
+        expect(response.error_code).toBe('ambiguous_match');
+        expect(response.error).toMatch(/^The string to replace was found 2 times in the note\./);
+        expect(response.match_strategy).toBe('exact');
+    });
+});
+
 describe('JSON-escape unescape fallback in matching', () => {
     let mockItem: any;
 
@@ -2483,6 +2542,34 @@ describe('citation anchor recovery', () => {
             const execution = await handleAgentActionExecuteRequest(makeExecuteRequest({ action_data }));
             expect(execution.success).toBe(true);
             expect(item.setNote.mock.calls[0][0]).toContain('<p>Updated</p>');
+        },
+    );
+});
+
+
+describe('mixed literal and wrapped math anchors', () => {
+    it.each(['str_replace', 'str_replace_all', 'insert_before', 'insert_after'] as const)(
+        'rejects ambiguous %s anchors in validation and execution without paste hints', async (operation) => {
+            const html = '<p>Literal $x$ and <span class="math">$x$</span>.</p>';
+            const item = makeMockItem({ getNote: vi.fn(() => html) });
+            (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync.mockResolvedValue(item);
+            vi.mocked(getOrSimplify).mockReturnValue({
+                simplified: html, metadata: { elements: new Map() }, isStale: false,
+            });
+            const action_data = {
+                library_id: 1, zotero_key: 'NOTE0001', operation,
+                old_string: '$x$', new_string: '$y$',
+            };
+            const validation = await handleAgentActionValidateRequest(makeValidateRequest({ action_data }));
+            const execution = await handleAgentActionExecuteRequest(makeExecuteRequest({ action_data }));
+            expect(validation.valid).toBe(false);
+            expect(execution.success).toBe(false);
+            for (const response of [validation, execution]) {
+                expect(response.error_code).toBe('ambiguous_match');
+                expect(response.error).toContain('copy the whole <span class="math">');
+            }
+            expect(item.setNote).not.toHaveBeenCalled();
+            expect(findCandidateSnippets).not.toHaveBeenCalled();
         },
     );
 });

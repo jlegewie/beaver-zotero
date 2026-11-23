@@ -102,12 +102,6 @@ vi.mock('../../react/constants/versionUpdateMessages', () => ({
     getAllVersionUpdateMessageVersions: vi.fn(() => []),
 }));
 
-vi.mock('../../src/services/voice/voiceService', () => ({
-    createVoiceService: vi.fn(() => { throw new Error('Timer module unavailable'); }),
-}));
-vi.mock('../../src/services/voice/developmentHarness', () => ({
-    DevelopmentVoiceHarness: vi.fn(function () { throw new Error('Timer module unavailable'); }),
-}));
 vi.mock('../../src/services/documentCache', () => ({
     DocumentCache: class {
         init = vi.fn().mockResolvedValue(undefined);
@@ -119,9 +113,14 @@ vi.mock('../../src/modules/readerIntegration', () => ({ initReaderIntegration: v
 vi.mock('../../src/modules/readerToolbarMenu', () => ({ initReaderToolbarMenu: vi.fn(), cleanupReaderToolbarMenu: vi.fn() }));
 vi.mock('../../src/modules/noteEditorExportMenu', () => ({ initNoteEditorExportMenu: vi.fn(), cleanupNoteEditorExportMenu: vi.fn() }));
 vi.mock('../../src/services/artifacts/view/readerTableView', () => ({
-    initReaderTableViews: vi.fn(), cleanupReaderTableViews: vi.fn(), cleanupReaderTableViewsForWindow: vi.fn(),
+    initTableReaderRedirect: vi.fn(), cleanupTableReaderRedirect: vi.fn(),
 }));
-vi.mock('../../src/ui/tableItemPane', () => ({ initTableItemPane: vi.fn(), cleanupTableItemPane: vi.fn() }));
+vi.mock('../../src/ui/tableTab', () => ({ initTableTabs: vi.fn(), cleanupTableTabs: vi.fn() }));
+vi.mock('../../src/ui/beaverTabs', () => ({
+    initBeaverTabs: vi.fn(), cleanupBeaverTabs: vi.fn(),
+    recoverTabsAfterBeaverTabs: vi.fn(async () => 0), restoreBeaverTabs: vi.fn(async () => 0),
+}));
+vi.mock('../../src/ui/tableTabProbe', () => ({ stopTableTabProbe: vi.fn(), handleTableTabProbe: vi.fn() }));
 vi.mock('../../src/services/artifacts/tablesApiHost', () => ({
     registerTablesApi: vi.fn(), unregisterTablesApi: vi.fn(), unregisterTableShadowRestore: vi.fn(),
 }));
@@ -168,6 +167,10 @@ function setupGlobals() {
             addObserver: vi.fn(),
             removeObserver: vi.fn(),
         },
+        wm: {
+            addListener: vi.fn(),
+            removeListener: vi.fn(),
+        },
     };
 
     (globalThis as any).Cc = {
@@ -194,8 +197,10 @@ function setupGlobals() {
         runtime: new BeaverInstance(),
         mutations: { cancelOwner: vi.fn(), dispose: vi.fn().mockResolvedValue(undefined) },
         itemImport: { dispose: vi.fn() },
+        images: { dispose: vi.fn() },
         notePreviews: { detachOwner: vi.fn().mockResolvedValue(undefined) },
         syncPause: { releaseWindow: vi.fn(), scheduleResumeAfterRun: vi.fn(), resumeSyncNow: vi.fn() },
+        transactionWatch: { start: vi.fn(), stop: vi.fn(), openAgeMs: vi.fn(() => 0) },
         data: {
             alive: true,
             config: {
@@ -215,6 +220,7 @@ function setupGlobals() {
     Object.assign(globalThis.Zotero, {
         getMainWindows: vi.fn(() => []),
         getMainWindow: vi.fn(() => null),
+        logError: vi.fn(),
         __beaverShuttingDown: false,
         Beaver: {},
     });
@@ -242,10 +248,53 @@ describe('hooks auth lock shutdown cleanup', () => {
         await shutdown;
     });
 
+    it.each(['onShutdown', 'onAppShutdown'] as const)('flushes table fills before the mutation queue closes in %s', async entry => {
+        const hooks = await loadHooks();
+        const instance = (globalThis as any).addon;
+        const order: string[] = [];
+        let flushed!: () => void;
+        instance.tableFills = {
+            dispose: vi.fn(() => new Promise<void>(resolve => { order.push('fills'); flushed = resolve; })),
+        };
+        instance.mutations.dispose = vi.fn(async () => { order.push('mutations'); });
+        const shutdown = hooks[entry]();
+        await Promise.resolve();
+        expect(order).toEqual(['fills']);
+        flushed();
+        await shutdown;
+        expect(order).toEqual(['fills', 'mutations']);
+        expect(instance.tableFills).toBeUndefined();
+    });
+
+    it('makes a second shutdown path wait for the first one\'s fill flush', async () => {
+        const hooks = await loadHooks();
+        const instance = (globalThis as any).addon;
+        const order: string[] = [];
+        let flushed!: () => void;
+        const dispose = vi.fn(() => new Promise<void>(resolve => { flushed = resolve; }));
+        instance.tableFills = { dispose };
+        instance.mutations.dispose = vi.fn(async () => { order.push('mutations'); });
+        const first = hooks.onAppShutdown();
+        await Promise.resolve();
+        const second = hooks.onShutdown();
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(order).toEqual([]);
+        order.push('flushed');
+        flushed();
+        await Promise.all([first, second]);
+        // Neither path closed the queue before the flush, and the service was disposed once.
+        expect(order[0]).toBe('flushed');
+        expect(order.filter((step) => step === 'mutations').length).toBeGreaterThan(0);
+        expect(dispose).toHaveBeenCalledTimes(1);
+    });
+
     beforeEach(() => {
         vi.resetModules();
         vi.clearAllMocks();
         setupGlobals();
+        // No `compileScript`: renderers load their bundle with a script tag.
+        (globalThis as any).ChromeUtils = {};
         mockDisposeMuPDFWorker.mockResolvedValue(undefined);
     });
 
@@ -253,28 +302,7 @@ describe('hooks auth lock shutdown cleanup', () => {
         vi.useRealTimers();
     });
 
-    it('cancels the originating voice session when a main window unloads', async () => {
-        const hooks = await loadHooks();
-        const win = makeWindow();
-        const voice = { windowUnloaded: vi.fn(), dispose: vi.fn() };
-        (globalThis as any).addon.voice = voice;
-        vi.mocked(Zotero.getMainWindows).mockReturnValue([win, makeWindow()]);
-        await hooks.onMainWindowUnload(win);
-        expect(voice.windowUnloaded).toHaveBeenCalledWith(win);
-        expect(voice.dispose).not.toHaveBeenCalled();
-    });
-
-    it('disposes and removes the plugin voice service on shutdown', async () => {
-        const hooks = await loadHooks();
-        const voice = { dispose: vi.fn() };
-        (globalThis as any).addon.voice = voice;
-        await hooks.onShutdown();
-        expect(voice.dispose).toHaveBeenCalledOnce();
-        expect((globalThis as any).addon.voice).toBeUndefined();
-    });
-
-    it.each(['production', 'development'])('continues essential startup when optional voice initialization fails in %s', async env => {
-        (globalThis as any).__env__ = env;
+    it('completes essential startup', async () => {
         (globalThis as any).Services.startup.shuttingDown = false;
         const testConnection = vi.fn().mockResolvedValue(undefined);
         (Zotero as any).DBConnection = vi.fn(function () { return { test: testConnection }; });
@@ -286,32 +314,113 @@ describe('hooks auth lock shutdown cleanup', () => {
         expect((globalThis as any).addon.db.closeDatabase).not.toHaveBeenCalled();
         expect(mockRegisterShortcuts).toHaveBeenCalledOnce();
         expect(Zotero.PreferencePanes.register).toHaveBeenCalledOnce();
-        expect((globalThis as any).addon.voice).toBeUndefined();
-        expect((globalThis as any).addon.voiceHarness).toBeUndefined();
         const prefs = await import('../../src/utils/prefs');
         expect(prefs.clearPref).toHaveBeenCalledWith('backgroundProcessingContinuous');
     });
 
-    it('continues window cleanup after voice unload throws', async () => {
-        const hooks = await loadHooks(); const win = makeWindow();
-        (globalThis as any).addon.voice = { windowUnloaded: vi.fn(() => { throw new Error('voice failure'); }) };
-        vi.mocked(Zotero.getMainWindows).mockReturnValue([win, makeWindow()]);
-        await hooks.onMainWindowUnload(win);
-        expect(mockRemoveChatPanel).toHaveBeenCalledWith(win);
+    describe('main windows opened after startup', () => {
+        async function startWatching() {
+            (globalThis as any).Services.startup.shuttingDown = false;
+            (Zotero as any).DBConnection = vi.fn(function () { return { test: vi.fn().mockResolvedValue(undefined) }; });
+            (Zotero as any).PreferencePanes = { register: vi.fn().mockResolvedValue(undefined) };
+            const hooks = await loadHooks();
+            await hooks.onStartup();
+            const listener = vi.mocked((globalThis as any).Services.wm.addListener).mock.calls[0]?.[0];
+            expect(listener).toBeDefined();
+            return { hooks, listener };
+        }
+
+        function openWindow(listener: any, pane: Record<string, unknown>) {
+            let onLoad: (() => void) | undefined;
+            const win: any = {
+                EventTarget,
+                closed: false,
+                location: { href: 'chrome://zotero/content/zoteroPane.xhtml' },
+                document: { getElementById: vi.fn(() => null), querySelector: vi.fn(() => null) },
+                ZoteroPane: pane,
+                addEventListener: vi.fn((type: string, handler: () => void) => { if (type === 'load') onLoad = handler; }),
+                removeEventListener: vi.fn(),
+            };
+            listener.onOpenWindow({ docShell: { domWindow: win } });
+            return { win, load: () => onLoad?.() };
+        }
+
+        it('attaches a Zotero 11 window that opens without a library view, once Zotero has set it up', async () => {
+            const { listener } = await startWatching();
+            let paneLoaded!: () => void;
+            const { win, load } = openWindow(listener, {
+                libraryViews: [],
+                loadedPromise: new Promise<void>(resolve => { paneLoaded = resolve; }),
+            });
+            load();
+            await Promise.resolve();
+            expect((globalThis as any).addon.runtime.getWindow(win)).toBeUndefined();
+            paneLoaded();
+            await vi.waitFor(() => expect((globalThis as any).addon.runtime.getWindow(win)).toBeDefined());
+        });
+
+        it('leaves Zotero 7–10 windows to Zotero\'s own load notification', async () => {
+            const { listener } = await startWatching();
+            const { win, load } = openWindow(listener, { loadedPromise: Promise.resolve() });
+            load();
+            await new Promise(resolve => setTimeout(resolve, 0));
+            expect((globalThis as any).addon.runtime.getWindow(win)).toBeUndefined();
+        });
+
+        it('stops attaching windows once Beaver shuts down', async () => {
+            const { hooks, listener } = await startWatching();
+            const { win, load } = openWindow(listener, { libraryViews: [], loadedPromise: Promise.resolve() });
+            (globalThis as any).Services.startup.shuttingDown = true;
+            await hooks.onShutdown();
+            expect((globalThis as any).Services.wm.removeListener).toHaveBeenCalledWith(listener);
+            load();
+            await new Promise(resolve => setTimeout(resolve, 0));
+            expect((globalThis as any).addon.runtime.getWindow(win)).toBeUndefined();
+        });
     });
 
-    it('closes the database and other services after voice disposal throws', async () => {
+    it('holds the quit until running table fills have flushed, and disposes the account after', async () => {
+        (globalThis as any).Services.startup.shuttingDown = false;
+        (Zotero as any).DBConnection = vi.fn(function () { return { test: vi.fn().mockResolvedValue(undefined) }; });
+        (Zotero as any).PreferencePanes = { register: vi.fn().mockResolvedValue(undefined) };
+        const addBlocker = vi.fn();
+        (globalThis as any).ChromeUtils = {
+            importESModule: vi.fn(() => ({ AsyncShutdown: { appShutdownConfirmed: { addBlocker, removeBlocker: vi.fn() } } })),
+        };
+        try {
+            const hooks = await loadHooks();
+            await hooks.onStartup();
+            expect(addBlocker).toHaveBeenCalledWith('Beaver: flush table fills', expect.any(Function));
+            const blocker = addBlocker.mock.calls[0][1] as () => Promise<void>;
+            const observer = vi.mocked((globalThis as any).Services.obs.addObserver).mock.calls
+                .find(([, topic]: [unknown, string]) => topic === 'quit-application')![0] as { observe(s: unknown, t: string): void };
+            let flushed!: () => void;
+            const dispose = vi.fn(() => new Promise<void>((resolve) => { flushed = resolve; }));
+            (globalThis as any).addon.tableFills = { dispose };
+            // Gecko runs the blocker and the observer in the same phase.
+            const holding = blocker();
+            observer.observe(null, 'quit-application');
+            await Promise.resolve();
+            await Promise.resolve();
+            // The account outlives the flush: its last commit needs it.
+            expect(dispose).toHaveBeenCalledOnce();
+            expect((globalThis as any).addon.account.dispose).not.toHaveBeenCalled();
+            flushed();
+            await holding;
+            await vi.waitFor(() => expect((globalThis as any).addon.account.dispose).toHaveBeenCalledOnce());
+        } finally {
+            delete (globalThis as any).ChromeUtils;
+        }
+    });
+
+    it('closes the database and stops background services on shutdown', async () => {
         const hooks = await loadHooks();
         const stop = vi.fn().mockResolvedValue(undefined), closeDatabase = vi.fn().mockResolvedValue(undefined);
-        (globalThis as any).addon.voice = { dispose: vi.fn(() => { throw new Error('voice failure'); }) };
-        (globalThis as any).addon.voiceHarness = {};
         (globalThis as any).addon.db = { closeDatabase };
         (globalThis as any).addon.backgroundExtractor = { stop };
         await hooks.onShutdown();
         expect(stop).toHaveBeenCalledOnce(); expect(closeDatabase).toHaveBeenCalledOnce();
         expect((globalThis as any).addon.runtime.getSnapshot()).toEqual([]);
-        expect((globalThis as any).addon.voice).toBeUndefined();
-        expect((globalThis as any).addon.voiceHarness).toBeUndefined();
     });
 
     it('disposes instance auth during full shutdown unload', async () => {

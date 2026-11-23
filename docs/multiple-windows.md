@@ -69,10 +69,10 @@ package type checks, bundle boundary checks, ESLint, and `git diff --check` pass
 - Repeated standalone open/close, reader-context initialization, sidebar context,
   table/chat round trips, and plugin rebuild/restart were exercised.
 - Live suites covered runtime cleanup, context isolation, account/access projection,
-  thread repository sharing, concurrent mutations and undo, and simulated voice
-  ownership. Unit tests cover server activity polling, late navigation/account
-  responses, busy/expired reservations, unseen successors, canceled undo, handshake
-  capability checks, authoritative history metadata, and command routing.
+  thread repository sharing, and concurrent mutations and undo. Unit tests cover
+  server activity polling, late navigation/account responses, busy/expired
+  reservations, unseen successors, canceled undo, handshake capability checks,
+  authoritative history metadata, and command routing.
 
 The manifest range remains **6.999–10.0.***. This validation does not establish
 compatibility with Zotero 11 or every release within that range. No version-number
@@ -83,9 +83,6 @@ branches were added; tagged and untagged tab-event behavior has unit coverage.
 - Supported stable Zotero releases and the upstream build with tagged multi-window
   notifications; repeat context and reader/note navigation across two main windows.
 - Windows and Linux window lifecycles, keyboard shortcuts, focus, sizing, and menus.
-- Real microphone permission/capture, transcription delivery to the initiating
-  window, and closing that window during recording; automated voice coverage uses
-  the fake transport/harness.
 - Native focus switching (the automation host could not locate a native Zotero
   window; programmatic focus did not activate it), plus visual review of chat
   switching confirmations, tables, scrolling/find-in-chat,

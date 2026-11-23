@@ -168,6 +168,24 @@ describe('preprocessCitations', () => {
             expect(result).toContain('data-adjacent="true"');
         });
 
+        it('treats table citations of different rows as different sources', () => {
+            const result = preprocessCitations(
+                '<citation id="u-TABLEKEY" loc="cell:u-PAPERAAA/design"/> ' +
+                    '<citation id="u-TABLEKEY" loc="cell:u-PAPERBBB/design"/> ' +
+                    '<citation id="u-TABLEKEY" loc="row:u-PAPERCCC"/>',
+                createPreprocessState(),
+            );
+            expect(result).not.toContain('data-consecutive="true"');
+        });
+
+        it('treats another cell of the same row as the same source', () => {
+            const result = preprocessCitations(
+                '<citation id="u-TABLEKEY" loc="cell:u-PAPERAAA/design"/> <citation id="u-TABLEKEY" loc="cell:u-PAPERAAA/sample"/>',
+                createPreprocessState(),
+            );
+            expect(result.match(/data-consecutive="true"/g)).toHaveLength(1);
+        });
+
         it('does not mark different items as consecutive', () => {
             const state = createPreprocessState();
             const result = preprocessCitations(

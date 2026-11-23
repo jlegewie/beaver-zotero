@@ -1,0 +1,207 @@
+{
+    "name": "external chapters of one book share its ISBN and stay apart",
+    "existing": [],
+    "incoming": [
+        {
+            "row": {
+                "id": "r1",
+                "ref": {
+                    "kind": "external",
+                    "source": "openalex",
+                    "source_id": "W1",
+                    "reference": {
+                        "source": "openalex",
+                        "source_id": "W1",
+                        "title": "Chapter one on sampling frames",
+                        "publication_types": [
+                            "book_chapter"
+                        ],
+                        "identifiers": {
+                            "isbn": "9780262033848"
+                        }
+                    }
+                },
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Chapter one on sampling frames",
+                            "title": "Chapter one on sampling frames",
+                            "item_type": "journalArticle"
+                        }
+                    },
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "date",
+                            "value": "2020"
+                        }
+                    }
+                },
+                "in_library": false,
+                "origin": [
+                    {
+                        "source": "s2",
+                        "date": "2026-10-21"
+                    }
+                ]
+            }
+        },
+        {
+            "row": {
+                "id": "r2",
+                "ref": {
+                    "kind": "external",
+                    "source": "openalex",
+                    "source_id": "W2",
+                    "reference": {
+                        "source": "openalex",
+                        "source_id": "W2",
+                        "title": "Chapter two on nonresponse bias",
+                        "publication_types": [
+                            "book_chapter"
+                        ],
+                        "identifiers": {
+                            "isbn": "9780262033848"
+                        }
+                    }
+                },
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Chapter two on nonresponse bias",
+                            "title": "Chapter two on nonresponse bias",
+                            "item_type": "journalArticle"
+                        }
+                    },
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "date",
+                            "value": "2020"
+                        }
+                    }
+                },
+                "in_library": false,
+                "origin": [
+                    {
+                        "source": "s2",
+                        "date": "2026-10-21"
+                    }
+                ]
+            }
+        }
+    ],
+    "after": {
+        "rows": [
+            {
+                "id": "r1",
+                "ref": {
+                    "kind": "external",
+                    "source": "openalex",
+                    "source_id": "W1",
+                    "reference": {
+                        "source": "openalex",
+                        "source_id": "W1",
+                        "title": "Chapter one on sampling frames",
+                        "identifiers": {
+                            "isbn": "9780262033848"
+                        },
+                        "library_items": [],
+                        "publication_types": [
+                            "book_chapter"
+                        ],
+                        "oa_candidates": []
+                    }
+                },
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Chapter one on sampling frames",
+                            "title": "Chapter one on sampling frames",
+                            "item_type": "journalArticle"
+                        }
+                    },
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "date",
+                            "value": "2020"
+                        }
+                    }
+                },
+                "in_library": false,
+                "origin": [
+                    {
+                        "source": "s2",
+                        "date": "2026-10-21"
+                    }
+                ]
+            },
+            {
+                "id": "r2",
+                "ref": {
+                    "kind": "external",
+                    "source": "openalex",
+                    "source_id": "W2",
+                    "reference": {
+                        "source": "openalex",
+                        "source_id": "W2",
+                        "title": "Chapter two on nonresponse bias",
+                        "identifiers": {
+                            "isbn": "9780262033848"
+                        },
+                        "library_items": [],
+                        "publication_types": [
+                            "book_chapter"
+                        ],
+                        "oa_candidates": []
+                    }
+                },
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Chapter two on nonresponse bias",
+                            "title": "Chapter two on nonresponse bias",
+                            "item_type": "journalArticle"
+                        }
+                    },
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "date",
+                            "value": "2020"
+                        }
+                    }
+                },
+                "in_library": false,
+                "origin": [
+                    {
+                        "source": "s2",
+                        "date": "2026-10-21"
+                    }
+                ]
+            }
+        ],
+        "added": [
+            "r1",
+            "r2"
+        ],
+        "merged": 0
+    }
+}

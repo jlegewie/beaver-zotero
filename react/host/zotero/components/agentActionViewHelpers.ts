@@ -25,6 +25,12 @@ import {
 import { truncateText } from '@beaver/agent-ui/utils/stringUtils';
 import { countEditAnnotationTargets, isUnconfirmedAction } from './reviewChangeRows';
 import { textAnnotationStyle } from '@beaver/agent-core/types/agentActions/createAnnotations';
+import { isStaleProposal, STALE_PROPOSAL_CODE } from '../../../../src/services/manualActions/staleProposal';
+import { isUnsuccessfulToolReturn } from '@beaver/agent-core/agents/types';
+import type { ToolResult } from '@beaver/agent-core/run-state/atoms';
+import { parseItemReference } from '@beaver/agent-core/identity/libraryRef';
+
+export { isStaleProposal };
 
 export type ActionStatus = 'pending' | 'applied' | 'rejected' | 'undone' | 'error';
 
@@ -72,6 +78,82 @@ export function inFlightProgressMessage(
 }
 
 /**
+ * The progress note an action card shows, if any. Shown while the call is
+ * open and the card is not waiting on the user. For most tools only while
+ * the action itself is still outstanding, since the note outlives the
+ * request that produced it; `create_items` keeps it until the call returns,
+ * because it then reports the PDF fetches the call waits on.
+ */
+export function actionCardProgressMessage(
+    toolName: string,
+    progress: string | undefined,
+    state: { isCallOpen: boolean; isAwaitingApproval: boolean; status: ActionStatus | 'awaiting' },
+): string | null {
+    const isActionOutstanding = state.status === 'awaiting' || state.status === 'pending';
+    return inFlightProgressMessage(
+        progress,
+        state.isCallOpen
+        && !state.isAwaitingApproval
+        && (isActionOutstanding || toolName === 'create_items'),
+    );
+}
+
+/**
+ * The full text a created item ended up with, as the `create_items` return
+ * reports it: the content kind of its attachment ("pdf", "snapshot", …), null
+ * when it has none, or undefined when the return does not say.
+ */
+export interface CreatedItemFullText {
+    /** Zotero key of the created item. */
+    zoteroKey: string | null;
+    kind: string | null | undefined;
+}
+
+/**
+ * The created items of a `create_items` (v2) return and their full text. Null
+ * without a successful return, or for a return in another shape. Read once the
+ * call has returned: Beaver does not follow fetches that finish later.
+ */
+export function createdItemsFullText(result: ToolResult | null | undefined): CreatedItemFullText[] | null {
+    if (result?.part_kind !== 'tool-return' || isUnsuccessfulToolReturn(result)) return null;
+    const items = result.content && typeof result.content === 'object' ? result.content.items : null;
+    if (!Array.isArray(items)) return null;
+    return items
+        .filter((entry: any) => entry?.outcome === 'created')
+        .map((entry: any): CreatedItemFullText => {
+            const zoteroKey = typeof entry.item_id === 'string' ? parseItemReference(entry.item_id)?.zotero_key ?? null : null;
+            if (!Array.isArray(entry.attachments)) return { zoteroKey, kind: undefined };
+            if (entry.attachments.length === 0) return { zoteroKey, kind: null };
+            const primary = entry.attachments.find((attachment: any) => attachment?.is_primary) ?? entry.attachments[0];
+            return { zoteroKey, kind: typeof primary?.content_kind === 'string' ? primary.content_kind : 'file' };
+        });
+}
+
+/**
+ * How many created items got full text, appended to the `create_items` header
+ * title ("3 Items (2 with full text)"). `single` words it for a card titled by
+ * its one item. Null when no item was created or the return does not report
+ * every created item's attachments.
+ */
+export function createItemsFullTextSummary(created: CreatedItemFullText[] | null, single: boolean): string | null {
+    if (!created || created.length === 0 || created.some((item) => item.kind === undefined)) return null;
+    const withFullText = created.filter((item) => item.kind !== null).length;
+    if (withFullText === 0) return 'no full text';
+    return single ? 'with full text' : `${withFullText} with full text`;
+}
+
+/** What an expanded row says about a created item's full text. */
+export function fullTextRowLabel(kind: string | null): string {
+    switch (kind) {
+        case null: return 'No full text';
+        case 'pdf': return 'PDF attached';
+        case 'epub': return 'EPUB attached';
+        case 'snapshot': return 'Snapshot saved';
+        default: return 'File attached';
+    }
+}
+
+/**
  * Shorten a backend error_message for inline display in action previews.
  *
  * Backend messages include agent-facing detail (multi-line lists, Zotero keys,
@@ -96,6 +178,8 @@ export interface StatusConfig {
     showReject: boolean;
     showUndo: boolean;
     showRetry: boolean;
+    /** Offer to write the change although the library moved since the proposal. */
+    showApplyAnyway?: boolean;
 }
 
 export const STATUS_CONFIGS: Record<ActionStatus | 'awaiting', StatusConfig> = {
@@ -170,17 +254,55 @@ const UNCONFIRMED_STATUS_CONFIG: StatusConfig = {
     showRetry: false,
 };
 
+/** Tooltip on a collapsed stale card's ✓, which applies it anyway. */
+export const STALE_APPLY_ANYWAY_TOOLTIP = 'Changed since proposed. Apply anyway';
+
+/**
+ * How a card shows an apply refused because the library changed since the
+ * proposal (see `isStaleProposal`). Retrying fails the same way, so the card
+ * offers to apply it anyway or to reject it.
+ */
+const STALE_PROPOSAL_STATUS_CONFIG: StatusConfig = {
+    icon: AlertIcon,
+    label: 'Changed since proposed',
+    iconClassName: 'font-color-orange',
+    showApply: false,
+    showReject: true,
+    showUndo: false,
+    showRetry: false,
+    showApplyAnyway: true,
+};
+
 /**
  * The card config for `status`, with an unconfirmed outcome in place of a
- * failure when every failed action is unconfirmed. A batch that also holds a
- * known failure keeps Retry, which leaves its unconfirmed actions alone.
+ * failure when every failed action is unconfirmed, and a stale proposal's
+ * choices when every failed action is one. A batch that also holds a known
+ * failure keeps Retry, which leaves its unconfirmed actions alone.
  */
 export function getStatusConfig(status: ActionStatus | 'awaiting', actions: AgentAction[]): StatusConfig {
     const failed = actions.filter((action) => action.status === 'error');
     if (status === 'error' && failed.length > 0 && failed.every(isUnconfirmedAction)) {
         return UNCONFIRMED_STATUS_CONFIG;
     }
+    if (status === 'error' && failed.length > 0 && failed.every(isStaleProposal)) {
+        return STALE_PROPOSAL_STATUS_CONFIG;
+    }
     return STATUS_CONFIGS[status];
+}
+
+/**
+ * What changed since a proposal whose apply was refused: the executor's
+ * message, shown in the expanded card. Null when no action on the card is one.
+ */
+export function staleProposalDetail(actions: AgentAction[]): string | null {
+    const stale = actions.find(isStaleProposal);
+    if (!stale) return null;
+    return stale.error_message || 'The library changed after this was proposed.';
+}
+
+/** Whether an apply was refused because the library changed since the proposal. */
+export function wasRefusedAsStale(result: { failed: Array<{ errorDetails?: Record<string, any> }> }): boolean {
+    return result.failed.some((failure) => failure.errorDetails?.error_code === STALE_PROPOSAL_CODE);
 }
 
 /** For an unconfirmed action stored without the server's explanation. */

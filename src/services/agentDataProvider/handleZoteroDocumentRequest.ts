@@ -56,7 +56,7 @@ import { EXTERNAL_LIBRARY_ID, resolveExternalFile } from '../externalFiles';
 // Identification only — `tableItemIdentity` is the esbuild-safe half of the
 // stored-table subsystem (see its module comment); `tableItem`/`tableStore`
 // must never be imported from here.
-import { isTableItem } from '../artifacts/tableItemIdentity';
+import { isTableAttachment } from '../artifacts/tableItemIdentity';
 import { effectiveMaxFileSizeMB } from '@beaver/agent-core/transport/attachmentLimits';
 import { withWorkerDiagnostics } from './workerDiagnostics';
 import type { ExternalFileRecord } from '../database';
@@ -65,6 +65,8 @@ import { getBestAttachmentBatch } from '../documentExtraction/attachmentInfoBatc
 import { libraryRefForLibraryID, modelObjectId } from '../../utils/libraryIdentity';
 import {
     createPreparedJsonMessage,
+    isPreparedJsonMessage,
+    preparedJsonEnvelope,
     type PreparedJsonMessage,
 } from '@beaver/agent-core/transport/preparedJsonMessage';
 
@@ -154,6 +156,8 @@ function documentTimingsField(
         if (typeof ms === 'number') (wire as unknown as Record<string, number>)[to] = Math.round(ms);
     }
     if (timings.workerState) wire.worker_state = timings.workerState;
+    if (timings.workerSlot) wire.worker_slot = timings.workerSlot;
+    if (timings.overflowSkip) wire.overflow_skip = timings.overflowSkip;
     if (diagnosticsWaitMs !== undefined) wire.diagnostics_wait_ms = diagnosticsWaitMs;
     return { timings: wire };
 }
@@ -488,10 +492,12 @@ export async function handleZoteroDocumentRequest(
         // A Beaver table is a snapshot attachment, so search surfaces it and the
         // model reads it like any other document. Extracting it would hand back
         // the rendered HTML instead of the table, so answer with the table's
-        // handle and let the backend point at `read_table`. A table is always a
-        // top-level attachment, so it is the requested item and `loadAllData`
-        // above has loaded the tags and `itemData` that `isTableItem` reads.
-        if (contentKind === 'snapshot' && isTableItem(resolvedItem)) {
+        // handle and let the backend point at `read_table`. The check is the one
+        // `read_table` resolves a table with, so a table whose cosmetic tag was
+        // removed is still never extracted. A table is always a top-level
+        // attachment, so it is the requested item and `loadAllData` above has
+        // loaded the `itemData` that `isTableAttachment` reads.
+        if (contentKind === 'snapshot' && isTableAttachment(resolvedItem)) {
             const handle = modelObjectId(resolvedItem.libraryID, resolvedItem.key);
             return errorResponse(
                 `Attachment '${handle}' is a Beaver table, not a readable document.`,
@@ -800,6 +806,7 @@ export async function handleZoteroDocumentRequest(
                 {
                     workerDispatched: result.workerDispatched === true,
                     leaseReaped: result.kind === 'timeout' && result.leaseReaped === true,
+                    slot: result.workerSlot,
                 },
             );
         }
@@ -832,6 +839,57 @@ export async function handleZoteroDocumentRequest(
     } finally {
         timeout.dispose();
     }
+}
+
+/** A document in the form the backend reads, or why it could not be read. */
+export type BackendDocumentRead =
+    | {
+          ok: true;
+          /** The backend-bound extraction, serialized once, ready to splice into a body. */
+          json: string;
+          contentKind: ExtractContentKind;
+          totalPages: number | null;
+      }
+    | {
+          ok: false;
+          code: ZoteroDocumentErrorCode;
+          message: string;
+          contentKind?: ExtractContentKind;
+      };
+
+/**
+ * Extracts a document for the backend: the payload the chat socket sends for
+ * `zotero_document_request`, with the same resolution, cache, citation level,
+ * page and size limits, returned as serialized JSON rather than wrapped in a
+ * socket message. Callers that post a document over HTTP (a table fill) use
+ * it so the backend reads exactly what the chat path would have sent.
+ */
+export async function readBackendDocument(
+    request: WSZoteroDocumentRequest,
+): Promise<BackendDocumentRead> {
+    const response = await handleZoteroDocumentRequest(request, { responseMode: 'websocket' });
+    if (isPreparedJsonMessage(response)) {
+        const envelope = preparedJsonEnvelope(response) as Omit<WSZoteroDocumentResponse, 'result'>;
+        const json = response.rawFields.result;
+        if (!json || !envelope.content_kind) {
+            return { ok: false, code: 'extraction_failed', message: 'The document response carried no result.' };
+        }
+        return { ok: true, json, contentKind: envelope.content_kind, totalPages: envelope.total_pages ?? null };
+    }
+    if (response.error || response.result == null || !response.content_kind) {
+        return {
+            ok: false,
+            code: response.error_code ?? 'extraction_failed',
+            message: response.error ?? 'The document response carried no result.',
+            ...(response.content_kind ? { contentKind: response.content_kind } : {}),
+        };
+    }
+    return {
+        ok: true,
+        json: JSON.stringify(response.result),
+        contentKind: response.content_kind,
+        totalPages: response.total_pages ?? null,
+    };
 }
 
 /** Model-facing message for an external file whose managed copy is unavailable. */
@@ -1035,6 +1093,7 @@ async function handleExternalFileDocumentRequest(
                 {
                     workerDispatched: result.workerDispatched === true,
                     leaseReaped: result.kind === 'timeout' && result.leaseReaped === true,
+                    slot: result.workerSlot,
                 },
             );
         }

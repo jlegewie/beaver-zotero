@@ -15,8 +15,10 @@ import {
     writeTargetLibraryError,
 } from '../../../utils/libraryIdentity';
 import type { ActionExecuteRequest, ActionValidateRequest } from '../operationContext';
+import type { CreateCollectionResultData } from '@beaver/agent-core/types/agentActions/base';
 import { checkAborted, TimeoutContext, TimeoutError } from '../timeout';
-import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
+import { excludedLibraryMessage, getDeferredToolPreference } from '../utils';
+import { actionError, assertLibraryNotExcluded, toExecuteResponse } from './actionExecution';
 
 
 /**
@@ -199,14 +201,15 @@ async function validateCreateCollectionAction(
 
 
 /**
- * Execute a create_collection action.
- * Creates a new Zotero collection with the specified properties.
+ * Create a collection, add the requested items to it and return its
+ * `result_data`. A collection whose items could not be added is erased again,
+ * so a failed apply leaves nothing behind.
  */
-async function executeCreateCollectionAction(
-    request: ActionExecuteRequest,
+export async function applyCreateCollection(
+    rawData: Record<string, any>,
     ctx: TimeoutContext,
-): Promise<WSAgentActionExecuteResponse> {
-    const { library_id: rawLibraryId, library_ref, library_name, name, parent_key, item_ids } = readCollectionActionData(request.action_data) as {
+): Promise<CreateCollectionResultData> {
+    const { library_id: rawLibraryId, library_ref, library_name, name, parent_key, item_ids } = readCollectionActionData(rawData) as {
         library_id?: number | null;
         library_ref?: string | null;
         library_name?: string | null;
@@ -217,28 +220,14 @@ async function executeCreateCollectionAction(
 
     const targetResolution = resolveWriteTargetLibrary({ library_ref, library_id: rawLibraryId, library_name });
     if (!targetResolution.ok) {
-        return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: false,
-            ...writeTargetLibraryError(targetResolution),
-        };
+        const { error, error_code } = writeTargetLibraryError(targetResolution);
+        throw actionError(error_code, error);
     }
     const library_id = targetResolution.libraryID;
 
     // TOCTOU guard: never create in a library the user excluded from Beaver,
-    // even if validation passed earlier or the execute request skipped it.
-    const excluded = checkLibraryExcluded(library_id);
-    if (excluded) {
-        return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: false,
-            error: excluded.message,
-            error_code: 'library_not_searchable',
-        };
-    }
-
+    // even if validation passed earlier or the action waited for approval.
+    assertLibraryNotExcluded(library_id);
     assertLibraryWritable(library_id);
 
     // Build collection params
@@ -247,7 +236,9 @@ async function executeCreateCollectionAction(
         libraryID: library_id,
     };
 
-    // Set parent if provided
+    // Set parent if provided. A parent deleted since approval fails the
+    // action; never fall back to creating at top level or to a same-named
+    // replacement.
     if (parent_key) {
         let parentCollection: Zotero.Collection | null = null;
         try {
@@ -255,17 +246,11 @@ async function executeCreateCollectionAction(
         } catch (error) {
             if (!(error instanceof CollectionResolutionError) || error.code !== 'collection_not_found') throw error;
         }
-        if (parentCollection) {
-            collectionParams.parentID = parentCollection.id;
-        } else {
-            return {
-                type: 'agent_action_execute_response',
-                request_id: request.request_id,
-                success: false,
-                error: collectionDeletedSinceValidationMessage('Parent collection', parent_key),
-                error_code: 'parent_not_found',
-            };
+        if (!parentCollection) {
+            throw actionError('parent_not_found', collectionDeletedSinceValidationMessage('Parent collection', parent_key),
+                { userMessage: `Parent collection not found: ${parent_key}` });
         }
+        collectionParams.parentID = parentCollection.id;
     }
 
     let collection: any = null;
@@ -281,7 +266,7 @@ async function executeCreateCollectionAction(
         // Save the collection
         await collection.saveTx();
         collectionSaved = true;
-        logger(`executeCreateCollectionAction: Created collection "${name}" with key ${collection.key}`, 1);
+        logger(`applyCreateCollection: Created collection "${name}" with key ${collection.key}`, 1);
 
         let itemsAdded = 0;
         // Reported by id so the backend can settle each one; a bare count
@@ -296,6 +281,9 @@ async function executeCreateCollectionAction(
             await Zotero.DB.executeTransaction(async () => {
                 const itemIdsToAdd: number[] = [];
 
+                // Accepts both the portable "<library_ref>-<zotero_key>"
+                // grammar and the legacy numeric grammar; unresolved, missing
+                // or child items are skipped.
                 for (const itemIdStr of item_ids) {
                     const parsedRef = resolveObjectId(itemIdStr);
                     if (!parsedRef) {
@@ -318,23 +306,18 @@ async function executeCreateCollectionAction(
                 if (itemIdsToAdd.length > 0) {
                     await collection.addItems(itemIdsToAdd);
                     itemsAdded = itemIdsToAdd.length;
-                    logger(`executeCreateCollectionAction: Added ${itemsAdded} items to collection`, 1);
+                    logger(`applyCreateCollection: Added ${itemsAdded} items to collection`, 1);
                 }
             });
         }
 
         return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: true,
-            result_data: {
-                library_id,
-                library_ref: libraryRefForLibraryID(library_id) ?? undefined,
-                collection_key: collection.key,
-                collection_id: formatCollectionId(collection.libraryID, collection.key),
-                items_added: itemsAdded,
-                skipped_item_ids: skippedItemIds,
-            },
+            library_id,
+            library_ref: libraryRefForLibraryID(library_id) ?? undefined,
+            collection_key: collection.key,
+            collection_id: formatCollectionId(collection.libraryID, collection.key),
+            items_added: itemsAdded,
+            skipped_item_ids: skippedItemIds,
         };
     } catch (error) {
         // Compensating action: delete collection if it was persisted but
@@ -343,23 +326,26 @@ async function executeCreateCollectionAction(
         if (collectionSaved) {
             try {
                 await collection.eraseTx();
-                logger(`executeCreateCollectionAction: Rolled back collection "${name}"`, 1);
+                logger(`applyCreateCollection: Rolled back collection "${name}"`, 1);
             } catch (eraseError) {
-                logger(`executeCreateCollectionAction: Failed to roll back collection: ${eraseError}`, 1);
+                logger(`applyCreateCollection: Failed to roll back collection: ${eraseError}`, 1);
             }
         }
 
-        // Re-throw TimeoutError so it propagates to the main handler
         if (error instanceof TimeoutError) throw error;
-        logger(`executeCreateCollectionAction: Failed to create collection: ${error}`, 1);
-        return {
-            type: 'agent_action_execute_response',
-            request_id: request.request_id,
-            success: false,
-            error: `Failed to create collection: ${error}`,
-            error_code: 'create_failed',
-        };
+        logger(`applyCreateCollection: Failed to create collection: ${error}`, 1);
+        throw actionError('create_failed', `Failed to create collection: ${error}`,
+            { userMessage: (error as Error)?.message || String(error) });
     }
+}
+
+/** Create a collection for the backend during a run. */
+async function executeCreateCollectionAction(
+    request: ActionExecuteRequest,
+    ctx: TimeoutContext,
+): Promise<WSAgentActionExecuteResponse> {
+    return toExecuteResponse(request.request_id, 'executeCreateCollectionAction',
+        () => applyCreateCollection(request.action_data, ctx));
 }
 
 export { executeCreateCollectionAction, validateCreateCollectionAction };

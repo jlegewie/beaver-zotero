@@ -74,7 +74,8 @@ import {
     canonicalTagForm,
     suggestionTagForm,
 } from '../../../src/services/agentDataProvider/actions/manageTags';
-import { validateLibraryAccess, getDeferredToolPreference } from '../../../src/services/agentDataProvider/utils';
+import { validateLibraryAccess, getDeferredToolPreference, checkLibraryExcluded } from '../../../src/services/agentDataProvider/utils';
+import { executeManageTagsAction as applyStoredManageTags } from '../../../src/services/manualActions/manageTagsActions';
 
 const Zot = (globalThis as any).Zotero;
 
@@ -172,6 +173,21 @@ describe('validateManageTagsAction', () => {
         expect(resp.normalized_action_data?.old_color).toBeUndefined();
         expect(resp.normalized_action_data?.library_id).toBe(1);
         expect(resp.preference).toBe('always_ask');
+    });
+
+    it('does not flag a merge when the rename target exists only in another library', async () => {
+        okLibrary();
+        Zot.Tags.getID.mockImplementation((name: string) => (name === 'old' ? 7 : name === 'new' ? 8 : false));
+        Zot.Tags.getTagItems.mockImplementation(async (_lib: number, tagID: number) => (tagID === 7 ? [10, 20] : []));
+
+        const resp = await validateManageTagsAction({
+            event: 'agent_action_validate',
+            request_id: 'r4b',
+            action_type: 'manage_tags',
+            action_data: { action: 'rename', name: 'old', new_name: 'new' },
+        } as any);
+        expect(resp.valid).toBe(true);
+        expect(resp.current_value?.is_merge).toBe(false);
     });
 
     it('reports item_count in current_value (preview) for delete', async () => {
@@ -486,7 +502,7 @@ describe('executeManageTagsAction', () => {
         // tagID for source, no existing target → no merge
         Zot.Tags.getID.mockImplementation((n: string) => (n === 'old' ? 7 : false));
         Zot.Tags.getTagItems.mockResolvedValue([10, 20]);
-        Zot.Tags.getColor.mockReturnValue({ color: '#00ff00', position: 1 });
+        Zot.Tags.getColor.mockImplementation((_lib: number, n: string) => (n === 'old' ? { color: '#00ff00', position: 1 } : null));
 
         const resp = await executeManageTagsAction({
             event: 'agent_action_execute',
@@ -640,6 +656,53 @@ describe('executeManageTagsAction', () => {
     });
 });
 
+
+describe('applying a stored manage_tags action', () => {
+    const stored = (proposed: Record<string, unknown>) => ({ id: 'a1', action_type: 'manage_tags', proposed_data: proposed } as any);
+
+    it('refuses a delete over the safety cap without writing, so the result never lacks its undo snapshot', async () => {
+        Zot.Tags.getID.mockReturnValue(11);
+        Zot.Tags.getTagItems.mockResolvedValue(Array.from({ length: 5001 }, (_, i) => i + 1));
+
+        await expect(applyStoredManageTags(stored({ action: 'delete', name: 'huge', library_id: 1 }), { skipStaleCheck: true }))
+            .rejects.toMatchObject({ code: 'too_many_items' });
+        expect(Zot.Tags.removeFromLibrary).not.toHaveBeenCalled();
+    });
+
+    it('refuses a library excluded after the proposal before touching any tag', async () => {
+        (checkLibraryExcluded as any).mockReturnValueOnce({ message: 'Library 1 is excluded' });
+
+        await expect(applyStoredManageTags(stored({ action: 'delete', name: 'foo', library_id: 1 })))
+            .rejects.toMatchObject({ code: 'library_not_searchable' });
+        expect(Zot.Tags.getID).not.toHaveBeenCalled();
+        expect(Zot.Tags.removeFromLibrary).not.toHaveBeenCalled();
+    });
+
+    it('checks the baseline against the tag the executor resolves, not only an exact-name hit', async () => {
+        // The exact name misses; the executor auto-resolves the case variant,
+        // which still has the proposal's item count, so nothing changed.
+        Zot.Tags.getID.mockImplementation((n: string) => (n === 'old tag' ? 7 : false));
+        Zot.Tags.getTagItems.mockResolvedValue([1, 2, 3]);
+        queueDbRow(['old tag']);
+
+        const result = await applyStoredManageTags(stored({
+            action: 'delete', name: 'Old Tag', library_id: 1, baseline: { item_count: 3 },
+        }));
+        expect(Zot.Tags.removeFromLibrary).toHaveBeenCalledWith(1, [7]);
+        expect(result).toMatchObject({ name: 'old tag', items_affected: 3 });
+    });
+
+    it('records the same result_data as the socket path', async () => {
+        Zot.Tags.getID.mockImplementation((n: string) => (n === 'old' ? 7 : false));
+        Zot.Tags.getTagItems.mockResolvedValue([10]);
+        const data = { action: 'rename', name: 'old', new_name: 'new', library_id: 1 };
+
+        const local = await applyStoredManageTags(stored(data));
+        const socket = await executeManageTagsAction({ request_id: 'r', action_type: 'manage_tags', action_data: data } as any,
+            { signal: { aborted: false }, timeoutSeconds: 25, startTime: Date.now() } as any);
+        expect(socket.result_data).toEqual(local);
+    });
+});
 
 describe('canonicalTagForm', () => {
     it('folds case, trims, and collapses whitespace runs', () => {

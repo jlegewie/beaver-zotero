@@ -1,12 +1,14 @@
 import { Setter } from "jotai";
 import { checkExternalReferencesAtom } from "../atoms/externalReferences";
 import { addExternalReferencesToMappingAtom } from "@beaver/agent-core/citations/externalReferences";
+import { combineSnapshotList } from "@beaver/agent-core/citations/externalRecords";
+import type { ExternalReference } from "@beaver/agent-core/types/externalReferences";
 import { loadFullItemDataWithAllTypes } from "../../src/utils/zoteroUtils";
 import { resolveItemReference } from "../../src/utils/libraryIdentity";
 import { extractExternalSearchData, extractLookupWorkData, isExternalSearchResult, isLookupWorkResult } from "@beaver/agent-core/run-state/toolResultTypes";
 import { ToolReturnPart, isUnsuccessfulToolReturn } from "@beaver/agent-core/agents/types";
 import { extractZoteroReferences } from "@beaver/agent-core/run-state/toolResultTypes";
-import { isExternalReferenceListView, isToolResultView } from "@beaver/agent-core/run-state/toolResultViews";
+import { isExternalReferenceListView, isToolResultView, relatedWorksViewInfo } from "@beaver/agent-core/run-state/toolResultViews";
 import { logger } from "@beaver/agent-core/platform/logger";
 
 /**
@@ -30,20 +32,20 @@ export async function processToolReturnResults(
     // allowlist alongside the render layer.
     const view = part.metadata?.view;
     if (isToolResultView(view) && isExternalReferenceListView(view)) {
-        const references = [...view.references];
-        const relatedWork = view.tool_info?.info_type === 'related_works'
-            ? view.tool_info.work
-            : null;
-        if (
-            relatedWork?.source_id
-            && !references.some((reference) => reference.source_id === relatedWork.source_id)
-        ) {
-            references.push(relatedWork);
-        }
-        if (references.length > 0) {
-            logger(`processToolReturnResults: Adding ${references.length} external references from view`, 1);
-            set(addExternalReferencesToMappingAtom, references);
-            set(checkExternalReferencesAtom, references);
+        // Every snapshot the tool produced: its rows, the other-source
+        // snapshots of the same ids, and the work a related-works list is for.
+        const snapshots: ExternalReference[] = [
+            ...(view.references ?? []),
+            ...(view.extra_snapshots ?? []),
+        ];
+        const relatedWork = relatedWorksViewInfo(view)?.work;
+        if (relatedWork?.source_id) snapshots.push(relatedWork);
+        if (snapshots.length > 0) {
+            logger(`processToolReturnResults: Adding ${snapshots.length} external reference snapshots from view`, 1);
+            set(addExternalReferencesToMappingAtom, snapshots);
+            // The library check matches on every identifier the tool's
+            // snapshots carry, so it runs on their combination per id.
+            set(checkExternalReferencesAtom, [...combineSnapshotList(snapshots).values()]);
         }
     } else if (
         part.metadata &&

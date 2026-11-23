@@ -516,7 +516,7 @@ describe('lookup_work results', () => {
             references: [{
                 source_id: 'openalex:W123',
                 title: 'Legacy Work',
-                source: 'openalex',
+                source: '',
                 id: undefined,
                 library_items: [],
             }],

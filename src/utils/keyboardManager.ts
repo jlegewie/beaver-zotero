@@ -47,6 +47,14 @@ export class KeyboardManager {
     }
 
     /**
+     * Listens in a window that is neither a main window nor a reader, such as
+     * a table window, so Beaver's shortcuts work there too.
+     */
+    attachWindow(win: Window) {
+        this._initKeyboardListener(win);
+    }
+
+    /**
      * Unregister a keyboard event listener.
      */
     unregister(callback: (event: KeyboardEvent, options: { keyboard?: KeyModifier; type: "keydown" | "keyup" }) => void) {

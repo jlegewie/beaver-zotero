@@ -42,3 +42,24 @@ export function isThinkingInProgress(message: ModelResponse): boolean {
     }
     return hasThinking;
 }
+
+/**
+ * Whether a response message draws anything at all.
+ *
+ * It draws when it has a thinking, text or tool-call part — except a
+ * `return_suggestions` call, which renders as follow-up prompts under the run
+ * rather than inside the message. A response holding nothing but auto-loading
+ * calls draws nothing either, unless it also has text.
+ */
+export function hasDrawnContent(message: ModelResponse): boolean {
+    const hasText = message.parts.some((part) => part.part_kind === 'text');
+    const hasThinking = message.parts.some((part) => part.part_kind === 'thinking');
+    const toolCalls = message.parts.filter(
+        (part): part is ToolCallPart =>
+            part.part_kind === 'tool-call' && part.tool_name !== 'return_suggestions',
+    );
+    if (!hasText && !hasThinking && toolCalls.length === 0) return false;
+    const isAutoLoadingResponse =
+        toolCalls.length > 0 && !hasText && toolCalls.every(isAutoLoadingToolCall);
+    return !isAutoLoadingResponse;
+}

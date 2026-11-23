@@ -1,8 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-    FIRST_RUN_FOLLOWUPS,
     WHERE_TO_START_FOLLOWUPS,
-    getFollowupsForCardKind,
     getFollowupsForWhereToStart,
     getWhereToStartCardKind,
     renderFollowup,
@@ -38,30 +36,6 @@ describe('firstRunFollowups', () => {
 
         it('falls back for an unknown action id', () => {
             expect(getWhereToStartCardKind('nope')).toBe('discover_research');
-        });
-    });
-
-    describe('shared follow-up constants', () => {
-        it('color-code launcher reuses the reading-assistant related/online follow-ups', () => {
-            // Same object identity confirms the single-source-of-truth refactor.
-            const launcher = getFollowupsForWhereToStart('builtin-color-code');
-            const reading = FIRST_RUN_FOLLOWUPS.reading_assistant;
-            expect(launcher.find((f) => f.id === 'related_in_library'))
-                .toBe(reading.find((f) => f.id === 'related_in_library'));
-            expect(launcher.find((f) => f.id === 'find_recent_external'))
-                .toBe(reading.find((f) => f.id === 'find_recent_external'));
-        });
-
-        it('discover launcher reuses the discover_research follow-ups', () => {
-            const launcher = getFollowupsForWhereToStart('builtin-whats-new');
-            expect(launcher).toEqual(FIRST_RUN_FOLLOWUPS.discover_research);
-        });
-
-        it('preserves existing card-kind follow-ups after the refactor', () => {
-            expect(ids(getFollowupsForCardKind('reading_assistant', false)))
-                .toEqual(['skim_with_highlights', 'related_in_library', 'find_recent_external']);
-            expect(ids(getFollowupsForCardKind('discover_research', false)))
-                .toEqual(['save_top_to_collection', 'compare_to_library']);
         });
     });
 

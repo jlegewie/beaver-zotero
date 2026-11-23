@@ -79,6 +79,21 @@ export interface MenuItem {
 const SUBMENU_CLOSE_DELAY_MS = 250;
 
 /**
+ * The horizontal range a menu may occupy, `margin` inside its edges: the
+ * window, narrowed to the nearest `data-menu-bounds` ancestor when there is
+ * one. A surface narrower than the window marks its visible area that way
+ * (a Beaver tab beside Zotero's context pane, which paints over anything past
+ * the tab's edge).
+ */
+function horizontalBounds(menu: HTMLElement, viewportWidth: number, margin: number): { minX: number; maxRight: number } {
+    const bounds = menu.parentElement?.closest('[data-menu-bounds]')?.getBoundingClientRect();
+    return {
+        minX: Math.max(0, bounds?.left ?? 0) + margin,
+        maxRight: Math.min(viewportWidth, bounds?.right ?? viewportWidth) - margin,
+    };
+}
+
+/**
 * Position interface for menu placement
 */
 export interface MenuPosition {
@@ -326,15 +341,17 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
         let adjustedX = anchorX;
         let adjustedY = anchorY;
         let newPlacement: 'top' | 'bottom' | 'left' | 'right' = 'bottom';
-        
+
+        const { minX, maxRight } = horizontalBounds(menuRef.current, viewportWidth, 8);
+
         // Check if menu would go off the right side
-        if (adjustedX + menuWidth > viewportWidth - 8) {
-            adjustedX = Math.max(8, viewportWidth - menuWidth - 8);
+        if (adjustedX + menuWidth > maxRight) {
+            adjustedX = Math.max(minX, maxRight - menuWidth);
         }
-        
+
         // Check if menu would go off the left side
-        if (adjustedX < 8) {
-            adjustedX = 8;
+        if (adjustedX < minX) {
+            adjustedX = minX;
         }
         
         // Determine vertical placement
@@ -589,10 +606,11 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
         const itemRect = parentItem.getBoundingClientRect();
         const subRect = submenuRef.current.getBoundingClientRect();
         const margin = 8;
+        const { minX, maxRight } = horizontalBounds(submenuRef.current, win.innerWidth, margin);
         let x = itemRect.right + 4;
-        if (x + subRect.width > win.innerWidth - margin) {
+        if (x + subRect.width > maxRight) {
             const left = itemRect.left - subRect.width - 4;
-            x = left >= margin ? left : Math.max(margin, win.innerWidth - subRect.width - margin);
+            x = left >= minX ? left : Math.max(minX, maxRight - subRect.width);
         }
         // Align the first submenu item with the parent item (the menu's padding is 4px).
         let y = itemRect.top - 5;

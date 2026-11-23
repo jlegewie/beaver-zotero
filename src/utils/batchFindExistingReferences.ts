@@ -4,7 +4,9 @@
  * Optimized batch lookup for checking if multiple external references exist in Zotero.
  *
  * Execution model:
- *   Phase 1 — Identifier match (DOI + ISBN) in a single SQL pass each.
+ *   Phase 1 — Identifier match (DOI + ISBN) in a single SQL pass each, then
+ *             record identifiers (PubMed id in Extra, trial registry URL or
+ *             report number) for what is still unmatched.
  *   Phase 2 — Title match for items not already matched by Phase 1:
  *     2a. Exact-value title fast path: BINARY equality against
  *         itemDataValues.value. Catches most titles that match byte-for-byte
@@ -26,6 +28,7 @@ import { logger } from '@beaver/agent-core/platform/logger';
 import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { FindReferenceData } from '../../react/utils/findExistingReference';
 import { libraryRefForLibraryID } from './libraryIdentity';
+import { nctFromExternalId } from '@beaver/agent-core/citations/externalRecords';
 
 /**
  * Lightweight representation of a title-matched candidate from Zotero DB.
@@ -291,6 +294,205 @@ async function batchFindByIdentifiers(
     })();
 
     await Promise.all([doiPromise, isbnPromise]);
+    return results;
+}
+
+const REGISTRY_URL = /^https?:\/\/(?:www\.)?clinicaltrials\.gov\/(?:study|ct2\/show)\/(NCT\d{8})\/?(?:[?#].*)?$/i;
+
+/** The NCT id a reference names: its report number, else its registry URL. */
+export function trialIdOf(data: FindReferenceData): string | null {
+    const fromNumber = nctFromExternalId(data.reportNumber);
+    if (fromNumber) return fromNumber;
+    const match = data.url ? REGISTRY_URL.exec(data.url.trim()) : null;
+    return match ? match[1].toUpperCase() : null;
+}
+
+/** The registry URLs an existing item may store for a trial. */
+function registryUrls(nct: string): string[] {
+    const urls: string[] = [];
+    for (const scheme of ['https://', 'http://']) {
+        for (const host of ['clinicaltrials.gov', 'www.clinicaltrials.gov']) {
+            for (const path of [`study/${nct}`, `ct2/show/${nct}`]) {
+                urls.push(`${scheme}${host}/${path}`, `${scheme}${host}/${path}/`);
+            }
+        }
+    }
+    return urls;
+}
+
+/** A field's id, or null when this Zotero version has no such field. */
+function fieldIdIfKnown(name: string): number | null {
+    try {
+        return Zotero.ItemFields.getID(name) || null;
+    } catch {
+        return null;
+    }
+}
+
+function cleanPmid(value: string | undefined): string | null {
+    const match = value ? /^\s*(?:pmid:\s*)?(\d{1,9})\s*$/i.exec(value) : null;
+    return match ? String(Number(match[1])) : null;
+}
+
+function addMatch(
+    results: Map<string, ZoteroItemReference>,
+    requestIds: string[] | undefined,
+    libraryId: number,
+    zoteroKey: string,
+): void {
+    for (const requestId of requestIds ?? []) {
+        if (!results.has(requestId)) {
+            results.set(requestId, {
+                library_id: libraryId,
+                zotero_key: zoteroKey,
+                library_ref: libraryRefForLibraryID(libraryId) ?? undefined,
+            });
+        }
+    }
+}
+
+/**
+ * Match references by the identifiers records carry beyond DOI and ISBN:
+ * a PubMed id (a `PMID: <id>` line in Extra) and a trial registration (an
+ * item whose URL is the trial's registry page, or a report numbered with the
+ * NCT id by institution "clinicaltrials.gov"). Any item type matches.
+ */
+export async function batchFindByRecordIdentifiers(
+    items: BatchReferenceCheckItem[],
+    libraryIds: number[],
+): Promise<Map<string, ZoteroItemReference>> {
+    const results = new Map<string, ZoteroItemReference>();
+    if (items.length === 0 || libraryIds.length === 0) return results;
+    const libraryPlaceholders = libraryIds.map(() => '?').join(', ');
+
+    const pmidMap = new Map<string, string[]>();
+    const trialMap = new Map<string, string[]>();
+    for (const item of items) {
+        const pmid = cleanPmid(item.data.PMID);
+        if (pmid) pmidMap.set(pmid, [...(pmidMap.get(pmid) ?? []), item.id]);
+        const nct = trialIdOf(item.data);
+        if (nct) trialMap.set(nct, [...(trialMap.get(nct) ?? []), item.id]);
+    }
+
+    // Zotero 7–10 keep the PubMed id in Extra; Zotero 11 has a PMID field and
+    // moves `PMID:` lines out of Extra into it.
+    const extraFieldID = Zotero.ItemFields.getID('extra');
+    const pmidFieldID = fieldIdIfKnown('PMID');
+    const pmids = Array.from(pmidMap.keys());
+    if (pmids.length && pmidFieldID) {
+        const sql = `
+            SELECT i.libraryID, i.key, TRIM(idv.value)
+            FROM items i
+            JOIN itemData id ON i.itemID = id.itemID
+            JOIN itemDataValues idv ON id.valueID = idv.valueID
+            LEFT JOIN deletedItems di ON i.itemID = di.itemID
+            WHERE i.libraryID IN (${libraryPlaceholders})
+            AND id.fieldID = ?
+            AND TRIM(idv.value) IN (${pmids.map(() => '?').join(', ')})
+            AND di.itemID IS NULL
+        `;
+        try {
+            await Zotero.DB.queryAsync(sql, [...libraryIds, pmidFieldID, ...pmids], {
+                onRow: (row: any) => {
+                    const pmid = cleanPmid(String(row.getResultByIndex(2) ?? ''));
+                    if (pmid) addMatch(results, pmidMap.get(pmid), row.getResultByIndex(0), row.getResultByIndex(1));
+                },
+            });
+        } catch (error) {
+            logger(`batchFindByRecordIdentifiers: PMID field query failed: ${error}`, 1);
+        }
+    }
+    if (pmids.length && extraFieldID) {
+        for (let start = 0; start < pmids.length; start += 100) {
+            const chunk = pmids.slice(start, start + 100);
+            const sql = `
+                SELECT i.libraryID, i.key, idv.value
+                FROM items i
+                JOIN itemData id ON i.itemID = id.itemID
+                JOIN itemDataValues idv ON id.valueID = idv.valueID
+                LEFT JOIN deletedItems di ON i.itemID = di.itemID
+                WHERE i.libraryID IN (${libraryPlaceholders})
+                AND id.fieldID = ?
+                AND (${chunk.map(() => 'idv.value LIKE ?').join(' OR ')})
+                AND di.itemID IS NULL
+            `;
+            try {
+                await Zotero.DB.queryAsync(sql, [...libraryIds, extraFieldID, ...chunk.map((pmid) => `%${pmid}%`)], {
+                    onRow: (row: any) => {
+                        const extra = String(row.getResultByIndex(2) ?? '');
+                        for (const match of extra.matchAll(/^\s*PMID:\s*(\d+)\s*$/gim)) {
+                            addMatch(results, pmidMap.get(String(Number(match[1]))), row.getResultByIndex(0), row.getResultByIndex(1));
+                        }
+                    },
+                });
+            } catch (error) {
+                logger(`batchFindByRecordIdentifiers: PMID query failed: ${error}`, 1);
+            }
+        }
+    }
+
+    const ncts = Array.from(trialMap.keys());
+    const urlFieldID = Zotero.ItemFields.getID('url');
+    if (ncts.length && urlFieldID) {
+        const urlToNct = new Map<string, string>();
+        for (const nct of ncts) for (const url of registryUrls(nct)) urlToNct.set(url, nct);
+        const urls = Array.from(urlToNct.keys());
+        for (let start = 0; start < urls.length; start += SQL_CHUNK_SIZE) {
+            const chunk = urls.slice(start, start + SQL_CHUNK_SIZE);
+            const sql = `
+                SELECT i.libraryID, i.key, idv.value
+                FROM items i
+                JOIN itemData id ON i.itemID = id.itemID
+                JOIN itemDataValues idv ON id.valueID = idv.valueID
+                LEFT JOIN deletedItems di ON i.itemID = di.itemID
+                WHERE i.libraryID IN (${libraryPlaceholders})
+                AND id.fieldID = ?
+                AND idv.value COLLATE NOCASE IN (${chunk.map(() => '?').join(', ')})
+                AND di.itemID IS NULL
+            `;
+            try {
+                await Zotero.DB.queryAsync(sql, [...libraryIds, urlFieldID, ...chunk], {
+                    onRow: (row: any) => {
+                        const value = String(row.getResultByIndex(2) ?? '');
+                        const nct = REGISTRY_URL.exec(value)?.[1]?.toUpperCase();
+                        if (nct) addMatch(results, trialMap.get(nct), row.getResultByIndex(0), row.getResultByIndex(1));
+                    },
+                });
+            } catch (error) {
+                logger(`batchFindByRecordIdentifiers: registry URL query failed: ${error}`, 1);
+            }
+        }
+    }
+
+    const reportNumberFieldID = Zotero.ItemFields.getID('reportNumber');
+    const institutionFieldID = Zotero.ItemFields.getID('institution');
+    const unmatched = ncts.filter((nct) => (trialMap.get(nct) ?? []).some((id) => !results.has(id)));
+    if (unmatched.length && reportNumberFieldID && institutionFieldID) {
+        const sql = `
+            SELECT i.libraryID, i.key, rnv.value
+            FROM items i
+            JOIN itemData rn ON rn.itemID = i.itemID AND rn.fieldID = ?
+            JOIN itemDataValues rnv ON rnv.valueID = rn.valueID
+            JOIN itemData ins ON ins.itemID = i.itemID AND ins.fieldID = ?
+            JOIN itemDataValues insv ON insv.valueID = ins.valueID
+            LEFT JOIN deletedItems di ON i.itemID = di.itemID
+            WHERE i.libraryID IN (${libraryPlaceholders})
+            AND TRIM(rnv.value) COLLATE NOCASE IN (${unmatched.map(() => '?').join(', ')})
+            AND LOWER(TRIM(insv.value)) = 'clinicaltrials.gov'
+            AND di.itemID IS NULL
+        `;
+        try {
+            await Zotero.DB.queryAsync(sql, [reportNumberFieldID, institutionFieldID, ...libraryIds, ...unmatched], {
+                onRow: (row: any) => {
+                    const nct = String(row.getResultByIndex(2) ?? '').trim().toUpperCase();
+                    addMatch(results, trialMap.get(nct), row.getResultByIndex(0), row.getResultByIndex(1));
+                },
+            });
+        } catch (error) {
+            logger(`batchFindByRecordIdentifiers: report number query failed: ${error}`, 1);
+        }
+    }
+
     return results;
 }
 
@@ -744,7 +946,12 @@ export async function batchFindExistingReferences(
     const phase1Time = Date.now() - phase1Start;
 
     for (const [itemId, ref] of identifierMatches) results.set(itemId, ref);
-    const foundByIdentifier = identifierMatches.size;
+    const recordMatches = await batchFindByRecordIdentifiers(
+        items.filter(item => results.get(item.id) == null),
+        libraryIds,
+    );
+    for (const [itemId, ref] of recordMatches) results.set(itemId, ref);
+    const foundByIdentifier = identifierMatches.size + recordMatches.size;
 
     // Phase 2 — title match only for items not resolved by Phase 1
     const phase2Start = Date.now();

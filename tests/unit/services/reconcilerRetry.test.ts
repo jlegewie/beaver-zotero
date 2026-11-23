@@ -36,6 +36,14 @@ import { OCR_ENGINE_VERSION, OCR_PRIORITY_ON_DEMAND } from '../../../src/service
 
 const ENTITLED = { hasOcrAccess: true, hasSearchIndexAccess: true };
 
+
+/** Zotero's field tables, which the processable-attachment SQL reads to leave Beaver tables out. */
+async function createItemDataTables(db: MockDBConnection): Promise<void> {
+    await db.queryAsync('CREATE TABLE itemData (itemID INT, fieldID INT, valueID)');
+    await db.queryAsync('CREATE TABLE fields (fieldID INTEGER PRIMARY KEY, fieldName TEXT)');
+    await db.queryAsync('CREATE TABLE itemDataValues (valueID INTEGER PRIMARY KEY, value)');
+}
+
 describe('ReconcilerService.retryAttachments', () => {
     let connection: MockDBConnection;
     let db: BeaverDB;
@@ -93,7 +101,8 @@ describe('ReconcilerService.retryAttachments', () => {
     it.each([true, false])('heals missed deletions and trashed parents with background processing enabled=%s', async (enabled) => {
         mocks.backgroundEnabled = enabled;
         await connection.queryAsync('CREATE TABLE items (itemID INTEGER PRIMARY KEY, libraryID INTEGER, key TEXT)');
-        await connection.queryAsync('CREATE TABLE itemAttachments (itemID INTEGER PRIMARY KEY, contentType TEXT, parentItemID INTEGER)');
+        await connection.queryAsync('CREATE TABLE itemAttachments (itemID INTEGER PRIMARY KEY, contentType TEXT, parentItemID INTEGER, linkMode INTEGER DEFAULT 0)');
+        await createItemDataTables(connection);
         await connection.queryAsync('CREATE TABLE deletedItems (itemID INTEGER PRIMARY KEY)');
         await connection.queryAsync("INSERT INTO items VALUES (10, 1, 'LIVEPARN'), (11, 1, 'TRASHPAR')");
         await connection.queryAsync('INSERT INTO deletedItems VALUES (11)');
@@ -109,7 +118,7 @@ describe('ReconcilerService.retryAttachments', () => {
                 contentKind, errorCode: 'file_missing', attemptedAt: 100 });
             if (key === 'DELETED1') continue;
             await connection.queryAsync('INSERT INTO items VALUES (?, 1, ?)', [id, key]);
-            await connection.queryAsync('INSERT INTO itemAttachments VALUES (?, ?, ?)', [id, contentKind === 'text' ? 'text/plain' : 'application/pdf', parentItemID]);
+            await connection.queryAsync('INSERT INTO itemAttachments (itemID, contentType, parentItemID) VALUES (?, ?, ?)', [id, contentKind === 'text' ? 'text/plain' : 'application/pdf', parentItemID]);
             if (deleted) await connection.queryAsync('INSERT INTO deletedItems VALUES (?)', [id]);
         }
         await db.recordAttachmentReadingOutcome({ libraryId: 9, zoteroKey: 'EXCLUDED',
@@ -153,6 +162,7 @@ describe('ReconcilerService.retryAttachments', () => {
     it('excludes trashed parents from enumeration and cursor counts even when item trash checks cannot load parents', async () => {
         await connection.queryAsync('CREATE TABLE items (itemID INTEGER PRIMARY KEY, libraryID INTEGER, key TEXT, clientDateModified TEXT)');
         await connection.queryAsync('CREATE TABLE itemAttachments (itemID INTEGER PRIMARY KEY, parentItemID INTEGER, linkMode INTEGER, contentType TEXT, path TEXT)');
+        await createItemDataTables(connection);
         await connection.queryAsync('CREATE TABLE deletedItems (itemID INTEGER PRIMARY KEY)');
         await connection.queryAsync("INSERT INTO items VALUES (10,1,'PARENT01','2026'), (11,1,'CHILD001','2026'), (12,1,'LIVE0001','2026')");
         await connection.queryAsync("INSERT INTO itemAttachments VALUES (11,10,0,'application/pdf','storage:a.pdf'), (12,NULL,0,'application/pdf','storage:b.pdf')");
@@ -168,6 +178,7 @@ describe('ReconcilerService.retryAttachments', () => {
     it('enumerates and counts mislabelled PDFs and EPUBs that item classification admits', async () => {
         await connection.queryAsync('CREATE TABLE items (itemID INTEGER PRIMARY KEY, libraryID INTEGER, key TEXT, clientDateModified TEXT)');
         await connection.queryAsync('CREATE TABLE itemAttachments (itemID INTEGER PRIMARY KEY, parentItemID INTEGER, linkMode INTEGER, contentType TEXT, path TEXT)');
+        await createItemDataTables(connection);
         await connection.queryAsync('CREATE TABLE deletedItems (itemID INTEGER PRIMARY KEY)');
         for (const [id, contentType, path] of [
             [1, 'application/octet-stream', 'storage:paper.pdf'],
@@ -185,6 +196,73 @@ describe('ReconcilerService.retryAttachments', () => {
         expect(await (reconciler as any).readLibraryCursor(1)).toMatchObject({ attachmentCount: 3 });
         expect(await (reconciler as any).listProcessableAttachments(1)).toHaveLength(3);
         expect(getAsync).toHaveBeenCalledWith([1, 2, 3]);
+    });
+
+    it('retires a Beaver table processed before tables were excluded, with its index membership and cache', async () => {
+        await connection.queryAsync('CREATE TABLE items (itemID INTEGER PRIMARY KEY, libraryID INTEGER, key TEXT, clientDateModified TEXT)');
+        await connection.queryAsync('CREATE TABLE itemAttachments (itemID INTEGER PRIMARY KEY, parentItemID INTEGER, linkMode INTEGER, contentType TEXT, path TEXT)');
+        await createItemDataTables(connection);
+        await connection.queryAsync('CREATE TABLE deletedItems (itemID INTEGER PRIMARY KEY)');
+        await connection.queryAsync("INSERT INTO items VALUES (1, 1, 'TABLE001', '2026'), (2, 1, 'PAPER001', '2026')");
+        await connection.queryAsync(`INSERT INTO itemAttachments VALUES (1, NULL, 1, 'text/html', 'storage:my-table.html'),
+            (2, NULL, 0, 'application/pdf', 'storage:a.pdf')`);
+        await connection.queryAsync("INSERT INTO fields VALUES (1, 'url')");
+        await connection.queryAsync("INSERT INTO itemDataValues VALUES (1, 'beaver://table/my-table')");
+        await connection.queryAsync('INSERT INTO itemData VALUES (1, 1, 1)');
+        await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: 'TABLE001', itemId: 1, contentKind: 'snapshot' });
+        await connection.queryAsync(`UPDATE attachment_processing_state SET extract_status = 'done', upsert_status = 'done',
+            upsert_remote_identity = '{"index_account_id":"account-a","index_scope_ref":"lLOCAL123","index_local_id":"LOCAL123"}',
+            structured_document_hash = ?`, ['b'.repeat(64)]);
+        const getAsync = vi.fn(async (ids: number[]) => ids.map(id => ({ id, key: 'PAPER001', isInTrash: () => false })));
+        vi.stubGlobal('Zotero', { ...Zotero, DB: { queryAsync: connection.queryAsync.bind(connection) },
+            Attachments: { LINK_MODE_LINKED_URL: 3 }, Items: { getAsync } });
+        vi.spyOn(reconciler as any, 'reconcileReadingState').mockResolvedValue(undefined);
+        const reconcileAttachment = vi.spyOn(reconciler as any, 'reconcileAttachment').mockResolvedValue(undefined);
+        reconciler.start();
+
+        expect(await (reconciler as any).readLibraryCursor(1)).toMatchObject({ attachmentCount: 1 });
+        await (reconciler as any).reconcileLibrary(db, 1, false, (reconciler as any).generation);
+
+        expect(getAsync).toHaveBeenCalledWith([2]);
+        expect(reconcileAttachment).toHaveBeenCalledTimes(1);
+        expect(await db.getAttachmentProcessingState(1, 'TABLE001')).toBeNull();
+        expect(await db.peekBackgroundJobs()).toEqual([
+            expect.objectContaining({ jobType: 'fulltext_untag', zoteroKey: 'TABLE001' }),
+        ]);
+        expect(invalidate).toHaveBeenCalledWith(1, 'TABLE001');
+    });
+
+    it('drops a Beaver table recorded before tables were excluded even while processing is paused', async () => {
+        mocks.backgroundEnabled = false;
+        await connection.queryAsync('CREATE TABLE items (itemID INTEGER PRIMARY KEY, libraryID INTEGER, key TEXT)');
+        await connection.queryAsync('CREATE TABLE itemAttachments (itemID INTEGER PRIMARY KEY, parentItemID INTEGER, linkMode INTEGER, contentType TEXT, path TEXT)');
+        await createItemDataTables(connection);
+        await connection.queryAsync('CREATE TABLE deletedItems (itemID INTEGER PRIMARY KEY)');
+        await connection.queryAsync("INSERT INTO items VALUES (1, 1, 'TABLE001'), (2, 1, 'PAGE0001')");
+        await connection.queryAsync(`INSERT INTO itemAttachments VALUES (1, NULL, 1, 'text/html', 'storage:my-table.html'),
+            (2, NULL, 1, 'text/html', 'storage:page.html')`);
+        await connection.queryAsync("INSERT INTO fields VALUES (1, 'url')");
+        await connection.queryAsync("INSERT INTO itemDataValues VALUES (1, 'beaver://table/my-table'), (2, 'https://example.org/')");
+        await connection.queryAsync('INSERT INTO itemData VALUES (1, 1, 1), (2, 1, 2)');
+        for (const key of ['TABLE001', 'PAGE0001']) {
+            await db.recordAttachmentReadingOutcome({ libraryId: 1, zoteroKey: key, contentKind: 'snapshot', errorCode: null, attemptedAt: 100 });
+        }
+        await db.ensureAttachmentProcessingState({ libraryId: 1, zoteroKey: 'TABLE001', itemId: 1, contentKind: 'snapshot' });
+        await connection.queryAsync(`UPDATE attachment_processing_state SET extract_status = 'done', upsert_status = 'done',
+            upsert_remote_identity = '{"index_account_id":"account-a","index_scope_ref":"lLOCAL123","index_local_id":"LOCAL123"}',
+            structured_document_hash = ?`, ['b'.repeat(64)]);
+        vi.stubGlobal('Zotero', { ...Zotero, DB: { queryAsync: connection.queryAsync.bind(connection) } });
+        reconciler.start();
+
+        await (reconciler as any).reconcileLibrary(db, 1, false, (reconciler as any).generation);
+
+        expect(await db.getAttachmentReadingKeysByLibrary(1)).toEqual(['PAGE0001']);
+        expect(await db.getAttachmentProcessingState(1, 'TABLE001')).toBeNull();
+        expect(await db.peekBackgroundJobs()).toEqual([
+            expect.objectContaining({ jobType: 'fulltext_untag', zoteroKey: 'TABLE001' }),
+        ]);
+        expect(invalidate).toHaveBeenCalledWith(1, 'TABLE001');
+        expect(invalidate).not.toHaveBeenCalledWith(1, 'PAGE0001');
     });
 
     it('revisits unchanged libraries once when OCR access changes without replaying native successes', async () => {

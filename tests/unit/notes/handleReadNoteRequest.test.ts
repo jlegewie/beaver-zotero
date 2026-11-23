@@ -187,6 +187,24 @@ describe('handleReadNoteRequest — success', () => {
         expect(response.lines_returned).toBe('1-5');
     });
 
+    it('returns explicit math wrappers alongside literal dollar text using the real simplifier', async () => {
+        const actual = await vi.importActual<typeof import('../../../src/utils/noteHtmlSimplifier')>(
+            '../../../src/utils/noteHtmlSimplifier'
+        );
+        vi.mocked(getOrSimplify).mockImplementationOnce(actual.getOrSimplify);
+        const html = '<div data-schema-version="9"><p>Literal $x$ and '
+            + '<span class="math">$x &lt; y$</span>.</p>'
+            + '<pre class="math">$$a + b$$</pre></div>';
+        const item = makeMockItem({ getNote: vi.fn(() => html) });
+        (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(item);
+
+        const response = await handleReadNoteRequest(makeRequest());
+        expect(response.success).toBe(true);
+        expect(response.content).toContain('Literal $x$');
+        expect(response.content).toContain('<span class="math">$x &lt; y$</span>');
+        expect(response.content).toContain('<pre class="math">$$a + b$$</pre>');
+    });
+
     it('includes parent_item_id and parent_title when note has parent', async () => {
         const parentItem = {
             libraryID: 1,

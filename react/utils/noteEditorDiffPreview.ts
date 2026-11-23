@@ -50,7 +50,9 @@ import {
 import {
     getOrSimplify,
     normalizeNoteHtml,
+    type SimplificationMetadata,
 } from '../../src/utils/noteHtmlSimplifier';
+import { classifyMathAnchorOccurrences } from '../../src/utils/noteMathAnchors';
 import {
     extractDataCitationItems,
     rebuildDataCitationItems,
@@ -450,7 +452,7 @@ export async function showDiffPreview(
                         targetAfterContext: edit.targetAfterContext,
                     });
                 } else {
-                    const expandedOld = edit.oldString ? expandToRawHtml(edit.oldString, metadata, 'old') : '';
+                    const expandedOld = edit.oldString ? expandOldForPreview(edit.oldString, metadata, normalizedHtml) : '';
                     // For insert_after / insert_before, new_string is already
                     // normalized by validation to merge old_string with
                     // new_string (via normalized_action_data):
@@ -458,7 +460,18 @@ export async function showDiffPreview(
                     //   - insert_before: new_string = new_string + old_string
                     // so computeHtmlDiff will naturally show the anchor as
                     // context and the insertion as addition.
-                    const expandedNew = edit.newString ? expandToRawHtml(edit.newString, metadata, 'new', externalRefContext, pageLabels, structuralPages) : '';
+                    const expandNew = (s: string) => expandToRawHtml(s, metadata, 'new', externalRefContext, pageLabels, structuralPages);
+                    let expandedNew = edit.newString ? expandNew(edit.newString) : '';
+                    // Like execution, keep a dollar-bearing insertion anchor as
+                    // matched and expand only the injected text, so literal
+                    // dollars in the anchor never pair with ones in the injection.
+                    if (expandedOld && edit.oldString?.includes('$') && edit.newString) {
+                        if (op === 'insert_after' && edit.newString.startsWith(edit.oldString)) {
+                            expandedNew = expandedOld + expandNew(edit.newString.substring(edit.oldString.length));
+                        } else if (op === 'insert_before' && edit.newString.endsWith(edit.oldString)) {
+                            expandedNew = expandNew(edit.newString.substring(0, edit.newString.length - edit.oldString.length)) + expandedOld;
+                        }
+                    }
                     if (expandedOld) {
                         expandedEdits.push({
                             expandedOld,
@@ -959,6 +972,56 @@ interface PreviewExpandedEdit {
 }
 
 /**
+ * The variant of `anchor` that actually occurs in `html`, or null.
+ *
+ * Mirrors `resolveExpandedOldForMatch`'s entity fallbacks so the math decision
+ * below is made against the same occurrence the diff will later locate.
+ */
+function findAnchorVariant(html: string, anchor: string): string | null {
+    if (html.includes(anchor)) return anchor;
+    const decoded = decodeHtmlEntities(anchor);
+    if (decoded !== anchor && html.includes(decoded)) return decoded;
+    for (const form of ENTITY_FORMS) {
+        const encoded = encodeTextEntities(anchor, form);
+        if (encoded !== anchor && html.includes(encoded)) return encoded;
+    }
+    return null;
+}
+
+/**
+ * Expand an edit anchor for the preview, mirroring the matcher's `legacy_math`
+ * second pass.
+ *
+ * `expandToRawHtml(..., 'old')` reproduces the anchor literally, matching
+ * `read_note`'s wrapper-preserving output. Models still send dollar-only math
+ * anchors (`$E = mc^2$`) copied from older reads, which the matcher resolves by
+ * re-expanding them with `'legacy-old'` so the whole `<span class="math">`
+ * element becomes the target. Without the same retry here, the literal anchor
+ * is located inside the math node's LaTeX and the preview either injects diff
+ * markup into the formula — a KaTeX error in the editor — or finds nothing at
+ * all and renders no preview under a pending approval.
+ *
+ * A `mixed` classification keeps the literal expansion: the matcher rejects
+ * those with `ambiguous_match`, so no approval (and no preview) exists for them.
+ */
+function expandOldForPreview(
+    oldString: string,
+    metadata: SimplificationMetadata,
+    html: string,
+): string {
+    const literal = expandToRawHtml(oldString, metadata, 'old');
+    if (!oldString.includes('$')) return literal;
+    const found = findAnchorVariant(html, literal);
+    if (found && classifyMathAnchorOccurrences(html, found) !== 'wrapped') return literal;
+    try {
+        const legacy = expandToRawHtml(oldString, metadata, 'legacy-old');
+        return legacy !== literal && findAnchorVariant(html, legacy) ? legacy : literal;
+    } catch {
+        return literal;
+    }
+}
+
+/**
  * Try to locate edit.expandedOld in `stripped`, falling back through entity
  * decode/encode variants the way the validation/execution paths do (see
  * src/services/agentDataProvider/actions/editNote.ts).
@@ -1238,10 +1301,18 @@ function computeHtmlDiff(oldHtml: string, newHtml: string) {
     let prefixLen = 0;
     while (prefixLen < oldHtml.length && prefixLen < newHtml.length && oldHtml[prefixLen] === newHtml[prefixLen]) prefixLen++;
     prefixLen = snapPrefixToTagBoundary(oldHtml, prefixLen);
+    prefixLen = Math.min(
+        snapOutOfMathElement(oldHtml, prefixLen),
+        snapOutOfMathElement(newHtml, prefixLen),
+    );
     let suffixLen = 0;
     while (suffixLen < oldHtml.length - prefixLen && suffixLen < newHtml.length - prefixLen
         && oldHtml[oldHtml.length - 1 - suffixLen] === newHtml[newHtml.length - 1 - suffixLen]) suffixLen++;
     suffixLen = snapSuffixToTagBoundary(oldHtml, suffixLen);
+    suffixLen = Math.min(
+        oldHtml.length - snapPastMathElement(oldHtml, oldHtml.length - suffixLen),
+        newHtml.length - snapPastMathElement(newHtml, newHtml.length - suffixLen),
+    );
     return {
         prefix: oldHtml.substring(0, prefixLen),
         oldMiddle: oldHtml.substring(prefixLen, oldHtml.length - suffixLen),
@@ -1253,6 +1324,34 @@ function computeHtmlDiff(oldHtml: string, newHtml: string) {
 function snapPrefixToTagBoundary(html: string, pos: number): number {
     for (let i = pos - 1; i >= 0; i--) { if (html[i] === '>') break; if (html[i] === '<') return i; }
     return pos;
+}
+
+/** Character ranges of every `<span class="math">` / `<pre class="math">`. */
+function mathElementRanges(html: string): Array<{ start: number; end: number }> {
+    return [...html.matchAll(/<(span|pre)\b[^>]*class="math"[^>]*>[\s\S]*?<\/\1>/g)]
+        .map(match => ({ start: match.index!, end: match.index! + match[0].length }));
+}
+
+/**
+ * Pull a diff boundary out of a math element it splits (start side).
+ *
+ * Both math nodes are ProseMirror atoms whose content is the element's
+ * `textContent`, and `math_inline` forbids every mark, so a boundary inside one
+ * collapses the deletion and the addition into a SINGLE node holding both LaTeX
+ * fragments — `$E = mc^2{2}$` for an `mc^2` → `mc^{2}` edit, a formula that
+ * exists in neither version. Widening the changed span to the element's edges
+ * replaces it as a unit instead. Only strict interiors move; a boundary already
+ * at an edge stays put.
+ */
+function snapOutOfMathElement(html: string, pos: number): number {
+    const range = mathElementRanges(html).find(r => pos > r.start && pos < r.end);
+    return range ? range.start : pos;
+}
+
+/** The same for the end side: move `pos` past any math element it splits. */
+function snapPastMathElement(html: string, pos: number): number {
+    const range = mathElementRanges(html).find(r => pos > r.start && pos < r.end);
+    return range ? range.end : pos;
 }
 
 function snapSuffixToTagBoundary(html: string, suffixLen: number): number {

@@ -13,14 +13,17 @@
  */
 
 import {
+    hasDrawnContent,
     isAutoLoadingToolCall,
+    isRenderableMessage,
     isThinkingInProgress,
 } from "../agents/messageVisibility";
-import type {
-    AgentRun,
-    ModelResponse,
-    RetryPromptPart,
-    ToolReturnPart,
+import {
+    isContinuationPrompt,
+    type AgentRun,
+    type ModelResponse,
+    type RetryPromptPart,
+    type ToolReturnPart,
 } from "../agents/types";
 import { getToolCallStatus } from "./atoms";
 
@@ -135,4 +138,34 @@ export function shouldShowRunStatus(
     if (!options.isStreamQuiet) return false;
     const newest = newestResponse(run);
     return newest !== null && !isThinkingInProgress(newest);
+}
+
+/**
+ * Whether a run in a thread draws nothing at all, so the thread can skip it.
+ *
+ * Only a run that continues another one (a resume, or the answers to a parked
+ * run's cards) can end up empty: its prompt carries no text, so it shows no
+ * user message, and what it wrote may all be hidden plumbing. Every other run
+ * shows at least the user's message. The last run
+ * and a streaming run are always kept — they own the thread's status line and
+ * the place new content arrives.
+ *
+ * The caller passes `showsRunSections`: whether anything outside the model
+ * messages is drawn for the run (warnings, an error or notice, the resume
+ * line, the footer, outcomes, suggestions). Those depend on thread state this
+ * module cannot see.
+ */
+export function isRunWithNothingToShow(
+    run: AgentRun,
+    options: { isLastRun: boolean; showsRunSections: boolean },
+): boolean {
+    if (options.isLastRun || options.showsRunSections) return false;
+    if (run.status === "in_progress") return false;
+    const isEmptyContinuation =
+        isContinuationPrompt(run.user_prompt) &&
+        run.user_prompt.content.length === 0;
+    if (!isEmptyContinuation) return false;
+    return !run.model_messages.some(
+        (message) => isRenderableMessage(message) && hasDrawnContent(message),
+    );
 }

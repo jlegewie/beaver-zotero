@@ -22,6 +22,11 @@ export interface ThreadData {
      * another agent's threads.
      */
     agentName?: string | null;
+    /**
+     * Open cards of the thread's parked run, counted by card kind; null when
+     * Beaver is not waiting on the user's answers. See `awaitingInputLabel`.
+     */
+    awaitingInput?: Readonly<Record<string, number>> | null;
 }
 
 export interface ThreadItemFilter {

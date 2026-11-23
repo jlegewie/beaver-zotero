@@ -57,6 +57,13 @@ export interface ConnectionFailureReport {
     reattach_outcome?: string | null;
     /** Milliseconds between noticing the loss and that outcome. */
     reattach_gap_ms?: number | null;
+    /** Sockets opened to reattach the run before that outcome. */
+    reattach_attempts?: number | null;
+    /**
+     * Sockets the run lost before that outcome, the first loss included. More
+     * than one means a socket opened to reattach was lost as well.
+     */
+    reattach_losses?: number | null;
 }
 
 /**
@@ -147,6 +154,8 @@ async function executeReport(
         connect_attempts: report.connect_attempts ?? null,
         reattach_outcome: report.reattach_outcome ?? null,
         reattach_gap_ms: report.reattach_gap_ms ?? null,
+        reattach_attempts: report.reattach_attempts ?? null,
+        reattach_losses: report.reattach_losses ?? null,
         plugin_version: pluginVersion,
         zotero_version: zoteroVersion,
         platform: nav?.platform ?? '',

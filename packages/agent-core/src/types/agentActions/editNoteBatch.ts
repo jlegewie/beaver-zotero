@@ -5,7 +5,7 @@
  */
 
 import type { ProposedAction } from './base';
-import type { EditNoteOperation } from './editNote';
+import type { EditNoteBaseline, EditNoteOperation } from './editNote';
 
 /**
  * A single edit within an edit_note_batch request.
@@ -64,6 +64,8 @@ export interface EditNoteBatchProposedData {
      * instead of an ordinary note edit.
      */
     destructive_rewrite?: boolean;
+    /** The note as the user saw it when proposed; absent on older proposals. */
+    baseline?: EditNoteBaseline | null;
 }
 
 /**

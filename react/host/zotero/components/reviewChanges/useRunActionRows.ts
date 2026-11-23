@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { useAtomValue, useStore } from 'jotai';
-import { getAgentActionsByRunAtom, pendingApprovalsAtom, threadAgentActionsAtom } from '../../../../agents/agentActions';
+import { agentActionsForRunsAtom, liveApprovalActionIdsForRunsAtom, threadAgentActionsAtom } from '../../../../agents/agentActions';
 import { libraryRefForLibraryID, parseLibraryRef, resolveLibraryRef } from '../../../../../src/utils/libraryIdentity';
 import {
     buildEditedNoteArtifacts,
@@ -12,11 +12,15 @@ import {
     RunActionRowSet,
     summarizeNoteEdits,
 } from '../reviewChangeRows';
+import { actionsInAnswerOrder } from './runArtifacts';
 
-/** Action ids the in-stream card and PendingActionsBar own, keyed by actionId. */
-function useLiveApprovalActionIds(): ReadonlySet<string> {
-    const pendingApprovals = useAtomValue(pendingApprovalsAtom);
-    return useMemo(() => new Set(pendingApprovals.keys()), [pendingApprovals]);
+/**
+ * Action ids the in-stream card and PendingActionsBar own. Only these runs'
+ * ids, the only ones their rows ask about, so an approval elsewhere in the
+ * thread leaves the answer's review surfaces alone.
+ */
+function useLiveApprovalActionIds(runIds: string[]): ReadonlySet<string> {
+    return useAtomValue(useMemo(() => liveApprovalActionIdsForRunsAtom(runIds), [runIds]));
 }
 
 /**
@@ -28,15 +32,13 @@ function useLiveApprovalActionIds(): ReadonlySet<string> {
  * a flex item in the run column and would add a `gap-2` row of blank space.
  */
 function useActionsByRun(runIds: string[]) {
-    const getAgentActionsByRun = useAtomValue(getAgentActionsByRunAtom);
-    return useMemo(
-        () => runIds.map((runId) => getAgentActionsByRun(runId)),
-        [getAgentActionsByRun, runIds],
-    );
+    // Scoped to these runs: an action written elsewhere in the thread leaves the
+    // answer's review surfaces alone.
+    return useAtomValue(useMemo(() => agentActionsForRunsAtom(runIds), [runIds]));
 }
 
 function useRunActionRows(runIds: string[], include: RunActionRowSet): ReviewRow[] {
-    const liveApprovalActionIds = useLiveApprovalActionIds();
+    const liveApprovalActionIds = useLiveApprovalActionIds(runIds);
     const actionsByRun = useActionsByRun(runIds);
 
     return useMemo(
@@ -60,13 +62,15 @@ export function useArtifactRows(runIds: string[]): ReviewRow[] {
  * edits that count are the answer's own; live approvals belong to the
  * in-stream card until they are decided.
  */
-export function useEditedNoteArtifacts(runIds: string[]): NoteEditSummary[] {
-    const liveApprovalActionIds = useLiveApprovalActionIds();
+export function useEditedNoteArtifacts(runIds: string[], order?: ReadonlyMap<string, number>): NoteEditSummary[] {
+    const liveApprovalActionIds = useLiveApprovalActionIds(runIds);
     const actionsByRun = useActionsByRun(runIds);
-    return useMemo(
-        () => buildEditedNoteArtifacts(actionsByRun, { liveApprovalActionIds, completeNoteIdentity }),
-        [actionsByRun, liveApprovalActionIds],
-    );
+    return useMemo(() => {
+        // In the answer's order, so a note's summary is keyed by its first edit
+        // and the list can sort notes by it; the store can hold them out of order.
+        const ordered = order ? actionsInAnswerOrder(actionsByRun, order) : actionsByRun;
+        return buildEditedNoteArtifacts(ordered, { liveApprovalActionIds, completeNoteIdentity });
+    }, [actionsByRun, liveApprovalActionIds, order]);
 }
 
 /**

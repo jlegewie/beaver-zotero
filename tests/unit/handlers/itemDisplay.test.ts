@@ -201,3 +201,46 @@ describe('handleItemDisplayRequest', () => {
         expect(res.error_code).toBe('internal_error');
     });
 });
+
+describe('handleItemDisplayRequest with include_pdf', () => {
+    beforeEach(() => {
+        mocks.getItemDisplayName.mockImplementation((item: any) => `${item.firstCreator} ${item.year}`);
+    });
+
+    it('reports whether each regular item has a document a row reads', async () => {
+        // Attachments sit in the same id space as the items the request names.
+        const attachment = (key: string, parentItemID: number, kind: string, deleted = false) => ({
+            key, libraryID: 1, parentItemID, deleted, kind, isAttachment: () => true,
+        });
+        library['1-PDFPAPR2'] = regularItem('PDFPAPR2', 1, { id: 11, isRegularItem: () => true, getAttachments: () => [4] });
+        library['1-EPUBPAP2'] = regularItem('EPUBPAP2', 1, { id: 12, isRegularItem: () => true, getAttachments: () => [5] });
+        library['1-NODOCPP2'] = regularItem('NODOCPP2', 1, { id: 13, isRegularItem: () => true, getAttachments: () => [6, 7] });
+        library['1-ATTPDF01'] = attachment('ATTPDF01', 11, 'pdf');
+        library['1-ATTEPUB1'] = attachment('ATTEPUB1', 12, 'epub');
+        library['1-ATTLINK1'] = attachment('ATTLINK1', 13, 'linked_url');
+        library['1-ATTTRSH1'] = attachment('ATTTRSH1', 13, 'pdf', true);
+        library['1-NQTEXXX2'] = regularItem('NQTEXXX2', 1, { id: 14, isRegularItem: () => false });
+        mocks.getContentKind.mockImplementation((item: any) => item.kind);
+        const loadDataTypes = vi.fn(async () => {});
+        (globalThis as any).Zotero.Items.loadDataTypes = loadDataTypes;
+
+        const res = await handleItemDisplayRequest({
+            ...request(['u-PDFPAPR2', 'u-EPUBPAP2', 'u-NODOCPP2', 'u-NQTEXXX2']),
+            include_pdf: true,
+        });
+
+        expect(loadDataTypes).toHaveBeenCalledWith(expect.any(Array), ['childItems']);
+        expect(res.items.map((row) => [row.item_id, row.has_pdf])).toEqual([
+            ['u-PDFPAPR2', true],
+            ['u-EPUBPAP2', true],
+            ['u-NODOCPP2', false],
+            ['u-NQTEXXX2', undefined],
+        ]);
+    });
+
+    it('leaves rows without has_pdf when the request does not ask', async () => {
+        library['1-PDFPAPR2'] = regularItem('PDFPAPR2', 1, { id: 11, isRegularItem: () => true });
+        const res = await handleItemDisplayRequest(request(['u-PDFPAPR2']));
+        expect(res.items[0]).not.toHaveProperty('has_pdf');
+    });
+});

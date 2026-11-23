@@ -1,10 +1,10 @@
-import { useAtomValue, useSetAtom } from 'jotai';
+import { atom, useAtomValue, useSetAtom } from 'jotai';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AgentRunStatus, ToolCallPart } from '@beaver/agent-core/agents/types';
 import {
     AgentAction,
-    agentActionsByToolcallAtom,
-    pendingApprovalsAtom,
+    agentActionsForToolcallAtom,
+    pendingApprovalForToolcallAtom,
     removePendingApprovalAtom,
 } from '../../../agents/agentActions';
 import type { EditNoteResolvedTarget, PendingApproval } from '@beaver/agent-ui/host';
@@ -14,6 +14,7 @@ import {
     removeApprovalResponseIntentAtom,
     sendApprovalResponseAtom,
 } from '../../../atoms/agentRunAtoms';
+import { pendingParkedAnswerIdsAtom } from '../../../atoms/parkedRuns';
 import { getToolCallStatusFromResult, toolResultAtom, type ToolCallStatus } from '@beaver/agent-core/run-state/atoms';
 import { openNoteAndSearchEdit, openNoteByKey } from '../../../utils/sourceUtils';
 import {
@@ -34,7 +35,6 @@ import {
 } from '../agentActionExecution';
 import {
     EditNoteDisplayStatus,
-    findPendingApprovalForToolcall,
     getEditNoteDisplayStatus,
     getEffectiveEditNotePendingApproval,
     isEditNoteOrphaned,
@@ -46,6 +46,10 @@ import {
 } from '../../../components/agentRuns/editNoteShared';
 import type { EditNoteOperation } from '@beaver/agent-core/types/agentActions/editNote';
 import { dismissActiveEditNotePreview } from '../editNotePreviewLifecycle';
+
+/** What a row reads in place of its own selectors when the group supplies them. */
+const NO_ACTIONS_ATOM = atom<AgentAction[]>([]);
+const NO_PENDING_APPROVAL_ATOM = atom<PendingApproval | null>(null);
 
 export { dismissActiveEditNotePreview } from '../editNotePreviewLifecycle';
 
@@ -153,10 +157,22 @@ export function useEditNoteActions({
     // frame of a streaming response, and a subscription to it would re-render
     // every note-edit row in the thread with it.
     const toolResult = useAtomValue(useMemo(() => toolResultAtom(toolcallId), [toolcallId]));
-    // Subscribe to the grouped-actions map (not the stable getter atom) so the
-    // fallback path re-renders with fresh actions when an action changes.
-    const actionsByToolcall = useAtomValue(agentActionsByToolcallAtom);
-    const allPendingApprovals = useAtomValue(pendingApprovalsAtom);
+    // Scoped to this call, like the result above: the fallback path re-renders
+    // with fresh actions when one of this call's actions or its approval
+    // changes, and not when any other card's does. A row given the group's
+    // precomputed state needs neither.
+    const hasPrecomputed = !!precomputed;
+    const toolcallActions = useAtomValue(useMemo(
+        () => (hasPrecomputed ? NO_ACTIONS_ATOM : agentActionsForToolcallAtom(toolcallId)),
+        [hasPrecomputed, toolcallId],
+    ));
+    const toolcallPendingApproval = useAtomValue(useMemo(
+        () => (hasPrecomputed ? NO_PENDING_APPROVAL_ATOM : pendingApprovalForToolcallAtom(toolcallId)),
+        [hasPrecomputed, toolcallId],
+    ));
+    // Subscribed, not read when the approval resolves: the rows of one batch
+    // share an approval, and each must see its intent before the first to
+    // settle removes it.
     const approvalResponseIntents = useAtomValue(approvalResponseIntentsAtom);
     const sendApprovalResponse = useSetAtom(sendApprovalResponseAtom);
     const removeApprovalResponseIntent = useSetAtom(removeApprovalResponseIntentAtom);
@@ -168,19 +184,13 @@ export function useEditNoteActions({
     const isRunPending = useAtomValue(isWSChatPendingAtom);
 
     const actions = precomputed?.actions
-        ?? (actionsByToolcall.get(toolcallId) ?? []).filter((a) => a.run_id === runId);
+        ?? toolcallActions.filter((a) => a.run_id === runId);
     // A single tool call always produces exactly one AgentAction, even for an
     // edit_note_batch call (the whole batch is one action with an edits[]
     // array in proposed_data) — actions[0] is never ambiguous here.
     const action = actions.length > 0 ? actions[0] : null;
-    // When the group supplies a precomputed effective pending approval, skip the
-    // linear scan over every pending approval so N sibling rows don't each redo it.
-    const pendingApprovalFromMap = useMemo(
-        () => (precomputed
-            ? null
-            : findPendingApprovalForToolcall(toolcallId, allPendingApprovals.values())),
-        [precomputed, toolcallId, allPendingApprovals],
-    );
+    // The group supplies a precomputed effective pending approval when it has one.
+    const pendingApprovalFromMap = precomputed ? null : toolcallPendingApproval;
     const pendingApproval = precomputed
         ? precomputed.pendingApproval
         : getEffectiveEditNotePendingApproval(action, pendingApprovalFromMap);
@@ -240,6 +250,15 @@ export function useEditNoteActions({
         const wasAwaiting = previousPendingApproval !== null;
         const isNoLongerAwaiting = pendingApproval === null;
 
+        // Waiting on a decision again: a parked card whose answer did not
+        // reach a run (the resume failed) is answerable once more.
+        if (!wasAwaiting && !isNoLongerAwaiting && (isProcessingApproval || isExternallyProcessing)) {
+            setIsProcessingApproval(false);
+            setIsExternallyProcessing(false);
+            setProcessingApproval(null);
+            setClickedButton(null);
+        }
+
         if (wasAwaiting && isNoLongerAwaiting) {
             const previousActionId = previousPendingApproval.actionId;
             const previousIntent = approvalResponseIntents.get(previousActionId);
@@ -265,6 +284,7 @@ export function useEditNoteActions({
     }, [
         pendingApproval,
         isProcessingApproval,
+        isExternallyProcessing,
         isRunPending,
         hasToolReturn,
         approvalResponseIntents,
@@ -287,7 +307,9 @@ export function useEditNoteActions({
     }, [isProcessingApproval, isExternallyProcessing, action?.status, hasToolReturn, isRunPending, action, setProcessingApproval]);
 
     const isWriting = actions.some((candidate) => inFlightActionIds.has(candidate.id));
-    const isProcessing = isProcessingApproval || isProcessingAction || isExternallyProcessing || isWriting;
+    // An answer to this parked card is on its way to the run that resumes it.
+    const isParkedAnswerPending = useAtomValue(pendingParkedAnswerIdsAtom).has(toolcallId);
+    const isProcessing = isProcessingApproval || isProcessingAction || isExternallyProcessing || isWriting || isParkedAnswerPending;
     const effectiveStatus: EditNoteDisplayStatus = getEditNoteDisplayStatus({
         action,
         pendingApproval,

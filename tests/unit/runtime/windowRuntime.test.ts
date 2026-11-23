@@ -122,31 +122,13 @@ describe('window runtime lifetimes', () => {
         expect(instance.resolveWindowFrom(readerFrame)).toBeUndefined();
     });
 
-    it('keeps one reader wrapper when either window closes and restores the original on disposal', () => {
+    it('releases a reader-width wrapper an earlier plugin version left behind', () => {
         const original = vi.fn();
-        Zotero.Reader.onChangeSidebarWidth = original;
+        const stale = Object.assign(vi.fn(), { __beaverOriginalSidebarWidthHandler: original });
+        Zotero.Reader.onChangeSidebarWidth = stale;
         const instance = new BeaverInstance();
-        const a = instance.attachWindow(makeWindow());
-        const b = instance.attachWindow(makeWindow());
-        const first = vi.fn(), second = vi.fn();
-        instance.subscribeReaderWidth(a, first);
-        const wrapper = Zotero.Reader.onChangeSidebarWidth;
-        instance.subscribeReaderWidth(b, second);
-        expect(Zotero.Reader.onChangeSidebarWidth).toBe(wrapper);
-        wrapper(300);
-        expect(original).toHaveBeenCalledWith(300);
-        expect(first).toHaveBeenCalledTimes(1);
-        expect(second).toHaveBeenCalledTimes(1);
-        instance.detachWindow(a.hostWindow);
-        wrapper(301);
-        expect(first).toHaveBeenCalledTimes(1);
-        expect(second).toHaveBeenCalledTimes(2);
-        instance.detachWindow(b.hostWindow);
-        expect(Zotero.Reader.onChangeSidebarWidth).toBe(wrapper);
-        instance.disposeInstance();
         expect(Zotero.Reader.onChangeSidebarWidth).toBe(original);
-        wrapper(302);
-        expect(second).toHaveBeenCalledTimes(2);
+        instance.disposeInstance();
     });
 });
 
@@ -225,6 +207,28 @@ describe('targeted window commands', () => {
         await expect(instance.dispatchWindowCommand('inspect', { windowId: a.id })).rejects.toMatchObject({ code: 'window_unavailable' });
         await expect(instance.dispatchWindowCommand('inspect', { windowId: 'missing' })).rejects.toMatchObject({ code: 'window_unavailable' });
     });
+});
+
+it("lets a table window follow the active main window as its context, as the standalone does", () => {
+    const instance = new BeaverInstance();
+    const a = makeWindow(),
+        b = makeWindow(),
+        tableWindow = makeWindow();
+    (Zotero as any).getMainWindow = vi.fn(() => a);
+    const ra = instance.attachWindow(a),
+        rb = instance.attachWindow(b);
+    const table = instance.attachWindow(tableWindow, "table");
+    ra.status = rb.status = table.status = "ready";
+    expect(table.kind).toBe("table");
+    expect(table.contextWindow).toBe(a);
+    // It is not the separate Beaver window.
+    expect(instance.standaloneWindow).toBeUndefined();
+    instance.refreshContext(b);
+    expect(table.contextWindow).toBe(b);
+    instance.markClosing(b);
+    instance.markClosing(a);
+    expect(table.contextWindow).toBeNull();
+    expect(instance.resolveWindow(table.id)).toBe(table);
 });
 
 it("rebinds standalone context across main-window focus and closure without detaching its renderer", () => {

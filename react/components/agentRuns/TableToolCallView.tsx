@@ -1,13 +1,21 @@
-import React, { useCallback, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import type { AgentRunStatus, ToolCallPart } from '@beaver/agent-core/agents/types';
+import { isRunActive, type AgentRunStatus, type ToolCallPart } from '@beaver/agent-core/agents/types';
 import { getToolCallStatusFromResult, type ToolResult } from '@beaver/agent-core/run-state/atoms';
-import { tableRecordFromMetadata, tableResultMessages } from '@beaver/agent-core/run-state/tableResults';
-import { TOOL_BASE_LABELS } from '@beaver/agent-core/run-state/toolCallRequest';
+import { tableRecordFromMetadata } from '@beaver/agent-core/run-state/tableResults';
+import { chatFillsAtom, fillForToolCall } from '@beaver/agent-core/run-state/tableChatFills';
+import {
+    fillStateFromRecord,
+    fillStateFromSnapshot,
+    jobCallFillState,
+    openJobCallsAtom,
+    tableCallLine,
+    type FillCallState,
+} from '@beaver/agent-core/run-state/jobCalls';
+import { jobIdOf } from '@beaver/agent-core/protocol/jobCallProtocol';
+import { tableMessages } from './ToolResultView';
+import { TableResultView } from './toolResultViews/TableResultView';
 import { getHost } from '@beaver/agent-ui/host';
-import IconButton from '@beaver/agent-ui/primitives/IconButton';
-import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
-import { ToolResultView } from './ToolResultView';
 import {
     AlertIcon,
     ArrowDownIcon,
@@ -18,6 +26,7 @@ import {
     TableIcon,
 } from '../icons/icons';
 import { toolExpandedAtom, setToolExpandedAtom } from '../../atoms/messageUIState';
+import { chatFillTableKey, jobWaitAtom, openAnswerRunIdAtom } from '../../atoms/jobWait';
 
 interface TableToolCallViewProps {
     part: ToolCallPart;
@@ -40,13 +49,21 @@ function requestedTitle(part: ToolCallPart): string | null {
 }
 
 /**
- * A table write (`create_table`, `edit_rows`, `edit_table`, `fill_table`) as a
- * card in the run, shaped like the agent-action cards for notes: a bordered
- * header carrying the tool label and the table title, an open control on the
- * right, and a body with the call's summary and any recovery notice.
+ * A table write (`create_table`, `edit_table`, `fill_table`) as a line in
+ * the run's timeline, headed like an action card: the tool's name, then the
+ * table's title or the call's status (see `tableCallLine`). The receipt under
+ * the answer is where the table is opened, filled or undone.
  *
- * The header opens the current snapshot through the navigation host; the body
- * is the ordinary tool-result view, so the outcome copy is defined once.
+ * A call that fills the table puts the fill's state in place of the title,
+ * live or parked alike: "Fill Table: 45 of 150 items complete (3 failed)",
+ * or "Fill Table: running" for a fill this device does not follow. A fill
+ * that completed every item shows the title again. Once the answer has
+ * ended (stopped, or left while the fill runs), a fill still running shows
+ * the title: the answer no longer follows it, and the table's card under
+ * the answer shows its progress. Until the call returns, clicking the line
+ * opens the table, whose own Fill control can stop the fill; once it
+ * returns, the line expands to the call's summary as it was recorded.
+ * Status notices (declined, partial, rejected rows) sit under the label.
  */
 export const TableToolCallView: React.FC<TableToolCallViewProps> = ({
     part,
@@ -57,110 +74,130 @@ export const TableToolCallView: React.FC<TableToolCallViewProps> = ({
 }) => {
     const status = getToolCallStatusFromResult(result, runStatus);
     const hasResult = result !== undefined;
-    const record = result?.part_kind === 'tool-return' ? tableRecordFromMetadata(result.metadata) : null;
-    const notices = hasResult ? tableResultMessages(result.content) : [];
+    const isReturn = result?.part_kind === 'tool-return';
+    const record = isReturn ? tableRecordFromMetadata(result.metadata) : null;
+    const notices = isReturn ? tableMessages(result) : [];
 
     const expansionKey = `${runId}:${responseIndex}:${part.tool_call_id}`;
-    const expansionState = useAtomValue(toolExpandedAtom);
+    const storedExpanded = useAtomValue(useMemo(() => toolExpandedAtom(expansionKey), [expansionKey]));
     const setExpanded = useSetAtom(setToolExpandedAtom);
-
-    // Both the summary and a recovery notice are short and actionable, so the
-    // card opens on arrival like a created note does; the user may fold it.
-    const canExpand = result?.part_kind === 'tool-return' && (record !== null || notices.length > 0);
-    const isExpanded = (expansionState[expansionKey] ?? canExpand) && canExpand;
-    const toggleExpanded = () => {
-        if (canExpand) setExpanded({ key: expansionKey, expanded: !isExpanded });
-    };
-
     const [isHovered, setIsHovered] = useState(false);
-    const [openMessage, setOpenMessage] = useState('');
-    const tableKey = record?.reference.key ?? null;
-    const handleOpen = useCallback(async () => {
-        if (!tableKey) return;
-        const open = getHost().navigation?.openTable;
-        if (!open) {
-            setOpenMessage('Table provider unavailable.');
-            return;
-        }
-        const outcome = await open(tableKey).catch(() => ({ error: 'Table provider unavailable.' }));
-        setOpenMessage('error' in outcome ? outcome.error : (outcome.warning ?? ''));
-    }, [tableKey]);
 
     const isInProgress = status === 'in_progress';
-    const isShimmering = isInProgress && !hasResult && runStatus === 'in_progress';
+    const isLive = isInProgress && runStatus === 'in_progress' && !hasResult;
+
+    // The fill this call started: the job this renderer follows, or the fill
+    // the returned record describes.
+    const jobCall = useAtomValue(openJobCallsAtom).find((call) => call.tool_call_id === part.tool_call_id) ?? null;
+    const fills = useAtomValue(chatFillsAtom);
+    const fill = (jobCall ? fills.get(jobIdOf(jobCall)) : undefined) ?? fillForToolCall(fills, part.tool_call_id, runId);
+    const recordFill = record?.run === 'fill' ? record.fill ?? null : null;
+    const knownFill: FillCallState | null = recordFill && recordFill.status !== 'running'
+        ? fillStateFromRecord(recordFill)
+        : jobCall && !hasResult
+          ? jobCallFillState(fill?.snapshot)
+          : fill
+            ? fillStateFromSnapshot(fill.snapshot)
+            : recordFill
+              ? { kind: 'started' }
+              : null;
+    // The answer is going while its run is, while it waits on a card, or while
+    // this window waits on this call's fill (which a resume may have parked
+    // on). An answer that ended no longer shows a fill still running.
+    const openAnswerRunId = useAtomValue(openAnswerRunIdAtom);
+    const wait = useAtomValue(jobWaitAtom);
+    const jobId = fill?.snapshot.job_id ?? (jobCall ? jobIdOf(jobCall) : null);
+    const waitedOn = wait !== null && wait.toolCallId === part.tool_call_id && wait.jobId === jobId;
+    const answerGoing = isRunActive({ status: runStatus }) || openAnswerRunId === runId || waitedOn;
+    const fillLeft = !answerGoing && (knownFill?.kind === 'running' || knownFill?.kind === 'started');
+    const fillState = fillLeft ? null : knownFill;
+    // A fill known only to have started (Zotero restarted since) does not spin.
+    const fillRunning = fillState?.kind === 'running';
+
+    const canExpand = record !== null;
+    const isExpanded = (storedExpanded ?? false) && canExpand;
+    // A fill whose call has not returned opens its table: its Fill control
+    // shows the fill and can stop it.
+    const openKey = !record && knownFill ? (jobCall?.state?.table ?? (fill ? chatFillTableKey(fill.snapshot) : null)) : null;
+    const canClick = canExpand || openKey !== null;
+    const handleClick = (event: React.MouseEvent) => {
+        if (canExpand) {
+            setExpanded({ key: expansionKey, expanded: !isExpanded });
+            return;
+        }
+        if (!openKey) return;
+        const origin = (event.currentTarget as Element).ownerDocument?.defaultView ?? null;
+        // The host reports a table that cannot be opened.
+        void getHost().navigation?.openTable?.(openKey, origin)?.catch(() => undefined);
+    };
+
+    const isShimmering = fillRunning || isLive;
+    const isFailed = status === 'error' || (isReturn && !record && notices.length > 0);
     const getIcon = () => {
+        if (isHovered && openKey) return ArrowUpRightIcon;
+        if (fillRunning) return Spinner;
+        if (isExpanded) return ArrowDownIcon;
+        if (isHovered && canExpand) return ArrowRightIcon;
+        if (fillState?.kind === 'stopped' || fillState?.kind === 'interrupted') return AlertIcon;
+        if (fillState || fillLeft) return TableIcon;
         if (isInProgress && (runStatus === 'canceled' || runStatus === 'error')) return AlertIcon;
         if (isInProgress) return Spinner;
-        if (isHovered && canExpand) return isExpanded ? ArrowDownIcon : ArrowRightIcon;
-        if (status === 'error') return AlertIcon;
+        if (isFailed) return AlertIcon;
         return TableIcon;
     };
-    const iconClassName = status === 'error' && !(isHovered && canExpand) ? 'color-error' : undefined;
+    const iconClassName = isFailed && !fillLeft && !(isHovered && canClick) && !isExpanded ? 'color-error' : undefined;
 
-    const label = TOOL_BASE_LABELS[part.tool_name] ?? 'Table';
-    // A returned record always names its table, even when the stored title is
-    // empty; only a call still in flight falls back to the requested title.
-    const title = record ? (record.reference.title || 'Untitled table') : requestedTitle(part);
-    const progress = isInProgress && runStatus === 'in_progress' ? part.progress : undefined;
+    // The line renders the call as recorded, title included; only a call
+    // without a record falls back to the title the model asked for.
+    const title = record
+        ? (record.reference.title || 'Untitled table')
+        : requestedTitle(part) ?? jobCall?.state?.title ?? fill?.snapshot.table.title ?? null;
+    const line = tableCallLine(part.tool_name, fillState, title);
+    const progress = !fillState && isLive ? part.progress : undefined;
 
     return (
         <div
             id={`tool-${part.tool_call_id}`}
-            className="agent-action-view rounded-card flex flex-col min-w-0 border-card mb-2"
+            className={`rounded-card flex flex-col min-w-0 ${isExpanded ? 'border-card mb-2' : 'border-transparent'}`}
         >
-            <div className={`display-flex flex-row py-15 bg-senary items-start ${isExpanded ? 'border-bottom-quinary' : ''}`}>
+            <div className={`display-flex flex-row py-15 ${isExpanded ? 'bg-senary border-bottom-quinary' : ''}`}>
                 <button
                     type="button"
-                    className={`variant-ghost-secondary display-flex flex-row py-15 gap-2 text-left mt-015 min-w-0 ${canExpand ? 'cursor-pointer' : ''}`}
+                    className={`variant-ghost-secondary display-flex flex-row py-15 gap-2 flex-1 text-left min-w-0 ${canClick ? 'cursor-pointer' : ''}`}
                     style={{ fontSize: '0.95rem', background: 'transparent', border: 0, padding: 0 }}
                     aria-expanded={isExpanded}
                     aria-controls={`tool-result-${part.tool_call_id}`}
-                    onClick={toggleExpanded}
-                    disabled={!canExpand}
+                    title={openKey ? 'Open table' : undefined}
+                    onClick={handleClick}
+                    disabled={!canClick}
                     onMouseEnter={() => setIsHovered(true)}
                     onMouseLeave={() => setIsHovered(false)}
                 >
-                    <div className="display-flex flex-row ml-3 gap-2 min-w-0">
-                        <div className="flex-1 display-flex mt-010 font-color-primary">
+                    <div className="display-flex flex-row px-3 gap-2 min-w-0">
+                        <div className={`flex-1 display-flex mt-010 ${isExpanded ? 'font-color-primary' : ''}`}>
                             <Icon icon={getIcon()} className={iconClassName} />
                         </div>
                         <div className="display-flex flex-col min-w-0 gap-1">
-                            <div className={`two-line-header${isShimmering ? ' shimmer-text' : ''}`}>
-                                <span className="font-color-primary font-medium">{label}</span>
-                                {title && <span className="font-color-secondary ml-15">{title}</span>}
+                            <div className={`min-w-0 truncate${isShimmering ? ' shimmer-text' : ''}`}>
+                                <span className="font-color-primary font-medium">{line.label}</span>
+                                {line.text && <span className="font-color-secondary ml-15">{line.text}</span>}
                             </div>
                             {progress && (
-                                <span className="font-color-tertiary shimmer-text">{progress}</span>
+                                <span className={`font-color-tertiary text-sm${isInProgress ? ' shimmer-text' : ''}`}>{progress}</span>
                             )}
-                            {openMessage && (
-                                <span role="status" className="font-color-tertiary">{openMessage}</span>
-                            )}
+                            {notices.map((line, index) => (
+                                <span key={index} role="status" className="font-color-secondary text-sm">
+                                    {line}
+                                </span>
+                            ))}
                         </div>
                     </div>
                 </button>
-
-                <div className="flex-1" />
-
-                {/* Siblings of the header button, not children: a control nested
-                    in a native button is neither focusable nor keyboard-activable. */}
-                <div className="display-flex flex-row items-center gap-25 mr-2 mt-015">
-                    {tableKey && (
-                        <Tooltip content="Open table" showArrow singleLine>
-                            <IconButton
-                                icon={ArrowUpRightIcon}
-                                variant="ghost-secondary"
-                                iconClassName="font-color-secondary scale-10"
-                                onClick={handleOpen}
-                                ariaLabel="Open table"
-                            />
-                        </Tooltip>
-                    )}
-                </div>
             </div>
 
-            {isExpanded && result?.part_kind === 'tool-return' && (
-                <div id={`tool-result-${part.tool_call_id}`}>
-                    <ToolResultView result={result} />
+            {isExpanded && record && (
+                <div id={`tool-result-${part.tool_call_id}`} className="display-flex flex-col">
+                    <TableResultView view={{ view_type: 'table', record }} />
                 </div>
             )}
         </div>

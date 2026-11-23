@@ -4,6 +4,11 @@ const deferredCommits = vi.hoisted(() => ({ wait: vi.fn(async () => true) }));
 vi.mock("../../../src/services/committedTransaction", () => ({
     waitForDeferredCommits: deferredCommits.wait,
 }));
+const openTransaction = vi.hoisted(() => ({ wait: vi.fn(async (_ms: number) => true) }));
+vi.mock("../../../src/services/openTransaction", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("../../../src/services/openTransaction")>()),
+    waitForOpenTransaction: openTransaction.wait,
+}));
 vi.mock("../../../src/services/agentDataProvider/utils", () => ({
     checkLibraryExcluded: () =>
         state.excluded ? { message: "Excluded library" } : null,
@@ -20,10 +25,17 @@ vi.mock("../../../src/utils/libraryIdentity", () => ({
 }));
 import {
     applyMerge,
+    refreshMergeProposal,
     undoMergeItemsAction,
     validateMergeItemsAction,
 } from "../../../src/services/duplicates/merge";
 let items: any[];
+class ZoteroTimeoutError extends Error {
+    constructor() {
+        super();
+        this.name = "TimeoutError";
+    }
+}
 const clone = (v: any) => JSON.parse(JSON.stringify(v));
 function makeItem(id: number, key: string, json: any) {
     return {
@@ -104,6 +116,8 @@ beforeEach(() => {
     state.bodyRan = false;
     deferredCommits.wait.mockReset();
     deferredCommits.wait.mockResolvedValue(true);
+    openTransaction.wait.mockReset();
+    openTransaction.wait.mockResolvedValue(true);
     items = [
         makeItem(1, "AAAA1111", {
             itemType: "journalArticle",
@@ -152,7 +166,9 @@ beforeEach(() => {
                 }),
             ),
         },
+        DBConnection: { TimeoutError: ZoteroTimeoutError },
         DB: {
+            inTransaction: () => false,
             waitForTransaction: async () => {},
             valueQueryAsync: async () => Math.max(...items.map((i) => i.id)),
             executeTransaction: async (fn: any) => {
@@ -180,11 +196,111 @@ describe("native merge action", () => {
         await undoMergeItemsAction({ result_data: result } as any);
         expect(items.map((i) => i.json)).toEqual(before);
     });
+    it("inventories annotations when Zotero returns them as items instead of IDs", async () => {
+        // Zotero 7 and 8 ignore getAnnotations' asIDs argument. Zotero loads a
+        // non-integer id as NaN, which fails and, on Zotero 7, stalls later loads.
+        const annotation = Object.assign(makeItem(11, "ANNO1111", { itemType: "annotation" }), {
+            isRegularItem: () => false,
+            isAnnotation: () => true,
+        });
+        const attachment = Object.assign(makeItem(10, "ATTA1111", { itemType: "attachment", title: "PDF" }), {
+            itemType: "attachment",
+            isRegularItem: () => false,
+            isAttachment: () => true,
+            isFileAttachment: () => true,
+            getAnnotations: () => [annotation],
+            numAnnotations: () => 1,
+        });
+        items[0].getAttachments = () => [10];
+        items.push(attachment, annotation);
+        const getAsync = Zotero.Items.getAsync;
+        Zotero.Items.getAsync = vi.fn(async (ids: unknown[]) => {
+            if (!ids.every(Number.isInteger)) throw new Error("no such column: NaN");
+            return getAsync(ids as number[]);
+        }) as any;
+
+        const data = await proposal();
+        expect(Object.keys(data.snapshot)).toContain("u-ANNO1111");
+        expect(data.preview.members[0].children[0].annotation_count).toBe(1);
+        await applyMerge(data);
+        expect(Zotero.Items.merge).toHaveBeenCalledOnce();
+    });
     it("rejects an edit made after proposal without invoking merge", async () => {
         const data = await proposal();
         items[1].json.title = "Changed";
         await expect(applyMerge(data)).rejects.toThrow("changed since");
         expect(state.bodyRan).toBe(false);
+    });
+    it("names the records and fields that changed since the proposal", async () => {
+        const data = await proposal();
+        items[1].json.title = "Changed";
+        items[1].json.tags = [];
+        const error: any = await applyMerge(data).catch((e) => e);
+        expect(error.code).toBe("stale_snapshot");
+        expect(error.message).toBe(
+            "Items changed since this merge was proposed (u-BBBB2222: tags, title). Inspect and propose the merge again.",
+        );
+        expect(error.details).toEqual({
+            stale_changes: [{ item_id: "u-BBBB2222", change: "changed", fields: ["tags", "title"] }],
+        });
+        expect(error.message).not.toContain("Changed");
+    });
+    it("names a record that joined the merge since the proposal", async () => {
+        const data = await proposal();
+        items.push(makeItem(3, "CCCC3333", { itemType: "journalArticle", relations: { "dc:relation": ["uri:BBBB2222"] } }));
+        Zotero.Relations.getByObject = async (_: string, uri: string) =>
+            uri === "uri:BBBB2222" ? [{ subject: items[2], predicate: "dc:relation" }] : [];
+        const error: any = await applyMerge(data).catch((e) => e);
+        expect(error.code).toBe("stale_snapshot");
+        expect(error.details.stale_changes).toEqual([{ item_id: "u-CCCC3333", change: "added" }]);
+        expect(error.message).toContain("u-CCCC3333: now part of the merge");
+    });
+    it("waits for another write's transaction to end before merging", async () => {
+        Zotero.DB.inTransaction = () => true;
+        await applyMerge(await proposal());
+        expect(openTransaction.wait).toHaveBeenCalledOnce();
+        expect(openTransaction.wait.mock.calls[0][0]).toBeLessThanOrEqual(30_000);
+        expect(Zotero.Items.merge).toHaveBeenCalledOnce();
+    });
+    it("bounds the wait by the execute deadline", async () => {
+        Zotero.DB.inTransaction = () => true;
+        const ctx = { signal: new AbortController().signal, timeoutSeconds: 25, startTime: Date.now() };
+        await applyMerge(await proposal(), ctx);
+        expect(openTransaction.wait.mock.calls[0][0]).toBeLessThanOrEqual(15_000);
+    });
+    it("reports a database held by another write as busy, without merging", async () => {
+        const data = await proposal();
+        Zotero.DB.inTransaction = () => true;
+        openTransaction.wait.mockResolvedValue(false);
+        const before = items.map((i) => clone(i.json));
+        const error: any = await applyMerge(data).catch((e) => e);
+        expect(error.code).toBe("db_busy");
+        expect(error.message).toContain("nothing was changed");
+        expect(Zotero.Items.merge).not.toHaveBeenCalled();
+        expect(items.map((i) => i.json)).toEqual(before);
+    });
+    it("reports Zotero's own transaction wait timing out as busy", async () => {
+        const data = await proposal();
+        vi.mocked(Zotero.Items.merge).mockImplementation(async () => {
+            throw new ZoteroTimeoutError();
+        });
+        const error: any = await applyMerge(data).catch((e) => e);
+        expect(error.code).toBe("db_busy");
+        expect(state.bodyRan).toBe(false);
+    });
+    it("applies a refreshed proposal with the same choices after the records changed", async () => {
+        const data = await proposal();
+        data.field_sources = { abstractNote: "u-BBBB2222" };
+        items[1].json.title = "Changed";
+        await expect(applyMerge(data)).rejects.toThrow("changed since");
+        const refreshed = await refreshMergeProposal(data);
+        expect(refreshed.field_sources).toEqual({ abstractNote: "u-BBBB2222" });
+        expect(refreshed.preview?.members.map((m: any) => m.item_id)).toEqual(["u-AAAA1111", "u-BBBB2222"]);
+        expect(deferredCommits.wait).toHaveBeenCalled();
+        expect(openTransaction.wait).toHaveBeenCalled();
+        await applyMerge(refreshed);
+        expect(items[0].json.abstractNote).toBe("Full abstract");
+        expect(items[1].deleted).toBe(true);
     });
     it("preserves unrelated later edits during undo", async () => {
         const result = await applyMerge(await proposal());

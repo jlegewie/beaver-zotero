@@ -11,7 +11,7 @@ vi.mock('../../../src/utils/zoteroDataLoading', async (importOriginal) => ({
 
 import { externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
 import { store } from '../../../react/store';
-import { renderToMarkdownAsync } from '../../../react/utils/citationRenderers';
+import { renderToMarkdown, renderToMarkdownAsync } from '../../../react/utils/citationRenderers';
 
 describe('renderToMarkdownAsync', () => {
     it('renders against the citation state from before libraries finished loading', async () => {
@@ -27,5 +27,27 @@ describe('renderToMarkdownAsync', () => {
         const markdown = await rendered;
         expect(markdown).toContain('A Study');
         expect(markdown).toContain('## Sources');
+    });
+});
+
+describe('renderToMarkdown', () => {
+    it('writes a table cell citation as its paper, with no source entry', () => {
+        const tag = '<citation id="u-TABLEKEY" loc="cell:u-PAPERAAA/design"/>';
+        const loc = { kind: 'cell' as const, value: 'u-PAPERAAA/design', raw: 'cell:u-PAPERAAA/design' };
+        const citation = {
+            citation_id: 'c',
+            citation_type: 'table' as const,
+            requested_ref: { kind: 'zotero' as const, library_id: 1, library_ref: 'u', zotero_key: 'TABLEKEY', loc },
+            display_name: 'Smith et al. 2021',
+            raw_tag: tag,
+            table: { title: 'Study designs', row_label: 'Smith et al. 2021', column_header: 'Design', value: 'Survey' },
+        };
+        const markdown = renderToMarkdown(`Most are surveys ${tag}.`, {
+            citations: [citation],
+            citationByKey: { 'zotero:u-TABLEKEY:cell:u-PAPERAAA/design': citation },
+            externalReferenceMapping: {},
+            externalItemMapping: {},
+        });
+        expect(markdown).toBe('Most are surveys (Smith et al. 2021).');
     });
 });

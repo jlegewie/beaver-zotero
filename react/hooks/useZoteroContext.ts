@@ -1,9 +1,11 @@
 import { selectedTabIfAccepted } from '../../src/runtime/navigation';
+import { countLibraryItems } from '../utils/libraryShape';
 import { getContextWindow } from '../runtime/windowRuntime';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { logger } from '@beaver/agent-core/platform/logger';
-import { isLibraryTabAtom } from '../atoms/ui';
+import { isLibraryTabAtom, selectedZoteroTabIdAtom } from '../atoms/ui';
+import { isLibraryTabType } from '../../src/ui/libraryPane';
 import {
     selectedZoteroItemsAtom,
     selectedZoteroItemCountAtom,
@@ -38,33 +40,6 @@ let moduleTabNotifierId: string | null = null;
  */
 function isNoteTabType(type: string): boolean {
     return type === 'note' || type === 'note-unloaded' || type === 'note-loading';
-}
-
-/**
- * Cheap regular-item count probe across non-feed libraries. Used by the
- * first-run gate to route truly empty AND small libraries to the discovery
- * flow (suggestion cards on a 3-paper library produce overblown "Synthesize
- * what your library says about X" framing).
- *
- * Returns the count clamped to `cap` — the SQL `LIMIT cap` stops the scan
- * early, so the query stays cheap on a 50k-item library while still letting
- * the caller distinguish 0/1/.../cap.
- */
-async function queryLibraryItemCount(cap: number): Promise<number> {
-    const sql = `SELECT 1 FROM items i
-        JOIN libraries l ON l.libraryID = i.libraryID
-        WHERE l.type != 'feed'
-          AND i.itemTypeID NOT IN (
-              SELECT itemTypeID FROM itemTypes
-              WHERE typeName IN ('note', 'attachment', 'annotation')
-          )
-          AND i.itemID NOT IN (SELECT itemID FROM deletedItems)
-        LIMIT ?`;
-    let count = 0;
-    await Zotero.DB.queryAsync(sql, [cap], {
-        onRow: () => { count++; },
-    });
-    return count;
 }
 
 /**
@@ -190,6 +165,13 @@ export function useZoteroContext() {
     const searchableLibraryIdsKey = searchableLibraryIds.join(',');
     const setRecentlyAddedTodayCount = useSetAtom(recentlyAddedTodayCountAtom);
     const setLibraryItemCount = useSetAtom(libraryItemCountAtom);
+    // `ZoteroPane.itemsView` / `collectionsView` belong to the active library
+    // view. Zotero 11 has one per library tab and builds its trees after the
+    // tab is first selected: attach again when another library tab becomes
+    // active, and when the selected one finishes loading.
+    const selectedTabId = useAtomValue(selectedZoteroTabIdAtom);
+    const libraryTabKey = isLibraryTab ? selectedTabId : null;
+    const [libraryViewRevision, setLibraryViewRevision] = useState(0);
 
     // A note tab may be discovered before profile exclusions and the local
     // library list finish loading. updateNoteItemAtom safely defers that first
@@ -278,66 +260,6 @@ export function useZoteroContext() {
             iv.onRefresh.addListener(handleItemsRefresh);
         }
 
-        // --- Zotero.Notifier for recently added items ---
-        if (moduleItemNotifierId) {
-            try {
-                Zotero.Notifier.unregisterObserver(moduleItemNotifierId);
-            } catch {
-                // ignore
-            }
-            moduleItemNotifierId = null;
-        }
-
-        // Tracked locally so 'modify' (frequent) can skip the query once the
-        // library has crossed the threshold — modify can only grow the count
-        // (via restore-from-trash), never shrink it, so we can stop re-probing
-        // once we already know the library is at-or-above the threshold.
-        let libraryItemCountLocal = 0;
-        const refreshLibraryItemCount = async () => {
-            libraryItemCountLocal = await queryLibraryItemCount(
-                SMALL_LIBRARY_THRESHOLD,
-            );
-            setLibraryItemCount(libraryItemCountLocal);
-        };
-
-        const itemObserver: { notify: _ZoteroTypes.Notifier.Notify } = {
-            notify: async function (
-                event: _ZoteroTypes.Notifier.Event,
-                type: _ZoteroTypes.Notifier.Type,
-                _ids: string[] | number[],
-            ) {
-                if (type !== 'item') return;
-                if (event === 'add') {
-                    const count = await queryRecentlyAddedTodayCount();
-                    setRecentlyAddedTodayCount(count);
-                    // 'add' fires for notes/attachments/annotations too, which
-                    // don't count as regular items — re-query rather than assume.
-                    // Skip once the library is at-or-above the threshold;
-                    // further adds can't cross any first-run boundary.
-                    if (libraryItemCountLocal < SMALL_LIBRARY_THRESHOLD) {
-                        await refreshLibraryItemCount();
-                    }
-                } else if (event === 'delete' || event === 'trash') {
-                    await refreshLibraryItemCount();
-                } else if (
-                    event === 'modify'
-                    && libraryItemCountLocal < SMALL_LIBRARY_THRESHOLD
-                ) {
-                    // Restore-from-trash fires only 'modify' on item (no
-                    // 'trash' event). Skip once we've crossed the threshold:
-                    // modify can only grow the count.
-                    await refreshLibraryItemCount();
-                }
-            },
-        };
-
-        const itemObserverId = Zotero.Notifier.registerObserver(
-            itemObserver,
-            ['item'],
-            'beaver-zoteroContextItemObserver',
-        );
-        moduleItemNotifierId = itemObserverId;
-
         // --- Zotero.Notifier for note tab tracking ---
         // Needed because isLibraryTab is false for both reader and note tabs,
         // so switching between them won't re-trigger this effect.
@@ -385,6 +307,13 @@ export function useZoteroContext() {
                     // if it's the currently selected tab and update the atom.
                     const loadedTab = selectedTabIfAccepted(mainWindow, ids, extraData);
                     if (!loadedTab) return;
+                    if (isLibraryTabType(loadedTab.type)) {
+                        // The selected library view has built its trees.
+                        if ((ids as (string | number)[]).includes(loadedTab.id)) {
+                            setLibraryViewRevision((revision) => revision + 1);
+                        }
+                        return;
+                    }
                     await setNoteItemFromTab(loadedTab);
                 }
             },
@@ -422,21 +351,20 @@ export function useZoteroContext() {
             }
         }
 
-        queryRecentlyAddedTodayCount().then(setRecentlyAddedTodayCount);
-        refreshLibraryItemCount();
-
         // --- Cleanup ---
         return () => {
             disposed = true;
             ++noteGeneration;
             logger('useZoteroContext: cleaning up');
-            cv?.onSelect?.removeListener(handleCollectionSelect);
-            iv?.onSelect?.removeListener(handleItemSelect);
-            iv?.onRefresh?.removeListener(handleItemsRefresh);
-            if (moduleItemNotifierId === itemObserverId) {
-                Zotero.Notifier.unregisterObserver(itemObserverId);
-                moduleItemNotifierId = null;
-            }
+            // A closed Zotero 11 library view has already torn down its trees,
+            // and their event dispatchers throw on removal. A throw here would
+            // unmount every hook of this renderer's context initializer.
+            const detach = (remove: () => void) => {
+                try { remove(); } catch { /* the view is gone */ }
+            };
+            detach(() => cv?.onSelect?.removeListener(handleCollectionSelect));
+            detach(() => iv?.onSelect?.removeListener(handleItemSelect));
+            detach(() => iv?.onRefresh?.removeListener(handleItemsRefresh));
             if (moduleTabNotifierId === tabObserverId) {
                 Zotero.Notifier.unregisterObserver(tabObserverId);
                 moduleTabNotifierId = null;
@@ -444,12 +372,92 @@ export function useZoteroContext() {
         };
     }, [
         isLibraryTab,
+        libraryTabKey,
+        libraryViewRevision,
         setSelectedItems,
         setSelectedItemCount,
         setLibraryView,
         setSelectedTags,
         setNoteItem,
-        setRecentlyAddedTodayCount,
-        setLibraryItemCount,
     ]);
+
+    // Library-wide counts for the first-run views. They don't depend on the
+    // selected tab or library view, so they stay out of the effect above,
+    // which re-runs on every tab switch.
+    useEffect(() => {
+        if (!getContextWindow()?.ZoteroPane) return;
+
+        // --- Zotero.Notifier for recently added items ---
+        if (moduleItemNotifierId) {
+            try {
+                Zotero.Notifier.unregisterObserver(moduleItemNotifierId);
+            } catch {
+                // ignore
+            }
+            moduleItemNotifierId = null;
+        }
+
+        // Tracked locally so 'modify' (frequent) can skip the query once the
+        // library has crossed the threshold — modify can only grow the count
+        // (via restore-from-trash), never shrink it, so we can stop re-probing
+        // once we already know the library is at-or-above the threshold.
+        let libraryItemCountLocal = 0;
+        const refreshLibraryItemCount = async () => {
+            // Every library but feeds, clamped to the threshold: first run
+            // only needs to tell empty and small libraries from the rest. A
+            // failed count leaves the last one in place.
+            const count = await countLibraryItems(SMALL_LIBRARY_THRESHOLD);
+            if (count === null) return;
+            libraryItemCountLocal = count;
+            setLibraryItemCount(count);
+        };
+
+        const itemObserver: { notify: _ZoteroTypes.Notifier.Notify } = {
+            notify: async function (
+                event: _ZoteroTypes.Notifier.Event,
+                type: _ZoteroTypes.Notifier.Type,
+                _ids: string[] | number[],
+            ) {
+                if (type !== 'item') return;
+                if (event === 'add') {
+                    const count = await queryRecentlyAddedTodayCount();
+                    setRecentlyAddedTodayCount(count);
+                    // 'add' fires for notes/attachments/annotations too, which
+                    // don't count as regular items — re-query rather than assume.
+                    // Skip once the library is at-or-above the threshold;
+                    // further adds can't cross any first-run boundary.
+                    if (libraryItemCountLocal < SMALL_LIBRARY_THRESHOLD) {
+                        await refreshLibraryItemCount();
+                    }
+                } else if (event === 'delete' || event === 'trash') {
+                    await refreshLibraryItemCount();
+                } else if (
+                    event === 'modify'
+                    && libraryItemCountLocal < SMALL_LIBRARY_THRESHOLD
+                ) {
+                    // Restore-from-trash fires only 'modify' on item (no
+                    // 'trash' event). Skip once we've crossed the threshold:
+                    // modify can only grow the count.
+                    await refreshLibraryItemCount();
+                }
+            },
+        };
+
+        const itemObserverId = Zotero.Notifier.registerObserver(
+            itemObserver,
+            ['item'],
+            'beaver-zoteroContextItemObserver',
+        );
+        moduleItemNotifierId = itemObserverId;
+
+        queryRecentlyAddedTodayCount().then(setRecentlyAddedTodayCount);
+        refreshLibraryItemCount();
+
+        return () => {
+            if (moduleItemNotifierId === itemObserverId) {
+                Zotero.Notifier.unregisterObserver(itemObserverId);
+                moduleItemNotifierId = null;
+            }
+        };
+    }, [setRecentlyAddedTodayCount, setLibraryItemCount]);
 }

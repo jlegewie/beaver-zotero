@@ -1,9 +1,10 @@
 import { isReaderAnnotationEvent, selectedTabIfAccepted } from '../../src/runtime/navigation';
+import { selectedTableTabItemID, TABLE_TAB_TYPE } from '../../src/ui/tableTabContextPane';
 import { getContextWindow } from '../runtime/windowRuntime';
 import { useEffect, useRef, useCallback } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { readerTextSelectionAtom } from '../atoms/messageComposition';
-import { currentReaderAttachmentAtom, updateReaderAttachmentAtom, clearReaderAttachmentAtom, isReaderLibrarySearchable, addItemToCurrentMessageItemsAtom, currentMessageItemsAtom, notifyReaderLibraryExcludedAtom } from '../atoms/messageComposition';
+import { currentReaderAttachmentAtom, updateReaderAttachmentAtom, clearReaderAttachmentAtom, isReaderLibrarySearchable, addItemToCurrentMessageItemsAtom, currentMessageItemsAtom, notifyReaderLibraryExcludedAtom, updateTableTabContextAtom } from '../atoms/messageComposition';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { addSelectionChangeListener, getCurrentReader, getSelectedTextAsTextSelection } from '../utils/readerUtils';
 import { isValidAnnotationType, TextSelection } from '@beaver/agent-core/types/attachments/apiTypes';
@@ -57,6 +58,8 @@ async function waitForReaderByTabID(tabID: string, mainWindow: Window, timeoutMs
  * Mounted once per renderer, bound to its current main-window context.
  * Context replacement tears down the old reader listeners before rebinding.
  */
+/** The table item of the selected tab when it is a Beaver tab. */
+
 export function useReaderTabSelection() {
     const isBeaverUIVisible = useAtomValue(isBeaverUIVisibleAtom);
     const isAuthenticated = useAtomValue(isAuthenticatedAtom);
@@ -67,6 +70,7 @@ export function useReaderTabSelection() {
     const searchableLibraryIdsKey = searchableLibraryIds.join(',');
     const updateReaderAttachment = useSetAtom(updateReaderAttachmentAtom);
     const clearReaderAttachment = useSetAtom(clearReaderAttachmentAtom);
+    const updateTableTabContext = useSetAtom(updateTableTabContextAtom);
     const notifyReaderLibraryExcluded = useSetAtom(notifyReaderLibraryExcludedAtom);
     const setReaderTextSelection = useSetAtom(readerTextSelectionAtom);
     const setCurrentMessageItems = useSetAtom(currentMessageItemsAtom);
@@ -339,6 +343,9 @@ export function useReaderTabSelection() {
                 if (isMounted) {
                     detachActiveReader();
                     clearReaderAttachment();
+                    // A Beaver tab's table is the context instead.
+                    const tableItemID = selectedTableTabItemID(mainWindow);
+                    if (tableItemID) void updateTableTabContext(tableItemID);
                 }
             }
         };
@@ -410,6 +417,10 @@ export function useReaderTabSelection() {
                         ++tabTransitionGeneration;
                         const previousReader = detachActiveReader();
                         clearReaderAttachment();
+                        // A Beaver tab makes its table the current context.
+                        if (selectedTab.type === TABLE_TAB_TYPE && selectedTab.data?.itemID) {
+                            void updateTableTabContext(selectedTab.data.itemID);
+                        }
 
                         await BeaverTemporaryAnnotations.cleanupAll(previousReader as ZoteroReader);
                     }
@@ -551,5 +562,5 @@ export function useReaderTabSelection() {
                 logger(`useReaderTabSelection: Error cleaning up temporary annotations on unmount: ${error}`);
             });
         };
-    }, [setupReader, detachActiveReader, setReaderTextSelection, updateReaderAttachment, clearReaderAttachment, notifyReaderLibraryExcluded, mainWindow, waitForInternalReader, isBeaverUIVisible, isAuthenticated, isDeviceAuthorized, hasAuthorized, isLibraryAccessReady, searchableLibraryIdsKey]);
+    }, [setupReader, detachActiveReader, setReaderTextSelection, updateReaderAttachment, clearReaderAttachment, updateTableTabContext, notifyReaderLibraryExcluded, mainWindow, waitForInternalReader, isBeaverUIVisible, isAuthenticated, isDeviceAuthorized, hasAuthorized, isLibraryAccessReady, searchableLibraryIdsKey]);
 }

@@ -8,10 +8,12 @@ import {
     getContentKind,
     isExternalCitation,
     isExternalFileCitation,
+    type TableCitation,
 } from '@beaver/agent-core/types/citations';
 import {
     baseCitationKey,
     CitationRef,
+    getRequestedRef,
     getResolvedRef,
     LocatorKind,
     requestedCitationKey,
@@ -62,6 +64,19 @@ function propBool(props: Record<string, unknown>, camel: string, kebab: string):
  *   <citation external_id="..."/>                - external reference
  * Legacy item_id/att_id/page attrs are still accepted by preprocessing.
  */
+function directCitation(value: unknown): Citation | undefined {
+    return value && typeof value === 'object' && typeof (value as Citation).citation_id === 'string'
+        ? (value as Citation)
+        : undefined;
+}
+
+/** The identity model of an assembled citation, as its tag would have parsed. */
+function propsFromCitation(citation: Citation): CitationPropsModel {
+    const ref = getRequestedRef(citation) ?? getResolvedRef(citation);
+    if (!ref) return { ok: false, requestedKey: '', consecutive: false, adjacent: false };
+    return { ok: true, ref, requestedKey: requestedCitationKey(ref), consecutive: false, adjacent: false };
+}
+
 export function readCitationProps(props: Record<string, unknown>): CitationPropsModel {
     const consecutive = propBool(props, 'dataConsecutive', 'data-consecutive');
     const adjacent = propBool(props, 'dataAdjacent', 'data-adjacent');
@@ -171,6 +186,11 @@ export interface CitationViewModel {
     /** The cited pages for prose ("page 12", "PDF page 5"); "" without pages. */
     pageReference: string;
     pages: number[];
+    /**
+     * A table cell or row citation's stored preview. The chip names only the
+     * row's paper ("Smith et al. 2021"); the tooltip shows the rest.
+     */
+    table?: TableCitation;
 }
 
 /**
@@ -185,7 +205,14 @@ export interface CitationViewModel {
  * host-agnostic.
  */
 export function useCitationViewModel(props: Record<string, unknown>): CitationViewModel {
-    const parsedProps = useMemo(() => readCitationProps(props), [props]);
+    // A caller holding the assembled citation (a table's evidence) passes it as
+    // `citation`: it identifies itself and is its own metadata, so it never
+    // depends on the thread's store or on a tag naming it uniquely.
+    const direct = directCitation(props.citation);
+    const parsedProps = useMemo(
+        () => (direct ? propsFromCitation(direct) : readCitationProps(props)),
+        [props, direct],
+    );
 
     const citationDataByCitationKey = useAtomValue(citationByKeyAtom);
     const externalReferenceToZoteroItem = useAtomValue(externalReferenceItemMappingAtom);
@@ -207,9 +234,9 @@ export function useCitationViewModel(props: Record<string, unknown>): CitationVi
     const identity = useMemo(() => {
         const citationKey = parsedProps.requestedKey || '';
 
-        let metadata = citationKey
+        let metadata = direct ?? (citationKey
             ? citationDataByCitationKey[citationKey]
-            : undefined;
+            : undefined);
 
         if (!metadata && parsedProps.ok) {
             metadata = citationDataByCitationKey[baseCitationKey(parsedProps.ref)];
@@ -276,7 +303,7 @@ export function useCitationViewModel(props: Record<string, unknown>): CitationVi
             resolvedRef,
             externalSourceId,
         };
-    }, [parsedProps, citationDataByCitationKey]);
+    }, [parsedProps, citationDataByCitationKey, direct]);
 
     const {
         metadata,
@@ -347,6 +374,9 @@ export function useCitationViewModel(props: Record<string, unknown>): CitationVi
         };
     }, [metadata, isExternalFile]);
 
+    // A table citation shows no locator: its chip names the row's paper.
+    const table = metadata?.citation_type === 'table' ? metadata.table : undefined;
+
     // Resolve page labels separately so page-label preload updates don't force
     // the citation/preview/HTML-stripping work above to recompute. The legacy
     // fallback (loading labels from the cited Zotero item) is delegated to the
@@ -358,6 +388,10 @@ export function useCitationViewModel(props: Record<string, unknown>): CitationVi
         let pageLabels: string[] = rawPages.map((p) => String(p));
         const contentKind = getContentKind(metadata);
         const noPages = { locatorDisplay: '', pageReference: '' };
+
+        if (table) {
+            return { pageLabels: [], ...noPages, pages: [] };
+        }
 
         if (contentKind === 'snapshot') {
             // Synthetic page numbers are a logical coordinate only; the snapshot
@@ -406,7 +440,7 @@ export function useCitationViewModel(props: Record<string, unknown>): CitationVi
             pageReference: display.reference,
             pages: rawPages,
         };
-    }, [rawPages, usePageLabels, resolvedRef, labelsByAttachmentId, metadata]);
+    }, [rawPages, usePageLabels, resolvedRef, labelsByAttachmentId, metadata, table]);
 
     return {
         metadata,
@@ -436,5 +470,6 @@ export function useCitationViewModel(props: Record<string, unknown>): CitationVi
         locatorDisplay,
         pageReference,
         pages,
+        table,
     };
 }

@@ -1,4 +1,5 @@
 import type { AgentAction } from '@beaver/agent-core/agents/agentActionTypes';
+import { STALE_PROPOSAL_CODE } from '../../../../src/services/manualActions/staleProposal';
 
 /**
  * Note-edit failures that a Retry cannot fix.
@@ -31,6 +32,9 @@ export function isStaleNoteEdit(action: AgentAction): boolean {
     // targets the undo and stays available.
     if (action.status !== 'error' || action.result_data != null) return false;
     const code = (action.error_details as Record<string, unknown> | undefined)?.error_code;
+    // A rewrite or append refused by the drift check can still be applied
+    // anyway; it is not a failure of the edit's target.
+    if (code === STALE_PROPOSAL_CODE) return false;
     if (typeof code === 'string' && STALE_TARGET_CODES.has(code)) return true;
     return STALE_TARGET_MESSAGE.test(action.error_message ?? '');
 }

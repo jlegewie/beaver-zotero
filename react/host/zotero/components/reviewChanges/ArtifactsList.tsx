@@ -1,57 +1,82 @@
-import React, { useState } from 'react';
+import React, { useMemo } from 'react';
+import { useAtomValue, useSetAtom } from 'jotai';
+import { setToolExpandedAtom, toolExpandedAtom } from '../../../../atoms/messageUIState';
 import type { TableArtifact } from '@beaver/agent-core/run-state/tableResults';
 import { getReviewRowKey, noteIdentityKey, type NoteEditSummary, type ReviewRow } from '../reviewChangeRows';
-import { ReviewActionRow } from './ReviewActionRow';
-import { EditedNoteArtifactRow } from './EditedNoteArtifactRow';
+import { NoteIcon, TableIcon } from '../../../../components/icons/icons';
+import { CreatedNoteCard, EditedNoteCard } from './NoteArtifactCards';
 import { TableArtifactRow } from './TableArtifactRow';
-import Button from '@beaver/agent-ui/primitives/Button';
-
-/**
- * Rows shown before the `Show all (N)` affordance. Tighter than the changes
- * card's, which spends its rows only once the user has opened it — these are
- * on screen at the end of every run that wrote one.
- */
-const MAX_VISIBLE_ROWS = 4;
+import { RunArtifactCard, RunArtifactToggleButton } from './RunArtifactCard';
+import { groupArtifacts, groupCard, inAnswerOrder, type ArtifactEntry } from './runArtifacts';
 
 interface ArtifactsListProps {
-    /** From `useArtifactRows`; the caller derives them so it can skip an empty list. */
+    /** From `useArtifactRows`: the notes the answer created. */
     rows: ReviewRow[];
     /** From `useTableArtifactRows`: the tables the answer wrote. */
     tableRows?: TableArtifact[];
     /** From `useEditedNoteArtifacts`: the notes the answer edited without creating them. */
     editedNotes?: NoteEditSummary[];
+    /** The answer's tool-call order (`toolCallOrder`), which orders the notes as the answer wrote them. */
+    order?: ReadonlyMap<string, number>;
 }
 
-type ArtifactEntry =
-    | { kind: 'action'; key: string; row: ReviewRow }
-    | { kind: 'editedNote'; key: string; summary: NoteEditSummary }
-    | { kind: 'table'; key: string; row: TableArtifact };
+function ArtifactCard({ entry }: { entry: ArtifactEntry }): React.ReactElement {
+    if (entry.kind === 'createdNote') return <CreatedNoteCard row={entry.row} />;
+    if (entry.kind === 'editedNote') return <EditedNoteCard summary={entry.summary} />;
+    return <TableArtifactRow row={entry.row} />;
+}
 
 /**
- * What a terminal run produced for the user to open — the notes it wrote or
- * edited, one row per note, and the tables it wrote.
- *
- * Sits at the bottom of the run so a note is reachable from where the answer
- * ends, however long the answer is, and whatever else the run did. That is the
- * whole reason this is a surface of its own rather than a row inside
- * `ChangesCard`: a note folded into a count is buried exactly when the run was
- * busy enough to make finding it hard.
- *
- * Deliberately without the aggregate header the changes card carries. There is
- * no bulk operation to offer and no status worth summarizing — each row is one
- * artifact, already carrying its own title, preview, open and delete. One
- * artifact therefore looks like a single bordered row, which is what a run that
- * wrote one note should look like; the frame is the list's, not a card's.
+ * Many artifacts of one kind as one card: how many, and what became of them.
+ * A click unfolds their cards under it.
  */
-export const ArtifactsList: React.FC<ArtifactsListProps> = ({ rows, tableRows = [], editedNotes = [] }) => {
-    const [showAllRows, setShowAllRows] = useState(false);
+function ArtifactGroupCard({ of, entries }: { of: ArtifactEntry['kind']; entries: ArtifactEntry[] }): React.ReactElement {
+    // In the renderer's expansion state, like the other run cards: opening a
+    // member moves the chat to the reader's sidebar, which mounts its own list.
+    const expansionKey = `artifacts:${of}:${entries[0].key}`;
+    const expanded = useAtomValue(useMemo(() => toolExpandedAtom(expansionKey), [expansionKey])) ?? false;
+    const setExpanded = useSetAtom(setToolExpandedAtom);
+    const { headline, condition } = groupCard(of, entries);
+    const toggle = () => setExpanded({ key: expansionKey, expanded: !expanded });
+    return (
+        <RunArtifactCard
+            icon={of === 'table' ? TableIcon : NoteIcon}
+            headline={headline}
+            condition={condition}
+            onActivate={toggle}
+            activateLabel={`${expanded ? 'Hide' : 'Show'} ${headline}`}
+            expanded={expanded}
+            actions={<RunArtifactToggleButton expanded={expanded} onClick={toggle} />}
+        >
+            {expanded ? entries.map((entry) => <ArtifactCard key={entry.key} entry={entry} />) : null}
+        </RunArtifactCard>
+    );
+}
 
-    // Notes first, then tables: the note rows carry apply/undo state the user
-    // may still have to settle, and a table is already written when it appears.
-    // Created notes lead the edited ones, as the answer's own writing.
+/**
+ * What a terminal run produced for the user to open: the notes it wrote or
+ * edited and the tables it wrote, each as one card of the same shape (see
+ * `RunArtifactCard`).
+ *
+ * Sits at the bottom of the run so an artifact is reachable from where the
+ * answer ends, however long the answer is, and whatever else the run did.
+ * That is the whole reason this is a surface of its own rather than a row
+ * inside `ChangesCard`: a note folded into a count is buried exactly when the
+ * run was busy enough to make finding it hard.
+ *
+ * A run can write a note per item, so a kind with many artifacts folds into
+ * one group card that unfolds on a click (see `groupArtifacts`). The frame is
+ * the list's: one artifact looks like a single bordered card.
+ */
+const NO_ORDER: ReadonlyMap<string, number> = new Map();
+
+export const ArtifactsList: React.FC<ArtifactsListProps> = ({ rows, tableRows = [], editedNotes = [], order = NO_ORDER }) => {
+    // Notes first, then tables: a created note may still wait for a decision,
+    // and a table is already written when it appears. Created notes lead the
+    // edited ones, as the answer's own writing.
     const entries: ArtifactEntry[] = [
-        ...rows.map((row): ArtifactEntry => ({ kind: 'action', key: getReviewRowKey(row), row })),
-        ...editedNotes.map((summary): ArtifactEntry => ({
+        ...inAnswerOrder(rows, order).map((row): ArtifactEntry => ({ kind: 'createdNote', key: getReviewRowKey(row), row })),
+        ...inAnswerOrder(editedNotes, order).map((summary): ArtifactEntry => ({
             kind: 'editedNote',
             key: `note:${noteIdentityKey(summary.note)}`,
             summary,
@@ -65,32 +90,17 @@ export const ArtifactsList: React.FC<ArtifactsListProps> = ({ rows, tableRows = 
 
     if (entries.length === 0) return null;
 
-    // A batch job can write a note per item, so this list is unbounded in
-    // principle. Same cap and affordance as the changes card — and for a run
-    // that large the batch receipt above already reports the total.
-    const visibleEntries = showAllRows ? entries : entries.slice(0, MAX_VISIBLE_ROWS);
-
     return (
         <div className="border-card rounded-card bg-senary overflow-hidden display-flex flex-col min-w-0">
-            {visibleEntries.map((entry, idx) => (
-                <div key={entry.key} className={idx > 0 ? 'border-top-quinary' : undefined}>
-                    {entry.kind === 'action' ? (
-                        <ReviewActionRow row={entry.row} inGroup />
-                    ) : entry.kind === 'editedNote' ? (
-                        <EditedNoteArtifactRow summary={entry.summary} />
+            {groupArtifacts(entries).map((card, idx) => (
+                <div key={card.key} className={idx > 0 ? 'border-top-quinary' : undefined}>
+                    {card.kind === 'group' ? (
+                        <ArtifactGroupCard of={card.of} entries={card.entries} />
                     ) : (
-                        <TableArtifactRow row={entry.row} />
+                        <ArtifactCard entry={card} />
                     )}
                 </div>
             ))}
-
-            {visibleEntries.length < entries.length && (
-                <div className="display-flex flex-row px-2 py-2 border-top-quinary">
-                    <Button variant="ghost-secondary" onClick={() => setShowAllRows(true)}>
-                        {`Show all (${entries.length})`}
-                    </Button>
-                </div>
-            )}
         </div>
     );
 };

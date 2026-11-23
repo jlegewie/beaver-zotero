@@ -14,6 +14,14 @@ const row = (extra: Partial<SearchPreparationRow> = {}): SearchPreparationRow =>
     error: null, readingSucceeded: false, ...extra,
 });
 
+
+/** Zotero's field tables, which the processable-attachment SQL reads to leave Beaver tables out. */
+async function createItemDataTables(db: MockDBConnection): Promise<void> {
+    await db.queryAsync('CREATE TABLE itemData (itemID INT, fieldID INT, valueID)');
+    await db.queryAsync('CREATE TABLE fields (fieldID INTEGER PRIMARY KEY, fieldName TEXT)');
+    await db.queryAsync('CREATE TABLE itemDataValues (valueID INTEGER PRIMARY KEY, value)');
+}
+
 describe('search preparation classification', () => {
     it('uses acknowledged membership even when local reading is unavailable', () => {
         expect(classifySearchPreparation(row({ error: 'file_missing' }), identity)).toBe('indexed');
@@ -70,6 +78,7 @@ describe('send-time search snapshot', () => {
         db = new BeaverDB(ledger); await db.initDatabase('0.99.0');
         await inventory.queryAsync('CREATE TABLE items (itemID INTEGER PRIMARY KEY, libraryID INTEGER, key TEXT)');
         await inventory.queryAsync('CREATE TABLE itemAttachments (itemID INTEGER PRIMARY KEY, parentItemID INTEGER, linkMode INTEGER, contentType TEXT, path TEXT)');
+        await createItemDataTables(inventory);
         await inventory.queryAsync('CREATE TABLE deletedItems (itemID INTEGER PRIMARY KEY)');
         Object.assign(Zotero, {
             DB: inventory,

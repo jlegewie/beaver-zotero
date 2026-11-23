@@ -1,0 +1,3136 @@
+{
+    "name": "a long document is read as selected passages, reranked against the row's questions: its answers are written as they are",
+    "request": {
+        "job_id": "job-1",
+        "row_id": "r4",
+        "price": 0.2,
+        "table": {
+            "title": "School meal trials",
+            "description": "Sample sizes and designs of school meal studies."
+        },
+        "columns": [
+            {
+                "id": "n",
+                "header": "Sample size",
+                "type": "text",
+                "description": "How many participants were analysed?",
+                "question_hash": "43a016f79f162aaa"
+            },
+            {
+                "id": "design",
+                "header": "Design",
+                "type": "select",
+                "description": "What is the study design?",
+                "options": [
+                    {
+                        "label": "RCT",
+                        "color": "blue",
+                        "description": "Random assignment of units to arms."
+                    },
+                    {
+                        "label": "Observational",
+                        "color": "green"
+                    }
+                ],
+                "question_hash": "08856a5066308361"
+            },
+            {
+                "id": "costs",
+                "header": "Costs",
+                "type": "boolean",
+                "description": "Does the study report monetary costs?",
+                "question_hash": "a9179a6cdd9877ac"
+            }
+        ],
+        "row": {
+            "reference": {
+                "title": "School meals and attendance",
+                "authors": "Okafor and Reyes",
+                "year": "2021",
+                "venue": "Journal of Development Studies",
+                "item_type": "journalArticle"
+            },
+            "abstract": "We study 120 pupils in a randomised trial of school meals in Kenya."
+        },
+        "document": {
+            "id": "u-LONG1111",
+            "kind": "pdf",
+            "content": {
+                "schemaVersion": "4",
+                "mode": "structured",
+                "document": {
+                    "pageCount": 70,
+                    "bboxOrigin": "top-left",
+                    "bboxPrecision": 1,
+                    "pages": [
+                        {
+                            "index": 0,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p1",
+                                    "pageIndex": 0,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 1 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s1",
+                                            "order": 0,
+                                            "text": "Page 1 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 1,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p2",
+                                    "pageIndex": 1,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 2 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s2",
+                                            "order": 0,
+                                            "text": "Page 2 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 2,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p3",
+                                    "pageIndex": 2,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 3 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s3",
+                                            "order": 0,
+                                            "text": "Page 3 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 3,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p4",
+                                    "pageIndex": 3,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 4 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s4",
+                                            "order": 0,
+                                            "text": "Page 4 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 4,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p5",
+                                    "pageIndex": 4,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 5 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s5",
+                                            "order": 0,
+                                            "text": "Page 5 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 5,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p6",
+                                    "pageIndex": 5,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 6 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s6",
+                                            "order": 0,
+                                            "text": "Page 6 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 6,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p7",
+                                    "pageIndex": 6,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 7 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s7",
+                                            "order": 0,
+                                            "text": "Page 7 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 7,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p8",
+                                    "pageIndex": 7,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 8 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s8",
+                                            "order": 0,
+                                            "text": "Page 8 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 8,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p9",
+                                    "pageIndex": 8,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 9 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s9",
+                                            "order": 0,
+                                            "text": "Page 9 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 9,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p10",
+                                    "pageIndex": 9,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 10 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s10",
+                                            "order": 0,
+                                            "text": "Page 10 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 10,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p11",
+                                    "pageIndex": 10,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 11 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s11",
+                                            "order": 0,
+                                            "text": "Page 11 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 11,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p12",
+                                    "pageIndex": 11,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 12 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s12",
+                                            "order": 0,
+                                            "text": "Page 12 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 12,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p13",
+                                    "pageIndex": 12,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 13 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s13",
+                                            "order": 0,
+                                            "text": "Page 13 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 13,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p14",
+                                    "pageIndex": 13,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 14 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s14",
+                                            "order": 0,
+                                            "text": "Page 14 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 14,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p15",
+                                    "pageIndex": 14,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 15 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s15",
+                                            "order": 0,
+                                            "text": "Page 15 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 15,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p16",
+                                    "pageIndex": 15,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 16 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s16",
+                                            "order": 0,
+                                            "text": "Page 16 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 16,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p17",
+                                    "pageIndex": 16,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 17 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s17",
+                                            "order": 0,
+                                            "text": "Page 17 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 17,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p18",
+                                    "pageIndex": 17,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 18 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s18",
+                                            "order": 0,
+                                            "text": "Page 18 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 18,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p19",
+                                    "pageIndex": 18,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 19 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s19",
+                                            "order": 0,
+                                            "text": "Page 19 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 19,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p20",
+                                    "pageIndex": 19,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 20 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s20",
+                                            "order": 0,
+                                            "text": "Page 20 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 20,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p21",
+                                    "pageIndex": 20,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 21 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s21",
+                                            "order": 0,
+                                            "text": "Page 21 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 21,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p22",
+                                    "pageIndex": 21,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 22 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s22",
+                                            "order": 0,
+                                            "text": "Page 22 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 22,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p23",
+                                    "pageIndex": 22,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 23 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s23",
+                                            "order": 0,
+                                            "text": "Page 23 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 23,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p24",
+                                    "pageIndex": 23,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 24 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s24",
+                                            "order": 0,
+                                            "text": "Page 24 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 24,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p25",
+                                    "pageIndex": 24,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 25 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s25",
+                                            "order": 0,
+                                            "text": "Page 25 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 25,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p26",
+                                    "pageIndex": 25,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 26 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s26",
+                                            "order": 0,
+                                            "text": "Page 26 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 26,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p27",
+                                    "pageIndex": 26,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 27 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s27",
+                                            "order": 0,
+                                            "text": "Page 27 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 27,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p28",
+                                    "pageIndex": 27,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 28 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s28",
+                                            "order": 0,
+                                            "text": "Page 28 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 28,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p29",
+                                    "pageIndex": 28,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 29 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s29",
+                                            "order": 0,
+                                            "text": "Page 29 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 29,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p30",
+                                    "pageIndex": 29,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 30 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s30",
+                                            "order": 0,
+                                            "text": "Page 30 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 30,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p31",
+                                    "pageIndex": 30,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 31 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s31",
+                                            "order": 0,
+                                            "text": "Page 31 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 31,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p32",
+                                    "pageIndex": 31,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 32 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s32",
+                                            "order": 0,
+                                            "text": "Page 32 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 32,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p33",
+                                    "pageIndex": 32,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 33 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s33",
+                                            "order": 0,
+                                            "text": "Page 33 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 33,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p34",
+                                    "pageIndex": 33,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 34 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s34",
+                                            "order": 0,
+                                            "text": "Page 34 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 34,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p35",
+                                    "pageIndex": 34,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 35 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s35",
+                                            "order": 0,
+                                            "text": "Page 35 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 35,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p36",
+                                    "pageIndex": 35,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 36 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s36",
+                                            "order": 0,
+                                            "text": "Page 36 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 36,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p37",
+                                    "pageIndex": 36,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 37 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s37",
+                                            "order": 0,
+                                            "text": "Page 37 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 37,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p38",
+                                    "pageIndex": 37,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 38 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s38",
+                                            "order": 0,
+                                            "text": "Page 38 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 38,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p39",
+                                    "pageIndex": 38,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 39 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s39",
+                                            "order": 0,
+                                            "text": "Page 39 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 39,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p40",
+                                    "pageIndex": 39,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 40 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s40",
+                                            "order": 0,
+                                            "text": "Page 40 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 40,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p41",
+                                    "pageIndex": 40,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "We analysed 96 pupils.",
+                                    "sentences": [
+                                        {
+                                            "id": "s41",
+                                            "order": 0,
+                                            "text": "We analysed 96 pupils.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 41,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p42",
+                                    "pageIndex": 41,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Schools were randomised.",
+                                    "sentences": [
+                                        {
+                                            "id": "s42",
+                                            "order": 0,
+                                            "text": "Schools were randomised.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 42,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p43",
+                                    "pageIndex": 42,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 43 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s43",
+                                            "order": 0,
+                                            "text": "Page 43 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 43,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p44",
+                                    "pageIndex": 43,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 44 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s44",
+                                            "order": 0,
+                                            "text": "Page 44 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 44,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p45",
+                                    "pageIndex": 44,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 45 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s45",
+                                            "order": 0,
+                                            "text": "Page 45 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 45,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p46",
+                                    "pageIndex": 45,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 46 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s46",
+                                            "order": 0,
+                                            "text": "Page 46 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 46,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p47",
+                                    "pageIndex": 46,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 47 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s47",
+                                            "order": 0,
+                                            "text": "Page 47 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 47,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p48",
+                                    "pageIndex": 47,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 48 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s48",
+                                            "order": 0,
+                                            "text": "Page 48 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 48,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p49",
+                                    "pageIndex": 48,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 49 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s49",
+                                            "order": 0,
+                                            "text": "Page 49 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 49,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p50",
+                                    "pageIndex": 49,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 50 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s50",
+                                            "order": 0,
+                                            "text": "Page 50 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 50,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p51",
+                                    "pageIndex": 50,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 51 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s51",
+                                            "order": 0,
+                                            "text": "Page 51 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 51,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p52",
+                                    "pageIndex": 51,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 52 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s52",
+                                            "order": 0,
+                                            "text": "Page 52 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 52,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p53",
+                                    "pageIndex": 52,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 53 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s53",
+                                            "order": 0,
+                                            "text": "Page 53 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 53,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p54",
+                                    "pageIndex": 53,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 54 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s54",
+                                            "order": 0,
+                                            "text": "Page 54 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 54,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p55",
+                                    "pageIndex": 54,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 55 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s55",
+                                            "order": 0,
+                                            "text": "Page 55 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 55,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p56",
+                                    "pageIndex": 55,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 56 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s56",
+                                            "order": 0,
+                                            "text": "Page 56 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 56,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p57",
+                                    "pageIndex": 56,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 57 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s57",
+                                            "order": 0,
+                                            "text": "Page 57 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 57,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p58",
+                                    "pageIndex": 57,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 58 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s58",
+                                            "order": 0,
+                                            "text": "Page 58 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 58,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p59",
+                                    "pageIndex": 58,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 59 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s59",
+                                            "order": 0,
+                                            "text": "Page 59 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 59,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p60",
+                                    "pageIndex": 59,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 60 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s60",
+                                            "order": 0,
+                                            "text": "Page 60 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 60,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p61",
+                                    "pageIndex": 60,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 61 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s61",
+                                            "order": 0,
+                                            "text": "Page 61 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 61,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p62",
+                                    "pageIndex": 61,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 62 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s62",
+                                            "order": 0,
+                                            "text": "Page 62 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 62,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p63",
+                                    "pageIndex": 62,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 63 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s63",
+                                            "order": 0,
+                                            "text": "Page 63 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 63,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p64",
+                                    "pageIndex": 63,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 64 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s64",
+                                            "order": 0,
+                                            "text": "Page 64 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 64,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p65",
+                                    "pageIndex": 64,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 65 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s65",
+                                            "order": 0,
+                                            "text": "Page 65 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 65,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p66",
+                                    "pageIndex": 65,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 66 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s66",
+                                            "order": 0,
+                                            "text": "Page 66 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 66,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p67",
+                                    "pageIndex": 66,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 67 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s67",
+                                            "order": 0,
+                                            "text": "Page 67 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 67,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p68",
+                                    "pageIndex": 67,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 68 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s68",
+                                            "order": 0,
+                                            "text": "Page 68 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 68,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p69",
+                                    "pageIndex": 68,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 69 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s69",
+                                            "order": 0,
+                                            "text": "Page 69 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 69,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p70",
+                                    "pageIndex": 69,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Page 70 describes the setting.",
+                                    "sentences": [
+                                        {
+                                            "id": "s70",
+                                            "order": 0,
+                                            "text": "Page 70 describes the setting.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    ],
+                    "citationIndex": {}
+                }
+            }
+        }
+    },
+    "model": [
+        {
+            "c1": {
+                "reasoning": null,
+                "value": "96",
+                "locators": [
+                    "s41"
+                ],
+                "confidence": "high"
+            },
+            "c2": {
+                "reasoning": "Schools were randomised.",
+                "value": "RCT",
+                "locators": [
+                    "s42"
+                ],
+                "confidence": "high"
+            },
+            "c3": {
+                "reasoning": "No costs appear in the passages.",
+                "value": false,
+                "locators": [
+                    "s42"
+                ],
+                "confidence": "high"
+            }
+        }
+    ],
+    "rerank_keeps": [
+        41,
+        42
+    ],
+    "response": {
+        "cells": {
+            "n": {
+                "outcome": "answered",
+                "value": {
+                    "kind": "text",
+                    "text": "96"
+                },
+                "provenance": "model",
+                "documents": [
+                    "u-LONG1111"
+                ],
+                "confidence": "high",
+                "evidence": [
+                    {
+                        "document": "u-LONG1111",
+                        "locator": "s41",
+                        "quote": "We analysed 96 pupils.",
+                        "page": 40,
+                        "boxes": [
+                            [
+                                10,
+                                0,
+                                300,
+                                12
+                            ]
+                        ]
+                    }
+                ]
+            },
+            "design": {
+                "outcome": "answered",
+                "value": {
+                    "kind": "select",
+                    "label": "RCT"
+                },
+                "provenance": "model",
+                "documents": [
+                    "u-LONG1111"
+                ],
+                "confidence": "high",
+                "reasoning": "Schools were randomised.",
+                "evidence": [
+                    {
+                        "document": "u-LONG1111",
+                        "locator": "s42",
+                        "quote": "Schools were randomised.",
+                        "page": 41,
+                        "boxes": [
+                            [
+                                10,
+                                0,
+                                300,
+                                12
+                            ]
+                        ]
+                    }
+                ]
+            },
+            "costs": {
+                "outcome": "answered",
+                "value": {
+                    "kind": "boolean",
+                    "value": false
+                },
+                "provenance": "model",
+                "documents": [
+                    "u-LONG1111"
+                ],
+                "confidence": "high",
+                "reasoning": "No costs appear in the passages.",
+                "evidence": [
+                    {
+                        "document": "u-LONG1111",
+                        "locator": "s42",
+                        "quote": "Schools were randomised.",
+                        "page": 41,
+                        "boxes": [
+                            [
+                                10,
+                                0,
+                                300,
+                                12
+                            ]
+                        ]
+                    }
+                ]
+            }
+        },
+        "row_failure": null,
+        "charged": 0.2
+    }
+}

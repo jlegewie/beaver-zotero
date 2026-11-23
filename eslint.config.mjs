@@ -322,27 +322,6 @@ export default tseslint.config(
             "no-restricted-globals": "off",
         },
     },
-    // Voice harness fragments are concatenated with a generated prefix and
-    // executed inside Zotero's chrome context over RDP (see
-    // native/voice/tests/zotero-dictation.py), so the VOICE_* consts and the
-    // chrome globals below are always defined by the time the file runs.
-    {
-        files: ["native/voice/tests/**/*.js"],
-        languageOptions: {
-            globals: {
-                Zotero: "readonly",
-                ChromeUtils: "readonly",
-                IOUtils: "readonly",
-                VOICE_TEST_WINDOW: "readonly",
-                VOICE_TEST_ROOT: "readonly",
-                VOICE_TEST_URL: "readonly",
-                VOICE_SCREENSHOT: "readonly",
-            },
-        },
-        rules: {
-            "no-restricted-globals": "off",
-        },
-    },
     // The MuPDF worker bundle is a separate execution context: no DOM, no
     // window, no Zotero. It must not import the BeaverExtract index barrel (re-exports
     // BeaverExtractor, MuPDFService, the logger — none of which are
@@ -454,6 +433,10 @@ export default tseslint.config(
             "react/components/agentRuns/ToolCallPartView.tsx",
             // The table write card: opens tables through getHost().navigation.
             "react/components/agentRuns/TableToolCallView.tsx",
+            // Column type tags, option chips and source icons, shared by the
+            // table card and the table tool card body.
+            "react/components/tables/columnTypes.tsx",
+            "react/components/tables/sourceKinds.ts",
             // Request-side label name resolution (extracted from ToolCallPartView):
             // goes through getHost().itemData, never the Zotero global.
             "react/utils/toolCallLabelEnrich.ts",
@@ -503,8 +486,9 @@ export default tseslint.config(
         files: [
             "src/services/artifacts/**/*.ts",
             "src/ui/openTable.ts",
-            "src/ui/tableItemPane.ts",
-            "src/ui/tableItemPaneModel.ts",
+            "src/ui/tableTab.ts",
+            "src/ui/tableTabTypes.ts",
+            "src/ui/tableTabProbe.ts",
         ],
         rules: {
             "no-restricted-imports": [
@@ -541,13 +525,14 @@ export default tseslint.config(
         files: [
             "src/services/artifacts/tableItemIdentity.ts",
             "src/services/artifacts/tableDocument.ts",
-            // The recovery shadow: the item-pane section reads it to say a
-            // table went backwards, so it has to be esbuild-safe too.
+            // The recovery shadow: `tablesApiHost.ts` publishes its inspection
+            // from the esbuild bundle, so it has to be esbuild-safe too.
             "src/services/artifacts/recoveryShadow.ts",
             "src/services/artifacts/view/**/*.ts",
             "src/ui/openTable.ts",
-            "src/ui/tableItemPane.ts",
-            "src/ui/tableItemPaneModel.ts",
+            "src/ui/tableTab.ts",
+            "src/ui/tableTabTypes.ts",
+            "src/ui/tableTabProbe.ts",
         ],
         rules: {
             "no-restricted-imports": [
@@ -581,10 +566,9 @@ export default tseslint.config(
     // `src/hooks.ts`. Importing one from the webpack bundle does not fail
     // anything; it silently creates a SECOND copy of whatever state it keeps.
     // The esbuild copy does the real work while the webpack copy stays empty,
-    // so `/beaver/test/table-view-state` reports no views for readers that are
-    // demonstrably enhanced, and a view registered through the webpack copy is
-    // invisible to `cleanupReaderTableViews()` — leaking the reader's document
-    // and the window it lives in.
+    // so a dev endpoint reports no tabs that are demonstrably open, and a
+    // listener registered through the webpack copy is invisible to the cleanup
+    // `hooks.ts` runs — leaking the window realm it closes over.
     //
     // `openTable.ts` keeps no state of its own and is listed for the other half
     // of the rule: `Zotero.__beaverTables` is the single seam every caller of a
@@ -612,13 +596,14 @@ export default tseslint.config(
                         {
                             group: [
                                 "**/ui/openTable",
-                                "**/ui/tableItemPane",
+                                "**/ui/tableTab",
+                                "**/ui/tableTabProbe",
                                 "**/artifacts/view/readerTableView",
                                 "**/artifacts/tablesApiHost",
                             ],
                             allowTypeImports: true,
                             message:
-                                "This module owns stored-table runtime state and is compiled into the esbuild bundle. Importing it here creates a second, permanently empty copy of that state (empty registries, leaked reader views). Use `getTablesApi()` from src/services/artifacts/tablesApi.ts; import stateless helpers from artifacts/view/tableLinks.ts instead.",
+                                "This module owns stored-table runtime state and is compiled into the esbuild bundle. Importing it here creates a second, permanently empty copy of that state (empty registries, leaked listeners). Use `getTablesApi()` from src/services/artifacts/tablesApi.ts; import stateless helpers from artifacts/view/tableLinks.ts instead.",
                         },
                     ],
                 },

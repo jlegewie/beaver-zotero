@@ -8,9 +8,11 @@
 import type React from 'react';
 import type { VersionShowcaseId } from './versionUpdateMessages';
 import QuickPromptShowcase from '../components/ui/popup/showcases/QuickPromptShowcase';
+import ResearchTableShowcase from '../components/ui/popup/showcases/ResearchTableShowcase';
 
 export const VERSION_SHOWCASES: Record<VersionShowcaseId, React.ComponentType> = {
     'quick-prompt': QuickPromptShowcase,
+    'research-table': ResearchTableShowcase,
 };
 
 export function getVersionShowcase(id: VersionShowcaseId | undefined): React.ComponentType | undefined {

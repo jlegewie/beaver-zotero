@@ -1,37 +1,6 @@
 import { logger } from "@beaver/agent-core/platform/logger";
 import { safeAttachmentFilename } from "./attachmentFiles";
-
-interface ZoteroApiConfig {
-    API_URL: string;
-    API_VERSION: string;
-}
-
-let zoteroConfig: ZoteroApiConfig | null = null;
-
-/**
- * Zotero's API endpoint and version, from `resource://zotero/config.mjs`.
- *
- * `ZOTERO_CONFIG` is **not** a global — it is an ES module export, and every
- * Zotero file that wants it imports it explicitly. Referencing the bare name
- * only appears to work: Zotero's own chrome scripts (`zoteroPane.js` and
- * friends) bind it with a top-level `const`, which lands in the main window's
- * global *lexical* scope, and Beaver's webpack bundle — injected into that
- * window as a classic `<script>` — picks it up by accident. The esbuild bundle
- * runs in the plugin's `Cu.Sandbox` (`Zotero.Plugins._loadScope`), whose globals
- * are an explicit allowlist that has never included it, so the same line threw
- * `ReferenceError` for every background-queue download.
- *
- * Imported lazily and cached: module-scope evaluation would break unit tests,
- * which import this file without a `ChromeUtils`.
- */
-function getZoteroConfig(): ZoteroApiConfig {
-    if (!zoteroConfig) {
-        zoteroConfig = (globalThis as any).ChromeUtils.importESModule(
-            "resource://zotero/config.mjs",
-        ).ZOTERO_CONFIG as ZoteroApiConfig;
-    }
-    return zoteroConfig;
-}
+import { getZoteroConfig } from "./zoteroModules";
 
 /**
  * A download that cannot succeed by trying again: the server answered
@@ -157,7 +126,7 @@ export async function getDownloadUrl(item: Zotero.Item): Promise<string | null> 
 		// 4. Make the first request to get the redirect URL
 		logger(`getDownloadUrl: Requesting download URL from: ${apiUrl}`);
 		const redirectResponse = await Zotero.HTTP.request('GET', apiUrl, {
-			headers: { 'Zotero-API-Key': apiKey, 'Zotero-API-Version': getZoteroConfig().API_VERSION }
+			headers: { 'Zotero-API-Key': apiKey, 'Zotero-API-Version': String(getZoteroConfig().API_VERSION) }
 		});
 
 		const downloadUrl = redirectResponse.responseURL;
@@ -260,7 +229,7 @@ async function downloadFromZFS(item: Zotero.Item, options?: DownloadOptions): Pr
     try {
         logger(`downloadFromZFS: Requesting download URL from: ${apiUrl}`);
         const resp = await Zotero.HTTP.request('GET', apiUrl, {
-            headers: { 'Zotero-API-Key': apiKey, 'Zotero-API-Version': getZoteroConfig().API_VERSION },
+            headers: { 'Zotero-API-Key': apiKey, 'Zotero-API-Version': String(getZoteroConfig().API_VERSION) },
             responseType: 'arraybuffer',
             ...httpOptions
         });

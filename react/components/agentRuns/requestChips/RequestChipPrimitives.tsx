@@ -13,35 +13,66 @@ import type { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
 import { useRemoveContextMenu } from '../../../hooks/useRemoveContextMenu';
 import { ChipButton } from './ChipButton';
 import { ChipRemovableIcon } from './ChipRemovableIcon';
+import { useSurfaceWindow } from '../../../runtime/SurfaceWindowContext';
 
 const MAX_CHIP_TEXT_LENGTH = 30;
 
 /**
  * A stored table as a request chip. Carries the table glyph rather than the
  * snapshot glyph of its Zotero item so it reads as the same thing the table
- * cards and the artifacts list show; clicking opens the current snapshot.
+ * cards and the artifacts list show; clicking opens it in the Beaver tab.
+ *
+ * `unavailable` marks a table that cannot be read here; its reason, and any
+ * feedback from opening it, show in the hover card, never beside the chip.
+ * A table whose files only need downloading is not marked invalid.
  */
-export function TableChip({ title, tableKey, remove }: { title: string; tableKey: string; remove?: ChipRemoveConfig }) {
-    const [error, setError] = React.useState('');
-    return <>
+export function TableChip({
+    title,
+    tableKey,
+    remove,
+    unavailable,
+}: {
+    title: string;
+    tableKey: string;
+    remove?: ChipRemoveConfig;
+    unavailable?: { reason: string; openable?: boolean } | null;
+}) {
+    const [feedback, setFeedback] = React.useState('');
+    const surfaceWindow = useSurfaceWindow();
+    const invalid = Boolean(unavailable && !unavailable.openable);
+    const label = title || 'Table';
+    const status = feedback || unavailable?.reason;
+    return (
         <ChipShell
-            icon={
-                <span className="scale-80 display-flex">
-                    <Icon icon={TableIcon} />
-                </span>
-            }
-            label={truncateText(title || 'Table', MAX_CHIP_TEXT_LENGTH)}
+            icon={tableChipIcon}
+            label={truncateText(label, MAX_CHIP_TEXT_LENGTH)}
+            invalid={invalid}
+            popup={{
+                icon: tableChipIcon,
+                title: label,
+                status: status ? { label: status } : null,
+                action: invalid ? null : { icon: TableIcon, label: 'Open table' },
+            }}
             remove={remove}
             onClick={() => {
+                // Failures are reported by the host; warnings show in the opened table.
                 const open = getHost().navigation?.openTable;
-                if (!open) { setError('Table provider unavailable.'); return; }
-                void open(tableKey).then(result => setError('error' in result ? result.error : result.warning ?? ''))
-                    .catch(() => setError('Table provider unavailable.'));
+                if (!open) { setFeedback('Table provider unavailable.'); return; }
+                setFeedback('');
+                void open(tableKey, surfaceWindow, { onDownload: () => setFeedback('Downloading table…') })
+                    .then(() => setFeedback(''))
+                    .catch(() => setFeedback('Table provider unavailable.'));
             }}
         />
-        {error && <span role="status">{error}</span>}
-    </>;
+    );
 }
+
+const tableChipIcon = (
+    <span className="scale-95 display-flex">
+        <Icon icon={TableIcon} />
+    </span>
+);
+
 const MAX_ANNOTATION_TOOLTIP_TEXT_LENGTH = 160;
 
 /**
@@ -84,6 +115,7 @@ function ChipShell({
     remove,
     itemRef,
     menuItems,
+    invalid = false,
 }: {
     icon: React.ReactNode;
     label: string;
@@ -93,6 +125,8 @@ function ChipShell({
     remove?: ChipRemoveConfig;
     itemRef?: ZoteroItemReference;
     menuItems?: MenuItem[];
+    /** Marks a source that cannot be used: red outline and label. */
+    invalid?: boolean;
 }) {
     const { isRemoveMenuOpen, contextMenuHandlers, removeHandlers, removeMenu } = useRemoveContextMenu({
         onRemove: () => remove?.onRemove(),
@@ -103,7 +137,7 @@ function ChipShell({
     });
 
     const button = (
-        <ChipButton onClick={onClick} {...contextMenuHandlers}>
+        <ChipButton onClick={onClick} className={invalid ? 'border-red' : ''} {...contextMenuHandlers}>
             {remove ? (
                 <ChipRemovableIcon
                     normalIcon={icon}
@@ -113,7 +147,7 @@ function ChipShell({
             ) : (
                 icon
             )}
-            <span className="truncate">{label}</span>
+            <span className={`truncate${invalid ? ' font-color-red' : ''}`}>{label}</span>
             {trailing}
         </ChipButton>
     );

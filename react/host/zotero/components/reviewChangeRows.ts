@@ -1,6 +1,7 @@
 import { isUnconfirmedAction, type AgentAction } from '@beaver/agent-core/agents/agentActionTypes';
 import { textAnnotationStyle } from '@beaver/agent-core/types/agentActions/createAnnotations';
 import { getActionToolGroup } from '../../../atoms/runApprovalPolicy';
+import { isStaleProposal } from '../../../../src/services/manualActions/staleProposal';
 
 /** A tool call the changes card lists, with all of its actions. */
 export interface ReviewRow {
@@ -271,19 +272,6 @@ export function pendingNoteChanges(summaries: NoteEditSummary[], target: OpenNot
     return summaries
         .filter((summary) => noteIdentityKeys(summary.note).some((key) => keys.has(key)))
         .reduce((total, summary) => total + summary.pendingChanges, 0);
-}
-
-/**
- * Header of an edited-note row: "Edited Note" and "3 changes, 1 pending".
- * Counts the edits to this one note, where the changes card counts notes.
- */
-export function getEditedNoteHeading(summary: NoteEditSummary): { label: string; detail: string } {
-    const { appliedChanges: applied, pendingChanges: pending } = summary;
-    if (applied === 0) return { label: 'Note Edits', detail: `${plural(pending, 'change')} pending` };
-    return {
-        label: 'Edited Note',
-        detail: pending > 0 ? `${plural(applied, 'change')}, ${pending} pending` : plural(applied, 'change'),
-    };
 }
 
 /**
@@ -585,8 +573,15 @@ export function getChangesCardHeading(rows: ReviewRow[]): { lead: string; trail?
             label: (count: number) => `${count} unconfirmed`,
         },
         {
+            // Refused because the library changed since the proposal: nothing
+            // was written, and the row offers "Apply anyway".
+            key: 'stale',
+            actions: settledErrors.filter(isStaleProposal),
+            label: (count: number) => `${count} changed since proposed`,
+        },
+        {
             key: 'failed',
-            actions: settledErrors.filter((action) => action.result_data == null),
+            actions: settledErrors.filter((action) => action.result_data == null && !isStaleProposal(action)),
             label: (count: number) => `${count} failed`,
         },
         {

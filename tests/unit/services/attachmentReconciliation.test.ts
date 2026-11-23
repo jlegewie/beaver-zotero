@@ -57,7 +57,8 @@ describe('attachment change reconciliation', () => {
         await connection.queryAsync('CREATE TABLE items (itemID INTEGER, libraryID INTEGER, key TEXT)');
         await connection.queryAsync("INSERT INTO items VALUES (7, 1, 'SNAPSHOT')");
         item = { id: 7, libraryID: 1, key: 'SNAPSHOT', getFilePathAsync: async () => '/a.html',
-            loadAllData: async () => {}, isRegularItem: () => false, attachmentContentType: 'text/html' };
+            loadAllData: async () => {}, isRegularItem: () => false, attachmentContentType: 'text/html',
+            isAttachment: () => true, isTopLevelItem: () => !item.parentID };
         reconciler = new ReconcilerService();
         watcher = new NewItemWatcher();
         vi.stubGlobal('IOUtils', { stat: mocks.stat });
@@ -959,6 +960,47 @@ describe('attachment change reconciliation', () => {
         await notify('delete');
         expect(await db.getAttachmentProcessingState(1, item.key)).toBeNull();
         expect(await db.peekBackgroundJobs()).toEqual([expect.objectContaining({ jobType: 'fulltext_untag' })]);
+    });
+
+    describe('Beaver tables', () => {
+        function makeTable() {
+            Object.assign(item, {
+                isAttachment: () => true,
+                isTopLevelItem: () => true,
+                attachmentLinkMode: Zotero.Attachments.LINK_MODE_IMPORTED_URL,
+                getField: (field: string) => (field === 'url' ? 'beaver://table/my-table' : ''),
+                loadDataType: vi.fn(async () => {}),
+            });
+        }
+
+        it('never queues processing for a table write and retires state recorded before', async () => {
+            await seed(false);
+            makeTable();
+            await notify('modify');
+            expect(item.loadDataType).toHaveBeenCalledWith('itemData');
+            expect(await db.getAttachmentProcessingState(1, item.key)).toBeNull();
+            expect(mocks.invalidate).toHaveBeenCalledWith(1, item.key);
+            // The only job is the cleanup of the table's earlier index membership.
+            expect(await db.peekBackgroundJobs()).toEqual([expect.objectContaining({ jobType: 'fulltext_untag' })]);
+
+            await connection.queryAsync('DELETE FROM background_jobs');
+            await notify('add');
+            await notify('modify');
+            expect(await db.peekBackgroundJobs()).toEqual([]);
+            expect(await db.getAttachmentProcessingState(1, item.key)).toBeNull();
+        });
+
+        it('completes a job queued for a table before the exclusion without extracting it', async () => {
+            await notify('add');
+            makeTable();
+            const job = await db.claimNextBackgroundJob(Date.now(), 60_000);
+            const outcome = await new DocumentExtractExecutor().execute(job!, {
+                db: db as any, runOnMuPDFWorker: async (fn) => fn(), externalAbortSignal: new AbortController().signal,
+                shouldSkipDbWrites: () => false, enqueue: async () => {},
+            });
+            expect(outcome).toEqual({ kind: 'complete', reason: 'beaver_table' });
+            expect(mocks.extract).not.toHaveBeenCalled();
+        });
     });
 
     it('coalesces notifications arriving during an attachment check without overlapping producers', async () => {

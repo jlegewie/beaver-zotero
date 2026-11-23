@@ -1,68 +1,19 @@
 {
-    "name": "a table with columns but no rows still reports a detail per column, with empty distributions",
+    "name": "an empty table counts nothing",
     "spec": {
-        "id": "t4",
-        "spec_version": 1,
-        "columns": [
-            {
-                "id": "paper",
-                "header": "Paper",
-                "type": "reference"
-            },
-            {
-                "id": "topic",
-                "header": "Topic",
-                "type": "select",
-                "options": [
-                    {
-                        "label": "Methods",
-                        "color": "blue"
-                    }
-                ]
-            },
-            {
-                "id": "open_access",
-                "header": "Open access",
-                "type": "boolean"
-            }
-        ],
+        "id": "t0",
+        "spec_version": 2,
+        "title": "Empty",
+        "columns": [],
         "rows": []
     },
     "summary": {
         "rows": 0,
-        "columns": 3,
+        "columns": 0,
+        "sources": 0,
+        "in_scope_rows": 0,
         "failed_rows": 0,
         "user_edits": 0,
-        "columns_detail": {
-            "paper": {
-                "type": "reference",
-                "filled": 0,
-                "unsure": 0,
-                "unsourced": 0,
-                "stale": 0,
-                "completed": 0,
-                "not_reported": 0
-            },
-            "topic": {
-                "type": "select",
-                "filled": 0,
-                "unsure": 0,
-                "unsourced": 0,
-                "stale": 0,
-                "distribution": {},
-                "completed": 0,
-                "not_reported": 0
-            },
-            "open_access": {
-                "type": "boolean",
-                "filled": 0,
-                "unsure": 0,
-                "unsourced": 0,
-                "stale": 0,
-                "distribution": {},
-                "completed": 0,
-                "not_reported": 0
-            }
-        }
+        "columns_detail": {}
     }
 }

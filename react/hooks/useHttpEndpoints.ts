@@ -5,6 +5,7 @@ import {
     handleTestBeaverSidebarHttpRequest,
     handleTestBeaverWindowHttpRequest,
     handleTestSelectTabHttpRequest,
+    handleTestSidebarPaneWidthHttpRequest,
 } from './httpHandlers/testApplicationStateHandlers';
 import {
     handleBatchProgressClear,
@@ -18,6 +19,10 @@ import {
     handleTestChatContinueHttpRequest,
     handleTestChatSendHttpRequest,
     handleTestConfirmCreditsHttpRequest,
+    handleTestTableCardHttpRequest,
+    handleTestAnswerQuestionHttpRequest,
+    handleTestBatchApprovalHttpRequest,
+    handleTestTableFillProgressHttpRequest,
     handleTestCurrentIdsHttpRequest,
     handleTestListActionsHttpRequest,
     handleTestLoadThreadHttpRequest,
@@ -56,10 +61,7 @@ import {
     handleTestSnapshotAnnotationParityHttpRequest,
 } from './httpHandlers/testSnapshotAnnotationHandlers';
 import {
-    handleTestCloseTableHttpRequest,
     handleTestOpenStoredTableHttpRequest,
-    handleTestOpenTableHttpRequest,
-    handleTestTableOpenReaderHttpRequest,
 } from './httpHandlers/testTableHandlers';
 import { handleTestVersionPopupHttpRequest } from './httpHandlers/testVersionPopupHandlers';
 import { handleTestExportHttpRequest } from './httpHandlers/testExportHandlers';
@@ -92,6 +94,10 @@ export function registerWindowTestCommands(
         '/beaver/test/list-actions': handleTestListActionsHttpRequest,
         '/beaver/test/approve-action': handleTestApproveActionHttpRequest,
         '/beaver/test/confirm-credits': handleTestConfirmCreditsHttpRequest,
+        '/beaver/test/table-card': handleTestTableCardHttpRequest,
+        '/beaver/test/answer-question': handleTestAnswerQuestionHttpRequest,
+        '/beaver/test/batch-approval': handleTestBatchApprovalHttpRequest,
+        '/beaver/test/table-fill-progress': handleTestTableFillProgressHttpRequest,
         '/beaver/test/undo-action': handleTestUndoActionHttpRequest,
         '/beaver/test/chat-drop-connection': handleTestChatDropConnectionHttpRequest,
         '/beaver/test/run-snapshot': handleTestRunSnapshotHttpRequest,
@@ -100,12 +106,10 @@ export function registerWindowTestCommands(
         '/beaver/test/application-state': handleTestApplicationStateHttpRequest,
         'application-state': handleTestApplicationStateHttpRequest,
         '/beaver/test/beaver-window': handleTestBeaverWindowHttpRequest,
-        '/beaver/test/open-table': handleTestOpenTableHttpRequest,
-        '/beaver/test/close-table': handleTestCloseTableHttpRequest,
         '/beaver/test/open-stored-table': handleTestOpenStoredTableHttpRequest,
-        '/beaver/test/table-open-reader': handleTestTableOpenReaderHttpRequest,
         '/beaver/test/beaver-sidebar': handleTestBeaverSidebarHttpRequest,
         '/beaver/test/select-tab': handleTestSelectTabHttpRequest,
+        '/beaver/test/sidebar-pane-width': handleTestSidebarPaneWidthHttpRequest,
         '/beaver/test/run-status-popup': handleTestRunStatusPopupHttpRequest,
         '/beaver/test/feature-tip': handleTestFeatureTipHttpRequest,
         '/beaver/test/quick-prompt': handleTestQuickPromptHttpRequest,

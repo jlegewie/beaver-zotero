@@ -173,6 +173,15 @@ export interface ReaderState {
     annotations?: Annotation[];
 }
 
+/** A stored table open in its Beaver tab. */
+export interface TableState {
+    library_id: number;
+    zotero_key: string;
+    /** Device-portable library identity ("u" | "g<groupID>"). */
+    library_ref: string;
+    title?: string;
+}
+
 export interface NoteState {
     library_id: number;
     zotero_key: string;

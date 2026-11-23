@@ -64,6 +64,8 @@ export interface RunPrompt {
 
 export class RunLink {
     readonly runId: string;
+    /** The run's thread: the request's, or the one the server assigned. */
+    threadId: string | null = null;
     /** The callbacks the run was started with; a reattach reuses them. */
     readonly callbacks: WSCallbacks;
     /** From `request_ack`; a run without one cannot be reattached. */
@@ -85,6 +87,10 @@ export class RunLink {
     stopSettled = false;
     /** When the current loss was noticed. */
     detachedAt: number | null = null;
+    /** Sockets lost since the run was last live, the first loss included. */
+    losses = 0;
+    /** Sockets opened to reattach the run since the current loss. */
+    reattachAttempts = 0;
     /** `Date.now()` after which the client stops trying to reattach. */
     deadline: number | null = null;
     /** How the socket was lost. */
@@ -94,6 +100,7 @@ export class RunLink {
     readonly ended: Promise<void>;
     private markEnded!: () => void;
 
+    private readonly stopController = new AbortController();
     private readonly replies = new Map<string, RunReply>();
     private readonly prompts = new Map<string, RunPrompt>();
     private held: Record<string, any>[] = [];
@@ -102,6 +109,16 @@ export class RunLink {
         this.runId = runId;
         this.callbacks = callbacks;
         this.ended = new Promise<void>((resolve) => { this.markEnded = resolve; });
+    }
+
+    /** Aborted once the user stops the run. */
+    get stopSignal(): AbortSignal {
+        return this.stopController.signal;
+    }
+
+    /** The user stopped the run: work its requests started stops too. */
+    markStopped(): void {
+        if (!this.stopController.signal.aborted) this.stopController.abort();
     }
 
     /** The service no longer carries this run. */
@@ -246,6 +263,7 @@ const PROMPTS = [
     { request: 'deferred_approval_request', response: 'deferred_approval_response', idField: 'action_id' },
     { request: 'credit_confirmation_request', response: 'credit_confirmation_response', idField: 'confirmation_id' },
     { request: 'batch_approval_request', response: 'batch_approval_response', idField: 'approval_id' },
+    { request: 'table_card_request', response: 'table_card_response', idField: 'card_id' },
     { request: 'ask_user_question_request', response: 'ask_user_question_response', idField: 'question_id' },
 ] as const;
 

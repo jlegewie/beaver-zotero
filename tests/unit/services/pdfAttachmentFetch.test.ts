@@ -1,7 +1,9 @@
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fetchPdfAttachment } from '../../../src/services/pdfAttachmentFetch';
 import { LibraryMutations } from '../../../src/services/libraryMutations';
+import { createPdfFetchDiagnostics } from '../../../src/services/pdfFetchDiagnostics';
 
+vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
 vi.mock('../../../src/utils/systemTimers', () => ({ getSystemTimers: () => ({ setTimeout, clearTimeout }) }));
 
 function deferred<T>() {
@@ -22,6 +24,7 @@ let generation: number;
 let assertAccess: () => void;
 
 beforeEach(() => {
+    vi.clearAllMocks();
     mutations = new LibraryMutations();
     controller = new AbortController();
     allowed = true;
@@ -127,4 +130,123 @@ it('retains the queue and shutdown barrier until an admitted save settles', asyn
     await expect(fetch).resolves.toMatchObject({ attachment: { key: 'SAVEDPDF' } });
     await disposal;
     expect(remove).toHaveBeenCalled();
+});
+
+describe('failure diagnostics', () => {
+    const cloudflare403 = {
+        message: 'HTTP 403',
+        status: 403,
+        xmlhttp: { getResponseHeader: (name: string) => (name === 'cf-mitigated' ? 'challenge' : null) },
+    };
+
+    /** Drives the hooks the way `downloadFirstAvailableFile` does for each resolver entry. */
+    const driveEntries = (steps: Array<{ method: string; url: string; error?: unknown; wins?: boolean }>) =>
+        async (_resolvers: unknown, _path: string, options: any) => {
+            for (const step of steps) {
+                options.onAccessMethodStart(step.method);
+                try {
+                    await options.onBeforeRequest(step.url);
+                    if (step.error) throw step.error;
+                    if (step.wins) return result;
+                } catch (error) {
+                    options.onRequestError(error);
+                }
+            }
+            return false;
+        };
+
+    it('records a failed entry and the winning entry that follows it', async () => {
+        const diagnostics = createPdfFetchDiagnostics();
+        download.mockImplementation(driveEntries([
+            { method: 'doi', url: 'https://doi.org/10.1/x', error: cloudflare403 },
+            { method: 'openalex', url: 'https://oa.example/paper.pdf', wins: true },
+        ]));
+        await fetchPdfAttachment(parent, [{ url: result.url }], controller.signal, assertAccess, diagnostics);
+        expect(diagnostics.attempts()).toEqual([
+            { accessMethod: 'doi', host: 'doi.org', outcome: 'bot_challenge', status: 403 },
+            { accessMethod: 'openalex', host: 'oa.example', outcome: 'ok' },
+        ]);
+    });
+
+    it('still sets the access method of the winning entry', async () => {
+        download.mockImplementation(driveEntries([{ method: 'openalex', url: 'https://oa.example/p.pdf', wins: true }]));
+        await expect(fetchPdfAttachment(parent, [], controller.signal, assertAccess, createPdfFetchDiagnostics()))
+            .resolves.toMatchObject({ accessMethod: 'openalex' });
+    });
+
+    it('reports a skipped CAPTCHA URL as an attempt', async () => {
+        const diagnostics = createPdfFetchDiagnostics();
+        (Zotero as any).BrowserRequest = { getEntryForURL: (url: string) => (url.includes('captcha.example') ? { captchaLocator: '#c' } : null) };
+        download.mockImplementation(driveEntries([{ method: 'url', url: 'https://captcha.example/a' }]));
+        await expect(fetchPdfAttachment(parent, [], controller.signal, assertAccess, diagnostics))
+            .resolves.toEqual({ attachment: null });
+        expect(diagnostics.attempts()).toEqual([{ accessMethod: 'url', host: 'captcha.example', outcome: 'captcha_skipped' }]);
+        expect(diagnostics.failureReason({ resolverCount: 1, threw: false })).toBe('captcha_skipped');
+    });
+
+    it('reports no_pdf_found when a page yields no file and Zotero moves on silently', async () => {
+        const diagnostics = createPdfFetchDiagnostics();
+        download.mockImplementation(driveEntries([{ method: 'url', url: 'https://publisher.example/article' }]));
+        await fetchPdfAttachment(parent, [], controller.signal, assertAccess, diagnostics);
+        expect(diagnostics.failureReason({ resolverCount: 1, threw: false })).toBe('no_pdf_found');
+    });
+
+    it('reports timeout when the budget elapses mid-download and keeps the attempt in flight', async () => {
+        vi.useFakeTimers();
+        const diagnostics = createPdfFetchDiagnostics();
+        const pending = deferred<any>();
+        download.mockImplementation(async (_resolvers: unknown, _path: string, options: any) => {
+            options.onAccessMethodStart('doi');
+            await options.onBeforeRequest('https://doi.org/10.1/x');
+            return pending.promise;
+        });
+        const fetch = fetchPdfAttachment(parent, [], controller.signal, assertAccess, diagnostics);
+        const rejected = expect(fetch).rejects.toThrow('timed out');
+        await vi.advanceTimersByTimeAsync(60_000);
+        await rejected;
+        expect(diagnostics.failureReason({ resolverCount: 1, threw: true })).toBe('timeout');
+        expect(diagnostics.attempts()).toEqual([{ accessMethod: 'doi', host: 'doi.org', outcome: 'cancelled' }]);
+        pending.resolve(result);
+        await vi.advanceTimersByTimeAsync(0);
+    });
+
+    it('does not report timeout when the task is aborted', async () => {
+        vi.useFakeTimers();
+        const diagnostics = createPdfFetchDiagnostics();
+        download.mockReturnValue(deferred<any>().promise);
+        const fetch = fetchPdfAttachment(parent, [], controller.signal, assertAccess, diagnostics);
+        const rejected = expect(fetch).rejects.toThrow('timed out');
+        await vi.advanceTimersByTimeAsync(0);
+        controller.abort();
+        await rejected;
+        expect(diagnostics.failureReason({ resolverCount: 1, threw: true })).toBe('error');
+    });
+
+    it('reports unsupported_type when the downloaded file cannot be attached', async () => {
+        const diagnostics = createPdfFetchDiagnostics();
+        download.mockImplementation(async (_resolvers: unknown, _path: string, options: any) => {
+            options.onAccessMethodStart('url');
+            await options.onBeforeRequest('https://a.example/file.zip');
+            return { ...result, mimeType: 'application/zip' };
+        });
+        await expect(fetchPdfAttachment(parent, [], controller.signal, assertAccess, diagnostics)).rejects.toThrow('unsupported type');
+        expect(diagnostics.failureReason({ resolverCount: 1, threw: true })).toBe('unsupported_type');
+        expect(diagnostics.attempts()).toEqual([{ accessMethod: 'url', host: 'a.example', outcome: 'not_pdf' }]);
+    });
+
+    it('reports error when saving fails after a successful download', async () => {
+        const diagnostics = createPdfFetchDiagnostics();
+        download.mockImplementation(driveEntries([
+            { method: 'doi', url: 'https://doi.org/x', error: { message: 'HTTP 404', status: 404 } },
+            { method: 'oa', url: 'https://oa.example/p.pdf', wins: true },
+        ]));
+        save.mockRejectedValue(new Error('disk full'));
+        await expect(fetchPdfAttachment(parent, [], controller.signal, assertAccess, diagnostics)).rejects.toThrow('disk full');
+        expect(diagnostics.failureReason({ resolverCount: 2, threw: true })).toBe('error');
+    });
+
+    it('works without a tracker', async () => {
+        download.mockImplementation(driveEntries([{ method: 'oa', url: 'https://oa.example/p.pdf', wins: true }]));
+        await expect(fetchPdfAttachment(parent, [], controller.signal, assertAccess)).resolves.toMatchObject({ accessMethod: 'oa' });
+    });
 });

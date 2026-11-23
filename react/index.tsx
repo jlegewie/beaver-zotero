@@ -1,6 +1,6 @@
 import { regenerateFromRunAtom } from './atoms/agentRunAtoms';
+import { watchJobCalls } from './atoms/jobCalls';
 import { threadAdmissionAtom, threadConflictAtom } from './runtime/threadAdmission';
-import { windowSurfaceAtom } from './atoms/windowSurface';
 import { openPreferencesWindow } from './ui/openPreferencesWindow';
 import { attachThreadAdmission } from "./runtime/threadAdmission";
 import { threadEntitiesAtom } from './atoms/threadList';
@@ -17,9 +17,7 @@ import { setSupabaseClientProvider } from '@beaver/agent-core/transport/supabase
 import { setThreadAgentName } from '@beaver/agent-core/transport/threadService';
 import type { ActionCategoryFilter } from '@beaver/agent-core/types/actions';
 import { setActionClient } from '@beaver/agent-core/types/actions';
-import { Provider } from 'jotai';
 import React from 'react';
-import { createRoot } from 'react-dom/client';
 import type { WindowRuntime } from '../src/runtime/instance';
 import { registerTableLocalCommands } from '../src/services/artifacts/tableStore';
 import { activateStoredCitation } from './host/zotero/citationActivation';
@@ -45,10 +43,11 @@ import { runStatusPopupEnabledAtom } from './atoms/runStatusPopup';
 import { isLibraryTabAtom, isSidebarVisibleAtom, PreferencePageTab, selectedZoteroTabIdAtom } from './atoms/ui';
 import { currentNoteItemAtom } from './atoms/zoteroContext';
 import FloatingPopupRoot from './components/FloatingPopupRoot';
-import LibrarySidebar from './components/LibrarySidebar';
 import PreferencesWindow from './components/PreferencesWindow';
-import ReaderSidebar from './components/ReaderSidebar';
 import WindowSidebar from './components/WindowSidebar';
+import TableTabView, { type TableViewCommands } from './components/tables/TableTabView';
+import type { TableRef } from '../src/services/artifacts/tableItemIdentity';
+import type { TableFocusTarget, TableTabHandle, TableTabMountOptions, TableTabRequest } from '../src/ui/tableTabTypes';
 import { eventManager } from './events/eventManager';
 import { useAuth } from './hooks/useAuth';
 import { useBackgroundProcessingStatus } from './hooks/useBackgroundProcessingStatus';
@@ -66,6 +65,7 @@ import { useReaderTabSelection } from './hooks/useReaderTabSelection';
 import { useReaderVisualizerActionHandler } from './hooks/useReaderVisualizerActionHandler';
 import { useRunStatusTip } from './hooks/useRunStatusTip';
 import { useNoteExportTip } from './hooks/useNoteExportTip';
+import { useFeatureCreditCompletions } from './hooks/useFeatureCreditCompletions';
 import { useSyncSuppression } from './hooks/useSyncSuppression';
 import { useThreadProtocolHandler } from './hooks/useThreadProtocolHandler';
 import { useToggleSidebar } from './hooks/useToggleSidebar';
@@ -73,14 +73,14 @@ import { useUpgradeHandler } from './hooks/useUpgradeHandler';
 import { useZoteroContext } from './hooks/useZoteroContext';
 import { useZoteroTabSelection } from './hooks/useZoteroTabSelection';
 import { registerZoteroHost } from './host/zotero';
-import { SurfaceWindowContext } from './runtime/SurfaceWindowContext';
 import { attachAccountProjection } from './runtime/accountProjection';
 import { openNote, openReader } from './runtime/navigation';
 import { captureOperationContext } from './runtime/operationContext';
 import { getContextWindow, getWindowRuntime, initializeWindowRuntime } from './runtime/windowRuntime';
 import { store } from './store';
+import { renderSidebar } from './ui/sidebarMount';
 import { uiManager } from './ui/UIManager';
-import { initializeReactUI } from './ui/initialization';
+import { mountedSurfaceCount, mountSurface, unmountAllSurfaces, unmountFromElement } from './ui/surfaceRoots';
 import { BeaverTemporaryAnnotations } from './utils/annotationUtils';
 import { undoEditNoteOrBatchAction } from './utils/editNoteActions';
 import { addPopupMessageAtom } from './utils/popupMessageUtils';
@@ -204,10 +204,16 @@ const GlobalContextInitializer = () => {
     // One-time tip about exporting, once Beaver has created a note
     useNoteExportTip();
 
+    // Completion cards for earned feature credits
+    useFeatureCreditCompletions();
+
     // Mirror background extraction activity into the shared Jotai store
     useBackgroundWorkerStatus();
 
     useBackgroundProcessingWelcome();
+
+    // Table fills a chat waits on: the waiting window resumes the run with the result.
+    React.useEffect(() => watchJobCalls(), []);
 
     // Command readiness follows the subscription effects above, not createRoot().render().
     React.useEffect(() => {
@@ -233,31 +239,6 @@ function ZoteroContextInitializer() {
     return null;
 }
 
-// Store root references for proper cleanup
-const rootsMap = new Map<HTMLElement, any>();
-
-function mountSurface(domElement: HTMLElement, children: React.ReactNode) {
-    unmountFromElement(domElement);
-    const root = createRoot(domElement);
-    rootsMap.set(domElement, root);
-    root.render(
-        <Provider store={store}>
-            <SurfaceWindowContext.Provider value={domElement.ownerDocument.defaultView}>
-                {getTransportConfigurationError() ? (
-                    <div role="alert" style={{ padding: 20 }}>
-                        <strong>Beaver couldn’t start</strong>
-                        <p>{getTransportConfigurationError()}</p>
-                        <p>
-                            Restart Zotero. If this continues, reinstall Beaver.
-                        </p>
-                    </div>
-                ) : children}
-            </SurfaceWindowContext.Provider>
-        </Provider>,
-    );
-    return root;
-}
-
 /**
  * Renders the GlobalContextInitializer into a dedicated DOM element.
  * This should be called once per window.
@@ -266,16 +247,11 @@ export function renderGlobalInitializer(domElement: HTMLElement) {
     return mountSurface(domElement, <GlobalContextInitializer />);
 }
 
-const App = ({ location }: { location: 'library' | 'reader' }) => {
-    // Return the sidebar based on location
-    return (
-        location === 'library' ? <LibrarySidebar /> : <ReaderSidebar />
-    );
-};
-
-export function renderAiSidebar(domElement: HTMLElement, location: 'library' | 'reader') {
-    return mountSurface(domElement, <App location={location} />);
-}
+/**
+ * Creates and renders a main window's sidebar, once. It serves library and
+ * reader tabs alike (see `react/ui/sidebarMount.tsx`).
+ */
+export { renderSidebar };
 
 /**
  * Renders the WindowSidebar into the separate Beaver window.
@@ -283,6 +259,76 @@ export function renderAiSidebar(domElement: HTMLElement, location: 'library' | '
  */
 export function renderWindowSidebar(domElement: HTMLElement) {
     return mountSurface(domElement, <WindowSidebar />);
+}
+
+/**
+ * Renders a stored table into a Beaver tab of this main window
+ * (`src/ui/tableTab.ts` owns the tab and calls this), or into a table window
+ * (`src/ui/tableWindow.ts`, with `surface: 'window'`). The handle carries the
+ * open's warning in after the mount, without remounting the table, and the
+ * native menus' commands and state.
+ */
+export function renderTableTab(
+    domElement: HTMLElement,
+    tableRef: TableRef,
+    options: TableTabMountOptions,
+): TableTabHandle {
+    let warning: string | null = null;
+    const listeners = new Set<() => void>();
+    const reloadListeners = new Set<() => void>();
+    const focusListeners = new Set<(target: TableFocusTarget) => void>();
+    const requestListeners = new Set<(request: TableTabRequest) => void>();
+    const selectionListeners = new Set<() => void>();
+    const commands = React.createRef<TableViewCommands>();
+    const warnings = {
+        get: () => warning,
+        subscribe(listener: () => void) {
+            listeners.add(listener);
+            return () => { listeners.delete(listener); };
+        },
+        onReload(listener: () => void) {
+            reloadListeners.add(listener);
+            return () => { reloadListeners.delete(listener); };
+        },
+        onFocus(listener: (target: TableFocusTarget) => void) {
+            focusListeners.add(listener);
+            return () => { focusListeners.delete(listener); };
+        },
+        onRequest(listener: (request: TableTabRequest) => void) {
+            requestListeners.add(listener);
+            return () => { requestListeners.delete(listener); };
+        },
+        onSelectionChange(listener: () => void) {
+            selectionListeners.add(listener);
+            return () => { selectionListeners.delete(listener); };
+        },
+    };
+    mountSurface(domElement, <TableTabView tableRef={tableRef} options={options} warnings={warnings} commandsRef={commands} />);
+    return {
+        setWarning(next) {
+            if (next === warning) return;
+            warning = next;
+            for (const listener of listeners) listener();
+        },
+        reload() {
+            for (const listener of reloadListeners) listener();
+        },
+        focus(target) {
+            for (const listener of focusListeners) listener(target);
+        },
+        request(request) {
+            for (const listener of requestListeners) listener(request);
+        },
+        selectionChanged() {
+            for (const listener of selectionListeners) listener();
+        },
+        command(command) {
+            return commands.current?.command(command) ?? false;
+        },
+        menuState() {
+            return commands.current?.menuState() ?? null;
+        },
+    };
 }
 
 /**
@@ -307,18 +353,7 @@ export function renderPreferencesWindow(domElement: HTMLElement, initialTab?: Pr
     ));
 }
 
-/**
- * Unmount a React root from a DOM element
- */
-export function unmountFromElement(domElement: HTMLElement) {
-    const root = rootsMap.get(domElement);
-    if (root) {
-        root.unmount();
-        rootsMap.delete(domElement);
-        return true;
-    }
-    return false;
-}
+export { unmountFromElement };
 
 /**
  * Dev-only cleanup hook called by the esbuild bundle before React unmounts.
@@ -354,17 +389,15 @@ export function initializeRuntime(runtime: WindowRuntime) {
     Zotero.Beaver.runtime.subscribeWindow(runtime, 'notification:popup', detail => {
         store.set(addPopupMessageAtom, detail);
     });
+    // A table window shows one table: it has no chat, so it follows no thread.
+    if (runtime.kind === "table") return;
     attachThreadProjection(runtime);
     attachThreadAdmission(runtime);
-    if (runtime.kind === "main") initializeReactUI(runtime.hostWindow);
 }
 
 export function disposeRuntime() {
     eventManager.dispose();
-    for (const root of rootsMap.values()) {
-        try { root.unmount(); } catch (error) { Zotero.logError(error as Error); }
-    }
-    rootsMap.clear();
+    unmountAllSurfaces();
     uiManager.cleanup();
 }
 
@@ -407,7 +440,7 @@ export function inspectRuntime(request?: { runId?: string; command?: string; thr
             });
         }
         case 'admission': return { snapshot: store.get(threadAdmissionAtom), conflict: store.get(threadConflictAtom) };
-        case 'surface': return { surface: store.get(windowSurfaceAtom), contextId: runtime.contextWindow?.__beaverRuntime?.id ?? null };
+        case 'surface': return { contextId: runtime.contextWindow?.__beaverRuntime?.id ?? null };
         case 'open-preferences': openPreferencesWindow(); return { ok: true };
         case 'thread-retry':
             if (!request.runId) return { error: 'run_required' };
@@ -466,6 +499,6 @@ export function inspectRuntime(request?: { runId?: string; command?: string; thr
         hasReaderAttachment: !!store.get(currentReaderAttachmentAtom),
         noteItemId: store.get(currentNoteItemAtom)?.id ?? null,
         backgroundRunning: store.get(isBackgroundWorkerRunningAtom),
-        roots: rootsMap.size,
+        roots: mountedSurfaceCount(),
     };
 }

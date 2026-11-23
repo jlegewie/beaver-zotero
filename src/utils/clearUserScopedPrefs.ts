@@ -20,7 +20,6 @@ import { clearPref } from "./prefs";
 export function clearUserScopedPrefs(): void {
     // Identity (callers may immediately re-set userId/userEmail to the new
     // authenticated user — see useProfileSync.ts)
-    clearPref("voice.language");
     clearPref("userId");
     clearPref("userEmail");
     clearPref("currentPlanId");
@@ -40,7 +39,7 @@ export function clearUserScopedPrefs(): void {
     clearPref("skippedItems");
     clearPref("deletionJobs");
 
-    // Per-account caches — regenerated on demand.
+    // Library suggestions an older version cached for the account.
     clearPref("librarySuggestions");
     clearPref("librarySuggestionsGeneratedAt");
 }

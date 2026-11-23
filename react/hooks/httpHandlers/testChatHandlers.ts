@@ -20,6 +20,9 @@ import { mergeItemsChoicesAtom } from '../../atoms/mergeItemsChoices';
  *   /beaver/test/list-actions   enumerate pending approvals + applied/rejected actions
  *   /beaver/test/approve-action approve or reject a pending write approval
  *   /beaver/test/confirm-credits continue or skip a pending credit confirmation
+ *   /beaver/test/table-card     answer a pending table card (create, with edits, or decline)
+ *   /beaver/test/answer-question answer (or skip) a pending ask_user_question card
+ *   /beaver/test/batch-approval approve or decline a pending batch approval
  *   /beaver/test/undo-action    undo an applied action
  *   /beaver/test/chat-drop-connection  lose the chat socket mid-run, to exercise run reattach
  *   /beaver/test/run-snapshot   the open chat's runs and the transport's reattach events
@@ -31,6 +34,30 @@ import { mergeItemsChoicesAtom } from '../../atoms/mergeItemsChoices';
  */
 
 import { store } from '../../store';
+import { pendingTableCardsAtom, tableCardDraftsAtom } from '@beaver/agent-core/run-state/pendingTableCards';
+import {
+    addColumn,
+    addItems,
+    addLibrarySource,
+    draftOptions,
+    draftCost,
+    initialTableCardDraft,
+    removeItem,
+    removeSource,
+    setSourceResolved,
+    tableCardDecline,
+    tableCardResponse,
+    tableFillCardResponse,
+    updateColumn,
+    type TableCardDraft,
+} from '@beaver/agent-core/run-state/tableCardDraft';
+import { isCreateCard, isFillCard, type TableCardChoice } from '@beaver/agent-core/protocol/tableCardProtocol';
+import { chatFillsAtom } from '@beaver/agent-core/run-state/tableChatFills';
+import { openJobCallsAtom } from '@beaver/agent-core/run-state/jobCalls';
+import { jobIdOf } from '@beaver/agent-core/protocol/jobCallProtocol';
+import { jobWaitAtom } from '../../atoms/jobWait';
+import { runningChatJobsAtom } from '../../atoms/jobCalls';
+import { resolveItems as resolveCardItems, resolveLibraryScope } from '../../components/tables/card/liveSources';
 import { sendComposedMessageAtom } from '../../atoms/actions';
 import {
     newThreadAtom,
@@ -54,7 +81,10 @@ import {
     isWSChatPendingAtom,
     resumeFromRunAtom,
     sendApprovalResponseAtom,
+    sendAskUserQuestionResponseAtom,
+    sendBatchApprovalResponseAtom,
     sendCreditConfirmationResponseAtom,
+    sendTableCardResponseAtom,
     stoppingPreviousRunAtom,
 } from '../../atoms/agentRunAtoms';
 import {
@@ -70,6 +100,10 @@ import {
 } from '../../agents/agentActions';
 import type { PendingApproval } from '@beaver/agent-ui/host';
 import { pendingQuestionsAtom } from '@beaver/agent-core/run-state/pendingQuestions';
+import { pendingBatchApprovalsAtom } from '@beaver/agent-core/run-state/pendingBatchApprovals';
+import { openParkedRunAtom } from '@beaver/agent-core/run-state/parkedRun';
+import type { AskUserQuestionAnswer } from '@beaver/agent-core/protocol/agentProtocol';
+import { isResumeWaitingAtom, isThreadParkedAtom, pendingParkedAnswerIdsAtom, resumeLiveCardsAtom } from '../../atoms/parkedRuns';
 import {
     currentMessageItemsAtom,
     currentMessageCollectionsAtom,
@@ -190,6 +224,27 @@ function currentIds() {
         lastRunId: runs.length ? runs[runs.length - 1].id : null,
         pendingApprovals: Array.from(approvals.values()).map(serializeApproval),
         pendingQuestionIds: Array.from(questions.keys()),
+        pendingBatchApprovals: Array.from(store.get(pendingBatchApprovalsAtom).values()).map((approval) => ({
+            approvalId: approval.approvalId,
+            toolcallId: approval.toolcallId,
+            batchId: approval.batchId,
+            title: approval.title,
+        })),
+        pendingTableCards: Array.from(store.get(pendingTableCardsAtom).values()),
+        // The run the open thread rests on while it waits for answers, and the
+        // answers on their way to the run that resumes it.
+        parked: (() => {
+            const open = store.get(openParkedRunAtom);
+            return open ? {
+                runId: open.runId,
+                toolCallIds: [...open.toolCallIds],
+                kinds: open.deferrals.map((deferral) => deferral.kind),
+                isThreadParked: store.get(isThreadParkedAtom),
+                resumeLiveCards: [...store.get(resumeLiveCardsAtom)],
+                isResumeWaiting: store.get(isResumeWaitingAtom),
+            } : null;
+        })(),
+        pendingParkedAnswers: [...store.get(pendingParkedAnswerIdsAtom)],
         pendingCreditConfirmations: Array.from(creditConfirmations.values()).map((c) => ({
             confirmationId: c.confirmationId,
             title: c.title,
@@ -201,21 +256,32 @@ function currentIds() {
     };
 }
 
-type SettleReason = 'done' | 'approval' | 'question' | 'credit-confirmation' | 'timeout';
+type SettleReason = 'done' | 'parked' | 'resume-waiting' | 'approval' | 'question' | 'credit-confirmation' | 'table-card' | 'batch-approval' | 'timeout';
 
 /**
- * Poll until the run settles: it finished streaming (`done`), paused for a write
- * approval (`approval`), paused for an ask_user_question (`question`), paused for
- * a run-level credit confirmation (`credit-confirmation`), or the timeout
+ * Poll until the run settles: it finished streaming (`done`), ended waiting
+ * on cards that stay answerable (`parked`), resumed with some answers and
+ * now waits live for the other cards (`resume-waiting`), paused for a write approval
+ * (`approval`), paused for an ask_user_question (`question`), paused for a
+ * run-level credit confirmation (`credit-confirmation`), or the timeout
  * elapsed. A paused run keeps `isWSChatPendingAtom` true, so we must break on
- * every blocking state or we would block until timeout.
+ * every blocking state or we would block until timeout. An answer to a parked
+ * card still on its way to its resume is waited for.
  */
 async function waitForRunSettle(timeoutMs: number, pollMs = 300): Promise<SettleReason> {
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
+        if (store.get(isResumeWaitingAtom)) return 'resume-waiting';
+        if (store.get(pendingParkedAnswerIdsAtom).size > 0) {
+            await sleep(pollMs);
+            continue;
+        }
+        if (store.get(isThreadParkedAtom) && !store.get(isWSChatPendingAtom)) return 'parked';
         if (store.get(pendingApprovalsAtom).size > 0) return 'approval';
         if (store.get(pendingQuestionsAtom).size > 0) return 'question';
         if (store.get(pendingCreditConfirmationsAtom).size > 0) return 'credit-confirmation';
+        if (store.get(pendingTableCardsAtom).size > 0) return 'table-card';
+        if (store.get(pendingBatchApprovalsAtom).size > 0) return 'batch-approval';
         if (!store.get(isWSChatPendingAtom)) return 'done';
         await sleep(pollMs);
     }
@@ -554,6 +620,182 @@ export async function handleTestConfirmCreditsHttpRequest(request: any) {
     }
 
     return { ok: true, approved, actedOn: [confirmationId], settle, ...currentIds() };
+}
+
+/**
+ * Answer a pending table card so a headless run can continue.
+ *
+ * Body: { cardId?, action: 'create' | 'decline' (default 'create'),
+ *         choice?: 'create' | 'create_and_run' | 'fill', instructions?,
+ *         edits?: { title?, description?, removeItemIds?, addItemIds?,
+ *                   addScopes?: TableCardLibraryScope[], removeSourceIndexes?: number[],
+ *                   columns?: TableCardColumn[] },
+ *         costOnly?, waitForDone?, timeoutMs? }
+ *
+ * The reply is built by the card's own draft functions, so it is the reply the
+ * card would send for the same edits. A create card whose edits change its
+ * sources resolves the changed sources' counts as the card does and computes
+ * the cost the card would show at the user's prices; `costOnly` returns that
+ * cost without answering the card. A fill card takes `choice: 'fill'` (its
+ * default) or a decline; nothing on it is edited.
+ */
+export async function handleTestTableCardHttpRequest(request: any) {
+    const pending = store.get(pendingTableCardsAtom);
+    if (pending.size === 0) return { ok: false, error: 'No pending table card', ...currentIds() };
+    const cardId: string = request?.cardId ?? Array.from(pending.keys())[0];
+    const card = pending.get(cardId);
+    if (!card) return { ok: false, error: `Unknown cardId: ${cardId}`, ...currentIds() };
+    const decline = request?.action === 'decline';
+
+    if (isFillCard(card)) {
+        let draft = initialTableCardDraft(card);
+        if (typeof request?.instructions === 'string') draft = { ...draft, instructions: request.instructions };
+        const response = decline ? tableCardDecline(draft, card) : tableFillCardResponse(card);
+        store.set(sendTableCardResponseAtom, response);
+        return { ok: true, cardId, scope: card.scope, cost: card.cost, response, settle: await settleIfAsked(request), ...currentIds() };
+    }
+    if (!isCreateCard(card)) return { ok: false, error: `Unsupported card scope: ${card.scope}`, ...currentIds() };
+
+    let draft = store.get(tableCardDraftsAtom).get(cardId) ?? initialTableCardDraft(card);
+    const edits = request?.edits ?? {};
+    if (typeof edits.title === 'string') draft = { ...draft, title: edits.title };
+    if (typeof edits.description === 'string') draft = { ...draft, description: edits.description };
+    for (const index of [...(edits.removeSourceIndexes ?? [])].sort((a: number, b: number) => b - a)) {
+        const source = draft.sources[index];
+        if (source) draft = removeSource(draft, source.key);
+    }
+    for (const id of edits.removeItemIds ?? []) draft = removeItem(draft, id);
+    if (Array.isArray(edits.addItemIds) && edits.addItemIds.length) draft = addItems(draft, edits.addItemIds);
+    for (const scope of edits.addScopes ?? []) draft = addLibrarySource(draft, scope).draft;
+    if (Array.isArray(edits.columns)) {
+        draft = { ...draft, columns: [] };
+        for (const column of edits.columns) {
+            const added = addColumn(draft);
+            draft = updateColumn(added.draft, added.key, {
+                header: column.header ?? '',
+                type: column.type ?? 'text',
+                description: column.description ?? '',
+                options: draftOptions(column.options),
+            });
+        }
+    }
+    if (typeof request?.instructions === 'string') draft = { ...draft, instructions: request.instructions };
+
+    // Count the sources the edits changed, as the card's live counts do.
+    for (const source of draft.sources) {
+        if (!source.counting) continue;
+        const live = source.type === 'items' ? await resolveCardItems(source.ids ?? []) : await resolveLibraryScope(source.scope!);
+        draft = setSourceResolved(draft, source.key, live.resolved, live.rows.map((row) => row.item_id));
+    }
+    // The run choice is made on the last step, under the card's cost.
+    draft = { ...draft, step: 'columns' };
+    const drafts = new Map(store.get(tableCardDraftsAtom));
+    drafts.set(card.card_id, draft);
+    store.set(tableCardDraftsAtom, drafts);
+    const prices = await Zotero.Beaver.tableFills?.pricing().catch(() => null) ?? null;
+    const cost = draftCost(draft, card, prices);
+    if (request?.costOnly === true) return { ok: true, cardId, scope: card.scope, cost, ...currentIds() };
+
+    const choice: TableCardChoice = request?.choice ?? 'create';
+    const response = decline ? tableCardDecline(draft, card) : tableCardResponse(draft, card, choice, cost.cost);
+    store.set(sendTableCardResponseAtom, response);
+    return { ok: true, cardId, scope: card.scope, cost, response, settle: await settleIfAsked(request), ...currentIds() };
+}
+
+/**
+ * Answer a pending ask_user_question card, live or parked, as its panel does.
+ *
+ * Body: { toolcallId?, answers?: [{item_id, selected_option_ids, custom_text?}],
+ *         cancelled?, waitForDone?, timeoutMs? }
+ * Without `answers`, every question takes its first option.
+ */
+export async function handleTestAnswerQuestionHttpRequest(request: any) {
+    const pending = store.get(pendingQuestionsAtom);
+    if (pending.size === 0) return { ok: false, error: 'No pending question', ...currentIds() };
+    const toolcallId: string = request?.toolcallId ?? Array.from(pending.keys())[0];
+    const question = pending.get(toolcallId);
+    if (!question) return { ok: false, error: `Unknown toolcallId: ${toolcallId}`, ...currentIds() };
+    const cancelled = request?.cancelled === true;
+    const answers: AskUserQuestionAnswer[] = cancelled
+        ? []
+        : Array.isArray(request?.answers)
+            ? request.answers
+            : question.questions.map((item) => ({
+                item_id: item.id,
+                selected_option_ids: item.options?.length ? [item.options[0].id] : [],
+                custom_text: null,
+            }));
+    store.set(sendAskUserQuestionResponseAtom, {
+        questionId: question.questionId,
+        toolcallId,
+        answers,
+        cancelled,
+    });
+    return { ok: true, toolcallId, answers, cancelled, settle: await settleIfAsked(request), ...currentIds() };
+}
+
+/**
+ * Approve or decline a pending batch approval, live or parked, as its card does.
+ *
+ * Body: { approvalId?, approved (default true), mode?, userInstructions?, waitForDone?, timeoutMs? }
+ */
+export async function handleTestBatchApprovalHttpRequest(request: any) {
+    const pending = store.get(pendingBatchApprovalsAtom);
+    if (pending.size === 0) return { ok: false, error: 'No pending batch approval', ...currentIds() };
+    const approvalId: string = request?.approvalId ?? Array.from(pending.keys())[0];
+    const approval = pending.get(approvalId);
+    if (!approval) return { ok: false, error: `Unknown approvalId: ${approvalId}`, ...currentIds() };
+    const approved = request?.approved !== false;
+    store.set(sendBatchApprovalResponseAtom, {
+        approvalId,
+        approved,
+        mode: request?.mode ?? approval.defaultMode,
+        userInstructions: request?.userInstructions ?? null,
+    });
+    return { ok: true, approvalId, approved, settle: await settleIfAsked(request), ...currentIds() };
+}
+
+async function settleIfAsked(request: any): Promise<SettleReason | null> {
+    if (request?.waitForDone !== true) return null;
+    await sleep(400);
+    return waitForRunSettle(typeof request?.timeoutMs === 'number' ? request.timeoutMs : 180000);
+}
+
+/**
+ * The chat fills this renderer follows, the fill this window waits on
+ * (`jobWait`), the open parked run's job calls, and the composer's fill
+ * jobs. Body: { stop?: jobId } stops a fill, as the table's Stop does.
+ */
+export async function handleTestTableFillProgressHttpRequest(request?: any) {
+    if (typeof request?.stop === 'string') Zotero.Beaver.tableFills?.stop(request.stop);
+    const all = store.get(chatFillsAtom);
+    const fills = Array.from(all.values()).map((fill) => ({
+        job_id: fill.snapshot.job_id,
+        thread_id: fill.threadId,
+        tool_call_id: fill.toolCallId,
+        run_id: fill.snapshot.origin.run?.run_id ?? null,
+        table: fill.snapshot.table,
+        state: fill.snapshot.state,
+        rows_total: fill.snapshot.rows_total,
+        rows_done: fill.snapshot.rows_done,
+        rows_failed: fill.snapshot.rows_failed,
+        in_flight: fill.snapshot.in_flight,
+        credits_charged: fill.snapshot.credits_charged,
+        result: fill.snapshot.result ?? null,
+    }));
+    const jobCalls = store.get(openJobCallsAtom).map((call) => ({
+        tool_call_id: call.tool_call_id,
+        job_id: jobIdOf(call),
+        state: call.state ?? null,
+    }));
+    return {
+        ok: true,
+        fills,
+        jobWait: store.get(jobWaitAtom),
+        jobCalls,
+        composerJobs: store.get(runningChatJobsAtom),
+        ...currentIds(),
+    };
 }
 
 /**

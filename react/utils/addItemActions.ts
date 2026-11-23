@@ -1,23 +1,20 @@
 import * as itemImport from '../../src/services/itemImport/legacy';
-import { getSelectedCollection } from '../../src/utils/zoteroSelection';
 import { captureWindowMutationOptions, runWindowOperation } from '../runtime/libraryMutation';
 import { getContextWindow } from '../runtime/windowRuntime';
 import { emitAttachmentResolved } from './attachmentResolvedEvent';
-import { getZoteroTargetContext } from './zoteroTargetContext';
+import { getLibraryViewCollection, getZoteroTargetContext } from './zoteroTargetContext';
 export { stampBeaverProvenanceExtra } from '../../src/services/itemImport/provenance';
 export type { ImportItemOptions } from '../../src/services/itemImport/legacy';
 
 async function resolveOptions(options?: itemImport.ImportItemOptions): Promise<itemImport.ImportItemOptions> {
     if (options?.libraryId !== undefined) return { onAttachmentResolved: emitAttachmentResolved, ...options };
     const win = getContextWindow();
-    const isReader = win?.Zotero_Tabs?.selectedType === 'reader';
-    const selectedCollection = isReader ? undefined : getSelectedCollection(win?.ZoteroPane);
     const context = await getZoteroTargetContext(win);
     return {
         onAttachmentResolved: emitAttachmentResolved,
         ...options,
         libraryId: context.targetLibraryId ?? Zotero.Libraries.userLibraryID,
-        collectionId: options?.collectionId ?? (isReader ? undefined : selectedCollection?.id ?? context.collectionToAddTo?.id),
+        collectionId: options?.collectionId ?? getLibraryViewCollection(win)?.id,
     };
 }
 

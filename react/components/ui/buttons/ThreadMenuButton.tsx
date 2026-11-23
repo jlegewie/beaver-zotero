@@ -11,7 +11,6 @@ import { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
 import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
 import { useAtomValue, useSetAtom } from 'jotai';
 import React, { useCallback, useState } from 'react';
-import { getSelectedCollection } from '../../../../src/utils/zoteroSelection';
 import { currentZoteroInstanceRef } from '../../../../src/utils/zoteroUtils';
 import { userAtom } from '../../../atoms/auth';
 import {
@@ -39,7 +38,7 @@ import { flushPendingPartEvents } from '../../../utils/streamingPartQueue';
 import { extractThreadContent, ExtractThreadContentOptions } from '../../../utils/threadContent';
 import { confirmAndDeleteThread, renameThread } from '../../../utils/threadActions';
 import { resolveToolCallLabelEnrichMap } from '../../../utils/toolCallLabelEnrich';
-import { getZoteroTargetContextSync } from '../../../utils/zoteroTargetContext';
+import { getLibraryViewCollection, getZoteroTargetContextSync, isLibraryTabSelected } from '../../../utils/zoteroTargetContext';
 import {
     CopyIcon,
     DeleteIcon,
@@ -166,8 +165,8 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
         const win = getContextWindow();
         const context = getZoteroTargetContextSync(win);
         if (context.targetLibraryId === undefined) return;
-        const selectedCollection = getSelectedCollection(win?.ZoteroPane);
-        const isInReader = win?.Zotero_Tabs?.selectedType === 'reader';
+        const selectedCollection = getLibraryViewCollection(win);
+        const inLibraryTab = isLibraryTabSelected(win);
         const content = await getThreadContent({ includeRunLinks: false, userMessageAsBlockquote: true });
         const renderContent = preprocessNoteContent(content);
         const renderContextData = await prepareCitationRenderContext(renderContent, {
@@ -194,14 +193,14 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
         newNote.setNote(htmlContent);
         await newNote.saveTx();
 
-        // Always add to the current collection (even when items are selected)
+        // Always add to the library tab's collection (even when items are selected)
         if (selectedCollection) {
             await Zotero.DB.executeTransaction(async () => {
                 selectedCollection.addItem(newNote.id);
             });
         }
 
-        if (!isInReader) {
+        if (inLibraryTab) {
             await selectItemById(newNote.id, true, selectedCollection?.id, win);
         }
     };
@@ -210,7 +209,7 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
         const win = getContextWindow();
         const context = getZoteroTargetContextSync(win);
         if (context.targetLibraryId === undefined) return;
-        const isInReader = win?.Zotero_Tabs?.selectedType === 'reader';
+        const inLibraryTab = isLibraryTabSelected(win);
         const content = await getThreadContent({ includeRunLinks: false, userMessageAsBlockquote: true });
         const renderContent = preprocessNoteContent(content);
         const renderContextData = await prepareCitationRenderContext(renderContent, {
@@ -238,7 +237,7 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
         newNote.setNote(htmlContent);
         await newNote.saveTx();
 
-        if (!isInReader) {
+        if (inLibraryTab) {
             selectItem(newNote, true, win);
         }
     };

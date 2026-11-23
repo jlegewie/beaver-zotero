@@ -5,6 +5,17 @@ import { getDisplayNameFromItem, isValidZoteroItem } from '../../../../utils/sou
 import { ZoteroTag } from '@beaver/agent-core/types/zotero';
 import { ThreadItemFilter } from '../../../../atoms/ui';
 import { highlightQuery } from './highlightQuery';
+import { normalizeQuickSearchQuery } from '../../../../utils/search';
+import { unrankedMatch, type UnrankedMatchField } from '../../../../../src/services/librarySearch/ranking';
+
+/** How a row introduces the field it matched on, when that is not its title or authors. */
+const UNRANKED_MATCH_PREFIX: Record<UnrankedMatchField, string> = {
+    publicationTitle: 'in ',
+    shortTitle: 'Short title: ',
+    court: 'Court: ',
+    citationKey: 'Citation key: ',
+    key: 'Item key: ',
+};
 
 /**
  * Context for creating source menu items
@@ -17,6 +28,10 @@ export interface SourceMenuItemContext {
      * hooks use the containing context as a fetch-effect dependency.
      */
     isAttached: (item: Zotero.Item) => boolean;
+    /** Whether `onAdd` can take the item; rows it refuses are not offered. */
+    canAdd?: (item: Zotero.Item) => boolean;
+    /** The item a row offers in a candidate's place, or null to leave it out (see `AddSourcesTarget`). */
+    asSourceItem?: (item: Zotero.Item) => Zotero.Item | null;
     onAdd: (item: Zotero.Item) => void;
     onRemove: (item: Zotero.Item) => void;
 }
@@ -54,6 +69,15 @@ export interface TagMenuItemContext {
 }
 
 /**
+ * Context for creating saved-search menu items
+ */
+export interface SavedSearchMenuItemContext {
+    /** Whether the target already has the saved search, for its checkmark. */
+    isPicked: (search: Zotero.Search) => boolean;
+    onSelect: (search: Zotero.Search) => void;
+}
+
+/**
  * Create a menu item from a Zotero item (for sources mode)
  */
 export async function createSourceMenuItem(
@@ -65,7 +89,11 @@ export async function createSourceMenuItem(
     const { isAttached, onAdd, onRemove } = context;
     
     const title = item.getDisplayTitle();
-    
+    // A search hit found only through a field the row does not otherwise show
+    // (its journal, its citation key) names that field, so the row explains
+    // why it is listed.
+    const match = searchQuery ? unrankedMatch(item, normalizeQuickSearchQuery(searchQuery)) : null;
+
     // Determine item status
     const { valid: isValid } = await isValidZoteroItem(item);
     const isInCurrentMessageItems = isAttached(item);
@@ -113,6 +141,11 @@ export async function createSourceMenuItem(
                     <span className={`truncate text-sm ${isValid ? 'font-color-tertiary' : 'font-color-red'} min-w-0`}>
                         {highlightQuery(title, searchQuery)}
                     </span>
+                    {match && (
+                        <span className="truncate text-sm font-color-tertiary min-w-0">
+                            {UNRANKED_MATCH_PREFIX[match.field]}{highlightQuery(match.value, searchQuery)}
+                        </span>
+                    )}
                 </div>
             </div>
         ),
@@ -237,8 +270,32 @@ export function createCollectionMenuItem(
 }
 
 /**
- * Create a menu item from a Zotero tag (for tags mode)
+ * Create a menu item from a Zotero saved search (for saved-searches mode)
  */
+export function createSavedSearchMenuItem(
+    search: Zotero.Search,
+    context: SavedSearchMenuItemContext,
+    /** Active search query, for highlighting what matched. */
+    searchQuery = ''
+): SearchMenuItem {
+    const isSelected = context.isPicked(search);
+    return {
+        label: search.name,
+        onClick: () => context.onSelect(search),
+        customContent: (
+            <div className={'display-flex flex-row gap-2 items-start min-w-0'}>
+                <CSSIcon name="search" className="icon-16 scale-90" />
+                <div className="display-flex flex-row justify-between flex-1 min-w-0 font-color-secondary">
+                    <span className="truncate">
+                        {highlightQuery(search.name, searchQuery)}
+                    </span>
+                    {isSelected && <Icon icon={TickIcon} className="scale-12 ml-2" />}
+                </div>
+            </div>
+        ),
+    };
+}
+
 /**
  * Create a menu item from a Zotero note item (for notes mode)
  */

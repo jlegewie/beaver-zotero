@@ -86,8 +86,8 @@ export {
     findMatchRanges,
     useFindQuery,
 } from './findContext';
-export type { FindMatchRange, FindQueryProviderProps } from './findContext';
+export type { FindMatchRange, FindQuery, FindQueryProviderProps } from './findContext';
 
-export { highlightText } from './highlightText';
+export { FindHighlight, highlightText } from './highlightText';
 
 export { rehypeFindHighlight } from './rehypeFindHighlight';

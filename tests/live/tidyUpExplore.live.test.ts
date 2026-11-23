@@ -62,6 +62,7 @@ const UNTAGGED_RECIPE = "{'field': 'tag', 'operator': 'doesNotContain', 'value':
 const NO_ABSTRACT_RECIPE = "{'field': 'abstractNote', 'operator': 'doesNotContain', 'value': ''}";
 const NO_DOI_RECIPE = "{'field': 'DOI', 'operator': 'doesNotContain', 'value': ''}";
 const RECENT_ITEMS_RECIPE = "'sort_by': 'dateAdded', 'sort_order': 'desc', 'limit': 20, 'item_category': 'regular'";
+const JOURNAL_ARTICLE_RECIPE = "{'field': 'itemType', 'operator': 'is', 'value': 'journalArticle'}";
 
 function tidyUpText(): string {
     const action = BUILTIN_ACTIONS.find(a => a.id === 'builtin-tidy-up');
@@ -98,6 +99,7 @@ describe('tidy-up explore recipes', () => {
             expect(text).toContain(NO_ABSTRACT_RECIPE);
             expect(text).toContain(NO_DOI_RECIPE);
             expect(text).toContain(RECENT_ITEMS_RECIPE);
+            expect(text).toContain(JOURNAL_ARTICLE_RECIPE);
         });
     });
 
@@ -127,6 +129,24 @@ describe('tidy-up explore recipes', () => {
             expectAppliedCondition(res);
             const all = await search([]);
             expect(res.total_count).toBeLessThanOrEqual(all.total_count);
+        }, 30000);
+
+        it('journal-article + missing-field searches narrow both conditions', async () => {
+            // The prompt asks for "journal articles missing an abstract or DOI"
+            // as two join_mode=all searches; each must be the intersection.
+            const journalArticle = { field: 'itemType', operator: 'is', value: 'journalArticle' };
+            const articles = await search([journalArticle]);
+            expectAppliedCondition(articles);
+            for (const missing of [
+                { field: 'abstractNote', operator: 'doesNotContain', value: '' },
+                { field: 'DOI', operator: 'doesNotContain', value: '' },
+            ]) {
+                const res = await search([journalArticle, missing]);
+                expectAppliedCondition(res);
+                const missingOnly = await search([missing]);
+                expect(res.total_count).toBeLessThanOrEqual(articles.total_count);
+                expect(res.total_count).toBeLessThanOrEqual(missingOnly.total_count);
+            }
         }, 30000);
 
         it('join_mode=any with a category filter stays within the category', async () => {

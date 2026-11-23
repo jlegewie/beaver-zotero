@@ -24,3 +24,22 @@ export async function removeTagFromLibrary(libraryID: number, tagID: number, nam
     }
     return false;
 }
+
+/**
+ * Look up a tag by name within one library.
+ *
+ * Tag IDs are global, so a name can resolve while no item in `libraryID`
+ * carries it. The tag is in the library when an item there carries it or the
+ * library assigns it a color (which keeps it in the tag selector).
+ *
+ * @returns whether the tag is in the library, and the IDs of its items there.
+ */
+export async function findLibraryTag(
+    libraryID: number,
+    name: string,
+): Promise<{ inLibrary: boolean; itemIDs: number[] }> {
+    const tagID = Zotero.Tags.getID(name);
+    const itemIDs = tagID ? await Zotero.Tags.getTagItems(libraryID, tagID) : [];
+    // Colors are keyed by the NFC-normalized name.
+    return { inLibrary: itemIDs.length > 0 || !!Zotero.Tags.getColor(libraryID, name.normalize()), itemIDs };
+}

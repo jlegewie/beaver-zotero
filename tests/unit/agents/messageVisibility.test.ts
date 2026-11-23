@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { ModelMessage, ModelResponse } from '@beaver/agent-core/agents/types';
-import { isRenderableMessage, isThinkingInProgress } from '@beaver/agent-core/agents/messageVisibility';
+import { hasDrawnContent, isRenderableMessage, isThinkingInProgress } from '@beaver/agent-core/agents/messageVisibility';
 
 /** A request message shaped like one carrying a tool result plus an injected directive. */
 const requestWithInjectedPrompt = {
@@ -120,5 +120,42 @@ describe('isThinkingInProgress', () => {
                 ),
             ),
         ).toBe(true);
+    });
+});
+
+/**
+ * Whether a response draws anything. `ModelResponseView` renders null exactly
+ * when this is false, and a thread skips a continuation run whose responses all
+ * draw nothing — so a false here that should be true would hide an answer.
+ */
+describe('hasDrawnContent', () => {
+    const responseWith = (...parts: unknown[]) =>
+        ({ kind: 'response', run_id: 'run-1', parts } as ModelResponse);
+    const call = (id: string, name = 'search') =>
+        ({ part_kind: 'tool-call', tool_name: name, args: null, tool_call_id: id });
+
+    it('draws text, reasoning, or an ordinary tool call', () => {
+        expect(hasDrawnContent(responseWith({ part_kind: 'text', content: 'Done.' }))).toBe(true);
+        expect(hasDrawnContent(responseWith({ part_kind: 'thinking', content: 'Hmm' }))).toBe(true);
+        expect(hasDrawnContent(responseWith(call('c1')))).toBe(true);
+    });
+
+    it('draws nothing for an empty response or one holding only suggestions', () => {
+        expect(hasDrawnContent(responseWith())).toBe(false);
+        expect(hasDrawnContent(responseWith(call('c1', 'return_suggestions')))).toBe(false);
+    });
+
+    it('draws nothing for auto-loading plumbing, even beside reasoning', () => {
+        expect(hasDrawnContent(responseWith(call('auto_load_1')))).toBe(false);
+        expect(
+            hasDrawnContent(responseWith({ part_kind: 'thinking', content: 'Hmm' }, call('auto_load_1'))),
+        ).toBe(false);
+    });
+
+    it('draws auto-loading calls that come with text, or mixed with an ordinary call', () => {
+        expect(
+            hasDrawnContent(responseWith({ part_kind: 'text', content: 'Loading.' }, call('auto_load_1'))),
+        ).toBe(true);
+        expect(hasDrawnContent(responseWith(call('auto_load_1'), call('c2')))).toBe(true);
     });
 });

@@ -1,0 +1,184 @@
+{
+    "name": "a row carrying a DOI and a PMID joins a DOI-only and a PMID-only row into one, whatever the order",
+    "existing": [],
+    "incoming": [
+        {
+            "row": {
+                "id": "r1",
+                "ref": {
+                    "kind": "external",
+                    "source": "openalex",
+                    "source_id": "W1",
+                    "reference": {
+                        "source": "openalex",
+                        "source_id": "W1",
+                        "title": "First record title here",
+                        "identifiers": {
+                            "doi": "10.1000/x"
+                        }
+                    }
+                },
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "First record title here",
+                            "title": "First record title here",
+                            "item_type": "journalArticle"
+                        }
+                    },
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "date",
+                            "value": "2020"
+                        }
+                    }
+                },
+                "in_library": false,
+                "origin": [
+                    {
+                        "source": "s2",
+                        "date": "2026-10-21"
+                    }
+                ]
+            }
+        },
+        {
+            "row": {
+                "id": "r2",
+                "ref": {
+                    "kind": "external",
+                    "source": "openalex",
+                    "source_id": "W2",
+                    "reference": {
+                        "source": "openalex",
+                        "source_id": "W2",
+                        "title": "Second record title here",
+                        "identifiers": {
+                            "pmid": "77"
+                        }
+                    }
+                },
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Second record title here",
+                            "title": "Second record title here",
+                            "item_type": "journalArticle"
+                        }
+                    },
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "date",
+                            "value": "2020"
+                        }
+                    }
+                },
+                "in_library": false,
+                "origin": [
+                    {
+                        "source": "s2",
+                        "date": "2026-10-21"
+                    }
+                ]
+            }
+        },
+        {
+            "row": {
+                "id": "r3",
+                "ref": {
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "AAA"
+                },
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Third record title here",
+                            "title": "Third record title here",
+                            "item_type": "journalArticle"
+                        }
+                    },
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "date",
+                            "value": "2020"
+                        }
+                    }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
+            },
+            "identifiers": {
+                "doi": "10.1000/x",
+                "pmid": "77"
+            }
+        }
+    ],
+    "after": {
+        "rows": [
+            {
+                "id": "r1",
+                "ref": {
+                    "library_ref": "u",
+                    "zotero_key": "AAA",
+                    "kind": "item"
+                },
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "Third record title here",
+                            "title": "Third record title here",
+                            "item_type": "journalArticle"
+                        }
+                    },
+                    "_year": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "date",
+                            "value": "2020"
+                        }
+                    }
+                },
+                "in_library": true,
+                "origin": [
+                    {
+                        "source": "s2",
+                        "date": "2026-10-21"
+                    },
+                    {
+                        "source": "s1",
+                        "date": "2026-10-20"
+                    }
+                ]
+            }
+        ],
+        "added": [
+            "r1"
+        ],
+        "merged": 2
+    }
+}

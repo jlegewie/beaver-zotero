@@ -1,3 +1,5 @@
+import { tableAttachmentSql } from '../services/artifacts/tableItemIdentity';
+
 /**
  * Safely check if an attachment file exists.
  *
@@ -141,16 +143,18 @@ const sqlStringList = (values: Iterable<string>): string => [...values].map((val
 
 /**
  * SQL condition selecting the attachments `processableKindFromStoredFields()`
- * accepts, for queries over Zotero's `itemAttachments` table. Library scans
- * must enumerate exactly the attachments that item-level classification
- * admits; otherwise a scan retires what a notifier event just queued.
+ * accepts, minus Beaver's own tables (`isTableAttachment`), for queries over
+ * Zotero's `itemAttachments` table. Library scans must enumerate exactly the
+ * attachments that item-level classification admits; otherwise a scan
+ * retires what a notifier event just queued.
  *
- * Built only from the constant type lists above, so it is safe to inline.
+ * Built only from constants, so it is safe to inline.
  *
- * @param contentTypeColumn - qualified `contentType` column, e.g. `IA.contentType`
- * @param pathColumn - qualified `path` column, e.g. `IA.path`
+ * @param alias - alias of the `itemAttachments` table in the query, e.g. `IA`
  */
-export function processableAttachmentSql(contentTypeColumn: string, pathColumn: string): string {
+export function processableAttachmentSql(alias: string): string {
+    const contentTypeColumn = `${alias}.contentType`;
+    const pathColumn = `${alias}.path`;
     const raw = `COALESCE(${contentTypeColumn}, '')`;
     // Mirrors the JS normalization: drop MIME parameters, trim, lowercase.
     const normalized = `LOWER(TRIM(CASE WHEN INSTR(${raw}, ';') > 0 `
@@ -160,9 +164,10 @@ export function processableAttachmentSql(contentTypeColumn: string, pathColumn: 
     const documentExtension = Object.keys(DOCUMENT_EXTENSIONS)
         .map((extension) => `SUBSTR(LOWER(COALESCE(${pathColumn}, '')), -${extension.length + 1}) = '.${extension}'`)
         .join(' OR ');
-    return `(LOWER(${raw}) IN (${sqlStringList(SNAPSHOT_CONTENT_TYPES)})`
+    return `((LOWER(${raw}) IN (${sqlStringList(SNAPSHOT_CONTENT_TYPES)})`
         + ` OR ${normalized} IN (${sqlStringList(Object.keys(DOCUMENT_CONTENT_TYPE_ALIASES))})`
-        + ` OR (${normalized} IN (${sqlStringList(GENERIC_CONTENT_TYPES)}) AND (${documentExtension})))`;
+        + ` OR (${normalized} IN (${sqlStringList(GENERIC_CONTENT_TYPES)}) AND (${documentExtension})))`
+        + ` AND NOT ${tableAttachmentSql(alias)})`;
 }
 
 /** Check whether an attachment is a PDF, including mislabelled ones. */

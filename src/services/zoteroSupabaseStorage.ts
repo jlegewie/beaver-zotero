@@ -5,6 +5,7 @@
  */
 
 import { EncryptedStorage } from './EncryptedStorage';
+import { recordAuthDiagnostic, summarizeStack } from './authDiagnostics';
 import { logger } from '@beaver/agent-core/platform/logger';
 import {
     SupabaseStorageAdapter,
@@ -22,7 +23,9 @@ import {
  */
 function createEncryptedStorageAdapter(): SupabaseStorageAdapter {
     // Create encrypted storage instance
-    const encryptedStorage = new EncryptedStorage();
+    const encryptedStorage = new EncryptedStorage({
+        onFailure: (operation, error) => recordAuthDiagnostic(`storage_${operation}_failed`, String(error)),
+    });
 
     // Adapter to make EncryptedStorage compatible with Supabase's expected storage interface
     return {
@@ -31,6 +34,7 @@ function createEncryptedStorageAdapter(): SupabaseStorageAdapter {
             const data = await encryptedStorage.getItem(key);
             if (!data) {
                 logger(`zoteroStorage: getItem("${key}") returned null (no stored session)`);
+                if (isSessionKey(key)) recordAuthDiagnostic('storage_read_empty');
                 return null;
             }
 
@@ -50,6 +54,7 @@ function createEncryptedStorageAdapter(): SupabaseStorageAdapter {
             return data;
         } catch (error) {
             logger(`zoteroStorage: Error getting auth from encrypted storage: ${error}`, 2);
+            recordAuthDiagnostic('storage_read_failed', String(error));
             return null;
         }
     },
@@ -66,9 +71,12 @@ function createEncryptedStorageAdapter(): SupabaseStorageAdapter {
         }
         logger('zoteroStorage: Auth token could NOT be persisted after 2 attempts. '
             + 'Session will work in memory but a restart will require re-login.', 2);
+        recordAuthDiagnostic('storage_write_abandoned', key);
     },
     removeItem: async (key: string) => {
-        logger(`zoteroStorage: removeItem("${key}") called — session being cleared`, new Error().stack);
+        const stack = new Error().stack;
+        logger(`zoteroStorage: removeItem("${key}") called — session being cleared`, stack);
+        if (isSessionKey(key)) recordAuthDiagnostic('storage_removed', summarizeStack(stack));
         try {
             await encryptedStorage.removeItem(key);
         } catch (error) {
@@ -76,6 +84,15 @@ function createEncryptedStorageAdapter(): SupabaseStorageAdapter {
         }
     }
     };
+}
+
+/**
+ * Whether `key` holds the session itself, not one of the SDK's companion
+ * entries (`-code-verifier`, `-user`), which are routinely empty or removed
+ * alongside it and would only add noise to the diagnostics.
+ */
+function isSessionKey(key: string): boolean {
+    return key.endsWith('-auth-token');
 }
 
 /**

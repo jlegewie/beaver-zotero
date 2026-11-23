@@ -3,7 +3,7 @@ import { useAtomValue } from 'jotai';
 import { externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
 import { AgentRun } from '@beaver/agent-core/agents/types';
 import {
-    getAgentActionsByRunAtom,
+    agentActionsForRunsAtom,
     isItemCreatingAgentAction,
     isImportItemAgentAction,
     ItemCreatingAgentAction,
@@ -14,6 +14,7 @@ import ArtifactsList from './reviewChanges/ArtifactsList';
 import ChangesCard from './reviewChanges/ChangesCard';
 import { useArtifactRows, useChangesRows, useEditedNoteArtifacts } from './reviewChanges/useRunActionRows';
 import { useTableArtifactRows } from './reviewChanges/useTableArtifactRows';
+import { toolCallOrder } from './reviewChanges/runArtifacts';
 
 interface AgentActionsReviewProps {
     /** The one or more runs that make up a single answer. */
@@ -32,12 +33,16 @@ interface AgentActionsReviewProps {
  * the changes card, to review or undo). Most answers show exactly one of them.
  */
 export const AgentActionsReview: React.FC<AgentActionsReviewProps> = ({ runs }) => {
-    const getAgentActionsByRun = useAtomValue(getAgentActionsByRunAtom);
     const referenceMapping = useAtomValue(externalReferenceMappingAtom);
     const runIds = React.useMemo(() => runs.map((run) => run.id), [runs]);
+    // Scoped to these runs: an action written elsewhere in the thread leaves
+    // this answer's review block alone.
+    const actionsByRun = useAtomValue(React.useMemo(() => agentActionsForRunsAtom(runIds), [runIds]));
     const changesRows = useChangesRows(runIds);
     const artifactRows = useArtifactRows(runIds);
-    const editedNotes = useEditedNoteArtifacts(runIds);
+    // The order the answer made its tool calls in, for the artifact cards.
+    const order = React.useMemo(() => toolCallOrder(runs), [runs]);
+    const editedNotes = useEditedNoteArtifacts(runIds, order);
     const tableRows = useTableArtifactRows(runs);
     const lastRun = runs[runs.length - 1];
 
@@ -50,16 +55,15 @@ export const AgentActionsReview: React.FC<AgentActionsReviewProps> = ({ runs }) 
             ? importActionReference(action.proposed_data, referenceMapping).citation_count ?? 0
             : action.proposed_data.item?.citation_count ?? 0
     ), [referenceMapping]);
-    const createItemActionsByRun = React.useMemo(() => runs.map((run) => ({
+    const createItemActionsByRun = React.useMemo(() => runs.map((run, index) => ({
         runId: run.id,
-        actions: (getAgentActionsByRun(
-            run.id,
+        actions: (actionsByRun[index].filter(
             (action) => isItemCreatingAgentAction(action) && action.toolcall_id === 'citations'
         ) as ItemCreatingAgentAction[]).sort((a, b) => citationCount(b) - citationCount(a)),
     })).filter(({ actions }) =>
         actions.length > 0 &&
         !actions.every((action) => action.status === 'rejected' || action.status === 'undone')
-    ), [getAgentActionsByRun, runs, citationCount]);
+    ), [actionsByRun, runs, citationCount]);
 
     // Don't show during streaming
     if (!lastRun || lastRun.status === 'in_progress') {
@@ -89,7 +93,7 @@ export const AgentActionsReview: React.FC<AgentActionsReviewProps> = ({ runs }) 
         <div className="px-4 display-flex flex-col gap-2">
             {/* What the answer made comes first: it is the most likely thing to be
                 opened, and the answer above it has just finished describing it. */}
-            <ArtifactsList rows={artifactRows} tableRows={tableRows} editedNotes={editedNotes} />
+            <ArtifactsList rows={artifactRows} tableRows={tableRows} editedNotes={editedNotes} order={order} />
             {createItemActionsByRun.map(({ runId, actions }) => (
                 <CreateItemAgentActionDisplay
                     key={runId}

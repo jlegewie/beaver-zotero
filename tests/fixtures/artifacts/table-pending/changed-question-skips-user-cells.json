@@ -1,0 +1,150 @@
+{
+    "name": "a stale answer is a changed column; a user cell is never pending",
+    "spec": {
+        "id": "t1",
+        "spec_version": 2,
+        "anchor_column_id": "_reference",
+        "columns": [
+            {
+                "id": "_reference",
+                "header": "Reference",
+                "type": "reference",
+                "system": true
+            },
+            {
+                "id": "method",
+                "header": "Method",
+                "type": "text",
+                "description": "What method?"
+            },
+            {
+                "id": "n",
+                "header": "Sample",
+                "type": "text",
+                "description": "How many participants?"
+            }
+        ],
+        "rows": [
+            {
+                "id": "r1",
+                "ref": {
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "R1R1R1"
+                },
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "r1"
+                        }
+                    },
+                    "method": {
+                        "outcome": "answered",
+                        "provenance": "model",
+                        "value": {
+                            "kind": "text",
+                            "text": "Survey"
+                        },
+                        "documents": [
+                            "u-A"
+                        ],
+                        "evidence": [
+                            {
+                                "document": "u-A",
+                                "locator": "s1",
+                                "quote": "q"
+                            }
+                        ],
+                        "stale": true
+                    },
+                    "n": {
+                        "outcome": "answered",
+                        "provenance": "user",
+                        "value": {
+                            "kind": "text",
+                            "text": "40"
+                        }
+                    }
+                },
+                "documents": [
+                    "u-A"
+                ]
+            },
+            {
+                "id": "r2",
+                "ref": {
+                    "kind": "item",
+                    "library_ref": "u",
+                    "zotero_key": "R2R2R2"
+                },
+                "cells": {
+                    "_reference": {
+                        "outcome": "answered",
+                        "provenance": "system",
+                        "value": {
+                            "kind": "reference",
+                            "display_name": "r2"
+                        }
+                    },
+                    "method": {
+                        "outcome": "answered",
+                        "provenance": "model",
+                        "value": {
+                            "kind": "text",
+                            "text": "Panel"
+                        },
+                        "documents": [
+                            "u-B"
+                        ],
+                        "evidence": [
+                            {
+                                "document": "u-B",
+                                "locator": "s1",
+                                "quote": "q"
+                            }
+                        ]
+                    },
+                    "n": {
+                        "outcome": "answered",
+                        "provenance": "model",
+                        "value": {
+                            "kind": "text",
+                            "text": "12"
+                        },
+                        "documents": [
+                            "u-B"
+                        ],
+                        "evidence": [
+                            {
+                                "document": "u-B",
+                                "locator": "s1",
+                                "quote": "q"
+                            }
+                        ]
+                    }
+                },
+                "documents": [
+                    "u-B"
+                ]
+            }
+        ]
+    },
+    "pending": {
+        "rows": 1,
+        "cells": 1,
+        "new_rows": 0,
+        "columns": [
+            {
+                "id": "method",
+                "header": "Method",
+                "reason": "changed",
+                "cells": 1
+            }
+        ],
+        "retry_rows": 0,
+        "blocked_rows": 0
+    }
+}

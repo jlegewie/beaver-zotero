@@ -10,10 +10,12 @@
 import type { PendingBatchApproval } from '@beaver/agent-core/run-state/pendingBatchApprovals';
 import type { PendingCreditConfirmation } from '@beaver/agent-core/run-state/pendingCreditConfirmations';
 import type { PendingQuestion } from '@beaver/agent-core/run-state/pendingQuestions';
+import type { PendingTableCard } from '@beaver/agent-core/run-state/pendingTableCards';
 
 export type ComposerTakeover =
     | { kind: 'input' }
     | { kind: 'batch-approval'; approval: PendingBatchApproval }
+    | { kind: 'table-card'; card: PendingTableCard }
     | { kind: 'credit-confirmation'; confirmation: PendingCreditConfirmation }
     | { kind: 'question'; question: PendingQuestion };
 
@@ -30,6 +32,7 @@ export type ComposerTakeover =
 export interface ComposerTakeoverInput {
     pendingApprovalCount?: number;
     batchApprovals?: ReadonlyMap<string, PendingBatchApproval>;
+    tableCards?: ReadonlyMap<string, PendingTableCard>;
     creditConfirmations?: ReadonlyMap<string, PendingCreditConfirmation>;
     questions?: ReadonlyMap<string, PendingQuestion>;
 }
@@ -48,9 +51,12 @@ const INPUT: ComposerTakeover = { kind: 'input' };
  * 2. A pending batch approval. It gates the work a credit confirmation would
  *    charge for, so deciding it first is what makes the cost decision
  *    meaningful — and a declined batch may remove the cost entirely.
- * 3. A pending credit confirmation. It gates the run's spending decision, so
+ * 3. A pending table card. Like a batch approval it gates the work a credit
+ *    confirmation would charge for, and the two never wait at once: each is
+ *    asked from its own tool call, and table calls run one at a time.
+ * 4. A pending credit confirmation. It gates the run's spending decision, so
  *    nothing else the run is waiting on can make progress behind it.
- * 4. A pending ask_user_question. Answering it cannot unblock a run that is
+ * 5. A pending ask_user_question. Answering it cannot unblock a run that is
  *    already stopped on a credit decision, so it waits its turn.
  *
  * Only one entry of each map is ever live per run; the first is taken when
@@ -61,6 +67,9 @@ export function selectComposerTakeover(input: ComposerTakeoverInput): ComposerTa
 
     const approval = input.batchApprovals?.values().next().value;
     if (approval) return { kind: 'batch-approval', approval };
+
+    const card = input.tableCards?.values().next().value;
+    if (card) return { kind: 'table-card', card };
 
     const confirmation = input.creditConfirmations?.values().next().value;
     if (confirmation) return { kind: 'credit-confirmation', confirmation };

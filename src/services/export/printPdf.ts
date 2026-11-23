@@ -14,6 +14,7 @@
 import type { HtmlPageSetup } from '@beaver/agent-export/html/writeHtml';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { getSystemTimers } from '../../utils/systemTimers';
+import { importZoteroModule, ZOTERO_MODULES } from '../../utils/zoteroModules';
 
 /** A generous bound for large documents (printing takes well under a second per page). */
 const PRINT_TIMEOUT_MS = 180_000;
@@ -24,12 +25,7 @@ const PAPER = {
 } as const;
 
 function loadHiddenBrowser(): any {
-    try {
-        return ChromeUtils.importESModule('chrome://zotero/content/HiddenBrowser.mjs').HiddenBrowser;
-    } catch {
-        // Zotero 7.0 ships the module as a JSM.
-        return (ChromeUtils as any).import('chrome://zotero/content/HiddenBrowser.jsm').HiddenBrowser;
-    }
+    return importZoteroModule(ZOTERO_MODULES.hiddenBrowser).HiddenBrowser;
 }
 
 /** Wait until the loaded page is complete. */

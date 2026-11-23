@@ -1,0 +1,243 @@
+{
+    "name": "a value without a passage is sent back once; still without one it is written as an answer without passages",
+    "request": {
+        "job_id": "job-1",
+        "row_id": "r5",
+        "price": 0.2,
+        "table": {
+            "title": "School meal trials",
+            "description": "Sample sizes and designs of school meal studies."
+        },
+        "columns": [
+            {
+                "id": "n",
+                "header": "Sample size",
+                "type": "text",
+                "description": "How many participants were analysed?",
+                "question_hash": "43a016f79f162aaa"
+            },
+            {
+                "id": "design",
+                "header": "Design",
+                "type": "select",
+                "description": "What is the study design?",
+                "options": [
+                    {
+                        "label": "RCT",
+                        "color": "blue",
+                        "description": "Random assignment of units to arms."
+                    },
+                    {
+                        "label": "Observational",
+                        "color": "green"
+                    }
+                ],
+                "question_hash": "08856a5066308361"
+            }
+        ],
+        "row": {
+            "reference": {
+                "title": "School meals and attendance",
+                "authors": "Okafor and Reyes",
+                "year": "2021",
+                "venue": "Journal of Development Studies",
+                "item_type": "journalArticle"
+            },
+            "abstract": "We study 120 pupils in a randomised trial of school meals in Kenya."
+        },
+        "document": {
+            "id": "u-PDF11111",
+            "kind": "pdf",
+            "content": {
+                "schemaVersion": "4",
+                "mode": "structured",
+                "document": {
+                    "pageCount": 2,
+                    "bboxOrigin": "top-left",
+                    "bboxPrecision": 1,
+                    "pages": [
+                        {
+                            "index": 0,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p1",
+                                    "pageIndex": 0,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "We enrolled 120 pupils. Classes were randomised to meals or none.",
+                                    "sentences": [
+                                        {
+                                            "id": "s1",
+                                            "order": 0,
+                                            "text": "We enrolled 120 pupils.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        },
+                                        {
+                                            "id": "s2",
+                                            "order": 1,
+                                            "text": "Classes were randomised to meals or none.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    1.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "index": 1,
+                            "width": 612.0,
+                            "height": 792.0,
+                            "viewBox": [
+                                0.0,
+                                0.0,
+                                612.0,
+                                792.0
+                            ],
+                            "rotation": 0,
+                            "items": [
+                                {
+                                    "id": "p2",
+                                    "pageIndex": 1,
+                                    "order": 0,
+                                    "bbox": [
+                                        10.0,
+                                        0.0,
+                                        300.0,
+                                        12.0
+                                    ],
+                                    "kind": "text",
+                                    "text": "Attrition was low.",
+                                    "sentences": [
+                                        {
+                                            "id": "s3",
+                                            "order": 0,
+                                            "text": "Attrition was low.",
+                                            "bboxes": [
+                                                [
+                                                    10.0,
+                                                    0.0,
+                                                    300.0,
+                                                    12.0
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    ],
+                    "citationIndex": {}
+                }
+            }
+        }
+    },
+    "model": [
+        {
+            "c1": {
+                "reasoning": null,
+                "value": "120",
+                "locators": [],
+                "confidence": "high"
+            },
+            "c2": {
+                "reasoning": "Classes were randomised.",
+                "value": "RCT",
+                "locators": [
+                    "s2"
+                ],
+                "confidence": "high"
+            }
+        },
+        {
+            "c1": {
+                "reasoning": null,
+                "value": "120",
+                "locators": [],
+                "confidence": "high"
+            },
+            "c2": {
+                "reasoning": "Classes were randomised.",
+                "value": "RCT",
+                "locators": [
+                    "s2"
+                ],
+                "confidence": "high"
+            }
+        }
+    ],
+    "response": {
+        "cells": {
+            "n": {
+                "outcome": "answered",
+                "value": {
+                    "kind": "text",
+                    "text": "120"
+                },
+                "provenance": "model",
+                "documents": [
+                    "u-PDF11111"
+                ],
+                "confidence": "high"
+            },
+            "design": {
+                "outcome": "answered",
+                "value": {
+                    "kind": "select",
+                    "label": "RCT"
+                },
+                "provenance": "model",
+                "documents": [
+                    "u-PDF11111"
+                ],
+                "confidence": "high",
+                "reasoning": "Classes were randomised.",
+                "evidence": [
+                    {
+                        "document": "u-PDF11111",
+                        "locator": "s2",
+                        "quote": "Classes were randomised to meals or none.",
+                        "page": 0,
+                        "boxes": [
+                            [
+                                10,
+                                1,
+                                300,
+                                12
+                            ]
+                        ]
+                    }
+                ]
+            }
+        },
+        "row_failure": null,
+        "charged": 0.2
+    }
+}

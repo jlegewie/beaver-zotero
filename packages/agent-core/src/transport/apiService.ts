@@ -466,6 +466,7 @@ export class ApiService {
             const response = await this.request(endpoint, 'POST', undefined, deadline, {
                 rawBody,
                 headers,
+                assertDispatch: options?.assertDispatch,
             });
             return await this.parseJsonResponse<T>(response, 'POST');
         });

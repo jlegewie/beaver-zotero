@@ -32,7 +32,9 @@ import { importActionReference } from "../utils/importItemDisplay";
 import { ExternalReference } from "@beaver/agent-core/types/externalReferences";
 import { threadRunsAtom, activeRunAtom, currentThreadIdAtom, currentThreadNameAtom, isLoadingThreadAtom, resetRunSelectorCaches } from "@beaver/agent-core/run-state/atoms";
 import { loadThreadRuns } from "@beaver/agent-core/run-state/loadThreadRuns";
-import { abandonActiveRunLocallyAtom, canLeaveReconnectingRun, isWSChatPendingAtom, isWSConnectedAtom, isWSReadyAtom } from "./agentRunAtoms";
+import { abandonActiveRunLocallyAtom, canLeaveReconnectingRun, isWSChatPendingAtom, isWSConnectedAtom, isWSReadyAtom, parkableRunId } from "./agentRunAtoms";
+import { clearParkedAnswersAtom, syncParkedCardsAtom } from "./parkedRuns";
+import { confirmLeaveJobWaitAtom, fillLeaveStops, leaveJobWait } from "./jobLeave";
 import { AgentRun, isRunActive } from "@beaver/agent-core/agents/types";
 import { 
     threadAgentActionsAtom,
@@ -44,10 +46,12 @@ import {
     validateAppliedAgentAction, 
     undoAgentActionAtom,
     clearAllPendingApprovalsAtom,
+    resetAgentActionSelectorCaches,
 } from "../agents/agentActions";
 import { clearAllPendingQuestionsAtom } from "@beaver/agent-core/run-state/pendingQuestions";
 import { clearAllPendingCreditConfirmationsAtom } from "@beaver/agent-core/run-state/pendingCreditConfirmations";
 import { clearAllPendingBatchApprovalsAtom } from "@beaver/agent-core/run-state/pendingBatchApprovals";
+import { clearAllPendingTableCardsAtom } from "@beaver/agent-core/run-state/pendingTableCards";
 import { processToolReturnResults } from "../agents/toolResultProcessing";
 import { upgradeToolReturn } from "../compat/legacyToolResults";
 import { loadItemDataForAgentActions } from "../utils/agentActionUtils";
@@ -56,6 +60,12 @@ import { enrichMessageAttachmentStub } from "../types/attachments/converters";
 import { zoteroReferenceKey } from "@beaver/agent-core/types/attachments/apiTypes";
 import { resolveItemReference } from "../../src/utils/libraryIdentity";
 import type { ZoteroItemReference } from "@beaver/agent-core/types/zotero";
+
+/** Drop the selectors scoped to the previous thread's runs, tool calls and actions. */
+function resetThreadSelectorCaches(): void {
+    resetRunSelectorCaches();
+    resetAgentActionSelectorCaches();
+}
 
 /**
  * Stores a run ID that ThreadView should scroll to after a thread finishes loading.
@@ -136,6 +146,7 @@ function reconcileToolcallIds(runs: AgentRun[], actions: AgentAction[]): void {
 
 // Thread types
 import type { ThreadData } from '../../src/services/threads/types';
+import type { ScrollAnchor } from '../utils/scrollAnchor';
 export type { ThreadData } from '../../src/services/threads/types';
 
 // Thread messages and attachments
@@ -144,15 +155,17 @@ export type { ThreadData } from '../../src/services/threads/types';
 export { currentThreadIdAtom, currentThreadNameAtom, isLoadingThreadAtom };
 
 /**
- * Where the reader is in each thread, by thread id: the offset they scrolled
- * back to. A thread with no entry is reopened at its bottom — the reader was
- * following the response when they left it, or has never opened it — and the
- * bottom is recorded by dropping the entry rather than storing an offset.
+ * Where the reader is in each thread, by thread id: the place they scrolled
+ * back to, recorded as what they were reading (see `scrollAnchor.ts`) so it
+ * survives being shown at another width. A thread with no entry is reopened at
+ * its bottom — the reader was following the response when they left it, or has
+ * never opened it — and the bottom is recorded by dropping the entry rather
+ * than storing a place.
  */
-export const threadScrollPositionsAtom = atom<Record<string, number>>({});
+export const threadScrollPositionsAtom = atom<Record<string, ScrollAnchor>>({});
 
 /**
- * Atom to get the scroll position of the current thread (for library/reader sidebars)
+ * The reader's remembered place in the current thread.
  */
 export const currentThreadScrollPositionAtom = atom(
     (get) => {
@@ -163,17 +176,17 @@ export const currentThreadScrollPositionAtom = atom(
         const positions = get(threadScrollPositionsAtom);
         return positions[threadId];
     },
-    (get, set, scrollTop: number | null) => {
+    (get, set, anchor: ScrollAnchor | null) => {
         const threadId = get(currentThreadIdAtom);
         if (!threadId) {
             return;
         }
         set(threadScrollPositionsAtom, (prevPositions) => {
             const nextPositions = { ...prevPositions };
-            if (scrollTop === null) {
+            if (anchor === null) {
                 delete nextPositions[threadId];
             } else {
-                nextPositions[threadId] = scrollTop;
+                nextPositions[threadId] = anchor;
             }
             return nextPositions;
         });
@@ -225,12 +238,34 @@ function leavableRunId(get: (atom: any) => any): string | null {
  * (see `agentService.leaveRun`) and the chat shows how it ended when the user
  * returns.
  */
-async function cancelActiveRunIfNeeded(get: (atom: any) => any, set: (atom: any, value?: any) => void, isCurrent = () => true, leaveRunId: string | null = null): Promise<void> {
+async function cancelActiveRunIfNeeded(
+    get: (atom: any) => any,
+    set: (atom: any, value?: any) => void,
+    isCurrent = () => true,
+    leaveRunId: string | null = null,
+    parkRunId: string | null = null,
+): Promise<void> {
     const hadActiveWork = get(isWSChatPendingAtom) || get(activeRunAtom);
     // Navigation revokes socket callbacks, so cleanup must be synchronous and
     // complete even when the connection's close notification is ignored.
     set(abandonActiveRunLocallyAtom);
     set(activeRunAtom, null);
+    set(clearParkedAnswersAtom);
+
+    if (parkRunId) {
+        // The run is waiting only on cards: it parks, and they stay
+        // answerable when the user comes back. Stopped instead if the server
+        // refuses.
+        const outcome = await agentService.parkRun(parkRunId);
+        logger(`cancelActiveRunIfNeeded: Parking run ${parkRunId} before switching threads: ${outcome}`, 1);
+        // Leaving released the chat, which refetched thread lists before the
+        // run parked: refetch them again so they show the chat as waiting.
+        if (outcome === 'ended' || outcome === 'sent') Zotero.Beaver?.threads?.invalidateViews();
+        if (!isCurrent()) return;
+        set(isWSConnectedAtom, false);
+        set(isWSReadyAtom, false);
+        return;
+    }
 
     if (leaveRunId && agentService.leaveRun(leaveRunId)) {
         logger(`cancelActiveRunIfNeeded: Leaving run ${leaveRunId} to the server after it lost its connection`, 1);
@@ -272,14 +307,21 @@ export const newThreadAtom = atom(
             preserveDraft?: boolean;
         },
     ): Promise<number | undefined> => {
+        // A fill the response waits on goes on in its open table, or stops;
+        // with the table closed, the user confirms leaving, or stays. That
+        // question replaces the one about stopping the response.
+        const asksAboutFill = !options?.skipActiveRunConfirm && !!fillLeaveStops(get);
+        if (asksAboutFill && !set(confirmLeaveJobWaitAtom, { leave: 'new_chat', window: options?.window })) return;
         // Show loading state immediately if there's an active run to cancel.
         // Gated on run status, not presence: a run that failed keeps sitting in
         // activeRunAtom, and prompting over it claims Beaver is still working.
         const hasActiveWork = get(isWSChatPendingAtom) || isRunActive(get(activeRunAtom));
-        // A reconnecting run is left, not stopped, so there is nothing to confirm.
+        // A reconnecting run is left, and a run waiting only on cards is
+        // parked, not stopped, so there is nothing to confirm.
         const leaveRunId = leavableRunId(get);
+        const parkRunId = leaveRunId ? null : parkableRunId(get);
         if (hasActiveWork) {
-            if (!options?.skipActiveRunConfirm && !leaveRunId && !confirmInterruptActiveRun(
+            if (!options?.skipActiveRunConfirm && !asksAboutFill && !leaveRunId && !parkRunId && !confirmInterruptActiveRun(
                 'Start new chat?',
                 'Beaver is still generating a response in this chat. Starting a new chat will stop it.',
                 'Start New Chat',
@@ -295,8 +337,10 @@ export const newThreadAtom = atom(
         const isCurrent = () => get(threadNavigationSeqAtom) === navigation;
 
         try {
+            // Before the run stops: a fill left to its open table runs on.
+            leaveJobWait();
             // Cancel any active run before switching threads
-            await cancelActiveRunIfNeeded(get, set, isCurrent, leaveRunId);
+            await cancelActiveRunIfNeeded(get, set, isCurrent, leaveRunId, parkRunId);
             if (!isCurrent()) return;
 
             // Clean up any temporary annotations from previous thread
@@ -317,6 +361,8 @@ export const newThreadAtom = atom(
             set(clearAllPendingQuestionsAtom);
             set(clearAllPendingCreditConfirmationsAtom);
             set(clearAllPendingBatchApprovalsAtom);
+            set(clearAllPendingTableCardsAtom);
+            set(clearParkedAnswersAtom);
 
             set(isWebSearchEnabledAtom, false);
 
@@ -328,7 +374,7 @@ export const newThreadAtom = atom(
             set(removePopupMessagesByTypeAtom, ['items_summary']);
             set(citationsAtom, []);
             set(resetCitationMarkersAtom);
-            resetRunSelectorCaches();
+            resetThreadSelectorCaches();
             if (!options?.preserveDraft) set(clearComposerAtom);
             set(resetMessageUIStateAtom);
             set(clearExternalReferenceCacheAtom);
@@ -391,9 +437,17 @@ export const loadThreadAtom = atom(
         // current thread. Status, not presence — see newThreadAtom.
         const hasActiveWork = get(isWSChatPendingAtom) || isRunActive(get(activeRunAtom));
         if (canCommit && (hasActiveWork || !canCommit())) return false;
-        // A reconnecting run is left, not stopped, so there is nothing to confirm.
+        // A reconnecting run is left, and a run waiting only on cards is
+        // parked, not stopped, so there is nothing to confirm.
         const leaveRunId = leavableRunId(get);
-        if (hasActiveWork && !leaveRunId && !confirmInterruptActiveRun(
+        const parkRunId = leaveRunId ? null : parkableRunId(get);
+        // A fill the response waits on asks below, in place of this question.
+        const leaving = threadId !== get(currentThreadIdAtom);
+        const asksAboutFill = leaving && !!fillLeaveStops(get);
+        // Asked here, the user has agreed to stop the response, and a fill it
+        // starts waiting on meanwhile is not asked about again.
+        const askedToStop = hasActiveWork && !asksAboutFill && !leaveRunId && !parkRunId;
+        if (askedToStop && !confirmInterruptActiveRun(
             'Switch chat?',
             'Beaver is still generating a response in this chat. Switching chats will stop it.',
             'Switch Chat',
@@ -488,6 +542,13 @@ export const loadThreadAtom = atom(
             confirmedMismatchedThreadIds.add(threadId);
         }
 
+        // Leaving a response that waits on a fill: see newThreadAtom.
+        if (isCurrent() && leaving && !askedToStop && !liveSet(confirmLeaveJobWaitAtom, { leave: 'switch_chat', window })) {
+            set(pendingScrollToRunAtom, null);
+            if (!canCommit) liveSet(isLoadingThreadAtom, false);
+            return false;
+        }
+
         if (!isCurrent()) return false;
         if (!canCommit) {
             committed = true;
@@ -496,8 +557,11 @@ export const loadThreadAtom = atom(
 
         let loaded = false;
         try {
+            // Before the run stops: a fill left to its open table runs on. A
+            // staged navigation ends the wait when it commits the new chat.
+            if (leaving && !canCommit) leaveJobWait();
             // Cancel any active run before loading a different thread
-            if (!canCommit) await cancelActiveRunIfNeeded(get, set, isCurrent, leaveRunId);
+            if (!canCommit) await cancelActiveRunIfNeeded(get, set, isCurrent, leaveRunId, parkRunId);
             if (!isCurrent()) return false;
             // Clean up any temporary annotations from previous thread
             if (!canCommit) await BeaverTemporaryAnnotations.cleanupAll().catch(error => {
@@ -524,6 +588,8 @@ export const loadThreadAtom = atom(
             set(clearAllPendingQuestionsAtom);
             set(clearAllPendingCreditConfirmationsAtom);
             set(clearAllPendingBatchApprovalsAtom);
+            set(clearAllPendingTableCardsAtom);
+            set(clearParkedAnswersAtom);
             // Legacy non-stateful path: fetch the name from the local DB when
             // not provided (the stateful path already resolved it above).
             const threadNamePromise = !resolvedName && !statefulChat
@@ -638,9 +704,11 @@ export const loadThreadAtom = atom(
                 // Set agent runs. The scoped run selectors are dropped in the
                 // same breath: reset any earlier and the old thread's runs, still
                 // in the store while this load ran, would populate them again.
-                if (canCommit) staged.push(resetRunSelectorCaches);
-                else resetRunSelectorCaches();
+                if (canCommit) staged.push(resetThreadSelectorCaches);
+                else resetThreadSelectorCaches();
                 set(threadRunsAtom, processedRuns);
+                // The cards of a run that parked waiting on the user.
+                set(syncParkedCardsAtom);
 
                 // Reconcile toolcall_id mismatches between REST API and model messages
                 if (agent_actions && agent_actions.length > 0) {
@@ -699,21 +767,22 @@ export const loadThreadAtom = atom(
                     .filter((action) => action.proposed_data?.source?.external_id
                         && !mapping[action.proposed_data.source.external_id])
                     .map((action) => importActionReference(action.proposed_data, mapping));
-                if (createItemActions.length > 0 || importReferences.length > 0) {
+                // Action payloads are derived copies, not source snapshots: they
+                // only stand in for ids no search result supplied.
+                const createItemReferences = (createItemActions
+                    .map((action: AgentAction) => action.proposed_data?.item)
+                    .filter(Boolean) as ExternalReference[])
+                    .filter((reference) => !reference.source_id || !mapping[reference.source_id]);
+                if (createItemReferences.length > 0 || importReferences.length > 0) {
                     logger(`loadThreadAtom: Adding external references from agent actions to mapping`, 1);
-                    const references = [
-                        ...(createItemActions
-                            .map((action: AgentAction) => action.proposed_data?.item)
-                            .filter(Boolean) as ExternalReference[]),
-                        ...importReferences,
-                    ];
+                    const references = [...createItemReferences, ...importReferences];
                     set(addExternalReferencesToMappingAtom, references);
                     set(checkExternalReferencesAtom, references);
                 }
             } else {
                 // No runs found, clear state
-                if (canCommit) staged.push(resetRunSelectorCaches);
-                else resetRunSelectorCaches();
+                if (canCommit) staged.push(resetThreadSelectorCaches);
+                else resetThreadSelectorCaches();
                 set(threadRunsAtom, []);
                 set(threadAgentActionsAtom, []);
                 set(citationsAtom, []);
@@ -743,7 +812,7 @@ export const loadThreadAtom = atom(
                 // on another device.
                 Zotero.Beaver.threads.markThreadDeleted(threadId);
                 set(currentThreadIdAtom, null);
-                if (!canCommit) resetRunSelectorCaches();
+                if (!canCommit) resetThreadSelectorCaches();
                 set(threadRunsAtom, []);
                 set(activeRunAtom, null);
                 set(threadAgentActionsAtom, []);
