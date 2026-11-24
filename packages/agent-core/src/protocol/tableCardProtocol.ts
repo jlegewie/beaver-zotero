@@ -170,6 +170,18 @@ export interface WSTableFillCardRequest extends WSTableCardRequest {
     scope: 'fill';
     table: TableCardTable;
     cost: TableCardCost;
+    /**
+     * Rows the fill reads again although they hold answers in other columns,
+     * for a question no row has answered yet: a changed question or a column
+     * added to a filled table. Absent from older backends.
+     */
+    rereads?: number | null;
+    /**
+     * The trial the card offers beside the fill: approving it with `trial`
+     * fills only the plan's first this many rows. Absent when the backend
+     * offers none (older backends, small fills).
+     */
+    trial_rows?: number | null;
 }
 
 export function isCreateCard(request: WSTableCardRequest): request is WSTableCreateCardRequest {
@@ -193,6 +205,8 @@ export interface WSTableCardResponse {
     card_id: string;
     approved: boolean;
     choice?: TableCardChoice | null;
+    /** `fill`: fill only the first `trial_rows` rows the request offered. */
+    trial?: boolean | null;
     /** `create_and_run`: the cost the card showed, the ceiling of the fill it starts. */
     cost?: TableCardCost | null;
     title?: string | null;

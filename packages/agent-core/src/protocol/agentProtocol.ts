@@ -3264,6 +3264,12 @@ export const CLIENT_FEATURES = {
      * `tables` capability.
      */
     TABLES: 'tables',
+    /**
+     * The fill card shows the trial a request offers (`trial_rows`) and
+     * answers it with `trial`, and `fill_plan` plans a kept plan's first rows
+     * (`plan_id` with `limit`). Without it the backend offers no trial.
+     */
+    TABLE_FILL_TRIAL: 'table_fill_trial',
 } as const;
 
 /** Client type identifier for the Zotero plugin. */

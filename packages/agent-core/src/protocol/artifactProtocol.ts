@@ -185,8 +185,16 @@ export interface ArtifactRequest {
      */
     rows?: string[] | null;
     columns?: string[] | TableColumnDraft[] | null;
-    /** `fill`: the approved plan. */
+    /**
+     * `fill`: the approved plan. `fill_plan` with `limit`: the plan whose
+     * first rows the new plan takes.
+     */
     plan_id?: string | null;
+    /**
+     * `fill_plan`, with `plan_id`: plan only the first `limit` rows of that
+     * plan (a trial), in its order.
+     */
+    limit?: number | null;
     /** `fill`: the tool call that starts it; one tool call is one job. */
     tool_call_id?: string | null;
     /**
@@ -286,7 +294,7 @@ const contracts: Record<string, [string[], string[]]> = {
     revert: [["key", "to_version", "meta"], []],
     trim: [["key", "thread_id", "run_ids"], []],
     delete: [["key"], []],
-    fill_plan: [["key"], ["rows", "columns"]],
+    fill_plan: [["key"], ["rows", "columns", "plan_id", "limit"]],
     fill: [["plan_id", "tool_call_id", "wait"], []],
 };
 const handle = /^(u|g[1-9]\d*)-[23456789ABCDEFGHIJKLMNPQRSTUVWXYZ]{8}$/;
@@ -353,6 +361,13 @@ export function validateArtifactRequest(
     for (const name of ["thread_id", "operation_id", "plan_id", "tool_call_id"])
         if (raw[name] != null && !nonempty(raw[name])) return "invalid_request";
     if (raw.wait != null && typeof raw.wait !== "boolean") return "invalid_request";
+    // A trial names the plan it takes rows from, and nothing else to select.
+    if (raw.op === "fill_plan" && (raw.limit != null || raw.plan_id != null)) {
+        if (raw.limit == null || raw.plan_id == null || raw.rows != null || raw.columns != null)
+            return "invalid_request";
+        if (!Number.isSafeInteger(raw.limit) || (raw.limit as number) < 1 || (raw.limit as number) > 1000)
+            return "invalid_request";
+    }
     const idLists: (readonly [string, number])[] =
         raw.op === "fill_plan" ? [["rows", 1000], ["columns", 30]] : [["rows", 1000]];
     for (const [name, max] of idLists) {
