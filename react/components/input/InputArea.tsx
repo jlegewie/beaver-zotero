@@ -26,6 +26,8 @@ import PendingActionsBar from './PendingActionsBar';
 import ThreadPresenceBar from './ThreadPresenceBar';
 import BatchProgressPanel from './BatchProgressPanel';
 import HighTokenUsageWarningBar from './HighTokenUsageWarningBar';
+import TablePlusToolsNotice from './TablePlusToolsNotice';
+import { tablePlusToolsNoticeAtom } from '../../atoms/chatAccess';
 import NextStepsPanel from '../pages/firstRun/NextStepsPanel';
 import RunContinueDisplay from '../agentRuns/RunContinueDisplay';
 import BackToSuggestions from '../pages/firstRun/BackToSuggestions';
@@ -58,6 +60,9 @@ interface InputAreaProps {
     placeholder?: string;
     hideModelSelector?: boolean;
     hideAttachmentMenu?: boolean;
+    /** Leave out the table Plus Tools notice: home places it under the
+     *  input itself, and the quick prompt has no room for it. */
+    hideTablePlusToolsNotice?: boolean;
 }
 
 const InputArea: React.FC<InputAreaProps> = ({
@@ -66,6 +71,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     placeholder,
     hideModelSelector = false,
     hideAttachmentMenu = false,
+    hideTablePlusToolsNotice = false,
 }) => {
     const surfaceWindow = useSurfaceWindow();
     // This window cannot write to the chat: another window is responding in
@@ -230,6 +236,9 @@ const InputArea: React.FC<InputAreaProps> = ({
     // Sidebar renders AskUserQuestionPanel INSTEAD of this component, so no
     // question-mode handling is needed here.
 
+    // The message carries a research table Beaver can only read here.
+    const showTableNotice = useAtomValue(tablePlusToolsNoticeAtom) !== null && !hideTablePlusToolsNotice;
+
     const lastRunUsage = lastRun?.totalUsage;
     const lastRequestInputTokens = lastRunUsage ? getLastRequestInputTokens(lastRunUsage) : null;
     const warningThreadId = lastRun?.threadId ?? currentThreadId;
@@ -303,12 +312,13 @@ const InputArea: React.FC<InputAreaProps> = ({
     // Priority: the chat being closed to this window (nothing below can be
     // acted on until that clears), then a blocked decision, then the standing
     // grant that stops decisions being asked for at all, then the offer to
-    // finish an unfinished response, then first-run guidance, then the cost
-    // warning.
+    // finish an unfinished response, then what the message being written
+    // cannot do (a table Beaver can only read), then first-run guidance, then
+    // the cost warning.
     // One ordered list (not a suppression clause in each predicate) so a new
     // band takes a place here instead of stacking. Laid out lowest-priority
     // first so the winner sits nearest the composer.
-    const composerBand: 'high-token' | 'next-steps' | 'back-to-suggestions' | 'continue' | 'approvals' | 'full-access' | 'thread-presence' | null =
+    const composerBand: 'high-token' | 'next-steps' | 'back-to-suggestions' | 'table-plus-tools' | 'continue' | 'approvals' | 'full-access' | 'thread-presence' | null =
         threadReadOnly || stoppingPreviousRun
             ? 'thread-presence'
             : hasPendingApprovals
@@ -317,13 +327,15 @@ const InputArea: React.FC<InputAreaProps> = ({
                     ? 'full-access'
                     : continuation
                         ? 'continue'
-                        : canShowNextSteps
-                            ? 'next-steps'
-                            : canShowBackToSuggestions
-                                ? 'back-to-suggestions'
-                                : canShowHighTokenWarning
-                                    ? 'high-token'
-                                    : null;
+                        : showTableNotice
+                            ? 'table-plus-tools'
+                            : canShowNextSteps
+                                ? 'next-steps'
+                                : canShowBackToSuggestions
+                                    ? 'back-to-suggestions'
+                                    : canShowHighTokenWarning
+                                        ? 'high-token'
+                                        : null;
 
     const {
         isSlashMenuOpen,
@@ -713,6 +725,10 @@ const InputArea: React.FC<InputAreaProps> = ({
                     <BackToSuggestions onDismiss={handleDismissNextSteps} />
                 </div>
             )}
+
+            {/* The attached research table can only be read: filling and
+                editing it need Plus Tools. */}
+            {composerBand === 'table-plus-tools' && <TablePlusToolsNotice placement="band" />}
 
             {/* Offer to carry on from a run that ended unfinished. Above the
                 first-run bands: an answer that stopped short is the thread's

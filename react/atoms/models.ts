@@ -321,3 +321,11 @@ export const resetUserModelStateAtom = atom(
         set(selectedModelAtom, null);
     }
 );
+
+/** Switch the chat input to the Beaver model, as the feature-credit setup card and the table notice do. */
+export const selectBeaverModelAtom = atom(null, (get, set): boolean => {
+    const model = get(beaverDefaultModelAtom);
+    if (!model) return false;
+    set(updateSelectedModelAtom, { ...model, access_mode: 'app_key' });
+    return true;
+});

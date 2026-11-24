@@ -23,6 +23,7 @@ import {
     anthropicApiKeyAtom,
 } from "../../../react/atoms/models";
 import { firstRunPreviewAtom } from "../../../react/atoms/firstRun";
+import { requestPlusToolsAtom } from "../../../react/atoms/ui";
 import { store } from "../../../react/store";
 import { recentThreadsAtom } from "../../../react/atoms/threads";
 import { threadEntitiesAtom, pinsPendingAtom } from "../../../react/atoms/threadList";
@@ -155,6 +156,24 @@ describe("account projection transitions", () => {
         savedPrefs.clear();
         emit({ session: { user: { id: "b" } }, authenticating: false });
         expect(store.get(openAiApiKeyAtom)).toBe("");
+    });
+    it("follows a Plus Tools preference changed outside this window", () => {
+        let notify: (change: { key: string; revision: number }) => void = () => {};
+        (Zotero.Beaver as any).preferences = {
+            subscribe: (listener: any) => {
+                notify = listener;
+                return () => {};
+            },
+            getSnapshot: () => ({ revision: 0 }),
+        };
+        attachAccountProjection({ status: "ready" } as any);
+        store.set(requestPlusToolsAtom, false);
+        savedPrefs.set("requestPlusTools", true);
+        notify({ key: "requestPlusTools", revision: 1 });
+        expect(store.get(requestPlusToolsAtom)).toBe(true);
+        savedPrefs.set("requestPlusTools", false);
+        notify({ key: "requestPlusTools", revision: 2 });
+        expect(store.get(requestPlusToolsAtom)).toBe(false);
     });
     it("closes a first-run preview when the account changes", () => {
         emit({ session: { user: { id: "a" } } });

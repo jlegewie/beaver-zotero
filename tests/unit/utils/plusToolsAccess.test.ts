@@ -3,7 +3,7 @@
  * each account state.
  */
 import { describe, expect, it } from 'vitest';
-import { getPlusToolsAccess, type PlusToolsAccessInput } from '../../../react/utils/plusToolsAccess';
+import { getPlusToolsAccess, getTablePlusToolsNotice, type PlusToolsAccessInput } from '../../../react/utils/plusToolsAccess';
 import {
     FEATURE_TASK_LABEL,
     NO_CREDITS_NOTE,
@@ -48,6 +48,33 @@ describe('getPlusToolsAccess', () => {
             .toEqual({ status: 'not-ready', gate: 'connecting' });
         expect(getPlusToolsAccess(input({ gate: 'onboarding' })))
             .toEqual({ status: 'not-ready', gate: 'onboarding' });
+    });
+});
+
+describe('getTablePlusToolsNotice', () => {
+    const notice = (overrides: Partial<PlusToolsAccessInput>, tableCount = 1) =>
+        getTablePlusToolsNotice(getPlusToolsAccess(input(overrides)), tableCount);
+
+    it('offers the Beaver model or Plus Tools for a table on an own model with Plus Tools off', () => {
+        expect(notice({ usesBeaverModel: false })).toEqual({ fix: 'switch-model-or-plus-tools', tableCount: 1 });
+        expect(notice({ usesBeaverModel: false }, 2)).toEqual({ fix: 'switch-model-or-plus-tools', tableCount: 2 });
+    });
+
+    it('offers credits when Plus Tools are off and there are none to spend', () => {
+        expect(notice({ usesBeaverModel: false, credits: 0 })).toEqual({ fix: 'get-credits', tableCount: 1 });
+    });
+
+    it('stays away without a table, on the Beaver model, or with Plus Tools on', () => {
+        expect(notice({ usesBeaverModel: false }, 0)).toBeNull();
+        expect(notice({})).toBeNull();
+        expect(notice({ credits: 0 })).toBeNull();
+        expect(notice({ usesBeaverModel: false, plusToolsPref: true })).toBeNull();
+        expect(notice({ usesBeaverModel: false, plusToolsPref: true, credits: 0 })).toBeNull();
+    });
+
+    it('stays away while there is no chat to send from', () => {
+        expect(notice({ usesBeaverModel: false, gate: 'signed-out' })).toBeNull();
+        expect(notice({ usesBeaverModel: false, gate: 'connecting' })).toBeNull();
     });
 });
 

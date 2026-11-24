@@ -14,11 +14,16 @@ vi.mock('../../../react/atoms/actions', async () => {
 const selectedModels = vi.hoisted(() => [] as unknown[]);
 vi.mock('../../../react/atoms/models', async () => {
     const { atom } = await import('jotai');
+    const beaverDefaultModelAtom = atom({ id: 'beaver-default', allow_app_key: true });
     return {
-        beaverDefaultModelAtom: atom({ id: 'beaver-default', allow_app_key: true }),
+        beaverDefaultModelAtom,
         isUsingBeaverCreditsAtom: atom(true),
         updateSelectedModelAtom: atom(null, (_get, _set, model: unknown) => {
             selectedModels.push(model);
+        }),
+        selectBeaverModelAtom: atom(null, (get) => {
+            selectedModels.push({ ...get(beaverDefaultModelAtom), access_mode: 'app_key' });
+            return true;
         }),
     };
 });

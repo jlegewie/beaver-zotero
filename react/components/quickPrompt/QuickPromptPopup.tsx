@@ -313,7 +313,9 @@ const QuickPromptPopup: React.FC = () => {
                     <DragDropWrapper overlayBorderRadius={12}>
                         <div className="beaver-quick-prompt__composer">
                             <PopupOverlayContainer />
-                            <InputArea inputRef={inputRef} verticalPosition="above" placeholder="Ask Beaver" />
+                            {/* No table notice here: its dismiss button would sit under the
+                                card's close button. */}
+                            <InputArea inputRef={inputRef} verticalPosition="above" placeholder="Ask Beaver" hideTablePlusToolsNotice />
                         </div>
                     </DragDropWrapper>
                 </div>
