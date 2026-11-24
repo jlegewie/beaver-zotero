@@ -23,7 +23,8 @@ export interface DownloadedFile {
     accessMethod?: string;
 }
 
-async function removeDirectory(directory: string | undefined): Promise<void> {
+/** Remove a private temporary directory, logging rather than throwing on failure. */
+export async function removeDirectory(directory: string | undefined): Promise<void> {
     if (!directory) return;
     try {
         await IOUtils.remove(directory, { recursive: true, ignoreAbsent: true });
@@ -191,22 +192,60 @@ export async function saveDownloadedAttachment(
     }
 }
 
+/** What a PDF source gets to look for `item`'s file. */
+export interface PdfSourceContext {
+    item: Zotero.Item;
+    signal: AbortSignal;
+    /** Throws when the library may no longer be read or written. */
+    assertAccess: () => void;
+    diagnostics?: PdfFetchDiagnostics;
+}
+
 /**
- * Find a PDF for `item` among `resolvers` and attach it, unless a PDF was
- * attached meanwhile. Download without holding the library queue; only
- * attachment admission and saving are serialized.
+ * One place to get a PDF from. Resolves to a downloaded file the caller owns,
+ * or null when the source has none.
+ */
+export type PdfSource = (context: PdfSourceContext) => Promise<DownloadedFile | null>;
+
+/** Zotero's resolver cascade over `resolvers`, as a PDF source. */
+export function zoteroResolverSource(resolvers: Record<string, unknown>[]): PdfSource {
+    return ({ signal, assertAccess, diagnostics }) => downloadAttachmentFile(resolvers, signal, assertAccess, diagnostics);
+}
+
+/**
+ * Find a PDF for `item` from `sources`, in order, and attach the first file
+ * found, unless a PDF was attached meanwhile. Download without holding the
+ * library queue; only attachment admission and saving are serialized.
+ *
+ * A source that fails (a timed-out or unusable download) leaves the next one
+ * to try; the first such failure is rethrown when no source found a file. A
+ * cancelled task or revoked access ends the fetch.
  *
  * The caller owns `diagnostics`, so what was tried survives a throw.
  */
 export async function fetchPdfAttachment(
     item: Zotero.Item,
-    resolvers: Record<string, unknown>[],
+    sources: PdfSource[],
     signal: AbortSignal,
     assertAccess: () => void,
     diagnostics?: PdfFetchDiagnostics,
 ): Promise<{ attachment: Zotero.Item | null; accessMethod?: string }> {
-    const file = await downloadAttachmentFile(resolvers, signal, assertAccess, diagnostics);
-    if (!file) return { attachment: null };
+    let file: DownloadedFile | null = null;
+    let failure: unknown;
+    for (const source of sources) {
+        try {
+            file = await source({ item, signal, assertAccess, diagnostics });
+        } catch (error) {
+            if (signal.aborted) throw error;
+            assertAccess();
+            failure ??= error;
+        }
+        if (file) break;
+    }
+    if (!file) {
+        if (failure !== undefined) throw failure;
+        return { attachment: null };
+    }
     const version = file.props?.articleVersion;
     const title = file.title || Zotero.getString(`attachment.${
         version === 'accepted' || version === 'acceptedVersion' ? 'acceptedVersion'

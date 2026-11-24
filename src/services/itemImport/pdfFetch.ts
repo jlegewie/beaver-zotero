@@ -9,8 +9,9 @@ import { logger } from '@beaver/agent-core/platform/logger';
 import { isPdfDocument } from '../../utils/attachmentFiles';
 import { generateTaskId, scheduleBackgroundTask } from '../../utils/backgroundTasks';
 import { buildPdfResolvers, type PdfFetchOptions } from '../../utils/pdfResolvers';
-import { fetchPdfAttachment } from '../pdfAttachmentFetch';
+import { fetchPdfAttachment, zoteroResolverSource, type PdfSource } from '../pdfAttachmentFetch';
 import { createPdfFetchDiagnostics } from '../pdfFetchDiagnostics';
+import { downloadServerPdf } from '../serverPdfSource';
 
 /**
  * Filter attachment IDs to return only PDF attachments.
@@ -90,7 +91,11 @@ export function schedulePdfFetchTask(
                 }
 
                 logger(`schedulePdfFetchTask: Trying ${resolvers.length} resolvers for ${itemKey}`, 2);
-                const outcome = await fetchPdfAttachment(item, resolvers, signal, assertAccess, diagnostics);
+                // Where to look, in order; the first source with a file wins.
+                // The user's own download comes first; the backend's cached
+                // open-access copy is the fallback for when it fails.
+                const sources: PdfSource[] = [zoteroResolverSource(resolvers), downloadServerPdf];
+                const outcome = await fetchPdfAttachment(item, sources, signal, assertAccess, diagnostics);
                 if (outcome.attachment) {
                     attachedPdf = outcome.attachment;
                     accessMethod = outcome.accessMethod;

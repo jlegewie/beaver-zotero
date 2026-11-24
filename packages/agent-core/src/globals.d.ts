@@ -83,6 +83,8 @@ declare interface Response {
   /** Read by the token-refresh guard to tell an auth-server answer from a proxy page. */
   readonly headers: { get(name: string): string | null };
   text(): Promise<string>;
+  /** Read by `ApiService.postForBytes` for endpoints that answer with a file. */
+  arrayBuffer(): Promise<ArrayBuffer>;
 }
 
 declare interface RequestInit {
