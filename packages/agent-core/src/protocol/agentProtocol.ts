@@ -3483,6 +3483,11 @@ export interface ApplicationStateInput {
      * (e.g. 'en-US', 'de', 'zh-CN'). Omitted when the host does not report one.
      */
     interface_language?: string;
+    /**
+     * IANA time zone of the user's system (e.g. 'America/New_York'). The
+     * backend dates the conversation in this zone, or in UTC when omitted.
+     */
+    time_zone?: string;
 }
 
 /** Frontend embedding index status reported with each agent run. */
