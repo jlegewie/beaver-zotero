@@ -79,6 +79,30 @@ describe('ApiService authentication recovery', () => {
         expect(report).not.toHaveBeenCalled();
     });
 
+    it('returns raw response bytes and headers from postForBytes, after the normal auth path', async () => {
+        const pdf = new TextEncoder().encode('%PDF-1.7 body');
+        fetchMock.mockResolvedValueOnce(new Response(pdf, {
+            status: 200,
+            headers: { 'Content-Type': 'application/pdf', 'X-Beaver-Pdf-Url': 'https://repo.example/p' },
+        }));
+
+        const { bytes, headers } = await (service as any).postForBytes('/api/v1/fulltext/pdf', { doi: '10.1/x' });
+
+        expect(Array.from(bytes)).toEqual(Array.from(pdf));
+        expect(headers.get('X-Beaver-Pdf-Url')).toBe('https://repo.example/p');
+        expect(fetchMock.mock.calls[0][1]?.headers).toMatchObject({ Authorization: 'Bearer stale-token' });
+        expect(fetchMock.mock.calls[0][1]?.body).toBe(JSON.stringify({ doi: '10.1/x' }));
+    });
+
+    it('raises the structured API error from postForBytes when the backend refuses', async () => {
+        fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+            detail: { code: 'pdf_not_available', message: 'No cached PDF' },
+        }), { status: 404, statusText: 'Not Found' }));
+
+        await expect((service as any).postForBytes('/api/v1/fulltext/pdf', { doi: '10.1/x' }))
+            .rejects.toMatchObject({ status: 404, code: 'pdf_not_available' });
+    });
+
     it('checks a dispatch guard before each attempt, including the retry after a refresh', async () => {
         mockSupabase.auth.refreshSession.mockResolvedValue({ data: { session: { access_token: 'fresh' } }, error: null });
         fetchMock.mockResolvedValueOnce(new Response('{}', { status: 401 }));

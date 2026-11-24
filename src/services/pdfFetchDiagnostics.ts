@@ -198,7 +198,18 @@ export interface PdfFetchDiagnostics {
     markSucceeded(): void;
     /** The downloaded file's type cannot be attached. */
     markUnsupportedType(): void;
-    /** Wire-ready attempts in order, capped at {@link MAX_PDF_FETCH_ATTEMPTS}. */
+    /**
+     * Record one request to a source outside Zotero's resolver cascade as a
+     * finished attempt: a success without `error`, otherwise a failure
+     * classified like a cascade error. Recorded even after the cascade
+     * stopped, since such a source runs on its own budget.
+     */
+    recordSourceAttempt(accessMethod: string, host: string, error?: unknown): void;
+    /**
+     * Wire-ready attempts in order, capped at {@link MAX_PDF_FETCH_ATTEMPTS}.
+     * Over the cap the last attempt is kept, so a fallback source that runs
+     * after a long cascade is still reported.
+     */
     attempts(): PdfFetchAttempt[];
     /**
      * Why the task failed.
@@ -213,7 +224,7 @@ export interface PdfFetchDiagnostics {
     failureReason(state: { resolverCount?: number; threw: boolean }): PdfFetchFailureReason;
 }
 
-/** Create a tracker for one `downloadFirstAvailableFile` run. */
+/** Create a tracker for one PDF fetch: Zotero's resolver cascade and any other sources. */
 export function createPdfFetchDiagnostics(): PdfFetchDiagnostics {
     const entries: Entry[] = [];
     let timedOut = false;
@@ -241,12 +252,11 @@ export function createPdfFetchDiagnostics(): PdfFetchDiagnostics {
     // destinations) reads `already_tried`. Both are rare.
     const resolve = (): PdfFetchAttempt[] => entries
         .filter(entry => entry.requests > 0)
-        .map((entry, index, tried) => {
+        .map((entry) => {
             const worst = entry.final ? undefined : mostInformative(entry.errors);
             const outcome: PdfFetchOutcome = entry.final
                 ?? worst?.outcome
-                ?? (stopped && index === tried.length - 1 ? 'cancelled'
-                    : isDoiResolverHost(entry.host) ? 'already_tried' : 'no_pdf_found');
+                ?? (isDoiResolverHost(entry.host) ? 'already_tried' : 'no_pdf_found');
             const host = worst?.host ?? entry.host;
             return {
                 ...(entry.accessMethod ? { accessMethod: entry.accessMethod } : {}),
@@ -255,6 +265,14 @@ export function createPdfFetchDiagnostics(): PdfFetchDiagnostics {
                 ...(worst?.status !== undefined ? { status: worst.status } : {}),
             };
         });
+
+    // The cascade entry in flight when the cascade stops was cut off, not
+    // finished: report it as cancelled unless an error already explains it.
+    const stop = () => {
+        const inFlight = stopped ? undefined : latest();
+        if (inFlight && !inFlight.final && inFlight.errors.length === 0) inFlight.final = 'cancelled';
+        stopped = true;
+    };
 
     return {
         onAccessMethodStart(accessMethod) {
@@ -276,11 +294,9 @@ export function createPdfFetchDiagnostics(): PdfFetchDiagnostics {
         },
         markTimeout() {
             timedOut = true;
-            stopped = true;
+            stop();
         },
-        stop() {
-            stopped = true;
-        },
+        stop,
         markSucceeded() {
             succeeded = true;
             const entry = latest();
@@ -291,8 +307,21 @@ export function createPdfFetchDiagnostics(): PdfFetchDiagnostics {
             const entry = latest();
             if (entry) entry.final = 'not_pdf';
         },
+        recordSourceAttempt(accessMethod, host, error) {
+            const entry: Entry = { accessMethod, host, requests: 1, errors: [] };
+            if (error === undefined) {
+                entry.final = 'ok';
+                succeeded = true;
+            } else {
+                entry.errors.push({ ...classifyRequestError(error), host });
+            }
+            entries.push(entry);
+        },
         attempts() {
-            return resolve().slice(0, MAX_PDF_FETCH_ATTEMPTS);
+            const all = resolve();
+            return all.length <= MAX_PDF_FETCH_ATTEMPTS
+                ? all
+                : [...all.slice(0, MAX_PDF_FETCH_ATTEMPTS - 1), all[all.length - 1]];
         },
         failureReason({ resolverCount, threw }) {
             if (resolverCount === 0) return 'no_sources';

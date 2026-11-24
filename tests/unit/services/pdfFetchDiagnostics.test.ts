@@ -276,6 +276,21 @@ describe('attempt tracking', () => {
         expect(attempts[0].accessMethod).toBe('m0');
     });
 
+    it('keeps a fallback attempt that runs after a cascade longer than the cap', () => {
+        const diagnostics = createPdfFetchDiagnostics();
+        for (let i = 0; i < MAX_PDF_FETCH_ATTEMPTS + 2; i++) {
+            diagnostics.onAccessMethodStart(`m${i}`);
+            diagnostics.onBeforeRequest(`https://h${i}.example/x`);
+            diagnostics.onRequestError(xhrStatusError(404));
+        }
+        diagnostics.recordSourceAttempt('openalex_content', 'content.openalex.org');
+
+        const attempts = diagnostics.attempts();
+        expect(attempts).toHaveLength(MAX_PDF_FETCH_ATTEMPTS);
+        expect(attempts.at(-2)?.accessMethod).toBe(`m${MAX_PDF_FETCH_ATTEMPTS - 2}`);
+        expect(attempts.at(-1)).toEqual({ accessMethod: 'openalex_content', host: 'content.openalex.org', outcome: 'ok' });
+    });
+
     it('reports the entry in flight at cancellation as cancelled and ignores later callbacks', () => {
         const diagnostics = createPdfFetchDiagnostics();
         diagnostics.onAccessMethodStart('doi');
@@ -380,5 +395,44 @@ describe('failureReason', () => {
         diagnostics.onAccessMethodStart('doi');
         diagnostics.onBeforeRequest('https://doi.org/10.1/x');
         expect(diagnostics.failureReason({ resolverCount: 2, threw: false })).toBe('network_error');
+    });
+});
+
+describe('sources outside the cascade', () => {
+    it('records a successful source as one ok attempt and no failure reason applies', () => {
+        const diagnostics = createPdfFetchDiagnostics();
+        diagnostics.onAccessMethodStart('doi');
+        diagnostics.onBeforeRequest('https://doi.org/10.1/x');
+        diagnostics.onRequestError(xhrStatusError(403, { 'cf-mitigated': 'challenge' }));
+        diagnostics.recordSourceAttempt('openalex_content', 'content.openalex.org');
+
+        expect(diagnostics.attempts()).toEqual([
+            { accessMethod: 'doi', host: 'doi.org', outcome: 'bot_challenge', status: 403 },
+            { accessMethod: 'openalex_content', host: 'content.openalex.org', outcome: 'ok' },
+        ]);
+    });
+
+    it('classifies a failed source like a cascade error', () => {
+        const diagnostics = createPdfFetchDiagnostics();
+        diagnostics.recordSourceAttempt('openalex_content', 'content.openalex.org', { message: 'Not found', status: 404 });
+
+        expect(diagnostics.attempts()).toEqual([
+            { accessMethod: 'openalex_content', host: 'content.openalex.org', outcome: 'not_found', status: 404 },
+        ]);
+        expect(diagnostics.failureReason({ resolverCount: 1, threw: false })).toBe('not_found');
+    });
+
+    it('records a source after the cascade timed out, keeping the cut-off entry cancelled', () => {
+        const diagnostics = createPdfFetchDiagnostics();
+        diagnostics.onAccessMethodStart('doi');
+        diagnostics.onBeforeRequest('https://doi.org/10.1/x');
+        diagnostics.markTimeout();
+        diagnostics.recordSourceAttempt('openalex_content', 'content.openalex.org', { message: 'Request timed out after 45000ms' });
+
+        expect(diagnostics.attempts()).toEqual([
+            { accessMethod: 'doi', host: 'doi.org', outcome: 'cancelled' },
+            { accessMethod: 'openalex_content', host: 'content.openalex.org', outcome: 'network_error' },
+        ]);
+        expect(diagnostics.failureReason({ resolverCount: 1, threw: true })).toBe('timeout');
     });
 });
