@@ -9,7 +9,7 @@ vi.mock('../../../src/utils/agentItemSupport', () => ({
 vi.mock('../../../src/utils/zoteroUtils', () => ({ safeIsInTrash: () => false }));
 vi.mock('../../../react/utils/sourceUtils', () => ({ getDisplayNameFromItem: () => 'Mock Item' }));
 
-import { computeActionGroups, getActiveTarget, type ActionContext } from '../../../react/utils/actionVisibility';
+import { computeActionGroups, primaryActionGroup, type ActionContext } from '../../../react/utils/actionVisibility';
 
 function unloadedDataError(): Error {
     const error = new Error("Item data not loaded and field 'title' not set for item 3/46GA3WJK");
@@ -57,7 +57,8 @@ describe('action group labels for items whose data is not loaded', () => {
         expect(groups.find(g => g.id === 'reader')?.label).toBe('Attachment');
     });
 
-    it('gives the active target a generic label instead of throwing', () => {
-        expect(getActiveTarget(context({}, [unloadedAttachment()]))?.label).toBe('Attachment');
+    it('gives the homepage context bar a generic label instead of throwing', () => {
+        const groups = computeActionGroups(ACTIONS, context({}, [unloadedAttachment()]));
+        expect(primaryActionGroup(groups)?.label).toBe('Attachment (attached)');
     });
 });

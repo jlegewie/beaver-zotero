@@ -14,7 +14,7 @@ import { getTransportConfigurationError, setTransportConfig } from '@beaver/agen
 import { setCredentialAdapter } from '@beaver/agent-core/transport/credentials';
 import { setSupabaseClientProvider } from '@beaver/agent-core/transport/supabaseClient';
 import { setThreadAgentName } from '@beaver/agent-core/transport/threadService';
-import type { ActionCategoryFilter } from '@beaver/agent-core/types/actions';
+import type { ActionsListFilter } from '@beaver/agent-core/types/actions';
 import { setActionClient } from '@beaver/agent-core/types/actions';
 import { Provider } from 'jotai';
 import React from 'react';
@@ -369,11 +369,11 @@ export function renderFloatingPopup(domElement: HTMLElement) {
  * Renders the PreferencesWindow into the separate preferences window.
  * Uses the shared Jotai store for consistent state.
  */
-export function renderPreferencesWindow(domElement: HTMLElement, initialTab?: PreferencePageTab | null, initialActionsCategoryFilter?: ActionCategoryFilter | null, initialActionId?: string | null) {
+export function renderPreferencesWindow(domElement: HTMLElement, initialTab?: PreferencePageTab | null, initialActionsFilter?: ActionsListFilter | null, initialActionId?: string | null) {
     return mountSurface(domElement, (
         <PreferencesWindow
             initialTab={initialTab ?? undefined}
-            initialActionsCategoryFilter={initialActionsCategoryFilter ?? undefined}
+            initialActionsFilter={initialActionsFilter ?? undefined}
             initialActionId={initialActionId ?? undefined}
         />
     ));

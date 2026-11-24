@@ -4,7 +4,7 @@ import { PopupMessage, PopupMessageType } from '../types/popupMessage';
 import { ExternalReference } from '@beaver/agent-core/types/externalReferences';
 import { getPref } from '../../src/utils/prefs';
 import { isUsingBeaverCreditsAtom } from './models';
-import type { ActionCategoryFilter } from '@beaver/agent-core/types/actions';
+import type { ActionsListFilter } from '@beaver/agent-core/types/actions';
 
 const isSidebarVisibleBaseAtom = atom(false);
 
@@ -76,16 +76,17 @@ export const activePreferencePageTabAtom = atom<PreferencePageTab>('general');
 export const isPreferencePageVisibleAtom = atom(false);
 
 /**
- * A one-shot request to set the Actions preferences category filter. A null
- * filter explicitly clears category filtering. `requestId` makes every request
- * distinct so re-requesting the same category still re-triggers the consumer's
- * effect. `ActionsPreferenceSection` applies it once, then resets this to null.
+ * A one-shot request to set the Actions preferences list filters. A null
+ * filter (or a missing dimension) explicitly clears that filtering. `requestId`
+ * makes every request distinct so re-requesting the same filter still
+ * re-triggers the consumer's effect. `ActionsPreferenceSection` applies it
+ * once, then resets this to null.
  */
-export interface ActionsCategoryFilterRequest {
-    filter: ActionCategoryFilter | null;
+export interface ActionsFilterRequest {
+    filter: ActionsListFilter | null;
     requestId: number;
 }
-export const pendingActionsCategoryFilterAtom = atom<ActionsCategoryFilterRequest | null>(null);
+export const pendingActionsFilterAtom = atom<ActionsFilterRequest | null>(null);
 
 /**
  * A one-shot request to reveal a specific action in the Actions preferences

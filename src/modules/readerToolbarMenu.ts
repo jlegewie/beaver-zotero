@@ -13,6 +13,7 @@ import { captureReaderActionLocation } from '../runtime/readerActionLocation';
 import { resolveChatWindow } from '../runtime/navigation';
 
 import { getMergedActions } from './zoteroContextMenu';
+import { resolveItemTargets } from '../services/actions/actionItemTargets';
 import {
     activeAgentPageViewSchema,
     disposeAllAgentPageViews,
@@ -239,13 +240,20 @@ function openBeaverMenu(reader: any, anchorButton: HTMLElement): void {
     });
     popup.appendChild(askItem);
 
-    // ---- Actions section (attachment actions, PDF and EPUB readers) ----
+    // ---- Actions section (PDF and EPUB readers) ----
+    // The open file follows the shared rule: file actions run on it, and item
+    // actions run on its parent paper (with the file attached too, as when an
+    // action is launched in the reader from the Beaver sidebar).
     const isPdf = reader.type === 'pdf';
     const isEpub = reader.type === 'epub';
-    const readerItemID: number | undefined = reader.itemID;
+    const readerItem = typeof reader.itemID === 'number'
+        ? Zotero.Items.get(reader.itemID) as Zotero.Item | false
+        : false;
 
-    if (isPdf || isEpub) {
-        const actions = getMergedActions().filter(a => a.targets.includes('attachment'));
+    if ((isPdf || isEpub) && readerItem) {
+        const actions = getMergedActions()
+            .map(action => ({ action, resolved: resolveItemTargets(action.targets, [readerItem]) }))
+            .filter(({ resolved }) => resolved.items.length > 0);
 
         if (actions.length > 0) {
             appendSeparator();
@@ -260,7 +268,10 @@ function openBeaverMenu(reader: any, anchorButton: HTMLElement): void {
             header.setAttribute('disabled', 'true');
             popup.appendChild(header);
 
-            for (const action of actions) {
+            for (const { action, resolved } of actions) {
+                const itemIds = resolved.targetType === 'items'
+                    ? [...resolved.items.map(item => item.id), readerItem.id]
+                    : resolved.items.map(item => item.id);
                 const menuitem = xulDoc.createXULElement('menuitem');
                 menuitem.setAttribute('label', action.title);
                 menuitem.classList.add('menuitem-iconic');
@@ -273,8 +284,8 @@ function openBeaverMenu(reader: any, anchorButton: HTMLElement): void {
                         detail: {
                             actionId: action.id,
                             actionTitle: action.title,
-                            targetType: 'attachment',
-                            itemIds: readerItemID ? [readerItemID] : [],
+                            targetType: resolved.targetType ?? 'attachment',
+                            itemIds,
                             collections: [],
                             views: [],
                         },
@@ -292,7 +303,7 @@ function openBeaverMenu(reader: any, anchorButton: HTMLElement): void {
     addItem.setAttribute('label', 'Add custom action\u2026');
     addItem.addEventListener('command', () => {
         void resolveChatWindow(reader._window).then(mainWin =>
-            openPreferencesWindow('actions', undefined, undefined, mainWin)).catch(Zotero.logError);
+            openPreferencesWindow('actions', { appliesTo: 'items' }, undefined, mainWin)).catch(Zotero.logError);
     });
     popup.appendChild(addItem);
 

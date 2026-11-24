@@ -1,21 +1,21 @@
 import React, { useEffect, useRef } from 'react';
 import { useSetAtom } from 'jotai';
-import { isPreferencePageVisibleAtom, activePreferencePageTabAtom, pendingActionsCategoryFilterAtom, pendingActionEditRequestAtom, PreferencePageTab } from '../atoms/ui';
+import { isPreferencePageVisibleAtom, activePreferencePageTabAtom, pendingActionsFilterAtom, pendingActionEditRequestAtom, PreferencePageTab } from '../atoms/ui';
 import { prefWindowFocusRefreshAtom } from '../atoms/profile';
-import type { ActionCategoryFilter } from '@beaver/agent-core/types/actions';
+import type { ActionsListFilter } from '@beaver/agent-core/types/actions';
 import PreferencePage from './preferences/PreferencePage';
 import DialogContainer from './dialog/DialogContainer';
 
 interface PreferencesWindowProps {
     initialTab?: PreferencePageTab | null;
-    initialActionsCategoryFilter?: ActionCategoryFilter | null;
+    initialActionsFilter?: ActionsListFilter | null;
     initialActionId?: string | null;
 }
 
-const PreferencesWindow: React.FC<PreferencesWindowProps> = ({ initialTab, initialActionsCategoryFilter, initialActionId }) => {
+const PreferencesWindow: React.FC<PreferencesWindowProps> = ({ initialTab, initialActionsFilter, initialActionId }) => {
     const setPreferencePageVisible = useSetAtom(isPreferencePageVisibleAtom);
     const setActiveTab = useSetAtom(activePreferencePageTabAtom);
-    const setPendingActionsCategoryFilter = useSetAtom(pendingActionsCategoryFilterAtom);
+    const setPendingActionsFilter = useSetAtom(pendingActionsFilterAtom);
     const setPendingActionEditRequest = useSetAtom(pendingActionEditRequestAtom);
     const setPrefWindowFocusRefresh = useSetAtom(prefWindowFocusRefreshAtom);
     const containerRef = useRef<HTMLDivElement>(null);
@@ -26,23 +26,22 @@ const PreferencesWindow: React.FC<PreferencesWindowProps> = ({ initialTab, initi
 
         // Set the initial tab, defaulting to 'general' for generic opens
         setActiveTab(initialTab || 'general');
-        // `!= null` so the uncategorized filter (`""`) is not dropped as falsy.
-        if (initialActionsCategoryFilter != null) {
-            setPendingActionsCategoryFilter({ filter: initialActionsCategoryFilter, requestId: Date.now() });
+        if (initialActionsFilter) {
+            setPendingActionsFilter({ filter: initialActionsFilter, requestId: Date.now() });
         }
         if (initialActionId) {
             setPendingActionEditRequest({ actionId: initialActionId, requestId: Date.now() });
         }
 
-        // Register global function so BeaverUIFactory can switch tabs (and request an
-        // actions category filter or an action-edit reveal) on an already-open window
-        (Zotero as any).__beaverOpenPreferencesTab = (tab: PreferencePageTab, actionsCategoryFilter?: ActionCategoryFilter, actionId?: string) => {
+        // Register global function so BeaverUIFactory can switch tabs (and request
+        // actions list filters or an action-edit reveal) on an already-open window
+        (Zotero as any).__beaverOpenPreferencesTab = (tab: PreferencePageTab, actionsFilter?: ActionsListFilter, actionId?: string) => {
             setActiveTab(tab);
             if (tab === 'actions') {
                 if (actionId) {
                     setPendingActionEditRequest({ actionId, requestId: Date.now() });
                 } else {
-                    setPendingActionsCategoryFilter({ filter: actionsCategoryFilter ?? null, requestId: Date.now() });
+                    setPendingActionsFilter({ filter: actionsFilter ?? null, requestId: Date.now() });
                 }
             }
         };

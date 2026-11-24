@@ -7,10 +7,12 @@
  *
  * An action declares the kinds of context it accepts via `targets` (a set of
  * target types). Visibility is an OR over the set: the action shows whenever
- * at least one eligible item of an accepted kind is in context. At invocation
- * a single *resolved* target type is chosen by the entry point (slash-menu
- * group, context menu, launcher) and carried on the pill / wire — the list
- * exists only at the declaration layer.
+ * at least one eligible item of an accepted kind is in context, where a paper
+ * and its file stand in for each other. Only `targets` decides where an action
+ * appears; `category` sets its icon. At invocation a single *resolved* target
+ * type is chosen by the entry point (context bar, slash-menu group, context
+ * menu) and carried on the pill / wire — the list exists only at the
+ * declaration layer.
  *
  * Stored data may still use the legacy single `targetType` field; readers
  * normalize via `normalizeStoredAction` / `normalizeStoredOverride` and
@@ -72,8 +74,9 @@ export const KNOWN_ACTION_CATEGORIES = ["research", "write", "organize", "annota
 export type KnownActionCategory = (typeof KNOWN_ACTION_CATEGORIES)[number];
 
 /**
- * Skill category for the homepage launcher. Orthogonal to `targets`:
- * `targets` is what an action binds to; `category` is what kind of work it is.
+ * What kind of work an action is. Sets its icon everywhere and, for actions
+ * that work anywhere, the homepage category list it is in. Never affects
+ * where an action appears: that is `targets` alone.
  *
  * Open vocabulary: any non-empty string is legal. Unknown values are stored
  * and rendered with a generic label/icon — rejecting them would drop the
@@ -108,7 +111,7 @@ export interface Action {
     targets: ActionTargetType[];
     /** Clients this action supports. Absent → runs in any client. */
     client?: ActionClient[];
-    category?: ActionCategory;     // Skill grouping for the homepage launcher (independent of targets)
+    category?: ActionCategory;     // Icon and homepage category list; never affects where the action appears
     argumentHint?: string;         // Hint shown during autocomplete to indicate expected arguments
     sortOrder?: number;            // Lower = higher in list
     deprecated?: boolean;          // For phasing out built-ins
@@ -154,26 +157,6 @@ export interface ActionCustomizations {
 /** Map of action id → ISO timestamp, stored in `beaver.actionsLastUsed`. */
 export type ActionLastUsedMap = Record<string, string>;
 
-// ---------------------------------------------------------------------------
-// Labels & descriptions for target types
-// ---------------------------------------------------------------------------
-
-export const TARGET_TYPE_LABELS: Record<ActionTargetType, string> = {
-    items: "Items",
-    attachment: "Attachment",
-    note: "Note",
-    collection: "Collection",
-    global: "Anywhere",
-};
-
-export const TARGET_TYPE_DESCRIPTIONS: Record<ActionTargetType, string> = {
-    global: "Works anywhere, no context needed",
-    items: "Works with library items",
-    attachment: "Works with PDF, EPUB, and snapshot attachments",
-    note: "Works with Zotero notes",
-    collection: "Works with collections",
-};
-
 /** Labels for known categories. Not exhaustive — use {@link categoryLabel}. */
 export const CATEGORY_LABELS: Record<string, string | undefined> = {
     research: "Research",
@@ -207,44 +190,102 @@ export const categoryLabel = (category: ActionCategory | undefined): string => {
     return CATEGORY_LABEL_LOOKUP.get(category) ?? titleCaseCategory(category);
 };
 
-// ---------------------------------------------------------------------------
-// Target presets — the curated target sets offered in the preferences UI.
-// The data model supports arbitrary sets; the picker only offers these.
-// ---------------------------------------------------------------------------
-
-export interface TargetPreset {
-    id: string;
-    label: string;
-    description: string;
-    targets: ActionTargetType[];
-}
-
-export const TARGET_PRESETS: TargetPreset[] = [
-    { id: "global", label: "Anywhere", description: "Works anywhere, no context needed", targets: ["global"] },
-    { id: "items", label: "Item", description: "Works with library items", targets: ["items"] },
-    { id: "attachment", label: "Attachment", description: "Works with PDF, EPUB, and snapshot attachments", targets: ["attachment"] },
-    { id: "items-attachment", label: "Item or attachment", description: "Works with library items and file attachments", targets: ["items", "attachment"] },
-    { id: "note", label: "Note", description: "Works with Zotero notes", targets: ["note"] },
-    { id: "collection", label: "Collection", description: "Works with collections", targets: ["collection"] },
-];
-
 /** Order-insensitive equality of two target sets. */
 export const sameTargets = (a: ActionTargetType[], b: ActionTargetType[]): boolean =>
     a.length === b.length && a.every(t => b.includes(t));
 
-/** The preset matching a target set (order-insensitive), if any. */
-export const findTargetPreset = (targets: ActionTargetType[]): TargetPreset | undefined =>
-    TARGET_PRESETS.find(p => sameTargets(p.targets, targets));
+// ---------------------------------------------------------------------------
+// "Applies to" — how the Actions preferences present an action's targets.
+//
+// When an action runs, a paper and its file stand in for each other, so the
+// editor offers one "Items" choice for `items` and `attachment`, with a "needs
+// the file" switch for actions that accept only attachments. Stored targets
+// keep their exact shape until the user changes the choice.
+// ---------------------------------------------------------------------------
 
-/** Display label for a target set: the preset label, or the joined kind labels
- *  for a custom (hand-edited) set. */
-export const targetsLabel = (targets: ActionTargetType[]): string =>
-    findTargetPreset(targets)?.label ?? targets.map(t => TARGET_TYPE_LABELS[t]).join(" or ");
+export interface AppliesTo {
+    items: boolean;
+    /** Items only through a file (`attachment` without `items`). */
+    needsFile: boolean;
+    notes: boolean;
+    collections: boolean;
+    /** Runs with nothing selected (`global`). */
+    anywhere: boolean;
+}
 
-/** Description for a target set: the preset description, or the primary
- *  kind's description for a custom set. */
-export const targetsDescription = (targets: ActionTargetType[]): string =>
-    findTargetPreset(targets)?.description ?? TARGET_TYPE_DESCRIPTIONS[targets[0]];
+export function appliesToFromTargets(targets: readonly ActionTargetType[]): AppliesTo {
+    const acceptsItems = targets.includes('items');
+    const acceptsFiles = targets.includes('attachment');
+    return {
+        items: acceptsItems || acceptsFiles,
+        needsFile: acceptsFiles && !acceptsItems,
+        notes: targets.includes('note'),
+        collections: targets.includes('collection'),
+        anywhere: targets.includes('global'),
+    };
+}
+
+/**
+ * Stored targets for an "Applies to" choice. An items choice keeps the item
+ * shape of `previous` (`['items']` stays item-level); new ones accept both the
+ * paper and its file. A choice with nothing checked works anywhere.
+ */
+export function targetsFromAppliesTo(choice: AppliesTo, previous: readonly ActionTargetType[] = []): ActionTargetType[] {
+    const targets: ActionTargetType[] = [];
+    if (choice.items) {
+        if (choice.needsFile) targets.push('attachment');
+        else if (previous.includes('items') && !previous.includes('attachment')) targets.push('items');
+        else targets.push('items', 'attachment');
+    }
+    if (choice.notes) targets.push('note');
+    if (choice.collections) targets.push('collection');
+    if (choice.anywhere || targets.length === 0) targets.push('global');
+    return targets;
+}
+
+/** Short label for an action's targets, e.g. "Items or collections". */
+export function appliesToLabel(targets: readonly ActionTargetType[]): string {
+    const choice = appliesToFromTargets(targets);
+    const parts: string[] = [];
+    if (choice.items) parts.push(choice.needsFile ? 'Item files' : 'Items');
+    if (choice.notes) parts.push('Notes');
+    if (choice.collections) parts.push('Collections');
+    if (choice.anywhere) parts.push('Anywhere');
+    const [first, ...rest] = parts.map((part, i) => (i === 0 ? part : part.toLowerCase()));
+    if (rest.length === 0) return first ?? 'Anywhere';
+    return `${[first, ...rest.slice(0, -1)].join(', ')} or ${rest[rest.length - 1]}`;
+}
+
+/** "Applies to" values the Actions preferences list can filter by. */
+export type AppliesToFilter = 'items' | 'note' | 'collection' | 'global';
+
+export const APPLIES_TO_FILTER_LABELS: Record<AppliesToFilter, string> = {
+    items: 'Items',
+    note: 'Notes',
+    collection: 'Collections',
+    global: 'Anywhere',
+};
+
+/** Whether an action shows under an "Applies to" filter. Items covers files. */
+export const matchesAppliesToFilter = (targets: readonly ActionTargetType[], filter: AppliesToFilter): boolean =>
+    filter === 'items' ? appliesToFromTargets(targets).items : targets.includes(filter);
+
+/** Targets for a new action created under an "Applies to" filter. */
+export const targetsForAppliesToFilter = (filter: AppliesToFilter): ActionTargetType[] =>
+    targetsFromAppliesTo({
+        items: filter === 'items',
+        needsFile: false,
+        notes: filter === 'note',
+        collections: filter === 'collection',
+        anywhere: filter === 'global',
+    });
+
+/** A request to pre-filter the Actions preferences list (and so the defaults
+ *  of an action added there). */
+export interface ActionsListFilter {
+    category?: ActionCategoryFilter;
+    appliesTo?: AppliesToFilter;
+}
 
 // ---------------------------------------------------------------------------
 // Validators & normalization

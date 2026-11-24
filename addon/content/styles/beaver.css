@@ -3524,6 +3524,63 @@
     background-color: var(--fill-quarternary);
 }
 
+/* Homepage project / context bar, tucked under the composer card: the card
+ * overlaps the bar's top so the two read as one unit. The bar keeps its height
+ * whether or not the context side is shown, so nothing below it moves when
+ * the Zotero selection changes. */
+[id^="beaver-pane-"] .home-composer .user-message-display {
+    z-index: 1;
+}
+
+[id^="beaver-pane-"] .home-context-bar {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    min-height: 22px;
+    margin: -10px 12px 0;
+    padding: 13px 4px 3px;
+    border-radius: 0 0 var(--beaver-radius-card) var(--beaver-radius-card);
+    background-color: var(--fill-quinary);
+}
+
+[id^="beaver-pane-"] button.home-context-bar__chip {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+    padding: 2px 5px;
+    border-radius: 5px;
+    font-size: 0.95rem;
+    color: var(--fill-secondary);
+}
+
+[id^="beaver-pane-"] .home-context-bar__project {
+    flex-shrink: 0;
+    max-width: 45%;
+}
+
+/* The context side sits at the far end and gives way (truncates) first. A
+ * wrapper, because the chip's tooltip wraps the button in its own element. */
+[id^="beaver-pane-"] .home-context-bar__selection {
+    display: flex;
+    justify-content: flex-end;
+    min-width: 0;
+    margin-left: auto;
+}
+
+/* The chip's tooltip wrapper sits between the flex container and the button;
+ * both must be allowed to shrink for the label to truncate. */
+[id^="beaver-pane-"] .home-context-bar__selection > *,
+[id^="beaver-pane-"] .home-context-bar__selection button.home-context-bar__chip {
+    min-width: 0;
+    max-width: 100%;
+}
+
+[id^="beaver-pane-"] .home-context-bar__caret {
+    opacity: 0.6;
+}
+
 [id^="beaver-pane-"] .card {
     border: 1px solid var(--fill-quinary);
     border-radius: 4px;

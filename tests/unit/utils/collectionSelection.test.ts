@@ -14,12 +14,18 @@ vi.mock('../../../react/utils/sourceUtils', () => ({ getDisplayNameFromItem: () 
 
 import {
     collectionTargetSelection,
-    getActiveTarget,
-    isActionVisible,
     computeActionGroups,
-    resolveActionBinding,
+    primaryActionGroup,
+    bindingForAction,
     ActionContext,
 } from '../../../react/utils/actionVisibility';
+
+/** Whether any group offers the action in this context. */
+const isActionVisible = (a: Action, c: ActionContext): boolean =>
+    computeActionGroups([a], c).some(g => g.actions.includes(a));
+
+/** The context the homepage bar acts on for a collection action. */
+const activeGroup = (c: ActionContext) => primaryActionGroup(computeActionGroups([COLLECTION_ACTION], c));
 
 const collection = (id: number, name: string, libraryId = 1): SelectedCollectionInfo => ({
     collectionId: id,
@@ -159,46 +165,46 @@ describe('collection target visibility', () => {
     });
 });
 
-describe('getActiveTarget — collection labels', () => {
+describe('primary action group — collection labels', () => {
     it('names the collection when exactly one is selected', () => {
-        const active = getActiveTarget(ctx(libraryView([collection(1, 'Methods')])));
-        expect(active).toMatchObject({ targetType: 'collection', label: 'Methods' });
+        const active = activeGroup(ctx(libraryView([collection(1, 'Methods')])));
+        expect(active).toMatchObject({ id: 'collection', label: 'Methods' });
     });
 
     it('counts them when several are selected', () => {
-        const active = getActiveTarget(ctx(libraryView([
+        const active = activeGroup(ctx(libraryView([
             collection(1, 'Methods'), collection(2, 'Theory'),
         ])));
-        expect(active).toMatchObject({ targetType: 'collection', label: '2 collections selected' });
+        expect(active).toMatchObject({ id: 'collection', label: '2 collections selected' });
     });
 
     it('names a selected special view and uses its icon', () => {
-        const active = getActiveTarget(ctx(viewSelection([view('unfiled', 'Unfiled Items')])));
-        expect(active).toEqual({
-            targetType: 'collection',
+        const active = activeGroup(ctx(viewSelection([view('unfiled', 'Unfiled Items')])));
+        expect(active).toMatchObject({
+            id: 'collection',
             label: 'Unfiled Items',
             iconInfo: { type: 'css-icon', name: 'unfiled' },
         });
     });
 
     it('names a selected saved search', () => {
-        const active = getActiveTarget(ctx(viewSelection([view('search', 'To read')])));
-        expect(active).toMatchObject({ targetType: 'collection', label: 'To read', iconInfo: { name: 'search' } });
+        const active = activeGroup(ctx(viewSelection([view('search', 'To read')])));
+        expect(active).toMatchObject({ id: 'collection', label: 'To read', iconInfo: { name: 'search' } });
     });
 
     it('counts collections and views selected together', () => {
-        const active = getActiveTarget(ctx(
+        const active = activeGroup(ctx(
             libraryView([collection(1, 'Methods')], 2, 'collection', [view('unfiled', 'Unfiled Items')]),
         ));
         expect(active).toMatchObject({
-            targetType: 'collection',
+            id: 'collection',
             label: '2 views selected',
             iconInfo: { name: 'collection' },
         });
     });
 
     it('reports no collection target for a mixed selection', () => {
-        const active = getActiveTarget(ctx(libraryView([collection(1, 'Methods')], 2)));
+        const active = activeGroup(ctx(libraryView([collection(1, 'Methods')], 2)));
         expect(active).toBeNull();
     });
 });
@@ -210,7 +216,8 @@ describe('computeActionGroups — collection group', () => {
             ctx(libraryView([collection(1, 'Methods'), collection(2, 'Theory'), collection(3, 'Data')])),
         );
         const group = groups.find(g => g.id === 'collection');
-        expect(group).toMatchObject({ label: '3 collections selected', targetType: 'collection' });
+        expect(group).toMatchObject({ label: '3 collections selected' });
+        expect(group?.bind(COLLECTION_ACTION)).toEqual({ targetType: 'collection' });
     });
 
     it('offers collection actions under a special view', () => {
@@ -220,7 +227,6 @@ describe('computeActionGroups — collection group', () => {
         );
         expect(groups.find(g => g.id === 'collection')).toMatchObject({
             label: 'Unfiled Items',
-            targetType: 'collection',
             actions: [COLLECTION_ACTION],
         });
     });
@@ -274,8 +280,9 @@ describe('actions that accept a selection or no context', () => {
     });
 
     it('binds to the selected collection, and to no context without one', () => {
-        const selected = getActiveTarget(ctx(libraryView([collection(1, 'Methods')])));
-        expect(resolveActionBinding(TABLE_ACTION, selected)).toBe('collection');
-        expect(resolveActionBinding(TABLE_ACTION, null)).toBe('global');
+        const selected = computeActionGroups([TABLE_ACTION], ctx(libraryView([collection(1, 'Methods')])));
+        expect(bindingForAction(TABLE_ACTION, selected)).toEqual({ targetType: 'collection' });
+        const nothing = computeActionGroups([TABLE_ACTION], ctx(libraryView([], 1, 'library')));
+        expect(bindingForAction(TABLE_ACTION, nothing)).toEqual({ targetType: 'global' });
     });
 });

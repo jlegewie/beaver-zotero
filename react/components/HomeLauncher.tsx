@@ -44,12 +44,11 @@ const CATEGORIES: CategoryDef[] = [
 ];
 
 /**
- * HomePage launcher shown under the input area. Category is a partition: each
- * action lives in exactly one skill bucket (Research / Write / Organize /
- * Annotate). Actions with no category are not surfaced here — they stay
- * available from the slash menu. Changing the Zotero selection updates the
- * actions listed inside the open panel (via CategoryPanel), but never switches
- * the tab.
+ * HomePage launcher shown under the input area. Each button lists its
+ * category's actions that work anywhere (via CategoryPanel), so the lists
+ * never change with the Zotero selection; actions for the selection live in
+ * the context bar under the composer. Uncategorized actions are not listed
+ * here — they stay available from the context bar and the slash menu.
  */
 const HomeLauncher: React.FC<{ style?: React.CSSProperties }> = ({ style }) => {
     // Only the user changes this while the UI is mounted. `null` = collapsed.
@@ -57,7 +56,7 @@ const HomeLauncher: React.FC<{ style?: React.CSSProperties }> = ({ style }) => {
     const [expanded, setExpanded] = useAtom(homeLauncherCategoryAtom);
 
     const toggle = (id: CategoryId) => setExpanded((prev) => (prev === id ? null : id));
-    const activeCategory = CATEGORIES.find((c) => c.id === expanded)?.category ?? null;
+    const activeCategory = CATEGORIES.find((c) => c.id === expanded)?.category;
 
     return (
         <div className="display-flex flex-col gap-4 py-1" style={style}>
@@ -94,7 +93,7 @@ const HomeLauncher: React.FC<{ style?: React.CSSProperties }> = ({ style }) => {
             </div>
 
             {/* Expanded panel for the active bucket */}
-            {expanded !== null && <CategoryPanel category={activeCategory} />}
+            {activeCategory && <CategoryPanel category={activeCategory} />}
         </div>
     );
 };

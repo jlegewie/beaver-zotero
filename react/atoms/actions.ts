@@ -17,7 +17,7 @@ import {
     isLockedBuiltinAction,
 } from '../types/actionStorage';
 import { zoteroContextAtom } from './zoteroContext';
-import { isActionVisible, ActionContext } from '../utils/actionVisibility';
+import { computeActionGroups, ActionContext, ActionGroup } from '../utils/actionVisibility';
 import {
     resolvePromptVariables,
     resolveTargetContext,
@@ -317,14 +317,11 @@ export const actionContextAtom = atom<ActionContext>((get) => {
 });
 
 // ---------------------------------------------------------------------------
-// Derived: context-filtered actions
+// Derived: the actions that apply right now, grouped by what they act on
 // ---------------------------------------------------------------------------
 
-export const actionsForContextAtom = atom<Action[]>((get) => {
-    const actions = get(actionsAtom);
-    const ctx = get(actionContextAtom);
-    return actions.filter(a => isActionVisible(a, ctx));
-});
+export const actionGroupsAtom = atom<ActionGroup[]>((get) =>
+    computeActionGroups(get(actionsAtom), get(actionContextAtom)));
 
 // ---------------------------------------------------------------------------
 // Bind an action to its targets the moment the user picks it.

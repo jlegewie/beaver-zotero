@@ -3,37 +3,36 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import { isStreamingAtom } from '@beaver/agent-core/run-state/atoms';
 import { isWSChatPendingAtom } from '../atoms/agentRunAtoms';
 import { Action } from '@beaver/agent-core/types/actions';
-import { stageActionPillAtom, actionContextAtom } from '../atoms/actions';
-import { getActiveTarget, resolveActionBinding } from '../utils/actionVisibility';
+import { stageActionPillAtom } from '../atoms/actions';
+import type { ActionBinding } from '../utils/actionVisibility';
 
 /**
- * Shared handler for running an action from a launcher surface (the contextual
- * Actions panel and the category skill panels).
+ * Shared handler for running an action from a homepage surface (the context
+ * bar menu and the category lists).
  *
- * Selecting an action stages a /command pill in the chat input; the user adds
- * any extra context and submits themselves. The action's prompt is resolved at
- * send time. The pill carries the single resolved target type — the active
- * context target when the action accepts it (see `resolveActionBinding`).
- * `isBusy` is true while a run is streaming or pending.
+ * Selecting an action stages a /command pill in the chat input and attaches
+ * what the binding resolves to; the user adds any extra context and submits
+ * themselves. The action's prompt is resolved at send time. `isBusy` is true
+ * while a run is streaming or pending.
  */
 export function useActionRunner() {
     const isStreaming = useAtomValue(isStreamingAtom);
     const isPending = useAtomValue(isWSChatPendingAtom);
-    const ctx = useAtomValue(actionContextAtom);
     const stageActionPill = useSetAtom(stageActionPillAtom);
 
     const isBusy = isPending || isStreaming;
 
     // `sourceWindow` identifies the surface the user clicked in (main-window
     // sidebar vs separate Beaver window) so the pill lands in that editor.
-    const runAction = useCallback((action: Action, sourceWindow?: Window | null) => {
+    const runAction = useCallback((action: Action, binding: ActionBinding, sourceWindow?: Window | null) => {
         if (isBusy || action.text.length === 0) return;
         stageActionPill({
             actionId: action.id,
-            targetType: resolveActionBinding(action, getActiveTarget(ctx)),
+            targetType: binding.targetType,
+            contextOverride: binding.items ? { items: binding.items, collections: [] } : undefined,
             targetWindow: sourceWindow ?? undefined,
         });
-    }, [isBusy, ctx, stageActionPill]);
+    }, [isBusy, stageActionPill]);
 
     return { runAction, isBusy };
 }

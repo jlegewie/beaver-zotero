@@ -3,6 +3,7 @@ import { useAtomValue } from 'jotai';
 import { allLibrariesExcludedAtom } from "../../atoms/profile";
 import RecentChats from "../RecentChats";
 import HomeLauncher from "../HomeLauncher";
+import HomeContextBar from "../HomeContextBar";
 import InputArea from "../input/InputArea";
 import DragDropWrapper from "../input/DragDropWrapper";
 import PopupOverlayContainer from "../PopupOverlayContainer";
@@ -55,10 +56,13 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false, inputRef }) => {
                     {/* Greeting */}
                     <div className="text-2xl font-semibold text-center p-2">How can I help you?</div>
 
-                    {/* Input area */}
-                    <DragDropWrapper>
-                        <InputArea inputRef={inputRef} verticalPosition="below" />
-                    </DragDropWrapper>
+                    {/* Input area, with the project / context bar tucked under it */}
+                    <div className="home-composer display-flex flex-col">
+                        <DragDropWrapper>
+                            <InputArea inputRef={inputRef} verticalPosition="below" />
+                        </DragDropWrapper>
+                        <HomeContextBar />
+                    </div>
 
                     {/* Action launcher — category row + expandable panels */}
                     {allLibrariesExcluded ? (
