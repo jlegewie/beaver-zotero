@@ -5,7 +5,10 @@ import { itemTypeToIconName, ContentKind } from '@beaver/agent-core/types/citati
 import {
     ItemListView,
     ItemRowView,
+    WebPageRowView,
+    isAnnotationRow,
     isItemRow,
+    isWebPageRow,
 } from '@beaver/agent-core/run-state/toolResultViews';
 import { getHost } from '@beaver/agent-ui/host';
 import { useItemContextMenu } from '@beaver/agent-ui/chat/useItemContextMenu';
@@ -13,7 +16,7 @@ import { EXTERNAL_LIBRARY_ID } from '../../../../src/services/externalFiles';
 import { AnnotationResultRow } from './AnnotationResultRow';
 
 /**
- * Shared renderer for hydrated item and annotation rows.
+ * Shared renderer for hydrated item, annotation and web page rows.
  *
  * Each item row pairs its item-type icon (in a rounded tile) with a two-line
  * title/subtitle block; clicking reveals the item in the host library and
@@ -177,6 +180,37 @@ const ItemRow: React.FC<{
     );
 };
 
+/** A web page the tool read: its title and site; the click opens the page in the browser. */
+const WebPageRow: React.FC<{ row: WebPageRowView } & RowEventProps> = ({ row, isHovered, onMouseEnter, onMouseLeave }) => {
+    const url = row.url;
+    return (
+        <div
+            className={`display-flex flex-row items-start gap-25 p-2 transition-colors ${url ? 'cursor-pointer' : ''} ${isHovered ? 'bg-quinary' : ''} ${row.status === 'error' ? 'opacity-50' : ''}`}
+            onClick={url ? () => getHost().navigation?.openExternalUrl(url) : undefined}
+            onMouseEnter={onMouseEnter}
+            onMouseLeave={onMouseLeave}
+            title={url}
+        >
+            <div className="display-flex items-center justify-center flex-shrink-0 rounded-md ml-05 mt-010">
+                <CSSItemTypeIcon itemType="webpage" className="scale-90" />
+            </div>
+            <div className="display-flex flex-col flex-1 gap-05 min-w-0 font-color-primary">
+                <div className="truncate font-color-primary" style={{ fontSize: '0.925rem' }}>
+                    {row.display_name}
+                </div>
+                {row.site && row.site !== row.display_name && (
+                    <div className="truncate text-sm font-color-secondary">{row.site}</div>
+                )}
+            </div>
+        </div>
+    );
+};
+
+/** A stable key for a row: its library object, or its web page. */
+function rowKey(row: ItemListView['items'][number], index: number): string {
+    return isWebPageRow(row) ? `${row.kind}-${row.web_id}-${index}` : `${row.kind}-${row.library_id}-${row.zotero_key}-${index}`;
+}
+
 export const ItemListResultView: React.FC<{ view: ItemListView; rowAction?: ItemRowAction }> = ({ view, rowAction }) => {
     const [hoveredKey, setHoveredKey] = useState<string | null>(null);
     const { openItemMenu, itemMenu } = useItemContextMenu();
@@ -192,7 +226,7 @@ export const ItemListResultView: React.FC<{ view: ItemListView; rowAction?: Item
     return (
         <div className="display-flex flex-col min-w-0">
             {view.items.map((row, index) => {
-                const key = `${row.kind}-${row.library_id}-${row.zotero_key}-${index}`;
+                const key = rowKey(row, index);
                 const rowEvents: RowEventProps = {
                     isHovered: hoveredKey === key,
                     onMouseEnter: () => setHoveredKey(key),
@@ -209,14 +243,16 @@ export const ItemListResultView: React.FC<{ view: ItemListView; rowAction?: Item
                                 onContextMenu={row.library_id === EXTERNAL_LIBRARY_ID ? undefined : (event) => openItemMenu(row, event)}
                                 {...rowEvents}
                             />
-                        ) : (
+                        ) : isAnnotationRow(row) ? (
                             <AnnotationResultRow
                                 row={row}
                                 variant="with-parent"
                                 onContextMenu={(event) => openItemMenu(row, event)}
                                 {...rowEvents}
                             />
-                        )}
+                        ) : isWebPageRow(row) ? (
+                            <WebPageRow row={row} {...rowEvents} />
+                        ) : null}
                     </div>
                 );
             })}

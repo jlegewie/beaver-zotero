@@ -72,6 +72,8 @@ const SNAPSHOT_BUDGET_MS = 60_000;
 const MODEL_METADATA_LINE = 'Beaver Metadata: written by Beaver from the conversation';
 /** A record with no identifier or URL to look up (e.g. a trial registration) is its own metadata. */
 const RECORD_METADATA_LINE = 'Beaver Metadata: search-result metadata';
+/** A PDF link the user gave, not identified: an item named after the file. */
+const FILE_NAME_METADATA_LINE = 'Beaver Metadata: named after the file';
 const FALLBACK_REASON: Record<FallbackLookup, string> = {
     identifier: 'identifier lookup failed',
     page: 'page could not be loaded',
@@ -80,10 +82,11 @@ const FALLBACK_REASON: Record<FallbackLookup, string> = {
 };
 
 /** The Extra line naming where unchecked metadata came from, or undefined for checked metadata. */
-function metadataSourceLine(method: string | undefined, lookup: FallbackLookup | null): string | undefined {
+function metadataSourceLine(method: string | undefined, lookup: FallbackLookup | null, fromLink: boolean): string | undefined {
     if (method === 'model_metadata') return MODEL_METADATA_LINE;
     if (method !== 'fallback_metadata') return undefined;
-    return lookup ? `${RECORD_METADATA_LINE} (${FALLBACK_REASON[lookup]})` : RECORD_METADATA_LINE;
+    const line = fromLink ? FILE_NAME_METADATA_LINE : RECORD_METADATA_LINE;
+    return lookup ? `${line} (${FALLBACK_REASON[lookup]})` : line;
 }
 
 function track<T>(timing: TimingAccumulator | undefined, name: string, fn: () => Promise<T>): Promise<T> {
@@ -533,7 +536,7 @@ export async function writeImportItem(data: ImportItemProposedData, options: Wri
             : lookupUrl || source?.kind === 'url'
                 ? (lookupUrl && urlNamesPdf(lookupUrl) ? 'pdf' : 'page')
                 : null);
-    const sourceLine = metadataSourceLine(method, lookup);
+    const sourceLine = metadataSourceLine(method, lookup, source?.kind === 'url');
     toSave.extra = withProvenanceLines(typeof json.extra === 'string' ? json.extra : '', sourceLine);
 
     const item = await track(options.timing, 'save_ms', () => saveItemJson(toSave, libraryID, collectionIDs, data.tags, options.timing));
@@ -572,16 +575,24 @@ export async function writeImportItem(data: ImportItemProposedData, options: Wri
             return resultFor(item, collections, 'pending');
         }
         if (recordFiles) return resultFor(item, collections, 'none');
+        // A PDF-link import fetches only under the guard, and always tries its
+        // own link (the backend can filter it out as a candidate).
+        const guardedOnly = isPdfLinkImport(plan, method, warnings, pdfCandidates);
+        const link = plan.pending_resolution?.url || plan.source?.url;
+        const candidates = guardedOnly && link
+            // First, so a page_url entry for the same address cannot replace it in the merge.
+            ? mergePdfCandidates([{ url: link, access_method: 'web' }], pdfCandidates)
+            : pdfCandidates;
         // Zotero's own resolvers work from a DOI or URL; with neither and no
         // candidates there is nowhere to look.
-        const hasPdfSource = (pdfCandidates?.length ?? 0) > 0
+        const hasPdfSource = (candidates?.length ?? 0) > 0
             || (typeof json.DOI === 'string' && !!json.DOI.trim())
             || (typeof json.url === 'string' && !!json.url.trim())
             || /(^|\n)\s*DOI:/i.test(typeof json.extra === 'string' ? json.extra : '');
         if (!WEB_CONTENT_ITEM_TYPES.has(json.itemType) && filesEditable && hasPdfSource) {
             schedulePdfFetchTask(libraryID, item.key, {
-                pdfCandidates,
-                guardedOnly: isPdfLinkImport(plan, method, warnings, pdfCandidates),
+                pdfCandidates: candidates,
+                guardedOnly,
                 actionId: options.actionId,
                 runId: options.runId,
                 threadId: options.threadId ?? undefined,

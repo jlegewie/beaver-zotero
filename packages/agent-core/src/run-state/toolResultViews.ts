@@ -105,7 +105,25 @@ export interface AnnotationRowView {
  * get_metadata that can reference an annotation) an annotation. Discriminated
  * by `kind`.
  */
-export type ItemListRow = ItemRowView | AnnotationRowView;
+/**
+ * A web page row (a `web-` id the tool read, e.g. in `extract`). Self-contained:
+ * the click opens `url`; there is no library item to reveal.
+ */
+export interface WebPageRowView {
+    kind: "web_page";
+    /** The page's `web-` id. */
+    web_id: string;
+    /** The page's URL, opened on click. */
+    url?: string;
+    /** The page title, or its site when it has none. */
+    display_name: string;
+    /** The page's site, e.g. "who.int". */
+    site?: string;
+    /** "error" when the tool failed on this page; absent or "ok" otherwise. */
+    status?: "ok" | "error";
+}
+
+export type ItemListRow = ItemRowView | AnnotationRowView | WebPageRowView;
 
 export interface CollectionRowView {
     collection_id?: string;
@@ -540,6 +558,10 @@ export function isItemRow(row: ItemListRow): row is ItemRowView {
 
 export function isAnnotationRow(row: ItemListRow): row is AnnotationRowView {
     return row.kind === "annotation";
+}
+
+export function isWebPageRow(row: ItemListRow): row is WebPageRowView {
+    return row.kind === "web_page";
 }
 
 /**

@@ -49,7 +49,9 @@ function fallbackReason(data: ImportItemProposedData): string {
     const identifier = data.source?.identifier ?? data.pending_resolution?.identifier;
     const url = data.pending_resolution?.url ?? data.source?.url;
     const lookup = fallbackLookup(data.warnings) ?? (identifier || !url ? null : urlNamesPdf(url) ? 'pdf' : 'page');
-    return `${lookup ? FALLBACK_TOOLTIP[lookup] : 'Lookup failed'}; from the search result`;
+    // A link the user gave has no search result: its fallback is named after the file.
+    const origin = data.source?.kind === 'url' ? 'named after the file' : 'from the search result';
+    return `${lookup ? FALLBACK_TOOLTIP[lookup] : 'Lookup failed'}; ${origin}`;
 }
 
 const FALLBACK_TOOLTIP: Record<FallbackLookup, string> = {

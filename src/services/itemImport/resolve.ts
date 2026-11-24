@@ -46,7 +46,7 @@ import { translateIdentifier } from './resolveIdentifier';
 import { translateUrl, type UrlTranslation } from './resolveUrl';
 import { urlNamesPdf } from '@beaver/agent-core/identity/webPages';
 import { discardDownloadedFile } from '../pdfAttachmentFetch';
-import { downloadPdfLink, keepResolvedPdf, PDF_MIME } from './pdfLinkImport';
+import { downloadPdfLink, keepResolvedPdf, pdfFilename, PDF_MIME } from './pdfLinkImport';
 
 export interface ResolveOptions {
     libraryID: number;
@@ -98,7 +98,9 @@ function fallbackMethod(spec: ImportItemSpec): ResolutionMethod {
 }
 
 function fallbackNote(spec: ImportItemSpec): string {
-    return spec.fallback_source === 'model' ? 'using the given metadata' : "using the search result's metadata";
+    if (spec.fallback_source === 'model') return 'using the given metadata';
+    // A link the user gave has no search result: its fallback is named after the file.
+    return spec.source?.kind === 'url' ? 'named after the file' : "using the search result's metadata";
 }
 
 function text(value: unknown): string | undefined {
@@ -235,6 +237,10 @@ async function resolveOne(
         } else if (spec.fallback_item) {
             warnings.push(`${FALLBACK_WARNINGS.page} (${translation.message}); ${fallbackNote(spec)}`);
             resolution = normalized(spec.fallback_item, libraryID, fallbackMethod(spec), undefined, warnings);
+        } else if (located) {
+            // The link did not load, but the file given with it can name the work.
+            warnings.push(`${FALLBACK_WARNINGS.page} (${translation.message}); identified from the attached file`);
+            resolution = await resolveFromFile(spec, located, libraryID, itemBudget(PER_ITEM_MS.file), warnings);
         } else {
             return failed(spec.key, translation.code, translation.message, { file: fileRef });
         }
@@ -319,22 +325,35 @@ async function resolveFromPdfLink(
     } else {
         failure = `${FALLBACK_WARNINGS.pdf_download} (${download.message})`;
     }
-    if (!spec.fallback_item) {
+    // The link is a PDF: downloaded, or named one by its path (the page was
+    // not loaded) and failing for a reason that may pass. A link that only
+    // failed to load as a page is no evidence of a PDF (a page fails the same way).
+    const isPdf = download.ok
+        || (pageFailure === null && !['url_not_allowed', 'too_large', 'not_pdf', 'not_found'].includes(download.code));
+    // A link the user gave has no search result: a PDF is named after its file.
+    const fallbackItem = spec.fallback_item
+        ?? (isPdf && spec.source?.kind === 'url' ? fileNamedReport(url, download.ok ? download.filename : null) : undefined);
+    if (!fallbackItem) {
         const message = download.ok ? `Zotero could not identify ${download.filename}.` : pageFailure ?? download.message;
         return { error: { code: download.ok ? 'unrecognized_file' : download.code, message } };
     }
     warnings.push(`${failure}; ${fallbackNote(spec)}`);
-    // Without the file there is no evidence the link is a PDF (a page that
-    // fails to load looks the same): the record as it is.
-    if (!download.ok) return normalized(spec.fallback_item, libraryID, fallbackMethod(spec), undefined, warnings);
-    // The link is a PDF: the item is a document with that PDF attached, not a
-    // web page (a repository link's record says `webpage`).
-    const fallback = WEB_CONTENT_ITEM_TYPES.has(spec.fallback_item.itemType)
-        ? { ...spec.fallback_item, itemType: 'report' }
-        : spec.fallback_item;
+    if (!isPdf) return normalized(fallbackItem, libraryID, fallbackMethod(spec), undefined, warnings);
+    // A document with that PDF: the download attached, or the link fetched
+    // again under the same guard. Not a web page (a repository link's record says `webpage`).
+    const fallback = WEB_CONTENT_ITEM_TYPES.has(fallbackItem.itemType) ? { ...fallbackItem, itemType: 'report' } : fallbackItem;
     const resolution = normalized(fallback, libraryID, fallbackMethod(spec), undefined, warnings);
     if ('item' in resolution) resolution.attachment_urls = [{ url, mime_type: PDF_MIME }];
     return resolution;
+}
+
+/** A report named after a PDF's file (`w31161.pdf` → `w31161`), from the download or else the link. */
+function fileNamedReport(url: string, filename: string | null): ZoteroItemJson {
+    const name = (filename ?? pdfFilename(url, null)).replace(/\.pdf$/i, '').trim();
+    let host = '';
+    try { host = new URL(url).hostname; } catch { /* the link itself names it */ }
+    const title = name && !['document', 'pdf', 'content'].includes(name.toLowerCase()) ? name : host || url;
+    return { itemType: 'report', title, url };
 }
 
 /** A page Zotero's translators described: its item, the files they found, and its snapshot. */

@@ -17,10 +17,10 @@ vi.mock('../../../src/services/itemImport/resolveIdentifier', () => ({ translate
 vi.mock('../../../src/services/itemImport/resolveUrl', () => ({
     translateUrl: mocks.translateUrl,
 }));
-vi.mock('../../../src/services/itemImport/pdfLinkImport', () => ({
+vi.mock('../../../src/services/itemImport/pdfLinkImport', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('../../../src/services/itemImport/pdfLinkImport')>()),
     downloadPdfLink: mocks.downloadPdfLink,
     keepResolvedPdf: mocks.keepResolvedPdf,
-    PDF_MIME: 'application/pdf',
 }));
 vi.mock('../../../src/services/pdfAttachmentFetch', () => ({ discardDownloadedFile: mocks.discardDownloadedFile }));
 vi.mock('../../../src/services/itemImport/recognizeFile', () => ({
@@ -608,12 +608,78 @@ describe('resolveImportItems PDF links', () => {
         expect(result).toMatchObject({ status: 'resolved', method: 'web_translator', item: { title: 'Landing' }, snapshot_url: PDF });
     });
 
-    it('fails with the download error when there is no fallback', async () => {
-        mocks.downloadPdfLink.mockResolvedValue({ ok: false, code: 'not_found', message: 'The file does not exist (HTTP 404).' });
+    it('names the fallback of a PDF link the user gave after the file, not a search result', async () => {
+        mocks.recognizeFile.mockResolvedValue({ kind: 'error', code: 'unrecognized_file', message: 'Zotero could not identify w31161.pdf.' });
+
+        const [result] = await resolveImportItems([{
+            key: 'a', source: { kind: 'url', input: PDF, url: PDF }, url: PDF,
+            fallback_item: { itemType: 'report', title: 'w31161', url: PDF },
+        }], base);
+
+        expect(result).toMatchObject({ method: 'fallback_metadata', item: { title: 'w31161' }, attachment_urls: [{ url: PDF }] });
+        expect(result.warnings?.[0]).toMatch(/; named after the file$/);
+    });
+
+    it('names an unidentified PDF the user gave after its downloaded file', async () => {
+        const link = 'https://iris.who.int/server/api/core/bitstreams/0f3b/content';
+        mocks.translateUrl.mockResolvedValue({ ok: false, code: 'file_download', message: 'The page could not be loaded.' });
+        mocks.downloadPdfLink.mockResolvedValue({ ok: true, file: download, filename: 'WHO-report-2024.pdf', size: 1000 });
+        mocks.recognizeFile.mockResolvedValue({ kind: 'error', code: 'no_text', message: 'WHO-report-2024.pdf has no text layer.' });
+
+        const [result] = await resolveImportItems([{ key: 'a', source: { kind: 'url', input: link, url: link }, url: link }], base);
+
+        expect(result).toMatchObject({
+            status: 'resolved', method: 'fallback_metadata',
+            item: { itemType: 'report', title: 'WHO-report-2024', url: link },
+            attachment_urls: [{ url: link }],
+        });
+        expect(result.warnings?.[0]).toMatch(/^PDF not identified .*; named after the file$/);
+    });
+
+    it('keeps a PDF link the user gave whose download may pass later, to fetch it again', async () => {
+        mocks.downloadPdfLink.mockResolvedValue({ ok: false, code: 'timeout', message: 'Downloading the file took too long.' });
 
         const [result] = await resolveImportItems([{ key: 'a', source: { kind: 'url', input: PDF, url: PDF }, url: PDF }], base);
 
-        expect(result).toMatchObject({ status: 'failed', error: { code: 'not_found' } });
+        expect(result).toMatchObject({
+            status: 'resolved',
+            item: { itemType: 'report', title: 'w31161', url: PDF },
+            attachment_urls: [{ url: PDF, mime_type: 'application/pdf' }],
+        });
+        expect(result.warnings?.[0]).toMatch(/^PDF download failed/);
+    });
+
+    it.each([
+        ['url_not_allowed', 'Local and private-network addresses cannot be imported.'],
+        ['not_found', 'The file does not exist (HTTP 404).'],
+    ])('fails a PDF link the user gave when %s, which trying again would not change', async (code, message) => {
+        mocks.downloadPdfLink.mockResolvedValue({ ok: false, code, message });
+        const [result] = await resolveImportItems([{ key: 'a', source: { kind: 'url', input: PDF, url: PDF }, url: PDF }], base);
+        expect(result).toMatchObject({ status: 'failed', error: { code, message } });
+    });
+
+    it('identifies the file given with a link that did not load', async () => {
+        mocks.locateImportFile.mockResolvedValue(located());
+        mocks.translateUrl.mockResolvedValue({ ok: false, code: 'blocked', message: 'bot check' });
+        mocks.recognizeFile.mockResolvedValue({ kind: 'item', json: { itemType: 'report', title: 'From the file' }, translator: 'Zotero recognizer', hints: {} });
+
+        const [result] = await resolveImportItems([{
+            key: 'a', source: { kind: 'url', input: PDF, url: PDF }, url: PDF, file: { path: '/home/u/papers/a.pdf' },
+        }], base);
+
+        expect(result).toMatchObject({ status: 'resolved', method: 'recognizer', item: { title: 'From the file' }, file: { path: '/home/u/papers/a.pdf' } });
+        expect(mocks.downloadPdfLink).not.toHaveBeenCalled();
+        expect(result.warnings?.[0]).toMatch(/^page lookup failed \(bot check\); identified from the attached file$/);
+    });
+
+    it('fails a link that did not load as a page and whose download failed', async () => {
+        const link = 'https://iris.who.int/server/api/core/bitstreams/0f3b/content';
+        mocks.translateUrl.mockResolvedValue({ ok: false, code: 'file_download', message: 'The page could not be loaded.' });
+        mocks.downloadPdfLink.mockResolvedValue({ ok: false, code: 'timeout', message: 'Downloading the file took too long.' });
+
+        const [result] = await resolveImportItems([{ key: 'a', source: { kind: 'url', input: link, url: link }, url: link }], base);
+
+        expect(result).toMatchObject({ status: 'failed', error: { code: 'timeout', message: 'The page could not be loaded.' } });
     });
 });
 

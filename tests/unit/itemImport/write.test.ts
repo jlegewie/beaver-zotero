@@ -476,6 +476,15 @@ describe('writeImportItem finishing touches', () => {
         expect(saved.setField).toHaveBeenCalledWith('extra', line);
     });
 
+    it('says an unidentified PDF link the user gave is named after the file', async () => {
+        await writeImportItem(journal({
+            source: { kind: 'url', input: 'url:https://www.nber.org/w31161.pdf', url: 'https://www.nber.org/w31161.pdf' },
+            resolution: { method: 'fallback_metadata' },
+            warnings: ['PDF not identified (Zotero could not identify w31161.pdf.); named after the file'],
+        }));
+        expect(saved.setField).toHaveBeenCalledWith('extra', 'Beaver Metadata: named after the file (PDF could not be identified)');
+    });
+
     it('takes the failed lookup from the resolution warning over the link\'s shape', async () => {
         await writeImportItem(journal({
             source: { kind: 'external', input: 'web-MJNNMKH4ED', provider: 'exa', external_id: 'web-MJNNMKH4ED', url: 'https://iris.who.int/bitstreams/1/content' },
@@ -552,6 +561,29 @@ describe('writeImportItem attachments', () => {
             ...(extra as any),
         }));
         expect(mocks.schedulePdfFetchTask.mock.calls[0][2]).toMatchObject({ guardedOnly: true });
+    });
+
+    it('always tries the PDF link of a PDF-link import, even when the backend sent no candidate for it', async () => {
+        const link = 'https://papers.ssrn.com/sol3/Delivery.cfm/1.pdf';
+        await writeImportItem(journal({
+            source: { kind: 'url', input: `url:${link}`, url: link },
+            resolution: { method: 'recognizer' },
+            pdf_candidates: [],
+        }));
+        expect(mocks.schedulePdfFetchTask.mock.calls[0][2]).toMatchObject({
+            guardedOnly: true,
+            pdfCandidates: [{ url: link, access_method: 'web' }],
+        });
+    });
+
+    it('keeps the PDF link as a direct download when a page candidate names the same address', async () => {
+        const link = 'https://reports.example.org/report.pdf';
+        await writeImportItem(journal({
+            source: { kind: 'url', input: `url:${link}`, url: link },
+            resolution: { method: 'recognizer' },
+            pdf_candidates: [{ page_url: link, access_method: 'openalex' }],
+        }));
+        expect(mocks.schedulePdfFetchTask.mock.calls[0][2].pdfCandidates[0]).toEqual({ url: link, access_method: 'web' });
     });
 
     it('lets Zotero look for the PDF of a paper found on the web by its identifier', async () => {

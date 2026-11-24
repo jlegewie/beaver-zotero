@@ -33,6 +33,10 @@ describe('importSourceBadge', () => {
             .toBe('The page could not be loaded; from the search result');
         expect(importSourceBadge(data({ resolution: { method: 'fallback_metadata' } }))?.tooltip)
             .toBe('Lookup failed; from the search result');
+        expect(importSourceBadge(data({
+            source: { kind: 'url', input: 'url:https://x.org/r.pdf', url: 'https://x.org/r.pdf' },
+            resolution: { method: 'fallback_metadata' },
+        }))?.tooltip).toBe('The PDF could not be identified; named after the file');
     });
 
     it('flags fallback metadata as partial', () => {
