@@ -53,9 +53,25 @@ export function collapseTableTabContextPane(win: Window): void {
 }
 
 /**
- * Opens the pane for Beaver's chat. The splitter and layout come from
- * Zotero's own update; the item sections' side nav stays hidden, since no item
- * belongs to a table tab.
+ * Shows the splitter of the current layout, which resizes the pane, and hides
+ * the other one. A library tab hides the splitter, and Zotero 11's own update
+ * skips tab types without a context pane, so on a Beaver tab it would stay
+ * hidden.
+ */
+function showSplitter(win: Window): void {
+    const doc = win.document;
+    const standard = doc.getElementById('zotero-context-splitter');
+    const stacked = doc.getElementById('zotero-context-splitter-stacked');
+    const isStacked = Zotero.Prefs.get('layout') === 'stacked';
+    (isStacked ? stacked : standard)?.removeAttribute('hidden');
+    setOn(isStacked ? standard : stacked, 'hidden');
+}
+
+/**
+ * Opens the pane for Beaver's chat, with the splitter that resizes it. The
+ * rest of the layout comes from Zotero's own update where it runs (Zotero
+ * 7–10); the item sections' side nav stays hidden, since no item belongs to a
+ * table tab.
  */
 export function openTableTabContextPane(win: Window): void {
     const doc = win.document;
@@ -66,6 +82,7 @@ export function openTableTabContextPane(win: Window): void {
     } catch {
         // Layout refresh is best effort; the pane is already open.
     }
+    showSplitter(win);
     hideSidenav(win);
 }
 

@@ -11,9 +11,19 @@ import {
     isMigratingDataAtom,
     isProfileLoadedAtom,
     pendingDowngradeAckAtom,
+    remainingBeaverCreditsAtom,
     updateRequiredAtom,
 } from './profile';
 import { isLoadingThreadAtom } from './threads';
+import { isUsingBeaverCreditsAtom } from './models';
+import { requestPlusToolsAtom } from './ui';
+import { messageTableNamesAtom } from './messageComposition';
+import {
+    getPlusToolsAccess,
+    getTablePlusToolsNotice,
+    type PlusToolsAccess,
+    type TablePlusToolsNotice,
+} from '../utils/plusToolsAccess';
 
 /**
  * What stands between the user and a chat, in the order the sidebar resolves
@@ -39,4 +49,27 @@ export const chatAccessGateAtom = atom<ChatAccessGate | null>((get) => {
     if (get(pendingDowngradeAckAtom)) return 'downgrade-ack';
     if (!get(hasAuthorizedFreeAccessAtom)) return 'onboarding';
     return null;
+});
+
+/** Whether the next message gets Plus Tools, and if not, why (see `getPlusToolsAccess`). */
+export const plusToolsAccessAtom = atom<PlusToolsAccess>((get) => getPlusToolsAccess({
+    gate: get(chatAccessGateAtom),
+    usesBeaverModel: get(isUsingBeaverCreditsAtom),
+    plusToolsPref: get(requestPlusToolsAtom),
+    credits: get(remainingBeaverCreditsAtom),
+}));
+
+/**
+ * Dismissed for this window's session: the notice stays away until Beaver
+ * reloads, whatever is attached next.
+ */
+export const tablePlusToolsNoticeDismissedAtom = atom(false);
+
+/**
+ * The chat input's notice that Beaver can only read the research tables the
+ * message carries (see `getTablePlusToolsNotice`), or null.
+ */
+export const tablePlusToolsNoticeAtom = atom<TablePlusToolsNotice | null>((get) => {
+    if (get(tablePlusToolsNoticeDismissedAtom)) return null;
+    return getTablePlusToolsNotice(get(plusToolsAccessAtom), get(messageTableNamesAtom).length);
 });

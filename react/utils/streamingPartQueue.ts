@@ -28,6 +28,7 @@ import { AgentRun } from '@beaver/agent-core/agents/types';
 import { WSPartEvent } from '@beaver/agent-core/protocol/agentProtocol';
 import { activeRunAtom, updateRunWithPart } from '@beaver/agent-core/run-state/atoms';
 import { logger } from '@beaver/agent-core/platform/logger';
+import type { createStore } from 'jotai';
 import { store } from '../store';
 import { tryGetWindowRuntime } from '../runtime/windowRuntime';
 
@@ -37,12 +38,6 @@ import { tryGetWindowRuntime } from '../runtime/windowRuntime';
  * pace the reader normally sees.
  */
 const FLUSH_BACKSTOP_MS = 100;
-
-let pendingEvents: WSPartEvent[] = [];
-/** The window whose animation frame holds the pending flush, if one is armed. */
-let scheduledWindow: Window | null = null;
-let scheduledFrame: number | null = null;
-let backstopTimer: unknown = null;
 
 interface RealmSafeTimers {
     setTimeout: (callback: () => void, delayMs: number) => unknown;
@@ -79,102 +74,132 @@ function getRealmSafeTimers(): RealmSafeTimers | undefined {
     return resolvedTimers;
 }
 
-function applyPendingEvents(): void {
-    if (pendingEvents.length === 0) return;
-
-    const events = pendingEvents;
-    pendingEvents = [];
-
-    store.set(activeRunAtom, (previous: AgentRun | null) => {
-        // No active run: the same drop as applying a single event to null. A
-        // part event for an archived run has nothing to update.
-        if (!previous) return previous;
-        return events.reduce((run, event) => updateRunWithPart(run, event), previous);
-    });
-}
-
-function cancelScheduledFlush(): void {
-    if (scheduledFrame !== null && scheduledWindow && !scheduledWindow.closed
-        && typeof scheduledWindow.cancelAnimationFrame === 'function') {
-        scheduledWindow.cancelAnimationFrame(scheduledFrame);
-    }
-    scheduledFrame = null;
-    scheduledWindow = null;
-
-    if (backstopTimer !== null) {
-        getRealmSafeTimers()?.clearTimeout(backstopTimer);
-        backstopTimer = null;
-    }
-}
-
-/** Whether anything is armed that will drain the queue on its own. */
-function isFlushScheduled(): boolean {
-    return scheduledFrame !== null || backstopTimer !== null;
-}
-
-function runScheduledFlush(): void {
-    cancelScheduledFlush();
-    try {
-        applyPendingEvents();
-    } catch (error) {
-        logger(`streamingPartQueue: failed to apply part events: ${error}`, 1);
-    }
-}
-
-function scheduleFlush(): void {
-    // The frame callback belongs to the window that scheduled it and dies with
-    // it, so the window is recorded and re-checked before the queue is left in
-    // its hands (see the cross-window notes in CLAUDE.md).
-    const win = tryGetWindowRuntime()?.hostWindow;
-    if (win && !win.closed && typeof win.requestAnimationFrame === 'function') {
-        scheduledWindow = win;
-        scheduledFrame = win.requestAnimationFrame(runScheduledFlush);
-    }
-
-    // The backstop covers a main window that is open but not painting, which
-    // no longer delivers frames while the response is still arriving.
-    const timers = getRealmSafeTimers();
-    if (timers) {
-        backstopTimer = timers.setTimeout(runScheduledFlush, FLUSH_BACKSTOP_MS);
-    }
-
-    // Nothing can wake the queue in this host, so it is applied now. Every
-    // event still lands; it just is not coalesced.
-    if (!isFlushScheduled()) applyPendingEvents();
-}
+type Store = ReturnType<typeof createStore>;
 
 /**
- * Queue a part event to be applied on the next animation frame.
+ * One run session's queue. The session applies the queued events to its own
+ * store; frames come from whichever window `frameWindow` names when a flush is
+ * armed.
+ */
+export class PartEventQueue {
+    private pendingEvents: WSPartEvent[] = [];
+    /** The window whose animation frame holds the pending flush, if one is armed. */
+    private scheduledWindow: Window | null = null;
+    private scheduledFrame: number | null = null;
+    private backstopTimer: unknown = null;
+
+    constructor(
+        private readonly store: Store,
+        private readonly frameWindow: () => Window | null | undefined,
+    ) {}
+
+    /**
+     * Queue a part event to be applied on the next animation frame.
+     */
+    queue(event: WSPartEvent): void {
+        this.pendingEvents.push(event);
+
+        if (this.isFlushScheduled()) {
+            // A frame armed by a window that has since closed will never run, so
+            // the queue falls back to system timers once its runtime is gone.
+            const frameIsLost = this.scheduledFrame !== null && (!this.scheduledWindow || this.scheduledWindow.closed);
+            if (!frameIsLost) return;
+            this.cancelScheduledFlush();
+        }
+
+        this.scheduleFlush();
+    }
+
+    /**
+     * Apply every queued part event now. Also what an armed frame or backstop
+     * runs.
+     *
+     * Call before any read or write of run state that must see the streamed text
+     * that has arrived so far.
+     */
+    readonly flush = (): void => {
+        this.cancelScheduledFlush();
+        // Same guard as the scheduled path. Callers flush as the first step of
+        // stopping a run or switching threads, and a malformed part event must not
+        // abort the sequence that follows — that would leave the composer pinned on
+        // a run nothing goes on to archive or cancel.
+        try {
+            this.applyPendingEvents();
+        } catch (error) {
+            logger(`streamingPartQueue: failed to apply part events: ${error}`, 1);
+        }
+    };
+
+    private applyPendingEvents(): void {
+        if (this.pendingEvents.length === 0) return;
+
+        const events = this.pendingEvents;
+        this.pendingEvents = [];
+
+        this.store.set(activeRunAtom, (previous: AgentRun | null) => {
+            // No active run: the same drop as applying a single event to null. A
+            // part event for an archived run has nothing to update.
+            if (!previous) return previous;
+            return events.reduce((run, event) => updateRunWithPart(run, event), previous);
+        });
+    }
+
+    private cancelScheduledFlush(): void {
+        const win = this.scheduledWindow;
+        if (this.scheduledFrame !== null && win && !win.closed
+            && typeof win.cancelAnimationFrame === 'function') {
+            win.cancelAnimationFrame(this.scheduledFrame);
+        }
+        this.scheduledFrame = null;
+        this.scheduledWindow = null;
+
+        if (this.backstopTimer !== null) {
+            getRealmSafeTimers()?.clearTimeout(this.backstopTimer);
+            this.backstopTimer = null;
+        }
+    }
+
+    /** Whether anything is armed that will drain the queue on its own. */
+    private isFlushScheduled(): boolean {
+        return this.scheduledFrame !== null || this.backstopTimer !== null;
+    }
+
+    private scheduleFlush(): void {
+        // The frame callback belongs to the window that scheduled it and dies with
+        // it, so the window is recorded and re-checked before the queue is left in
+        // its hands (see the cross-window notes in CLAUDE.md).
+        const win = this.frameWindow();
+        if (win && !win.closed && typeof win.requestAnimationFrame === 'function') {
+            this.scheduledWindow = win;
+            this.scheduledFrame = win.requestAnimationFrame(this.flush);
+        }
+
+        // The backstop covers a main window that is open but not painting, which
+        // no longer delivers frames while the response is still arriving.
+        const timers = getRealmSafeTimers();
+        if (timers) {
+            this.backstopTimer = timers.setTimeout(this.flush, FLUSH_BACKSTOP_MS);
+        }
+
+        // Nothing can wake the queue in this host, so it is applied now. Every
+        // event still lands; it just is not coalesced.
+        if (!this.isFlushScheduled()) this.applyPendingEvents();
+    }
+}
+
+/** The queue of this renderer's run session, paced by the renderer's window. */
+export const windowPartQueue = new PartEventQueue(store, () => tryGetWindowRuntime()?.hostWindow);
+
+/**
+ * Queue a part event on this renderer's queue.
  */
 export function queuePartEvent(event: WSPartEvent): void {
-    pendingEvents.push(event);
-
-    if (isFlushScheduled()) {
-        // A frame armed by a window that has since closed will never run, so
-        // the queue falls back to system timers once its runtime is gone.
-        const frameIsLost = scheduledFrame !== null && (!scheduledWindow || scheduledWindow.closed);
-        if (!frameIsLost) return;
-        cancelScheduledFlush();
-    }
-
-    scheduleFlush();
+    windowPartQueue.queue(event);
 }
 
 /**
- * Apply every queued part event now.
- *
- * Call before any read or write of run state that must see the streamed text
- * that has arrived so far.
+ * Apply every part event queued on this renderer's queue now.
  */
 export function flushPendingPartEvents(): void {
-    cancelScheduledFlush();
-    // Same guard as the scheduled path. Callers flush as the first step of
-    // stopping a run or switching threads, and a malformed part event must not
-    // abort the sequence that follows — that would leave the composer pinned on
-    // a run nothing goes on to archive or cancel.
-    try {
-        applyPendingEvents();
-    } catch (error) {
-        logger(`streamingPartQueue: failed to apply part events: ${error}`, 1);
-    }
+    windowPartQueue.flush();
 }

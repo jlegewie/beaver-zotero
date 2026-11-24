@@ -31,7 +31,7 @@ import {
     normalizeSelectLabel,
 } from '../layouts/table';
 import type { TableFillPricing } from '../protocol/tableFillProtocol';
-import { balanceLine, creditsText, formatCredits, planRowLine } from './tableFillCopy';
+import { balanceLine, creditsText, formatCredits, runningFillsText } from './tableFillCopy';
 
 export type TableCardStep = 'sources' | 'screening' | 'columns';
 
@@ -453,6 +453,15 @@ export function cardRowCount(draft: TableCardDraft, request: WSTableCreateCardRe
 }
 
 /**
+ * A note for a table of one paper: it saves that paper's answers, but a table
+ * shows what it is for once papers can be compared. Null for any other size.
+ */
+export function singlePaperHint(draft: TableCardDraft, request: WSTableCreateCardRequest): string | null {
+    if (cardRowCount(draft, request) !== 1) return null;
+    return 'A table compares papers side by side. With a few related papers, it shows how they differ.';
+}
+
+/**
  * The papers the card reports: the table's rows, or, when the cap cut a source
  * short, at least that source's full size — the rows alone would understate
  * what the user asked for.
@@ -851,19 +860,29 @@ export function tableCardResponse(
  * The approval of a fill card: nothing on it is editable, so it names only
  * the run. It approves exactly the plan the card shows.
  */
-export function tableFillCardResponse(request: WSTableFillCardRequest): WSTableCardResponse {
+export function tableFillCardResponse(request: WSTableFillCardRequest, trial = false): WSTableCardResponse {
     return {
         type: 'table_card_response',
         card_id: request.card_id,
         approved: true,
         choice: 'fill',
+        // Only a trial the request offered: an older backend would fill everything.
+        ...(trial && fillCardTrialRows(request) ? { trial: true } : {}),
     };
 }
 
-/** "Fill 180": the fill card's run button, named for the papers it reads. */
-export function fillActionLabel(request: WSTableFillCardRequest): string {
-    const { rows, documents, title_abstract } = request.cost;
-    return `Fill ${format(documents + title_abstract || rows)}`;
+/** The rows the fill card's trial fills; null when it offers none or the fill is no larger. */
+export function fillCardTrialRows(request: WSTableFillCardRequest): number | null {
+    const rows = request.trial_rows;
+    return typeof rows === 'number' && rows > 0 && request.cost.rows > rows ? rows : null;
+}
+
+/** The fill card's one primary button. */
+export const FILL_TABLE_LABEL = 'Fill table';
+
+/** What the fill card's run covers, beside its receipt: "Fill 3 columns". */
+export function fillScopeLine(request: WSTableFillCardRequest): string {
+    return `Fill ${plural(request.columns.length, 'column')}`;
 }
 
 /** The decline; instructions make it a request for something else. */
@@ -936,26 +955,6 @@ export function draftCost(
     };
 }
 
-/** The row line of a card's cost: "Reads 180 papers: 150 from their documents, 30 from title and abstract". */
-export function costLine(cost: TableCardCost | null, upperBound = false): string | null {
-    if (!cost) return null;
-    const line = planRowLine({
-        rows: cost.rows,
-        documents: cost.documents,
-        document_kinds: {},
-        title_abstract: cost.title_abstract,
-        no_input: cost.no_input,
-        unavailable: 0,
-    });
-    return upperBound ? line.replace(/^Reads /, 'Reads up to ') : line;
-}
-
-/** The credits line of a card's cost: "0.45 credits", "Up to 9.2 credits". */
-export function costCredits(cost: TableCardCost | null, upperBound = false): string | null {
-    if (!cost) return null;
-    return `${upperBound ? 'Up to ' : ''}${creditsText(cost.credits)}`;
-}
-
 /** The papers a cost reads (a document, or title and abstract); all rows when none can be read. */
 function costPapers(cost: TableCardCost): number {
     return cost.documents + cost.title_abstract || cost.rows;
@@ -1016,19 +1015,31 @@ export function costBreakdown(cost: TableCardCost, prices: TableFillPricing | nu
  * credits aren't enough to fill these papers." Null when the balance covers
  * the fill, or is unknown. A fill stops at the first paper it cannot pay for.
  */
-export function balanceNotice(cost: TableCardCost, balance: number | null, prices: TableFillPricing | null): string | null {
-    const reach = balanceLine({
-        credits: cost.credits,
-        balance,
-        documents: cost.documents,
-        title_abstract: cost.title_abstract,
-        prices: prices ?? { document: cost.credits, title_abstract: cost.credits },
-    });
+export function balanceNotice(
+    cost: TableCardCost,
+    balance: number | null,
+    prices: TableFillPricing | null,
+    /** The account's balance, when `balance` is less what running fills may still charge. */
+    accountBalance: number | null = balance,
+): string | null {
+    const reach = balanceLine(
+        {
+            credits: cost.credits,
+            balance,
+            documents: cost.documents,
+            title_abstract: cost.title_abstract,
+            prices: prices ?? { document: cost.credits, title_abstract: cost.credits },
+        },
+        accountBalance,
+    );
     if (!reach || balance == null) return null;
     const paying = cost.documents + cost.title_abstract;
     // The same average per paper the estimate uses.
     const perPaper = paying > 0 ? cost.credits / paying : Infinity;
     if (balance + 1e-9 >= perPaper) return `${reach}.`;
+    const these = paying === 1 ? 'this item' : 'these items';
+    const running = runningFillsText(balance, accountBalance);
+    if (running) return `${running}; the rest isn't enough to fill ${these}.`;
     const text = creditsText(balance);
-    return `Your ${text} ${text.endsWith('credit') ? "isn't" : "aren't"} enough to fill ${paying === 1 ? 'this item' : 'these items'}.`;
+    return `Your ${text} ${text.endsWith('credit') ? "isn't" : "aren't"} enough to fill ${these}.`;
 }

@@ -11,6 +11,7 @@ import { AttachmentSearchResultView } from './toolResultViews/AttachmentSearchRe
 import { UserQuestionResultView } from './toolResultViews/UserQuestionResultView';
 import { BatchJobResultView } from './toolResultViews/BatchJobResultView';
 import { TableResultView } from './toolResultViews/TableResultView';
+import { OpenAlexNamesResultView } from './toolResultViews/OpenAlexNamesResultView';
 import { tableResultMessages } from '@beaver/agent-core/run-state/toolResultViews';
 import { isTableToolName, tableResultBody } from '@beaver/agent-core/run-state/tableResults';
 
@@ -52,6 +53,8 @@ function renderFromView(view: ToolResultViewModel, searchDetails?: SearchDetails
             return <UserQuestionResultView view={view} />;
         case 'batch_operation':
             return <BatchJobResultView view={view} />;
+        case 'openalex_names':
+            return <OpenAlexNamesResultView view={view} />;
         default:
             return null;
     }

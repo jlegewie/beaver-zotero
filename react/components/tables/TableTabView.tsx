@@ -12,8 +12,13 @@ import {
     tableReadProblem,
     type TableRef,
 } from '../../../src/services/artifacts/tableItemIdentity';
-import { isTableChatEnabled } from '../../../src/services/tableCapability';
-import { TableFillButton, useFillResultBanner, useTableFillJob, type TableFillButtonHandle } from './TableFillControl';
+import {
+    TableFillButton,
+    useFillResultBanner,
+    useNoCreditsNotice,
+    useTableFillJob,
+    type TableFillButtonHandle,
+} from './TableFillControl';
 import type { TableFillScope } from '@beaver/agent-core/protocol/tableFillProtocol';
 import type { ResearchTableFill } from '@beaver/agent-ui/layouts';
 import { TABLE_UPDATED_EVENT, type TableUpdatedDetail } from '../../../src/services/artifacts/tableStore';
@@ -331,7 +336,6 @@ export default function TableTabView({
     const documents = useTableDocuments(table?.spec ?? null);
     const newPapers = useNewPapers(table?.spec ?? null);
     const [actionError, setActionError] = React.useState<string | null>(null);
-    const fillEnabled = isTableChatEnabled();
     const fillJob = useTableFillJob(tableRef);
     const searchableLibraryIds = useAtomValue(searchableLibraryIdsAtom);
     const library = Zotero.Libraries.get(tableRef.libraryID);
@@ -352,16 +356,13 @@ export default function TableTabView({
     // A fill commits one version; an edit between its commits would split it,
     // so the table is not editable while one runs.
     const tableDisabledReason = editDisabledReason ?? (fillRunning ? FILL_RUNNING_REASON : undefined);
-    const fill = React.useMemo<ResearchTableFill | undefined>(
-        () =>
-            fillEnabled
-                ? {
-                      disabledReason: tableDisabledReason,
-                      onFillRows: (rowIds) => requestFill({ kind: 'cells', rows: rowIds }),
-                      onFillColumn: (column) => requestFill({ kind: 'cells', columns: [column.id] }),
-                  }
-                : undefined,
-        [fillEnabled, tableDisabledReason, requestFill],
+    const fill = React.useMemo<ResearchTableFill>(
+        () => ({
+            disabledReason: tableDisabledReason,
+            onFillRows: (rowIds) => requestFill({ kind: 'cells', rows: rowIds }),
+            onFillColumn: (column) => requestFill({ kind: 'cells', columns: [column.id] }),
+        }),
+        [tableDisabledReason, requestFill],
     );
     const edits = useTableEditing({
         tableRef,
@@ -380,12 +381,11 @@ export default function TableTabView({
         onColumnsAdded: (columnIds) => setReveal({ columnIds, token: ++focusRequests.current }),
     });
     const { showAllRows, showFailedRows } = fillResult;
-    const tableMessage = useTableMessage(
-        edits.toast,
-        edits.clearToast,
-        fillEnabled ? fillResult.banner : null,
-        fillResult.jobId,
-    );
+    // Without credits, a notice that filling needs them, under any other
+    // message: it waits while an edit's or a fill's message is shown.
+    const noCreditsNotice = useNoCreditsNotice(!readOnly && !fillRunning);
+    const tableMessage =
+        useTableMessage(edits.toast, edits.clearToast, fillResult.banner, fillResult.jobId) ?? noCreditsNotice;
     // A fill's failed rows asked for from the chat, shown once the table is
     // on screen.
     const [request, setRequest] = React.useState<TableTabRequest | null>(() => options.request ?? null);
@@ -430,11 +430,7 @@ export default function TableTabView({
 
     const itemID = Zotero.Items.getIDFromLibraryAndKey(tableRef.libraryID, tableRef.key);
     const research = React.useRef<ResearchTableHandle>(null);
-    const onAskBeaver = fillEnabled
-        ? inWindow
-            ? () => void askAboutTableInChat(tableRef)
-            : askBeaver
-        : undefined;
+    const onAskBeaver = inWindow ? () => void askAboutTableInChat(tableRef) : askBeaver;
     const onShowInLibrary = itemID
         ? () => void showTableInLibrary(itemID, inWindow ? null : surfaceWindow)
         : undefined;
@@ -454,7 +450,6 @@ export default function TableTabView({
             newItems: newPapers.notice?.count ?? 0,
             addNewItems: edits.editing.onAddNewPapers,
             removeRows: edits.removeRows,
-            fillAvailable: fillEnabled,
             fillRunning,
             openFillPlan: requestFill,
             stopFill: () => {
@@ -513,21 +508,17 @@ export default function TableTabView({
                     selectionActions={edits.selectionActions}
                     rowMenuItems={edits.rowMenuItems}
                     notice={notices.length ? notices.join(' ') : undefined}
-                    headerEnd={
-                        fillEnabled
-                            ? (selectedRowIds: string[]) => (
-                                  <TableFillButton
-                                      tableRef={tableRef}
-                                      table={state.table.spec}
-                                      job={fillJob}
-                                      improvableRows={improvableRows}
-                                      disabledReason={editDisabledReason}
-                                      selectedRowIds={selectedRowIds}
-                                      ref={fillButton}
-                                  />
-                              )
-                            : undefined
-                    }
+                    headerEnd={(selectedRowIds: string[]) => (
+                        <TableFillButton
+                            tableRef={tableRef}
+                            table={state.table.spec}
+                            job={fillJob}
+                            improvableRows={improvableRows}
+                            disabledReason={editDisabledReason}
+                            selectedRowIds={selectedRowIds}
+                            ref={fillButton}
+                        />
+                    )}
                     banner={tableMessage ?? undefined}
                     onActivity={fillResult.onActivity}
                     onlyRows={fillResult.failedRows}
@@ -547,6 +538,7 @@ export default function TableTabView({
                         );
                     }}
                     onShowInLibrary={onShowInLibrary}
+                    onOpenInWindow={options.moveToNewWindow}
                     renderVersionHistory={() => (
                         <TableVersionHistory
                             tableRef={tableRef}

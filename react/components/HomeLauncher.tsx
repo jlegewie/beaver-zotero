@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useLayoutEffect, useRef, useState } from "react";
 import { useAtom } from "jotai";
 import Button from "@beaver/agent-ui/primitives/Button";
 import Tooltip from "@beaver/agent-ui/primitives/Tooltip";
@@ -43,6 +43,43 @@ const CATEGORIES: CategoryDef[] = [
     },
 ];
 
+/** Layout of the category buttons, chosen by the launcher's width (see beaver.css). */
+type LauncherSize = "narrow" | "compact" | "wide" | "spacious";
+
+/**
+ * Picks the button layout from the launcher's width in rem, the unit the button
+ * sizes use, so the steps hold whatever the root font size is.
+ */
+function measureLauncherSize(element: HTMLElement): LauncherSize {
+    const { documentElement: root, defaultView: win } = element.ownerDocument;
+    const rootFontSize = (root && win && parseFloat(win.getComputedStyle(root)?.fontSize ?? "")) || 16;
+    const width = element.clientWidth / rootFontSize;
+    if (width < 25.5) return "narrow";
+    if (width >= 44) return "spacious";
+    if (width >= 30) return "wide";
+    return "compact";
+}
+
+/**
+ * Tracks the launcher's layout as it resizes. A ResizeObserver rather than a CSS
+ * container query: before Firefox 133, `container-type` made the launcher the
+ * containing block of its `position: fixed` tooltips, which then render offset.
+ */
+function useLauncherSize(ref: React.RefObject<HTMLElement | null>): LauncherSize {
+    const [size, setSize] = useState<LauncherSize>("compact");
+    useLayoutEffect(() => {
+        const element = ref.current;
+        const ResizeObserverCtor = element?.ownerDocument.defaultView?.ResizeObserver;
+        if (!element || !ResizeObserverCtor) return;
+        const update = () => setSize(measureLauncherSize(element));
+        update();
+        const observer = new ResizeObserverCtor(update);
+        observer.observe(element);
+        return () => observer.disconnect();
+    }, [ref]);
+    return size;
+}
+
 /**
  * HomePage launcher shown under the input area. Each button lists its
  * category's actions that work anywhere (via CategoryPanel), so the lists
@@ -54,14 +91,16 @@ const HomeLauncher: React.FC<{ style?: React.CSSProperties }> = ({ style }) => {
     // Only the user changes this while the UI is mounted. `null` = collapsed.
     // The shared atom keeps library and reader sidebars in sync.
     const [expanded, setExpanded] = useAtom(homeLauncherCategoryAtom);
+    const rootRef = useRef<HTMLDivElement>(null);
+    const size = useLauncherSize(rootRef);
 
     const toggle = (id: CategoryId) => setExpanded((prev) => (prev === id ? null : id));
     const activeCategory = CATEGORIES.find((c) => c.id === expanded)?.category;
 
     return (
-        <div className="display-flex flex-col gap-4 py-1" style={style}>
+        <div ref={rootRef} className="home-launcher display-flex flex-col gap-4 py-1" data-size={size} style={style}>
             {/* Category row — always visible */}
-            <div className="display-flex flex-row flex-wrap gap-15 items-center justify-center">
+            <div className="home-launcher-row">
                 {CATEGORIES.map((cat) => {
                     const isActive = expanded === cat.id;
                     return (
@@ -82,8 +121,8 @@ const HomeLauncher: React.FC<{ style?: React.CSSProperties }> = ({ style }) => {
                                 icon={cat.icon}
                                 onClick={() => toggle(cat.id)}
                                 aria-pressed={isActive}
+                                className="home-launcher-button"
                                 iconClassName="flex-shrink-0 scale-11"
-                                style={{ padding: "4px 7px", borderRadius: "6px" }}
                             >
                                 <span className="font-medium">{cat.label}</span>
                             </Button>

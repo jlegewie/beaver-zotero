@@ -2,8 +2,11 @@ import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { tableCardDraftsAtom } from '@beaver/agent-core/run-state/pendingTableCards';
 import type { WSTableCardResponse, WSTableFillCardRequest } from '@beaver/agent-core/protocol/tableCardProtocol';
+import { refillNotice } from '@beaver/agent-core/run-state/tableFillCopy';
 import {
-    fillActionLabel,
+    FILL_TABLE_LABEL,
+    fillCardTrialRows,
+    fillScopeLine,
     initialTableCardDraft,
     setCancelling,
     setInstructions,
@@ -17,9 +20,11 @@ import Button from '@beaver/agent-ui/primitives/Button';
 import { isImeKeyEvent } from '@beaver/agent-ui/primitives/ime';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import { ArrowUpRightIcon, Icon, Spinner, StopStrokeIcon, TableIcon } from '../../icons/icons';
-import { ColumnTypeTag } from '../columnTypes';
 import AutoGrowTextarea from './AutoGrowTextarea';
-import TableCardCostBlock, { useFillPricing } from './TableCardCost';
+import { ColumnSummary } from './TableColumnsStep';
+import { TableCardFillWarnings, TableCardReceipt, useFillPricing, useShortWindow } from './TableCardCost';
+
+const BLOCK_GAP = '0.85rem';
 
 export interface TableFillCardProps {
     request: WSTableFillCardRequest;
@@ -31,12 +36,17 @@ export interface TableFillCardProps {
 }
 
 /**
- * The fill card (`fill_table`): the same chrome as the create card with one
- * step and nothing to edit. Title and description, "Open table", the columns
- * being filled, the plan's row line and exact cost with the balance and the
- * pricing sentence, and two buttons: Cancel, which asks what Beaver should do
- * instead, and one named for the run ("Fill 46"). Approving approves exactly
- * the plan it shows: edits made meanwhile can only drop work from it.
+ * The fill card (`fill_table`): the create card's last step, with nothing to
+ * edit. The title row with "Open table", the description, and the columns
+ * being filled as the create card summarizes them. The footer stacks the same
+ * parts as the create card's: a band for what the user must know first (a
+ * held answer, a balance that does not reach, items without full text), the
+ * decision row with the receipt and its pricing popover, and the controls:
+ * Cancel, which asks what Beaver should do instead, "Try 5 first" when the
+ * backend offers a trial, and Fill table. Approving approves exactly the plan
+ * it shows, and the trial its first rows: edits made meanwhile can only drop
+ * work from it. A fill that reads answered papers again for a new or changed
+ * question says so in a band, and the trial stands out beside it.
  */
 export const TableFillCard: React.FC<TableFillCardProps> = ({ request, onSubmit, disabled = false, heldCaption, onStop }) => {
     // Cancel view and typed instructions live in the renderer's store, keyed
@@ -56,21 +66,26 @@ export const TableFillCard: React.FC<TableFillCardProps> = ({ request, onSubmit,
         [cardId, initialDraft, setDrafts],
     );
     const prices = useFillPricing();
+    const shortWindow = useShortWindow();
     const [isDecided, setIsDecided] = useState(false);
     const [openMessage, setOpenMessage] = useState('');
+    const [bodyScrolled, setBodyScrolled] = useState(false);
     const decidedRef = useRef(false);
     const locked = isDecided || disabled;
     const hasInstructions = draft.instructions.trim().length > 0;
+    const trialRows = fillCardTrialRows(request);
+    const refill = (request.rereads ?? 0) > 0 ? refillNotice(trialRows) : null;
 
     const decide = useCallback(
-        (approve: boolean) => {
+        (approve: boolean, trial = false) => {
             if (decidedRef.current || disabled) return;
             decidedRef.current = true;
             setIsDecided(true);
-            onSubmit(approve ? tableFillCardResponse(request) : tableCardDecline(draft, request));
+            onSubmit(approve ? tableFillCardResponse(request, trial) : tableCardDecline(draft, request));
         },
         [disabled, draft, onSubmit, request],
     );
+    const resumeReview = useCallback(() => setDraft((prev) => setCancelling(prev, false)), [setDraft]);
 
     // The table opens beside the surface that was clicked.
     const openTable = useCallback(async (event: React.SyntheticEvent) => {
@@ -84,13 +99,6 @@ export const TableFillCard: React.FC<TableFillCardProps> = ({ request, onSubmit,
             .catch(() => ({ error: 'Table provider unavailable.' }));
         setOpenMessage('error' in outcome ? '' : (outcome.warning ?? ''));
     }, [request.table.key]);
-
-    const heldNotice = disabled && heldCaption ? (
-        <div className="table-card-notice table-card-notice-pending" role="status">
-            <Spinner size={12} />
-            <span className="table-card-notice-text">{heldCaption}</span>
-        </div>
-    ) : null;
 
     const stopButton = disabled && onStop && (
         <Tooltip content="Stop the agent run" showArrow singleLine>
@@ -129,6 +137,12 @@ export const TableFillCard: React.FC<TableFillCardProps> = ({ request, onSubmit,
     );
 
     if (draft.cancelling) {
+        const heldNotice = disabled && heldCaption ? (
+            <div className="table-card-notice table-card-notice-pending" role="status">
+                <Spinner size={12} />
+                <span className="table-card-notice-text">{heldCaption}</span>
+            </div>
+        ) : null;
         return (
             <div
                 className="user-message-display table-card"
@@ -140,11 +154,11 @@ export const TableFillCard: React.FC<TableFillCardProps> = ({ request, onSubmit,
                     if (e.key !== 'Escape' || locked || isImeKeyEvent(e.nativeEvent)) return;
                     e.preventDefault();
                     e.stopPropagation();
-                    setDraft((prev) => setCancelling(prev, false));
+                    resumeReview();
                 }}
             >
                 <div className="table-card-top">{header}</div>
-                <div className="table-card-body" style={{ gap: '0.85rem' }}>
+                <div className="table-card-body" style={{ gap: BLOCK_GAP }}>
                     <div className="table-card-header-body">
                         <AutoGrowTextarea
                             value={draft.instructions}
@@ -162,11 +176,11 @@ export const TableFillCard: React.FC<TableFillCardProps> = ({ request, onSubmit,
                     <Button
                         variant="ghost"
                         icon={ArrowLeftIcon}
-                        onClick={() => setDraft((prev) => setCancelling(prev, false))}
+                        onClick={resumeReview}
                         disabled={locked}
                         className="flex-none whitespace-nowrap"
                     >
-                        Back
+                        Back to fill
                     </Button>
                     {stopButton}
                     <div className="flex-1" />
@@ -185,14 +199,33 @@ export const TableFillCard: React.FC<TableFillCardProps> = ({ request, onSubmit,
         );
     }
 
-    const runLabel = fillActionLabel(request);
+    // The band above the decision: the held answer, or else the fill's
+    // warnings, as on the create card. In a short window the warnings scroll
+    // at the end of the content instead.
+    const held = disabled && !!heldCaption;
+    const bands = held ? (
+        <div className="table-card-footer-band table-card-footer-band-pending" role="status">
+            <Spinner size={12} />
+            <span className="table-card-notice-text">{heldCaption}</span>
+        </div>
+    ) : shortWindow ? null : (
+        <TableCardFillWarnings cost={request.cost} prices={prices} refill={refill} />
+    );
+
     return (
         <div className="user-message-display table-card" role="group" aria-label="Proposed fill" aria-live="assertive">
-            <div className="table-card-top">{header}</div>
-            <div className="table-card-body" style={{ gap: '0.85rem' }}>
-                {request.description && (
+            {/* The title row and the footer stay in place; everything between
+                them scrolls in one area. */}
+            <div className={`table-card-top ${bodyScrolled ? 'table-card-top-scrolled' : ''}`}>{header}</div>
+            <div
+                className="table-card-body"
+                style={{ gap: BLOCK_GAP }}
+                onScroll={(e) => setBodyScrolled(e.currentTarget.scrollTop > 0)}
+            >
+                {(request.description || openMessage) && (
                     <div className="table-card-header-body">
-                        <div className="table-card-description font-color-secondary">{request.description}</div>
+                        {request.description && <div className="table-card-description">{request.description}</div>}
+                        {openMessage && <div className="text-sm font-color-secondary">{openMessage}</div>}
                     </div>
                 )}
                 <div className="table-card-step">
@@ -200,45 +233,61 @@ export const TableFillCard: React.FC<TableFillCardProps> = ({ request, onSubmit,
                         <span className="font-semibold font-color-primary">Columns</span>
                         <span className="table-card-count">{request.columns.length.toLocaleString('en-US')}</span>
                     </div>
-                    <div className="display-flex flex-col min-w-0" style={{ gap: '0.3rem' }}>
+                    <div className="display-flex flex-col min-w-0" style={{ gap: '0.45rem' }}>
                         {request.columns.map((column, index) => (
-                            <div key={`${index}:${column.header}`} className="display-flex flex-row items-center gap-2 min-w-0 text-sm">
-                                <span className="flex-1 min-w-0 truncate font-medium font-color-primary" title={column.description ?? undefined}>
-                                    {column.header}
-                                </span>
-                                <span className="flex-none">
-                                    <ColumnTypeTag type={column.type} />
-                                </span>
+                            <div key={`${index}:${column.header}`} className="table-card-column table-card-column-disabled">
+                                <ColumnSummary column={column} full />
                             </div>
                         ))}
                     </div>
-                    <TableCardCostBlock cost={request.cost} prices={prices} />
-                    {openMessage && <div className="text-sm font-color-secondary">{openMessage}</div>}
                 </div>
+                {!held && shortWindow && <TableCardFillWarnings cost={request.cost} prices={prices} refill={refill} inBody />}
             </div>
-            <div className="table-card-footer">
-                {heldNotice}
-                <Button
-                    variant="ghost"
-                    onClick={() => setDraft((prev) => setCancelling(prev, true))}
-                    disabled={locked}
-                    className="flex-none whitespace-nowrap"
-                >
-                    Cancel
-                </Button>
-                {stopButton}
-                <div className="flex-1" />
-                <Button
-                    variant="solid"
-                    ariaLabel={`${runLabel} items`}
-                    onClick={() => decide(true)}
-                    disabled={locked}
-                    title={disabled ? heldCaption : undefined}
-                    className="flex-none whitespace-nowrap"
-                    style={{ padding: '3px 8px' }}
-                >
-                    {runLabel}
-                </Button>
+
+            <div className="table-card-footer table-card-footer-stack">
+                {bands}
+                {/* What Fill table starts and what it costs, as the create
+                    card's run checkbox and receipt. */}
+                <div className={`table-card-decision ${disabled ? 'table-card-decision-held' : ''}`}>
+                    <span className="table-card-decision-label">{fillScopeLine(request)}</span>
+                    <TableCardReceipt cost={request.cost} prices={prices} disabled={locked} />
+                </div>
+                <div className="table-card-controls">
+                    <Button
+                        variant="ghost"
+                        onClick={() => setDraft((prev) => setCancelling(prev, true))}
+                        disabled={locked}
+                        className="flex-none whitespace-nowrap"
+                    >
+                        Cancel
+                    </Button>
+                    <div className="flex-1" />
+                    {/* While the answer is held, Stop takes the way forward's place. */}
+                    {stopButton || (
+                        <>
+                            {trialRows && (
+                                <Button
+                                    variant={refill ? 'outline' : 'ghost-secondary'}
+                                    onClick={() => decide(true, true)}
+                                    disabled={locked}
+                                    className="flex-none whitespace-nowrap"
+                                    title={`Fill the first ${trialRows} rows now to check the answers`}
+                                >
+                                    Try {trialRows} first
+                                </Button>
+                            )}
+                            <Button
+                                variant="solid"
+                                onClick={() => decide(true)}
+                                disabled={locked}
+                                className="flex-none whitespace-nowrap"
+                                style={{ padding: '3px 8px' }}
+                            >
+                                {FILL_TABLE_LABEL}
+                            </Button>
+                        </>
+                    )}
+                </div>
             </div>
         </div>
     );

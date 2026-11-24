@@ -3,13 +3,6 @@ import { selectAtom } from 'jotai/utils';
 import { Session } from '@supabase/supabase-js';
 import { credentials } from '@beaver/agent-core/transport/credentials';
 import { isProfileLoadedAtom, profileWithPlanAtom } from './profile';
-import {
-    firstRunNextStepsDismissedAtom,
-    firstRunReturnRequestedAtom,
-    firstRunSuggestionsAtom,
-    firstRunSuggestionsErrorAtom,
-    firstRunSuggestionsModeAtom,
-} from './firstRun';
 import { whereToStartVisibleAtom } from './whereToStart';
 import { getPref, setPref } from '../../src/utils/prefs';
 import { logger } from '@beaver/agent-core/platform/logger';

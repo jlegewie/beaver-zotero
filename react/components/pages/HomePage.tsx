@@ -3,8 +3,15 @@ import { useAtomValue } from 'jotai';
 import { allLibrariesExcludedAtom } from "../../atoms/profile";
 import RecentChats from "../RecentChats";
 import HomeLauncher from "../HomeLauncher";
-import HomeContextBar from "../HomeContextBar";
+import HomeActionsTray from "../HomeActionsTray";
+import FeatureCreditsCard from "../featureCredits/FeatureCreditsCard";
+import FeatureCreditsTeaser from "../featureCredits/FeatureCreditsTeaser";
+import { featureCreditEntriesAtom, featureCreditsCardVisibleAtom, featureCreditsTeaserVisibleAtom } from "../../atoms/featureCredits";
+import { isCreditsFirstRunAtom } from "../../atoms/firstRun";
+import { activeFeatureTaskAtom } from "../../atoms/featureCreditRuns";
 import InputArea from "../input/InputArea";
+import TablePlusToolsNotice from "../input/TablePlusToolsNotice";
+import { tablePlusToolsNoticeAtom } from "../../atoms/chatAccess";
 import DragDropWrapper from "../input/DragDropWrapper";
 import PopupOverlayContainer from "../PopupOverlayContainer";
 import { SettingsIcon }  from "../icons/icons";
@@ -37,6 +44,26 @@ const AllLibrariesExcludedMessage = () => (
 
 const HomePage: React.FC<HomePageProps> = ({ isWindow = false, inputRef }) => {
     const allLibrariesExcluded = useAtomValue(allLibrariesExcludedAtom);
+    const featureCreditsVisible = useAtomValue(featureCreditsCardVisibleAtom);
+    const featureCreditEntries = useAtomValue(featureCreditEntriesAtom);
+    const activeFeatureTask = useAtomValue(activeFeatureTaskAtom);
+    const featureCreditsTeaserVisible = useAtomValue(featureCreditsTeaserVisibleAtom);
+    const isCreditsFirstRun = useAtomValue(isCreditsFirstRunAtom);
+    // An attached research table Beaver can only read takes the tray under
+    // the input from the feature-credit list or line. Not from a setup card,
+    // which says itself which model its task needs.
+    const showTableNotice = useAtomValue(tablePlusToolsNoticeAtom) !== null && !activeFeatureTask;
+    // A setup card stays while its task is open, even if the list is dismissed.
+    const showFeatureCredits = !allLibrariesExcluded && !showTableNotice && (featureCreditsVisible || !!activeFeatureTask);
+    // Someone who already uses Beaver first gets one line that leads to the
+    // card, with the launcher and recent chats still on screen.
+    const showTeaser = showFeatureCredits && featureCreditsTeaserVisible && !activeFeatureTask;
+    // The card takes the place of the launcher and recent chats while it is
+    // on screen (it renders nothing without tasks); the header's history
+    // button still lists them.
+    const trayOnScreen = showFeatureCredits && !!featureCreditEntries;
+    const cardOnScreen = trayOnScreen && !showTeaser;
+    const showRecentChats = !isWindow && !cardOnScreen;
 
     // Beta versions use a pre-release tag (e.g. "0.20.0-beta.1")
     const isBeta = /-beta\.\d+$/.test(Zotero.Beaver?.pluginVersion ?? "");
@@ -47,28 +74,36 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false, inputRef }) => {
             className="display-flex flex-col flex-1 min-h-0"
         >
             {/* Scrollable top section */}
-            <div className="display-flex flex-col flex-1 overflow-y-auto scrollbar px-3 pt-4">
+            <div className={`display-flex flex-col flex-1 overflow-y-auto scrollbar px-3 pt-4 ${cardOnScreen ? 'pb-3' : ''}`}>
                 <div className="display-flex flex-col flex-1 gap-4 beaver-content-column">
                     {/* Top spacer. The window has the height to sit the
                         greeting lower, where the eye lands first. */}
                     <div className="flex-1" style={{ minHeight: '2vh', maxHeight: isWindow ? '18vh' : '4vh' }} />
 
-                    {/* Greeting */}
-                    <div className="text-2xl font-semibold text-center p-2">How can I help you?</div>
+                    {/* Greeting. A feature-credits first run welcomes the new
+                        user to the task list under the input. */}
+                    <div className="text-2xl font-semibold text-center p-2">
+                        {isCreditsFirstRun ? 'Welcome! Where should we start?' : 'How can I help you?'}
+                    </div>
 
-                    {/* Input area, with the project / context bar tucked under it */}
-                    <div className="home-composer display-flex flex-col">
+                    {/* Input area, with at most one tray tucked under it.
+                        Feature-credit tasks take the launcher's place; the
+                        table notice and the feature-credit trays take
+                        precedence over the actions tray. */}
+                    <div className="home-composer-dock">
                         <DragDropWrapper>
-                            <InputArea inputRef={inputRef} verticalPosition="below" />
+                            <InputArea inputRef={inputRef} verticalPosition="below" hideTablePlusToolsNotice />
                         </DragDropWrapper>
-                        <HomeContextBar />
+                        {showTableNotice && <TablePlusToolsNotice placement="tray" />}
+                        {showFeatureCredits && (showTeaser ? <FeatureCreditsTeaser /> : <FeatureCreditsCard />)}
+                        {!allLibrariesExcluded && !showTableNotice && !trayOnScreen && <HomeActionsTray />}
                     </div>
 
                     {/* Action launcher — category row + expandable panels */}
                     {allLibrariesExcluded ? (
                         <AllLibrariesExcludedMessage />
                     ) : (
-                        <HomeLauncher />
+                        !cardOnScreen && <HomeLauncher />
                     )}
 
                     {/* Bottom spacer */}
@@ -82,7 +117,7 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false, inputRef }) => {
                 className="flex-none px-25 beaver-content-column"
             >
                 {/* The separate window lists its history in its sidebar. */}
-                {!isWindow && <RecentChats />}
+                {showRecentChats && <RecentChats />}
 
                 <div className="relative -mx-4 px-4 mb-3">
                     <PopupOverlayContainer />

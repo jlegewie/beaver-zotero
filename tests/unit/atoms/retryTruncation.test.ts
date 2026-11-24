@@ -2,7 +2,7 @@ import { viewedHistoryRevisionAtom } from "../../../react/runtime/threadProjecti
 import { ThreadPresence } from "../../../src/services/threads/threadPresence";
 import { getCredentialGeneration } from "@beaver/agent-core/transport/credentials";
 import { initializeWindowRuntime } from "../../../react/runtime/windowRuntime";
-import { releaseWriter } from "../../../react/runtime/threadWriter";
+import { currentWriter, releaseWriter } from "../../../react/runtime/threadWriter";
 import {
     threadAdmissionAtom,
     threadConflictAtom,
@@ -336,6 +336,17 @@ describe('retry via synchronous truncation', () => {
             expect(sentRequest().expected_tail_run_id).toBe("a");
             expect(threadRunIds()).toEqual(["a"]);
         });
+        it("auto-retry resends the feature task the failed run was sent for", async () => {
+            store.set(threadRunsAtom, [makeRun("a")]);
+            store.set(activeRunAtom, makeRun("local", {
+                status: "error",
+                user_prompt: { content: "/review", feature_task: "literature_review" },
+            }));
+            store.set(threadAdmissionAtom, { threadId: "thread-1", tailRunId: "a", activity: { state: "idle", run_id: null } });
+            historyMock.mockResolvedValue({ runs: [makeRun("a")], tail_run_id: "a", activity: { state: "idle", run_id: null } });
+            await store.set(autoRetryErroredRunAtom, "local");
+            expect(sentRequest().user_prompt.feature_task).toBe("literature_review");
+        });
         it.each(["busy", "unseen", "removed", "offline"])("preserves local history when auto-retry history is %s", async (state) => {
             store.set(threadRunsAtom, [makeRun("a"), makeRun("local", { status: "error" })]);
             store.set(activeRunAtom, makeRun("live", { status: "error" }));
@@ -605,6 +616,138 @@ describe('retry via synchronous truncation', () => {
             expect(connectMock).not.toHaveBeenCalled();
             expect(store.get(activeRunAtom)).toBeNull();
             expect(threadRunIds()).toEqual(["a", "b", "live"]);
+        });
+        describe("Stop while the removal commits", () => {
+            beforeEach(() => {
+                const settled = (runs: AgentRun[]) => ({
+                    tail_run_id: "b", tailRunId: "b",
+                    activity: { state: "idle", run_id: null },
+                    runs, agent_actions: [], citations: [],
+                    agentActions: store.get(threadAgentActionsAtom),
+                });
+                historyMock.mockImplementation(async () => settled(store.get(threadRunsAtom)));
+                loadThreadRunsMock.mockImplementation(async () => settled(store.get(threadRunsAtom)));
+                store.set(activeRunAtom, null);
+                store.set(threadAdmissionAtom, {
+                    threadId: "thread-1", tailRunId: "b", activity: { state: "idle", run_id: null },
+                });
+            });
+
+            /** The user presses Stop while the truncate request is in flight. */
+            function stopDuringTruncate(report = okReport(["b"])) {
+                truncateMock.mockImplementation(async () => {
+                    await store.set(closeWSConnectionAtom);
+                    return report;
+                });
+            }
+
+            function lastRun(): AgentRun {
+                return store.get(threadRunsAtom).at(-1)!;
+            }
+
+            it("keeps an edited prompt as a stopped message once the server removed the turn", async () => {
+                stopDuringTruncate();
+
+                await store.set(regenerateWithEditedPromptAtom, {
+                    runId: "b",
+                    editedPrompt: { content: "rewritten" },
+                });
+
+                expect(truncateMock).toHaveBeenCalledWith("thread-1", ["b"], "a");
+                expect(connectMock).not.toHaveBeenCalled();
+                expect(cancelMock).not.toHaveBeenCalled();
+                expect(threadRunIds()).toHaveLength(2);
+                expect(threadRunIds()[0]).toBe("a");
+                expect(lastRun().status).toBe("canceled");
+                expect(lastRun().user_prompt.content).toBe("rewritten");
+                expect(store.get(activeRunAtom)).toBeNull();
+                expect(store.get(isWSChatPendingAtom)).toBe(false);
+                expect(store.get(retryPendingRunIdAtom)).toBeNull();
+                expect(currentWriter()).toBeUndefined();
+            });
+
+            it("keeps a retried prompt as a stopped message when the only turn is removed", async () => {
+                store.set(threadRunsAtom, [makeRun("b")]);
+                stopDuringTruncate();
+
+                await store.set(regenerateFromRunAtom, { runId: "b" });
+
+                expect(truncateMock).toHaveBeenCalledWith("thread-1", ["b"], null);
+                expect(connectMock).not.toHaveBeenCalled();
+                expect(threadRunIds()).toHaveLength(1);
+                expect(lastRun().id).not.toBe("b");
+                expect(lastRun().status).toBe("canceled");
+                expect(lastRun().user_prompt.content).toBe("prompt for b");
+            });
+
+            it("finishes the confirmed undo before applying a Stop pressed during it", async () => {
+                store.set(threadAgentActionsAtom, [makeAppliedMetadataEdit("edit", "b")]);
+                promptConfirmMock.mockReturnValue(0);
+                truncateMock.mockResolvedValue(okReport(["b"]));
+                undoEditMetadataMock.mockImplementation(async () => {
+                    await store.set(closeWSConnectionAtom);
+                });
+
+                await store.set(regenerateFromRunAtom, { runId: "b" });
+
+                expect(undoEditMetadataMock).toHaveBeenCalledOnce();
+                expect(store.get(threadAgentActionsAtom)).toEqual([]);
+                expect(connectMock).not.toHaveBeenCalled();
+                expect(lastRun().status).toBe("canceled");
+            });
+
+            it("leaves history intact when the server refuses the removal", async () => {
+                stopDuringTruncate(refusedReport(["b"]));
+
+                await store.set(regenerateWithEditedPromptAtom, {
+                    runId: "b",
+                    editedPrompt: { content: "rewritten" },
+                });
+
+                expect(connectMock).not.toHaveBeenCalled();
+                expect(threadRunIds()).toEqual(["a", "b"]);
+                expect(store.get(isWSChatPendingAtom)).toBe(false);
+                expect(store.get(retryPendingRunIdAtom)).toBeNull();
+            });
+
+            it("keeps an automatic retry's prompt as a stopped message", async () => {
+                store.set(threadRunsAtom, [makeRun("a"), makeRun("b", { status: "error" })]);
+                stopDuringTruncate();
+
+                await store.set(autoRetryErroredRunAtom, "b");
+
+                expect(truncateMock).toHaveBeenCalledWith("thread-1", ["b"], "a");
+                expect(connectMock).not.toHaveBeenCalled();
+                expect(cancelMock).not.toHaveBeenCalled();
+                expect(threadRunIds()).toHaveLength(2);
+                expect(lastRun().status).toBe("canceled");
+                expect(lastRun().user_prompt.content).toBe("prompt for b");
+                expect(store.get(isWSChatPendingAtom)).toBe(false);
+                expect(store.get(retryPendingRunIdAtom)).toBeNull();
+            });
+
+            it("still stops a retry immediately before its removal is sent", async () => {
+                // The first read is the writer's admission check; the second is
+                // the retry's settlement read, made while it holds the lock.
+                let settle!: (value: any) => void;
+                const settled = historyMock.getMockImplementation()!;
+                historyMock
+                    .mockImplementationOnce(settled)
+                    .mockImplementationOnce(() => new Promise(resolve => { settle = resolve; }));
+                const pending = store.set(regenerateFromRunAtom, { runId: "b" });
+                await vi.waitFor(() => expect(historyMock).toHaveBeenCalledTimes(2));
+                expect(store.get(retryPendingRunIdAtom)).toBe("b");
+
+                await store.set(closeWSConnectionAtom);
+                expect(store.get(retryPendingRunIdAtom)).toBeNull();
+                expect(store.get(isWSChatPendingAtom)).toBe(false);
+                settle({ tail_run_id: "b", activity: { state: "idle", run_id: null } });
+                await pending;
+
+                expect(truncateMock).not.toHaveBeenCalled();
+                expect(connectMock).not.toHaveBeenCalled();
+                expect(threadRunIds()).toEqual(["a", "b"]);
+            });
         });
         it("rejects a late settlement result after navigation", async () => {
             let settle!: (value: any) => void;
@@ -897,6 +1040,72 @@ describe('retry via synchronous truncation', () => {
         expect(threadRunIds()).toEqual(['a']);
     });
 
+    describe('table changes', () => {
+        /** A run whose create_table call returned a table record. */
+        function makeTableRun(id: string): AgentRun {
+            return makeRun(id, {
+                model_messages: [
+                    {
+                        kind: 'response',
+                        parts: [{ part_kind: 'tool-call', tool_name: 'create_table', tool_call_id: 'tc-1', args: {} }],
+                    },
+                    {
+                        kind: 'request',
+                        parts: [{
+                            part_kind: 'tool-return',
+                            tool_name: 'create_table',
+                            tool_call_id: 'tc-1',
+                            content: { ok: true },
+                            metadata: {
+                                view: {
+                                    view_type: 'table',
+                                    record: { reference: { kind: 'table', key: 'TABLE001', title: 'Effect sizes' } },
+                                },
+                            },
+                        }],
+                    },
+                ],
+            } as any);
+        }
+
+        const TABLES_NOTE = 'Changes to tables are kept. To go back, use Version history in the table.';
+
+        it('notes that tables are kept when the dialog lists other changes', async () => {
+            store.set(threadRunsAtom, [makeRun('a'), makeTableRun('b')]);
+            store.set(threadAgentActionsAtom, [makeAppliedMetadataEdit('edit-1', 'b')]);
+            truncateMock.mockImplementation(async (_thread, ids) => okReport(ids));
+
+            await store.set(regenerateFromRunAtom, { runId: 'b' });
+
+            expect(promptConfirmMock).toHaveBeenCalledOnce();
+            const text: string = promptConfirmMock.mock.calls[0][0].text;
+            expect(text).toContain('1 metadata edit');
+            expect(text).toContain(TABLES_NOTE);
+        });
+
+        it('leaves the note out when no removed run wrote a table', async () => {
+            // The kept run wrote a table; only the removed runs count.
+            store.set(threadRunsAtom, [makeTableRun('a'), makeRun('b')]);
+            store.set(threadAgentActionsAtom, [makeAppliedMetadataEdit('edit-1', 'b')]);
+            truncateMock.mockImplementation(async (_thread, ids) => okReport(ids));
+
+            await store.set(regenerateFromRunAtom, { runId: 'b' });
+
+            expect(promptConfirmMock.mock.calls[0][0].text).not.toContain('tables');
+        });
+
+        it('retries without a dialog when the only changes are to tables', async () => {
+            store.set(threadRunsAtom, [makeRun('a'), makeTableRun('b')]);
+            truncateMock.mockImplementation(async (_thread, ids) => okReport(ids));
+
+            await store.set(regenerateFromRunAtom, { runId: 'b' });
+
+            expect(promptConfirmMock).not.toHaveBeenCalled();
+            expect(connectMock).toHaveBeenCalled();
+            expect(threadRunIds()).toEqual(['a']);
+        });
+    });
+
     it('undoes a merge in reverse order with the other applied actions', async () => {
         store.set(threadRunsAtom, [makeRun('a'), makeRun('b')]);
         const edit = { ...makeAppliedMetadataEdit('edit-1', 'b'), created_at: '2026-10-02T10:00:01Z' };
@@ -1077,6 +1286,25 @@ describe('retry via synchronous truncation', () => {
             editedPrompt: { content: 'rewritten' },
         });
         expect(sentRequest().retry_trigger).toBeUndefined();
+    });
+
+    it('keeps the feature task a message was sent for across successive retries', async () => {
+        // The task travels on the stored prompt, so every retry that rebuilds
+        // from it, including a retry of a retry, sends it again.
+        const prompt = { content: '/table neighborhood effects', feature_task: 'research_table' };
+        store.set(threadRunsAtom, [makeRun('a'), makeRun('b', { user_prompt: prompt })]);
+        truncateMock.mockResolvedValue(okReport(['b']));
+        await store.set(regenerateFromRunAtom, { runId: 'b' });
+        expect(sentRequest().user_prompt.feature_task).toBe('research_table');
+
+        const replacement = store.get(activeRunAtom)!;
+        expect(replacement.user_prompt.feature_task).toBe('research_table');
+        store.set(activeRunAtom, null);
+        store.set(threadRunsAtom, [makeRun('a'), { ...replacement, status: 'error' }]);
+        store.set(isWSChatPendingAtom, false);
+        truncateMock.mockResolvedValue(okReport([replacement.id]));
+        await store.set(regenerateFromRunAtom, { runId: replacement.id });
+        expect(sentRequest().user_prompt.feature_task).toBe('research_table');
     });
 
     it('folds a terminal active run into the dialog and the POSTed removal', async () => {

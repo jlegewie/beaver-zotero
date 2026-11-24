@@ -19,7 +19,7 @@ import { InvalidItemsMessageContent } from '../components/ui/popup/InvalidItemsM
 import { agentItemFilter } from "../../src/utils/agentItemSupport";
 import { getCurrentReader } from "../utils/readerUtils";
 import { TextSelection, zoteroReferenceLookupKeys, messageAttachmentKey, type ViewAttachment } from "@beaver/agent-core/types/attachments/apiTypes";
-import { ZoteroTag, CollectionReference } from "@beaver/agent-core/types/zotero";
+import { ZoteroTag, CollectionReference, collectionReferenceKey } from "@beaver/agent-core/types/zotero";
 import type { ExternalFileRecord } from "../../src/services/database";
 import { currentNoteItemAtom } from "./zoteroContext";
 import type { SlashCommandDescriptor } from "@beaver/agent-ui/composer/slashCommands";
@@ -102,6 +102,13 @@ export const validateFiltersAtom = atom((get) => {
 export const currentMessageContentAtom = atom<string>('');
 
 /**
+ * The `@query` text the composer holds while its Add Sources menu searches
+ * from it, or null. It is a search in progress, not part of the message: the
+ * menu deletes it when an item is picked.
+ */
+export const composerSourceSearchTextAtom = atom<string | null>(null);
+
+/**
 * Current message items
 * Items that are currently being added to the message
 */
@@ -146,7 +153,40 @@ export const currentMessageItemsAtom = atom(
  * Set when a collection action is triggered (context menu, slash menu).
  * Cleared after the message is sent.
  */
+/**
+ * The names of the research tables the message carries: attached, or open in
+ * the tab whose context it sends.
+ */
+export const messageTableNamesAtom = atom<string[]>((get) => {
+    get(messageItemDataRevisionAtom);
+    const reader = get(currentReaderAttachmentAtom);
+    const candidates = reader ? [...get(currentMessageItemsAtom), reader] : get(currentMessageItemsAtom);
+    const names: string[] = [];
+    const seen = new Set<string>();
+    for (const item of candidates) {
+        const key = `${item.libraryID}-${item.key}`;
+        if (seen.has(key) || !isTableAttachment(item)) continue;
+        seen.add(key);
+        let title = '';
+        try {
+            title = String(item.getField('title') || '');
+        } catch {
+            // Item data not loaded yet: the table reads as untitled.
+        }
+        names.push(title || 'Untitled');
+    }
+    return names;
+});
+
 export const currentMessageCollectionsAtom = atom<CollectionReference[]>([]);
+
+/** Attach collections to the current message, keeping those it already carries. */
+export const addCollectionsToCurrentMessageAtom = atom(null, (get, set, collections: CollectionReference[]) => {
+    const current = get(currentMessageCollectionsAtom);
+    const existingKeys = new Set(current.map(collectionReferenceKey));
+    const added = collections.filter((collection) => !existingKeys.has(collectionReferenceKey(collection)));
+    if (added.length > 0) set(currentMessageCollectionsAtom, [...current, ...added]);
+});
 
 /**
  * Saved searches and built-in views (Unfiled Items, …) attached to the current
@@ -214,6 +254,14 @@ export interface PendingPillInsert {
      *  InputAreas are mounted (main-window sidebar + separate Beaver window)
      *  the pill deterministically lands in the right editor. */
     targetWindow?: Window;
+    /** Text to set right after the pill, replacing anything already after it
+     *  (see `stageActionPillAtom`). Absent → the pill is inserted as is. */
+    argumentText?: string;
+    /** A part of `argumentText` selected once it is placed, so typing replaces it. */
+    selectText?: string;
+    /** Actions whose pills this one replaces: every pill of each is removed,
+     *  with its text, before this pill is placed. */
+    replaceActionIds?: string[];
 }
 
 /**
@@ -446,6 +494,23 @@ export const removeItemFromMessageAtom = atom(
         set(removePopupMessageAtom, item.key);
     }
 );
+
+/**
+ * Remove the items and collections the chat input took from the Zotero
+ * selection, keeping those the user added.
+ */
+export const removeAutomaticAttachmentsAtom = atom(null, (get, set) => {
+    const automaticItemKeys = get(automaticMessageItemKeysAtom);
+    for (const item of get(currentMessageItemsAtom)) {
+        if (automaticItemKeys.has(messageItemKey(item))) set(removeItemFromMessageAtom, item);
+    }
+    const automaticCollections = get(automaticMessageCollectionsAtom);
+    if (automaticCollections.length > 0) {
+        const keys = new Set(automaticCollections.map(collectionReferenceKey));
+        set(currentMessageCollectionsAtom, (collections) => collections.filter((collection) => !keys.has(collectionReferenceKey(collection))));
+        set(automaticMessageCollectionsAtom, []);
+    }
+});
 
 /**
 * Remove all editable context from the current message at once.
@@ -931,9 +996,9 @@ export const updateTableTabContextAtom = atom(
             set(currentReaderAttachmentAtom, null);
             return;
         }
-        // Only a table that can be submitted becomes the context: table chat
-        // may be disabled in this build, and the provider refuses a table that
-        // is corrupt, pending a write, or cites an excluded library.
+        // Only a table that can be submitted becomes the context: the provider
+        // refuses a table that is corrupt, pending a write, or cites an
+        // excluded library.
         let sendable = false;
         try {
             sendable = (await toValidatedMessageAttachment(item)) !== null;

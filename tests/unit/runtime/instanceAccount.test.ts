@@ -81,6 +81,7 @@ describe("instance account ownership", () => {
         const beaver = {
             backgroundExtractor: { abortJobsWithoutAccess: vi.fn(), notify: vi.fn() },
             processingReconciler: { notify: vi.fn() },
+            data: { env: "production" },
         };
         (Zotero as any).Beaver = beaver;
         (Zotero.Libraries.getAll as any).mockReturnValue([
@@ -429,6 +430,39 @@ describe("instance account ownership", () => {
             account.getSnapshot().data?.profile.has_completed_onboarding,
         ).toBe(true);
     });
+    it("takes a fill's reported balance over a profile read already in flight", async () => {
+        const withCredits = (subscription: number) => {
+            const data = profile();
+            data.profile.available_subscription_credits = subscription;
+            data.profile.available_purchased_credits = 0;
+            return data;
+        };
+        mocks.profile.mockResolvedValue(withCredits(5));
+        await load();
+        const old = deferred<any>();
+        mocks.profile.mockReturnValueOnce(old.promise).mockResolvedValue(withCredits(4.8));
+        const reading = account.refresh();
+        account.applyCreditBalance({ subscription: 4.8, purchased: 0 }, account.getGeneration());
+        expect(account.getSnapshot().data?.profile.available_subscription_credits).toBe(4.8);
+        // The read started before the charge: it is discarded, not applied.
+        old.resolve(withCredits(5));
+        await reading;
+        expect(account.getSnapshot().data?.profile.available_subscription_credits).toBe(4.8);
+    });
+    it("ignores a reported balance that is higher, or for another account", async () => {
+        const data = profile();
+        data.profile.available_subscription_credits = 3;
+        data.profile.available_purchased_credits = 1;
+        mocks.profile.mockResolvedValue(data);
+        await load();
+        const generation = account.getGeneration();
+        // A response that arrived after a later one: it reports more than the profile shows.
+        account.applyCreditBalance({ subscription: 3.2, purchased: 1 }, generation);
+        account.applyCreditBalance({ subscription: 2, purchased: 1 }, generation + 1);
+        expect(account.getSnapshot().data?.profile.available_subscription_credits).toBe(3);
+        account.applyCreditBalance({ subscription: 2.8, purchased: 1 }, generation);
+        expect(account.getSnapshot().data?.profile.available_subscription_credits).toBe(2.8);
+    });
     it("discards a profile response from the previous account, including an ABA switch", async () => {
         await load();
         const pending = deferred<any>();
@@ -529,6 +563,39 @@ describe("instance account ownership", () => {
         expect(Zotero.Beaver.searchableLibraryIds).toEqual([]);
         writePending.resolve({});
         await write;
+    });
+    describe("test exclusion override", () => {
+        const savedExcluded = () => {
+            const saved = profile();
+            saved.profile.excluded_libraries = [{ type: "user" }];
+            return saved;
+        };
+        beforeEach(() => {
+            vi.stubEnv("NODE_ENV", "development");
+            mocks.profile.mockResolvedValue(savedExcluded());
+        });
+        afterEach(() => {
+            vi.unstubAllEnvs();
+        });
+        it("outlasts profile reads until it is dropped", async () => {
+            await load();
+            expect(Zotero.Beaver.searchableLibraryIds).toEqual([]);
+            account.setExcludedLibrariesForTesting([]);
+            expect(Zotero.Beaver.searchableLibraryIds).toEqual([1]);
+            await account.refresh(true);
+            expect(Zotero.Beaver.searchableLibraryIds).toEqual([1]);
+            await account.clearExcludedLibrariesForTesting();
+            expect(Zotero.Beaver.searchableLibraryIds).toEqual([]);
+        });
+        it("gives way to exclusions the user saves", async () => {
+            mocks.profile.mockResolvedValue(profile());
+            await load();
+            account.setExcludedLibrariesForTesting([]);
+            mocks.profile.mockResolvedValue(savedExcluded());
+            await account.updateExcludedLibraries([{ type: "user" }]);
+            await account.refresh(true);
+            expect(Zotero.Beaver.searchableLibraryIds).toEqual([]);
+        });
     });
     it("rejects concurrent settings writes and never rolls back into a different account", async () => {
         await load();

@@ -41,7 +41,7 @@ function openBeaver(): void {
  * an element inside one stays connected while being invisible — focus must not
  * be handed back to it when the popup goes away.
  */
-const SIDEBAR_ROOTS = '#beaver-react-root-library, #beaver-react-root-reader';
+const SIDEBAR_ROOTS = '#beaver-react-root-sidebar';
 
 /**
  * The close control, in the card's top-right corner. Shown only while the
@@ -313,7 +313,9 @@ const QuickPromptPopup: React.FC = () => {
                     <DragDropWrapper overlayBorderRadius={12}>
                         <div className="beaver-quick-prompt__composer">
                             <PopupOverlayContainer />
-                            <InputArea inputRef={inputRef} verticalPosition="above" placeholder="Ask Beaver" />
+                            {/* No table notice here: its dismiss button would sit under the
+                                card's close button. */}
+                            <InputArea inputRef={inputRef} verticalPosition="above" placeholder="Ask Beaver" hideTablePlusToolsNotice />
                         </div>
                     </DragDropWrapper>
                 </div>

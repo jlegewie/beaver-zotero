@@ -10,6 +10,7 @@
 
 import { TABLE_FILL_CHANGED_EVENT, type TableFillJobSnapshot } from '@beaver/agent-core/protocol/tableFillProtocol';
 import { activeRunAtom } from '@beaver/agent-core/run-state/atoms';
+import { atom } from 'jotai';
 import { chatFillsAtom, recordChatFillAtom } from '@beaver/agent-core/run-state/tableChatFills';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
@@ -19,6 +20,14 @@ import { getHostWindow, tryGetWindowRuntime } from '../runtime/windowRuntime';
 import { findToolCallName } from './agentRunAtoms';
 
 let subscribed = false;
+
+/**
+ * Credits running fills may still charge (`InstanceTableFills.committedCredits`),
+ * read again on every job change. Fills started from a table's tab count too.
+ */
+export const committedFillCreditsAtom = atom(0);
+
+const committedNow = () => Zotero.Beaver.tableFills?.committedCredits() ?? 0;
 
 /**
  * Subscribe this renderer to job snapshots, once. The runtime revokes the
@@ -32,10 +41,12 @@ export function watchChatFills(): void {
         Zotero.Beaver.runtime.subscribeWindow(runtime, TABLE_FILL_CHANGED_EVENT, (snapshot: TableFillJobSnapshot) => {
             const seen = store.get(chatFillsAtom).has(snapshot?.job_id);
             store.set(recordChatFillAtom, snapshot);
+            store.set(committedFillCreditsAtom, committedNow());
             if (!seen) openTableForCreationFill(snapshot);
         });
         subscribed = true;
         for (const snapshot of Zotero.Beaver.tableFills?.listJobs() ?? []) store.set(recordChatFillAtom, snapshot);
+        store.set(committedFillCreditsAtom, committedNow());
     } catch (error) {
         logger(`tableChatFills: could not subscribe to fill jobs: ${String(error)}`, 1);
     }

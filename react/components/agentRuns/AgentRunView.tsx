@@ -1,7 +1,6 @@
 import React, { forwardRef, useMemo, useState, useCallback } from 'react';
 import { useAtomValue } from 'jotai';
 import { AgentRun, ToolCallPart, isContinuationPrompt, isRunActive, isRunFinished } from '@beaver/agent-core/agents/types';
-import { openParkedRunAtom } from '@beaver/agent-core/run-state/parkedRun';
 import { hasInProgressToolCall, isRunWithNothingToShow, shouldShowRunStatus } from '@beaver/agent-core/run-state/runStatusVisibility';
 import { wasRunContinued } from '@beaver/agent-core/run-state/runResumeHelpers';
 import { PARTIAL_RESPONSE_NOTE } from '@beaver/agent-core/transport/connectionFailure';
@@ -19,6 +18,7 @@ import { resumeChainAtom, runToolResultsAtom, resumedRunIdsAtom, threadRunsAtom 
 import { streamQuietAtom } from '@beaver/agent-core/run-state/streamActivity';
 import { autoReplacementPendingRunIdsAtom, streamingDoneRunIdsAtom } from '../../atoms/agentRunAtoms';
 import { isThreadParkedAtom } from '../../atoms/parkedRuns';
+import { openAnswerRunIdAtom } from '../../atoms/jobWait';
 import { useVisibleReconnect } from '../../hooks/useVisibleReconnect';
 import { getHost } from '@beaver/agent-ui/host';
 import BatchRunReceipt, { hasBatchReceipt } from '@beaver/agent-ui/chat/BatchRunReceipt';
@@ -96,8 +96,10 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
     // Don't show the user message of a run that continues another (a resume,
     // or the answer to a parked card): its content is empty.
     const showUserMessage = !isContinuationPrompt(run.user_prompt) || run.user_prompt.content.length > 0;
-    // A run still waiting on the user's answer to one of its cards.
-    const isOpenParked = useAtomValue(openParkedRunAtom)?.runId === run.id;
+    // A run whose answer is still going: a card waits for the user, or this
+    // window waits on a fill it started. One whose open calls are only fills
+    // nobody here waits on has ended, though its calls are open.
+    const isOpenParked = useAtomValue(openAnswerRunIdAtom) === run.id;
     
     // The provider can go quiet mid-response — after the sentence of preamble it
     // writes before calling its tools, while it works out what those calls are —
@@ -277,6 +279,12 @@ export const AgentRunView = React.memo(forwardRef<HTMLDivElement, AgentRunViewPr
                 one block. */}
             {showRunOutcomes && (
                 getHost().components?.pendingActionsReview({ runs: chainRuns }) ?? null
+            )}
+
+            {/* A client's card for the finished answer (a reward it earned),
+                after what the answer did. */}
+            {showRunOutcomes && (
+                getHost().components?.runEndCard?.({ runs: chainRuns }) ?? null
             )}
 
             {/* Suggestions (only for the last run, rendered below footer) */}

@@ -8,6 +8,14 @@ vi.mock("@beaver/agent-core/run-state/atoms", () => ({
     toolResultAtom: () => resultAtom,
     getToolCallStatusFromResult: () => "completed",
 }));
+vi.mock("@beaver/agent-core/run-state/jobCalls", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("@beaver/agent-core/run-state/jobCalls")>()),
+    openJobCallsAtom: atom([]),
+}));
+vi.mock("../../../react/atoms/jobWait", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("../../../react/atoms/jobWait")>()),
+    openAnswerRunIdAtom: atom(null),
+}));
 vi.mock("../../../react/agents/agentActions", () => ({
     pendingApprovalForToolcallAtom: () => atom(null),
     agentActionsForToolcallAtom: () => atom([]),
@@ -193,7 +201,7 @@ it("shows a failed table write's status under the title without expanding", asyn
         ),
     );
     const button = container.querySelector<HTMLButtonElement>("button[aria-expanded]")!;
-    expect(button.textContent).toContain("Create table");
+    expect(button.textContent).toContain("Create Table");
     expect(button.textContent).toContain("Study comparison");
     expect(container.querySelector('[role="status"]')?.textContent).toBe(
         "The table was declined. Nothing was created.",

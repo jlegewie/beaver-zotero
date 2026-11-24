@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fetchPdfAttachment } from '../../../src/services/pdfAttachmentFetch';
+import { fetchPdfAttachment, zoteroResolverSource } from '../../../src/services/pdfAttachmentFetch';
 import { LibraryMutations } from '../../../src/services/libraryMutations';
 import { createPdfFetchDiagnostics } from '../../../src/services/pdfFetchDiagnostics';
 
@@ -55,7 +55,7 @@ beforeEach(() => {
 
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
-const fetchPdf = () => fetchPdfAttachment(parent, [{ url: result.url }], controller.signal, assertAccess);
+const fetchPdf = () => fetchPdfAttachment(parent, [zoteroResolverSource([{ url: result.url }])], controller.signal, assertAccess);
 
 it('allows unrelated mutations and disposal while a download is stalled', async () => {
     const pending = deferred<any>();
@@ -161,7 +161,7 @@ describe('failure diagnostics', () => {
             { method: 'doi', url: 'https://doi.org/10.1/x', error: cloudflare403 },
             { method: 'openalex', url: 'https://oa.example/paper.pdf', wins: true },
         ]));
-        await fetchPdfAttachment(parent, [{ url: result.url }], controller.signal, assertAccess, diagnostics);
+        await fetchPdfAttachment(parent, [zoteroResolverSource([{ url: result.url }])], controller.signal, assertAccess, diagnostics);
         expect(diagnostics.attempts()).toEqual([
             { accessMethod: 'doi', host: 'doi.org', outcome: 'bot_challenge', status: 403 },
             { accessMethod: 'openalex', host: 'oa.example', outcome: 'ok' },
@@ -170,7 +170,7 @@ describe('failure diagnostics', () => {
 
     it('still sets the access method of the winning entry', async () => {
         download.mockImplementation(driveEntries([{ method: 'openalex', url: 'https://oa.example/p.pdf', wins: true }]));
-        await expect(fetchPdfAttachment(parent, [], controller.signal, assertAccess, createPdfFetchDiagnostics()))
+        await expect(fetchPdfAttachment(parent, [zoteroResolverSource([])], controller.signal, assertAccess, createPdfFetchDiagnostics()))
             .resolves.toMatchObject({ accessMethod: 'openalex' });
     });
 
@@ -178,7 +178,7 @@ describe('failure diagnostics', () => {
         const diagnostics = createPdfFetchDiagnostics();
         (Zotero as any).BrowserRequest = { getEntryForURL: (url: string) => (url.includes('captcha.example') ? { captchaLocator: '#c' } : null) };
         download.mockImplementation(driveEntries([{ method: 'url', url: 'https://captcha.example/a' }]));
-        await expect(fetchPdfAttachment(parent, [], controller.signal, assertAccess, diagnostics))
+        await expect(fetchPdfAttachment(parent, [zoteroResolverSource([])], controller.signal, assertAccess, diagnostics))
             .resolves.toEqual({ attachment: null });
         expect(diagnostics.attempts()).toEqual([{ accessMethod: 'url', host: 'captcha.example', outcome: 'captcha_skipped' }]);
         expect(diagnostics.failureReason({ resolverCount: 1, threw: false })).toBe('captcha_skipped');
@@ -187,7 +187,7 @@ describe('failure diagnostics', () => {
     it('reports no_pdf_found when a page yields no file and Zotero moves on silently', async () => {
         const diagnostics = createPdfFetchDiagnostics();
         download.mockImplementation(driveEntries([{ method: 'url', url: 'https://publisher.example/article' }]));
-        await fetchPdfAttachment(parent, [], controller.signal, assertAccess, diagnostics);
+        await fetchPdfAttachment(parent, [zoteroResolverSource([])], controller.signal, assertAccess, diagnostics);
         expect(diagnostics.failureReason({ resolverCount: 1, threw: false })).toBe('no_pdf_found');
     });
 
@@ -200,7 +200,7 @@ describe('failure diagnostics', () => {
             await options.onBeforeRequest('https://doi.org/10.1/x');
             return pending.promise;
         });
-        const fetch = fetchPdfAttachment(parent, [], controller.signal, assertAccess, diagnostics);
+        const fetch = fetchPdfAttachment(parent, [zoteroResolverSource([])], controller.signal, assertAccess, diagnostics);
         const rejected = expect(fetch).rejects.toThrow('timed out');
         await vi.advanceTimersByTimeAsync(60_000);
         await rejected;
@@ -214,7 +214,7 @@ describe('failure diagnostics', () => {
         vi.useFakeTimers();
         const diagnostics = createPdfFetchDiagnostics();
         download.mockReturnValue(deferred<any>().promise);
-        const fetch = fetchPdfAttachment(parent, [], controller.signal, assertAccess, diagnostics);
+        const fetch = fetchPdfAttachment(parent, [zoteroResolverSource([])], controller.signal, assertAccess, diagnostics);
         const rejected = expect(fetch).rejects.toThrow('timed out');
         await vi.advanceTimersByTimeAsync(0);
         controller.abort();
@@ -229,7 +229,7 @@ describe('failure diagnostics', () => {
             await options.onBeforeRequest('https://a.example/file.zip');
             return { ...result, mimeType: 'application/zip' };
         });
-        await expect(fetchPdfAttachment(parent, [], controller.signal, assertAccess, diagnostics)).rejects.toThrow('unsupported type');
+        await expect(fetchPdfAttachment(parent, [zoteroResolverSource([])], controller.signal, assertAccess, diagnostics)).rejects.toThrow('unsupported type');
         expect(diagnostics.failureReason({ resolverCount: 1, threw: true })).toBe('unsupported_type');
         expect(diagnostics.attempts()).toEqual([{ accessMethod: 'url', host: 'a.example', outcome: 'not_pdf' }]);
     });
@@ -241,12 +241,92 @@ describe('failure diagnostics', () => {
             { method: 'oa', url: 'https://oa.example/p.pdf', wins: true },
         ]));
         save.mockRejectedValue(new Error('disk full'));
-        await expect(fetchPdfAttachment(parent, [], controller.signal, assertAccess, diagnostics)).rejects.toThrow('disk full');
+        await expect(fetchPdfAttachment(parent, [zoteroResolverSource([])], controller.signal, assertAccess, diagnostics)).rejects.toThrow('disk full');
         expect(diagnostics.failureReason({ resolverCount: 2, threw: true })).toBe('error');
     });
 
     it('works without a tracker', async () => {
         download.mockImplementation(driveEntries([{ method: 'oa', url: 'https://oa.example/p.pdf', wins: true }]));
-        await expect(fetchPdfAttachment(parent, [], controller.signal, assertAccess)).resolves.toMatchObject({ accessMethod: 'oa' });
+        await expect(fetchPdfAttachment(parent, [zoteroResolverSource([])], controller.signal, assertAccess)).resolves.toMatchObject({ accessMethod: 'oa' });
+    });
+});
+
+describe('ordered sources', () => {
+    const serverFile = (overrides: Record<string, unknown> = {}) => ({
+        directory: '/tmp/server-pdf',
+        path: '/tmp/server-pdf/file.pdf',
+        url: 'https://repo.example/paper',
+        mimeType: 'application/pdf',
+        props: { articleVersion: 'acceptedVersion' },
+        accessMethod: 'openalex_content',
+        ...overrides,
+    });
+
+    it('does not ask a later source once an earlier one found a file', async () => {
+        const fallback = vi.fn();
+        await expect(fetchPdfAttachment(parent, [zoteroResolverSource([{ url: result.url }]), fallback], controller.signal, assertAccess))
+            .resolves.toMatchObject({ attachment: { key: 'PDFKEYAA' } });
+        expect(fallback).not.toHaveBeenCalled();
+    });
+
+    it('attaches the next source file when the cascade finds none, with its own url and access method', async () => {
+        download.mockResolvedValue(false);
+        const fallback = vi.fn().mockResolvedValue(serverFile());
+
+        await expect(fetchPdfAttachment(parent, [zoteroResolverSource([{ url: result.url }]), fallback], controller.signal, assertAccess))
+            .resolves.toEqual({ attachment: { key: 'PDFKEYAA' }, accessMethod: 'openalex_content' });
+
+        expect(fallback).toHaveBeenCalledWith(expect.objectContaining({ item: parent, signal: controller.signal }));
+        expect(save).toHaveBeenCalledWith(expect.objectContaining({
+            directory: '/tmp/server-pdf',
+            url: 'https://repo.example/paper',
+            contentType: 'application/pdf',
+        }));
+    });
+
+    it('still asks the next source when the cascade runs out of budget', async () => {
+        vi.useFakeTimers();
+        download.mockReturnValue(deferred<any>().promise);
+        const fallback = vi.fn().mockResolvedValue(serverFile());
+
+        const fetch = fetchPdfAttachment(parent, [zoteroResolverSource([]), fallback], controller.signal, assertAccess);
+        await vi.advanceTimersByTimeAsync(60_000);
+
+        await expect(fetch).resolves.toMatchObject({ accessMethod: 'openalex_content' });
+    });
+
+    it('rethrows the first failure when no source found a file', async () => {
+        const first = vi.fn().mockRejectedValue(new Error('unsupported type'));
+        const second = vi.fn().mockResolvedValue(null);
+
+        await expect(fetchPdfAttachment(parent, [first, second], controller.signal, assertAccess)).rejects.toThrow('unsupported type');
+        expect(second).toHaveBeenCalled();
+    });
+
+    it('returns no attachment when every source comes back empty', async () => {
+        const sources = [vi.fn().mockResolvedValue(null), vi.fn().mockResolvedValue(null)];
+        await expect(fetchPdfAttachment(parent, sources, controller.signal, assertAccess)).resolves.toEqual({ attachment: null });
+    });
+
+    it('stops at a cancelled task instead of asking the next source', async () => {
+        const first = vi.fn().mockImplementation(async () => {
+            controller.abort();
+            throw new Error('PDF fetch cancelled or timed out');
+        });
+        const second = vi.fn();
+
+        await expect(fetchPdfAttachment(parent, [first, second], controller.signal, assertAccess)).rejects.toThrow('cancelled');
+        expect(second).not.toHaveBeenCalled();
+    });
+
+    it('stops when access was revoked while a source failed', async () => {
+        const first = vi.fn().mockImplementation(async () => {
+            allowed = false;
+            throw new Error('download failed');
+        });
+        const second = vi.fn();
+
+        await expect(fetchPdfAttachment(parent, [first, second], controller.signal, assertAccess)).rejects.toThrow('Access revoked');
+        expect(second).not.toHaveBeenCalled();
     });
 });

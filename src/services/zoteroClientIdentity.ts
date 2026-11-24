@@ -10,7 +10,6 @@
 import { CLIENT_FEATURES, ZOTERO_PLUGIN_CLIENT_TYPE, ZOTERO_PLUGIN_FEATURES } from '@beaver/agent-core/protocol/agentProtocol';
 import { ClientIdentity, setClientIdentityProvider } from '@beaver/agent-core/transport/clientIdentity';
 import { buildZoteroInstanceWire } from './zoteroInstanceWire';
-import { isTableChatEnabled } from './tableCapability';
 import { isExternalRecordsEnabled } from './externalRecordsCapability';
 import { extractSchemaVersionsDeclaration } from './documentExtraction/shared/extractionSchemaVersions';
 
@@ -23,7 +22,6 @@ const WITHHELD_FEATURES: string[] = isExternalRecordsEnabled() ? [] : [CLIENT_FE
 
 function resolveZoteroClientIdentity(): ClientIdentity {
     const clientFeatures = ZOTERO_PLUGIN_FEATURES.filter((feature) => !WITHHELD_FEATURES.includes(feature));
-    if (isTableChatEnabled()) clientFeatures.push('tables');
     return {
         frontendVersion: Zotero.Beaver?.pluginVersion || '',
         clientType: ZOTERO_PLUGIN_CLIENT_TYPE,

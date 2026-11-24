@@ -13,13 +13,11 @@ import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { safeStub, serializeAttachmentStub, serializeItemStub } from '../../../src/utils/zoteroSerializers';
 import { libraryRefForLibraryID } from '../../../src/utils/libraryIdentity';
 import { isTableAttachment, loadTableItemFields } from '../../../src/services/artifacts/tableItemIdentity';
-import { isTableChatEnabled } from '../../../src/services/tableCapability';
 
 /** Validate the embedded table and current access before creating a submitted reference. */
 export async function toValidatedMessageAttachment(item: Zotero.Item): Promise<MessageAttachment | null> {
     if (item.isAttachment() && item.attachmentContentType === 'text/html') await loadTableItemFields([item]);
     if (!isTableAttachment(item)) return toMessageAttachment(item);
-    if (!isTableChatEnabled()) throw new Error('Table chat is not enabled in this build.');
     const libraryRef = libraryRefForLibraryID(item.libraryID);
     if (!libraryRef) throw new Error('Table library unavailable.');
     const key = `${libraryRef}-${item.key}`;

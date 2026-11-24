@@ -107,19 +107,33 @@ it("keeps a collapsed search a plain line without actions", async () => {
     expect(openButton(el)).toBeNull();
 });
 
-it("shows the search actions on the expanded card and toggles the details panel", async () => {
+it("shows one search-details toggle on the expanded card; the site link lives in the panel", async () => {
     const el = await renderCard(pubmedView([record]), "pubmed_search", true);
     const button = detailsButton(el)!;
     expect(button.getAttribute("aria-expanded")).toBe("false");
     expect(button.getAttribute("aria-controls")).toBe("search-details-call");
     expect(received.searchDetails.at(-1)).toEqual({ open: false, id: "search-details-call" });
+    expect(openButton(el)).toBeNull();
 
     act(() => button.click());
     expect(button.getAttribute("aria-expanded")).toBe("true");
     expect(received.searchDetails.at(-1)).toEqual({ open: true, id: "search-details-call" });
+});
 
-    act(() => openButton(el)!.click());
-    expect(openExternalUrl).toHaveBeenCalledWith("https://pubmed.ncbi.nlm.nih.gov/?term=semaglutide+obesity");
+it("keeps the result count whole, outside the text that shortens", async () => {
+    const el = await renderCard(pubmedView([record]), "pubmed_search", true);
+    const header = el.querySelector('button[aria-controls="tool-result-call"]')!;
+    const text = header.querySelector(".truncate")!;
+    expect(text.textContent).toBe("PubMed search: semaglutide obesity");
+    expect(text.nextElementSibling?.textContent).toBe("(1 result)");
+    expect(text.nextElementSibling?.className).toContain("flex-none");
+});
+
+it("offers the details toggle for a search that has only a site link", async () => {
+    const view = pubmedView([record]);
+    view.tool_info = { ...view.tool_info, query: null, query_translation: null } as any;
+    const el = await renderCard(view, "pubmed_search", true);
+    expect(detailsButton(el)).not.toBeNull();
 });
 
 it("lets a search that found nothing expand, with its details open", async () => {

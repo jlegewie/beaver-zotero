@@ -161,6 +161,18 @@ export interface WSRequestAckEvent extends WSBaseEvent {
      * losing its socket. Only for runs the backend lets outlive their socket.
      */
     reattach_token?: string;
+    /**
+     * Feature credits this request granted (see `BeaverAgentPrompt.feature_task`).
+     * Present only on the request that earned them.
+     */
+    feature_credit?: FeatureCreditGrant;
+}
+
+/** Credits granted for starting a feature-credit task. */
+export interface FeatureCreditGrant {
+    /** The task key, e.g. `annotate`. */
+    key: string;
+    credits: number;
 }
 
 /** Part event for streaming content (text, thinking, tool calls) */
@@ -1641,6 +1653,13 @@ export interface AnnotationResultItem {
     tags?: string[];
     /** Annotation author, when Zotero stores one. */
     author?: string | null;
+    /**
+     * Who made the annotation: `beaver` when its author marks it as Beaver's,
+     * otherwise `user` (the user, a group member, or the file itself). The
+     * author name is a preference and may be empty, so a Beaver annotation can
+     * read as `user`, which errs toward leaving it alone.
+     */
+    created_by?: 'beaver' | 'user';
     /** Parent attachment id ("library_id-zotero_key"). */
     attachment_id?: string | null;
     /** Bibliographic regular item id ("library_id-zotero_key"). */
@@ -2391,7 +2410,8 @@ export interface ErrorCandidate {
         | 'word_overlap'
         | 'inline_tag_drift'
         | 'structural_anchor'
-        | 'fuzzy_window';
+        | 'fuzzy_window'
+        | 'ambiguous_occurrence';
     score: number;
 }
 
@@ -2402,6 +2422,8 @@ export interface EditValidationError {
     error: string;
     error_code?: string | null;
     error_candidates?: ErrorCandidate[];
+    /** Diagnostic matcher strategy; see `WSAgentActionValidateResponse.match_strategy`. */
+    match_strategy?: string;
 }
 
 /** Response to agent action validation request */
@@ -2415,10 +2437,18 @@ export interface WSAgentActionValidateResponse {
     errors?: FieldValidationErrorInfo[];
     /**
      * Ranked alternative snippets when an edit_note old_string lookup fails.
-     * Present only with `error_code === 'old_string_not_found'`. Already
-     * truncated — do not re-truncate.
+     * Present with `error_code === 'old_string_not_found'` or
+     * `'ambiguous_match'`. Already truncated — do not re-truncate.
      */
     error_candidates?: ErrorCandidate[];
+    /**
+     * Diagnostic for edit_note match failures, for logging only. With
+     * `ambiguous_match`, the matcher strategy whose needle matched several
+     * times (`exact` when old_string itself did); with `old_string_not_found`,
+     * a fallback that matched but was refused because it could not pick one
+     * target.
+     */
+    match_strategy?: string;
     /**
      * Per-edit validation failures for batch actions (e.g. edit_note_batch).
      * Present only when validating a multi-edit payload and one or more edits
@@ -3136,8 +3166,9 @@ export const CLIENT_FEATURES = {
      * and `tool_info.info_type === 'search'`, combines per-source snapshots of
      * one id, prepares unresolved imports through the import-proposals
      * endpoint, applies the fill-only rules when resolving, and attaches a
-     * proposal's `attachments` in order. Gates the `pubmed_search` and
-     * `clinical_trials` capabilities.
+     * proposal's `attachments` in order, and renders the OpenAlex tools and
+     * their `openalex_names` view. Gates the `openalex`, `pubmed_search` and
+     * `clinical_trials` capabilities; `openalex` replaces `external_sources`.
      */
     EXTERNAL_RECORDS: 'external_records',
     /**
@@ -3219,6 +3250,26 @@ export const CLIENT_FEATURES = {
      * when it leaves a run that is waiting only on such cards.
      */
     PARKED_RUNS: 'parked_runs',
+    /**
+     * A table fill is a job call: a tool call that waits for the fill live
+     * and parks when the wait ends first. The client starts the fill without
+     * waiting, answers `job_wait_request`, and the window that waited resumes
+     * the parked run once the fill ends, answering the call with the same
+     * `job_wait_response`. Used only together with `parked_runs`.
+     */
+    BACKGROUND_JOBS: 'background_jobs',
+    /**
+     * Research tables: the client serves `artifact_request` for table
+     * attachments, runs table fills and renders table tool results. Gates the
+     * `tables` capability.
+     */
+    TABLES: 'tables',
+    /**
+     * The fill card shows the trial a request offers (`trial_rows`) and
+     * answers it with `trial`, and `fill_plan` plans a kept plan's first rows
+     * (`plan_id` with `limit`). Without it the backend offers no trial.
+     */
+    TABLE_FILL_TRIAL: 'table_fill_trial',
 } as const;
 
 /** Client type identifier for the Zotero plugin. */
@@ -3438,6 +3489,11 @@ export interface ApplicationStateInput {
      * (e.g. 'en-US', 'de', 'zh-CN'). Omitted when the host does not report one.
      */
     interface_language?: string;
+    /**
+     * IANA time zone of the user's system (e.g. 'America/New_York'). The
+     * backend dates the conversation in this zone, or in UTC when omitted.
+     */
+    time_zone?: string;
 }
 
 /** Frontend embedding index status reported with each agent run. */
@@ -3571,6 +3627,8 @@ export interface WSRequestAckData {
     modelId: string | null;
     modelName: string | null;
     chargeType: ChargeType;
+    /** Feature credits this request granted; absent otherwise. */
+    featureCredit?: FeatureCreditGrant;
 }
 
 /** A run lost its socket and is waiting on the server to be reattached. */

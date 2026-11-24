@@ -66,6 +66,11 @@
     "./src/activity.ts",
     "./src/math/latexToOmml.ts",
     "./src/math/mathmlToOmml.ts",
-    "./src/math/xml.ts"
+    "./src/math/xml.ts",
+    "./src/render/noteHtml.ts",
+    "./src/render/markdownPipeline.ts",
+    "./src/render/reactStaticMarkup.ts",
+    "./src/render/partialContent.ts",
+    "./src/render/legacyNoteTags.ts"
   ]
 }

@@ -13,7 +13,7 @@ import { checkShadowRestore, registerTableShadowRestore } from './tableStore';
  */
 
 import { logger } from '@beaver/agent-core/platform/logger';
-import { openTable } from '../../ui/openTable';
+import { isTableShown, openTable } from '../../ui/openTable';
 import { listTableTabs } from '../../ui/tableTab';
 import { inspectTableShadow } from './recoveryShadow';
 import {
@@ -36,6 +36,7 @@ export function registerTablesApi(): void {
     registerTableShadowRestore();
     const api: TablesApi = {
         openTable,
+        isShown: isTableShown,
         local: { commands: getTableLocalCommands },
         tabs: {
             list: () => listTableTabs(),

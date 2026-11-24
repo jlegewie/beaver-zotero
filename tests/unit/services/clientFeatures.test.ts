@@ -117,6 +117,13 @@ const VERSION_GATES: { feature: string; minVersion: string; op: Op }[] = [
 // search headers, combined snapshots) and import behavior (click-time
 // proposals, fill-only rules, ordered attachments) a build must implement; the
 // PubMed and trial capabilities are offered only to declaring clients.
+// tables is declaration-only because the client serves the table data and runs
+// fills itself; the backend never infers it from a version.
+// table_fill_trial is declaration-only because an older card never shows the
+// trial and an older provider refuses `fill_plan` with `limit`.
+// background_jobs is declaration-only because it commits the client to answering
+// `job_wait_request`, storing parked fill results and resuming without
+// answers.
 const DECLARATION_ONLY_FEATURES = [
     'external_files',
     'pdf_candidates',
@@ -151,6 +158,9 @@ const DECLARATION_ONLY_FEATURES = [
     'undelivered_action_ack',
     'parked_runs',
     'external_records',
+    'tables',
+    'background_jobs',
+    'table_fill_trial',
 ];
 
 // The full backend feature vocabulary (ALL_FEATURES in version_gates.py): every

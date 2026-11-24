@@ -229,6 +229,11 @@ export interface OrganizeItemsResultData {
     skipped_items?: string[];
     /** Items that already held every requested change so nothing was written for them. */
     unchanged_items?: string[];
+    /**
+     * Tags this write created that differ from tags already in their library
+     * only in case, spacing, hyphens or a plural ending. Advisory.
+     */
+    similar_existing_tags?: Array<{ tag: string; library_ref: string | null; existing: string[] }>;
 }
 
 // =============================================================================
@@ -268,7 +273,7 @@ export interface ManageTagsProposedData {
 export interface ManageTagsBaseline {
     /** Items carrying the tag. */
     item_count?: number | null;
-    /** Whether `new_name` already existed (rename only; null for delete). */
+    /** Whether `new_name` was already in the library (rename only; null for delete). */
     is_merge?: boolean | null;
 }
 
@@ -293,6 +298,17 @@ export interface ManageTagsResultData {
     old_color?: TagColorSnapshot | null;
     /** True iff a rename merged into an existing tag (re-checked at execute) */
     is_merge?: boolean | null;
+    /**
+     * Merge only: the `affected_item_ids` that already carried `new_name`,
+     * which keep it on undo. Absent on older results.
+     */
+    target_item_ids?: string[];
+    /**
+     * Merge only: the color `new_name` had before the merge (null when none),
+     * which the rename replaces with the source tag's color. Absent on older
+     * results.
+     */
+    target_color?: TagColorSnapshot | null;
 }
 
 // =============================================================================

@@ -124,6 +124,26 @@ it('reports the Zotero interface language when the host exposes one', async () =
     expect(await buildZoteroApplicationState(createStore().get)).not.toHaveProperty('interface_language');
 });
 
+it('reports the system time zone, and omits it when none can be resolved', async () => {
+    mocks.win = undefined;
+    vi.stubGlobal('Zotero', { Libraries: { get: () => null } });
+    const spy = vi.spyOn(Intl, 'DateTimeFormat');
+    const withTimeZone = (resolve: () => string | undefined) =>
+        spy.mockImplementation((() => ({ resolvedOptions: () => ({ timeZone: resolve() }) })) as any);
+    try {
+        withTimeZone(() => 'America/New_York');
+        expect((await buildZoteroApplicationState(createStore().get)).time_zone).toBe('America/New_York');
+
+        withTimeZone(() => '');
+        expect(await buildZoteroApplicationState(createStore().get)).not.toHaveProperty('time_zone');
+
+        withTimeZone(() => { throw new RangeError('no time zone'); });
+        expect(await buildZoteroApplicationState(createStore().get)).not.toHaveProperty('time_zone');
+    } finally {
+        spy.mockRestore();
+    }
+});
+
 it('reports selected special collection rows with counts, skipping unknown views and excluded libraries', async () => {
     const row = (type: string, libraryID: number) => ({ type, ref: { libraryID } });
     mocks.specialCounts.mockImplementation(async (type: string) => (type === 'duplicates'

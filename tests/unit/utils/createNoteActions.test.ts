@@ -11,10 +11,6 @@ vi.mock('../../../react/store', () => ({
     },
 }));
 
-vi.mock('@beaver/agent-core/citations/atoms', () => ({
-    citationMapAtom: Symbol('citationMapAtom'),
-}));
-
 vi.mock('@beaver/agent-core/citations/externalReferences', () => ({
     externalReferenceItemMappingAtom: Symbol('externalReferenceItemMappingAtom'),
     externalReferenceMappingAtom: Symbol('externalReferenceMappingAtom'),
@@ -22,15 +18,6 @@ vi.mock('@beaver/agent-core/citations/externalReferences', () => ({
 
 vi.mock('../../../react/atoms/threads', () => ({
     currentThreadIdAtom,
-}));
-
-vi.mock('../../../react/utils/citationRenderers', () => ({
-    renderToHTML: vi.fn((content: string) => `<p>${content}</p>`),
-}));
-
-vi.mock('../../../react/utils/pageLabels', () => ({
-    preloadPageLabelsForCitations: vi.fn().mockResolvedValue({}),
-    preloadPageLabelsForContent: vi.fn().mockResolvedValue({}),
 }));
 
 vi.mock('../../../react/utils/noteActions', () => ({
@@ -389,3 +376,6 @@ describe('executeCreateNoteAction', () => {
 });
 
 beforeEach(installMutationInstance);
+beforeEach(() => {
+    (Zotero.Beaver as any).exporter = { renderNoteMarkdown: vi.fn((content: string) => `<p>${content}</p>`) };
+});

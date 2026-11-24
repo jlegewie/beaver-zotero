@@ -1,14 +1,10 @@
 import React, { useEffect, useRef } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { firstRunReturnRequestedAtom } from '../../../atoms/firstRun';
-import { newThreadAtom } from '../../../atoms/threads';
 import { currentMessageContentAtom } from '../../../atoms/messageComposition';
 import { sendWSMessageAtom } from '../../../atoms/agentRunAtoms';
 import { PromptOrigin } from '@beaver/agent-core/agents/types';
-import { CardKind } from '@beaver/agent-core/types/librarySuggestions';
 import {
     FirstRunFollowup,
-    getFollowupsForCardKind,
     getFollowupsForWhereToStart,
     getWhereToStartCardKind,
     renderFollowup,
@@ -22,13 +18,11 @@ import { textWithTrailingNoWrap } from '../../../utils/textWithTrailingNoWrap';
 
 
 /**
- * Origins that surface guided next steps: a first-run suggestion card or a
- * "Where should we start?" launcher action. Both carry the context the
- * follow-up templates and the `first_run_followup` run need.
+ * The origin that surfaces guided next steps: a "Where should we start?"
+ * launcher action. It carries the context the follow-up templates and the
+ * `first_run_followup` run need.
  */
-type NextStepsOrigin =
-    | Extract<PromptOrigin, { kind: 'first_run_card' }>
-    | Extract<PromptOrigin, { kind: 'where_to_start' }>;
+type NextStepsOrigin = Extract<PromptOrigin, { kind: 'where_to_start' }>;
 
 interface NextStepsPanelProps {
     origin: NextStepsOrigin;
@@ -36,14 +30,11 @@ interface NextStepsPanelProps {
 }
 
 /**
- * Rendered once below the first agent run that originated from a first-run
- * suggestion card or the "Where should we start?" launcher (matched by run id).
- * Three paths:
+ * Rendered once below the first agent run that originated from the "Where
+ * should we start?" launcher (matched by run id). Three paths:
  *   1. Follow-up prompts — submit a second run in the same thread with origin
- *      `first_run_followup`. The follow-up list is resolved by launcher action
- *      id (where_to_start) or by card kind (suggestion card).
- *   2. "Back to suggestions" — re-renders the originating onboarding page
- *      (FirstRunPage or WhereToStartPage, per the user's sticky variant).
+ *      `first_run_followup`, resolved by the launcher action id.
+ *   2. "Back to starting points" — reopens the launcher.
  *   3. The tip line below documents the new-chat shortcut + icon.
  *
  * Auto-dismisses when:
@@ -52,26 +43,14 @@ interface NextStepsPanelProps {
  *   - parent stops rendering it (origin run id changes / new run starts)
  */
 const NextStepsPanel: React.FC<NextStepsPanelProps> = ({ origin, onDismiss }) => {
-    const setReturnRequested = useSetAtom(firstRunReturnRequestedAtom);
-    const newThread = useSetAtom(newThreadAtom);
     const sendWSMessage = useSetAtom(sendWSMessageAtom);
     const messageContent = useAtomValue(currentMessageContentAtom);
 
-    // Normalize the two origin shapes into the fields the follow-up flow needs.
-    const isWhereToStart = origin.kind === 'where_to_start';
     const topicLabel = origin.topic_label ?? null;
-    const collectionName = isWhereToStart ? null : (origin.collection_name ?? null);
-    const emptyLibrary = isWhereToStart ? false : (origin.empty_library ?? false);
-    // The `first_run_followup` run carries a card kind for analytics. Launcher
-    // runs derive a representative one from the action; suggestion cards use
-    // their own kind directly.
-    const followupCardKind: CardKind = isWhereToStart
-        ? getWhereToStartCardKind(origin.action_id)
-        : origin.card_kind;
-
-    const followups = isWhereToStart
-        ? getFollowupsForWhereToStart(origin.action_id)
-        : getFollowupsForCardKind(origin.card_kind, emptyLibrary);
+    // The `first_run_followup` run carries a card kind for analytics, derived
+    // from the launcher action.
+    const followupCardKind = getWhereToStartCardKind(origin.action_id);
+    const followups = getFollowupsForWhereToStart(origin.action_id);
 
     // Auto-dismiss when the user types a follow-up. Capture the initial value
     // so we don't dismiss on the first render if the input is already non-empty
@@ -84,7 +63,7 @@ const NextStepsPanel: React.FC<NextStepsPanelProps> = ({ origin, onDismiss }) =>
     }, [messageContent, onDismiss]);
 
     const handleFollowup = async (fu: FirstRunFollowup) => {
-        const { prompt } = renderFollowup(fu, topicLabel, collectionName);
+        const { prompt } = renderFollowup(fu, topicLabel);
         onDismiss();
         await sendWSMessage(prompt, {
             origin: {
@@ -92,8 +71,8 @@ const NextStepsPanel: React.FC<NextStepsPanelProps> = ({ origin, onDismiss }) =>
                 card_kind: followupCardKind,
                 followup_id: fu.id,
                 topic_label: topicLabel,
-                collection_name: collectionName,
-                empty_library: emptyLibrary,
+                collection_name: null,
+                empty_library: false,
             },
         });
     };
@@ -121,7 +100,7 @@ const NextStepsPanel: React.FC<NextStepsPanelProps> = ({ origin, onDismiss }) =>
 
                 <div className="display-flex flex-col gap-1 items-start">
                     {followups.map((fu) => {
-                        const { title } = renderFollowup(fu, topicLabel, collectionName);
+                        const { title } = renderFollowup(fu, topicLabel);
                         return (
                             <Button
                                 key={fu.id}
@@ -141,10 +120,7 @@ const NextStepsPanel: React.FC<NextStepsPanelProps> = ({ origin, onDismiss }) =>
                     })}
                 </div>
                 <div className="mt-3">
-                    <BackToSuggestions
-                        onDismiss={onDismiss}
-                        backTarget={isWhereToStart ? 'launcher' : 'suggestions'}
-                    />
+                    <BackToSuggestions onDismiss={onDismiss} />
                 </div>
             </div>
         </div>

@@ -6,6 +6,13 @@ import pkg from "./package.json";
 
 const { mode, definitions } = loadBuildEnvironment();
 
+// On Ctrl-C, `zotero-plugin serve` runs ZOTERO_PLUGIN_KILL_COMMAND, whose macOS
+// default (`kill -9 $(ps -x | grep zotero)`) kills every Zotero on the machine,
+// including other worktrees' instances. Limit it to this checkout's profile.
+// The shell expands the profile path when the command runs, after .env is loaded.
+process.env.ZOTERO_PLUGIN_KILL_COMMAND ??=
+  '[ -z "$ZOTERO_PLUGIN_PROFILE_PATH" ] || pkill -f -- "-profile $ZOTERO_PLUGIN_PROFILE_PATH( |\\$)" || true';
+
 // Zotero UI locales (mirrors chrome/locale/* in the Zotero source tree)
 const ZOTERO_LOCALES = [
   "af-ZA", "ar", "bg-BG", "br", "ca-AD", "cs-CZ", "da-DK", "de", "el-GR",
@@ -53,6 +60,10 @@ export default defineConfig({
     },
     prefs: {
       prefix: pkg.config.prefsPrefix,
+    },
+    // Fluent ids are looked up as plain strings, so no typings file is generated.
+    fluent: {
+      dts: false,
     },
     esbuildOptions: [
       {

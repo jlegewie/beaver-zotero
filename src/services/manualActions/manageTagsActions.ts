@@ -15,7 +15,8 @@
  *   - Zotero.Tags.rename(libraryID, oldName, newName): atomic rename; merges
  *     if newName already exists (UPDATE OR REPLACE + purge).
  *   - Zotero.Tags.removeFromLibrary(libraryID, tagIDs[]): atomic delete.
- *   - Zotero.Tags.getID(name): returns tagID or false.
+ *   - Zotero.Tags.getID(name): returns the global tagID or false; whether a
+ *     tag is in a library takes findLibraryTag.
  *   - Zotero.Tags.getTagItems(libraryID, tagID): returns itemID[].
  *   - Zotero.Tags.getColor/setColor: color snapshot.
  */
@@ -29,6 +30,7 @@ import {
 } from '../../utils/libraryIdentity';
 import { unboundedExecutionContext } from '../agentDataProvider/actions/actionExecution';
 import { applyManageTags } from '../agentDataProvider/actions/manageTags';
+import { findLibraryTag } from '../../utils/zoteroTags';
 import { itemCountPhrase, joinList, ManualApplyOptions, staleProposalError } from './staleProposal';
 
 function snapshotItemKey(itemId: string): string | null {
@@ -63,8 +65,7 @@ async function assertTagUnchanged(
     }
     if (data.action === 'rename' && typeof baseline.is_merge === 'boolean') {
         const target = (data.new_name ?? '').trim();
-        const targetID = target ? Zotero.Tags.getID(target) : false;
-        const isMerge = targetID !== false && targetID != null;
+        const isMerge = target ? (await findLibraryTag(libraryID, target)).inLibrary : false;
         if (isMerge !== baseline.is_merge) {
             changes.push(isMerge
                 ? `'${target}' now exists, so renaming would merge the two tags`
@@ -95,11 +96,14 @@ export async function executeManageTagsAction(
  * result_data is missing — which should not happen for an applied action.
  *
  * - `rename` without merge: atomic rename back to original name.
- * - `rename` WITH merge: cannot cleanly reverse the merge. Re-tags the
- *   snapshot; items that had both tags before the merge keep the target tag.
+ * - `rename` WITH merge: re-tags the snapshot with the original name and
+ *   removes the target tag from snapshot items that did not have it before
+ *   (`target_item_ids`). Results without that field keep the target tag on
+ *   every snapshot item.
  * - `delete`: re-add the tag to items in the snapshot.
  *
- * In all cases the tag color (if any) is restored.
+ * In all cases the tag color (if any) is restored, and a merge also restores
+ * the target tag's own color (`target_color`).
  */
 export async function undoManageTagsAction(
     action: AgentAction
@@ -150,8 +154,32 @@ export async function undoManageTagsAction(
             logger(`undoManageTagsAction: No affected_item_ids snapshot; cannot undo merge`, 1);
             return;
         }
-        await retagItems(resolvedLibraryID, affected_item_ids, name);
-        await restoreColor();
+        const keepTarget = result.target_item_ids;
+        await retagItems(
+            resolvedLibraryID,
+            affected_item_ids,
+            name,
+            // Zotero stores tag names NFC-normalized; item tags compare exactly.
+            keepTarget ? { name: target.normalize(), keepItemIds: keepTarget } : undefined,
+        );
+        if (old_color && 'target_color' in result) {
+            // The rename moved the source color onto the target, replacing the
+            // target's own. Clear it, then reinsert both colors in position
+            // order so the library's color list is as before.
+            try {
+                await (Zotero.Tags.setColor as any)(resolvedLibraryID, target, false);
+                const colors: [string, TagColorSnapshot][] = [[name, old_color]];
+                if (result.target_color) colors.push([target, result.target_color]);
+                colors.sort((a, b) => (a[1].position ?? 0) - (b[1].position ?? 0));
+                for (const [tag, c] of colors) {
+                    await Zotero.Tags.setColor(resolvedLibraryID, tag, c.color, c.position ?? 0);
+                }
+            } catch (e) {
+                logger(`undoManageTagsAction: Failed to restore colors: ${e}`, 1);
+            }
+        } else {
+            await restoreColor();
+        }
         logger(`undoManageTagsAction: Re-tagged ${affected_item_ids.length} items with '${name}' (merge undo)`, 1);
     } else if (op === 'delete') {
         if (affected_item_ids.length === 0) {
@@ -168,7 +196,17 @@ export async function undoManageTagsAction(
 }
 
 
-async function retagItems(libraryId: number, itemIds: string[], tagName: string): Promise<void> {
+/**
+ * Add `tagName` back to the snapshot items. With `removeTag`, also remove that
+ * tag from the snapshot items not listed in `removeTag.keepItemIds`.
+ */
+async function retagItems(
+    libraryId: number,
+    itemIds: string[],
+    tagName: string,
+    removeTag?: { name: string; keepItemIds: string[] },
+): Promise<void> {
+    const keepKeys = new Set(removeTag?.keepItemIds.map(snapshotItemKey));
     const items: Zotero.Item[] = [];
     for (const itemId of itemIds) {
         const zoteroKey = snapshotItemKey(itemId);
@@ -186,10 +224,16 @@ async function retagItems(libraryId: number, itemIds: string[], tagName: string)
     await Zotero.DB.executeTransaction(async () => {
         for (const item of items) {
             const existing = new Set(item.getTags().map((t: { tag: string }) => t.tag));
+            let changed = false;
             if (!existing.has(tagName)) {
                 item.addTag(tagName);
-                await item.save();
+                changed = true;
             }
+            if (removeTag && existing.has(removeTag.name) && !keepKeys.has(item.key)) {
+                item.removeTag(removeTag.name);
+                changed = true;
+            }
+            if (changed) await item.save();
         }
     });
 }

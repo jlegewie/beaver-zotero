@@ -28,6 +28,15 @@ const mocks = vi.hoisted(() => ({
     describeItems: vi.fn(async (ids: string[]) => ids.map((id) => ({ item_id: id, display_name: `Paper ${id}`, has_pdf: true }))),
     target: null as any,
     openPreferencesWindow: vi.fn(),
+    /** Whether the card's window reads as short (max-height: 500px). */
+    shortWindow: false,
+}));
+
+// The card's window answers the short-window media query from `mocks.shortWindow`.
+vi.mock('../../../react/runtime/SurfaceWindowContext', () => ({
+    useSurfaceWindow: () => ({
+        matchMedia: () => ({ matches: mocks.shortWindow, addEventListener: () => {}, removeEventListener: () => {} }),
+    }),
 }));
 
 vi.mock('../../../react/components/tables/card/liveSources', () => ({
@@ -425,6 +434,9 @@ describe('TableCard', () => {
             await click('Done');
             const chip = [...container.querySelectorAll('.table-card-option')].find((c) => c.textContent === 'RCT')!;
             expect(chip.getAttribute('title')).toBe('RCT: Random assignment to arms.');
+            // A chip without a definition still names its full label, which the row may shorten.
+            const plain = [...container.querySelectorAll('.table-card-option')].find((c) => c.textContent === 'Observational')!;
+            expect(plain.getAttribute('title')).toBe('Observational');
             await click('Create table');
             expect(sent[0].columns![1].options![0]).toEqual({ label: 'RCT', description: 'Random assignment to arms.' });
         });
@@ -1051,7 +1063,7 @@ describe('TableCard', () => {
             expect(runOption()).toBeNull();
             expect(controls()).toEqual(['Cancel', 'Next']);
             await click('Next');
-            expect(controls()).toEqual(['Back', 'Cancel', 'Create table']);
+            expect(controls()).toEqual(['Cancel', 'Back', 'Create table']);
             expect(button('Create only')).toBeUndefined();
             expect(container.querySelector('.table-card-run-option')?.textContent).toBe('Fill the table now');
             expect(runOption()!.checked).toBe(true);
@@ -1146,6 +1158,21 @@ describe('TableCard', () => {
             // Creating without the fill costs nothing, so the warning goes.
             await clickElement(runOption());
             expect(container.querySelector('.table-card-footer-band')).toBeNull();
+        });
+
+        it('in a short window, scrolls the fill warnings with the step and keeps the decision pinned', async () => {
+            mocks.shortWindow = true;
+            try {
+                render({ ...costedFixture('create-items'), cost: { rows: 46, documents: 44, title_abstract: 2, no_input: 0, credits: 9.2 } });
+                await click('Next');
+                const footer = container.querySelector('.table-card-footer')!;
+                const inBody = container.querySelectorAll('.table-card-body .table-card-body-bands .table-card-footer-band-warning');
+                expect(inBody).toHaveLength(2);
+                expect(footer.querySelector('.table-card-footer-band')).toBeNull();
+                expect(footer.querySelector('.table-card-decision')).not.toBeNull();
+            } finally {
+                mocks.shortWindow = false;
+            }
         });
 
         it('replaces the decision with the blocker and leads to the part that needs the fix', async () => {
@@ -1278,7 +1305,11 @@ describe('TableCard', () => {
     });
 
     describe('the fill card', () => {
-        function renderFill(request: WSTableFillCardRequest) {
+        const controls = () => [...container.querySelectorAll('.table-card-controls button')].map((b) => b.textContent?.trim());
+        function renderFill(
+            request: WSTableFillCardRequest,
+            props: { disabled?: boolean; heldCaption?: string; onStop?: () => void } = {},
+        ) {
             sent = [];
             act(() => {
                 root = createRoot(container);
@@ -1286,31 +1317,136 @@ describe('TableCard', () => {
                     React.createElement(
                         Provider,
                         { store: createStore() },
-                        React.createElement(TableFillCard, { request, onSubmit: (r: WSTableCardResponse) => sent.push(r) }),
+                        React.createElement(TableFillCard, { request, onSubmit: (r: WSTableCardResponse) => sent.push(r), ...props }),
                     ),
                 );
             });
         }
 
-        it('shows the columns, the plan\'s cost and a run button named for the papers', async () => {
+        it('shows the columns as the create card does, the receipt, and Fill table', async () => {
             const { request, reply } = read('fill-with-credits');
             const opened: unknown[] = [];
             setHost({ navigation: { openTable: async (key: string) => { opened.push(key); return { ok: true }; } } } as any);
             renderFill(request);
             expect(container.textContent).toContain('Comparison');
-            expect(container.textContent).toContain('Sample size');
-            expect(container.textContent).toContain('Design');
-            const cost = container.querySelector('.table-card-cost')?.textContent ?? '';
-            expect(cost).toContain('Reads 32 items: 30 from their documents, 2 from title and abstract');
-            expect(cost).toContain('6.1 credits');
-            // The balance (6) does not cover the plan.
-            expect(cost).toContain('Your 6 credits cover about');
+            // Each column is a read-only summary: header, type, question, options.
+            const columns = Array.from(container.querySelectorAll('.table-card-column'));
+            expect(columns).toHaveLength(2);
+            expect(columns[0].textContent).toContain('Sample size');
+            expect(columns[0].textContent).toContain('How many participants?');
+            // Read only, so nothing is clamped or cut to a preview.
+            expect(columns[0].querySelector('.table-card-column-question-full')).not.toBeNull();
+            expect(columns[1].querySelector('.table-card-options-all')).not.toBeNull();
+            expect(columns[1].textContent).toContain('What is the study design?');
+            expect(Array.from(columns[1].querySelectorAll('.table-card-option')).map((chip) => chip.textContent)).toEqual([
+                'RCT',
+                'Observational',
+            ]);
+            expect(container.querySelector('.table-card-column[role="button"]')).toBeNull();
+            // The decision row: what Fill table covers, and the receipt.
+            expect(container.querySelector('.table-card-decision-label')?.textContent).toBe('Fill 2 columns');
+            expect(container.querySelector('.table-card-receipt')?.textContent).toBe('32 items · 6.1 credits');
+            // Bands: the balance (6) does not cover the plan, and two items have no full text.
+            const bands = Array.from(container.querySelectorAll('.table-card-footer-band-warning')).map((band) => band.textContent);
+            expect(bands).toHaveLength(2);
+            expect(bands[0]).toContain('Your 6 credits cover about');
+            expect(bands[0]).toContain('Add credits');
+            expect(bands[1]).toContain('2 items have no full text and are read from their abstracts.');
+            await click('Add credits');
+            expect(mocks.openPreferencesWindow).toHaveBeenCalledWith('billing');
             // Nothing on it is editable.
             expect(container.querySelector('input, textarea')).toBeNull();
             await click('Open table');
             expect(opened).toEqual(['u-TABLE222']);
-            await click('Fill 32');
+            await click('Fill table');
             expect(sent).toEqual([{ type: 'table_card_response', card_id: reply.card_id, approved: true, choice: 'fill' }]);
+        });
+
+        it('shows every option of a category column, past the create card\'s preview', () => {
+            const { request } = read('fill-with-credits');
+            const labels = ['RCT', 'Cohort', 'Case-control', 'Cross-sectional', 'Qualitative'];
+            const columns = [{ ...request.columns[1], options: labels.map((label) => ({ label })) }];
+            renderFill({ ...request, columns });
+            expect(Array.from(container.querySelectorAll('.table-card-option')).map((chip) => chip.textContent)).toEqual(labels);
+            expect(container.textContent).not.toContain('+1');
+        });
+
+        it('in a short window, scrolls its warnings with the columns but keeps the held band pinned', () => {
+            const { request } = read('fill-with-credits');
+            mocks.shortWindow = true;
+            try {
+                renderFill(request);
+                const footer = container.querySelector('.table-card-footer')!;
+                expect(container.querySelectorAll('.table-card-body .table-card-body-bands .table-card-footer-band-warning')).toHaveLength(2);
+                expect(footer.querySelector('.table-card-footer-band')).toBeNull();
+                expect(footer.querySelector('.table-card-decision')).not.toBeNull();
+                act(() => root?.unmount());
+                renderFill(request, { disabled: true, heldCaption: 'You can answer as soon as Beaver reconnects.', onStop: () => {} });
+                expect(container.querySelector('.table-card-footer .table-card-footer-band-pending')).not.toBeNull();
+                expect(container.querySelector('.table-card-body-bands')).toBeNull();
+            } finally {
+                mocks.shortWindow = false;
+            }
+        });
+
+        it('opens the pricing popover from the receipt', async () => {
+            const { request } = read('fill-with-credits');
+            renderFill(request);
+            await clickElement(container.querySelector('.table-card-receipt-info'));
+            const popover = container.querySelector('.table-card-pricing-popover');
+            expect(popover?.textContent).toContain('Full text');
+            expect(popover?.textContent).toContain('Abstract only');
+        });
+
+        it('while the answer is held, shows why and offers Stop in place of Fill table', async () => {
+            const { request } = read('fill-with-credits');
+            const onStop = vi.fn();
+            renderFill(request, { disabled: true, heldCaption: 'You can answer as soon as Beaver reconnects.', onStop });
+            expect(container.querySelector('.table-card-footer-band-pending')?.textContent).toContain('as soon as Beaver reconnects');
+            // The held band replaces the warnings.
+            expect(container.querySelector('.table-card-footer-band-warning')).toBeNull();
+            expect(button('Fill table')).toBeUndefined();
+            await click('Stop');
+            expect(onStop).toHaveBeenCalled();
+            expect(sent).toEqual([]);
+        });
+
+        it('says a changed column reads every paper again, and approves only the trial with Try 5 first', async () => {
+            const { request, reply } = read('fill-trial');
+            renderFill(request);
+            const bands = Array.from(container.querySelectorAll('.table-card-footer-band-warning')).map((band) => band.textContent);
+            expect(bands).toEqual([
+                'Each paper is read again, so filling one column costs as much as filling all of them. Finish your column changes first, then try 5 rows to check the answers.',
+            ]);
+            expect(controls()).toEqual(['Cancel', 'Try 5 first', 'Fill table']);
+            expect(button('Try 5 first')!.className).toContain('variant-outline');
+            await click('Try 5 first');
+            expect(sent).toEqual([reply]);
+            // One answer per card.
+            expect(button('Fill table')!.disabled).toBe(true);
+        });
+
+        it('fills the whole plan with Fill table when a trial is on offer', async () => {
+            const { request } = read('fill-trial');
+            renderFill(request);
+            await click('Fill table');
+            expect(sent).toEqual([{ type: 'table_card_response', card_id: request.card_id, approved: true, choice: 'fill' }]);
+        });
+
+        it('without a trial on offer, leaves it out of the alert and the controls', () => {
+            const { request } = read('fill-trial');
+            renderFill({ ...request, trial_rows: null });
+            expect(container.querySelector('.table-card-footer-band-warning')?.textContent).toBe(
+                'Each paper is read again, so filling one column costs as much as filling all of them. Finish your column changes first.',
+            );
+            expect(controls()).toEqual(['Cancel', 'Fill table']);
+        });
+
+        it('keeps the trial quiet, without the alert, on a fill that reads no answered paper again', () => {
+            const { request } = read('fill-trial');
+            renderFill({ ...request, rereads: 0 });
+            expect(container.querySelector('.table-card-footer-band-warning')).toBeNull();
+            expect(button('Try 5 first')!.className).toContain('variant-ghost-secondary');
         });
 
         it('declines with instructions from the cancel view', async () => {

@@ -83,7 +83,11 @@ export const ActionPreview: React.FC<{
     /** Use the compact presentation intended for the end-of-run review card. */
     compact?: boolean;
     disabled?: boolean;
-}> = ({ toolName, previewData, status, actions, isStreaming, compact = false, disabled = false }) => {
+    /** `create_items` only: whether the call is still open (see `ImportItemsPreview`). */
+    isCallOpen?: boolean;
+    /** `create_items` only: each created item's full text, from the call's return. */
+    fullTextByKey?: ReadonlyMap<string, string | null>;
+}> = ({ toolName, previewData, status, actions, isStreaming, compact = false, disabled = false, isCallOpen, fullTextByKey }) => {
     if (toolName === 'merge_items') {
         // A failed undo leaves the merge in place, and the action keeps its
         // result: show it as merged, not as the proposal.
@@ -310,7 +314,7 @@ export const ActionPreview: React.FC<{
 
     if (toolName === 'create_items' || toolName === 'create_item' || previewData.actionType === 'create_item' || previewData.actionType === 'import_item') {
         if (actions && actions.length > 0 && actions[0].action_type === 'import_item') {
-            return <ImportItemsPreview actions={actions} status={status} />;
+            return <ImportItemsPreview actions={actions} status={status} isCallOpen={isCallOpen} fullTextByKey={fullTextByKey} />;
         }
         // If no actions array provided, return fallback
         if (!actions || actions.length === 0) {

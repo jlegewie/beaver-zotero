@@ -27,6 +27,24 @@ Notes:
   `npm start` runs the copy step before the watchers, then keeps it watching.
 - **Never create commits** unless explicitly asked.
 
+### Dependencies and install scripts
+
+`.npmrc` sets `ignore-scripts=true`, so `npm ci` / `npm install` run no dependency
+install scripts (and no root `pre*`/`post*` hooks). After installing, run
+`npm run rebuild:native` to build the dependencies that need theirs — today only
+`better-sqlite3`, which the unit tests' SQLite doubles load. Tests failing with
+`Could not locate the bindings file` mean that step was skipped.
+
+- A new dependency that needs its install script goes on the `npm rebuild` line of
+  `rebuild:native` in `package.json`. Check first whether it works without one:
+  esbuild, `@swc/core` and sharp ship prebuilt platform packages, and their scripts
+  only verify them.
+- `min-release-age=7` makes npm resolve only versions at least 7 days old (npm ≥ 11.10;
+  `npm ci` installs the lockfile as is). To take a fresh security fix, pass
+  `--min-release-age=0` for that one install.
+- Dependabot uses the same 7-day cooldown, for npm and for the SHA-pinned actions.
+  Pin new workflow actions to a full commit SHA with the tag in a trailing comment.
+
 ### Build vs. watch — do not mix them
 
 **Never run `npm run build:dev` while `npm start` is running.** `build:dev` calls
@@ -69,9 +87,10 @@ Consequences:
 | `packages/agent-core/` | both (compiled from source) | consumed as `@beaver/agent-core/<subpath>` |
 | `packages/agent-ui/` | webpack only (compiled from source) | consumed as `@beaver/agent-ui/<subpath>`; its `src/theme/*.css` is copied into `addon/content/styles/` by `scripts/copy-agent-ui-css.mjs` |
 
-**The two bundles cannot import from each other.** The webpack bundle is loaded via a
-`<script>` tag into the window; cross-bundle communication goes through `__beaver*`
-properties on `Window`/`Zotero` (e.g. `__beaverEventBus`, `__beaverJotaiStore`).
+**The two bundles cannot import from each other.** The plugin compiles the webpack bundle
+once and runs it in each renderer window (`src/ui/rendererBundle.ts`, with a `<script>` tag
+as fallback); cross-bundle communication goes through `__beaver*` properties on
+`Window`/`Zotero` (e.g. `__beaverEventBus`, `__beaverJotaiStore`).
 
 ### `addon` global vs `Zotero.Beaver`
 
@@ -196,21 +215,29 @@ originless user commands resolve a destination once with `resolveChatWindow()`. 
 
 | Mount point | Location | Component |
 |-------------|----------|-----------|
-| `#beaver-react-root-library` | `#zotero-item-pane` (main window) | `<LibrarySidebar />` |
-| `#beaver-react-root-reader` | `#zotero-context-pane` (main window) | `<ReaderSidebar />` |
+| `#beaver-react-root-sidebar` | active `#zotero-item-pane` on a library tab, `#zotero-context-pane` on any other (main window) | `<MainSidebar />` |
 | `#beaver-pane-window` | separate Beaver window | `<WindowSidebar />` (`isWindow={true}`) |
+
+A main window renders **one** sidebar. On a tab switch `react/ui/UIManager.ts` moves its
+element (`#beaver-pane-sidebar`) to the other pane instead of rendering a second copy, so the
+switch re-renders nothing and component state survives. Moving an element resets the scroll
+offsets inside it; the UI manager saves and restores them. In the standard layout the pane it
+occupies takes the `sidebarWidth` pref as its inline width and flex-basis; a splitter drag
+updates the pref, and the pane's `width` attribute (which Zotero persists as its own width) is
+put back. The flex-basis keeps Zotero's own width writes, which it lays out at once on every
+window resize, from resizing the pane (they made the reader resize in a loop). The inline width
+is where a splitter drag starts from.
 
 A hidden `#beaver-global-initializer-root` mounts `<GlobalContextInitializer />` for global
 hooks (auth, tab tracking, …).
 
 - **Each main-window renderer owns its Jotai store and atom identities** (`react/store.ts`).
-  Its library/reader sidebars and borrowed preferences surface share that store. The
+  Its sidebar and borrowed preferences surface share that store. The
   standalone owns another store and may also host preferences.
   `win.__beaverJotaiStore` is a lifetime-bounded diagnostic handle, never a cross-window API.
-  **Scroll state belongs to the renderer**: library/reader sidebars share it; the
-  standalone store isolates its scroll state. `isWindow` selects presentation.
-- `addon.runtime` owns stable runtime ids, the window registry, instance notifications and
-  one reader-width dispatcher. Attach installs a targeted UI bus on each chat window;
+  **Scroll state belongs to the renderer**: the standalone store isolates its scroll state. `isWindow` selects presentation.
+- `addon.runtime` owns stable runtime ids, the window registry and instance notifications.
+  Attach installs a targeted UI bus on each chat window;
   `BeaverReact.initializeRuntime` binds the renderer before any React roots mount. Renderer
   code uses `getHostWindow()` / `getContextWindow()` from `react/runtime/windowRuntime.ts`.
 - UI events target the owning renderer's bus (`react/events/eventManager.ts`). Background
@@ -272,8 +299,8 @@ quitting (full global cleanup behind the `isAppQuitting || isAppShuttingDown` gu
 `onStartup()` just ran.
 
 During cleanup, unmount React roots **before** removing DOM (stale `Zotero.Notifier` observers
-otherwise cause SIGSEGV), and unsubscribe its UI manager from reader-width updates. The plugin-owned dispatcher
-restores `Zotero.Reader.onChangeSidebarWidth` on instance disposal.
+otherwise cause SIGSEGV). The UI manager's cleanup gives the occupied pane back its own
+content, width and collapsed state, and unregisters its `layout` pref observer.
 
 ### Cross-window state: `Zotero` global vs `window`
 
@@ -298,7 +325,7 @@ scheduled from a closed window never fires — and the reference pins the dead w
   status reads and notification claims. Renderers only subscribe or issue commands.
   See [document and background runtime](docs/document-runtime.md).
 - Same rule for callbacks handed to app-lifetime Zotero registries (`Zotero.Notifier` observers,
-  `Zotero.Reader.onChangeSidebarWidth`): unregister them on their window's unload.
+  `Zotero.Prefs` observers): unregister them on their window's unload.
 
 ## Zotero API conventions
 

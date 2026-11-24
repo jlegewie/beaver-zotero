@@ -1,4 +1,11 @@
 /**
+ * Earlier plugin versions wrapped `Zotero.Reader.onChangeSidebarWidth`. Beaver
+ * no longer does, but a wrapper left in that app-lifetime slot by an earlier
+ * version, or by a plugin generation that did not shut down cleanly, pins the
+ * compartment it came from until something removes it.
+ */
+
+/**
  * Property stashed on the Beaver-authored `Zotero.Reader.onChangeSidebarWidth`
  * wrapper, holding whatever handler was installed before it (or null — core
  * initializes the slot to null and nothing else assigns it).
@@ -74,40 +81,3 @@ export function restoreReaderSidebarWidthHandler(): void {
     }
 }
 
-
-/** One plugin-owned callback fans out to attached renderers. */
-export class ReaderWidthDispatcher {
-    private listeners = new Set<() => void>();
-    private wrapper: ReaderWidthHandler | null = null;
-
-    subscribe(callback: () => void): () => void {
-        this.install();
-        this.listeners.add(callback);
-        return () => { this.listeners.delete(callback); };
-    }
-
-    install(): void {
-        const reader = Zotero.Reader;
-        if (this.wrapper && reader.onChangeSidebarWidth === this.wrapper) return;
-        const original = unwrapReaderWidthHandler(reader.onChangeSidebarWidth);
-        const wrapper = (...args: any[]) => {
-            try { original?.apply(reader, args); }
-            finally {
-                for (const listener of [...this.listeners]) {
-                    try { listener(); } catch (error) { Zotero.logError(error as Error); }
-                }
-            }
-        };
-        (wrapper as any)[ORIGINAL_HANDLER_PROP] = original;
-        reader.onChangeSidebarWidth = wrapper;
-        this.wrapper = wrapper;
-    }
-
-    get isCurrent(): boolean { return this.wrapper !== null && Zotero.Reader.onChangeSidebarWidth === this.wrapper; }
-
-    dispose(): void {
-        this.listeners.clear();
-        if (this.isCurrent) restoreReaderSidebarWidthHandler();
-        this.wrapper = null;
-    }
-}

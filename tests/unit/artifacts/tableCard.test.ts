@@ -197,7 +197,7 @@ describe("recorded columns", () => {
         // shows its options as chips.
         expect(html).toContain(">Text</span>");
         expect(html).toContain(">Category</span>");
-        expect(html).toContain('<span class="table-card-option">Observational</span>');
+        expect(html).toContain('<span class="table-card-option" title="Observational">Observational</span>');
         // The sources and columns give the size, so the status line says only
         // how much is filled.
         expect(html).toContain(">Not filled yet<");

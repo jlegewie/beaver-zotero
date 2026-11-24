@@ -7,6 +7,7 @@
 import type { PendingWork } from "../layouts/tableFill";
 import type {
     TableFillJobSnapshot,
+    TableFillNotStartedReason,
     TableFillPlanSummary,
     TableFillPricing,
     TableFillResult,
@@ -26,6 +27,28 @@ export function creditsText(credits: number): string {
 
 function count(n: number, one: string, many = `${one}s`): string {
     return `${n.toLocaleString("en-US")} ${n === 1 ? one : many}`;
+}
+
+/**
+ * Whether a fill reads as stopped early. A Stop that came once every item had
+ * started left nothing undone, so the fill reads as finished.
+ * `notStarted` is the result's `not_started` (a record's `rows_not_started`).
+ */
+export function readsAsStopped(
+    stoppedBy: string | null | undefined,
+    notStarted: Partial<Record<string, number>> | null | undefined,
+): boolean {
+    return !!stoppedBy && !(stoppedBy === "stopped" && !notStarted?.stopped);
+}
+
+/** What stopped a fill, as its result reads (see {@link readsAsStopped}). */
+export function shownStop(result: TableFillResult): TableFillNotStartedReason | undefined {
+    return readsAsStopped(result.stopped_by, result.not_started) ? result.stopped_by : undefined;
+}
+
+/** The items a fill wrote answers for: "Filled 12 items", "Filled 11 of 12 items". */
+export function filledText(answered: number, total: number): string {
+    return answered === total ? `Filled ${count(total, "item")}` : `Filled ${answered.toLocaleString("en-US")} of ${count(total, "item")}`;
 }
 
 /** The pricing sentence, the same everywhere a fill is priced. */
@@ -98,6 +121,30 @@ export function pendingLines(
     if (changed.length) lines.push({ label: "Changed", value: headers(changed) });
     if (pending.retry_rows > 0) lines.push({ label: "Retry", value: count(pending.retry_rows, "item") });
     return lines;
+}
+
+/**
+ * The alert on a fill that reads answered papers again for a new or changed
+ * question: a paper costs the same however many columns are filled. With a
+ * trial on offer (`trialRows`), it points to it. The cost stands beside it,
+ * so it names no number of credits.
+ */
+export function refillNotice(trialRows: number | null): string {
+    const head = "Each paper is read again, so filling one column costs as much as filling all of them.";
+    return trialRows
+        ? `${head} Finish your column changes first, then try ${trialRows} rows to check the answers.`
+        : `${head} Finish your column changes first.`;
+}
+
+/**
+ * Whether a plan shows {@link refillNotice}: it reads answered rows again
+ * for a new or changed question. Never on a trial, which is the advice, or
+ * on a retry of failed rows.
+ */
+export function showsRefillNotice(plan: Pick<TableFillPlanSummary, "scope" | "rereads">): boolean {
+    if (plan.scope.kind === "retry_failed") return false;
+    if (plan.scope.kind === "pending" && plan.scope.limit) return false;
+    return (plan.rereads ?? 0) > 0;
 }
 
 /** "Reads 46 papers: 43 from the PDF, 3 from title and abstract". */
@@ -194,22 +241,94 @@ function papersRead(plan: Pick<TableFillPlanSummary, "rows" | "documents" | "tit
 }
 
 /**
+ * What running fills may still charge, when `balance` is `accountBalance` less
+ * that: "Fills already running may use up to 4.7 of your 5 credits". Null
+ * when they hold nothing, or less than the display precision (rounding residue).
+ * It is an upper bound: a row that fails, or reads only an abstract, charges less.
+ */
+export function runningFillsText(balance: number, accountBalance: number | null): string | null {
+    const account = accountBalance ?? balance;
+    const held = account - balance;
+    if (held < 0.005) return null;
+    return `Fills already running may use up to ${formatCredits(held)} of your ${creditsText(account)}`;
+}
+
+/**
  * How far the balance reaches, when the fill costs more than it: "Your 6
- * credits cover about 30 of 46 papers". Null when the balance covers it or
- * is unknown.
+ * credits cover about 30 of 46 papers". With running fills holding part of the
+ * account's balance (`accountBalance`), it says so first: "Fills already
+ * running may use up to 4.7 of your 5 credits; the rest covers about 2 of 3
+ * items". Null when the balance covers it or is unknown.
  */
 export function balanceLine(
     plan: Pick<
         TableFillPlanSummary,
         "credits" | "balance" | "documents" | "title_abstract" | "prices"
     >,
+    accountBalance: number | null = plan.balance,
 ): string | null {
     if (plan.balance == null || plan.credits <= plan.balance) return null;
     const paying = plan.documents + plan.title_abstract;
     const perPaper = paying > 0 ? plan.credits / paying : plan.prices.document;
     const covered = perPaper > 0 ? Math.floor(plan.balance / perPaper + 1e-9) : paying;
+    const reach = `about ${Math.min(covered, paying)} of ${paying} items`;
+    const running = runningFillsText(plan.balance, accountBalance);
+    if (running) return `${running}; the rest covers ${reach}`;
     const balance = creditsText(plan.balance);
-    return `Your ${balance} ${balance.endsWith("credit") ? "covers" : "cover"} about ${Math.min(covered, paying)} of ${paying} items`;
+    return `Your ${balance} ${balance.endsWith("credit") ? "covers" : "cover"} ${reach}`;
+}
+
+/** The price of the cheapest item a plan pays for; null when it pays for none. */
+function cheapestItem(
+    plan: Pick<TableFillPlanSummary, "documents" | "title_abstract" | "prices">,
+): number | null {
+    const prices: number[] = [];
+    if (plan.documents) prices.push(plan.prices.document);
+    if (plan.title_abstract) prices.push(plan.prices.title_abstract);
+    return prices.length ? Math.min(...prices) : null;
+}
+
+/**
+ * Why a plan cannot start when the balance cannot pay for a single item it
+ * fills, so the fill would stop before answering anything: "Filling uses
+ * Beaver credits: 0.2 per item. You have 0 credits." When running fills hold
+ * the account's credits, that is the reason, and waiting for them is a way
+ * out: "… Fills already running may use up to 2 of your 2.02 credits. Wait
+ * for them to finish or add credits." Null when the balance pays for an item,
+ * is unknown, or the plan costs nothing.
+ */
+export function noCreditsText(
+    plan: Pick<TableFillPlanSummary, "credits" | "documents" | "title_abstract" | "prices">,
+    balance: number | null,
+    /** The account's balance, when `balance` is less what running fills may still charge. */
+    accountBalance: number | null = balance,
+): string | null {
+    if (balance == null || plan.credits <= 0) return null;
+    const cheapest = cheapestItem(plan);
+    if (cheapest == null || balance + 1e-9 >= cheapest) return null;
+    const price = `Filling uses Beaver credits: ${formatCredits(plan.documents ? plan.prices.document : plan.prices.title_abstract)} per item.`;
+    const running = runningFillsText(balance, accountBalance);
+    if (running) return `${price} ${running}. Wait for them to finish or add credits.`;
+    return `${price} You have ${creditsText(accountBalance ?? balance)}.`;
+}
+
+/** What a table can still do without credits. */
+export const FILL_BY_HAND_NOTE = "You can still add rows and edit cells by hand.";
+
+/** The table tab's notice for an account without credits. */
+export const NO_CREDITS_NOTICE = `Filling uses Beaver credits, and you have none. ${FILL_BY_HAND_NOTE}`;
+
+/** Whether the balance reads as no credits at all ("0 credits"). False when unknown. */
+export function hasNoCredits(balance: number | null): boolean {
+    return balance != null && formatCredits(balance) === "0";
+}
+
+/**
+ * The label of a way to buy credits: "Get credits" with none to spend (or an
+ * unknown balance), "Add credits" to top up a balance.
+ */
+export function creditsActionLabel(balance: number | null): string {
+    return balance == null || hasNoCredits(balance) ? "Get credits" : "Add credits";
 }
 
 /** "About 3 minutes left". */
@@ -258,8 +377,9 @@ export function resultTone(job: TableFillJobSnapshot): "clean" | "stopped" | "wa
     const result = job.result;
     if (!result) return "warning";
     if (result.failed_row_ids.length || result.not_written) return "warning";
-    if (result.stopped_by === "stopped") return "stopped";
-    return result.stopped_by ? "warning" : "clean";
+    const stop = shownStop(result);
+    if (stop === "stopped") return "stopped";
+    return stop ? "warning" : "clean";
 }
 
 /** The link to a finished fill's failed rows: "Show 2 failed". */
@@ -283,21 +403,24 @@ export function runningLabel(job: TableFillJobSnapshot): string {
 function stoppedText(job: TableFillJobSnapshot, result: TableFillResult): string | null {
     const failed = result.failed_row_ids.length;
     const unread = failed ? `${failed.toLocaleString("en-US")} couldn't be read` : null;
-    const after = afterText(job);
-    if (result.stopped_by === "insufficient_credits")
-        return unread ? `Out of credits ${after} · ${unread}` : `Out of credits ${after}`;
-    if (result.stopped_by === "stopped") return unread ? `Stopped ${after} · ${unread}` : `Stopped ${after}`;
-    const sentence = stopSentence(result, after);
+    const after = afterText(job, result);
+    const stop = shownStop(result);
+    // Rows a fill never started stay pending, so the next fill picks them up.
+    if (stop === "insufficient_credits")
+        return `Out of credits ${after}${unread ? ` · ${unread}` : ""} · the rest stay pending`;
+    if (stop === "stopped") return unread ? `Stopped ${after} · ${unread}` : `Stopped ${after}`;
+    const sentence = stopSentence(stop, after);
     return sentence && unread ? `${sentence}; ${unread}` : sentence;
 }
 
-function afterText(job: TableFillJobSnapshot): string {
-    return `after ${job.rows_done} of ${count(job.rows_total, "item")}`;
+/** How far a stopped fill got, counting the items it filled: "after 6 of 12 items". */
+function afterText(job: TableFillJobSnapshot, result: TableFillResult): string {
+    return `after ${result.rows_answered.toLocaleString("en-US")} of ${count(job.rows_total, "item")}`;
 }
 
 /** A stop that neither the user nor the balance caused, as a sentence. */
-function stopSentence(result: TableFillResult, after: string): string | null {
-    switch (result.stopped_by) {
+function stopSentence(stop: TableFillNotStartedReason | undefined, after: string): string | null {
+    switch (stop) {
         case "price_changed":
             return "Prices changed; fill again to see the new cost";
         case "account_changed":
@@ -319,19 +442,20 @@ function stopSentence(result: TableFillResult, after: string): string | null {
 /**
  * A finished fill's result in a few words, for a surface that links to the
  * failed rows itself and leaves the cost to the tool call and the table:
- * "Filled 12 rows", "Stopped after 7 of 12 papers", "Out of credits after 7
- * of 12 papers".
+ * "Filled 12 items", "Stopped after 7 of 12 items", "Out of credits after 7
+ * of 12 items".
  */
 export function resultSummary(job: TableFillJobSnapshot): string {
     const result = job.result;
     if (!result) return runningLabel(job);
-    const after = afterText(job);
+    const after = afterText(job, result);
+    const stop = shownStop(result);
     const line =
-        result.stopped_by === "insufficient_credits"
+        stop === "insufficient_credits"
             ? `Out of credits ${after}`
-            : result.stopped_by === "stopped"
+            : stop === "stopped"
               ? `Stopped ${after}`
-              : (stopSentence(result, after) ?? `Filled ${count(result.rows_answered, "row")}`);
+              : (stopSentence(stop, after) ?? filledText(result.rows_answered, job.rows_total));
     return result.not_written ? `${line} · ${count(result.not_written, "item")} not saved` : line;
 }
 
@@ -344,7 +468,7 @@ function skippedAnswers(result: TableFillResult): number {
  * Whether a finished fill's result asks something of the user: it stopped
  * early, rows could not be read or saved, or answers were left for the next
  * fill. False only for a clean result, which {@link resultText} reduces to
- * the rows filled.
+ * the items filled.
  */
 export function resultNeedsAttention(job: TableFillJobSnapshot): boolean {
     const result = job.result;
@@ -368,7 +492,7 @@ export function resultText(job: TableFillJobSnapshot): string {
             ? `${stopped}; ${count(result.not_written, "item")} could not be saved`
             : stopped;
     const failed = result.failed_row_ids.length;
-    const parts = [`Filled ${count(result.rows_answered, "row")}`];
+    const parts = [filledText(result.rows_answered, job.rows_total)];
     if (failed) parts.push(`${failed.toLocaleString("en-US")} couldn't be read`);
     if (result.not_written)
         parts.push(`${count(result.not_written, "item")} could not be saved`);

@@ -297,6 +297,30 @@ describe('ordinary edits', () => {
     });
 });
 
+describe('moving columns', () => {
+    it('moves a column from its menu as an ordinary edit, without a toast', async () => {
+        commands.edit.mockResolvedValue(committed([]));
+        mount();
+        await openColumnMenu('Effect');
+        await click(menuItem('Move right'));
+        expect(commands.edit).toHaveBeenCalledWith(
+            ref,
+            { move_columns: [{ id: 'effect', after: 'notes' }] },
+            expect.objectContaining({ seal: false, change: 'Moved column “Effect”' }),
+        );
+        expect($('.rt-toast')).toBeNull();
+        await openColumnMenu('Notes');
+        await click(menuItem('Move left'));
+        expect(commands.edit).toHaveBeenLastCalledWith(ref, { move_columns: [{ id: 'notes', after: null }] }, expect.anything());
+    });
+
+    it('offers the moves disabled while a fill runs', async () => {
+        mount({ fillRunning: true });
+        await openColumnMenu('Notes');
+        expect(document.querySelector('[aria-label="Move left"]')?.getAttribute('aria-disabled')).toBe('true');
+    });
+});
+
 describe('destructive edits and Undo', () => {
     it('removes a column without asking when no answer is the user’s, then undoes it', async () => {
         commands.edit.mockResolvedValue(committed([{ op: 'remove_column', column: 'notes', header: 'Notes', cleared: 1, user_cleared: 0 }]));

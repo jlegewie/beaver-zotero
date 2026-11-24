@@ -273,6 +273,16 @@ describe('tab hooks', () => {
         expect(findTableTab(win, REF)).toBeNull();
     });
 
+    it("moves the table to a window of its own from the table's own menu, as the tab menu does", async () => {
+        const win = windows[0];
+        openTableTab(win, tableItem(), REF);
+        const { moveToNewWindow } = win.BeaverReact.renderTableTab.mock.calls[0][2];
+        opener.mockResolvedValueOnce({ ok: true });
+        moveToNewWindow();
+        await vi.waitFor(() => expect(findTableTab(win, REF)).toBeNull());
+        expect(opener).toHaveBeenCalledWith(REF, { openIn: 'window' });
+    });
+
     it('keeps the tab when its window could not be opened', async () => {
         const win = windows[0];
         const { tabID } = openTableTab(win, tableItem(), REF);

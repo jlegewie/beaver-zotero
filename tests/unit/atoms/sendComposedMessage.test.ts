@@ -27,11 +27,20 @@ vi.mock('../../../react/atoms/messageComposition', async () => {
     const { atom } = await import('jotai');
     const currentMessageItemsAtom = atom<any[]>([]);
     const currentMessageViewsAtom = atom<any[]>([]);
+    const currentMessageCollectionsAtom = atom<any[]>([]);
     return {
         currentMessageItemsAtom,
-        currentMessageCollectionsAtom: atom<unknown[]>([]),
+        currentMessageCollectionsAtom,
+        addCollectionsToCurrentMessageAtom: atom(null, (get, set, collections: any[]) => {
+            const current = get(currentMessageCollectionsAtom);
+            const added = collections.filter((c) => !current.some((a: any) => a.library_id === c.library_id && a.zotero_key === c.zotero_key));
+            if (added.length > 0) set(currentMessageCollectionsAtom, [...current, ...added]);
+        }),
         currentMessageViewsAtom,
         pendingPillInsertsAtom: atom<unknown[]>([]),
+        currentMessageContentAtom: atom(''),
+        currentMessagePillsAtom: atom<any[]>([]),
+        composerResetTokenAtom: atom(0),
         addViewsToCurrentMessageAtom: atom(null, (get, set, views: any[]) => {
             set(currentMessageViewsAtom, [...get(currentMessageViewsAtom), ...views]);
         }),
@@ -125,6 +134,7 @@ vi.mock('../../../src/utils/libraryIdentity', () => ({
 // =============================================================================
 
 import {
+    actionRequirementBlockAtom,
     actionsAtom,
     buildEditedPromptActionsAtom,
     resolveActionForStagingAtom,
@@ -134,10 +144,14 @@ import {
 } from '../../../react/atoms/actions';
 import {
     currentMessageCollectionsAtom,
+    currentMessageContentAtom,
     currentMessageItemsAtom,
+    currentMessagePillsAtom,
     currentMessageViewsAtom,
+    composerResetTokenAtom,
     pendingPillInsertsAtom,
 } from '../../../react/atoms/messageComposition';
+import { activeFeatureTaskAtom } from '../../../react/atoms/featureCreditRuns';
 import { resolvePromptVariables, resolveTargetContext } from '../../../react/utils/promptVariables';
 import { toValidatedMessageAttachment } from '../../../react/types/attachments/converters';
 import type { Action } from '@beaver/agent-core/types/actions';
@@ -402,6 +416,40 @@ describe('sendComposedMessageAtom', () => {
         });
         expect(sendWSMessageMock.mock.calls[0][1].actions).toHaveLength(1);
         expect(resolvePromptVariables).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe('sending from a feature-credit setup card', () => {
+    const colorCode: Action = { id: 'builtin-color-code', name: 'color-code', title: 'Color-code this paper', text: 'Color-code.', targets: ['attachment'] };
+    const pill = (action: Action) => ({ commandName: action.name!, actionId: action.id, title: action.title });
+
+    it('names the task when the message runs the task action', async () => {
+        const store = makeStore([colorCode, summarizeAction]);
+        store.set(activeFeatureTaskAtom, 'annotate');
+        await store.set(sendComposedMessageAtom, { baseText: '/color-code', pills: [pill(colorCode)] });
+        expect(sendWSMessageMock.mock.calls[0][1].featureTask).toBe('annotate');
+    });
+
+    it('names no task for another action, or without a setup card', async () => {
+        const store = makeStore([colorCode, summarizeAction]);
+        store.set(activeFeatureTaskAtom, 'annotate');
+        await store.set(sendComposedMessageAtom, { baseText: '/summarize', pills: [pill({ ...summarizeAction, name: 'summarize' })] });
+        expect(sendWSMessageMock.mock.calls[0][1]).not.toHaveProperty('featureTask');
+
+        store.set(activeFeatureTaskAtom, null);
+        await store.set(sendComposedMessageAtom, { baseText: '/color-code', pills: [pill(colorCode)] });
+        expect(sendWSMessageMock.mock.calls[1][1]).not.toHaveProperty('featureTask');
+    });
+
+    it('names no task on a later message, once the chat input was reset', async () => {
+        const store = makeStore([colorCode]);
+        store.set(activeFeatureTaskAtom, 'annotate');
+        await store.set(sendComposedMessageAtom, { baseText: '/color-code', pills: [pill(colorCode)] });
+        // Sending clears the chat input.
+        store.set(composerResetTokenAtom, store.get(composerResetTokenAtom) + 1);
+        await store.set(sendComposedMessageAtom, { baseText: '/color-code', pills: [pill(colorCode)] });
+        expect(sendWSMessageMock.mock.calls[0][1].featureTask).toBe('annotate');
+        expect(sendWSMessageMock.mock.calls[1][1]).not.toHaveProperty('featureTask');
     });
 });
 
@@ -690,5 +738,62 @@ describe('stageActionPillAtom', () => {
         const store = makeStore();
         expect(store.set(stageActionPillAtom, { actionId: 'custom-1', targetType: 'items' })).toBe(false);
         expect(store.get(pendingPillInsertsAtom)).toEqual([]);
+    });
+
+    it('carries the text to put after the pill', () => {
+        const store = makeStore();
+        store.set(stageActionPillAtom, { actionId: 'custom-1', argumentText: 'the methods', selectText: 'methods' });
+        const pending = store.get(pendingPillInsertsAtom) as any[];
+        expect(pending[0].argumentText).toBe('the methods');
+        expect(pending[0].selectText).toBe('methods');
+    });
+
+    it('binds and attaches nothing when staged without a target type', () => {
+        const store = makeStore([{ ...summarizeAction, targets: ['global'] }]);
+        expect(store.set(stageActionPillAtom, { actionId: 'custom-1' })).toBe(true);
+        expect(resolveTargetContext).toHaveBeenCalledWith(undefined, undefined);
+        expect((store.get(pendingPillInsertsAtom) as any[])[0].descriptor.targetType).toBeUndefined();
+        expect(store.get(currentMessageItemsAtom)).toEqual([]);
+        expect(store.get(currentMessageCollectionsAtom)).toEqual([]);
+        expect(store.get(currentMessageViewsAtom)).toEqual([]);
+    });
+});
+
+describe('actionRequirementBlockAtom', () => {
+    const annotate: Action = {
+        id: 'builtin-annotate',
+        name: 'annotate',
+        title: 'Annotate',
+        text: 'Annotate.',
+        targets: ['global'],
+        argumentRequired: true,
+        argumentRequiredHint: 'Describe what to highlight',
+    };
+    const pill = (action: Action, targetType?: Action['targets'][number]) =>
+        ({ commandName: action.name!, actionId: action.id, targetType, title: action.title });
+
+    function compose(actions: Action[], content: string, pills: any[]) {
+        const store = makeStore(actions);
+        store.set(currentMessageContentAtom, content);
+        store.set(currentMessagePillsAtom, pills);
+        return store;
+    }
+
+    it('blocks a command that needs text until text follows it', () => {
+        const store = compose([annotate], '/annotate ', [pill(annotate)]);
+        expect(store.get(actionRequirementBlockAtom)).toEqual({ hint: 'Describe what to highlight after /annotate' });
+        store.set(currentMessageContentAtom, '/annotate the methods');
+        expect(store.get(actionRequirementBlockAtom)).toBeNull();
+    });
+
+    it('does not block an action with nothing attached', () => {
+        const sortAction: Action = { id: 'custom-sort', name: 'sort', title: 'Sort', text: 'Sort.', targets: ['items', 'collection'] };
+        const store = compose([sortAction], '/sort ', [pill(sortAction, 'items')]);
+        expect(store.get(actionRequirementBlockAtom)).toBeNull();
+    });
+
+    it('does not block without pills', () => {
+        const store = compose([annotate], '', []);
+        expect(store.get(actionRequirementBlockAtom)).toBeNull();
     });
 });

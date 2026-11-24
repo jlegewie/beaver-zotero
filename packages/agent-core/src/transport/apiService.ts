@@ -473,6 +473,27 @@ export class ApiService {
     }
     
     /**
+     * POST a JSON body and return the response's raw bytes and headers, for
+     * endpoints that answer with a file instead of JSON. Errors are handled
+     * like any other request.
+     */
+    protected async postForBytes(
+        endpoint: string,
+        body: unknown,
+        options?: RequestOptions,
+    ): Promise<{ bytes: Uint8Array; headers: Response['headers'] }> {
+        return withDeadline(options, async (deadline) => {
+            const response = await this.request(endpoint, 'POST', body, deadline, {
+                assertDispatch: options?.assertDispatch,
+            });
+            const bytes = new Uint8Array(await response.arrayBuffer());
+            const generation = this.responseGenerations.get(response);
+            if (generation !== undefined) assertCredentialGeneration(generation);
+            return { bytes, headers: response.headers };
+        });
+    }
+
+    /**
     * Performs a PATCH request
     */
     async patch<T>(endpoint: string, body: any, options?: RequestOptions): Promise<T> {

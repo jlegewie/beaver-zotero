@@ -5,6 +5,8 @@ import { addColumnBlockedReason } from "@beaver/agent-core/layouts/tableMutation
 import type { TableFillCells } from "@beaver/agent-core/protocol/tableFillProtocol";
 import {
     ArrowDownIcon,
+    ArrowLeftIcon,
+    ArrowRightIcon,
     ArrowUpIcon,
     CancelIcon,
     CheckmarkCircleIcon,
@@ -21,6 +23,7 @@ import {
     LibraryIcon,
     ListBulletIcon,
     MoreHorizontalIcon,
+    PictureInPictureIcon,
     PlayIcon,
     PlusSignIcon,
     RepeatIcon,
@@ -33,12 +36,22 @@ import MenuButton from "../../primitives/MenuButton";
 import ContextMenu, { type MenuItem, type MenuPosition } from "../../primitives/ContextMenu";
 import { HoverLayerProvider, selectionWithin } from "../../primitives/HoverLayer";
 import { FindQueryProvider } from "../../chat/findContext";
-import { buildFilterMenu, buildSortMenu, FilterChips } from "../tableMenus";
+import { buildFilterMenu, buildSortMenu, columnFilterItems, FilterChips } from "../tableMenus";
 import { renderPlainText, type TableDensity, type TextRenderer } from "../tableView";
 import { useTableState } from "../useTableState";
 import { CellEditor, editsAsList, type CellEditInput } from "./CellEditor";
 import { CellInspector, type CellActionControls } from "./CellInspector";
-import { cellFill, isNewRow, PAPER_HEADER, researchColumns, rowFills, sortOrderLabel, type TableDocuments } from "./cellModel";
+import {
+    cellFill,
+    isNewRow,
+    moveAfter,
+    PAPER_HEADER,
+    researchColumns,
+    rowFills,
+    sortOrderLabel,
+    type ColumnDrop,
+    type TableDocuments,
+} from "./cellModel";
 import { EmptyTableGuide } from "./EmptyTableGuide";
 import { ResearchGrid, type CellAddress } from "./ResearchGrid";
 import { AnchoredPopover, InlineText } from "./TableEditing";
@@ -78,6 +91,13 @@ export interface ResearchTableEditing {
     onAddColumn?(): void;
     onChangeType?(column: Column, type: ResearchColumnType): void;
     onRemoveColumn?(column: Column): void;
+    /**
+     * Moves a question column: the column menu's Move left and Move right,
+     * and dragging its header. It goes just after the question column
+     * `after`, or with null before every other question. The paper and the
+     * year keep their places.
+     */
+    onMoveColumn?(column: Column, after: string | null): void;
     /** The sources popover's content, opened from the sources chip. */
     renderSources?(close: () => void): React.ReactNode;
     /** The new-papers notice's Add. */
@@ -211,6 +231,8 @@ export interface ResearchTableProps {
      */
     onExport?: (format: "xlsx" | "csv", sort: TableSort | undefined) => void;
     onShowInLibrary?: () => void;
+    /** Moves the table from its tab to a window of its own. */
+    onOpenInWindow?: () => void;
     /** The version history view; offered under More actions when given. */
     renderVersionHistory?: () => React.ReactNode;
     /** Bulk verbs while rows are selected, after the count. */
@@ -247,6 +269,9 @@ const NO_ROWS: ReadonlySet<string> = new Set();
 /** How long rows and columns the user just added stay highlighted. */
 const ADDED_HIGHLIGHT_MS = 2000;
 
+/** The cell being edited, and where its editor is: over the grid cell or in the inspector. */
+type EditingCell = CellAddress & { surface: "grid" | "inspector" };
+
 /** The side panel: a selected cell (a question, or the Paper cell) or the version history. */
 type Panel = { kind: "cell"; address: CellAddress } | { kind: "history" };
 
@@ -277,6 +302,7 @@ export function ResearchTable({
     onCopy,
     onExport,
     onShowInLibrary,
+    onOpenInWindow,
     renderVersionHistory,
     selectionActions,
     rowMenuItems,
@@ -314,7 +340,7 @@ export function ResearchTable({
     );
     const [panel, setPanel] = useState<Panel | null>(null);
     const [sourcesOpen, setSourcesOpen] = useState(false);
-    const [editingCell, setEditingCell] = useState<CellAddress | null>(null);
+    const [editingCell, setEditingCell] = useState<EditingCell | null>(null);
     const editDisabled = editing?.disabledReason;
     // Both Add column controls: the edit's own reason, else the table's limits.
     const addColumnDisabled = editDisabled ?? addColumnBlockedReason(table);
@@ -397,23 +423,45 @@ export function ResearchTable({
         if (covered > 0) scroller.scrollLeft -= covered;
     }, [selected?.rowId, selected?.columnId]);
 
-    // The editor follows its cell the same way, and closes when editing ends.
+    // One cell editor at a time: floated over its grid cell, or in the
+    // inspector in place of the answer. It follows its cell the same way, and
+    // closes when editing ends; in the inspector, also when the inspector
+    // shows another cell or closes.
     const editingRow = editingCell ? table.rows.find((row) => row.id === editingCell.rowId) : undefined;
     const editingColumn = editingCell ? columns.questions.find((column) => column.id === editingCell.columnId) : undefined;
+    const editingInInspector = editingCell?.surface === "inspector";
+    const inspectorShowsEditingCell =
+        selected?.rowId === editingCell?.rowId && selected?.columnId === editingCell?.columnId;
     useEffect(() => {
-        if (editingCell && (!editingRow || !editingColumn || !cellEditing || cellEditing.disabledReason)) setEditingCell(null);
-    }, [editingCell, editingRow, editingColumn, cellEditing]);
-    // The editor floats over its grid cell: a hidden column is shown and
-    // filters hiding the row are cleared first (the inspector reaches both).
-    const openEditor = useCallback(
-        (address: CellAddress) => {
-            if (state.hiddenColumns.has(address.columnId)) state.toggleColumn(address.columnId);
-            if (!state.rows.some((row) => row.id === address.rowId)) state.clearFilters();
-            setEditingCell(address);
-            activityRef.current?.();
-        },
-        [state],
-    );
+        if (
+            editingCell &&
+            (!editingRow ||
+                !editingColumn ||
+                !cellEditing ||
+                cellEditing.disabledReason ||
+                (editingInInspector && !inspectorShowsEditingCell))
+        )
+            setEditingCell(null);
+    }, [editingCell, editingRow, editingColumn, cellEditing, editingInInspector, inspectorShowsEditingCell]);
+    const openEditor = useCallback((address: CellAddress, surface: EditingCell["surface"] = "grid") => {
+        setEditingCell({ ...address, surface });
+        activityRef.current?.();
+    }, []);
+    const cellEditor =
+        editingCell && editingRow && editingColumn && cellEditing ? (
+            <CellEditor
+                key={`${editingCell.surface}/${editingCell.rowId}/${editingCell.columnId}`}
+                inline={editingInInspector}
+                column={editingColumn}
+                cell={editingRow.cells[editingColumn.id]}
+                onCancel={() => setEditingCell(null)}
+                onSave={async (input) => {
+                    const refused = await cellEditing.onEdit(editingRow, editingColumn, input);
+                    if (!refused) setEditingCell(null);
+                    return refused;
+                }}
+            />
+        ) : null;
     // Scrolled to a frame after the editor opens, once the view with the row
     // in it (and a windowed grid's spacers) has rendered.
     const viewRows = useRef(state.rows);
@@ -421,7 +469,7 @@ export function ResearchTable({
     useEffect(() => {
         const scroller = scrollRef.current;
         const win = scroller?.ownerDocument.defaultView;
-        if (!editingCell || !scroller || !win) return;
+        if (!editingCell || editingCell.surface !== "grid" || !scroller || !win) return;
         const frame = win.requestAnimationFrame(() => {
             const index = viewRows.current.findIndex((row) => row.id === editingCell.rowId);
             scrollRowIntoView(scroller, editingCell.rowId, index >= 0 ? index : undefined);
@@ -491,9 +539,41 @@ export function ResearchTable({
         [state, columns.year],
     );
 
+    // Moves a question column beside another one in view.
+    const moveColumn = useMemo(() => {
+        if (!editing?.onMoveColumn || editing.disabledReason) return undefined;
+        const onMoveColumn = editing.onMoveColumn;
+        return (columnId: string, drop: ColumnDrop) => {
+            const column = columns.questions.find((candidate) => candidate.id === columnId);
+            if (column) onMoveColumn(column, moveAfter(columns.questions, columnId, drop));
+        };
+    }, [editing?.onMoveColumn, editing?.disabledReason, columns.questions]);
+    const shownQuestions = useMemo(
+        () => columns.questions.filter((column) => !state.hiddenColumns.has(column.id)),
+        [columns.questions, state.hiddenColumns],
+    );
+
+    // A category or yes/no column's Filter submenu: its choices, then Clear
+    // filter while one is active.
+    const filterEntry = useCallback(
+        (column: Column): MenuItem[] => {
+            const choices = columnFilterItems(table, column, state);
+            if (choices.length === 0) return [];
+            const submenu = state.filters.some((filter) => filter.column_id === column.id)
+                ? [
+                      ...choices,
+                      { label: "", isDivider: true, onClick: () => {} },
+                      { label: "Clear filter", icon: CancelIcon, onClick: () => state.clearFilter(column.id) },
+                  ]
+                : choices;
+            return [{ label: "Filter", icon: FilterIcon, onClick: () => {}, submenu }];
+        },
+        [table, state],
+    );
+
     // A column's menu. The paper's and the year's offer only the sort; a
     // question's has its edits (when the host makes them), then the view's
-    // own Sort and Hide.
+    // own Sort, Filter and Hide, and Move left and right.
     const columnMenu = useCallback(
         (column: Column): MenuItem[] => {
             if (column === columns.paper || column === columns.year) return sortEntries(column);
@@ -511,8 +591,26 @@ export function ResearchTable({
                 });
             }
             if (items.length) items.push({ label: "", isDivider: true, onClick: () => {} });
-            items.push(...sortEntries(column));
+            items.push(...sortEntries(column), ...filterEntry(column));
             items.push({ label: "Hide column", icon: ViewIcon, onClick: () => state.toggleColumn(column.id) });
+            if (editing?.onMoveColumn) {
+                // Beside the neighbouring columns in view, past any hidden between.
+                const at = shownQuestions.indexOf(column);
+                items.push(
+                    {
+                        label: "Move left",
+                        icon: ArrowLeftIcon,
+                        disabled: disabled || at <= 0,
+                        onClick: () => moveColumn?.(column.id, { before: shownQuestions[at - 1].id }),
+                    },
+                    {
+                        label: "Move right",
+                        icon: ArrowRightIcon,
+                        disabled: disabled || at === -1 || at >= shownQuestions.length - 1,
+                        onClick: () => moveColumn?.(column.id, { after: shownQuestions[at + 1].id }),
+                    },
+                );
+            }
             if (editing?.onChangeType) {
                 const current = COLUMN_TYPE_LABELS.find((entry) => entry.type === column.type);
                 items.push({
@@ -544,7 +642,7 @@ export function ResearchTable({
             }
             return items;
         },
-        [editing, state, fill, fillable, columns, sortEntries],
+        [editing, state, fill, fillable, columns, sortEntries, filterEntry, moveColumn, shownQuestions],
     );
     const hiddenQuestions = columns.questions.filter((column) => state.hiddenColumns.has(column.id));
 
@@ -648,6 +746,8 @@ export function ResearchTable({
               const title = cellEditing.disabledReason;
               const cell = row.cells[column.id];
               const mine = cell?.provenance === "user";
+              if (editingCell?.surface === "inspector" && editingCell.rowId === row.id && editingCell.columnId === column.id && cellEditor)
+                  return { editor: cellEditor };
               return {
                   edit: (
                       <button
@@ -656,7 +756,7 @@ export function ResearchTable({
                           aria-label="Edit answer"
                           disabled={disabled}
                           title={title ?? "Edit answer"}
-                          onClick={() => openEditor({ rowId: row.id, columnId: column.id })}
+                          onClick={() => openEditor({ rowId: row.id, columnId: column.id }, "inspector")}
                       >
                           <Icon icon={EditIcon} size={13} />
                       </button>
@@ -709,6 +809,8 @@ export function ResearchTable({
             { label: "Export CSV", icon: DownloadIcon, onClick: () => onExport("csv", state.sort) },
         );
     if (onShowInLibrary) moreItems.push({ label: "Show in library", icon: LibraryIcon, onClick: onShowInLibrary });
+    if (onOpenInWindow)
+        moreItems.push({ label: "Open in new window", icon: PictureInPictureIcon, onClick: onOpenInWindow });
     if (renderVersionHistory)
         moreItems.push({ label: "Version history", icon: ClockIcon, onClick: () => setPanel({ kind: "history" }) });
 
@@ -912,20 +1014,25 @@ export function ResearchTable({
                                         ) : null}
                                     </span>
                                 ) : null}
-                                {editing?.addItems}
-                                {editing?.onAddColumn ? (
-                                    // A disabled button shows no tooltip of its own.
-                                    <span title={addColumnDisabled}>
-                                        <button
-                                            type="button"
-                                            className="rt-add-column-action"
-                                            aria-label="Add column"
-                                            disabled={!!addColumnDisabled}
-                                            onClick={editing.onAddColumn}
-                                        >
-                                            <Icon icon={PlusSignIcon} size={13} />
-                                            <span>Column</span>
-                                        </button>
+                                {editing?.addItems || editing?.onAddColumn ? (
+                                    // The add actions wrap to the next line together.
+                                    <span className="rt-toolbar-adds">
+                                        {editing.addItems}
+                                        {editing.onAddColumn ? (
+                                            // A disabled button shows no tooltip of its own.
+                                            <span title={addColumnDisabled}>
+                                                <button
+                                                    type="button"
+                                                    className="rt-add-column-action"
+                                                    aria-label="Add column"
+                                                    disabled={!!addColumnDisabled}
+                                                    onClick={editing.onAddColumn}
+                                                >
+                                                    <Icon icon={PlusSignIcon} size={13} />
+                                                    <span>Column</span>
+                                                </button>
+                                            </span>
+                                        ) : null}
                                     </span>
                                 ) : null}
                             </div>
@@ -1045,30 +1152,15 @@ export function ResearchTable({
                                     onSelectCell={onSelectCell}
                                     rowMenuItems={rowMenu}
                                     columnMenuItems={columnMenu}
+                                    onMoveColumn={moveColumn}
                                     onAddColumn={editing?.onAddColumn}
                                     addColumnDisabledReason={addColumnDisabled}
                                     onEditCell={cellEditing ? openEditor : undefined}
                                     cellEditDisabledReason={cellEditing?.disabledReason}
                                     onCopyCell={onCopy}
                                     cellEditor={
-                                        editingCell && editingRow && editingColumn && cellEditing
-                                            ? {
-                                                  address: editingCell,
-                                                  list: editsAsList(editingColumn),
-                                                  content: (
-                                                      <CellEditor
-                                                          key={`${editingCell.rowId}/${editingCell.columnId}`}
-                                                          column={editingColumn}
-                                                          cell={editingRow.cells[editingColumn.id]}
-                                                          onCancel={() => setEditingCell(null)}
-                                                          onSave={async (input) => {
-                                                              const refused = await cellEditing.onEdit(editingRow, editingColumn, input);
-                                                              if (!refused) setEditingCell(null);
-                                                              return refused;
-                                                          }}
-                                                      />
-                                                  ),
-                                              }
+                                        cellEditor && editingCell && editingColumn && !editingInInspector
+                                            ? { address: editingCell, list: editsAsList(editingColumn), content: cellEditor }
                                             : null
                                     }
                                     fills={fills}

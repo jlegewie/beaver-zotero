@@ -31,7 +31,6 @@ export interface TableViewCommandContext {
     newItems: number;
     addNewItems?(): void;
     removeRows(rowIds: string[]): void;
-    fillAvailable: boolean;
     fillRunning: boolean;
     /** Opens the Fill button's plan. */
     openFillPlan(scope: TableFillScope): void;
@@ -50,7 +49,6 @@ export function tableViewAvailability(context: TableViewCommandContext): Record<
     const view = context.view?.viewState();
     const loaded = !!view;
     const editable = loaded && !context.editDisabled;
-    const fill = editable && context.fillAvailable;
     const selected = (view?.selectedRowIds.length ?? 0) > 0;
     const rows = (view?.rows ?? 0) > 0;
     return {
@@ -73,11 +71,11 @@ export function tableViewAvailability(context: TableViewCommandContext): Record<
         'add-items': editable && !!addItemsControl(context.host),
         'add-column': editable && context.canAddColumn && !!context.addColumn,
         'add-new-items': editable && context.newItems > 0 && !!context.addNewItems,
-        'fill-pending': fill,
-        'fill-trial': fill,
-        'fill-selected': fill && selected,
-        'fill-retry': fill,
-        'fill-stop': loaded && context.fillAvailable && context.fillRunning,
+        'fill-pending': editable,
+        'fill-trial': editable,
+        'fill-selected': editable && selected,
+        'fill-retry': editable,
+        'fill-stop': loaded && context.fillRunning,
         'remove-selected': editable && selected,
         'ask-beaver': loaded && !!context.askBeaver,
     };
@@ -87,7 +85,6 @@ export function tableViewMenuState(context: TableViewCommandContext): TableViewM
     return {
         enabled: tableViewAvailability(context),
         density: context.view?.viewState().density ?? null,
-        fillAvailable: context.fillAvailable,
     };
 }
 

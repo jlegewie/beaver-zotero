@@ -274,7 +274,13 @@ function buildEditErrors(
         ...(f.candidates && f.candidates.length > 0
             ? { error_candidates: f.candidates as ErrorCandidate[] }
             : {}),
+        ...(f.strategy ? { match_strategy: f.strategy } : {}),
     }));
+    for (const f of failures) {
+        if (f.strategy) {
+            logger(`edit_note_batch: edit ${f.index} ${f.errorCode} (match strategy ${f.strategy})`, 1);
+        }
+    }
 
     // One edit can overlap several siblings — collapse its pairs into a single
     // edit_errors entry naming every conflicting partner, so indices are unique

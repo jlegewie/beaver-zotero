@@ -29,6 +29,7 @@ import { applyMutations, type CellWrite, type SkippedCell, type TableMutation } 
 import {
     cellsToFill,
     pendingWork,
+    rereadRows,
     retryableFailedRows,
     rowFailure,
     selectedColumns,
@@ -37,6 +38,7 @@ import {
 } from '@beaver/agent-core/layouts/tableFill';
 import {
     TABLE_FILL_CHANGED_EVENT,
+    balanceAfterCommitted,
     type TableFillCells,
     type TableFillColumn,
     type TableFillJobSnapshot,
@@ -60,6 +62,7 @@ import {
     rowsToLookUp,
     type DocumentUpdate,
     type PlannedColumn,
+    type PlannedFill,
     type RowLookup,
     type RowPlan,
 } from './planner';
@@ -118,6 +121,8 @@ export interface TableFillDeps {
         signedIn(): boolean;
         /** Available credits from the account snapshot; null when unknown. */
         balance(): number | null;
+        /** The balance a fill response reported after its charge, for the account of `generation`. */
+        applyBalance(balance: { subscription: number; purchased: number }, generation: number): void;
         subscribe(listener: () => void): () => void;
         refreshProfile(): void;
     };
@@ -171,6 +176,8 @@ interface StoredPlan {
     rows: RowPlan[];
     columns: Map<string, PlannedColumn>;
     documentUpdates: DocumentUpdate[];
+    /** The rows read again although answered elsewhere (see `rereadRows`). */
+    rereads: ReadonlySet<string>;
 }
 
 function tableKey(target: TableFillTarget): string {
@@ -244,6 +251,8 @@ class FillJob {
     private rowsFailed = 0;
     private requestRowsDone = 0;
     private charged = 0;
+    /** Charges whose response reported no balance (an older backend): the account snapshot does not show them. */
+    private unreported = 0;
     private balanceAtStart: number | null;
     private stopReason?: TableFillNotStartedReason;
     /**
@@ -259,7 +268,7 @@ class FillJob {
      * Rows started and not settled, with the columns they fill. `saving`: its
      * writes wait for a commit, and the row stays until that commit settles.
      */
-    private working = new Map<string, { columns: string[]; saving: boolean }>();
+    private working = new Map<string, { columns: string[]; saving: boolean; price: number }>();
     private commitTimer?: ReturnType<typeof setTimeout>;
     private commitChain: Promise<void> = Promise.resolve();
     /** A commit landed, so the snapshot is behind until the job renders it. */
@@ -307,6 +316,22 @@ class FillJob {
 
     get running(): boolean {
         return this.state !== 'done';
+    }
+
+    /**
+     * Credits the job holds while it runs: what its queued and in-flight rows
+     * may still charge. Each answered row's response updates the account's
+     * balance, so its charge is not held here, except a charge the response
+     * reported no balance for. The profile is read again when the job ends,
+     * so a finished job holds none.
+     */
+    get committed(): number {
+        // A job of a previous account spends nothing of this one's balance.
+        if (!this.running || this.generation !== this.deps.account.generation()) return 0;
+        let pending = 0;
+        for (const row of this.queue) pending += rowPrice(row, this.plan.summary.prices);
+        for (const row of this.working.values()) if (!row.saving) pending += row.price;
+        return this.unreported + pending;
     }
 
     get done(): Promise<void> {
@@ -473,7 +498,7 @@ class FillJob {
             const row = this.queue.shift();
             if (!row) return;
             this.inFlight += 1;
-            this.working.set(row.row, { columns: row.columns, saving: false });
+            this.working.set(row.row, { columns: row.columns, saving: false, price: rowPrice(row, this.plan.summary.prices) });
             this.publish();
             try {
                 await this.processRow(row);
@@ -510,7 +535,7 @@ class FillJob {
             this.addNotStarted('changed', 1);
             return;
         }
-        this.working.set(row.row, { columns: row.columns, saving: false });
+        this.working.set(row.row, { columns: row.columns, saving: false, price: rowPrice(row, this.plan.summary.prices) });
         let document: SerializedFillDocument | undefined;
         if (read && row.document) {
             if (!read.ok) {
@@ -644,7 +669,15 @@ class FillJob {
     }
 
     private applyResponse(row: RowPlan, response: TableFillResponse): void {
-        this.charged += Number(response.charged) || 0;
+        const charged = Number(response.charged) || 0;
+        this.charged += charged;
+        const subscription = response.available_subscription_credits;
+        const purchased = response.available_purchased_credits;
+        if (typeof subscription === 'number' && typeof purchased === 'number') {
+            this.deps.account.applyBalance({ subscription, purchased }, this.generation);
+        } else {
+            this.unreported += charged;
+        }
         this.result.credits_charged = round(this.charged);
         this.requestRowsDone += 1;
         const writes: CellWrite[] = [];
@@ -871,7 +904,10 @@ class FillJob {
         this.publish();
         // A chat run's tool call keeps the result, whether or not a request still waits on it.
         this.owner.agent.noteEnded(this.snapshot);
-        if (this.charged > 0 && !this.abandoned) this.deps.account.refreshProfile();
+        // A refusal for credits refreshes too: a balance the cache still
+        // shows as enough would offer the same refused fill again.
+        if ((this.charged > 0 || this.stopReason === 'insufficient_credits') && !this.abandoned)
+            this.deps.account.refreshProfile();
     }
 
     private async renderSnapshot(): Promise<void> {
@@ -995,39 +1031,86 @@ export class InstanceTableFills {
                 delete row.document;
             }
         }
-        const count = (mode: RowPlan['mode']) => planned.rows.filter((row) => row.mode === mode).length;
-        const credits = round(planned.rows.reduce((sum, row) => sum + rowPrice(row, prices), 0));
-        const now = this.deps.now();
+        return {
+            ok: true,
+            plan: this.keep(
+                {
+                    generation,
+                    target: { ...target },
+                    table,
+                    context,
+                    selection: scope.kind === 'pending' ? {} : { rows: selection.rows, columns: selection.columns },
+                    rows: planned.rows,
+                    columns: new Map(planned.columns.map((column) => [column.request.id, column])),
+                    documentUpdates: planned.documentUpdates,
+                    // Only rows the fill reads: unavailable and no-input rows are only marked.
+                    rereads: new Set(
+                        rereadRows(spec, planned.rows.filter((row) => row.mode === 'document' || row.mode === 'metadata')),
+                    ),
+                },
+                { title: spec.title ?? '', scope, cells: planned.cells, prices, pending: pendingWork(spec) },
+            ),
+        };
+    }
+
+    /**
+     * A trial of a kept plan: its first `limit` rows, in its order, at its
+     * prices, kept as a new plan for {@link start}. The plan it comes from
+     * stays as it is, so the trial is a part of what the user was shown.
+     * With `target`, a plan of another table is not found.
+     */
+    trial(planId: string, limit: number, target?: TableFillTarget): TableFillPlanResult {
+        this.prunePlans();
+        const plan = this.plans.get(planId);
+        if (!plan || (target && tableKey(plan.target) !== tableKey(target))) return { ok: false, code: 'plan_not_found', message: 'This fill plan is no longer available. Plan the fill again.' };
+        if (this.disposed || !this.deps.account.signedIn() || plan.generation !== this.deps.account.generation())
+            return { ok: false, code: 'signed_out', message: 'The account changed since the fill was planned.' };
+        const trial = trialPlan(plan, limit);
+        const scope: TableFillScope =
+            plan.summary.scope.kind === 'pending' ? { kind: 'pending', limit: trial.rows.length } : plan.summary.scope;
+        return {
+            ok: true,
+            plan: this.keep(
+                {
+                    ...plan,
+                    rows: trial.rows,
+                    documentUpdates: trial.documentUpdates,
+                    rereads: new Set(trial.rows.map((row) => row.row).filter((row) => plan.rereads.has(row))),
+                },
+                { ...plan.summary, title: plan.summary.table.title, scope, cells: trial.cells },
+            ),
+        };
+    }
+
+    /** Prices a plan's rows and keeps it under a new id until it expires. */
+    private keep(
+        plan: Omit<StoredPlan, 'summary'>,
+        parts: Pick<TableFillPlanSummary, 'scope' | 'cells' | 'prices' | 'pending'> & { title: string },
+    ): TableFillPlanSummary {
+        const rows = plan.rows;
+        const count = (mode: RowPlan['mode']) => rows.filter((row) => row.mode === mode).length;
         const summary: TableFillPlanSummary = {
             plan_id: this.deps.newId(),
-            table: { ...target, title: spec.title ?? '' },
-            scope,
-            rows: planned.rows.length,
-            cells: planned.cells,
+            table: { ...plan.target, title: parts.title },
+            scope: parts.scope,
+            rows: rows.length,
+            cells: parts.cells,
             documents: count('document'),
-            document_kinds: documentKinds(planned.rows),
+            document_kinds: documentKinds(rows),
             title_abstract: count('metadata'),
             no_input: count('no_input'),
             unavailable: count('unavailable'),
-            credits,
-            prices: { ...prices },
-            pending: pendingWork(spec),
-            balance: this.deps.account.balance(),
-            expires_at: now + this.settings.planTtlMs,
+            credits: round(rows.reduce((sum, row) => sum + rowPrice(row, parts.prices), 0)),
+            prices: { ...parts.prices },
+            pending: parts.pending,
+            rereads: plan.rereads.size,
+            // Less what running fills may still charge.
+            balance: balanceAfterCommitted(this.deps.account.balance(), this.committedCredits()),
+            expires_at: this.deps.now() + this.settings.planTtlMs,
         };
         this.prunePlans();
-        this.plans.set(summary.plan_id, {
-            summary,
-            generation,
-            target: { ...target },
-            table,
-            context,
-            selection: scope.kind === 'pending' ? {} : { rows: selection.rows, columns: selection.columns },
-            rows: planned.rows,
-            columns: new Map(planned.columns.map((column) => [column.request.id, column])),
-            documentUpdates: planned.documentUpdates,
-        });
-        return { ok: true, plan: summary };
+        this.plans.set(summary.plan_id, { ...plan, summary });
+        return summary;
     }
 
     private prunePlans(): void {
@@ -1139,6 +1222,13 @@ export class InstanceTableFills {
         return true;
     }
 
+    /** Credits the running jobs hold (see `FillJob.committed`); a running job holds its table's lease. */
+    committedCredits(): number {
+        let committed = 0;
+        for (const job of this.leases.values()) committed += job.committed;
+        return committed;
+    }
+
     /** Every job still kept: the running ones and the finished ones still shown. */
     listJobs(): TableFillJobSnapshot[] {
         this.prunePlans();
@@ -1222,7 +1312,10 @@ export class InstanceTableFills {
  * only their own document changes. Validation at start re-selects on the
  * table as it is then and keeps only these rows, so nothing is added.
  */
-export function trialPlan(planned: ReturnType<typeof buildPlan>, limit: number): ReturnType<typeof buildPlan> {
+export function trialPlan<T extends Pick<PlannedFill, 'rows' | 'documentUpdates'>>(
+    planned: T,
+    limit: number,
+): T & { cells: number } {
     const rows = planned.rows.slice(0, Math.max(1, Math.floor(limit)));
     const kept = new Set(rows.map((row) => row.row));
     return {

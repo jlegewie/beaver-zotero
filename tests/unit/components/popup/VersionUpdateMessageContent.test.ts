@@ -8,11 +8,59 @@ import { Provider, createStore } from 'jotai';
 import { createRoot, Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({ gate: null as string | null, open: vi.fn(), dismiss: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+    gate: null as string | null,
+    usesBeaverModel: true,
+    plusToolsPref: false,
+    credits: 10,
+    open: vi.fn(),
+    dismiss: vi.fn(),
+    runAction: vi.fn(),
+    setPref: vi.fn(),
+    openPreferences: vi.fn(),
+    startFeatureTask: vi.fn(async () => {}),
+    featureTasks: null as { key: string; credits: number; completed_at: string | null }[] | null,
+    /** Tasks the task list shows as unavailable (a small library). */
+    unavailableTasks: [] as string[],
+    surfaceWindow: { name: 'surface' },
+}));
 vi.mock('../../../../react/atoms/chatAccess', async () => {
     const { atom } = await import('jotai');
-    return { chatAccessGateAtom: atom(() => mocks.gate) };
+    const { getPlusToolsAccess } = await import('../../../../react/utils/plusToolsAccess');
+    return {
+        plusToolsAccessAtom: atom(() => getPlusToolsAccess({
+            gate: mocks.gate as any,
+            usesBeaverModel: mocks.usesBeaverModel,
+            plusToolsPref: mocks.plusToolsPref,
+            credits: mocks.credits,
+        })),
+    };
 });
+vi.mock('../../../../react/atoms/actions', async () => {
+    const { atom } = await import('jotai');
+    return { actionsAtom: atom(() => [{ id: 'builtin-research-table', text: 'Create a table' }]) };
+});
+vi.mock('../../../../react/atoms/featureCredits', async () => {
+    const { atom } = await import('jotai');
+    return {
+        featureCreditEntriesAtom: atom(() => mocks.featureTasks?.map((task) => ({ task, definition: { key: task.key } })) ?? null),
+        featureTaskUnavailableAtom: atom(() => (definition: { key: string }) =>
+            mocks.unavailableTasks.includes(definition.key)),
+    };
+});
+vi.mock('../../../../react/hooks/useStartFeatureTaskInNewChat', () => ({
+    useStartFeatureTaskInNewChat: () => mocks.startFeatureTask,
+}));
+vi.mock('../../../../react/atoms/ui', async () => {
+    const { atom } = await import('jotai');
+    return { requestPlusToolsAtom: atom(false) };
+});
+vi.mock('../../../../react/hooks/useActionRunner', () => ({
+    useActionRunner: () => ({ runAction: mocks.runAction, isBusy: false }),
+}));
+vi.mock('../../../../react/runtime/SurfaceWindowContext', () => ({ useSurfaceWindow: () => mocks.surfaceWindow }));
+vi.mock('../../../../react/ui/openPreferencesWindow', () => ({ openPreferencesWindow: mocks.openPreferences }));
+vi.mock('../../../../src/utils/prefs', () => ({ getPref: vi.fn(), setPref: mocks.setPref }));
 vi.mock('../../../../react/atoms/quickPrompt', async () => {
     const { atom } = await import('jotai');
     return { openQuickPromptAtom: atom(null, () => mocks.open()) };
@@ -51,6 +99,11 @@ const order = () => Array.from(container.querySelectorAll('[data-showcase], [dat
 beforeEach(() => {
     vi.clearAllMocks();
     mocks.gate = null;
+    mocks.usesBeaverModel = true;
+    mocks.plusToolsPref = false;
+    mocks.credits = 10;
+    mocks.featureTasks = null;
+    mocks.unavailableTasks = [];
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
     (globalThis as any).Zotero = { launchURL: vi.fn() };
 });
@@ -82,6 +135,81 @@ describe('VersionUpdateMessageContent', () => {
             expect(mocks.open).not.toHaveBeenCalled();
             expect(eventManager.dispatch).toHaveBeenCalledWith('toggleChat', { forceOpen: true });
         }
+    });
+
+    const tableAction = { type: 'stage-action', label: 'Try it', actionId: 'builtin-research-table', requiresPlusTools: true } as const;
+    const clickButton = (label: string) => {
+        const button = Array.from(container.querySelectorAll('button')).find(b => b.textContent === label);
+        expect(button).toBeDefined();
+        act(() => { button!.click(); });
+    };
+
+    it('opens Beaver with the action staged in this window for a user who can run it', () => {
+        render({ primaryAction: tableAction }, true);
+        clickButton('Try it');
+        expect(mocks.dismiss).toHaveBeenCalledOnce();
+        expect(eventManager.dispatch).toHaveBeenCalledWith('toggleChat', { forceOpen: true, skipAutoPopulate: true });
+        expect(mocks.runAction).toHaveBeenCalledWith(expect.objectContaining({ id: 'builtin-research-table' }), mocks.surfaceWindow);
+        expect(mocks.setPref).not.toHaveBeenCalled();
+    });
+
+    it('turns Plus Tools on for an own-model user before staging the action, and says why', () => {
+        mocks.usesBeaverModel = false;
+        render({ primaryAction: tableAction }, true);
+        expect(container.textContent).toContain('needs Plus Tools');
+        clickButton('Turn on Plus Tools');
+        expect(mocks.setPref).toHaveBeenCalledWith('requestPlusTools', true);
+        expect(mocks.runAction).toHaveBeenCalledOnce();
+    });
+
+    it('sends a user without credits to Billing without staging anything', () => {
+        mocks.credits = 0;
+        render({ primaryAction: tableAction }, true);
+        expect(container.textContent).toContain('you have none left');
+        clickButton('Get credits');
+        expect(mocks.openPreferences).toHaveBeenCalledWith('billing');
+        expect(mocks.runAction).not.toHaveBeenCalled();
+        expect(eventManager.dispatch).not.toHaveBeenCalled();
+    });
+
+    const taughtAction = { ...tableAction, featureTask: 'research_table' };
+
+    it('starts the feature-credit task on a new chat while the account can earn it, even without credits', () => {
+        mocks.credits = 0;
+        mocks.featureTasks = [{ key: 'research_table', credits: 5, completed_at: null }];
+        render({ primaryAction: taughtAction }, true);
+        expect(container.textContent).not.toContain('you have none left');
+        expect(container.textContent).toContain('Trying it earns 5 free credits.');
+        clickButton('Try it for free');
+        expect(mocks.dismiss).toHaveBeenCalledOnce();
+        expect(mocks.startFeatureTask).toHaveBeenCalledWith('research_table');
+        expect(mocks.runAction).not.toHaveBeenCalled();
+        expect(mocks.openPreferences).not.toHaveBeenCalled();
+    });
+
+    it('keeps the usual button while the task list shows the task as unavailable', () => {
+        mocks.featureTasks = [{ key: 'research_table', credits: 5, completed_at: null }];
+        mocks.unavailableTasks = ['research_table'];
+        render({ primaryAction: taughtAction }, true);
+        clickButton('Try it');
+        expect(mocks.runAction).toHaveBeenCalledOnce();
+        expect(mocks.startFeatureTask).not.toHaveBeenCalled();
+    });
+
+    it('keeps the usual button once the task is earned', () => {
+        mocks.featureTasks = [{ key: 'research_table', credits: 5, completed_at: '2026-11-01T00:00:00Z' }];
+        render({ primaryAction: taughtAction }, true);
+        clickButton('Try it');
+        expect(mocks.runAction).toHaveBeenCalledOnce();
+        expect(mocks.startFeatureTask).not.toHaveBeenCalled();
+    });
+
+    it('asks a signed-out user to sign in, opening Beaver without staging', () => {
+        mocks.gate = 'signed-out';
+        render({ primaryAction: tableAction }, true);
+        clickButton('Sign in to try');
+        expect(eventManager.dispatch).toHaveBeenCalledWith('toggleChat', { forceOpen: true });
+        expect(mocks.runAction).not.toHaveBeenCalled();
     });
 
     it('defaults older releases to opening Beaver', () => {

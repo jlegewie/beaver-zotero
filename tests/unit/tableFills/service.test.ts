@@ -157,6 +157,7 @@ function harness(
                 return () => listeners.delete(listener);
             },
             refreshProfile: vi.fn(),
+            applyBalance: vi.fn(),
         },
         publish: (snapshot) => state.snapshots.push(snapshot),
         newId: () => `id-${++id}`,
@@ -259,6 +260,63 @@ describe("the Fill menu's scopes", () => {
         const planned = await fills.plan(TARGET, { kind: "cells", columns: ["method"] });
         if (!planned.ok) throw new Error(planned.message);
         expect(planned.plan).toMatchObject({ rows: 1, cells: 1 });
+    });
+});
+
+describe("a trial of a plan", () => {
+    const answered = (id: string): Cell => ({ outcome: "answered", provenance: "model", value: { kind: "text", text: "x" }, documents: [`u-PDF${id}`] });
+    /** Rows answered in Method, with Design added since. */
+    const filled = (ids: string[]) => ids.map((id) => itemRow(id, { documents: [`u-PDF${id}`], cells: { method: answered(id) } }));
+
+    it("counts the answered rows a new column reads again, and none on a first fill", async () => {
+        const first = harness(["a", "b"].map((id) => itemRow(id)));
+        const fresh = await first.fills.plan(TARGET);
+        expect(fresh.ok && fresh.plan.rereads).toBe(0);
+        const { fills } = harness([...filled(["a", "b", "c"]), itemRow("d")]);
+        const planned = await fills.plan(TARGET);
+        expect(planned.ok && planned.plan).toMatchObject({ rows: 4, rereads: 3 });
+    });
+
+    it("counts the answered rows of a fill of named rows or of one column", async () => {
+        const { fills } = harness(filled(["a", "b", "c"]));
+        const planned = await fills.plan(TARGET, { kind: "cells", rows: ["a"], columns: ["design"] });
+        expect(planned.ok && planned.plan).toMatchObject({ rows: 1, rereads: 1 });
+        const column = await fills.plan(TARGET, { kind: "cells", columns: ["design"] });
+        expect(column.ok && column.plan).toMatchObject({ rows: 3, rereads: 3 });
+    });
+
+    it("does not count an answered row the fill cannot read: it is only marked", async () => {
+        const { state, fills } = harness(filled(["a", "b"]));
+        // Row b's item is in an excluded library: planned as unavailable, never read.
+        state.excluded.add("KBXXXXXX");
+        const planned = await fills.plan(TARGET);
+        expect(planned.ok && planned.plan).toMatchObject({ rows: 2, unavailable: 1, rereads: 1 });
+    });
+
+    it("plans the first rows of a kept plan at its prices, and starts only those", async () => {
+        const { state, fills } = harness(filled(["a", "b", "c", "d", "e", "f", "g"]));
+        const planned = await fills.plan(TARGET);
+        if (!planned.ok) throw new Error(planned.message);
+        expect(planned.plan).toMatchObject({ rows: 7, credits: 1.4, rereads: 7 });
+        const trial = fills.trial(planned.plan.plan_id, 5);
+        if (!trial.ok) throw new Error(trial.message);
+        expect(trial.plan).toMatchObject({ rows: 5, cells: 5, credits: 1, rereads: 5, scope: { kind: "pending", limit: 5 } });
+        expect(trial.plan.plan_id).not.toBe(planned.plan.plan_id);
+        expect(fills.plannedColumns(trial.plan.plan_id)).toEqual(["design"]);
+        const started = await fills.start(trial.plan.plan_id);
+        if (!started.ok) throw new Error(started.message);
+        await fills.wait(started.job.job_id);
+        expect(state.requests.map((r) => r.row_id)).toEqual(["a", "b", "c", "d", "e"]);
+        expect(state.table.rows[5].cells.design).toBeUndefined();
+    });
+
+    it("keeps an explicit selection's scope, and refuses a plan no longer kept", async () => {
+        const { fills } = harness(filled(["a", "b", "c", "d", "e", "f", "g"]));
+        const planned = await fills.plan(TARGET, { kind: "cells", columns: ["design"] });
+        if (!planned.ok) throw new Error(planned.message);
+        const trial = fills.trial(planned.plan.plan_id, 5);
+        expect(trial.ok && trial.plan).toMatchObject({ rows: 5, scope: { kind: "cells", columns: ["design"] } });
+        expect(fills.trial("gone", 5)).toMatchObject({ ok: false, code: "plan_not_found" });
     });
 });
 
@@ -879,6 +937,17 @@ describe("failed requests", () => {
         expect(state.table.rows.slice(1).every((row) => !row.cells.method && !row.failure)).toBe(true);
     });
 
+    it("refreshes the balance after a refusal for credits that charged nothing", async () => {
+        const { state, fills, deps } = harness([itemRow("a", { documents: ["u-PDFa"] })]);
+        state.respond = async () => {
+            throw new ApiError(402, "Payment Required", "insufficient_credits", "insufficient_credits");
+        };
+        const { job } = await planAndStart(fills);
+        const done = await fills.wait(job.job_id);
+        expect(done?.result).toMatchObject({ rows_answered: 0, credits_charged: 0, stopped_by: "insufficient_credits" });
+        expect(deps.account.refreshProfile).toHaveBeenCalledTimes(1);
+    });
+
     it("stops on price_changed before anything is charged", async () => {
         const { state, fills } = harness([itemRow("a", { documents: ["u-PDFa"] }), itemRow("b", { documents: ["u-PDFb"] })]);
         state.respond = async () => {
@@ -1076,6 +1145,20 @@ describe("a chat run's fill_plan and fill", () => {
         expect(wire).toMatchObject({ rows: 1, documents: 1, columns: ["method"], credits: 0.2, prices: { document: 0.2, title_abstract: 0.05 } });
         expect(wire).not.toHaveProperty("table");
         expect(wire).not.toHaveProperty("scope");
+    });
+
+    it("answers the trial of a plan it showed: its first rows, with the answered rows it reads again", async () => {
+        const cell = (id: string): Cell => ({ outcome: "answered", provenance: "model", value: { kind: "text", text: "x" }, documents: [`u-PDF${id}`] });
+        const rows = ["a", "b", "c", "d", "e", "f", "g"].map((id) => itemRow(id, { documents: [`u-PDF${id}`], cells: { method: cell(id) } }));
+        const { fills } = harness(rows);
+        const whole = await plan(fills);
+        expect(whole).toMatchObject({ rows: 7, rereads: 7 });
+        const trial = await plan(fills, { plan_id: whole.plan_id, limit: 5 });
+        expect(trial).toMatchObject({ rows: 5, credits: 1, columns: ["design"], rereads: 5 });
+        expect(trial.plan_id).not.toBe(whole.plan_id);
+        // A plan of another table is not one this table can try.
+        const other = await fills.agent.plan(request("fill_plan", { key: "u-TABLE002", plan_id: whole.plan_id, limit: 5 }), { libraryID: 1, key: "TABLE002" });
+        expect(other).toMatchObject({ ok: false, error_code: "plan_not_found" });
     });
 
     it("answers a refused plan with its code", async () => {
@@ -1373,3 +1456,215 @@ describe("a chat run's fill_plan and fill", () => {
     });
 });
 
+
+describe("job calls", () => {
+    const RUN = { runId: "run-1", threadId: "thread-1" };
+
+    function request(op: "fill_plan" | "fill", fields: Record<string, unknown>): ArtifactRequest {
+        return { event: "artifact_request", request_id: `${op}-${Math.random()}`, op, ...fields } as ArtifactRequest;
+    }
+
+    function context(overrides: Partial<AgentDataRequestContext> = {}): AgentDataRequestContext {
+        return { receivedAt: Date.now(), reportPhase: vi.fn(), run: RUN, ...overrides };
+    }
+
+    async function plan(fills: InstanceTableFills) {
+        const answer = await fills.agent.plan(request("fill_plan", { key: "u-TABLE001" }), TARGET);
+        if (!answer.ok || !answer.plan) throw new Error(answer.error);
+        return answer.plan;
+    }
+
+    function jobWait(jobId: string, timeoutSeconds = 90) {
+        return {
+            event: "job_wait_request" as const,
+            request_id: `wait-${Math.random()}`,
+            kind: "table_fill" as const,
+            job_id: jobId,
+            tool_call_id: "call-1",
+            timeout_seconds: timeoutSeconds,
+        };
+    }
+
+    /** A job started without waiting, its rows held until `held` resolves. */
+    async function startHeld(h: ReturnType<typeof harness>) {
+        const held = deferred<void>();
+        h.state.respond = async (r) => {
+            await held.promise;
+            return answer(r);
+        };
+        const wire = await plan(h.fills);
+        const started = await h.fills.agent.fill(
+            request("fill", { plan_id: wire.plan_id, tool_call_id: "call-1", wait: false }),
+            context(),
+        );
+        expect(started).toMatchObject({ ok: true, status: "running" });
+        return { held, jobId: started.job_id! };
+    }
+
+    it("job_wait answers done with the job's result once the job ends", async () => {
+        const h = harness([itemRow("a"), itemRow("b")]);
+        const { held, jobId } = await startHeld(h);
+        const waiting = h.fills.agent.waitJob(jobWait(jobId), context());
+        held.resolve();
+        const answered = await waiting;
+        expect(answered).toMatchObject({
+            type: "job_wait_response",
+            job_id: jobId,
+            status: "done",
+            result: { kind: "table_fill", status: "done", progress: { state: "done", rows_total: 2 }, result: { rows_answered: 2 } },
+        });
+    });
+
+    it("job_wait answers running at its deadline and leaves the job running", async () => {
+        const now = 1_000_000;
+        const h = harness([itemRow("a")], { now: () => now });
+        const { held, jobId } = await startHeld(h);
+        // Arrived 89.99 s ago: almost none of the 90 s wait is left.
+        const answered = await h.fills.agent.waitJob(jobWait(jobId), context({ receivedAt: now - 89_990 }));
+        expect(answered).toMatchObject({ status: "running" });
+        expect(answered.result).toBeUndefined();
+        expect(h.fills.getJob(jobId)?.state).toBe("running");
+        held.resolve();
+        await h.fills.wait(jobId);
+    });
+
+    it("job_wait answers not_found for a job this device does not know", async () => {
+        const h = harness([itemRow("a")]);
+        expect(await h.fills.agent.waitJob(jobWait("nope"), context())).toMatchObject({ status: "not_found" });
+    });
+
+    it("stopping the run during job_wait stops the job and answers once it has ended", async () => {
+        const h = harness([itemRow("a"), itemRow("b"), itemRow("c")]);
+        const { held, jobId } = await startHeld(h);
+        const stopped = new AbortController();
+        const waiting = h.fills.agent.waitJob(jobWait(jobId), context({ runStopped: stopped.signal }));
+        await until(() => h.state.requests.length === 1, "the first row in flight");
+        stopped.abort();
+        held.resolve();
+        const answered = await waiting;
+        expect(answered).toMatchObject({ status: "done", result: { result: { stopped_by: "stopped", rows_answered: 1 } } });
+    });
+
+    it("a job left to its open table survives the run that waits on it being stopped", async () => {
+        const h = harness([itemRow("a"), itemRow("b"), itemRow("c")]);
+        const { held, jobId } = await startHeld(h);
+        const stopped = new AbortController();
+        const waiting = h.fills.agent.waitJob(jobWait(jobId), context({ runStopped: stopped.signal }));
+        await until(() => h.state.requests.length === 1, "the first row in flight");
+        h.fills.agent.release(jobId);
+        stopped.abort();
+        expect(h.fills.getJob(jobId)?.state).toBe("running");
+        held.resolve();
+        const ended = await h.fills.wait(jobId);
+        expect(ended?.result).toMatchObject({ rows_answered: 3 });
+        expect(ended?.result?.stopped_by ?? null).toBeNull();
+        await waiting;
+    });
+
+    it("keeps an excluded library's row ids out of the job's result", async () => {
+        const h = harness([itemRow("a"), itemRow("u-SECRET22")]);
+        h.state.respond = async (r) => (r.row_id === "a" ? answer(r) : { cells: {}, row_failure: { code: "no_answer", message: "No answer." }, charged: 0 });
+        const { job } = await planAndStart(h.fills);
+        const ended = (await h.fills.wait(job.job_id))!;
+        expect(JSON.stringify(h.fills.agent.jobResult(ended))).toContain("SECRET22");
+        // Excluded since the job ended: the waiting window's resume sends nothing of it.
+        h.state.excluded.add("SECRET22");
+        expect(JSON.stringify(h.fills.agent.jobResult(ended))).not.toContain("SECRET22");
+        h.deps.writeRefusal = () => "library_excluded";
+        expect(h.fills.agent.jobResult(ended).result).toMatchObject({ failed_row_ids: [], pending: null });
+    });
+});
+
+describe("credits a fill holds", () => {
+    it("holds its plan while it runs and nothing once it ends", async () => {
+        const h = harness([itemRow("a"), itemRow("b")]);
+        const gate = deferred<void>();
+        h.state.respond = async (request) => {
+            await gate.promise;
+            return answer(request);
+        };
+        const { job } = await planAndStart(h.fills);
+        expect(h.fills.committedCredits()).toBeCloseTo(0.4);
+
+        // Another table planned meanwhile sees the balance less what the running fill holds.
+        const other = await h.fills.plan({ libraryID: 1, key: "TABLE002" });
+        expect(other.ok && other.plan.balance).toBeCloseTo(9.6);
+
+        gate.resolve();
+        const done = await h.fills.wait(job.job_id);
+        // The profile is read again when the fill ends: it holds nothing more.
+        expect(done?.state).toBe("done");
+        expect(h.fills.committedCredits()).toBe(0);
+        expect(h.deps.account.refreshProfile).toHaveBeenCalled();
+    });
+
+    it("holds nothing of a new account's balance after an account switch", async () => {
+        const h = harness([itemRow("a"), itemRow("b")]);
+        const gate = deferred<void>();
+        h.state.respond = async (request) => {
+            await gate.promise;
+            return answer(request);
+        };
+        const { job } = await planAndStart(h.fills);
+        await until(() => h.state.requests.length === 1, "first request");
+        h.switchAccount();
+        // The row in flight is the old account's.
+        expect(h.fills.committedCredits()).toBe(0);
+        gate.resolve();
+        await h.fills.wait(job.job_id);
+    });
+
+    it("drops the queued rows a stop discards", async () => {
+        const h = harness([itemRow("a"), itemRow("b"), itemRow("c")]);
+        const gate = deferred<void>();
+        h.state.respond = async (request) => {
+            await gate.promise;
+            return answer(request);
+        };
+        const { job } = await planAndStart(h.fills);
+        await until(() => h.state.requests.length === 1, "first request");
+        expect(h.fills.committedCredits()).toBeCloseTo(0.6);
+        h.fills.stop(job.job_id);
+        // Only the row in flight can still be charged.
+        expect(h.fills.committedCredits()).toBeCloseTo(0.2);
+        gate.resolve();
+        await h.fills.wait(job.job_id);
+    });
+});
+
+describe("the balance each answered row reports", () => {
+    it("updates the account and holds only the rows still to come", async () => {
+        const h = harness([itemRow("a"), itemRow("b")]);
+        const second = deferred<void>();
+        let left = 9.8;
+        h.state.respond = async (request) => {
+            if (request.row_id === "b") await second.promise;
+            const response = { ...answer(request), available_subscription_credits: left, available_purchased_credits: 0 };
+            left -= 0.2;
+            return response;
+        };
+        const { job } = await planAndStart(h.fills);
+        await until(() => h.state.requests.length === 2, "second request");
+        expect(h.deps.account.applyBalance).toHaveBeenCalledWith({ subscription: 9.8, purchased: 0 }, 1);
+        // Row a's charge is in the account's balance now: only row b is held.
+        expect(h.fills.committedCredits()).toBeCloseTo(0.2);
+        second.resolve();
+        await h.fills.wait(job.job_id);
+        expect(h.fills.committedCredits()).toBe(0);
+    });
+
+    it("holds a charge whose response reported no balance (an older backend)", async () => {
+        const h = harness([itemRow("a"), itemRow("b")]);
+        const second = deferred<void>();
+        h.state.respond = async (request) => {
+            if (request.row_id === "b") await second.promise;
+            return answer(request);
+        };
+        const { job } = await planAndStart(h.fills);
+        await until(() => h.state.requests.length === 2, "second request");
+        expect(h.deps.account.applyBalance).not.toHaveBeenCalled();
+        expect(h.fills.committedCredits()).toBeCloseTo(0.4);
+        second.resolve();
+        await h.fills.wait(job.job_id);
+    });
+});

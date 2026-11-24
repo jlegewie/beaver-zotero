@@ -41,6 +41,9 @@ declare namespace _ZoteroTypes {
       "enableResponseCompleteNotifications": boolean;
       "enableRunStatusPopup": boolean;
       "windowSidebarCollapsed": boolean;
+      "featureCreditsCardDismissed": boolean;
+      "featureCreditsTeaserDone": boolean;
+      "sidebarWidth": number;
       "deferredToolPreferences": string;
       "customInstructions": string;
       "googleGenerativeAiApiKey": string;
@@ -70,6 +73,7 @@ declare namespace _ZoteroTypes {
       "onboardingWelcomeShownAt": string;
       "versionUpdatePopupShownAt": string;
       "onboardingSignInTextShown": boolean;
+      "tableNoCreditsNoticeDismissed": boolean;
       "interruptedThread": string;
       "beaverTabsToRestore": string;
       "tableWindowsToRestore": string;
@@ -84,9 +88,6 @@ declare namespace _ZoteroTypes {
       "backgroundProcessingWelcomeDeferred": boolean;
       "runEmbeddingFullDiff": boolean;
       "pendingVersionNotifications": string;
-      "librarySuggestions": string;
-      "librarySuggestionsGeneratedAt": string;
-      "firstRunAssignments": string;
       "documentCacheMaxBytes": number;
       "maxAttachmentFileSizeMB": number;
       "tables.defaultLibraryID": number;

@@ -1,9 +1,9 @@
 /**
- * Dev-only HTTP handlers for UI lifecycle state — currently the
- * plugin-owned `Zotero.Reader.onChangeSidebarWidth` dispatcher.
+ * Dev-only HTTP handlers for UI lifecycle state: the cleanup of
+ * `Zotero.Reader.onChangeSidebarWidth` wrappers left by earlier plugin
+ * versions, window runtime commands, and closing or reopening main windows.
  */
 import {
-    ReaderWidthDispatcher,
     restoreReaderSidebarWidthHandler,
     unwrapReaderWidthHandler,
 } from '../../../runtime/readerWidth';
@@ -13,12 +13,10 @@ const ORIGINAL_HANDLER_PROP = '__beaverOriginalSidebarWidthHandler';
 type AnyFn = (...args: any[]) => void;
 
 /** Fabricate a wrapper shaped like one from another plugin generation. */
-function makeTaggedWrapper(original: AnyFn | null): AnyFn & { calls: number } {
-    const wrapper = ((width: number) => {
-        wrapper.calls += 1;
+function makeTaggedWrapper(original: AnyFn | null): AnyFn {
+    const wrapper = (width: number) => {
         if (original) original(width);
-    }) as AnyFn & { calls: number };
-    wrapper.calls = 0;
+    };
     (wrapper as any)[ORIGINAL_HANDLER_PROP] = original;
     return wrapper;
 }
@@ -28,30 +26,22 @@ function makeTaggedWrapper(original: AnyFn | null): AnyFn & { calls: number } {
  * predate the marker property: untagged, original held in closure state,
  * and the two identifying property accesses present in the source.
  */
-function makeLegacyWrapper(): AnyFn & { calls: number } {
+function makeLegacyWrapper(): AnyFn {
     const _this: any = {
         originalOnChangeSidebarWidth: null,
         enforceConsistentWidth: () => {},
     };
-    const legacy = (function (width: number) {
-        legacy.calls += 1;
+    return function (width: number) {
         if (_this.originalOnChangeSidebarWidth) {
             _this.originalOnChangeSidebarWidth.call(null, width);
         }
         setTimeout(() => _this.enforceConsistentWidth(), 50);
-    }) as AnyFn & { calls: number };
-    legacy.calls = 0;
-    return legacy;
+    };
 }
 
-function makeCountingFn(): AnyFn & { calls: number; lastWidth: number | null } {
-    const fn = ((width: number) => {
-        fn.calls += 1;
-        fn.lastWidth = width;
-    }) as AnyFn & { calls: number; lastWidth: number | null };
-    fn.calls = 0;
-    fn.lastWidth = null;
-    return fn;
+/** A plain handler, standing in for Zotero's or another plugin's. */
+function makePlainFn(): AnyFn {
+    return () => {};
 }
 
 function describeSlot(reader: any): Record<string, unknown> {
@@ -67,8 +57,6 @@ function describeSlot(reader: any): Record<string, unknown> {
         slotType: slot === null ? 'null' : typeof slot,
         taggedLayers,
         bottom: cur === null ? 'null' : typeof cur,
-        ownWrapperCurrent:
-            Zotero.Beaver.runtime.readerWidth.isCurrent,
     };
 }
 
@@ -85,65 +73,11 @@ export async function handleTestSidebarWidthHandlerHttpRequest(request: any) {
 
     // Mutating scenarios: snapshot slot + instance state, restore in finally.
     const savedSlot = reader.onChangeSidebarWidth;
-    const dispatcher = new ReaderWidthDispatcher();
-    const runInstall = () => dispatcher.install();
     try {
         switch (scenario) {
-            case 'install-over-plain-original': {
-                const base = makeCountingFn();
-                reader.onChangeSidebarWidth = base;
-                runInstall();
-                const installed = reader.onChangeSidebarWidth;
-                const tagged =
-                    typeof installed === 'function' && ORIGINAL_HANDLER_PROP in installed;
-                installed(271);
-                return {
-                    ok: true,
-                    installedTagged: tagged,
-                    originalIsBase: (installed as any)[ORIGINAL_HANDLER_PROP] === base,
-                    basePropagatedWidth: base.lastWidth,
-                };
-            }
-            case 'replace-stale-tagged': {
-                const base = makeCountingFn();
-                const stale = makeTaggedWrapper(base);
-                reader.onChangeSidebarWidth = stale;
-                runInstall();
-                const installed = reader.onChangeSidebarWidth;
-                installed(272);
-                return {
-                    ok: true,
-                    replacedStale: installed !== stale,
-                    originalIsBase: (installed as any)[ORIGINAL_HANDLER_PROP] === base,
-                    baseCalls: base.calls,
-                    staleCalls: stale.calls,
-                };
-            }
-            case 'replace-legacy': {
-                const legacy = makeLegacyWrapper();
-                reader.onChangeSidebarWidth = legacy;
-                runInstall();
-                const installed = reader.onChangeSidebarWidth;
-                let invokeError: string | null = null;
-                try {
-                    installed(273);
-                } catch (e: any) {
-                    invokeError = String(e?.message ?? e);
-                }
-                return {
-                    ok: true,
-                    replacedLegacy: installed !== legacy,
-                    installedTagged:
-                        typeof installed === 'function' && ORIGINAL_HANDLER_PROP in installed,
-                    originalIsNull: (installed as any)[ORIGINAL_HANDLER_PROP] === null,
-                    legacyCalls: legacy.calls,
-                    invokeError,
-                };
-            }
             case 'restore-unwinds-own': {
-                const base = makeCountingFn();
-                reader.onChangeSidebarWidth = base;
-                runInstall();
+                const base = makePlainFn();
+                reader.onChangeSidebarWidth = makeTaggedWrapper(makeTaggedWrapper(base));
                 restoreReaderSidebarWidthHandler();
                 return { ok: true, slotIsBase: reader.onChangeSidebarWidth === base };
             }
@@ -153,39 +87,13 @@ export async function handleTestSidebarWidthHandlerHttpRequest(request: any) {
                 return { ok: true, slotIsNull: reader.onChangeSidebarWidth === null };
             }
             case 'restore-leaves-foreign': {
-                const foreign = makeCountingFn();
+                const foreign = makePlainFn();
                 reader.onChangeSidebarWidth = foreign;
                 restoreReaderSidebarWidthHandler();
                 return { ok: true, slotIsForeign: reader.onChangeSidebarWidth === foreign };
             }
-            case 'own-wrapper-skip': {
-                const base = makeCountingFn();
-                reader.onChangeSidebarWidth = base;
-                runInstall();
-                const first = reader.onChangeSidebarWidth;
-                runInstall();
-                return { ok: true, sameWrapper: reader.onChangeSidebarWidth === first };
-            }
-            case 'reinstall-after-displacement': {
-                const base = makeCountingFn();
-                reader.onChangeSidebarWidth = base;
-                runInstall();
-                const own = reader.onChangeSidebarWidth;
-                const displacer = makeTaggedWrapper(own);
-                reader.onChangeSidebarWidth = displacer;
-                runInstall();
-                const reinstalled = reader.onChangeSidebarWidth;
-                reinstalled(274);
-                return {
-                    ok: true,
-                    replacedDisplacer: reinstalled !== displacer && reinstalled !== own,
-                    originalIsBase: (reinstalled as any)[ORIGINAL_HANDLER_PROP] === base,
-                    baseCalls: base.calls,
-                    displacerCalls: displacer.calls,
-                };
-            }
             case 'unwrap-direct': {
-                const base = makeCountingFn();
+                const base = makePlainFn();
                 const chain = makeTaggedWrapper(makeTaggedWrapper(base));
                 return {
                     ok: true,
@@ -198,7 +106,6 @@ export async function handleTestSidebarWidthHandlerHttpRequest(request: any) {
                 return { error: `unknown scenario: ${String(scenario)}` };
         }
     } finally {
-        dispatcher.dispose();
         reader.onChangeSidebarWidth = savedSlot;
     }
 }
@@ -221,3 +128,39 @@ export async function handleTestWindowRuntimeHttpRequest(request: any) {
         throw error;
     }
 }
+
+async function waitForCondition(check: () => boolean, timeoutMs: number): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    while (!check()) {
+        if (Date.now() >= deadline) return false;
+        await Zotero.Promise.delay(100);
+    }
+    return true;
+}
+
+function readyMainWindows(): number {
+    return Zotero.Beaver.runtime.getSnapshot().filter(window => window.kind === 'main' && window.status === 'ready').length;
+}
+
+/**
+ * Close every main window, or open one again, for checks that must run with
+ * no window. Closing is refused except on macOS: elsewhere, closing the last
+ * main window quits Zotero. Without an `action`, reports the current state.
+ */
+export async function handleTestMainWindowsHttpRequest(request: any) {
+    const timeoutMs = Number(request?.timeout_ms) || 20_000;
+    const state = () => ({ mainWindows: Zotero.getMainWindows().length, readyMainWindows: readyMainWindows(), canClose: !!Zotero.isMac });
+    if (request?.action === 'close') {
+        if (!Zotero.isMac) return { error: 'unsupported_platform', ...state() };
+        for (const win of Zotero.getMainWindows()) win.close();
+        const ok = await waitForCondition(() => Zotero.getMainWindows().length === 0 && readyMainWindows() === 0, timeoutMs);
+        return { ok, ...state() };
+    }
+    if (request?.action === 'open') {
+        if (Zotero.getMainWindows().length === 0) Zotero.openMainWindow();
+        const ok = await waitForCondition(() => readyMainWindows() > 0, timeoutMs);
+        return { ok, ...state() };
+    }
+    return state();
+}
+

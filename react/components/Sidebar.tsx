@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
+import React, { useCallback, useRef, useState, type ReactNode } from 'react';
 import InputArea from "./input/InputArea"
 import AskUserQuestionPanel from "./input/AskUserQuestionPanel"
 import BatchApprovalPanel from "./input/BatchApprovalPanel"
@@ -35,17 +35,12 @@ import { chatAccessGateAtom } from '../atoms/chatAccess';
 import { Spinner } from './icons/icons';
 import { threadWarningsAtom } from '../atoms/warnings';
 import PopupOverlayContainer from './PopupOverlayContainer';
-import {
-    isMigratingDataAtom,
-    profileWithPlanAtom,
-} from '../atoms/profile';
+import { isMigratingDataAtom } from '../atoms/profile';
 import UpdateRequiredPage from './pages/UpdateRequiredPage';
-import FirstRunPage from './pages/FirstRunPage';
-import { firstRunReturnRequestedAtom, isFirstRunVisibleAtom } from '../atoms/firstRun';
+import { isFirstRunVisibleAtom } from '../atoms/firstRun';
 import WhereToStartPage from './pages/WhereToStartPage';
 import { whereToStartVisibleAtom } from '../atoms/whereToStart';
 import ScreenReaderRunAnnouncer from './agentRuns/ScreenReaderRunAnnouncer';
-import { getFirstRunSelectionVariant } from '../utils/firstRunSelection';
 import { FindQueryProvider } from '@beaver/agent-ui/chat/findContext';
 import { FindInChatControlsProvider, useFindInChat } from '../hooks/useFindInChat';
 import FindBar from './ui/FindBar';
@@ -218,17 +213,7 @@ const Sidebar = ({ location, isWindow = false, header: headerOverride }: Sidebar
     const allWarnings = useAtomValue(threadWarningsAtom);
     const creditInfoWarning = allWarnings.findLast((w) => w.type === 'credit_info');
     const isFirstRunVisible = useAtomValue(isFirstRunVisibleAtom);
-    const isFirstRunReturnRequested = useAtomValue(firstRunReturnRequestedAtom);
     const isWhereToStartVisible = useAtomValue(whereToStartVisibleAtom);
-    const profile = useAtomValue(profileWithPlanAtom);
-    const shouldAssignFirstRunVariant = isFirstRunVisible
-        && !isFirstRunReturnRequested
-        && !!profile?.user_id;
-    const firstRunVariant = useMemo(() => {
-        return shouldAssignFirstRunVariant && profile?.user_id
-            ? getFirstRunSelectionVariant(profile.user_id)
-            : 'first_run';
-    }, [profile?.user_id, shouldAssignFirstRunVariant]);
 
     // Composer takeover: while the run blocks on a batch approval, a question
     // or a credit confirmation, that panel replaces the composer entirely (the
@@ -375,29 +360,22 @@ const Sidebar = ({ location, isWindow = false, header: headerOverride }: Sidebar
         );
     }
 
-    {/* First-run suggestions page (see isFirstRunVisibleAtom in firstRun.ts):
-        - explicit "Try another starting point" return (session atom), or
-        - Free user, device authorized, never completed first-run on this account. */}
+    {/* First-run page (see isFirstRunVisibleAtom in firstRun.ts): a Dev Tools
+        preview, or a Free user in first run who cannot earn feature credits.
+        An account that can starts on the home screen with the task list. */}
     if (isFirstRunVisible) {
-        const showWhereToStart = !isFirstRunReturnRequested
-            && firstRunVariant === 'where_to_start';
         return (
             <SidebarShell isWindow={isWindow}>
                 <ScreenReaderRunAnnouncer inputRef={inputRef} surface={isWindow ? 'window' : 'sidebar'} />
                 {header}
-                {showWhereToStart ? (
-                    <WhereToStartPage />
-                ) : (
-                    <FirstRunPage isWindow={isWindow} inputRef={inputRef} />
-                )}
+                <WhereToStartPage />
                 <DialogContainer />
             </SidebarShell>
         );
     }
 
     {/* "Where should we start?" launcher shown outside the first-run gate:
-        reopened via "Back to starting points" after a launcher follow-up, or
-        from the Dev Tools menu. */}
+        reopened via "Back to starting points" after a launcher follow-up. */}
     if (isWhereToStartVisible) {
         return (
             <SidebarShell isWindow={isWindow}>

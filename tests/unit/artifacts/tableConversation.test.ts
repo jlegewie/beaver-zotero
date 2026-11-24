@@ -9,7 +9,6 @@ import {
     isToolResultView,
     tableResultMessages,
 } from "@beaver/agent-core/run-state/toolResultViews";
-import { isTableChatEnabled } from "../../../src/services/tableCapability";
 import { ZOTERO_PLUGIN_FEATURES } from "@beaver/agent-core/protocol/agentProtocol";
 
 const attachment: TableAttachment = {
@@ -65,17 +64,8 @@ describe("table conversation contracts", () => {
             }),
         ).toBe(false);
     });
-    it.each(["production", "test", undefined])(
-        "keeps table activation off in %s",
-        (env) => {
-            vi.stubGlobal("Zotero", { Beaver: { data: { env } } });
-            expect(isTableChatEnabled()).toBe(false);
-            expect(ZOTERO_PLUGIN_FEATURES).not.toContain("tables");
-        },
-    );
-    it("allows development opt-in", () => {
-        vi.stubGlobal("Zotero", { Beaver: { data: { env: "development" } } });
-        expect(isTableChatEnabled()).toBe(true);
+    it("declares tables in every build", () => {
+        expect(ZOTERO_PLUGIN_FEATURES).toContain("tables");
     });
     it("distinguishes unknown commits from confirmed uncommitted answers", () => {
         expect(

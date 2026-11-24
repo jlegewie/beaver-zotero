@@ -1,9 +1,11 @@
 /**
  * Load the export runtime: the parser and writers (Word, HTML for PDF,
- * Markdown, LaTeX, Excel) of `@beaver/agent-export` with their dependencies
- * (remark, KaTeX, docx, JSZip).
+ * Markdown, LaTeX, Excel) and the note Markdown renderer of
+ * `@beaver/agent-export` with their dependencies (remark, rehype, KaTeX, docx,
+ * JSZip).
  * They are bundled separately (`content/scripts/beaver-export.js`) and loaded
- * on first export, so the plugin's main bundle does not carry them at startup.
+ * on first export or note write, so the plugin's main bundle does not carry
+ * them at startup.
  */
 
 import type * as ExportRuntimeModule from '@beaver/agent-export/runtime';
@@ -44,7 +46,7 @@ export function loadExportRuntime(): ExportRuntime {
     // across plugin updates and reloads.
     Services.scriptloader.loadSubScriptWithOptions(RUNTIME_SCRIPT, { target: scope, ignoreCache: true });
     const runtime = scope[RUNTIME_GLOBAL] as ExportRuntime | undefined;
-    if (!runtime?.parseExportSource || !runtime.parseNoteDoc || !runtime.writeDocx || !runtime.writeHtml || !runtime.writeMarkdown || !runtime.writeLatex || !runtime.writeXlsx) {
+    if (!runtime?.parseExportSource || !runtime.parseNoteDoc || !runtime.renderNoteMarkdownHtml || !runtime.codeRanges || !runtime.writeDocx || !runtime.writeHtml || !runtime.writeMarkdown || !runtime.writeLatex || !runtime.writeXlsx) {
         throw new Error('The export runtime did not load');
     }
     // The runtime's agent-core copy has its own identity registry; without

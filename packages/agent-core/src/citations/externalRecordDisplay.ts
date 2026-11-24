@@ -66,6 +66,7 @@ export function trialRegistryUrl(nct: string): string {
     return `https://clinicaltrials.gov/study/${encodeURIComponent(nct.toUpperCase())}`;
 }
 
+/** The OpenAlex page of a work (W…), author (A…) or venue (S…) id. */
 export function openAlexWorkUrl(workId: string): string {
     return `https://openalex.org/${encodeURIComponent(workId)}`;
 }

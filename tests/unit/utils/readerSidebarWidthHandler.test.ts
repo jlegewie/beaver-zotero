@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
-    ReaderWidthDispatcher,
     unwrapReaderWidthHandler,
     restoreReaderSidebarWidthHandler,
 } from '../../../src/runtime/readerWidth';
@@ -43,10 +42,8 @@ function makeLegacyWrapper(): (width: number) => void {
 }
 
 describe('reader sidebar width handler lifecycle', () => {
-    let dispatcher: ReaderWidthDispatcher;
     beforeEach(() => {
         vi.clearAllMocks();
-        dispatcher = new ReaderWidthDispatcher();
     });
 
     afterEach(() => {
@@ -121,98 +118,4 @@ describe('reader sidebar width handler lifecycle', () => {
         });
     });
 
-    describe('initSidebarWidthTracking', () => {
-        it('installs a tagged wrapper that chains to the pre-existing handler', () => {
-            const base = vi.fn();
-            const reader = installReaderStub(base);
-
-            dispatcher.install();
-
-            const installed = reader.onChangeSidebarWidth;
-            expect(installed).not.toBe(base);
-            expect((installed as any)[ORIGINAL_HANDLER_PROP]).toBe(base);
-
-            installed(275);
-            expect(base).toHaveBeenCalledWith(275);
-        });
-
-        it('does not reinstall while its own wrapper is still current', () => {
-            const base = vi.fn();
-            const reader = installReaderStub(base);
-
-            dispatcher.install();
-            const first = reader.onChangeSidebarWidth;
-            dispatcher.install();
-
-            expect(reader.onChangeSidebarWidth).toBe(first);
-        });
-
-        it('re-installs when another generation displaced its wrapper', () => {
-            const base = vi.fn();
-            const reader = installReaderStub(base);
-
-            dispatcher.install();
-            const own = reader.onChangeSidebarWidth;
-
-            // Another window/generation wraps over us.
-            const displacer = makeTaggedWrapper(own);
-            reader.onChangeSidebarWidth = displacer;
-
-            dispatcher.install();
-
-            const reinstalled = reader.onChangeSidebarWidth;
-            expect(reinstalled).not.toBe(displacer);
-            expect(reinstalled).not.toBe(own);
-            // The displaced chain is unwound to the true original, so neither
-            // stale wrapper stays reachable from the reader slot.
-            expect((reinstalled as any)[ORIGINAL_HANDLER_PROP]).toBe(base);
-
-            reinstalled(280);
-            expect(base).toHaveBeenCalledWith(280);
-            expect(displacer).not.toHaveBeenCalled();
-        });
-
-        it('replaces a legacy (pre-marker) wrapper without chaining onto it', () => {
-            const legacy = makeLegacyWrapper();
-            const reader = installReaderStub(legacy);
-
-            dispatcher.install();
-
-            const installed = reader.onChangeSidebarWidth;
-            expect(installed).not.toBe(legacy);
-            expect((installed as any)[ORIGINAL_HANDLER_PROP]).toBeNull();
-            expect(() => installed(310)).not.toThrow();
-        });
-
-        it('replaces a stale wrapper from a previous generation instead of chaining onto it', () => {
-            const base = vi.fn();
-            const staleWrapper = makeTaggedWrapper(base);
-            const reader = installReaderStub(staleWrapper);
-
-            dispatcher.install();
-
-            const installed = reader.onChangeSidebarWidth;
-            // The new wrapper must reference the true original, not the stale
-            // wrapper — otherwise the stale generation stays reachable from
-            // the long-lived Zotero.Reader and its compartment leaks.
-            expect((installed as any)[ORIGINAL_HANDLER_PROP]).toBe(base);
-
-            installed(320);
-            expect(base).toHaveBeenCalledWith(320);
-            expect(staleWrapper).not.toHaveBeenCalled();
-        });
-
-        it('disposal restores only the handler this dispatcher owns', () => {
-            const base = vi.fn();
-            const reader = installReaderStub(base);
-            dispatcher.install();
-            dispatcher.dispose();
-            expect(reader.onChangeSidebarWidth).toBe(base);
-            const foreign = vi.fn();
-            dispatcher.install();
-            reader.onChangeSidebarWidth = foreign;
-            dispatcher.dispose();
-            expect(reader.onChangeSidebarWidth).toBe(foreign);
-        });
-    });
 });

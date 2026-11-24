@@ -3,6 +3,7 @@ import { getMergedItemReference } from '../../../atoms/mergeItemsChoices';
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { AgentRunStatus } from '@beaver/agent-core/agents/types';
+import { toolResultAtom } from '@beaver/agent-core/run-state/atoms';
 import {
     AgentAction,
     agentActionsForToolcallAtom,
@@ -75,7 +76,9 @@ import {
     PreviewData,
     getCreateAnnotationsDisplayStatus,
     getAgentActionToolIcon,
-    inFlightProgressMessage,
+    actionCardProgressMessage,
+    createdItemsFullText,
+    createItemsFullTextSummary,
     hasFailedUndo,
     getStatusConfig,
     STALE_APPLY_ANYWAY_TOOLTIP,
@@ -407,16 +410,30 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         status !== 'pending';
 
     // The wait this reports is the backend's, not the user's: an approved edit
-    // whose save is taking Zotero a long time. Suppressed while the card waits
-    // on the user (`isAwaitingApproval`) and once the action has settled, since
-    // the note outlives the request that produced it.
-    const progressMessage = inFlightProgressMessage(
-        progress,
-        runStatus === 'in_progress'
-        && !hasToolReturn
-        && !isAwaitingApproval
-        && (status === 'awaiting' || status === 'pending'),
+    // whose save is taking Zotero a long time, or the items and PDF fetches of
+    // `create_items`. See `actionCardProgressMessage`.
+    const progressMessage = actionCardProgressMessage(toolName, progress, {
+        isCallOpen: runStatus === 'in_progress' && !hasToolReturn,
+        isAwaitingApproval,
+        status,
+    });
+
+    // `create_items`: what full text each created item got, as the call's
+    // return reports it. Fixed once returned; a PDF that lands later is not
+    // followed.
+    const toolResult = useAtomValue(useMemo(() => toolResultAtom(toolcallId), [toolcallId]));
+    const createdFullText = useMemo(
+        () => (toolName === 'create_items' && hasToolReturn ? createdItemsFullText(toolResult) : null),
+        [toolName, hasToolReturn, toolResult],
     );
+    const fullTextSummary = createItemsFullTextSummary(createdFullText, actions.length === 1);
+    const fullTextByKey = useMemo(() => {
+        const byKey = new Map<string, string | null>();
+        for (const item of createdFullText ?? []) {
+            if (item.zoteroKey && item.kind !== undefined) byKey.set(item.zoteroKey, item.kind);
+        }
+        return byKey;
+    }, [createdFullText]);
 
     // While the run reconnects, a card awaiting a decision says when it can be
     // answered, and one already answered says its answer has yet to be sent.
@@ -433,6 +450,8 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         : isAnswerHeld
             ? RECONNECT_HELD_CAPTION
             : isReplyHeld ? RECONNECT_SENDING_CAPTION : null;
+    // A reconnect caption says more than a progress note from before the drop.
+    const headerProgress = reconnectCaption ? null : progressMessage;
     // An unconfirmed action offers nothing to click; this says what to do.
     const unconfirmedNote = !isProcessing && !isConfirmAction ? unconfirmedCaption(actions) : null;
     // An apply refused because the library changed: what changed, once expanded.
@@ -747,15 +766,25 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                     count-carrying label would otherwise read as
                                     singular while an approval is still pending and
                                     no action row exists yet. */}
-                                <span className="font-color-primary font-medium">{getActionLabel(toolName, previewData?.actionData ?? action?.proposed_data)}</span>
-                                {actionTitle && <span className="font-color-secondary ml-15">{actionTitle}</span>}
+                                <span className="font-color-primary font-medium">
+                                    {getActionLabel(toolName, previewData?.actionData ?? action?.proposed_data)}
+                                    {headerProgress ? ':' : ''}
+                                </span>
+                                {/* Progress takes the title's place, as in a passive
+                                    tool row ("Label: progress"), so it stays on the
+                                    header line however long the title is. */}
+                                {headerProgress ? (
+                                    <span className={`font-color-secondary ml-15${isAwaitingToolReturn ? '' : ' shimmer-text'}`}>{headerProgress}</span>
+                                ) : actionTitle && (
+                                    <span className="font-color-secondary ml-15">
+                                        {fullTextSummary ? `${actionTitle} (${fullTextSummary})` : actionTitle}
+                                    </span>
+                                )}
                             </div>
                             {reconnectCaption ? (
                                 <span className="font-color-secondary text-sm" role="status">{reconnectCaption}</span>
-                            ) : unconfirmedNote ? (
+                            ) : unconfirmedNote && (
                                 <span className="font-color-secondary text-sm" role="status">{unconfirmedNote}</span>
-                            ) : progressMessage && (
-                                <span className="font-color-tertiary shimmer-text">{progressMessage}</span>
                             )}
                         </div>
                     </div>
@@ -835,6 +864,8 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                             disabled={isProcessing}
                             status={status}
                             actions={actions}
+                            isCallOpen={runStatus === 'in_progress' && !hasToolReturn}
+                            fullTextByKey={fullTextByKey}
                         />
                     ) : (
                         <div className="text-sm font-color-secondary">

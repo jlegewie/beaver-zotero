@@ -4,6 +4,8 @@ const mocks = vi.hoisted(() => ({
     scheduleBackgroundTask: vi.fn(),
     buildPdfResolvers: vi.fn(),
     fetchPdfAttachment: vi.fn(),
+    zoteroResolverSource: vi.fn((resolvers: unknown[]) => ({ resolvers })),
+    downloadServerPdf: vi.fn(),
     isPdfDocument: vi.fn(() => true),
 }));
 
@@ -13,7 +15,11 @@ vi.mock('../../../src/utils/backgroundTasks', () => ({
     scheduleBackgroundTask: mocks.scheduleBackgroundTask,
 }));
 vi.mock('../../../src/utils/pdfResolvers', () => ({ buildPdfResolvers: mocks.buildPdfResolvers }));
-vi.mock('../../../src/services/pdfAttachmentFetch', () => ({ fetchPdfAttachment: mocks.fetchPdfAttachment }));
+vi.mock('../../../src/services/pdfAttachmentFetch', () => ({
+    fetchPdfAttachment: mocks.fetchPdfAttachment,
+    zoteroResolverSource: mocks.zoteroResolverSource,
+}));
+vi.mock('../../../src/services/serverPdfSource', () => ({ downloadServerPdf: mocks.downloadServerPdf }));
 vi.mock('../../../src/utils/attachmentFiles', () => ({ isPdfDocument: mocks.isPdfDocument }));
 
 import { schedulePdfFetchTask } from '../../../src/services/itemImport/pdfFetch';
@@ -41,6 +47,15 @@ beforeEach(() => {
 });
 
 describe('schedulePdfFetchTask failure telemetry', () => {
+    it('tries the user download first and the server copy only after it', async () => {
+        mocks.fetchPdfAttachment.mockResolvedValue({ attachment: null });
+
+        await runTask();
+
+        const sources = mocks.fetchPdfAttachment.mock.calls[0][1];
+        expect(sources).toEqual([{ resolvers: [{ url: 'https://a.example/x.pdf' }] }, mocks.downloadServerPdf]);
+    });
+
     it('reports no_sources when no resolvers can be built', async () => {
         mocks.buildPdfResolvers.mockReturnValue([]);
         expect(await runTask()).toMatchObject({ attachmentStatus: 'failed', failureReason: 'no_sources' });
@@ -77,16 +92,14 @@ describe('schedulePdfFetchTask failure telemetry', () => {
             diagnostics.onAccessMethodStart('doi');
             diagnostics.onBeforeRequest('https://doi.org/10.1/x');
             diagnostics.onRequestError({ message: 'HTTP 404', status: 404 });
-            diagnostics.onAccessMethodStart('openalex');
-            diagnostics.onBeforeRequest('https://oa.example/x.pdf');
-            diagnostics.markSucceeded();
-            return { attachment: { key: 'PDFKEYAA' }, accessMethod: 'openalex' };
+            diagnostics.recordSourceAttempt('openalex_content', 'content.openalex.org');
+            return { attachment: { key: 'PDFKEYAA' }, accessMethod: 'openalex_content' };
         });
         const payload = await runTask();
         expect(payload).toMatchObject({
             attachmentStatus: 'available',
             attachmentKey: '1-PDFKEYAA',
-            accessMethod: 'openalex',
+            accessMethod: 'openalex_content',
             attempts: [{ outcome: 'not_found' }, { outcome: 'ok' }],
         });
         expect(payload.failureReason).toBeUndefined();

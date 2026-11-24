@@ -78,6 +78,12 @@ export interface TableFillResponse {
     row_failure?: RowFailure | null;
     /** Credits this request charged. */
     charged: number;
+    /**
+     * The account's spendable credits after the charge, on an answered row;
+     * absent from older backends and null when the backend could not read them.
+     */
+    available_subscription_credits?: number | null;
+    available_purchased_credits?: number | null;
 }
 
 /** The error codes of the endpoint, in `{"detail": {"code", "message"?}}`. */
@@ -139,6 +145,11 @@ export interface TableFillPlanSummary {
     prices: TableFillPricing;
     /** The table's pending work as planned. */
     pending: PendingWork;
+    /**
+     * Rows the plan reads again although they hold answers in other columns,
+     * for a question no row has answered yet (see `rereadRows`).
+     */
+    rereads: number;
     /** The balance when planned, from the account snapshot; null when unknown. */
     balance: number | null;
     /** Epoch ms after which the plan can no longer start. */
@@ -154,7 +165,9 @@ export type TableFillPlanError =
     | "invalid_column"
     | TableFillWriteRefusal
     | "pricing_unavailable"
-    | "signed_out";
+    | "signed_out"
+    /** A trial of a plan no longer kept (it expired, or ran). */
+    | "plan_not_found";
 
 export type TableFillPlanResult =
     | { ok: true; plan: TableFillPlanSummary }
@@ -294,6 +307,8 @@ export interface TableFillWirePlan {
     credits: number;
     prices: TableFillPricing;
     pending: PendingWork;
+    /** Rows read again although answered in other columns; see {@link TableFillPlanSummary.rereads}. */
+    rereads: number;
     balance: number | null;
     /** Epoch ms. */
     expires_at: number;
@@ -309,6 +324,12 @@ export interface TableFillProgress {
     credits_charged: number;
     credits_planned: number;
     seconds_left: number | null;
+}
+
+/** A balance less the credits fill jobs hold; null while the balance is unknown. */
+export function balanceAfterCommitted(balance: number | null, committed: number): number | null {
+    // Rounded to the credit precision: 0.6 - 0.4 must leave 0.2, not 0.19999….
+    return balance == null ? null : Math.max(0, Math.round((balance - committed) * 1e6) / 1e6);
 }
 
 /** The progress counts of a snapshot. */

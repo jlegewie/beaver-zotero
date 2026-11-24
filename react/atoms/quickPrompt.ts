@@ -12,6 +12,7 @@ import { activeRunAtom } from '@beaver/agent-core/run-state/atoms';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { isWSChatPendingAtom } from './agentRunAtoms';
 import { chatAccessGateAtom } from './chatAccess';
+import { jobWaitAtom } from './jobWait';
 import { addItemsToCurrentMessageItemsAtom, currentReaderAttachmentAtom } from './messageComposition';
 import { newThreadAtom } from './threads';
 import {
@@ -29,7 +30,8 @@ export type { QuickPromptMode, QuickPromptState };
 
 /** Whether the open thread has a run that a send right now would join or stop. */
 export const hasActiveWorkAtom = atom(
-    (get) => get(isWSChatPendingAtom) || isRunActive(get(activeRunAtom)),
+    // A chat waiting on a fill is busy too: leaving it would stop the fill.
+    (get) => get(isWSChatPendingAtom) || isRunActive(get(activeRunAtom)) || get(jobWaitAtom) !== null,
 );
 
 /**

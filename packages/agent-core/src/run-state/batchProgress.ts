@@ -11,7 +11,7 @@
  */
 
 import { isRunActive } from '../agents/types';
-import type { AgentRun, ModelMessage } from '../agents/types';
+import type { AgentRun, ModelMessage, ToolReturnPart } from '../agents/types';
 import { isZoteroKey, parseItemReference, UNRESOLVED_LIBRARY_ID } from '../identity/libraryRef';
 import type { ZoteroItemReference } from '../types/zotero';
 
@@ -183,6 +183,12 @@ function legacyBlocks(entry: BatchProgressEntry): BatchOutcomeBlock[] {
 export interface BatchProgressStamp {
     /** Handover batch first, then the rest. */
     batches: BatchProgressEntry[];
+    /**
+     * The newest ledger record when the stamp was taken. Parallel calls of one
+     * step are stored in call order but finish in any order, so within a
+     * message the highest `seq` is the current stamp. Absent on older stamps.
+     */
+    seq?: number | null;
 }
 
 interface BatchProgressContainer {
@@ -245,12 +251,30 @@ export function readBatchProgressStamp(value: unknown): BatchProgressStamp | nul
         : { batches: adapted };
 }
 
-/** The stamp a message's tool returns carry, latest part first. */
+/**
+ * A request's tool returns, newest first: by the `seq` of the progress stamp
+ * each carries, then by position. Parallel calls are stored in call order, not
+ * the order they finished in.
+ */
+function toolReturnsNewestFirst(message: ModelMessage): ToolReturnPart[] {
+    if (message.kind !== 'request') return [];
+    const seqOf = (part: ToolReturnPart): number => {
+        const seq = (part.metadata as { batch_progress?: { seq?: unknown } } | undefined)
+            ?.batch_progress?.seq;
+        return typeof seq === 'number' ? seq : -1;
+    };
+    return message.parts
+        .map((part, index) => ({ part, index }))
+        .filter((entry): entry is { part: ToolReturnPart; index: number } =>
+            entry.part.part_kind === 'tool-return')
+        .map(({ part, index }) => ({ part, index, seq: seqOf(part) }))
+        .sort((a, b) => b.seq - a.seq || b.index - a.index)
+        .map(({ part }) => part);
+}
+
+/** The newest stamp a message's tool returns carry. */
 function stampInMessage(message: ModelMessage): BatchProgressStamp | null {
-    if (message.kind !== 'request') return null;
-    for (let index = message.parts.length - 1; index >= 0; index--) {
-        const part = message.parts[index];
-        if (part.part_kind !== 'tool-return') continue;
+    for (const part of toolReturnsNewestFirst(message)) {
         const stamp = (part.metadata as { batch_progress?: unknown } | undefined)?.batch_progress;
         const usable = readBatchProgressStamp(stamp);
         if (usable) return usable;
@@ -585,11 +609,7 @@ export function selectChainBatchItems(runs: readonly AgentRun[]): BatchItemsByBa
         const messages = runs[runIndex]?.model_messages;
         if (!messages?.length) continue;
         for (let index = messages.length - 1; index >= 0; index--) {
-            const message = messages[index];
-            if (message.kind !== 'request') continue;
-            for (let part = message.parts.length - 1; part >= 0; part--) {
-                const candidate = message.parts[part];
-                if (candidate.part_kind !== 'tool-return') continue;
+            for (const candidate of toolReturnsNewestFirst(messages[index])) {
                 const raw = (candidate.metadata as { batch_items?: unknown } | undefined)?.batch_items;
                 if (!raw) continue;
                 const stamp = readBatchItemsStamp(raw);

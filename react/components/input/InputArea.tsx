@@ -2,11 +2,11 @@ import { threadReadOnlyAtom } from '../../runtime/threadProjection';
 import { RECONNECT_HELD_CAPTION, RECONNECT_UNAVAILABLE_TOOLTIP } from '@beaver/agent-core/transport/connectionFailure';
 import { useRunReconnectShown } from '../../hooks/useVisibleReconnect';
 import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
-import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { StopIcon, GlobalSearchIcon, ArrowUpLineIcon } from '../icons/icons';
 import { useAtom, useSetAtom, useAtomValue, useStore } from 'jotai';
 import { newThreadAtom, currentThreadIdAtom } from '../../atoms/threads';
-import { currentMessageContentAtom, currentMessagePillsAtom, pendingPillInsertsAtom, composerResetTokenAtom, pendingAttachmentTokensAtom, clearComposerAtom } from '../../atoms/messageComposition';
+import { currentMessageContentAtom, currentMessagePillsAtom, pendingPillInsertsAtom, composerResetTokenAtom, pendingAttachmentTokensAtom, clearComposerAtom, composerSourceSearchTextAtom } from '../../atoms/messageComposition';
 import { sendWSMessageAtom, isWSChatPendingAtom, answerPendingApprovalsAtom, setRunPermissionModeAtom, approvalVerdictInFlightAtom, beginApprovalVerdictAtom, releaseApprovalVerdictAtom, streamingDoneRunIdsAtom, isRunReconnectingAtom, stoppingPreviousRunAtom } from '../../atoms/agentRunAtoms';
 import { pendingApprovalsAtom, agentActionsByRunAtom } from '../../agents/agentActions';
 import { isCoveredByFullAccess, runApprovalPolicyAtom } from '../../atoms/runApprovalPolicy';
@@ -25,13 +25,14 @@ import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import PendingActionsBar from './PendingActionsBar';
 import ThreadPresenceBar from './ThreadPresenceBar';
 import BatchProgressPanel from './BatchProgressPanel';
-import TableFillProgressPanel from './TableFillProgressPanel';
 import HighTokenUsageWarningBar from './HighTokenUsageWarningBar';
+import TablePlusToolsNotice from './TablePlusToolsNotice';
+import { tablePlusToolsNoticeAtom } from '../../atoms/chatAccess';
 import NextStepsPanel from '../pages/firstRun/NextStepsPanel';
 import RunContinueDisplay from '../agentRuns/RunContinueDisplay';
-import BackToSuggestions, { FirstRunBackTarget } from '../pages/firstRun/BackToSuggestions';
+import BackToSuggestions from '../pages/firstRun/BackToSuggestions';
 import { continuationOfferAtom, hasWhereToStartRunAtom, lastRunSummaryAtom, threadRunIdsAtom } from '@beaver/agent-core/run-state/atoms';
-import { waitsOnFillAtom } from '@beaver/agent-core/run-state/tableChatFills';
+import { runningChatJobsAtom, stopChatJobsAtom } from '../../atoms/jobCalls';
 import { PromptOrigin, isRunFinished } from '@beaver/agent-core/agents/types';
 import { isThreadParkedAtom } from '../../atoms/parkedRuns';
 import { firstRunNextStepsDismissedAtom } from '../../atoms/firstRun';
@@ -46,6 +47,7 @@ import { useComposerPasteHandlers } from '../../hooks/useComposerPasteHandlers';
 import { useActionPopupResolver } from '../../hooks/useActionPopupResolver';
 import { useStopRun } from '../../hooks/useStopRun';
 import { sendComposedMessageAtom } from '../../atoms/actions';
+import { composerSendBlockAtom } from '../../atoms/featureCredits';
 import { dismissActiveEditNotePreview } from '../../host/zotero/editNotePreviewLifecycle';
 
 const HIGH_INPUT_TOKEN_WARNING_THRESHOLD = 100_000;
@@ -58,6 +60,9 @@ interface InputAreaProps {
     placeholder?: string;
     hideModelSelector?: boolean;
     hideAttachmentMenu?: boolean;
+    /** Leave out the table Plus Tools notice: home places it under the
+     *  input itself, and the quick prompt has no room for it. */
+    hideTablePlusToolsNotice?: boolean;
 }
 
 const InputArea: React.FC<InputAreaProps> = ({
@@ -66,6 +71,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     placeholder,
     hideModelSelector = false,
     hideAttachmentMenu = false,
+    hideTablePlusToolsNotice = false,
 }) => {
     const surfaceWindow = useSurfaceWindow();
     // This window cannot write to the chat: another window is responding in
@@ -88,8 +94,6 @@ const InputArea: React.FC<InputAreaProps> = ({
     const runIds = useAtomValue(threadRunIdsAtom);
     const hasWhereToStartRun = useAtomValue(hasWhereToStartRunAtom);
     const currentThreadId = useAtomValue(currentThreadIdAtom);
-    // While the response waits on a table fill, stopping it stops the fill too.
-    const waitsOnFill = useAtomValue(waitsOnFillAtom);
     const dismissedHighTokenByThread = useAtomValue(dismissedHighTokenWarningByThreadAtom);
     const dismissHighTokenWarning = useSetAtom(dismissHighTokenWarningForThreadAtom);
     const backendHighTokenUsageRuns = useAtomValue(backendHighTokenUsageRunsAtom);
@@ -99,8 +103,13 @@ const InputArea: React.FC<InputAreaProps> = ({
     // dequeued (see the claim effect below).
     const pendingPillInsert = useAtomValue(pendingPillInsertsAtom)[0] ?? null;
     const composerResetToken = useAtomValue(composerResetTokenAtom);
+    // Send is held, and its tooltip says what is missing, while a feature
+    // task's setup card has a required step open or a /command pill's action
+    // needs text after it that the message lacks.
+    const sendBlock = useAtomValue(composerSendBlockAtom);
     const store = useStore();
     const webSearchDescriptionId = useId();
+    const requirementHintId = useId();
 
     // Turns a paste carrying files or image bytes into message attachments.
     const pasteHandlers = useComposerPasteHandlers();
@@ -143,7 +152,17 @@ const InputArea: React.FC<InputAreaProps> = ({
     // answer them. A resume that waits for the rest of the cards looks the
     // same: sending a message parks it first.
     const isParked = useAtomValue(isThreadParkedAtom);
-    const isPending = useAtomValue(isWSChatPendingAtom) && !isParked;
+    // Fills this window waits on. While one goes, the chat is busy as during
+    // any other tool call, parked or not: the composer shows Stop, which
+    // stops the fill and ends the response.
+    const chatJobs = useAtomValue(runningChatJobsAtom);
+    const stopChatJobs = useSetAtom(stopChatJobsAtom);
+    const jobsBusy = isParked && chatJobs.length > 0;
+    const isPending = (useAtomValue(isWSChatPendingAtom) && !isParked) || jobsBusy;
+    // The fill was stopped in its table: it winds down, then the response
+    // continues with how far it got.
+    const isStoppingJobs = chatJobs.length > 0 && chatJobs.every((job) => job.stopping);
+    const waitsOnJob = isPending && chatJobs.length > 0;
 
     // A file staged for THIS composition is still being attached, so sending is
     // held until it lands. Work left over from a composition the user has since
@@ -217,6 +236,9 @@ const InputArea: React.FC<InputAreaProps> = ({
     // Sidebar renders AskUserQuestionPanel INSTEAD of this component, so no
     // question-mode handling is needed here.
 
+    // The message carries a research table Beaver can only read here.
+    const showTableNotice = useAtomValue(tablePlusToolsNoticeAtom) !== null && !hideTablePlusToolsNotice;
+
     const lastRunUsage = lastRun?.totalUsage;
     const lastRequestInputTokens = lastRunUsage ? getLastRequestInputTokens(lastRunUsage) : null;
     const warningThreadId = lastRun?.threadId ?? currentThreadId;
@@ -259,26 +281,26 @@ const InputArea: React.FC<InputAreaProps> = ({
         ? streamingDoneRunIds.has(continuation.runId)
         : false;
 
-    // Guided next steps surface after a suggestion-card run or a "Where should
-    // we start?" launcher run — both carry the context NextStepsPanel needs.
-    // Not while that run waits on its cards: it has not finished yet.
+    // Guided next steps surface after a "Where should we start?" launcher run,
+    // which carries the context NextStepsPanel needs. Not while that run waits
+    // on its cards: it has not finished yet.
     const lastRunOriginKind = lastRun?.origin?.kind;
     const canShowNextSteps = Boolean(
         lastRun &&
-        (lastRunOriginKind === 'first_run_card' || lastRunOriginKind === 'where_to_start') &&
+        lastRunOriginKind === 'where_to_start' &&
         isRunFinished(lastRun) &&
         !isParked &&
         !nextStepsDismissedRunIds.has(lastRun.id)
     );
+    // After a launcher follow-up, the way back to the launcher.
     const canShowBackToSuggestions = Boolean(
         lastRun &&
         lastRunOriginKind === 'first_run_followup' &&
+        hasWhereToStartRun &&
         isRunFinished(lastRun) &&
         !isParked &&
         !nextStepsDismissedRunIds.has(lastRun.id)
     );
-    // The follow-up run's origin
-    const firstRunBackTarget: FirstRunBackTarget = hasWhereToStartRun ? 'launcher' : 'suggestions';
 
     // Counted labels, so the destructive verdict states its blast radius where
     // the decision is actually taken rather than only in the bar above.
@@ -290,12 +312,13 @@ const InputArea: React.FC<InputAreaProps> = ({
     // Priority: the chat being closed to this window (nothing below can be
     // acted on until that clears), then a blocked decision, then the standing
     // grant that stops decisions being asked for at all, then the offer to
-    // finish an unfinished response, then first-run guidance, then the cost
-    // warning.
+    // finish an unfinished response, then what the message being written
+    // cannot do (a table Beaver can only read), then first-run guidance, then
+    // the cost warning.
     // One ordered list (not a suppression clause in each predicate) so a new
     // band takes a place here instead of stacking. Laid out lowest-priority
     // first so the winner sits nearest the composer.
-    const composerBand: 'high-token' | 'next-steps' | 'back-to-suggestions' | 'continue' | 'approvals' | 'full-access' | 'thread-presence' | null =
+    const composerBand: 'high-token' | 'next-steps' | 'back-to-suggestions' | 'table-plus-tools' | 'continue' | 'approvals' | 'full-access' | 'thread-presence' | null =
         threadReadOnly || stoppingPreviousRun
             ? 'thread-presence'
             : hasPendingApprovals
@@ -304,13 +327,15 @@ const InputArea: React.FC<InputAreaProps> = ({
                     ? 'full-access'
                     : continuation
                         ? 'continue'
-                        : canShowNextSteps
-                            ? 'next-steps'
-                            : canShowBackToSuggestions
-                                ? 'back-to-suggestions'
-                                : canShowHighTokenWarning
-                                    ? 'high-token'
-                                    : null;
+                        : showTableNotice
+                            ? 'table-plus-tools'
+                            : canShowNextSteps
+                                ? 'next-steps'
+                                : canShowBackToSuggestions
+                                    ? 'back-to-suggestions'
+                                    : canShowHighTokenWarning
+                                        ? 'high-token'
+                                        : null;
 
     const {
         isSlashMenuOpen,
@@ -352,6 +377,16 @@ const InputArea: React.FC<InputAreaProps> = ({
         setMessageContent,
         menuRef: addSourcesMenuRef,
     });
+
+    // Publish the `@query` the menu is searching from, so readers of the
+    // message text (the feature-credit setup steps) can leave it out. A layout
+    // effect, so the setup card never paints the query as an instruction.
+    const setSourceSearchText = useSetAtom(composerSourceSearchTextAtom);
+    const sourceSearchText = isAddSourcesMenuOpen && addSourcesQuerySource === 'editor' ? `@${addSourcesSearchQuery}` : null;
+    useLayoutEffect(() => {
+        setSourceSearchText(sourceSearchText);
+    }, [sourceSearchText, setSourceSearchText]);
+    useEffect(() => () => setSourceSearchText(null), [setSourceSearchText]);
 
     useEffect(() => {
         if (isPending && getPref('focusResponseForScreenReaders')) {
@@ -403,7 +438,21 @@ const InputArea: React.FC<InputAreaProps> = ({
             // Another editor may have claimed this pill already.
             if (queue[0] !== pendingPillInsert) return;
             store.set(pendingPillInsertsAtom, queue.slice(1));
-            editorHandleRef.current?.insertSlashCommand(descriptor, null);
+            const editor = editorHandleRef.current;
+            if (!editor) return;
+            const { argumentText, selectText, replaceActionIds } = pendingPillInsert;
+            // Pills this one takes the place of go first, every one of them,
+            // with their text.
+            for (const actionId of replaceActionIds ?? []) editor.removeCommandsWithArguments(actionId);
+            // Staged with text for after the command (an example the user
+            // picked): reuse a pill of the same action rather than adding a
+            // second one, and replace whatever follows it.
+            if (argumentText !== undefined && editor.setCommandArgument(descriptor.actionId, argumentText, selectText)) return;
+            editor.insertSlashCommand(descriptor, null);
+            if (argumentText !== undefined) {
+                editor.setCommandArgument(descriptor.actionId, argumentText, selectText);
+                return;
+            }
             focusEditor();
         };
         const ownWindow = inputRef.current?.ownerDocument.defaultView ?? null;
@@ -516,6 +565,9 @@ const InputArea: React.FC<InputAreaProps> = ({
         // state before it (see flushPendingText).
         const message = editorHandleRef.current?.flushPendingText() ?? composedMessage;
         if (isPending || message.length === 0) return;
+        // Read from the store, not the render: the flush above may have just
+        // published the text that satisfies the requirement.
+        if (store.get(composerSendBlockAtom)) return;
         // If the message contains /command pills, resolve each back to its
         // action's prompt (and attach its items/collection) before sending.
         const pills = editorHandleRef.current?.getSlashCommands() ?? [];
@@ -533,6 +585,10 @@ const InputArea: React.FC<InputAreaProps> = ({
             e.preventDefault();
             e.stopPropagation();
         }
+        if (isStoppingJobs) return;
+        // A parked chat stops the fills it waits on; a live run stops as any
+        // run does, and its fills with it.
+        if (stopChatJobs()) return;
         stopRun();
     };
 
@@ -615,6 +671,8 @@ const InputArea: React.FC<InputAreaProps> = ({
     const getPlaceholderText = () => {
         if (placeholder !== undefined) return placeholder;
         if (isAwaitingApproval) return "Optional instructions, then approve or reject";
+        // The window waits on a fill: the response continues once it is done.
+        if (waitsOnJob) return isStoppingJobs ? "Stopping the table fill…" : "Beaver continues once the table is filled";
         if (isLibraryTab) return "@ to add a source, / for actions";
         if (currentNoteItem) return "@ to add a source, / for actions";
         return "@ to add a source, / for actions, drag to add annotations";
@@ -637,7 +695,6 @@ const InputArea: React.FC<InputAreaProps> = ({
             {/* Live batch progress. Above the band so it stacks as: what the
                 run is doing, then what it wants from the user. */}
             <BatchProgressPanel />
-            <TableFillProgressPanel />
 
             {/* One band, chosen by `composerBand`. Lowest priority first so
                 the winner sits on the composer. */}
@@ -654,21 +711,24 @@ const InputArea: React.FC<InputAreaProps> = ({
             )}
 
             {/* First-run "Next steps" panel — shown after a run that originated
-                from a first-run suggestion card. Auto-dismisses on type. */}
+                from the launcher. Auto-dismisses on type. */}
             {composerBand === 'next-steps' && lastRun && (
                 <NextStepsPanel
-                    origin={lastRun.origin as Extract<PromptOrigin, { kind: 'first_run_card' | 'where_to_start' }>}
+                    origin={lastRun.origin as Extract<PromptOrigin, { kind: 'where_to_start' }>}
                     onDismiss={handleDismissNextSteps}
                 />
             )}
 
-            {/* After a first-run follow-up run, offer a path back to the
-                originating surface (suggestion grid or launcher). */}
+            {/* After a launcher follow-up run, offer a path back to the launcher. */}
             {composerBand === 'back-to-suggestions' && (
                 <div className="composer-docked-bar next-steps-panel px-3 py-2">
-                    <BackToSuggestions onDismiss={handleDismissNextSteps} backTarget={firstRunBackTarget} />
+                    <BackToSuggestions onDismiss={handleDismissNextSteps} />
                 </div>
             )}
+
+            {/* The attached research table can only be read: filling and
+                editing it need Plus Tools. */}
+            {composerBand === 'table-plus-tools' && <TablePlusToolsNotice placement="band" />}
 
             {/* Offer to carry on from a run that ended unfinished. Above the
                 first-run bands: an answer that stopped short is the thread's
@@ -816,6 +876,11 @@ const InputArea: React.FC<InputAreaProps> = ({
                     <span id={webSearchDescriptionId} className="sr-only">
                         {webSearchDescription}
                     </span>
+                    {sendBlock && (
+                        <span id={requirementHintId} className="sr-only">
+                            {sendBlock.hint}
+                        </span>
+                    )}
                     {!showVerdictButtons && (
                     <Tooltip
                         key={String(isWebSearchAllowed)}
@@ -885,7 +950,7 @@ const InputArea: React.FC<InputAreaProps> = ({
                         </>
                     ) : isPending ? (
                         <Tooltip
-                            content={waitsOnFill ? 'Stop response (also stops the table fill)' : 'Stop response'}
+                            content={isStoppingJobs ? 'Stopping…' : waitsOnJob ? 'Stop' : 'Stop response'}
                             showArrow
                             singleLine
                         >
@@ -893,19 +958,28 @@ const InputArea: React.FC<InputAreaProps> = ({
                                 icon={StopIcon}
                                 variant="surface"
                                 className="composer-send composer-send-stop"
-                                ariaLabel={waitsOnFill ? 'Stop response (also stops the table fill)' : 'Stop generating'}
+                                ariaLabel={isStoppingJobs ? 'Stopping' : waitsOnJob ? 'Stop' : 'Stop generating'}
+                                disabled={isStoppingJobs}
                                 onClick={handleStop}
                             />
                         </Tooltip>
                     ) : (
-                        <IconButton
-                            icon={ArrowUpLineIcon}
-                            variant="solid"
-                            className="composer-send"
-                            ariaLabel="Send message"
-                            onClick={handleSubmit}
-                            disabled={threadReadOnly || messageContent.length === 0 || !selectedModel || isSlashMenuOpen || isAttachingFiles}
-                        />
+                        <Tooltip
+                            content={sendBlock?.hint ?? ''}
+                            disabled={!sendBlock}
+                            showArrow
+                            singleLine
+                        >
+                            <IconButton
+                                icon={ArrowUpLineIcon}
+                                variant="solid"
+                                className="composer-send"
+                                ariaLabel="Send message"
+                                ariaDescribedBy={sendBlock ? requirementHintId : undefined}
+                                onClick={handleSubmit}
+                                disabled={threadReadOnly || messageContent.length === 0 || !selectedModel || isSlashMenuOpen || isAttachingFiles || sendBlock !== null}
+                            />
+                        </Tooltip>
                     )}
                 </div>
 

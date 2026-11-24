@@ -37,13 +37,16 @@ import {
  *   - `fuzzy_window`       — region located by multi-line window scoring when
  *     no single line matched; region-level confidence only, the model should
  *     read_note around it rather than paste blindly.
+ *   - `ambiguous_occurrence` — one occurrence of an old_string that matched
+ *     several times, widened until unique; a verbatim, pasteable slice.
  */
 export type CandidateSource =
     | 'whitespace_relaxed'
     | 'word_overlap'
     | 'inline_tag_drift'
     | 'structural_anchor'
-    | 'fuzzy_window';
+    | 'fuzzy_window'
+    | 'ambiguous_occurrence';
 
 export interface CandidateSnippet {
     /** Snippet to show the model. Already truncated — do not re-truncate. */

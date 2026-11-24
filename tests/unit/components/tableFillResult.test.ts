@@ -13,7 +13,7 @@ import type { TableFillJobSnapshot, TableFillResult } from '@beaver/agent-core/p
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
-vi.mock('../../../react/runtime/windowRuntime', () => ({ getWindowRuntime: () => ({}) }));
+vi.mock('../../../react/runtime/windowRuntime', () => ({ getWindowRuntime: () => ({}), getHostWindow: () => window }));
 vi.mock('../../../react/components/tables/card/liveSources', () => ({ describeItems: vi.fn() }));
 
 import { setHost } from '@beaver/agent-ui/host';
@@ -125,7 +125,7 @@ afterEach(() => {
 describe('a clean result', () => {
     it('clears at the next cell selection, letting the plugin forget the job', () => {
         render(done());
-        expect(banner()?.textContent).toContain('Filled 2 rows');
+        expect(banner()?.textContent).toContain('Filled 2 items');
         click(cell('r1'));
         expect(banner()).toBeNull();
         expect(dismiss).toHaveBeenCalledWith('job-1');
@@ -170,7 +170,7 @@ describe('a clean result', () => {
 describe('a result that needs attention', () => {
     it.each([
         ['rows could not be read', { failed_row_ids: ['r2'] }],
-        ['the fill was stopped', { stopped_by: 'stopped' as const }],
+        ['the fill was stopped', { stopped_by: 'stopped' as const, not_started: { stopped: 1 } }],
         ['credits ran out', { stopped_by: 'insufficient_credits' as const }],
         ['papers could not be saved', { not_written: 1 }],
         ['answers were left for the next fill', { skipped_cells: { column_changed: 1 } }],
@@ -261,7 +261,7 @@ describe('one message at a time', () => {
         show(null);
         act(() => setToast('Added 1 paper'));
         show(done({}, 'job-2'));
-        expect(banner()?.textContent).toContain('Filled 2 rows');
+        expect(banner()?.textContent).toContain('Filled 2 items');
         expect(banner()?.textContent).not.toContain('Added 1 paper');
     });
 });

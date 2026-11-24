@@ -3,13 +3,13 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import { AgentRunStatus, ToolCallPart, isEmptyWriteReturn, isNotFoundWriteReturn, isUnsuccessfulToolReturn } from '@beaver/agent-core/agents/types';
 import { getToolCallStatusFromResult, toolResultAtom } from '@beaver/agent-core/run-state/atoms';
 import { isTableToolName, isTableWriteToolName, tableResultMessages } from '@beaver/agent-core/run-state/tableResults';
-import { getToolCallLabel, type ToolCallLabelEnrich } from '@beaver/agent-core/run-state/toolLabels';
+import { getToolCallLabelParts, type ToolCallLabelEnrich } from '@beaver/agent-core/run-state/toolLabels';
+import { parseArgs } from '@beaver/agent-core/run-state/toolCallRequest';
 import {
     isExternalReferenceListView,
     isToolResultView,
     getToolResultRenderableCount,
     searchHasDetails,
-    searchSiteLabel,
     searchViewInfo,
     type ToolResultView as ToolResultViewModel,
 } from '@beaver/agent-core/run-state/toolResultViews';
@@ -50,8 +50,9 @@ import {
     TableIcon,
     BookCopyIcon,
     BookSearchIcon,
-    MedicalFileIcon,
-    ArrowUpRightIcon,
+    FilterLinesIcon,
+    AuthorIcon,
+    LibraryIcon,
 } from '../icons/icons';
 import { toolExpandedAtom, setToolExpandedAtom } from '../../atoms/messageUIState';
 import { resolveToolCallLabelEnrich } from '../../utils/toolCallLabelEnrich';
@@ -116,8 +117,11 @@ const TOOL_ICONS: Record<string, IconComponent> = {
     find_related_works: FlowConnectionIcon,
     find_book_chapters: BookSearchIcon,
     pubmed_search: GlobalSearchIcon,
-    search_trials: MedicalFileIcon,
-    get_trial: MedicalFileIcon,
+    openalex_search_by_topic: GlobalSearchIcon,
+    openalex_search_by_keywords: GlobalSearchIcon,
+    trials_search: GlobalSearchIcon,
+    search_trials: GlobalSearchIcon,
+    get_trial: FileViewIcon,
 
     // Create item tool
     create_zotero_item: DocumentValidationIcon,
@@ -219,15 +223,7 @@ function getToolIcon(part: ToolCallPart): IconComponent {
     
     // Special handling for the file readers - check file type
     if (toolName === 'read_file' || toolName === 'read_documentation') {
-        let args: Record<string, unknown> | undefined;
-        try {
-            args = typeof part.args === 'string'
-                ? JSON.parse(part.args)
-                : (part.args as Record<string, unknown>);
-        } catch {
-            // args may be incomplete while streaming
-        }
-        const path = args?.path as string | undefined;
+        const path = parseArgs(part).path as string | undefined;
         
         if (path) {
             const fileType = detectReadFileType(path);
@@ -237,6 +233,10 @@ function getToolIcon(part: ToolCallPart): IconComponent {
         }
     }
     
+    if (toolName === 'openalex_resolve_names') {
+        return parseArgs(part).kind === 'venue' ? LibraryIcon : AuthorIcon;
+    }
+
     return TOOL_ICONS[toolName] ?? PuzzleIcon;
 }
 
@@ -278,7 +278,6 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
     // and run the same search on the source's site, from its header.
     const searchInfo = view && isExternalReferenceListView(view) ? searchViewInfo(view) : null;
     const hasSearchDetails = !!searchInfo && searchHasDetails(searchInfo);
-    const searchUrl = searchInfo?.search_url || null;
 
     // Host-resolved request-side display names for the parts the view model does
     // not cover (pending/failed item names, list_* library/collection scope names).
@@ -358,7 +357,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
         !showAgentActionView &&
         isEmptyWriteReturn(result);
 
-    const label = getToolCallLabel(part, status, {
+    const { main: label, suffix: labelSuffix } = getToolCallLabelParts(part, status, {
         view,
         enrich: labelEnrich,
         noChange: isNoChangeReturn,
@@ -422,7 +421,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
     }, [effectiveExpanded]);
     const searchDetailsOpen = hasSearchDetails && (searchDetailsChoice ?? renderableCount === 0);
     const searchDetailsId = `search-details-${part.tool_call_id}`;
-    const showSearchActions = effectiveExpanded && (hasSearchDetails || !!searchUrl);
+    const showSearchActions = effectiveExpanded && hasSearchDetails;
 
     const handleToggleExpanded = () => {
         if (canExpand) {
@@ -539,8 +538,14 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
                             names/locators get an ellipsis instead of wrapping. Must stay a
                             block (not display-flex) — text-overflow:ellipsis is ignored on
                             flex containers, which clips the text without the "…". */}
-                        <div className={`min-w-0 truncate ${effectiveLabelColor} ${isShimmering ? 'shimmer-text' : ''}`}>
-                            {label}
+                        <div className="display-flex flex-row gap-1 min-w-0">
+                            <div className={`min-w-0 truncate ${effectiveLabelColor} ${isShimmering ? 'shimmer-text' : ''}`}>
+                                {label}
+                            </div>
+                            {/* The count stays whole while the text before it shortens. */}
+                            {labelSuffix && (
+                                <div className={`flex-none ${effectiveLabelColor}`}>{labelSuffix.trim()}</div>
+                            )}
                         </div>
                     </div>
                 </button>
@@ -550,31 +555,19 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
                     stays a plain line. */}
                 {showSearchActions && (
                     <div className="display-flex flex-row items-center gap-05 mr-2 flex-none">
-                        {hasSearchDetails && (
-                            <Tooltip content="Search details" showArrow singleLine>
-                                <IconButton
-                                    icon={SearchIcon}
-                                    variant="ghost-secondary"
-                                    iconClassName={`${searchDetailsOpen ? 'font-color-primary' : 'font-color-secondary'} scale-90`}
-                                    className="tool-header-toggle"
-                                    onClick={() => setSearchDetailsChoice(!searchDetailsOpen)}
-                                    ariaLabel="Search details"
-                                    ariaExpanded={searchDetailsOpen}
-                                    ariaControls={searchDetailsId}
-                                />
-                            </Tooltip>
-                        )}
-                        {searchUrl && searchInfo && (
-                            <Tooltip content={searchSiteLabel(searchInfo)} showArrow singleLine>
-                                <IconButton
-                                    icon={ArrowUpRightIcon}
-                                    variant="ghost-secondary"
-                                    iconClassName="font-color-secondary scale-10"
-                                    onClick={() => getHost().navigation?.openExternalUrl(searchUrl)}
-                                    ariaLabel={searchSiteLabel(searchInfo)}
-                                />
-                            </Tooltip>
-                        )}
+                        <Tooltip content="Search details" showArrow singleLine>
+                            <IconButton
+                                icon={FilterLinesIcon}
+                                variant="ghost-secondary"
+                                iconClassName={`${searchDetailsOpen ? 'font-color-primary' : 'font-color-secondary'} scale-90`}
+                                className="tool-header-toggle"
+                                onClick={() => setSearchDetailsChoice(!searchDetailsOpen)}
+                                ariaLabel="Search details"
+                                ariaExpanded={searchDetailsOpen}
+                                ariaControls={searchDetailsId}
+                                style={{ padding: '3px' }}
+                            />
+                        </Tooltip>
                     </div>
                 )}
             </div>

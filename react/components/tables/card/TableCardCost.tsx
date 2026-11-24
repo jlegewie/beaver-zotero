@@ -1,12 +1,15 @@
 import React from 'react';
-import { useAtomValue } from 'jotai';
+import { atom, useAtomValue } from 'jotai';
 import type { TableCardCost } from '@beaver/agent-core/protocol/tableCardProtocol';
-import type { TableFillPricing } from '@beaver/agent-core/protocol/tableFillProtocol';
-import { costBreakdown, costCredits, costLine, costReceipt } from '@beaver/agent-core/run-state/tableCardDraft';
-import { balanceLine, pricingSentence } from '@beaver/agent-core/run-state/tableFillCopy';
+import { balanceAfterCommitted, type TableFillPricing } from '@beaver/agent-core/protocol/tableFillProtocol';
+import { balanceNotice, costBreakdown, costNotice, costReceipt } from '@beaver/agent-core/run-state/tableCardDraft';
+import { creditsActionLabel } from '@beaver/agent-core/run-state/tableFillCopy';
 import { isImeKeyEvent } from '@beaver/agent-ui/primitives/ime';
 import { profileWithPlanAtom, remainingBeaverCreditsAtom } from '../../../atoms/profile';
-import { Icon, InformationCircleIcon } from '../../icons/icons';
+import { committedFillCreditsAtom } from '../../../atoms/tableChatFills';
+import { Icon, InformationCircleIcon, SecurityWarningIcon } from '../../icons/icons';
+import { openPreferencesWindow } from '../../../ui/openPreferencesWindow';
+import { useSurfaceWindow } from '../../../runtime/SurfaceWindowContext';
 
 /** How long the card waits before asking for the prices again after a failure. */
 const PRICING_RETRY_MS = 5_000;
@@ -39,44 +42,98 @@ export function useFillPricing(): TableFillPricing | null {
     return prices;
 }
 
-/** The user's credit balance, or null while the profile is not loaded. */
-export function useCreditBalance(): number | null {
-    const profile = useAtomValue(profileWithPlanAtom);
-    const remaining = useAtomValue(remainingBeaverCreditsAtom);
-    return profile ? remaining : null;
+/**
+ * The spendable balance as a number, so a reader re-renders only when it
+ * changes. Each answered fill row updates the profile's balance; what running
+ * fills may still charge is taken off here.
+ */
+const creditBalanceAtom = atom((get) =>
+    get(profileWithPlanAtom) ? balanceAfterCommitted(get(remainingBeaverCreditsAtom), get(committedFillCreditsAtom)) : null,
+);
+
+/** The account's credit balance, or null while the profile is not loaded. */
+const accountBalanceAtom = atom((get) => (get(profileWithPlanAtom) ? get(remainingBeaverCreditsAtom) : null));
+
+/** The account's credit balance, running fills included, or null while the profile is not loaded. */
+export function useAccountCreditBalance(): number | null {
+    return useAtomValue(accountBalanceAtom);
 }
 
-export interface TableCardCostBlockProps {
+/** The credits the user can spend on a new fill, or null while the profile is not loaded. */
+export function useCreditBalance(): number | null {
+    return useAtomValue(creditBalanceAtom);
+}
+
+/** Window heights at which a card's fill warnings scroll with its content. */
+const SHORT_WINDOW_QUERY = '(max-height: 500px)';
+
+/**
+ * Whether the card's window is short. There the footer would leave the
+ * card's content almost no room, so the fill warnings scroll at the end of
+ * the content; the decision row and the controls stay pinned.
+ */
+export function useShortWindow(): boolean {
+    const win = useSurfaceWindow();
+    // Gecko's matchMedia may return null (for example in a hidden frame).
+    const [short, setShort] = React.useState(() => win.matchMedia(SHORT_WINDOW_QUERY)?.matches ?? false);
+    React.useEffect(() => {
+        const query = win.matchMedia(SHORT_WINDOW_QUERY);
+        if (!query) return;
+        const update = () => setShort(query.matches);
+        update();
+        query.addEventListener('change', update);
+        return () => query.removeEventListener('change', update);
+    }, [win]);
+    return short;
+}
+
+export interface TableCardFillWarningsProps {
     cost: TableCardCost;
-    /** The count is not exact: the user edited the sources. */
-    upperBound?: boolean;
     prices: TableFillPricing | null;
+    /** Rendered at the end of the card's scrolling content rather than in its footer. */
+    inBody?: boolean;
+    /** A fill card's alert that the fill reads answered papers again (`refillNotice`). */
+    refill?: string | null;
 }
 
 /**
- * A card's cost, as the tab's Fill popover shows a plan: the row line, the
- * credits, how far the balance reaches when the fill costs more, and the
- * pricing sentence. The fill's credits are its own, charged per paper.
+ * The bands for the facts about a fill that change what the user does: a
+ * fill that reads answered papers again (a fill card's `refill`), a balance
+ * that does not reach (with Add credits), and items without full text.
+ * Renders nothing when none applies.
  */
-const TableCardCostBlock: React.FC<TableCardCostBlockProps> = ({ cost, upperBound = false, prices }) => {
+export const TableCardFillWarnings: React.FC<TableCardFillWarningsProps> = ({ cost, prices, inBody = false, refill = null }) => {
     const balance = useCreditBalance();
-    const reach = upperBound
-        ? null
-        : balanceLine({
-              credits: cost.credits,
-              balance,
-              documents: cost.documents,
-              title_abstract: cost.title_abstract,
-              prices: prices ?? { document: cost.credits, title_abstract: cost.credits },
-          });
-    return (
-        <div className="table-card-cost display-flex flex-col text-sm font-color-secondary" style={{ gap: '0.15rem' }}>
-            <span>{costLine(cost, upperBound)}</span>
-            <span className="font-color-primary">{costCredits(cost, upperBound)}</span>
-            {reach && <span>{reach}</span>}
-            {prices && <span className="opacity-80">{pricingSentence(prices, cost.title_abstract)}</span>}
-        </div>
+    const accountBalance = useAccountCreditBalance();
+    const balanceWarning = balanceNotice(cost, balance, prices, accountBalance ?? balance);
+    const readWarning = costNotice(cost);
+    if (!refill && !balanceWarning && !readWarning) return null;
+    const bands = (
+        <>
+            {refill && (
+                <div className="table-card-footer-band table-card-footer-band-warning" role="note">
+                    <Icon icon={SecurityWarningIcon} className="table-card-warning-icon" />
+                    <span className="table-card-notice-text">{refill}</span>
+                </div>
+            )}
+            {balanceWarning && (
+                <div className="table-card-footer-band table-card-footer-band-warning" role="alert">
+                    <Icon icon={SecurityWarningIcon} className="table-card-warning-icon" />
+                    <span className="table-card-notice-text">{balanceWarning}</span>
+                    <button type="button" className="table-card-warning-action" onClick={() => openPreferencesWindow('billing')}>
+                        {creditsActionLabel(accountBalance ?? balance)}
+                    </button>
+                </div>
+            )}
+            {readWarning && (
+                <div className="table-card-footer-band table-card-footer-band-warning" role="status">
+                    <Icon icon={SecurityWarningIcon} className="table-card-warning-icon" />
+                    <span className="table-card-notice-text">{readWarning}</span>
+                </div>
+            )}
+        </>
     );
+    return inBody ? <div className="table-card-body-bands">{bands}</div> : bands;
 };
 
 export interface TableCardReceiptProps {
@@ -186,5 +243,3 @@ export const TableCardReceipt: React.FC<TableCardReceiptProps> = ({ cost, upperB
         </>
     );
 };
-
-export default TableCardCostBlock;

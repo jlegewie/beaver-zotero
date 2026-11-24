@@ -21,11 +21,14 @@ import { PaperActions, paperText } from "./PaperCell";
 
 /**
  * The cell's edit controls: `edit` sits beside the answer (the pencil), and
- * `more` under it (Reset to Beaver's answer on the user's answer).
+ * `more` under it (Reset to Beaver's answer on the user's answer). While the
+ * cell is being edited here, `editor` takes the answer's place, and the
+ * other two are not shown.
  */
 export interface CellActionControls {
     edit?: React.ReactNode;
     more?: React.ReactNode;
+    editor?: React.ReactNode;
 }
 
 export interface CellInspectorProps {
@@ -256,18 +259,20 @@ function CellDetails({
         case "failed":
             return (
                 <section className="rt-inspector-section">
-                    <div className="rt-inspector-answer-row">
-                        {content.kind === "failed" ? (
-                            <p className="rt-failed">{content.message}</p>
-                        ) : (
-                            <p className="rt-inspector-empty">
-                                {row.failure
-                                    ? "Not answered: the last fill could not read this item."
-                                    : "Not filled yet. The next Fill answers it."}
-                            </p>
-                        )}
-                        {actions?.edit}
-                    </div>
+                    {actions?.editor ?? (
+                        <div className="rt-inspector-answer-row">
+                            {content.kind === "failed" ? (
+                                <p className="rt-failed">{content.message}</p>
+                            ) : (
+                                <p className="rt-inspector-empty">
+                                    {row.failure
+                                        ? "Not answered: the last fill could not read this item."
+                                        : "Not filled yet. The next Fill answers it."}
+                                </p>
+                            )}
+                            {actions?.edit}
+                        </div>
+                    )}
                 </section>
             );
         case "system":
@@ -286,6 +291,7 @@ function CellDetails({
                     documents={documents}
                     primary
                     edit={actions?.edit}
+                    editor={actions?.editor}
                     documentLine={documentLine}
                 />
             );
@@ -297,25 +303,31 @@ function CellDetails({
                             <Icon icon={EditIcon} size={12} />
                             <span>Your answer</span>
                         </div>
-                        <div className="rt-inspector-answer-row">
-                            <div className="rt-inspector-answer">
-                                {content.outcome === "answered" ? (
-                                    <CellValue cell={content.cell} column={column} renderText={renderText} />
-                                ) : (
-                                    <span className="rt-muted">
-                                        {content.outcome === "not_reported" ? "Not reported" : "Cleared"}
-                                    </span>
-                                )}
-                            </div>
-                            {actions?.edit}
-                        </div>
-                        {content.note ? <p className="rt-inspector-text">{content.note}</p> : null}
+                        {actions?.editor ?? (
+                            <>
+                                <div className="rt-inspector-answer-row">
+                                    <div className="rt-inspector-answer">
+                                        {content.outcome === "answered" ? (
+                                            <CellValue cell={content.cell} column={column} renderText={renderText} />
+                                        ) : (
+                                            <span className="rt-muted">
+                                                {content.outcome === "not_reported" ? "Not reported" : "Cleared"}
+                                            </span>
+                                        )}
+                                    </div>
+                                    {actions?.edit}
+                                </div>
+                                {content.note ? <p className="rt-inspector-text">{content.note}</p> : null}
+                            </>
+                        )}
                         {content.stale ? (
                             <p className="rt-inspector-stale">
                                 {tagDefinition({ kind: "stale", reason: "question" }, content.cell)}
                             </p>
                         ) : null}
-                        {actions?.more ? <div className="rt-inspector-links">{actions.more}</div> : null}
+                        {actions?.more && !actions.editor ? (
+                            <div className="rt-inspector-links">{actions.more}</div>
+                        ) : null}
                     </section>
                     {content.replaced ? (
                         <AnswerSection
@@ -346,6 +358,7 @@ function AnswerSection({
     documents,
     primary = false,
     edit,
+    editor,
     documentLine,
 }: {
     row: Row;
@@ -356,6 +369,8 @@ function AnswerSection({
     primary?: boolean;
     /** The Edit control beside the answer. */
     edit?: React.ReactNode;
+    /** The cell's open editor, in the answer's place. */
+    editor?: React.ReactNode;
     /** The row's document line, under the Evidence heading. */
     documentLine?: React.ReactNode;
 }): React.ReactElement {
@@ -364,16 +379,18 @@ function AnswerSection({
         <>
             <section className="rt-inspector-section rt-inspector-answer-section">
                 <div className="rt-inspector-heading">{primary ? "Answer" : "Beaver’s answer"}</div>
-                <div className="rt-inspector-answer-row">
-                    <div className="rt-inspector-answer">
-                        {answer.outcome === "answered" ? (
-                            <CellValue cell={answer.cell} column={column} renderText={renderText} />
-                        ) : (
-                            <span className="rt-muted">Not reported</span>
-                        )}
+                {editor ?? (
+                    <div className="rt-inspector-answer-row">
+                        <div className="rt-inspector-answer">
+                            {answer.outcome === "answered" ? (
+                                <CellValue cell={answer.cell} column={column} renderText={renderText} />
+                            ) : (
+                                <span className="rt-muted">Not reported</span>
+                            )}
+                        </div>
+                        {edit}
                     </div>
-                    {edit}
-                </div>
+                )}
                 {answer.fromAbstract ? (
                     <span className="rt-tags rt-tags-wrap">
                         <StatusTag tag={{ kind: "abstract" }} cell={answer.cell} />

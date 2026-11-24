@@ -14,6 +14,7 @@ import {
     TableSelectionError,
     cellsToFill,
     pendingWork,
+    rereadRows,
     retryableFailedRows,
     rowBlocked,
     rowFailure,
@@ -113,5 +114,92 @@ describe("row failures", () => {
             ],
         };
         expect(retryableFailedRows(spec)).toEqual(["b"]);
+    });
+});
+
+describe("rereadRows", () => {
+    const answer = { outcome: "answered", provenance: "model", value: { kind: "text", text: "x" }, documents: ["u-A"] } as const;
+    const stale = { ...answer, stale: true } as const;
+    const columns = [
+        { id: "method", header: "Method", type: "text" },
+        { id: "sample", header: "Sample", type: "text" },
+    ] as TableSpec["columns"];
+    const table = (rows: TableSpec["rows"]): TableSpec => ({ id: "t", title: "T", columns, rows });
+    /** The default fill's rows, with the columns each answers. */
+    const planRows = (spec: TableSpec) => {
+        const byRow = new Map<string, string[]>();
+        for (const [row, column] of cellsToFill(spec)) byRow.set(row, [...(byRow.get(row) ?? []), column]);
+        return [...byRow].map(([row, cols]) => ({ row, columns: cols }));
+    };
+    const row = (id: string, cells: TableSpec["rows"][number]["cells"] = {}, extra = {}) => ({
+        id,
+        documents: ["u-A"],
+        cells,
+        ...extra,
+    });
+
+    it("is empty for a first fill", () => {
+        const spec = table([row("a"), row("b")]);
+        expect(rereadRows(spec, planRows(spec))).toEqual([]);
+    });
+
+    it("is empty for rows added to a filled table", () => {
+        const spec = table([row("a", { method: answer, sample: answer }), row("b"), row("c")]);
+        expect(rereadRows(spec, planRows(spec))).toEqual([]);
+    });
+
+    it("is empty for a retry of failed rows", () => {
+        const spec = table([
+            row("a", { method: answer, sample: answer }),
+            row("b", {}, { failure: { code: "timeout", message: "Took too long." } }),
+        ]);
+        expect(rereadRows(spec, planRows(spec))).toEqual([]);
+        expect(rereadRows(spec, retryableFailedRows(spec).map((id) => ({ row: id, columns: ["method", "sample"] })))).toEqual([]);
+    });
+
+    it("names answered rows that failed on a new column: a retry reads them again", () => {
+        const failure = { code: "timeout", message: "Took too long." };
+        const spec = table([row("a", { method: answer }, { failure }), row("b", { method: answer }, { failure })]);
+        expect(rereadRows(spec, planRows(spec))).toEqual(["a", "b"]);
+    });
+
+    it("names the rows a changed question reads again in a table of one question", () => {
+        const one = { ...table([row("a", { method: stale }), row("b", { method: stale })]), columns: [columns[0]] };
+        expect(rereadRows(one, planRows(one))).toEqual(["a", "b"]);
+    });
+
+    it("names the answered rows a changed question reads again", () => {
+        const spec = table([row("a", { method: stale, sample: answer }), row("b", { method: stale, sample: answer }), row("c")]);
+        expect(rereadRows(spec, planRows(spec))).toEqual(["a", "b"]);
+    });
+
+    it("names the answered rows a column added to a filled table reads", () => {
+        const spec = table([row("a", { method: answer }), row("b", { method: answer })]);
+        expect(rereadRows(spec, planRows(spec))).toEqual(["a", "b"]);
+    });
+
+    it("is empty once a trial answered the new question: the rest are its empty cells", () => {
+        const spec = table([row("a", { method: answer, sample: answer }), row("b", { method: answer }), row("c", { method: answer })]);
+        expect(rereadRows(spec, planRows(spec))).toEqual([]);
+    });
+
+    it("does not count a row whose document changed, which is read again whole", () => {
+        const spec = table([
+            row("a", { method: answer, sample: answer }),
+            row("b", { method: answer, sample: answer }, { documents: ["u-B"] }),
+        ]);
+        expect(rereadRows(spec, planRows(spec))).toEqual([]);
+    });
+
+    it("counts a user's correction of the filler's answer: that paper was read", () => {
+        const corrected = { outcome: "answered", provenance: "user", value: { kind: "text", text: "mine" }, replaced: answer } as const;
+        const spec = table([row("a", { method: corrected }), row("b", { method: answer })]);
+        expect(rereadRows(spec, planRows(spec))).toEqual(["a", "b"]);
+    });
+
+    it("counts only the filler's answers, not the user's", () => {
+        const user = { outcome: "answered", provenance: "user", value: { kind: "text", text: "mine" } } as const;
+        const spec = table([row("a", { method: user }), row("b", { method: user })]);
+        expect(rereadRows(spec, planRows(spec))).toEqual([]);
     });
 });

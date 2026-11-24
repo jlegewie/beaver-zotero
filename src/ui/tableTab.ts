@@ -42,6 +42,7 @@ import {
     addBeaverTab,
     beaverTabWindow,
     closeBeaverTab,
+    moveBeaverTabToNewWindow,
     findBeaverTab,
     listBeaverTabs,
     registerBeaverTabKind,
@@ -215,6 +216,7 @@ export function openTableTab(
                 if (owned.renders.length > MAX_RENDER_REPORTS) owned.renders.shift();
             },
             isSelected: () => tabsOf(owned.win)?.selectedID === owned.tabID,
+            moveToNewWindow: () => void moveBeaverTabToNewWindow(owned.tabID),
         });
     } catch (error) {
         // A tab with nothing in it is worse than none.

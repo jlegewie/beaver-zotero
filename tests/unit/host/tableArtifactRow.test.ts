@@ -234,7 +234,7 @@ describe('the stream line of a table write', () => {
             }),
             store,
         );
-        expect(container!.textContent).toContain('Edited the table');
+        expect(container!.textContent).toContain('Edit Table');
         expect(container!.textContent).toContain('Cash transfers');
         expect(button('Undo')).toBeUndefined();
         expect(button('Open table')).toBeUndefined();

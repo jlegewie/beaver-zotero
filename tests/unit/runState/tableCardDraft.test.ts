@@ -18,11 +18,10 @@ import {
     addLibrarySource,
     addScreening,
     cardTotals,
-    costCredits,
-    costLine,
     draftCost,
-    fillActionLabel,
+    fillScopeLine,
     tableFillCardResponse,
+    fillCardTrialRows,
     balanceNotice,
     columnProblem,
     costBreakdown,
@@ -42,6 +41,7 @@ import {
     draftSourceEntries,
     draftSourcesKey,
     setDraftPreview,
+    singlePaperHint,
     nextStep,
     overCapMessage,
     overCapSources,
@@ -574,17 +574,6 @@ describe('table card draft', () => {
     describe('cost', () => {
         const PRICES = { document: 0.2, title_abstract: 0.05 };
 
-        it('writes the row line and the credits, with "up to" while the count is not exact', () => {
-            const cost = { rows: 180, documents: 150, title_abstract: 18, no_input: 12, credits: 30.9 };
-            expect(costLine(cost)).toBe(
-                "Reads 168 items: 150 from their documents, 18 from title and abstract. 12 items can't be read and are skipped",
-            );
-            expect(costLine(cost, true)).toMatch(/^Reads up to 168 items/);
-            expect(costCredits(cost)).toBe('30.9 credits');
-            expect(costCredits(cost, true)).toBe('Up to 30.9 credits');
-            expect(costLine(null)).toBeNull();
-        });
-
         it('keeps the proposal\'s cost until the sources change; a question edit changes nothing', () => {
             const { request } = fixture('create-items');
             let draft = initialTableCardDraft(request);
@@ -677,6 +666,13 @@ describe('table card draft', () => {
                 "Your 0 credits aren't enough to fill this item.",
             );
             expect(balanceNotice(cost, null, PRICES)).toBeNull();
+            // Running fills hold part of the account's balance: the warning says how much, at most.
+            expect(balanceNotice(cost, 1.4, PRICES, 6)).toBe(
+                'Fills already running may use up to 4.6 of your 6 credits; the rest covers about 7 of 12 items.',
+            );
+            expect(balanceNotice(cost, 0.1, PRICES, 3)).toBe(
+                "Fills already running may use up to 2.9 of your 3 credits; the rest isn't enough to fill these items.",
+            );
         });
     });
 
@@ -691,9 +687,20 @@ describe('table card draft', () => {
                 approved: true,
                 choice: reply!.choice,
             });
-            expect(fillActionLabel(request)).toBe('Fill 32');
-            expect(costLine(request.cost)).toBe('Reads 32 items: 30 from their documents, 2 from title and abstract');
-            expect(costCredits(request.cost)).toBe('6.1 credits');
+            expect(fillScopeLine(request)).toBe('Fill 2 columns');
+            expect(fillScopeLine({ ...request, columns: request.columns.slice(0, 1) })).toBe('Fill 1 column');
+            expect(costReceipt(request.cost)).toEqual({ papers: '32 items', credits: '6.1 credits' });
+        });
+
+        it('approves only the trial the request offered with trial', () => {
+            const { request, reply } = fillFixture('fill-trial');
+            expect(fillCardTrialRows(request)).toBe(5);
+            expect(tableFillCardResponse(request, true)).toEqual(reply);
+            expect(tableFillCardResponse(request)).not.toHaveProperty('trial');
+            // No trial on offer, or none smaller than the fill: the approval fills the plan.
+            expect(fillCardTrialRows({ ...request, trial_rows: null })).toBeNull();
+            expect(tableFillCardResponse({ ...request, trial_rows: null }, true)).not.toHaveProperty('trial');
+            expect(fillCardTrialRows({ ...request, cost: { ...request.cost, rows: 5 } })).toBeNull();
         });
 
         it('declines with the instructions typed', () => {
@@ -701,5 +708,16 @@ describe('table card draft', () => {
             const draft = setInstructions(initialTableCardDraft(request), 'Try three papers first');
             expect(tableCardDecline(draft, request)).toEqual(reply);
         });
+    });
+});
+
+describe('a table of one paper', () => {
+    it('notes that a table compares papers once one paper is left, and only then', () => {
+        const { request } = fixture('create-merge-across-sources');
+        let draft = initialTableCardDraft(request);
+        expect(singlePaperHint(draft, request)).toBeNull();
+        draft = removeItem(draft, request.sources[0].ids![0]);
+        draft = setDraftPreview(draft, { sourcesKey: draftSourcesKey(draft), rows: 1, duplicates: 0, documents: 1, title_abstract: 0, no_input: 0 });
+        expect(singlePaperHint(draft, request)).toMatch(/compares papers side by side/);
     });
 });

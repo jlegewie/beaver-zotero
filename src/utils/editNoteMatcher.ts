@@ -75,6 +75,7 @@ import {
 } from './editNoteStrippers';
 import type { EditNoteOperation } from '@beaver/agent-core/types/agentActions/editNote';
 import type { PageLabelsByAttachmentId } from '@beaver/agent-core/citations/atoms';
+import { locateEditTarget } from './editNotePositionLookup';
 
 // =============================================================================
 // Types
@@ -171,9 +172,24 @@ export interface MatchResult {
     normalizeAnchor: (anchor: string) => string;
 }
 
+/** A fallback that matched but was refused because it could not pick one target. */
+export interface RejectedMatch {
+    strategy: MatchStrategyName;
+    /** The rewritten simplified-space old_string the fallback searched for. */
+    oldString: string;
+    matchCount: number;
+}
+
+/** Filled by `findBestMatch` when the caller passes it. */
+export interface MatchDiagnostics {
+    rejected: RejectedMatch[];
+}
+
 interface StrategyInput extends MatchInput {
     /** Internal second-pass policy; callers always start with literal math. */
     oldMathContext?: 'legacy-old';
+    /** Receives fallbacks refused by `acceptsMatch`. */
+    diagnostics?: MatchDiagnostics;
 }
 
 interface Strategy {
@@ -235,6 +251,8 @@ export function expandBase(input: MatchInput): BaseExpansion {
  * Skipped entirely: italic (ambiguous with bold), links, lists, tables, code,
  * math, smart-punctuation drift. Splits on `<...>` boundaries so content inside
  * HTML tag attributes (e.g. `<citation label="**x**"/>`) is never transformed.
+ * Code is left as written: text inside `<code>` / `<pre>` elements and
+ * backtick code spans, where `__init__` is a name, not bold.
  *
  * ATX headings follow CommonMark: up to 3 leading spaces, one or more
  * spaces/tabs after the `#`s, optional closing `#+` fence preceded by
@@ -249,9 +267,18 @@ function convertMarkdownToHtml(s: string): string {
     // Text at even indices, tags at odd indices — same pattern as noteHtmlEntities.
     const parts = s.split(/(<[^>]*>)/);
     let changed = false;
-    for (let i = 0; i < parts.length; i += 2) {
+    let codeDepth = 0;
+    for (let i = 0; i < parts.length; i++) {
+        if (i % 2 === 1) {
+            const codeTag = /^<(\/?)(?:code|pre)\b/i.exec(parts[i]);
+            if (codeTag) codeDepth = Math.max(0, codeDepth + (codeTag[1] ? -1 : 1));
+            continue;
+        }
+        if (codeDepth > 0) continue;
         const before = parts[i];
-        let after = before;
+        // Set backtick code spans aside while converting, then put them back.
+        const codeSpans: string[] = [];
+        let after = before.replace(/(`+)[^`\n]*?\1/g, (span) => `${codeSpans.push(span) - 1}`);
         // ATX headings: `# h` through `###### h`, each on its own line.
         // `\r?` lets `$` (which matches before `\n`) absorb a stray `\r` from
         // CRLF input so the captured text never contains a trailing `\r`.
@@ -264,6 +291,7 @@ function convertMarkdownToHtml(s: string): string {
         // markers can't straddle paragraph breaks.
         after = after.replace(/\*\*([^\n*]+?)\*\*/g, '<strong>$1</strong>');
         after = after.replace(/__([^\n_]+?)__/g, '<strong>$1</strong>');
+        after = after.replace(/(\d+)/g, (_m, index) => codeSpans[Number(index)]);
         if (after !== before) {
             parts[i] = after;
             changed = true;
@@ -638,7 +666,7 @@ const spuriousWrapStripStrategy: Strategy = {
             }
             const matchCount = countOccurrences(input.strippedHtml, expandedOld);
             if (matchCount === 0) continue;
-            return {
+            const result: MatchResult = {
                 strategy: 'spurious_wrap_strip',
                 oldString: candidate.strippedOld,
                 newString: candidate.strippedNew,
@@ -647,6 +675,9 @@ const spuriousWrapStripStrategy: Strategy = {
                 matchCount,
                 normalizeAnchor: identity,
             };
+            // A less aggressive strip that matches several places must not
+            // shadow a later one that pins a single target.
+            if (acceptsMatch(input, result)) return result;
         }
         return null;
     },
@@ -1293,6 +1324,139 @@ const markdownRenderStrategy: Strategy = {
 };
 
 // =============================================================================
+// Fallback policy
+// =============================================================================
+
+/**
+ * Strategies that drop part of old_string (tags, attributes, a partial
+ * element) instead of re-spelling the same text. What they search for can be
+ * broader than what the model wrote, so a match counts only when it pins down
+ * a single target; see `acceptsMatch`.
+ */
+const TEXT_DROPPING_STRATEGIES: ReadonlySet<MatchStrategyName> = new Set([
+    'partial_element_strip',
+    'spurious_wrap_strip',
+    'tag_attribute_strip',
+]);
+
+/** True when `strategy` matched only after dropping part of old_string. */
+function dropsOldStringText(strategy: MatchStrategyName): boolean {
+    return TEXT_DROPPING_STRATEGIES.has(strategy);
+}
+
+function recordRejected(input: StrategyInput, result: MatchResult): void {
+    input.diagnostics?.rejected.push({
+        strategy: result.strategy,
+        oldString: result.oldString,
+        matchCount: result.matchCount,
+    });
+}
+
+/**
+ * Whether a strategy's match may stand. Re-spelling strategies always may:
+ * several matches there are a real ambiguity of the model's own text, which
+ * the caller reports. A text-dropping strategy may only when it resolves to a
+ * single target: one match, its own raw position, or one occurrence that the
+ * ref-aware validate-time lookup pins down. Otherwise the error would describe
+ * a string the model never wrote ("found 20 times" for a bare `</p>` left
+ * after stripping a citation) and a `str_replace_all` would replace every hit
+ * of it. Refused matches are recorded so a not-found error can explain them,
+ * and later strategies still get their turn.
+ */
+function acceptsMatch(input: StrategyInput, result: MatchResult): boolean {
+    if (!dropsOldStringText(result.strategy) || result.matchCount <= 1) return true;
+    if (input.operation !== 'str_replace_all') {
+        if (result.rawPositionHint !== undefined) return true;
+        const location = locateEditTarget({
+            strippedHtml: input.strippedHtml,
+            simplified: input.simplified,
+            oldString: result.oldString,
+            expandedOld: result.expandedOld,
+            metadata: input.metadata,
+        });
+        if (location.kind !== 'ambiguous') return true;
+    }
+    recordRejected(input, result);
+    return false;
+}
+
+/** Head-tail truncate a snippet for a single-line warning string. */
+export function truncateForWarning(s: string, headTail = 30): string {
+    const escaped = s.replace(/\n/g, '\\n');
+    const threshold = headTail * 2 + 5;
+    if (escaped.length <= threshold) return escaped;
+    return `${escaped.slice(0, headTail)}…${escaped.slice(-headTail)}`;
+}
+
+/**
+ * Describe how a strategy changed old_string before matching, as a phrase
+ * that completes "after …", or `null` for an exact match. `originalOld` is
+ * what the model sent; `matchedOld` is the strategy's simplified-space needle.
+ */
+export function describeMatchRewrite(
+    strategy: MatchStrategyName,
+    originalOld: string,
+    matchedOld: string,
+): string | null {
+    switch (strategy) {
+        case 'exact': return null;
+        case 'entity_decode': return 'decoding its HTML entities';
+        case 'entity_encode': return 'writing its special characters as HTML entities';
+        case 'nfkc': return 'converting full-width characters to their standard forms';
+        case 'quote_normalized': return 'treating curly and straight quotation marks as equal';
+        case 'trim_trailing_newlines': return 'removing its trailing newlines';
+        case 'json_unescape': return 'turning escape sequences such as `\\n` into the characters they stand for';
+        case 'tag_attribute_strip': return 'removing the attributes of its block tags';
+        case 'markdown_to_html': return 'converting its Markdown to HTML';
+        case 'whitespace_relaxed': return 'ignoring differences in whitespace';
+        case 'legacy_math': return 'reading its `$…$` text as math';
+        case 'markdown_render': return 'rendering it as Markdown';
+        case 'partial_element_strip':
+        case 'spurious_wrap_strip': {
+            const at = originalOld.indexOf(matchedOld);
+            const parts: string[] = [];
+            if (at > 0) parts.push(`\`${truncateForWarning(originalOld.substring(0, at))}\` from its start`);
+            const tail = at >= 0 ? originalOld.substring(at + matchedOld.length) : '';
+            if (tail) parts.push(`\`${truncateForWarning(tail)}\` from its end`);
+            if (parts.length === 0) {
+                return strategy === 'spurious_wrap_strip'
+                    ? 'removing the tags it shares with new_string'
+                    : 'removing an incomplete citation or annotation tag';
+            }
+            return `removing ${parts.join(' and ')}`;
+        }
+    }
+}
+
+/**
+ * Sentence for a not-found error when a text-dropping fallback matched but was
+ * refused, or `null`. Explains why the match was not used, so the agent does
+ * not conclude its text is absent everywhere.
+ */
+export function describeRejectedFallback(
+    originalOld: string,
+    diagnostics: MatchDiagnostics | undefined,
+): string | null {
+    const rejected = diagnostics?.rejected[0];
+    if (!rejected) return null;
+    const rewrite = describeMatchRewrite(rejected.strategy, originalOld, rejected.oldString);
+    return `After ${rewrite ?? 'adjusting it'}, it would match ${rejected.matchCount} places, `
+        + 'too many to tell which one you meant, so that match was not used.';
+}
+
+/**
+ * Warning for an edit that applied only after a text-dropping fallback, or
+ * `null`. The agent believes its exact text was found; this tells it what was
+ * matched instead so it can check the result.
+ */
+export function buildFallbackMatchWarning(originalOld: string, match: MatchResult): string | null {
+    if (!dropsOldStringText(match.strategy)) return null;
+    const rewrite = describeMatchRewrite(match.strategy, originalOld, match.oldString);
+    return `old_string "${truncateForWarning(originalOld)}" was not found exactly as written; it matched after `
+        + `${rewrite}, and new_string was adjusted the same way. Check that the edited text reads as intended.`;
+}
+
+// =============================================================================
 // Public API
 // =============================================================================
 
@@ -1329,6 +1493,13 @@ function runStrategies(
         const result = strategy.tryMatch(input, base);
         if (!result || result.matchCount === 0) continue;
         const mathMatches = classifyMathAnchorOccurrences(input.strippedHtml, result.expandedOld);
+        if (mathMatches === 'mixed' && dropsOldStringText(result.strategy)) {
+            // The mix comes from the text the fallback dropped, not from
+            // what the model wrote.
+            recordRejected(input, result);
+            continue;
+        }
+        if (!acceptsMatch(input, result)) continue;
         if (mathMatches === 'mixed') {
             throw Object.assign(new Error(
                 'old_string matches both literal dollar text and part of a math element. '
@@ -1344,20 +1515,47 @@ function runStrategies(
 }
 
 /**
+ * new_string for the legacy math pass. An anchor that matches only once its
+ * `$…$` is read as math was written as Markdown, so new_string's bold and
+ * headings are Markdown too, as in `markdown_to_html`; otherwise `**text**`
+ * would be saved as literal asterisks. An anchor whose own `**` matched literal
+ * note text keeps new_string literal. A copied insert anchor is kept as
+ * written, so a marker in it cannot pair with one in the inserted text.
+ */
+function legacyMarkdownReplacement({ oldString, newString, operation }: MatchInput): string {
+    if (convertMarkdownToHtml(oldString) !== oldString) return newString;
+    if (operation === 'insert_after' && newString.startsWith(oldString)) {
+        return oldString + convertMarkdownToHtml(newString.substring(oldString.length));
+    }
+    if (operation === 'insert_before' && newString.endsWith(oldString)) {
+        return convertMarkdownToHtml(newString.substring(0, newString.length - oldString.length)) + oldString;
+    }
+    return convertMarkdownToHtml(newString);
+}
+
+/**
  * Prefer every literal normalization strategy before retrying the same chain
  * with legacy dollar expansion. Mutation strategies re-expand their rewritten
  * anchors under the current pass's policy. Markdown rendering remains last.
  */
 export function findBestMatch(
-    input: MatchInput,
+    matchInput: MatchInput,
     base: BaseExpansion,
+    diagnostics?: MatchDiagnostics,
 ): MatchResult | null {
+    const input: StrategyInput = { ...matchInput, diagnostics };
     const literal = runStrategies(input, base);
     if (literal) return literal;
 
     if (input.oldString.includes('$')) {
-        const legacyInput: StrategyInput = { ...input, oldMathContext: 'legacy-old' };
-        const legacyBase = { ...base, expandedOld: expandOldAnchor(legacyInput, input.oldString) };
+        const newString = legacyMarkdownReplacement(input);
+        const legacyInput: StrategyInput = { ...input, newString, oldMathContext: 'legacy-old' };
+        const legacyBase = {
+            expandedOld: expandOldAnchor(legacyInput, input.oldString),
+            expandedNew: newString === input.newString ? base.expandedNew : expandToRawHtml(
+                newString, input.metadata, 'new', input.externalRefContext, input.pageLabels, input.resolvedLocatorPages,
+            ),
+        };
         const legacy = runStrategies(legacyInput, legacyBase);
         if (legacy) {
             return { ...legacy, strategy: legacy.strategy === 'exact' ? 'legacy_math' : legacy.strategy };

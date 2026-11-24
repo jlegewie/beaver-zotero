@@ -77,7 +77,6 @@ import {
     checkDuplicateCitations,
     validateNewString,
 } from '../../../src/utils/editNoteValidation';
-import { captureValidatedEditTargetContext } from '../../../src/utils/editNoteRawPosition';
 import {
     expandToRawHtml,
 } from '../../../src/utils/noteCitationExpand';
@@ -1343,15 +1342,18 @@ describe('executeEditNoteAction + undoEditNoteAction', () => {
             throw new Error('Expected duplicate citation to simplify to ref c_DUP_10');
         }
         const newString = '<citation id="1-DUP" loc="page42" label="Mock Title, p. 42" ref="c_DUP_10"/>';
-        // Use PM-normalized HTML for context capture (expanded strings are PM-canonical)
-        const targetContext = captureValidatedEditTargetContext(
-            stripDataCitationItems(noteHtml),
-            simplified,
-            targetCitationTag,
-            expandToRawHtml(targetCitationTag, metadata, 'old'),
-            metadata
-        );
-        expect(targetContext).not.toBeNull();
+        // Fixed 200-char anchors around the eleventh citation: identical
+        // paragraphs on both sides, so they bracket several occurrences. The
+        // executor must refuse rather than trust the ref, which may have
+        // shifted since validation.
+        const stripped = stripDataCitationItems(noteHtml);
+        const expandedOld = expandToRawHtml(targetCitationTag, metadata, 'old');
+        let pos = -1;
+        for (let i = 0; i <= 10; i++) pos = stripped.indexOf(expandedOld, pos + 1);
+        const targetContext = {
+            beforeContext: stripped.substring(pos - 200, pos),
+            afterContext: stripped.substring(pos + expandedOld.length, pos + expandedOld.length + 200),
+        };
 
         const item = makeMockItem(noteHtml);
         (globalThis as any).Zotero.Items.getByLibraryAndKeyAsync = vi.fn().mockResolvedValue(item);

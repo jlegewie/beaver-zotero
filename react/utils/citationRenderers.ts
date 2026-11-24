@@ -15,7 +15,7 @@ import { formatExternalCitation } from '@beaver/agent-core/citations/externalRef
 import { UNRESOLVED_LIBRARY_ID, libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
 import { hydrateItemLinkLibraryRefs } from '@beaver/agent-core/identity/itemLinks';
 import { loadCitedLibraries } from './citationRenderContext';
-import { unwrapLegacyNoteTags } from './legacyNoteTags';
+import { unwrapLegacyNoteTags } from '@beaver/agent-export/render/legacyNoteTags';
 import {
     baseCitationKey,
     getPageLocator,

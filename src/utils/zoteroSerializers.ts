@@ -1,3 +1,4 @@
+import { isBeaverAuthoredAnnotation } from '../constants/annotations';
 import { serializeCollectionReadIdentity } from '../services/collections/collectionIdentity';
 import type { ContentKind } from '@beaver/agent-core/extract/document/shared/contentKinds';
 import { logger } from '@beaver/agent-core/platform/logger';
@@ -735,6 +736,7 @@ export function serializeAnnotation(
         page_label: ann.annotationPageLabel ?? null,
         tags,
         author: ann.annotationAuthorName || null,
+        created_by: isBeaverAuthoredAnnotation(ann.annotationAuthorName) ? 'beaver' : 'user',
         attachment_id: attachmentInfo?.item_id ?? null,
         item_id: itemInfo?.item_id ?? null,
         item_type: itemInfo?.item_type ?? null,

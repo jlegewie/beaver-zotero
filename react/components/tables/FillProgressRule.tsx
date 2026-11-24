@@ -4,8 +4,8 @@ import type { TableFillJobSnapshot } from '@beaver/agent-core/protocol/tableFill
 /**
  * A running fill's rule along the top edge of its row: rows filled in blue,
  * rows that could not be read in orange, a sweep until the first row
- * finishes, faded while stopping. The fill bar above the composer and the
- * table receipt under an answer both draw it.
+ * finishes, faded while stopping. The table receipt under an answer draws
+ * it.
  */
 export function FillProgressRule({ job }: { job: TableFillJobSnapshot }): React.ReactElement {
     const total = job.rows_total;

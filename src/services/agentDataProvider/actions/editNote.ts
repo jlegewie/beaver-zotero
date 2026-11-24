@@ -5,16 +5,20 @@ import {
 } from '@beaver/agent-core/protocol/agentProtocol';
 import { EditNoteProposedData, type EditNoteOperation, type EditNoteResultData } from '@beaver/agent-core/types/agentActions/editNote';
 import {
-    buildAmbiguousMatchError,
     buildInsertDedupWarning,
+    buildUnresolvedTargetError,
     mergeInsertNewString,
 } from '../../../utils/editNoteBatchCore';
 import {
+    buildFallbackMatchWarning,
+    describeRejectedFallback,
     expandBase,
     findBestMatch,
     findMarkdownRenderMatch,
     type BaseExpansion,
+    type MatchDiagnostics,
     type MatchInput,
+    type MatchResult,
 } from '../../../utils/editNoteMatcher';
 import {
     buildExecutionZeroMatchHint,
@@ -254,18 +258,24 @@ function buildValidateSuccess(
     };
 }
 
-function buildAmbiguousMatchResponse(
+function buildUnresolvedTargetResponse(
     requestId: string,
-    matchCount: number,
-    operation?: EditNoteOperation,
+    simplified: string,
+    requestedOldString: string,
+    match: MatchResult,
+    operation: EditNoteOperation | undefined,
 ): WSAgentActionValidateResponse {
+    const unresolved = buildUnresolvedTargetError(simplified, requestedOldString, match, operation);
+    logger(`validateEditNoteAction: ${unresolved.errorCode} via ${match.strategy} strategy`, 1);
     return {
         type: 'agent_action_validate_response',
         request_id: requestId,
         valid: false,
-        error: buildAmbiguousMatchError(matchCount, operation),
-        error_code: 'ambiguous_match',
+        error: unresolved.message,
+        error_code: unresolved.errorCode,
         preference: 'always_ask',
+        ...(unresolved.candidates.length > 0 ? { error_candidates: unresolved.candidates } : {}),
+        match_strategy: match.strategy,
     };
 }
 
@@ -604,9 +614,10 @@ async function validateEditNoteAction(
 
     // 13. Run the ranked matcher. The first strategy that produces a match
     //     wins. See editNoteMatcher.ts for the full chain.
+    const diagnostics: MatchDiagnostics = { rejected: [] };
     if (!match && base) {
         try {
-            match = findBestMatch(matchInput, base);
+            match = findBestMatch(matchInput, base, diagnostics);
         } catch (error: any) {
             if (error?.code !== 'ambiguous_match') throw error;
             return {
@@ -644,7 +655,13 @@ async function validateEditNoteAction(
                 preference: 'always_ask',
             };
         }
-        const hint = buildZeroMatchHint(simplified, old_string ?? '');
+        const rejected = diagnostics.rejected[0];
+        if (rejected) {
+            logger(`validateEditNoteAction: refused ${rejected.strategy} fallback (${rejected.matchCount} matches)`, 1);
+        }
+        const hint = buildZeroMatchHint(simplified, old_string ?? '', {
+            rejectedFallback: describeRejectedFallback(old_string ?? '', diagnostics),
+        });
         return {
             type: 'agent_action_validate_response',
             request_id: request.request_id,
@@ -655,11 +672,15 @@ async function validateEditNoteAction(
             ...(hint.candidates.length > 0
                 ? { error_candidates: hint.candidates }
                 : {}),
+            ...(rejected ? { match_strategy: rejected.strategy } : {}),
         };
     }
 
     logger(`validateEditNoteAction: matched ${noteId} via ${match.strategy} strategy`, 1);
 
+    // The model's own old_string (after ref enrichment): errors and warnings
+    // describe what it wrote, not the matcher's rewrite.
+    const requestedOldString = old_string ?? '';
     // Propagate any matcher rewrite of old_string through the outer binding so
     // buildNormalizedActionData emits the final form for the executor.
     old_string = match.oldString;
@@ -691,7 +712,9 @@ async function validateEditNoteAction(
                 overrides.target_before_context = location.beforeContext;
                 overrides.target_after_context = location.afterContext;
             } else if (location.kind === 'ambiguous') {
-                return buildAmbiguousMatchResponse(request.request_id, match.matchCount, operation);
+                return buildUnresolvedTargetResponse(
+                    request.request_id, simplified, requestedOldString, match, operation,
+                );
             }
             // 'position' — silent success; executor will re-locate via
             // findUniqueRawMatchPosition with no anchors needed.
@@ -708,6 +731,8 @@ async function validateEditNoteAction(
         structuralLocators.missing,
     );
     if (locatorWarning) warnings.push(locatorWarning);
+    const fallbackWarning = buildFallbackMatchWarning(requestedOldString, match);
+    if (fallbackWarning) warnings.push(fallbackWarning);
     if (operation === 'insert_after' || operation === 'insert_before') {
         const dedupWarning = buildInsertDedupWarning(
             operation, match.oldString, match.newString,
@@ -1088,9 +1113,10 @@ export async function applyEditNote(
     //    normalizes via normalized_action_data, but the note may have drifted
     //    between validation and execution (PM re-normalization, concurrent
     //    edit) so we re-match here against the current HTML.
+    const diagnostics: MatchDiagnostics = { rejected: [] };
     if (!match && base) {
         try {
-            match = findBestMatch(matchInput, base);
+            match = findBestMatch(matchInput, base, diagnostics);
         } catch (error: any) {
             if (error?.code !== 'ambiguous_match') throw error;
             throw actionError('ambiguous_match', error.message);
@@ -1111,7 +1137,13 @@ export async function applyEditNote(
         if (partial) {
             throw actionError('partial_simplified_tag', buildPartialSimplifiedTagMessage(partial, operation));
         }
-        const hint = buildExecutionZeroMatchHint(simplified, old_string ?? '');
+        const rejected = diagnostics.rejected[0];
+        if (rejected) {
+            logger(`applyEditNote: refused ${rejected.strategy} fallback (${rejected.matchCount} matches)`, 1);
+        }
+        const hint = buildExecutionZeroMatchHint(simplified, old_string ?? '', {
+            rejectedFallback: describeRejectedFallback(old_string ?? '', diagnostics),
+        });
         throw actionError('old_string_not_found', hint.message, { errorCandidates: hint.candidates });
     }
 
@@ -1176,7 +1208,9 @@ export async function applyEditNote(
         // Single raw match or disambiguation succeeded
         if (rawPos === -1) {
             if (matchCount > 1) {
-                throw actionError('ambiguous_match', buildAmbiguousMatchError(matchCount, operation));
+                const unresolved = buildUnresolvedTargetError(simplified, old_string ?? '', match, operation);
+                logger(`applyEditNote: ${unresolved.errorCode} via ${match.strategy} strategy`, 1);
+                throw actionError(unresolved.errorCode, unresolved.message, { errorCandidates: unresolved.candidates });
             }
             rawPos = strippedHtml.indexOf(expandedOld);
         }

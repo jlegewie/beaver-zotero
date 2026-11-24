@@ -177,6 +177,7 @@ import {
 import {
     handleTestSidebarWidthHandlerHttpRequest,
     handleTestWindowRuntimeHttpRequest,
+    handleTestMainWindowsHttpRequest,
 } from './handlers/testUiHandlers';
 
 
@@ -702,6 +703,7 @@ async function handleAgentActionValidateHttpRequest(request: any) {
         collection_names: response.collection_names,
         preference: response.preference,
         warnings: response.warnings,
+        match_strategy: response.match_strategy,
     };
 }
 
@@ -1103,6 +1105,11 @@ export function registerEndpoints(): (() => void) | undefined {
         endpoints['/beaver/test/window-runtime'] =
             createEndpoint(handleTestWindowRuntimeHttpRequest);
 
+        // Close every main window or open one again (dev-only; closing is
+        // macOS-only, where Zotero keeps running with no main window).
+        endpoints['/beaver/test/main-windows'] =
+            createEndpoint(handleTestMainWindowsHttpRequest);
+
         endpoints['/beaver/test/sidebar-width-handler'] =
             createEndpoint(handleTestSidebarWidthHandlerHttpRequest);
 
@@ -1207,6 +1214,9 @@ export function registerEndpoints(): (() => void) | undefined {
         endpoints['/beaver/test/beaver-sidebar'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/beaver-sidebar', request));
 
         endpoints['/beaver/test/select-tab'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/select-tab', request));
+
+        // The pane holding the main-window sidebar, measured while Zotero sizes it.
+        endpoints['/beaver/test/sidebar-pane-width'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/sidebar-pane-width', request));
 
         endpoints['/beaver/test/run-status-popup'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/run-status-popup', request));
 

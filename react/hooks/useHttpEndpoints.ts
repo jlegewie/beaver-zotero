@@ -5,6 +5,7 @@ import {
     handleTestBeaverSidebarHttpRequest,
     handleTestBeaverWindowHttpRequest,
     handleTestSelectTabHttpRequest,
+    handleTestSidebarPaneWidthHttpRequest,
 } from './httpHandlers/testApplicationStateHandlers';
 import {
     handleBatchProgressClear,
@@ -64,7 +65,6 @@ import {
 } from './httpHandlers/testTableHandlers';
 import { handleTestVersionPopupHttpRequest } from './httpHandlers/testVersionPopupHandlers';
 import { handleTestExportHttpRequest } from './httpHandlers/testExportHandlers';
-import { captureOperationContext } from '../runtime/operationContext';
 export function registerWindowTestCommands(
     runtime: WindowRuntime,
     inspect: (request: any) => any,
@@ -108,13 +108,13 @@ export function registerWindowTestCommands(
         '/beaver/test/open-stored-table': handleTestOpenStoredTableHttpRequest,
         '/beaver/test/beaver-sidebar': handleTestBeaverSidebarHttpRequest,
         '/beaver/test/select-tab': handleTestSelectTabHttpRequest,
+        '/beaver/test/sidebar-pane-width': handleTestSidebarPaneWidthHttpRequest,
         '/beaver/test/run-status-popup': handleTestRunStatusPopupHttpRequest,
         '/beaver/test/feature-tip': handleTestFeatureTipHttpRequest,
         '/beaver/test/quick-prompt': handleTestQuickPromptHttpRequest,
         '/beaver/test/version-popup': handleTestVersionPopupHttpRequest,
         '/beaver/test/saved-actions': handleTestListSavedActionsHttpRequest,
         '/beaver/test/export': handleTestExportHttpRequest,
-        'render-markdown': async (request: { content: string }) => captureOperationContext(false).renderMarkdown!(request.content),
     };
     Zotero.Beaver.runtime.registerWindowCommands(runtime, handlers);
 }

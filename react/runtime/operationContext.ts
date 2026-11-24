@@ -1,4 +1,3 @@
-import { citationMapAtom } from '@beaver/agent-core/citations/atoms';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
 import { activeRunAtom } from '@beaver/agent-core/run-state/atoms';
 import type { OperationContext } from '../../src/services/agentDataProvider/operationContext';
@@ -7,21 +6,15 @@ import { grantCreatedNoteEditsForRunAtom, isActionApprovedForCurrentRun, isFullA
 import { currentThreadIdAtom } from '../atoms/threads';
 import { store } from '../store';
 import { captureAttachmentCompletion } from './attachmentCompletion';
-import { renderNoteMarkdownToHTML } from '../utils/noteMarkdownRender';
 import { tryGetWindowRuntime } from './windowRuntime';
 
-/** Originless requests receive empty citation/grant state and an explicit render seam. */
+/** Originless requests receive empty citation/grant state; Markdown renders in the plugin realm. */
 export function captureOperationContext(local = false): OperationContext {
     const runtime = local ? tryGetWindowRuntime() : undefined;
     const runId = local ? store.get(activeRunAtom)?.id : undefined;
     const currentPolicy = local ? store.get(runApprovalPolicyAtom) : undefined;
     const policy = currentPolicy ? { ...currentPolicy, approvedResources: new Set(currentPolicy.approvedResources) } : undefined;
     const generation = Zotero.Beaver.account?.getGeneration();
-    const renderContext = {
-        citationDataMap: local ? { ...store.get(citationMapAtom) } : {},
-        externalMapping: local ? { ...store.get(externalReferenceItemMappingAtom) } : {},
-        externalReferencesMap: local ? { ...store.get(externalReferenceMappingAtom) } : {},
-    };
     return {
         accountGeneration: generation,
         userId: Zotero.Beaver.account?.getSnapshot().session?.user.id,
@@ -35,9 +28,9 @@ export function captureOperationContext(local = false): OperationContext {
             const prefs = loadPreferences();
             return prefs.groupPreferences[prefs.toolToGroup[tool] ?? tool] ?? 'always_ask';
         },
-        externalRefs: renderContext.externalReferencesMap,
-        externalItemMapping: renderContext.externalMapping,
-        renderMarkdown: content => renderNoteMarkdownToHTML(content, renderContext),
+        externalRefs: local ? { ...store.get(externalReferenceMappingAtom) } : {},
+        externalItemMapping: local ? { ...store.get(externalReferenceItemMappingAtom) } : {},
+        renderMarkdown: async content => Zotero.Beaver.exporter.renderNoteMarkdown(content),
         grantCreatedNote: (libraryId, zoteroKey) => {
             if (runtime?.status !== 'closing' && runId && generation === Zotero.Beaver.account?.getGeneration() && store.get(activeRunAtom)?.id === runId) {
                 store.set(grantCreatedNoteEditsForRunAtom, { runId, libraryId, zoteroKey });

@@ -250,7 +250,7 @@ async function windowMounted(ref: TableRef, timeoutMs: number): Promise<boolean>
     ));
 }
 
-/** What a menu shows in the table window: each command's state, the checked row height, hidden entries. */
+/** What a menu shows in the table window: each command's state and the checked row height. */
 function windowMenus(tableWin: Window) {
     onTableWindowMenuShowing(tableWin);
     const doc = tableWin.document;
@@ -260,8 +260,7 @@ function windowMenus(tableWin: Window) {
     }
     const checked = (Array.from(doc.querySelectorAll('menuitem[data-density][checked]')) as Element[])
         .map((item) => item.getAttribute('data-density'));
-    const fillHidden = (Array.from(doc.querySelectorAll('[data-table-fill]')) as Element[]).every((item) => item.hasAttribute('hidden'));
-    return { commands, density: checked, fillHidden, title: doc.title };
+    return { commands, density: checked, title: doc.title };
 }
 
 /** Waits until `ref` is the selected Beaver tab in `win`, timing it from `t0`. */

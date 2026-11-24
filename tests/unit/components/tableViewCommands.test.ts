@@ -66,7 +66,6 @@ beforeEach(() => {
         newItems: 3,
         addNewItems: vi.fn(),
         removeRows: vi.fn(),
-        fillAvailable: true,
         fillRunning: false,
         openFillPlan: vi.fn(),
         stopFill: vi.fn(),
@@ -79,7 +78,6 @@ describe('the menu state', () => {
     it("offers what the table can do now, with the view's row height", () => {
         const state = tableViewMenuState(context);
         expect(state.density).toBe('compact');
-        expect(state.fillAvailable).toBe(true);
         expect(state.enabled).toMatchObject({
             'export-csv': true,
             'copy-selection': true,
@@ -128,11 +126,8 @@ describe('the menu state', () => {
         expect(tableViewAvailability({ ...context, view: view({ rows: 0, searchable: false }) }).find).toBe(false);
     });
 
-    it('offers no fill in a build without table chat', () => {
-        const enabled = tableViewAvailability({ ...context, fillAvailable: false, fillRunning: true, askBeaver: undefined });
-        expect(enabled['fill-pending']).toBe(false);
-        expect(enabled['fill-stop']).toBe(false);
-        expect(enabled['ask-beaver']).toBe(false);
+    it('offers no Ask Beaver without a chat to ask in', () => {
+        expect(tableViewAvailability({ ...context, askBeaver: undefined })['ask-beaver']).toBe(false);
     });
 });
 
@@ -222,11 +217,6 @@ describe('running a command', () => {
         expect(context.removeRows).not.toHaveBeenCalled();
         expect(context.openFillPlan).not.toHaveBeenCalled();
         expect(runTableViewCommand('export-csv', refused)).toBe(true);
-    });
-
-    it('offers no fill in a build without table chat', () => {
-        expect(runTableViewCommand('fill-pending', { ...context, fillAvailable: false })).toBe(false);
-        expect(runTableViewCommand('fill-stop', { ...context, fillAvailable: false, fillRunning: true })).toBe(false);
     });
 
     it('shows the table in the library and asks Beaver about it, when the view can', () => {

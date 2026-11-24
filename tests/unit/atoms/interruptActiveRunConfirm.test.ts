@@ -215,6 +215,9 @@ import {
 import { isLibraryTabAtom } from '../../../react/atoms/ui';
 import { activeRunAtom } from '@beaver/agent-core/run-state/atoms';
 import { isWSChatPendingAtom } from '../../../react/atoms/agentRunAtoms';
+import { jobWaitAtom } from '../../../react/atoms/jobWait';
+import { chatFillsAtom, recordChatFill } from '@beaver/agent-core/run-state/tableChatFills';
+import type { TableFillJobSnapshot } from '@beaver/agent-core/protocol/tableFillProtocol';
 
 const run = (status: string) => ({ id: 'run-1', status });
 
@@ -328,6 +331,51 @@ describe('interrupt-active-run confirm', () => {
 
             expect(confirmMock).toHaveBeenCalledTimes(1);
             expect(confirmMock.mock.calls[0][0]).toMatchObject({ title: 'Switch chat?' });
+        });
+    });
+
+    /** A live run waits on a fill whose table is not open: one question, naming the fill. */
+    describe('while the run waits on a fill', () => {
+        const fill = {
+            job_id: 'job-1',
+            plan_id: 'plan-1',
+            table: { libraryID: 1, key: 'TABLE001', title: 'Trials' },
+            origin: { kind: 'agent', run: { run_id: 'run-1', thread_id: 'thread-0', tool_call_id: 'call-1' } },
+            state: 'running',
+            rows_total: 10,
+            rows_done: 2,
+            rows_failed: 0,
+            in_flight: 2,
+            credits_charged: 0,
+            credits_planned: 1,
+            balance: null,
+            started_at: 1,
+            seconds_left: null,
+        } as TableFillJobSnapshot;
+
+        beforeEach(() => {
+            store.set(currentThreadIdAtom, 'thread-0');
+            store.set(activeRunAtom, run('in_progress'));
+            store.set(chatFillsAtom, recordChatFill(new Map(), fill));
+            store.set(jobWaitAtom, { threadId: 'thread-0', runId: 'run-1', toolCallId: 'call-1', jobId: 'job-1' });
+        });
+
+        it('asks once, about the fill, before a new chat, then stops the run', async () => {
+            await store.set(newThreadAtom, { skipAutoPopulate: true });
+            expect(confirmMock).toHaveBeenCalledTimes(1);
+            expect(confirmMock.mock.calls[0][0]).toMatchObject({ title: 'Start new chat?', confirmLabel: 'Start New Chat' });
+            expect(confirmMock.mock.calls[0][0].text).toContain('the fill of “Trials”');
+            expect(cancelMock).toHaveBeenCalledTimes(1);
+        });
+
+        it('asks once, about the fill, before another chat', async () => {
+            confirmMock.mockReturnValue(false);
+            const loaded = await store.set(loadThreadAtom, loadArgs);
+            expect(loaded).toBe(false);
+            expect(confirmMock).toHaveBeenCalledTimes(1);
+            expect(confirmMock.mock.calls[0][0]).toMatchObject({ title: 'Switch chat?', confirmLabel: 'Switch Chat' });
+            expect(confirmMock.mock.calls[0][0].text).toContain('the fill of “Trials”');
+            expect(store.get(currentThreadIdAtom)).toBe('thread-0');
         });
     });
 

@@ -175,6 +175,20 @@ describe('the grid', () => {
         ]);
     });
 
+    it('offers Open in new window only when the host can move the table to one', () => {
+        mount({ onCopy: vi.fn() });
+        click(container!.querySelector<HTMLButtonElement>('button[aria-label="More actions"]')!);
+        expect(menuEntry('Open in new window')).toBeUndefined();
+        act(() => root?.unmount());
+        container!.remove();
+
+        const onOpenInWindow = vi.fn();
+        mount({ onOpenInWindow });
+        click(container!.querySelector<HTMLButtonElement>('button[aria-label="More actions"]')!);
+        click(menuEntry('Open in new window')!);
+        expect(onOpenInWindow).toHaveBeenCalledTimes(1);
+    });
+
     it("expands the Paper cell to the paper's full details, with its actions in the footer", () => {
         const revealInLibrary = vi.fn();
         setHost({ navigation: { activateCitation, revealInLibrary, openSource: vi.fn() } as never });
@@ -1086,6 +1100,89 @@ describe('editing cells and filling from rows and columns', () => {
         click(pencil()!);
         expect(editor()!.querySelector('textarea')!.value).toBe('Gains in consumption.');
         expect(editor()!.querySelector<HTMLInputElement>('input[placeholder="Why you changed it (optional)"]')!.value).toBe('Schooling was not an outcome.');
+        // The editor stands in for the user's answer, its note and Reset.
+        const mine = editor()!.closest('.rt-inspector-answer-section')!;
+        expect(mine.textContent).toContain('Your answer');
+        expect(mine.querySelector('.rt-inspector-answer-row')).toBeNull();
+        expect(mine.textContent).not.toContain('Schooling was not an outcome.');
+        expect(links()).toEqual([]);
+        // Beaver's earlier answer stays below, for reference.
+        expect(inspector()!.textContent).toContain('Transfers raised consumption.');
+    });
+
+    it('edits a text cell in the inspector, in place of the answer, rather than over the grid', async () => {
+        const cellEditing = editing();
+        mount({ cellEditing });
+        click(cell('r1', 'effect'));
+        click(pencil()!);
+        const panelEditor = inspector()!.querySelector<HTMLElement>('.rt-cell-editor')!;
+        expect(panelEditor).not.toBeNull();
+        expect(panelEditor.classList.contains('rt-cell-editor-inline')).toBe(true);
+        expect(container!.querySelector('.rt-cell-editor-layer')).toBeNull();
+        expect(panelEditor.closest('.rt-inspector-answer-section')!.textContent).toContain('Answer');
+        // Beaver's explanation and evidence stay in view while editing.
+        expect(inspector()!.querySelector('.rt-inspector-reasoning')).not.toBeNull();
+        const answer = panelEditor.querySelector('textarea')!;
+        expect(answer.value).toBe('Conditional transfers raised enrollment.');
+        // The section's "Answer" heading names the field; no second label under it.
+        expect(Array.from(panelEditor.querySelectorAll('.rt-cell-editor-label')).map((el) => el.textContent)).toEqual(['Note']);
+        expect(answer.getAttribute('aria-label')).toBe('Answer');
+        type(answer, 'Enrollment rose 3.4 points.');
+        click(Array.from(panelEditor.querySelectorAll('button')).find((b) => b.textContent === 'Save')!);
+        await flush();
+        expect(cellEditing.onEdit).toHaveBeenCalledWith(
+            expect.objectContaining({ id: 'r1' }),
+            expect.objectContaining({ id: 'effect' }),
+            { op: 'answer', value: { kind: 'text', text: 'Enrollment rose 3.4 points.' }, note: undefined },
+        );
+        expect(editor()).toBeNull();
+        expect(pencil()).not.toBeNull();
+    });
+
+    it('keeps the inspector editor open with a refusal, and Cancel puts the answer back', async () => {
+        const cellEditing = editing(vi.fn(async () => 'This row is no longer in the table.'));
+        mount({ cellEditing });
+        click(cell('r1', 'effect'));
+        click(pencil()!);
+        click(Array.from(editor()!.querySelectorAll('button')).find((b) => b.textContent === 'Save')!);
+        await flush();
+        expect(inspector()!.querySelector('.rt-cell-editor [role="alert"]')?.textContent).toBe('This row is no longer in the table.');
+        click(Array.from(editor()!.querySelectorAll('button')).find((b) => b.textContent === 'Cancel')!);
+        expect(editor()).toBeNull();
+        expect(inspector()!.querySelector('.rt-inspector-answer')?.textContent).toBe('Conditional transfers raised enrollment.');
+    });
+
+    it("lists a Choice cell's options in the inspector, saving at once", async () => {
+        const cellEditing = editing();
+        mount({ cellEditing });
+        click(cell('r1', 'design'));
+        click(pencil()!);
+        const options = Array.from(inspector()!.querySelectorAll('.rt-cell-editor [role="option"]')).map((o) => o.textContent);
+        expect(options).toEqual(['RCT', 'Not reported', 'Clear cell']);
+        click(Array.from(editor()!.querySelectorAll('[role="option"]')).find((o) => o.textContent === 'Not reported')!);
+        await flush();
+        expect(cellEditing.onEdit).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ id: 'design' }), { op: 'not_reported' });
+        expect(editor()).toBeNull();
+    });
+
+    it('closes the inspector editor when the inspector moves to another row', () => {
+        mount({ cellEditing: editing() });
+        click(cell('r1', 'effect'));
+        click(pencil()!);
+        expect(editor()).not.toBeNull();
+        click(inspector()!.querySelector<HTMLButtonElement>('button[aria-label="Next row"]')!);
+        expect(inspector()!.getAttribute('data-row-id')).toBe('r2');
+        expect(editor()).toBeNull();
+    });
+
+    it('keeps one editor open: the grid editor closes the inspector one', () => {
+        mount({ cellEditing: editing() });
+        click(cell('r1', 'effect'));
+        click(pencil()!);
+        click(expand(cell('r1', 'design'))!.querySelector('button[aria-label="Edit Design"]')!);
+        expect(container!.querySelectorAll('.rt-cell-editor')).toHaveLength(1);
+        expect(inspector()?.querySelector('.rt-cell-editor') ?? null).toBeNull();
+        expect(container!.querySelector('.rt-cell-editor-layer .rt-cell-editor')).not.toBeNull();
     });
 
     it("makes Beaver's own choice the user's when it is picked, so fills keep it", async () => {
@@ -1100,7 +1197,7 @@ describe('editing cells and filling from rows and columns', () => {
         });
     });
 
-    it("opens the editor from the inspector on a hidden column, showing the column first", () => {
+    it('edits a hidden column\'s cell in the inspector, leaving the column hidden', () => {
         mount({ cellEditing: editing() });
         click(cell('r1', 'amount'));
         act(() => {
@@ -1109,8 +1206,8 @@ describe('editing cells and filling from rows and columns', () => {
         click(menuItem('Hide column')!);
         expect(container!.querySelector('th[data-column-id="amount"]')).toBeNull();
         click(pencil()!);
-        expect(container!.querySelector('th[data-column-id="amount"]')).not.toBeNull();
-        expect(editor()).not.toBeNull();
+        expect(container!.querySelector('th[data-column-id="amount"]')).toBeNull();
+        expect(inspector()!.querySelector('.rt-cell-editor')).not.toBeNull();
     });
 
     it('shows the cell controls disabled with the reason in a read-only library', () => {
@@ -1380,6 +1477,174 @@ describe('columns the user just added', () => {
     });
 });
 
+describe('moving columns', () => {
+    const openMenu = (label: string) => click(container!.querySelector(`button[aria-label="Column menu: ${label}"]`)!);
+    const entry = (label: string) => document.querySelector<HTMLElement>(`[aria-label="${label}"]`);
+    const header = (id: string) => container!.querySelector<HTMLElement>(`th[data-column-id="${id}"]`)!;
+    const rect = (left: number, right: number) =>
+        ({ left, right, top: 0, bottom: 40, width: right - left, height: 40, x: left, y: 0, toJSON() {} }) as DOMRect;
+    // The questions sit side by side, 100 px each, from 300 px.
+    const original = HTMLElement.prototype.getBoundingClientRect;
+    beforeEach(() => {
+        HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+            // The grid's view: 1000 px wide and 400 px tall.
+            if (this.classList.contains('rt-scroll')) return { ...rect(0, 1000), bottom: 400, height: 400 } as DOMRect;
+            const at = ['effect', 'design', 'amount'].indexOf(this.getAttribute('data-column-id') ?? '');
+            return at === -1 ? rect(0, 0) : rect(300 + 100 * at, 400 + 100 * at);
+        };
+    });
+    afterEach(() => {
+        HTMLElement.prototype.getBoundingClientRect = original;
+    });
+    const mouse = (target: EventTarget, type: string, clientX: number, clientY = 20) =>
+        act(() => {
+            target.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX, clientY }));
+        });
+    /** Presses a header, drags it to `x`, and releases it there. */
+    const drag = (id: string, x: number, release = true) => {
+        const from = header(id).getBoundingClientRect().left + 50;
+        mouse(header(id), 'mousedown', from);
+        mouse(document, 'mousemove', from + (x > from ? 10 : -10));
+        mouse(document, 'mousemove', x);
+        if (release) releaseAt(x);
+    };
+    /** Releases the mouse over `target`, with the click the release fires. */
+    const releaseAt = (x: number, target: EventTarget = document, y = 20) => {
+        mouse(target, 'mouseup', x, y);
+        mouse(target, 'click', x, y);
+    };
+
+    it('moves a column left and right from its menu, past a hidden column, and not past either end', () => {
+        const onMoveColumn = vi.fn();
+        mount({ editing: { onMoveColumn } });
+        openMenu('Headline effect');
+        expect(entry('Move left')!.getAttribute('aria-disabled')).toBe('true');
+        expect(entry('Move right')!.getAttribute('aria-disabled')).toBe('false');
+        click(entry('Move right')!);
+        expect(onMoveColumn).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'effect' }), 'design');
+
+        openMenu('Amount');
+        expect(entry('Move right')!.getAttribute('aria-disabled')).toBe('true');
+        click(entry('Move left')!);
+        expect(onMoveColumn).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'amount' }), 'effect');
+
+        // With Design hidden, Amount's left neighbour in view is Headline effect.
+        openMenu('Design');
+        click(entry('Hide column')!);
+        openMenu('Amount');
+        click(entry('Move left')!);
+        expect(onMoveColumn).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'amount' }), null);
+        expect(onMoveColumn).toHaveBeenCalledTimes(3);
+    });
+
+    it('offers no move on the item and year columns, nor without the host, and disables it in a read-only library', () => {
+        mount({ editing: { onMoveColumn: vi.fn() } });
+        for (const label of ['Item', 'Year']) {
+            openMenu(label);
+            expect(entry('Move left')).toBeNull();
+            act(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+        }
+        expect(header('_reference').hasAttribute('data-column-drag')).toBe(false);
+        expect(header('_year').hasAttribute('data-column-drag')).toBe(false);
+        act(() => root?.unmount());
+        container?.remove();
+
+        mount({ editing: { onEditColumn: vi.fn() } });
+        openMenu('Design');
+        expect(entry('Move left')).toBeNull();
+        expect(header('design').hasAttribute('data-column-drag')).toBe(false);
+        act(() => root?.unmount());
+        container?.remove();
+
+        mount({ editing: { onMoveColumn: vi.fn(), disabledReason: 'This library is read-only.' } });
+        openMenu('Design');
+        expect(entry('Move left')!.getAttribute('aria-disabled')).toBe('true');
+        expect(entry('Move right')!.getAttribute('aria-disabled')).toBe('true');
+        expect(header('design').hasAttribute('data-column-drag')).toBe(false);
+    });
+
+    it('drags a header before another column or past the last one, showing the header and where it lands', () => {
+        const onMoveColumn = vi.fn();
+        mount({ editing: { onMoveColumn } });
+        drag('amount', 320, false);
+        expect(header('amount').classList.contains('rt-th-dragging')).toBe(true);
+        expect(container!.querySelector('col.rt-col-dragging')).not.toBeNull();
+        const line = container!.querySelector<HTMLElement>('.rt-drop-indicator')!;
+        expect(line.style.display).toBe('block');
+        expect(line.style.left).toBe('300px');
+        // A copy of the header follows the mouse, held where it was pressed (50 px in).
+        const ghost = container!.querySelector<HTMLElement>('.rt-drag-ghost')!;
+        expect(ghost.style.display).toBe('block');
+        expect(ghost.style.left).toBe('270px');
+        expect(ghost.querySelector('.rt-th-label')?.textContent).toBe('Amount');
+        expect(ghost.querySelector('.rt-th-question-text')?.textContent).toBe('Transfer size?');
+        expect(ghost.querySelector('.rt-column-menu, button')).toBeNull();
+        releaseAt(320);
+        expect(ghost.style.display).toBe('none');
+        expect(ghost.childElementCount).toBe(0);
+        expect(onMoveColumn).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'amount' }), null);
+        expect(header('amount').classList.contains('rt-th-dragging')).toBe(false);
+        expect(line.style.display).toBe('none');
+
+        // Released over a cell, the drop does not also select the cell.
+        drag('effect', 590, false);
+        releaseAt(590, cell('r1', 'amount'));
+        expect(onMoveColumn).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'effect' }), 'amount');
+        expect(inspector()).toBeNull();
+        drag('effect', 480);
+        expect(onMoveColumn).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'effect' }), 'design');
+        expect(onMoveColumn).toHaveBeenCalledTimes(3);
+    });
+
+    it('does not move a column dropped beside itself, released before it moved or outside the grid, or dragged off with Escape', () => {
+        const onMoveColumn = vi.fn();
+        mount({ editing: { onMoveColumn } });
+        drag('design', 480);
+        drag('design', 420);
+        mouse(header('design'), 'mousedown', 450);
+        mouse(document, 'mousemove', 452);
+        releaseAt(452);
+        // Released over the toolbar above the grid.
+        drag('design', 320, false);
+        mouse(document, 'mousemove', 320, -30);
+        expect(container!.querySelector<HTMLElement>('.rt-drop-indicator')!.style.display).toBe('none');
+        releaseAt(320, document, -30);
+        drag('design', 320, false);
+        act(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+        expect(header('design').classList.contains('rt-th-dragging')).toBe(false);
+        releaseAt(320);
+        expect(onMoveColumn).not.toHaveBeenCalled();
+    });
+
+    it('draws the line no further left than a pinned Item column, under which the target scrolled', () => {
+        const onMoveColumn = vi.fn();
+        mount({ editing: { onMoveColumn } });
+        const scroller = container!.querySelector<HTMLElement>('.rt-scroll')!;
+        act(() => scroller.setAttribute('data-pinned', ''));
+        const base = HTMLElement.prototype.getBoundingClientRect;
+        // The pinned Item column ends at 340: Headline effect starts under it.
+        HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+            return this.classList.contains('rt-th-paper') ? rect(40, 340) : base.call(this);
+        };
+        drag('amount', 345, false);
+        const line = container!.querySelector<HTMLElement>('.rt-drop-indicator')!;
+        expect(line.style.left).toBe('340px');
+        releaseAt(345);
+        expect(onMoveColumn).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'amount' }), null);
+    });
+
+    it("does not start a drag from the header's menu button", () => {
+        const onMoveColumn = vi.fn();
+        mount({ editing: { onMoveColumn } });
+        mouse(container!.querySelector('button[aria-label="Column menu: Amount"]')!, 'mousedown', 550);
+        mouse(document, 'mousemove', 320);
+        mouse(document, 'mouseup', 320);
+        expect(header('amount').classList.contains('rt-th-dragging')).toBe(false);
+        expect(onMoveColumn).not.toHaveBeenCalled();
+    });
+
+});
+
 describe('search', () => {
     const shownRows = () =>
         Array.from(container!.querySelectorAll<HTMLElement>('tbody tr[data-row-id]')).map((row) => row.dataset.rowId);
@@ -1549,6 +1814,86 @@ describe('sorting', () => {
         click(container!.querySelector('button[aria-label="Sort rows"]')!);
         const entries = Array.from(document.querySelectorAll<HTMLElement>('.bt-menu-check span:last-child')).map((el) => el.textContent);
         expect(entries.slice(0, 2)).toEqual(['Item', 'Year']);
+    });
+});
+
+describe('filtering', () => {
+    const shownRows = () =>
+        Array.from(container!.querySelectorAll<HTMLElement>('tbody tr[data-row-id]')).map((row) => row.getAttribute('data-row-id'));
+    const header = (columnId: string) => container!.querySelector<HTMLElement>(`th[data-column-id="${columnId}"]`)!;
+    const openColumnMenu = (name: string) => click(container!.querySelector(`button[aria-label="Column menu: ${name}"]`)!);
+    const submenuLabels = () =>
+        Array.from(document.querySelectorAll<HTMLElement>('[role="menu"][aria-label="Filter"] [role="menuitem"]')).map((item) =>
+            item.getAttribute('aria-label'),
+        );
+    const filterItem = () => document.querySelector<HTMLElement>('[role="menuitem"][aria-label="Filter"]');
+    /** The table with a yes/no column, answered Yes for r1 and No for r2. */
+    function withBoolean(): TableSpec {
+        const spec = table();
+        spec.columns = [...spec.columns, { id: 'urban', header: 'Urban', type: 'boolean' }];
+        spec.rows[0].cells.urban = { outcome: 'answered', provenance: 'model', value: { kind: 'boolean', value: true } } as Cell;
+        spec.rows[1].cells.urban = { outcome: 'answered', provenance: 'model', value: { kind: 'boolean', value: false } } as Cell;
+        return spec;
+    }
+
+    it("filters a category column from its own menu, marks its header and clears from the menu", () => {
+        mount();
+        expect(header('design').querySelector('.rt-th-filter')).toBeNull();
+        openColumnMenu('Design');
+        click(filterItem()!);
+        expect(submenuLabels()).toEqual(['RCT']);
+        click(menuEntry('RCT')!);
+        expect(shownRows()).toEqual(['r1']);
+        expect(header('design').querySelector('.rt-th-filter')).not.toBeNull();
+        expect(container!.querySelector('.bt-chip')?.textContent).toBe('Design:RCT');
+
+        openColumnMenu('Design');
+        click(filterItem()!);
+        expect(submenuLabels()).toEqual(['RCT', 'Clear filter']);
+        expect(document.querySelector('[aria-label="RCT"] .bt-menu-check.bt-checked')).not.toBeNull();
+        click(menuEntry('Clear filter')!);
+        expect(shownRows()).toEqual(['r1', 'r2', 'r3']);
+        expect(header('design').querySelector('.rt-th-filter')).toBeNull();
+    });
+
+    it('filters a yes/no column to Yes or No, and picking the active one again clears it', () => {
+        mount({ table: withBoolean() });
+        openColumnMenu('Urban');
+        click(filterItem()!);
+        expect(submenuLabels()).toEqual(['Yes', 'No']);
+        click(menuEntry('No')!);
+        expect(shownRows()).toEqual(['r2']);
+        openColumnMenu('Urban');
+        click(filterItem()!);
+        click(menuEntry('Yes')!);
+        expect(shownRows()).toEqual(['r1']);
+        openColumnMenu('Urban');
+        click(filterItem()!);
+        click(menuEntry('Yes')!);
+        expect(shownRows()).toEqual(['r1', 'r2', 'r3']);
+    });
+
+    it('offers no Filter on a text column', () => {
+        mount();
+        openColumnMenu('Amount');
+        expect(menuEntry('Hide column')).toBeDefined();
+        expect(filterItem()).toBeNull();
+    });
+
+    it('lists only category and yes/no columns in the toolbar Filter menu', () => {
+        mount({ table: withBoolean() });
+        click(container!.querySelector('button[aria-label="Filter rows"]')!);
+        const sections = Array.from(document.querySelectorAll<HTMLElement>('.bt-menu-section')).map((el) => el.textContent);
+        expect(sections).toEqual(['Design', 'Urban']);
+        expect(menuEntry('Has a value')).toBeUndefined();
+        expect(menuEntry('No value')).toBeUndefined();
+    });
+
+    it('shows no Filter button when no column can be filtered by value', () => {
+        const spec = table();
+        spec.columns = spec.columns.filter((column) => column.type !== 'select');
+        mount({ table: spec });
+        expect(container!.querySelector('button[aria-label="Filter rows"]')).toBeNull();
     });
 });
 

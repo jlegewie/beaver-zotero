@@ -1496,6 +1496,38 @@
     border-bottom: 1px solid var(--fill-quinary);
 }
 
+/* A research table Beaver can only read (own API key, Plus Tools off). */
+[id^="beaver-pane-"] .table-plus-tools-notice.composer-docked-bar {
+    background-color: var(--beaver-fill-bar);
+    border-bottom: 1px solid var(--fill-quinary);
+}
+/* On home the notice is a tray under the input (`.home-tray`). */
+.beaver-root .table-plus-tools-notice.is-tray {
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 6px;
+    padding-top: calc(8px + var(--beaver-radius-card));
+    padding-bottom: 8px;
+}
+.beaver-root .table-plus-tools-notice-text {
+    min-width: 0;
+    font-size: 0.875rem;
+    line-height: 1.45;
+    color: var(--fill-secondary);
+}
+.beaver-root .table-plus-tools-notice.is-tray .table-plus-tools-notice-text {
+    padding-top: 2px;
+}
+.beaver-root .table-plus-tools-notice-link {
+    color: var(--fill-secondary);
+    text-decoration: underline;
+    transition: color 0.2s ease-in-out;
+}
+.beaver-root .table-plus-tools-notice-link:hover,
+.beaver-root .table-plus-tools-notice-link:focus-visible {
+    color: var(--fill-primary);
+}
+
 /* First-run "Next steps" panel. */
 [id^="beaver-pane-"] .next-steps-panel {
     border-bottom: 1px solid var(--fill-quarternary);
@@ -1512,14 +1544,6 @@
 [id^="beaver-pane-"] .thread-presence-bar {
     background-color: var(--beaver-fill-bar);
     border-bottom: 1px solid var(--fill-quinary);
-}
-
-/* A chat fill's progress. The surface is `.batch-progress-bar`'s; this lays
-   out its two lines: glyph, title and actions on the first, what is happening
-   on the second, indented under the title. The rule along the top edge draws
-   rows filled and rows that could not be read. */
-[id^="beaver-pane-"] .table-fill-progress {
-    position: relative;
 }
 
 [id^="beaver-pane-"] .table-fill-progress-rule {
@@ -1548,78 +1572,6 @@
 [id^="beaver-pane-"] .table-fill-progress-rule-stopping .table-fill-progress-filled,
 [id^="beaver-pane-"] .table-fill-progress-rule-stopping .table-fill-progress-failed {
     opacity: 0.4;
-}
-
-[id^="beaver-pane-"] .table-fill-progress-body {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    column-gap: 0.5rem;
-    row-gap: 0.1rem;
-    align-items: center;
-    padding: 0.55rem 0.75rem 0.6rem;
-}
-
-[id^="beaver-pane-"] .table-fill-progress-glyph {
-    width: 14px;
-    height: 14px;
-}
-
-[id^="beaver-pane-"] .table-fill-progress-head {
-    display: flex;
-    align-items: center;
-    gap: 0.25rem;
-    min-width: 0;
-}
-
-[id^="beaver-pane-"] .table-fill-progress-title {
-    flex: 1 1 auto;
-    min-width: 0;
-    font-weight: 600;
-    color: var(--fill-primary);
-}
-
-[id^="beaver-pane-"] .table-fill-progress-status {
-    grid-column: 2;
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    column-gap: 0.5rem;
-    min-width: 0;
-    color: var(--fill-secondary);
-}
-
-[id^="beaver-pane-"] .table-fill-progress-text {
-    min-width: 0;
-}
-
-[id^="beaver-pane-"] .table-fill-progress-warning {
-    color: var(--tag-orange-primary);
-}
-
-/* "· 2 couldn't be read" wraps as one phrase. */
-[id^="beaver-pane-"] .table-fill-progress-text .table-fill-progress-warning {
-    white-space: nowrap;
-}
-
-/* A follow-up on line two: a link, not a button. */
-[id^="beaver-pane-"] .table-fill-progress-link {
-    font: inherit;
-    font-weight: 600;
-    color: var(--accent-blue);
-    background: none;
-    border: 0;
-    padding: 0;
-    cursor: pointer;
-}
-
-[id^="beaver-pane-"] .table-fill-progress-link:hover {
-    text-decoration: underline;
-}
-
-[id^="beaver-pane-"] .table-fill-progress-link:focus-visible {
-    outline: 2px solid var(--accent-blue);
-    outline-offset: 1px;
-    border-radius: 2px;
 }
 
 /* An artifact at the end of a run, a note or a table: a glyph, two lines
@@ -3049,6 +3001,11 @@
     background-color: transparent;
 }
 
+/* A source chip that cannot be used: trashed, excluded, unreadable. */
+[id^="beaver-pane-"] .variant-outline.border-red {
+    border-color: var(--tag-red-secondary);
+}
+
 [id^="beaver-pane-"] .variant-outline.loading {
     position: relative;
 }
@@ -3524,61 +3481,178 @@
     background-color: var(--fill-quarternary);
 }
 
-/* Homepage project / context bar, tucked under the composer card: the card
- * overlaps the bar's top so the two read as one unit. The bar keeps its height
- * whether or not the context side is shown, so nothing below it moves when
- * the Zotero selection changes. */
-[id^="beaver-pane-"] .home-composer .user-message-display {
+/* ── Home composer dock and trays ──
+ * At most one tray sits under the homepage input: the feature-credit card or
+ * line, the research-table notice, or the actions tray. A tray is inset from
+ * both sides and its top slides up behind the input's bottom edge, so only
+ * its sides and rounded bottom show. The inset is at least the input's corner
+ * radius, so the tray's top corners stay hidden behind the input's flat
+ * bottom. */
+.beaver-root .home-composer-dock {
+    --home-tray-inset: 10px;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Above the tray, so the input's opaque surface covers the tucked-in top. */
+.beaver-root .home-composer-dock > :first-child {
+    position: relative;
     z-index: 1;
 }
 
-[id^="beaver-pane-"] .home-context-bar {
+.beaver-root .home-tray {
     display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: calc(-1 * var(--beaver-radius-card)) var(--home-tray-inset) 0;
+    padding: calc(10px + var(--beaver-radius-card)) calc(var(--beaver-card-pad-x) - 4px) 10px var(--beaver-card-pad-x);
+    border-radius: 0 0 var(--beaver-radius-card) var(--beaver-radius-card);
+    background-color: var(--beaver-fill-chip);
+    font-size: 0.95rem;
+}
+
+/* A tray holding a single line. */
+.beaver-root .home-tray.is-line {
+    padding-top: calc(6px + var(--beaver-radius-card));
+    padding-bottom: 6px;
+}
+
+/* ── Slide presence ──
+ * Content that slides out from behind what sits above it (`useSlidePresence`).
+ * The slot's one grid row grows from nothing to the content's height while the
+ * content moves down by its own height, so it appears to slide out rather than
+ * unroll. The clip hides whatever is still above the slot's top edge. */
+.beaver-root .slide-presence {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 0.2s ease-out;
+}
+
+.beaver-root .slide-presence[data-open="true"] {
+    grid-template-rows: 1fr;
+}
+
+.beaver-root .slide-presence-clip {
+    min-height: 0;
+    overflow: hidden;
+}
+
+.beaver-root .slide-presence-clip > * {
+    transform: translateY(-100%);
+    transition: transform 0.2s ease-out;
+}
+
+.beaver-root .slide-presence[data-open="true"] .slide-presence-clip > * {
+    transform: none;
+}
+
+/* Still ends with a transition, so the content unmounts once closed. */
+@media (prefers-reduced-motion: reduce) {
+    .beaver-root .slide-presence,
+    .beaver-root .slide-presence-clip > * {
+        transition-duration: 1ms;
+    }
+}
+
+/* ── Home actions tray ── */
+.beaver-root .home-actions-tray {
     flex-direction: row;
     align-items: center;
-    gap: 8px;
-    min-height: 22px;
-    margin: -10px 12px 0;
-    padding: 13px 4px 3px;
-    border-radius: 0 0 var(--beaver-radius-card) var(--beaver-radius-card);
-    background-color: var(--fill-quinary);
 }
 
-[id^="beaver-pane-"] button.home-context-bar__chip {
-    display: flex;
-    align-items: center;
-    gap: 5px;
+/* The button's tooltip wraps it in its own element; both must be allowed to
+ * shrink for a long label to truncate. The wrapper's negative margin keeps
+ * the icon where it would sit without the button's hover padding. */
+.beaver-root .home-actions-tray > * {
     min-width: 0;
-    padding: 2px 5px;
-    border-radius: 5px;
-    font-size: 0.95rem;
-    color: var(--fill-secondary);
+    max-width: calc(100% + 6px);
+    margin: -3px 0 -3px -6px;
 }
 
-[id^="beaver-pane-"] .home-context-bar__project {
-    flex-shrink: 0;
-    max-width: 45%;
-}
-
-/* The context side sits at the far end and gives way (truncates) first. A
- * wrapper, because the chip's tooltip wraps the button in its own element. */
-[id^="beaver-pane-"] .home-context-bar__selection {
-    display: flex;
-    justify-content: flex-end;
-    min-width: 0;
-    margin-left: auto;
-}
-
-/* The chip's tooltip wrapper sits between the flex container and the button;
- * both must be allowed to shrink for the label to truncate. */
-[id^="beaver-pane-"] .home-context-bar__selection > *,
-[id^="beaver-pane-"] .home-context-bar__selection button.home-context-bar__chip {
+.beaver-root .home-actions-tray button.home-actions-tray-button {
     min-width: 0;
     max-width: 100%;
 }
 
-[id^="beaver-pane-"] .home-context-bar__caret {
+/* A quiet line like the feature-credits line. */
+.beaver-root button.home-actions-tray-button {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 6px;
+    border-radius: 6px;
+    font-size: inherit;
+    color: var(--fill-secondary);
+}
+
+.beaver-root .home-actions-tray-caret {
     opacity: 0.6;
+}
+
+/* ── Home launcher: category buttons ──
+ * HomeLauncher sets `data-size` from the launcher's width in rem, so the same
+ * rules serve the sidebar, the context pane and the separate window. Text and
+ * icons keep the size of the composer's own controls at every width; only the
+ * spacing and the layout grow, so the row never outweighs the composer. Spacing
+ * is in rem like the thresholds, so each layout still fits where it starts.
+ *   narrow   (< 25.5rem): 2×2 grid; a single row would wrap 3+1
+ *   compact  (default):   one row, 24px tall; needs ~25rem
+ *   wide     (≥ 30rem):   one row, a little more padding; needs ~27rem
+ *   spacious (≥ 44rem):   four equal columns in a capped row */
+[id^="beaver-pane-"] .home-launcher .home-launcher-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 0.3rem;
+}
+
+[id^="beaver-pane-"] .home-launcher .home-launcher-button {
+    gap: 0.45rem;
+    padding: 0.3rem 0.45rem;
+    border-radius: 6px;
+}
+
+[id^="beaver-pane-"] .home-launcher[data-size="wide"] .home-launcher-row {
+    gap: 0.45rem;
+}
+
+[id^="beaver-pane-"] .home-launcher[data-size="wide"] .home-launcher-button {
+    gap: 0.4rem;
+    padding: 0.35rem 0.65rem;
+}
+
+[id^="beaver-pane-"] .home-launcher:is([data-size="narrow"], [data-size="spacious"]) .home-launcher-row {
+    display: grid;
+    width: 100%;
+    margin: 0 auto;
+}
+
+[id^="beaver-pane-"] .home-launcher[data-size="narrow"] .home-launcher-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    max-width: 20rem;
+}
+
+[id^="beaver-pane-"] .home-launcher[data-size="spacious"] .home-launcher-row {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    max-width: 34rem;
+    gap: 0.5rem;
+}
+
+[id^="beaver-pane-"] .home-launcher[data-size="spacious"] .home-launcher-button {
+    gap: 0.4rem;
+    padding: 0.4rem 0.6rem;
+}
+
+/* In a grid each tooltip anchor fills its cell, and its button fills the anchor. */
+[id^="beaver-pane-"] .home-launcher:is([data-size="narrow"], [data-size="spacious"]) .home-launcher-row > span {
+    display: block;
+    min-width: 0;
+}
+
+[id^="beaver-pane-"] .home-launcher:is([data-size="narrow"], [data-size="spacious"]) .home-launcher-button {
+    width: 100%;
+    justify-content: center;
 }
 
 [id^="beaver-pane-"] .card {
@@ -5105,6 +5179,18 @@
     font-weight: 600;
 }
 
+/* In a short window the fill warnings close the scrolling content instead,
+ * flush with the card's edges and the footer below them. */
+[id^="beaver-pane-"] .table-card-body-bands {
+    display: flex;
+    flex-direction: column;
+    margin: 0 -0.8rem -0.75rem;
+}
+
+[id^="beaver-pane-"] .table-card-body-bands > .table-card-footer-band:last-child {
+    border-bottom: 0;
+}
+
 /* The decision and its price, side by side: unticking visibly changes it. */
 [id^="beaver-pane-"] .table-card-decision {
     display: flex;
@@ -5115,6 +5201,16 @@
     padding: 0.55rem 0.8rem 0.5rem;
     border-bottom: 1px solid var(--fill-quinary);
     font-size: 0.925rem;
+}
+
+/* The fill card has no run checkbox: what Fill table covers takes its place. */
+[id^="beaver-pane-"] .table-card-decision-label {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--fill-primary);
 }
 
 /* A held answer keeps the decision in view, quiet. */
@@ -5242,7 +5338,7 @@
     color: var(--fill-secondary);
 }
 
-/* Ways out on the left, the one way forward on the right. */
+/* Cancel on the left; Back, when there is one, beside the way forward on the right. */
 [id^="beaver-pane-"] .table-card-controls {
     display: flex;
     flex-direction: row;
@@ -5547,11 +5643,6 @@
     white-space: nowrap;
 }
 
-/* The fill card's cost under its columns: what the run would fill and how. */
-[id^="beaver-pane-"] .table-card-cost {
-    padding-top: 0.15rem;
-}
-
 [id^="beaver-pane-"] .table-card-head-action:disabled {
     cursor: default;
     opacity: 0.6;
@@ -5602,6 +5693,12 @@
     min-width: 0;
     padding-top: 0.75rem;
     border-top: 1px solid var(--fill-quinary);
+}
+
+/* A fill card without a description opens on its step: no rule under the title. */
+[id^="beaver-pane-"] .table-card-body > .table-card-step:first-child {
+    padding-top: 0.2rem;
+    border-top: 0;
 }
 
 [id^="beaver-pane-"] .table-card-step-head {
@@ -5906,6 +6003,25 @@
     overflow-wrap: anywhere;
 }
 
+/* The fill card's summaries are read only: nothing is clamped. */
+[id^="beaver-pane-"] .table-card-column-question-full {
+    display: block;
+    -webkit-line-clamp: none;
+    line-clamp: none;
+}
+
+[id^="beaver-pane-"] .table-card-options-all {
+    flex-wrap: wrap;
+    row-gap: 4px;
+}
+
+[id^="beaver-pane-"] .table-card-options-all .table-card-option {
+    box-sizing: border-box;
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
 [id^="beaver-pane-"] .table-card-empty {
     font-style: italic;
 }
@@ -5941,8 +6057,11 @@
     overflow: hidden;
 }
 
+/* Preview chips shrink, with an ellipsis, so the "+N" after them stays in
+ * the row; each chip's tooltip holds its full label. */
 [id^="beaver-pane-"] .table-card-option {
-    flex: none;
+    flex: 0 1 auto;
+    min-width: 0;
     max-width: 10rem;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -6608,6 +6727,7 @@
 .beaver-root .ext-facts > .ext-fact-value {
     color: var(--fill-primary);
     min-width: 0;
+    overflow-wrap: anywhere;
 }
 .beaver-root .ext-chip {
     display: inline-block;
@@ -6617,7 +6737,9 @@
     border-radius: 10px;
     color: var(--fill-primary);
     background-color: var(--beaver-fill-chip);
-    white-space: nowrap;
+    /* A long chip (several filter names) wraps inside the card instead of overflowing it. */
+    max-width: 100%;
+    overflow-wrap: break-word;
 }
 .beaver-root .ext-chip[data-muted] {
     color: var(--fill-secondary);
@@ -6651,4 +6773,407 @@
 /* A header button that discloses a panel looks pressed while it is open. */
 .beaver-root .tool-header-toggle[aria-expanded="true"] {
     background-color: var(--fill-quinary);
+}
+
+/* Feature credits: the home card ("Get more out of Beaver") and the
+   reward card shown under a run that earned a task. */
+.beaver-root .feature-credits-card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 8px 8px 12px;
+    border: 1px solid var(--beaver-border-subtle);
+    border-radius: var(--beaver-radius-card);
+    background-color: var(--beaver-fill-subtle);
+    font-size: 0.95rem;
+}
+/* On home the card is a tray under the chat input (`.home-tray`). */
+.beaver-root .feature-credits-home .feature-credits-title {
+    font-size: 1rem;
+}
+.beaver-root .feature-credits-home .feature-credits-text {
+    color: var(--fill-secondary);
+}
+.beaver-root .feature-credits-header {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    margin-right: 4px;
+}
+.beaver-root .feature-credits-title {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--fill-primary);
+}
+/* A setup card's header: one button that goes back to the task list. */
+.beaver-root .feature-credits-back-heading {
+    display: flex;
+    margin: 0;
+    font-size: inherit;
+    font-weight: inherit;
+}
+/* Only as wide as the arrow and title. Padded for the hover background like
+   the task rows; the negative margin keeps the arrow and title where they
+   would sit without it. */
+.beaver-root .feature-credits-back {
+    display: inline-flex;
+    max-width: calc(100% + 12px);
+    margin: -4px -6px;
+    padding: 4px 6px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: background-color 0.2s ease-in-out;
+    margin-bottom: 4px;
+}
+.beaver-root .feature-credits-back:hover {
+    background-color: var(--beaver-fill-hover);
+}
+/* Sized and colored like the ghost-secondary icon button it replaces. */
+.beaver-root .feature-credits-back-icon {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    /* padding: 2px; */
+    font-size: 0.9rem;
+    color: var(--fill-secondary);
+    transition: color 0.2s ease-in-out;
+}
+.beaver-root .feature-credits-back-icon svg {
+    width: 1em;
+    height: 1em;
+}
+.beaver-root .feature-credits-back:hover .feature-credits-back-icon {
+    color: var(--fill-primary);
+}
+.beaver-root .feature-credits-text {
+    margin: 0;
+    padding-right: 4px;
+    color: var(--fill-primary);
+    line-height: 1.45;
+}
+.beaver-root .feature-credits-list {
+    list-style: none;
+    margin: 0 0 0 -6px;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+}
+.beaver-root .feature-credits-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 5px 6px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    text-align: left;
+    font: inherit;
+    color: inherit;
+}
+.beaver-root .feature-credits-row-button {
+    cursor: pointer;
+}
+.beaver-root .feature-credits-row-button:hover:not(:disabled) {
+    background-color: var(--beaver-fill-hover);
+}
+.beaver-root .feature-credits-row-button:disabled {
+    cursor: default;
+    opacity: 0.6;
+}
+/* The one-line prompt for existing users: a quiet button, only as wide as
+   its text and arrow, lined up with the card's title. Hovering darkens the
+   text and arrow instead of filling the row. */
+.beaver-root .feature-credits-teaser .feature-credits-row {
+    flex: 0 1 auto;
+    width: auto;
+    min-width: 0;
+    gap: 4px;
+    margin: -5px auto -5px -6px;
+}
+.beaver-root .feature-credits-teaser .feature-credits-row-button:hover:not(:disabled) {
+    background-color: transparent;
+}
+.beaver-root .feature-credits-teaser-text,
+.beaver-root .feature-credits-teaser .feature-credits-row-arrow {
+    min-width: 0;
+    color: var(--fill-secondary);
+    transition: color 0.2s ease-in-out;
+}
+.beaver-root .feature-credits-teaser .feature-credits-row:hover .feature-credits-teaser-text,
+.beaver-root .feature-credits-teaser .feature-credits-row:hover .feature-credits-row-arrow {
+    color: var(--fill-primary);
+}
+.beaver-root .feature-credits-row-mark {
+    flex: none;
+    margin-top: 2px;
+    color: var(--fill-secondary);
+}
+.beaver-root .feature-credits-row-arrow {
+    flex: none;
+    margin-top: 2px;
+}
+.beaver-root .feature-credits-row-credits {
+    flex: none;
+    color: var(--fill-secondary);
+    font-variant-numeric: tabular-nums;
+}
+.beaver-root .feature-credits-row-text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    line-height: 1.3;
+}
+.beaver-root .feature-credits-row-subtitle {
+    font-size: 0.95em;
+    color: var(--fill-secondary);
+}
+/* Setup card: numbered steps. A step's number turns into a check when it
+   is done; the step to act on next has the accent. */
+.beaver-root .feature-credits-steps {
+    list-style: none;
+    margin: 2px 0 0;
+    padding: 0 4px 0 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+.beaver-root .feature-credits-step {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 8px;
+}
+.beaver-root .feature-credits-step-marker {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    width: 17px;
+    height: 17px;
+    margin-top: 1px;
+    border: 1px solid var(--fill-quarternary);
+    border-radius: 50%;
+    font-size: 0.75rem;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    color: var(--fill-secondary);
+}
+.beaver-root .feature-credits-step-marker.is-active {
+    border-color: var(--accent-blue);
+    color: var(--accent-blue);
+}
+.beaver-root .feature-credits-step-marker.is-done {
+    border-color: transparent;
+    background-color: var(--fill-quinary);
+    color: var(--fill-secondary);
+}
+.beaver-root .feature-credits-step-marker.is-checking {
+    border-color: transparent;
+}
+.beaver-root .feature-credits-step-body {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    line-height: 1.4;
+}
+.beaver-root .feature-credits-step-title {
+    margin: 0;
+    font: inherit;
+    font-weight: 550;
+    color: var(--fill-primary);
+}
+.beaver-root .feature-credits-step-optional {
+    font-weight: 400;
+    color: var(--fill-secondary);
+}
+.beaver-root .feature-credits-step-text {
+    /* color: var(--fill-secondary); */
+    overflow-wrap: anywhere;
+}
+/* The reward, under the steps. */
+.beaver-root .feature-credits-reward {
+    margin: 2px 0 0;
+    padding-right: 4px;
+    color: var(--fill-secondary);
+    line-height: 1.4;
+}
+/* Examples, one per row under the step text: picking one fills and focuses
+   the chat input. */
+.beaver-root .feature-credits-examples {
+    list-style: none;
+    margin: 2px 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+}
+/* Examples read as links: underlined text color, blue on hover. */
+.beaver-root .feature-credits-example {
+    display: block;
+    width: fit-content;
+    max-width: 100%;
+    padding: 2px 0;
+    border: 0;
+    background: transparent;
+    font: inherit;
+    line-height: 1.4;
+    text-align: left;
+    color: var(--fill-primary);
+    text-decoration: underline;
+    text-decoration-color: var(--fill-secondary);
+    text-underline-offset: 2px;
+    cursor: pointer;
+}
+.beaver-root .feature-credits-example::before {
+    content: "\201C";
+}
+.beaver-root .feature-credits-example::after {
+    content: "\201D";
+}
+.beaver-root .feature-credits-example:hover {
+    color: var(--accent-blue);
+    text-decoration-color: var(--accent-blue);
+}
+.beaver-root .feature-credits-example:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: 1px;
+    border-radius: 3px;
+}
+/* Inline links in the text color, blue on hover. */
+.beaver-root .feature-credits-link {
+    color: var(--fill-primary);
+    text-decoration: underline;
+    text-decoration-color: var(--fill-secondary);
+    text-underline-offset: 2px;
+    cursor: pointer;
+}
+.beaver-root .feature-credits-link:hover {
+    color: var(--accent-blue);
+    text-decoration-color: var(--accent-blue);
+}
+.beaver-root .feature-credits-completion {
+    gap: 4px;
+    padding: 6px 6px 8px 10px;
+}
+.beaver-root .feature-credits-completion-title {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    font-size: 1em;
+    font-weight: 600;
+    color: var(--fill-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+/* The note card's export icon, named in the text. */
+.beaver-root .feature-credits-inline-icon {
+    vertical-align: -0.15em;
+}
+/* Lined up with the title, after the mark. */
+.beaver-root .feature-credits-completion-body {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding-left: 20px;
+}
+.beaver-root .feature-credits-next {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    /* Only as wide as the label and arrow, not the whole column. */
+    align-self: flex-start;
+    gap: 6px;
+    margin: -4px -6px;
+    padding: 4px 6px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    font: inherit;
+    color: var(--fill-primary);
+    text-align: left;
+    cursor: pointer;
+}
+.beaver-root .feature-credits-next:hover {
+    background-color: var(--beaver-fill-hover);
+}
+
+/* First-run pages ("Where should we start?" and the feature-credit tasks):
+   a centered heading over one card, with the footer below. */
+.beaver-root .first-run-page {
+    background: var(--material-sidepane);
+}
+.beaver-root .first-run-scroll {
+    padding: 18px 18px 12px;
+}
+.beaver-root .first-run-shell {
+    width: 100%;
+    max-width: 560px;
+    margin: 0 auto;
+}
+.beaver-root .first-run-heading {
+    text-align: center;
+    margin: 4px 0 18px;
+}
+.beaver-root .first-run-title {
+    font-size: 2rem;
+    line-height: 1.08;
+    font-weight: 700;
+    letter-spacing: 0;
+    color: var(--fill-primary);
+    margin-bottom: 10px;
+}
+.beaver-root .first-run-subtitle {
+    font-size: 1.1rem;
+    line-height: 1.35;
+    color: var(--fill-secondary);
+}
+.beaver-root .first-run-card {
+    background: var(--material-sidepane);
+    border: 1px solid var(--fill-quarternary);
+    border-radius: 18px;
+    box-shadow: 0 10px 24px rgba(0,0,0,0.06);
+    padding: 16px;
+}
+.beaver-root .first-run-loader {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.beaver-root .first-run-loader-row {
+    height: 56px;
+    border-radius: 10px;
+    background: var(--fill-quinary);
+    opacity: 0.72;
+}
+@media (max-width: 520px) {
+    .beaver-root .first-run-scroll {
+        padding: 16px 14px 10px;
+    }
+    .beaver-root .first-run-heading {
+        text-align: left;
+        margin-bottom: 14px;
+    }
+    .beaver-root .first-run-title {
+        font-size: 1.75rem;
+    }
+    .beaver-root .first-run-card {
+        padding: 12px;
+    }
 }
