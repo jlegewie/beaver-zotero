@@ -1,6 +1,9 @@
 import React from 'react';
 import { useAtomValue } from 'jotai';
 import { externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
+import { webPageId } from '@beaver/agent-core/citations/externalRecords';
+import type { ExternalReference } from '@beaver/agent-core/types/externalReferences';
+import { workKeys } from '@beaver/agent-ui/chat/CitedSourcesList';
 import { AgentRun } from '@beaver/agent-core/agents/types';
 import {
     agentActionsForRunsAtom,
@@ -19,6 +22,29 @@ import { toolCallOrder } from './reviewChanges/runArtifacts';
 interface AgentActionsReviewProps {
     /** The one or more runs that make up a single answer. */
     runs: AgentRun[];
+}
+
+/** The external id an item-creating citation action imports. */
+function actionExternalId(action: ItemCreatingAgentAction): string | undefined {
+    return isImportItemAgentAction(action) ? action.proposed_data.source?.external_id : action.proposed_data.item?.source_id;
+}
+
+/**
+ * One import per work: a pending import of a web page that is a paper (its
+ * record names a DOI, arXiv id or PMID) is left out when the answer also cites
+ * that work's own record, as the sources list merges the two.
+ */
+export function withoutDuplicateWebPages(
+    actions: ItemCreatingAgentAction[],
+    references: Record<string, ExternalReference>,
+): ItemCreatingAgentAction[] {
+    const keysOf = (action: ItemCreatingAgentAction) => {
+        const id = actionExternalId(action);
+        return id ? workKeys(references[id]) : [];
+    };
+    const isWebPage = (action: ItemCreatingAgentAction) => !!webPageId(actionExternalId(action));
+    const works = new Set(actions.filter((action) => !isWebPage(action)).flatMap(keysOf));
+    return actions.filter((action) => !(isWebPage(action) && action.status === 'pending' && keysOf(action).some((key) => works.has(key))));
 }
 
 /**
@@ -57,13 +83,13 @@ export const AgentActionsReview: React.FC<AgentActionsReviewProps> = ({ runs }) 
     ), [referenceMapping]);
     const createItemActionsByRun = React.useMemo(() => runs.map((run, index) => ({
         runId: run.id,
-        actions: (actionsByRun[index].filter(
+        actions: withoutDuplicateWebPages(actionsByRun[index].filter(
             (action) => isItemCreatingAgentAction(action) && action.toolcall_id === 'citations'
-        ) as ItemCreatingAgentAction[]).sort((a, b) => citationCount(b) - citationCount(a)),
+        ) as ItemCreatingAgentAction[], referenceMapping).sort((a, b) => citationCount(b) - citationCount(a)),
     })).filter(({ actions }) =>
         actions.length > 0 &&
         !actions.every((action) => action.status === 'rejected' || action.status === 'undone')
-    ), [actionsByRun, runs, citationCount]);
+    ), [actionsByRun, runs, citationCount, referenceMapping]);
 
     // Don't show during streaming
     if (!lastRun || lastRun.status === 'in_progress') {

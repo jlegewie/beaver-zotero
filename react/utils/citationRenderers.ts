@@ -14,6 +14,8 @@ import { ExternalReference } from '@beaver/agent-core/types/externalReferences';
 import { formatExternalCitation } from '@beaver/agent-core/citations/externalReferences';
 import { UNRESOLVED_LIBRARY_ID, libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
 import { hydrateItemLinkLibraryRefs } from '@beaver/agent-core/identity/itemLinks';
+import { rewriteWebLinkTargets, webCitationExport, webCitationMarkdown } from '@beaver/agent-core/identity/webPages';
+import { webPageId } from '@beaver/agent-core/citations/externalRecords';
 import { loadCitedLibraries } from './citationRenderContext';
 import { unwrapLegacyNoteTags } from '@beaver/agent-export/render/legacyNoteTags';
 import {
@@ -88,6 +90,8 @@ export function renderToMarkdown(
 
     // Preprocess note tags and clean up backticks
     text = preprocessNoteContent(text);
+    // Web page links (`[WHO fact sheet](web-…)`) point at the page's URL.
+    text = rewriteWebLinkTargets(text, (webId) => externalReferenceMapping[webId]?.url);
 
     // Format references
     const formattedContent = text.replace(citationRegex, (match: string, attrString: string = ''): string => {
@@ -102,6 +106,11 @@ export function renderToMarkdown(
         const externalId = ref.kind === 'external' ? ref.external_id : undefined;
         const isExternalReference = ref.kind === 'external';
         const isExternalReferenceMappedToZoteroItem = !!externalId && !!externalItemMapping[externalId];
+
+        // 0. A web page links to itself, in the library or not: ([Title](URL), site).
+        // Its sentences are Beaver's copy of the page, not a Zotero item's.
+        const page = webPageId(externalId) ? webCitationExport(externalReferenceMapping[externalId!]) : null;
+        if (page) return webCitationMarkdown(page);
 
         // 1. External reference (not mapped to Zotero) ---------------------------------------------------
         if (isExternalReference && !isExternalReferenceMappedToZoteroItem) {
@@ -312,6 +321,9 @@ export function renderToHTML(
     // older history become portable here, so the renderer can write them as
     // note links without consulting library state itself.
     content = hydrateItemLinkLibraryRefs(content, libraryRefForLibraryID);
+    // Web page links (`[WHO fact sheet](web-…)`) point at the page's URL.
+    const pages = contextData?.externalReferencesMap ?? store.get(externalReferenceMappingAtom);
+    content = rewriteWebLinkTargets(content, (webId) => pages[webId]?.url);
 
     // Pre-calculate citation markers for static render to avoid React state updates during render.
     // This must happen before the render since effects don't run during renderToStaticMarkup.

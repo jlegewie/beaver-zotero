@@ -167,6 +167,7 @@ export const TOOL_BASE_LABELS: Record<string, string> = {
     create_zotero_item: 'Add item',
     create_items: 'Import items',
     external_search: 'Web search',
+    web_search: 'Web search',
     lookup_work: 'Lookup work',
     find_related_works: 'Related works',
     find_book_chapters: 'Book chapters',

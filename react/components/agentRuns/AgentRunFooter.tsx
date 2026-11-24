@@ -9,7 +9,7 @@ import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
 import type { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
 import Button from '@beaver/agent-ui/primitives/Button';
-import CitedSourcesList from '@beaver/agent-ui/chat/CitedSourcesList';
+import CitedSourcesList, { mergeWebPagesByDoi } from '@beaver/agent-ui/chat/CitedSourcesList';
 import { renderToHTML, preprocessNoteContent, renderToMarkdownAsync } from '../../utils/citationRenderers';
 import CopyButton from '../ui/buttons/CopyButton';
 import { citationMapAtom, citationsByRunIdAtom, citationKeyToMarkerAtom } from '@beaver/agent-core/citations/atoms';
@@ -101,8 +101,9 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
             }
         }
 
-        return unique;
-    }, [runCitations, citationMarkerMap]);
+        // A web page that is a paper cited elsewhere lists once, as the work.
+        return mergeWebPagesByDoi(unique, externalReferencesMap);
+    }, [runCitations, citationMarkerMap, externalReferencesMap]);
 
     // Sources visibility state
     const sourcesVisibilityMap = useAtomValue(messageSourcesVisibilityAtom);

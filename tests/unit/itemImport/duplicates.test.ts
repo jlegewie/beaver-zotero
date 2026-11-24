@@ -7,7 +7,8 @@ vi.mock('../../../src/utils/libraryIdentity', () => ({ libraryRefForLibraryID: v
 import { MockDBConnection } from '../../mocks/mockDBConnection';
 import { createSeedContext, createZoteroSchema, installZoteroDB, seedZoteroItem } from '../../helpers/zoteroSchemaSeed';
 import { batchFindExistingReferences } from '../../../src/utils/batchFindExistingReferences';
-import { findExistingItems, urlVariants } from '../../../src/services/itemImport/duplicates';
+import { findExistingItems } from '../../../src/services/itemImport/duplicates';
+import { urlVariants } from '../../../src/utils/findItemsByUrl';
 
 describe('urlVariants', () => {
     it('toggles the trailing slash on the path and the scheme', () => {
@@ -77,6 +78,32 @@ describe('findExistingItems URL matching', () => {
         const existing = await findExistingItems([blogPost], 1);
 
         expect(existing.get('NEW')).toMatchObject({ library_id: 1, zotero_key: `K${String(itemID).padStart(7, '0')}` });
+    });
+
+    it('matches the same page stored with tracking parameters, a fragment or another host case', async () => {
+        const itemID = await seedWithUrl({ itemType: 'blogPost', title: 'Saved' }, 'https://EXAMPLE.org/page?utm_source=news#top');
+
+        const existing = await findExistingItems([blogPost], 1);
+
+        expect(existing.get('NEW')).toMatchObject({ library_id: 1, zotero_key: `K${String(itemID).padStart(7, '0')}` });
+    });
+
+    it('prefers an item storing the exact URL over an earlier one storing a variant', async () => {
+        await seedWithUrl({ itemType: 'blogPost', title: 'Old' }, 'http://example.org/page/');
+        const exactID = await seedWithUrl({ itemType: 'blogPost', title: 'Exact' }, PAGE_URL);
+
+        const existing = await findExistingItems([blogPost], 1);
+
+        expect(existing.get('NEW')).toMatchObject({ zotero_key: `K${String(exactID).padStart(7, '0')}` });
+    });
+
+    it('does not match another page on the same site', async () => {
+        await seedWithUrl({ itemType: 'blogPost', title: 'Other' }, 'https://example.org/page-2');
+        await seedWithUrl({ itemType: 'blogPost', title: 'Query' }, 'https://example.org/page?id=2');
+
+        const existing = await findExistingItems([blogPost], 1);
+
+        expect(existing.has('NEW')).toBe(false);
     });
 
     it('ignores a standalone attachment with the same URL', async () => {

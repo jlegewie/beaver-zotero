@@ -3,9 +3,9 @@
  * CSL-JSON, so a citation processor can format it like a library item.
  */
 
-import { NormalizedPublicationType, type ExternalReference } from '@beaver/agent-core/types/externalReferences';
+import { NormalizedPublicationType, webPageDetails, type ExternalReference } from '@beaver/agent-core/types/externalReferences';
 import type { ZoteroCreatorJson } from '@beaver/agent-core/types/itemImport';
-import { nctFromExternalId, pmidFromExternalId } from '@beaver/agent-core/citations/externalRecords';
+import { nctFromExternalId, pmidFromExternalId, webPageId } from '@beaver/agent-core/citations/externalRecords';
 import { pubmedUrl, trialRegistryUrl } from '@beaver/agent-core/citations/externalRecordDisplay';
 
 export type CslName = { family: string; given?: string } | { literal: string };
@@ -147,6 +147,14 @@ export function externalReferenceToCsl(ref: ExternalReference, id: string): Reco
     if (ids.pmcid) csl.PMCID = ids.pmcid;
     const url = isReport ? ref.url || ref.publication_url : ref.publication_url || ref.url;
     if (url && (!ids.doi || isReport)) csl.URL = url;
+    // A web page: the site is its container, and the day Beaver read it is when it was accessed.
+    const page = webPageDetails(ref);
+    if (page) {
+        const site = page.site_name || page.site;
+        if (site && !csl['container-title'] && !isReport) csl['container-title'] = site;
+        const accessed = ref.retrieved_at?.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (accessed) csl.accessed = { 'date-parts': [accessed.slice(1).map(Number)] };
+    }
     return csl;
 }
 
@@ -165,5 +173,6 @@ export function externalReferenceUri(externalId: string, reference: ExternalRefe
     if (pmid) return pubmedUrl(pmid);
     if (reference.source === 'openalex' || /^W\d+$/.test(externalId)) return `https://openalex.org/${encodeURIComponent(externalId)}`;
     if (reference.source === 'semantic_scholar') return `https://www.semanticscholar.org/paper/${encodeURIComponent(externalId)}`;
+    if (webPageId(externalId) && reference.url) return reference.url;
     return `urn:beaver:external:${encodeURIComponent(externalId)}`;
 }

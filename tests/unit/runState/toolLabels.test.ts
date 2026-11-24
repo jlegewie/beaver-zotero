@@ -107,6 +107,31 @@ describe('getToolCallLabel for list_items', () => {
     });
 });
 
+describe('web page tool labels', () => {
+    const page = {
+        source: 'exa', source_id: 'web-MJNNMKH4ED', title: 'Obesity and overweight', url: 'https://www.who.int/x',
+        details: { kind: 'webpage' as const, site: 'who.int', site_name: 'World Health Organization' }, library_items: [],
+    };
+
+    it('labels a web search by its query and counts the pages it found', () => {
+        const part = toolCall({ tool_name: 'web_search', args: { query: 'obesity prevalence', objective: 'WHO figures' } });
+        expect(getToolCallLabel(part, 'in_progress')).toBe('Web search: obesity prevalence');
+        const view = {
+            view_type: 'external_reference_list' as const,
+            tool_name: 'web_search',
+            references: [page, { ...page, source_id: 'web-X45SUKGLKI' }],
+            tool_info: { info_type: 'search' as const, source: 'exa', source_label: 'Web', returned: 2 },
+        };
+        expect(getToolCallLabel(part, 'completed', { view })).toBe('Web search: obesity prevalence (2 results)');
+    });
+
+    it('labels a web read with the site, without its synthetic page range', () => {
+        const part = toolCall({ tool_name: 'read', args: { file: 'web-MJNNMKH4ED', pages: '1-3' } });
+        const view = { view_type: 'external_reference_list' as const, tool_name: 'read', references: [page] };
+        expect(getToolCallLabel(part, 'completed', { view })).toBe('Reading: World Health Organization');
+    });
+});
+
 describe('external record tool labels', () => {
     const searchView = (shown: number, total: number) => ({
         view_type: 'external_reference_list' as const,

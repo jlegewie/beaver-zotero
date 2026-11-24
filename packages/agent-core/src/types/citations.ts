@@ -201,6 +201,11 @@ export interface Citation {
     filename?: string;
     /** Preview of the cited passage. */
     preview?: string;
+    /**
+     * Web pages: date the cited copy of the page was fetched (YYYY-MM-DD).
+     * Absent for citations of search highlights, whose age is unknown.
+     */
+    retrieved?: string;
     /** 1-based cited page numbers (EPUB: section ordinals). */
     pages?: number[];
     /** Sparse 0-based page index -> printed label map for cited pages. */

@@ -17,6 +17,12 @@ export interface PdfFetchOptions {
     fallbackUrl?: string;
     fileAvailable?: boolean;
     /**
+     * An import from a PDF link (a web page's, or one the user gave): its
+     * candidates are fetched only under the private-network guard
+     * (`downloadPdfLink`), never by Zotero's resolver cascade.
+     */
+    guardedOnly?: boolean;
+    /**
      * Optional correlation IDs. When provided, the background task emits an
      * attachment_resolved ws event on completion (success or failure) so the
      * backend can update the matching agent action and surface the result to

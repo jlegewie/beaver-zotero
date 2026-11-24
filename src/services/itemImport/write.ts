@@ -19,6 +19,7 @@
  * Must run in the plugin realm (through `addon.libraryOperations`).
  */
 
+import { fallbackLookup, type FallbackLookup } from '@beaver/agent-core/types/itemImport';
 import type {
     ImportItemProposedData,
     ImportItemResultData,
@@ -44,6 +45,8 @@ import { scheduleAttachInOrderTask } from './attachInOrder';
 import { fetchImportProposal } from './importProposals';
 import type { PdfCandidate } from '@beaver/agent-core/types/agentActions/items';
 import { BEAVER_PROVENANCE_MARKER, stampBeaverProvenanceExtra } from './provenance';
+import { urlNamesPdf } from '@beaver/agent-core/identity/webPages';
+import { webPageId } from '@beaver/agent-core/citations/externalRecords';
 import { locateImportFile, type LocatedFile } from './recognizeFile';
 import { resolveImportItems } from './resolve';
 import { checkUrlAllowed, createGuardedBrowser, landedOnBlockedHost } from './resolveUrl';
@@ -66,17 +69,21 @@ export interface WriteImportOptions {
 export { ImportItemError };
 
 const SNAPSHOT_BUDGET_MS = 60_000;
-const BEAVER_METADATA_LINE: Record<string, string> = {
-    model_metadata: 'Beaver Metadata: written by Beaver from the conversation',
-    fallback_metadata: 'Beaver Metadata: search-result metadata (identifier lookup failed)',
-};
+const MODEL_METADATA_LINE = 'Beaver Metadata: written by Beaver from the conversation';
 /** A record with no identifier or URL to look up (e.g. a trial registration) is its own metadata. */
 const RECORD_METADATA_LINE = 'Beaver Metadata: search-result metadata';
+const FALLBACK_REASON: Record<FallbackLookup, string> = {
+    identifier: 'identifier lookup failed',
+    page: 'page could not be loaded',
+    pdf_download: 'PDF could not be downloaded',
+    pdf: 'PDF could not be identified',
+};
 
 /** The Extra line naming where unchecked metadata came from, or undefined for checked metadata. */
-function metadataSourceLine(method: string | undefined, lookupAttempted: boolean): string | undefined {
-    if (method === 'fallback_metadata' && !lookupAttempted) return RECORD_METADATA_LINE;
-    return method ? BEAVER_METADATA_LINE[method] : undefined;
+function metadataSourceLine(method: string | undefined, lookup: FallbackLookup | null): string | undefined {
+    if (method === 'model_metadata') return MODEL_METADATA_LINE;
+    if (method !== 'fallback_metadata') return undefined;
+    return lookup ? `${RECORD_METADATA_LINE} (${FALLBACK_REASON[lookup]})` : RECORD_METADATA_LINE;
 }
 
 function track<T>(timing: TimingAccumulator | undefined, name: string, fn: () => Promise<T>): Promise<T> {
@@ -408,6 +415,26 @@ function withActionTarget(fresh: ImportItemProposedData, action: ImportItemPropo
     };
 }
 
+/**
+ * Whether an import came from a PDF link (a web page's, or one the user gave):
+ * resolution downloaded and identified the file (`pdfLinkImport`), or kept the
+ * search result after trying, or the backend named the link as the page's PDF
+ * (`access_method: "web"`). Its PDF is then fetched only under the
+ * private-network guard.
+ */
+function isPdfLinkImport(
+    plan: ImportItemProposedData,
+    method: string | undefined,
+    warnings: string[] | undefined,
+    candidates: PdfCandidate[] | undefined,
+): boolean {
+    const source = plan.source;
+    if (!webPageId(source?.external_id) && source?.kind !== 'url') return false;
+    const lookup = fallbackLookup(warnings);
+    return method === 'recognizer' || lookup === 'pdf' || lookup === 'pdf_download'
+        || (candidates ?? []).some((candidate) => candidate.access_method === 'web');
+}
+
 /** PDF links a translator returned, as download candidates. */
 function translatorPdfCandidates(attachments: ResolvedItem['attachment_urls']): PdfCandidate[] {
     return (attachments ?? [])
@@ -459,6 +486,7 @@ export async function writeImportItem(data: ImportItemProposedData, options: Wri
 
     let json = data.item;
     let method = data.resolution?.method;
+    let warnings = data.warnings;
     // What the item's files come from: the approved proposal, or for an
     // unresolved external record the proposal prepared at this click.
     let plan: ImportItemProposedData = data;
@@ -475,6 +503,7 @@ export async function writeImportItem(data: ImportItemProposedData, options: Wri
         const resolved = await track(options.timing, 'resolve_ms', () => resolvePending(plan, libraryID, options.threadId));
         json = resolved.item;
         method = resolved.method;
+        warnings = resolved.warnings;
         snapshotUrl = resolved.snapshot_url;
         // Translator PDF links first, then the record's candidates.
         pdfCandidates = mergePdfCandidates(translatorPdfCandidates(resolved.attachment_urls), plan.pdf_candidates);
@@ -496,9 +525,15 @@ export async function writeImportItem(data: ImportItemProposedData, options: Wri
     // (title linters, arXiv helpers) may re-save the item from their own copy,
     // which would drop a stamp added in a second save.
     const source = plan.source;
-    const lookupAttempted = !!(plan.pending_resolution?.identifier || plan.pending_resolution?.url
-        || source?.identifier || source?.url || source?.kind === 'identifier' || source?.kind === 'url');
-    const sourceLine = metadataSourceLine(method, lookupAttempted);
+    // The resolution's own warning names what failed; older proposals carry none.
+    const lookupUrl = plan.pending_resolution?.url || source?.url;
+    const lookup: FallbackLookup | null = fallbackLookup(warnings)
+        ?? (plan.pending_resolution?.identifier || source?.identifier || source?.kind === 'identifier'
+            ? 'identifier'
+            : lookupUrl || source?.kind === 'url'
+                ? (lookupUrl && urlNamesPdf(lookupUrl) ? 'pdf' : 'page')
+                : null);
+    const sourceLine = metadataSourceLine(method, lookup);
     toSave.extra = withProvenanceLines(typeof json.extra === 'string' ? json.extra : '', sourceLine);
 
     const item = await track(options.timing, 'save_ms', () => saveItemJson(toSave, libraryID, collectionIDs, data.tags, options.timing));
@@ -546,6 +581,7 @@ export async function writeImportItem(data: ImportItemProposedData, options: Wri
         if (!WEB_CONTENT_ITEM_TYPES.has(json.itemType) && filesEditable && hasPdfSource) {
             schedulePdfFetchTask(libraryID, item.key, {
                 pdfCandidates,
+                guardedOnly: isPdfLinkImport(plan, method, warnings, pdfCandidates),
                 actionId: options.actionId,
                 runId: options.runId,
                 threadId: options.threadId ?? undefined,

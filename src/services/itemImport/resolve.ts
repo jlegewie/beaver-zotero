@@ -6,9 +6,10 @@
  * approval, and duplicates are checked on resolved metadata.
  *
  * Per spec (see `ImportItemSpec`): model metadata wins; else an identifier is
- * translated (falling back to `fallback_item`); else a URL is web-translated;
- * else `fallback_item` is used as-is (a file then attaches to it); else a file
- * is recognized. Every result
+ * translated (falling back to `fallback_item`); else a URL is web-translated
+ * — or, when it is a PDF link, downloaded and recognized like an attached file
+ * (`pdfLinkImport`); else `fallback_item` is used as-is (a file then attaches
+ * to it); else a file is recognized. Every result
  * is normalized through `fromJSON`/`toJSON`.
  *
  * Work is bounded: per-kind concurrency, a per-item cap, and the caller's
@@ -29,7 +30,7 @@
  * (60 s), both in `write.ts`.
  */
 
-import { itemJsonPmid } from '@beaver/agent-core/types/itemImport';
+import { FALLBACK_WARNINGS, itemJsonPmid } from '@beaver/agent-core/types/itemImport';
 import type {
     ImportFileRef,
     ImportItemSpec,
@@ -42,7 +43,10 @@ import { findExistingItems, WEB_CONTENT_ITEM_TYPES } from './duplicates';
 import { normalizeItemJson } from './itemJson';
 import { locateImportFile, recognizeFile, type LocatedFile } from './recognizeFile';
 import { translateIdentifier } from './resolveIdentifier';
-import { translateUrl } from './resolveUrl';
+import { translateUrl, type UrlTranslation } from './resolveUrl';
+import { urlNamesPdf } from '@beaver/agent-core/identity/webPages';
+import { discardDownloadedFile } from '../pdfAttachmentFetch';
+import { downloadPdfLink, keepResolvedPdf, PDF_MIME } from './pdfLinkImport';
 
 export interface ResolveOptions {
     libraryID: number;
@@ -78,7 +82,8 @@ class Semaphore {
 function laneFor(spec: ImportItemSpec): Lane {
     if (spec.item) return 'metadata';
     if (spec.identifier) return 'identifier';
-    if (spec.url) return 'url';
+    // A PDF link is a file download, not a page load.
+    if (spec.url) return urlNamesPdf(spec.url) ? 'file' : 'url';
     if (spec.file) return 'file';
     return 'metadata';
 }
@@ -183,7 +188,10 @@ async function resolveOne(
     remainingMs: () => number,
 ): Promise<ResolvedItem> {
     const { libraryID } = options;
+    const started = Date.now();
     const budget = (cap: number) => Math.max(0, Math.min(cap, remainingMs()));
+    // What is left of this item's own cap, for a second attempt after a first one.
+    const itemBudget = (cap: number) => budget(cap - (Date.now() - started));
     if (remainingMs() <= 0) return failed(spec.key, 'timeout', 'The lookup ran out of time before this input was reached.');
 
     let located: LocatedFile | undefined;
@@ -209,22 +217,23 @@ async function resolveOne(
                 fillFromFallback(resolution.item, spec.fallback_item);
             }
         } else if (spec.fallback_item) {
-            warnings.push(`identifier lookup failed (${translation.message}); ${fallbackNote(spec)}`);
+            warnings.push(`${FALLBACK_WARNINGS.identifier} (${translation.message}); ${fallbackNote(spec)}`);
             resolution = normalized(spec.fallback_item, libraryID, fallbackMethod(spec), undefined, warnings);
         } else {
             return failed(spec.key, translation.code, translation.message, { file: fileRef });
         }
+    } else if (spec.url && urlNamesPdf(spec.url) && !located) {
+        // A link whose path names a PDF goes straight to the download.
+        resolution = await resolveFromPdfLink(spec, spec.url, libraryID, budget(PER_ITEM_MS.file), warnings, null);
     } else if (spec.url) {
         const translation = await translateUrl(spec.url, budget(PER_ITEM_MS.url));
-        if (translation.ok) {
-            resolution = normalized(translation.json, libraryID, 'web_translator', translation.translator, warnings);
-            if ('item' in resolution && resolution.item) {
-                resolution.attachment_urls = translation.attachments;
-                resolution.snapshot_url = located ? undefined : snapshotUrlFor(resolution.item, translation.pageUrl, translation.attachments);
-                fillFromFallback(resolution.item, spec.fallback_item);
-            }
+        if (!translation.ok && translation.code === 'file_download' && !located) {
+            // A repository link without `.pdf` (`…/bitstreams/<uuid>/content`) turned out to be a download.
+            resolution = await resolveFromPdfLink(spec, spec.url, libraryID, itemBudget(PER_ITEM_MS.file), warnings, translation.message);
+        } else if (translation.ok) {
+            resolution = fromPageTranslation(translation, spec, libraryID, warnings, !!located);
         } else if (spec.fallback_item) {
-            warnings.push(`page lookup failed (${translation.message}); ${fallbackNote(spec)}`);
+            warnings.push(`${FALLBACK_WARNINGS.page} (${translation.message}); ${fallbackNote(spec)}`);
             resolution = normalized(spec.fallback_item, libraryID, fallbackMethod(spec), undefined, warnings);
         } else {
             return failed(spec.key, translation.code, translation.message, { file: fileRef });
@@ -255,6 +264,94 @@ async function resolveOne(
         ...(fileRef ? { file: fileRef } : {}),
         ...(resolution.warnings.length ? { warnings: resolution.warnings } : {}),
     };
+}
+
+/**
+ * Resolve a PDF link like an attached file: download it, identify it with
+ * Zotero's recognizer, and keep the download for the write, which attaches it
+ * as the item's PDF. Not recognized: the fallback item (the search result),
+ * as a document with the downloaded PDF. The download failed: the fallback
+ * item alone. A link that names no PDF but serves a page is translated as
+ * one. `pageFailure`
+ * is why the link did not load as a page, when it was tried as one first.
+ */
+async function resolveFromPdfLink(
+    spec: ImportItemSpec,
+    url: string,
+    libraryID: number,
+    timeoutMs: number,
+    warnings: string[],
+    pageFailure: string | null,
+): Promise<Resolution | { error: { code: string; message: string } }> {
+    const deadline = Date.now() + timeoutMs;
+    const download = await downloadPdfLink(url, timeoutMs);
+    let failure: string;
+    if (download.ok) {
+        const located: LocatedFile = {
+            path: download.file.path,
+            filename: download.filename,
+            mimeType: PDF_MIME,
+            size: download.size,
+            ref: { filename: download.filename, mime_type: PDF_MIME, size: download.size },
+        };
+        let recognized: Resolution | { error: { code: string; message: string } };
+        try {
+            recognized = await resolveFromFile(spec, located, libraryID, Math.max(1, deadline - Date.now()), warnings);
+        } catch (error) {
+            await discardDownloadedFile(download.file);
+            throw error;
+        }
+        // Kept either way: the item's PDF candidate is this link.
+        keepResolvedPdf(url, download.file);
+        if ('item' in recognized && recognized.item) {
+            fillFromFallback(recognized.item, spec.fallback_item, recognized.recognizer_hints?.language);
+            // The link names the item, so the library check by URL finds it later.
+            if (!text(recognized.item.url)) recognized.item.url = url;
+            recognized.attachment_urls = [{ url, mime_type: PDF_MIME }];
+            return recognized;
+        }
+        failure = `${FALLBACK_WARNINGS.pdf} (${'error' in recognized ? recognized.error.message : 'no metadata'})`;
+    } else if (download.code === 'not_pdf' && pageFailure === null) {
+        // The path said PDF, but the server sent a page: translate it as one.
+        const translation = await translateUrl(url, Math.max(1, deadline - Date.now()));
+        if (translation.ok) return fromPageTranslation(translation, spec, libraryID, warnings, false);
+        failure = `${FALLBACK_WARNINGS.page} (${translation.message})`;
+    } else {
+        failure = `${FALLBACK_WARNINGS.pdf_download} (${download.message})`;
+    }
+    if (!spec.fallback_item) {
+        const message = download.ok ? `Zotero could not identify ${download.filename}.` : pageFailure ?? download.message;
+        return { error: { code: download.ok ? 'unrecognized_file' : download.code, message } };
+    }
+    warnings.push(`${failure}; ${fallbackNote(spec)}`);
+    // Without the file there is no evidence the link is a PDF (a page that
+    // fails to load looks the same): the record as it is.
+    if (!download.ok) return normalized(spec.fallback_item, libraryID, fallbackMethod(spec), undefined, warnings);
+    // The link is a PDF: the item is a document with that PDF attached, not a
+    // web page (a repository link's record says `webpage`).
+    const fallback = WEB_CONTENT_ITEM_TYPES.has(spec.fallback_item.itemType)
+        ? { ...spec.fallback_item, itemType: 'report' }
+        : spec.fallback_item;
+    const resolution = normalized(fallback, libraryID, fallbackMethod(spec), undefined, warnings);
+    if ('item' in resolution) resolution.attachment_urls = [{ url, mime_type: PDF_MIME }];
+    return resolution;
+}
+
+/** A page Zotero's translators described: its item, the files they found, and its snapshot. */
+function fromPageTranslation(
+    translation: Extract<UrlTranslation, { ok: true }>,
+    spec: ImportItemSpec,
+    libraryID: number,
+    warnings: string[],
+    hasFile: boolean,
+): Resolution | { error: { code: string; message: string } } {
+    const resolution = normalized(translation.json, libraryID, 'web_translator', translation.translator, warnings);
+    if ('item' in resolution && resolution.item) {
+        resolution.attachment_urls = translation.attachments;
+        resolution.snapshot_url = hasFile ? undefined : snapshotUrlFor(resolution.item, translation.pageUrl, translation.attachments);
+        fillFromFallback(resolution.item, spec.fallback_item);
+    }
+    return resolution;
 }
 
 async function resolveFromFile(

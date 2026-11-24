@@ -1,7 +1,9 @@
 import { useMemo } from 'react';
 import { useAtomValue } from 'jotai';
 import { citationByKeyAtom, pageLabelsByAttachmentIdAtom } from '@beaver/agent-core/citations/atoms';
-import { externalReferenceItemMappingAtom } from '@beaver/agent-core/citations/externalReferences';
+import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
+import { webPageId } from '@beaver/agent-core/citations/externalRecords';
+import { webPageDetails } from '@beaver/agent-core/types/externalReferences';
 import {
     Citation,
     getCitationPages,
@@ -23,6 +25,23 @@ import { formatCitedPages, hasPageLabels, resolvePageLabelFromLabels, type PageL
 import { explicitPageLabel } from '../utils/locationDisplay';
 import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { getHost } from '../host';
+
+/** A cited web page, as the citation shows and opens it. */
+export interface CitationWebPage {
+    /** Canonical `web-<KEY>` id. */
+    webId: string;
+    /** The page's URL; null when this conversation has no record of the page. */
+    url: string | null;
+    /** A PDF: browsers ignore text fragments in it. */
+    isPdf: boolean;
+    title: string | null;
+    /** Publisher name or site, e.g. "World Health Organization", "who.int". */
+    site: string | null;
+    /** Date the cited copy was fetched (YYYY-MM-DD). */
+    retrieved: string | null;
+    /** The citation names only search-highlight sentences (no retrieval date). */
+    searchExcerpt: boolean;
+}
 
 /**
  * Citation display state - explicit FSM for citation lifecycle.
@@ -161,6 +180,8 @@ export interface CitationViewModel {
     isExternalFile: boolean;
     externalFileKey: string | null;
     externalSourceId?: string;
+    /** Set for a web page citation (`web-` id). */
+    webPage: CitationWebPage | null;
     /** Resolved Zotero identity (0 / '' when not a Zotero citation). */
     libraryID: number;
     itemKey: string;
@@ -216,6 +237,7 @@ export function useCitationViewModel(props: Record<string, unknown>): CitationVi
 
     const citationDataByCitationKey = useAtomValue(citationByKeyAtom);
     const externalReferenceToZoteroItem = useAtomValue(externalReferenceItemMappingAtom);
+    const externalReferences = useAtomValue(externalReferenceMappingAtom);
     const labelsByAttachmentId = useAtomValue(pageLabelsByAttachmentIdAtom);
 
     // Whether page locators should render using the PDF's page labels (e.g.,
@@ -325,6 +347,26 @@ export function useCitationViewModel(props: Record<string, unknown>): CitationVi
     const mappedZoteroItem = isExternal && externalSourceId
         ? externalReferenceToZoteroItem[externalSourceId]
         : undefined;
+
+    // A web page (`web-` id): where the page lives and which copy was cited,
+    // from the thread's record of the page and the citation itself.
+    const webPage = useMemo((): CitationWebPage | null => {
+        const webId = isExternal ? webPageId(externalSourceId) : null;
+        if (!webId) return null;
+        const record = externalReferences[webId] ?? (externalSourceId ? externalReferences[externalSourceId] : undefined);
+        const details = webPageDetails(record);
+        const locations = metadata?.locations ?? [];
+        return {
+            webId,
+            url: record?.url || null,
+            isPdf: details?.content_type === 'pdf',
+            title: record?.title || null,
+            site: details?.site_name || details?.site || null,
+            retrieved: metadata?.retrieved || null,
+            // Cites only sentences of search highlights (h ids), whose age is unknown.
+            searchExcerpt: locations.length > 0 && locations.every((location) => /^h\d/.test(location.part_id)),
+        };
+    }, [isExternal, externalSourceId, externalReferences, metadata]);
 
     // Compute effective libraryID and itemKey (accounting for mapped external citations).
     const effectiveLibraryID = libraryID || mappedZoteroItem?.library_id || 0;
@@ -455,6 +497,7 @@ export function useCitationViewModel(props: Record<string, unknown>): CitationVi
         isExternalFile,
         externalFileKey,
         externalSourceId,
+        webPage,
         libraryID,
         itemKey,
         mappedZoteroItem,

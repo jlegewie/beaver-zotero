@@ -3,7 +3,7 @@ import { ToolCallPart } from '../agents/types';
 import { getToolBaseLabel, parseArgs } from './toolCallRequest';
 import { textAnnotationStyle } from '../types/agentActions/createAnnotations';
 import { isExternalReferenceListView, isItemRow, openAlexFilterName, relatedWorksViewInfo, searchViewInfo, type ToolResultView } from './toolResultViews';
-import { authorLastNames, type ExternalReference } from '../types/externalReferences';
+import { authorLastNames, webPageDetails, type ExternalReference } from '../types/externalReferences';
 import { LISTABLE_SPECIAL_COLLECTION_NAMES } from '../protocol/agentProtocol';
 
 // The request-side reference extraction lives in `toolCallRequest`; re-exported
@@ -50,6 +50,7 @@ const CAPABILITY_LABELS: Record<string, string> = {
     openalex: 'Literature Search',
     pubmed_search: 'PubMed Search',
     clinical_trials: 'Clinical Trials',
+    web_search: 'Web Search',
 };
 
 function humanizeCapabilityId(id: string): string {
@@ -105,6 +106,13 @@ export function getViewDisplayName(
     if (SINGLE_ITEM_NAME_TOOLS.has(toolName) && view.view_type === 'item_list') {
         const row = view.items[0];
         return row && isItemRow(row) ? (row.display_name ?? null) : null;
+    }
+    if (toolName === 'read' && isExternalReferenceListView(view)) {
+        // A web page read: the backend serves the page, so the view carries its record.
+        const page = view.references[0];
+        if (!page) return null;
+        const details = webPageDetails(page);
+        return details?.site_name || details?.site || page.title || null;
     }
     if (ANNOTATION_NAME_TOOLS.has(toolName) && view.view_type === 'annotation_list') {
         // Scoped (single distinct source) → that source name; unscoped
@@ -322,6 +330,7 @@ const ARG_LABELED_SEARCH_TOOLS = new Set([
     'openalex_resolve_names',
     'pubmed_search',
     'trials_search',
+    'web_search',
 ]);
 
 /** Search tools whose calls in older threads carry a model-written `search_label`. */
@@ -399,6 +408,7 @@ export function toolCallSearchText(part: ToolCallPart, view?: ToolResultView | n
             return TRIAL_TERM_KEYS.map((key) => text(args[key])).filter(Boolean).join(' · ') || null;
         case 'pubmed_search':
         case 'external_search':
+        case 'web_search':
             return text(args.query) || null;
         case 'openalex_search_by_topic':
         case 'openalex_search_by_keywords':
@@ -763,8 +773,10 @@ function computeMainLabel(
             }
 
             // The completed view's actual locator wins over the requested range;
-            // the locator is shown only alongside a resolved item name.
-            const locator = viewLocator ?? argRange;
+            // the locator is shown only alongside a resolved item name. A web
+            // page's pages are synthetic, like a snapshot's: no locator.
+            const webPage = !!view && isExternalReferenceListView(view);
+            const locator = webPage ? '' : viewLocator ?? argRange;
             if (resolvedName) {
                 return locator ? `${baseLabel}: ${resolvedName}, ${locator}` : `${baseLabel}: ${resolvedName}`;
             }
@@ -865,6 +877,7 @@ function computeMainLabel(
         case 'search_trials':
         case 'trials_search':
         case 'external_search':
+        case 'web_search':
         case 'openalex_search_by_topic':
         case 'openalex_search_by_keywords': {
             // Not cut here: the header shortens it to its width, and copied text keeps it whole.

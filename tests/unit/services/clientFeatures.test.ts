@@ -117,6 +117,8 @@ const VERSION_GATES: { feature: string; minVersion: string; op: Op }[] = [
 // search headers, combined snapshots) and import behavior (click-time
 // proposals, fill-only rules, ordered attachments) a build must implement; the
 // PubMed and trial capabilities are offered only to declaring clients.
+// web_pages is declaration-only because a build that predates it cannot open
+// `web-` links or citations, so web search is offered only to declaring clients.
 // tables is declaration-only because the client serves the table data and runs
 // fills itself; the backend never infers it from a version.
 // background_jobs is declaration-only because it commits the client to answering
@@ -156,6 +158,7 @@ const DECLARATION_ONLY_FEATURES = [
     'undelivered_action_ack',
     'parked_runs',
     'external_records',
+    'web_pages',
     'tables',
     'background_jobs',
 ];
@@ -319,7 +322,8 @@ describe('external records build gate', () => {
         expect(isExternalRecordsEnabled()).toBe(true);
     });
 
-    it('keeps external_records in the declared vocabulary this build implements', () => {
+    it('keeps external_records and web_pages in the declared vocabulary this build implements', () => {
         expect(ZOTERO_PLUGIN_FEATURES).toContain(CLIENT_FEATURES.EXTERNAL_RECORDS);
+        expect(ZOTERO_PLUGIN_FEATURES).toContain(CLIENT_FEATURES.WEB_PAGES);
     });
 });

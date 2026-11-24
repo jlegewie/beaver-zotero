@@ -3165,6 +3165,16 @@ export const CLIENT_FEATURES = {
      */
     EXTERNAL_RECORDS: 'external_records',
     /**
+     * Web pages from web search (`web-<KEY>` ids, `source: "exa"`): the client
+     * opens `web-` links and citations at the page's URL (with a text fragment
+     * for cited sentences), shows a web citation's cited sentences and
+     * retrieval date, renders `web_search` results, converts web citations and
+     * links in its own exports, matches library items by URL, and imports a
+     * PDF link by downloading and recognizing the file. Gates `web_search`,
+     * together with EXTERNAL_RECORDS.
+     */
+    WEB_PAGES: 'web_pages',
+    /**
      * `resolve_population` honors `any_conditions`: a second condition list,
      * ORed among itself and ANDed with `conditions`. Without it the backend
      * must not send the group — a handler that predates it drops the field and

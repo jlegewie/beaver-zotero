@@ -7,6 +7,7 @@
  * The Beaver agent is the primary agent that handles chat completions and tool execution.
  */
 
+import { webPageId } from '@beaver/agent-core/citations/externalRecords';
 import { logger } from '@beaver/agent-core/platform/logger';
 
 import {
@@ -48,7 +49,9 @@ export async function handleExternalReferenceCheckRequest(request: WSExternalRef
     const batchItems: BatchReferenceCheckItem[] = request.items.map(item => ({
         id: item.id,
         data: {
-            title: item.title,
+            // A web page matches by its URL or an identifier, never by title:
+            // pages share generic titles ("About us") with unrelated items.
+            title: webPageId(item.id) ? undefined : item.title,
             date: item.date,
             DOI: item.doi,
             ISBN: item.isbn,

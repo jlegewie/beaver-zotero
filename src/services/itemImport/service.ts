@@ -12,9 +12,12 @@
 import type { ImportItemSpec, ResolvedItem } from '@beaver/agent-core/types/itemImport';
 import { resolveImportItems, type ResolveOptions } from './resolve';
 import { probeAllZoteroApis, type ZoteroApiName, type ZoteroApiStatus } from './zoteroApis';
+import { ResolvedPdfStore } from './pdfLinkImport';
 
 export class ItemImportService {
     private disposed = false;
+    /** PDF links downloaded while resolving, waiting for their approved import. */
+    readonly resolvedPdfs = new ResolvedPdfStore();
 
     /** Resolve specs to item JSON without writing (same order as the input). */
     async resolve(specs: ImportItemSpec[], options: ResolveOptions): Promise<ResolvedItem[]> {
@@ -29,5 +32,7 @@ export class ItemImportService {
 
     dispose(): void {
         this.disposed = true;
+        // PDFs downloaded for imports that were never approved.
+        void this.resolvedPdfs.discardAll();
     }
 }

@@ -14,6 +14,7 @@ import {
 import Tooltip from '../primitives/Tooltip';
 import { externalReferenceMappingAtom, externalReferenceItemMappingAtom, formatExternalCitation } from '@beaver/agent-core/citations/externalReferences';
 import { ExternalReference } from '@beaver/agent-core/types/externalReferences';
+import { webPageId } from '@beaver/agent-core/citations/externalRecords';
 import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { getHost, type ResolvedItemDisplay } from '../host';
 import { useItemContextMenu } from './useItemContextMenu';
@@ -275,7 +276,7 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                                 {/* Right bottom section - formatted citation */}
                                 <div className="flex-1 px-2 text-sm font-color-secondary
                                                 min-w-0 overflow-hidden text-ellipsis">
-                                    {showAsExternal && externalRef
+                                    {showAsExternal && externalRef && !webPageId(externalRef.source_id)
                                         ? formatExternalCitation(externalRef)
                                         : table
                                         ? 'Research table'
@@ -291,6 +292,67 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
         </div>
     );
 };
+
+/**
+ * The keys a record names its work by: its DOI, an arXiv id as the DataCite
+ * DOI arXiv registers (version dropped), and its PMID — the same rules the
+ * backend uses to list a web page as its paper.
+ */
+export function workKeys(reference: ExternalReference | undefined): string[] {
+    const ids = reference?.identifiers;
+    if (!ids) return [];
+    const keys: string[] = [];
+    const doi = typeof ids.doi === 'string' ? ids.doi.trim().toLowerCase() : '';
+    if (doi) keys.push(doi);
+    const arxiv = typeof ids.arXivID === 'string'
+        ? ids.arXivID.trim().replace(/^arxiv:/i, '').replace(/v\d+$/i, '').toLowerCase()
+        : '';
+    if (arxiv) keys.push(`10.48550/arxiv.${arxiv}`);
+    const pmid = typeof ids.pmid === 'string' ? ids.pmid.trim() : '';
+    if (/^\d+$/.test(pmid)) keys.push(`pmid:${Number(pmid)}`);
+    return keys;
+}
+
+/**
+ * One entry per work: a web page whose record names a work (a DOI, an arXiv
+ * id or a PMID: a journal landing page, an arXiv page, a PDF link) merges into
+ * another cited external record of that work, or into an earlier web page of
+ * it. The backend lists such a page as the paper, so the two entries would
+ * show the same work. The entry kept shows the numeric markers of both, since
+ * each was cited under its own.
+ */
+export function mergeWebPagesByDoi(
+    citations: CitedSource[],
+    references: Record<string, ExternalReference>,
+): CitedSource[] {
+    const keysOf = (citation: CitedSource): string[] => {
+        const id = getExternalSourceId(citation);
+        return id ? workKeys(references[id]) : [];
+    };
+    const isWebPage = (citation: CitedSource) => !!webPageId(getExternalSourceId(citation));
+    const merged = citations.map((citation) => ({ ...citation }));
+    const keeperByKey = new Map<string, CitedSource>();
+    const claim = (citation: CitedSource, keys: string[]) => {
+        for (const key of keys) if (!keeperByKey.has(key)) keeperByKey.set(key, citation);
+    };
+    // Works first, so a page merges into the work even when the page was cited first.
+    for (const citation of merged) if (!isWebPage(citation)) claim(citation, keysOf(citation));
+    const dropped = new Set<CitedSource>();
+    for (const citation of merged) {
+        if (!isWebPage(citation)) continue;
+        const keys = keysOf(citation);
+        const keeper = keys.map((key) => keeperByKey.get(key)).find(Boolean);
+        if (!keeper) {
+            claim(citation, keys);
+            continue;
+        }
+        dropped.add(citation);
+        const markers = [keeper.numericCitation, citation.numericCitation].filter((marker): marker is string => !!marker);
+        const numbers = [...new Set(markers.join(', ').split(', '))].sort((a, b) => Number(a) - Number(b));
+        keeper.numericCitation = numbers.length ? numbers.join(', ') : null;
+    }
+    return merged.filter((citation) => !dropped.has(citation));
+}
 
 /**
  * Return the citation identity used for source-list actions and lookups.

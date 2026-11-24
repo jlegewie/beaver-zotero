@@ -47,6 +47,7 @@
     "./src/extract/document/snapshot/schema.ts",
     "./src/identity/libraryRef.ts",
     "./src/identity/itemLinks.ts",
+    "./src/identity/webPages.ts",
     "./src/identity/collectionActionData.ts",
     "./src/extract/types.ts",
     "./src/extract/schema.ts",

@@ -13,6 +13,7 @@ import {
     getExternalReferenceUrl,
 } from '@beaver/agent-core/citations/externalReferences';
 import { pageLabelsByAttachmentIdAtom, externalFileLocalPathsAtom } from '@beaver/agent-core/citations/atoms';
+import { textFragmentUrl, webCitationExport } from '@beaver/agent-core/identity/webPages';
 import { useCitationMarker } from './useCitationMarker';
 import { getHost } from '../host';
 import type { CitationExportRender, CitationReaderTarget } from '../host/types';
@@ -179,9 +180,19 @@ function activateCitationViewModel(
     readerTarget: CitationReaderTarget | undefined,
 ): void {
     if (!vm.metadata || vm.isStreaming || vm.isInvalid) return;
+    const intent = flags.canRevealItem && alternate ? 'item' : 'passage';
+    // A web page opens in the browser at the cited sentences. They are
+    // sentences of Beaver's copy of the page, never a Zotero snapshot's, so a
+    // reader never opens; the alternate click reveals an imported page.
+    const page = vm.webPage;
+    if (page?.url && intent === 'passage') {
+        const sentences = (vm.metadata.locations ?? []).map((location) => ({ partId: location.part_id, text: location.text }));
+        getHost().navigation?.openExternalUrl(textFragmentUrl(page.url, sentences, { isPdf: page.isPdf }));
+        return;
+    }
     void getHost().navigation?.activateCitation({
         metadata: vm.metadata,
-        intent: flags.canRevealItem && alternate ? 'item' : 'passage',
+        intent,
         ...(readerTarget ? { readerTarget } : {}),
         isExternal: vm.isExternal,
         isExternalFile: vm.isExternalFile,
@@ -257,6 +268,7 @@ const Citation: React.FC<CitationProps> = (props) => {
         itemKey,
         requestedRef,
         externalSourceId,
+        webPage,
         mappedZoteroItem,
         effectiveLibraryID,
         effectiveItemKey,
@@ -319,6 +331,22 @@ const Citation: React.FC<CitationProps> = (props) => {
     // Rendering for export to Zotero note (using CSL JSON for citations)
     if (exportRendering) {
         displayText = authorYearFormat ? ` (${displayText})` : ` [${displayText}]`;
+
+        // A web page, in the library or not: a link to the page with its title
+        // and site. Its sentences are Beaver's copy of the page, not a Zotero item's.
+        const exportedPage = webPage && externalSourceId
+            ? webCitationExport(externalReferenceMap[webPage.webId] ?? externalReferenceMap[externalSourceId])
+            : null;
+        if (exportedPage) {
+            return (
+                <span>
+                    (
+                    <a href={exportedPage.url} target="_blank" rel="noopener noreferrer">{exportedPage.title}</a>
+                    {exportedPage.site ? `, ${exportedPage.site}` : ''}
+                    )
+                </span>
+            );
+        }
 
         // External works not in the library: a host-native citation when the
         // host can build one, otherwise a link to the work.
@@ -505,11 +533,38 @@ const Citation: React.FC<CitationProps> = (props) => {
                 </>
             ) : (
                 <>
+                {webPage && (webPage.title || webPage.site) && (
+                    <span className="px-3 py-15 block border-bottom-quinary">
+                        {webPage.title && (
+                            <span className="font-color-primary text-sm block" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
+                                {webPage.title}
+                            </span>
+                        )}
+                        <span className="font-color-secondary text-xs block" style={{ wordBreak: 'break-word' }}>
+                            {[
+                                webPage.site,
+                                webPage.searchExcerpt ? 'Search excerpt' : webPage.retrieved ? `Retrieved ${webPage.retrieved}` : '',
+                            ].filter(Boolean).join(' · ')}
+                        </span>
+                    </span>
+                )}
                 {showPreviewText && (
                     <span className="font-color-secondary text-sm px-3 py-15 block" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>
                         {previewText}
                     </span>
                 )}
+                {webPage ? (
+                    webPage.url && (
+                        <span className={`px-3 py-15 block ${showPreviewText ? 'border-top-quinary' : ''}`}>
+                            <span className="display-flex flex-row items-center gap-15">
+                                <Icon icon={ExternalLinkIcon} className="font-color-secondary scale-90" style={{ flexShrink: 0 }} />
+                                <span className="text-sm font-color-secondary" style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={webPage.url}>
+                                    {webPage.url.replace(/^https?:\/\//i, '')}
+                                </span>
+                            </span>
+                        </span>
+                    )
+                ) : (<>
                 {isExternal && !mappedZoteroItem && (
                     <span className={`px-3 py-15 block ${showPreviewText ? 'border-top-quinary' : ''}`}>
                         <span className="display-flex flex-row items-center gap-15">
@@ -594,6 +649,7 @@ const Citation: React.FC<CitationProps> = (props) => {
                         </span>
                     </span>
                 )}
+                </>)}
                 </>
             )}
         </span>

@@ -6,7 +6,7 @@
  * Execution model:
  *   Phase 1 — Identifier match (DOI + ISBN) in a single SQL pass each, then
  *             record identifiers (PubMed id in Extra, trial registry URL or
- *             report number) for what is still unmatched.
+ *             report number, the record's page URL) for what is still unmatched.
  *   Phase 2 — Title match for items not already matched by Phase 1:
  *     2a. Exact-value title fast path: BINARY equality against
  *         itemDataValues.value. Catches most titles that match byte-for-byte
@@ -29,6 +29,7 @@ import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { FindReferenceData } from '../../react/utils/findExistingReference';
 import { libraryRefForLibraryID } from './libraryIdentity';
 import { nctFromExternalId } from '@beaver/agent-core/citations/externalRecords';
+import { findItemsByUrl } from './findItemsByUrl';
 
 /**
  * Lightweight representation of a title-matched candidate from Zotero DB.
@@ -353,9 +354,10 @@ function addMatch(
 
 /**
  * Match references by the identifiers records carry beyond DOI and ISBN:
- * a PubMed id (a `PMID: <id>` line in Extra) and a trial registration (an
+ * a PubMed id (a `PMID: <id>` line in Extra), a trial registration (an
  * item whose URL is the trial's registry page, or a report numbered with the
- * NCT id by institution "clinicaltrials.gov"). Any item type matches.
+ * NCT id by institution "clinicaltrials.gov"), and the page a record's URL
+ * names (`findItemsByUrl`: a regular item storing the same normalized URL).
  */
 export async function batchFindByRecordIdentifiers(
     items: BatchReferenceCheckItem[],
@@ -490,6 +492,16 @@ export async function batchFindByRecordIdentifiers(
             });
         } catch (error) {
             logger(`batchFindByRecordIdentifiers: report number query failed: ${error}`, 1);
+        }
+    }
+
+    // Any other record URL (a web page, a landing page) names the item that stores the same page.
+    const pages = items
+        .filter((item) => !results.has(item.id) && item.data.url && !trialIdOf(item.data))
+        .map((item) => ({ id: item.id, url: item.data.url! }));
+    if (pages.length) {
+        for (const [id, match] of await findItemsByUrl(pages, libraryIds)) {
+            if (!results.has(id)) results.set(id, match);
         }
     }
 

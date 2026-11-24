@@ -54,7 +54,9 @@ describe('source labels and presentation', () => {
         expect(externalRecordPresentation('pubmed')).toBe('pubmed');
         expect(externalRecordPresentation('clinicaltrials', trial())).toBe('trial');
         expect(externalRecordPresentation('openalex')).toBe('generic');
-        expect(externalRecordPresentation('eric', ref({ details: { kind: 'webpage', site: 'x' } }))).toBe('generic');
+        expect(externalRecordPresentation('eric', ref({ details: { kind: 'future', site: 'x' } }))).toBe('generic');
+        // Web pages have their own row, whichever view lists them.
+        expect(externalRecordPresentation('eric', ref({ details: { kind: 'webpage', site: 'x' } }))).toBe('webpage');
     });
 
     it('falls back to the generic card for a trial record without trial details', () => {

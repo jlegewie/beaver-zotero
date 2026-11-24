@@ -1,6 +1,7 @@
 import { ID_PREFIXES } from '../extract/schema';
 import { parseExtractId, parseExtractIdValue, type ExtractIdScheme } from '../extract/ids';
 import { resolveObjectIdReference } from '../identity/libraryRef';
+import { webPageId } from './externalRecords';
 import type { ZoteroItemReference } from '../types/zotero';
 
 /**
@@ -43,6 +44,8 @@ export type LocatorKind =
     /** A research table's cell (`cell:<row>/<column>`) or row (`row:<row>`). */
     | 'cell'
     | 'row'
+    /** A sentence of a web search highlight (`h3`), cited on a `web-` page. */
+    | 'highlight'
     | 'unknown';
 
 export interface Locator {
@@ -119,6 +122,7 @@ const LOC_PREFIXES: Array<{ prefix: string; kind: LocatorKind; numericOnly?: boo
     { prefix: 'eq', kind: 'equation', numericOnly: true },
     { prefix: 'p', kind: 'paragraph', numericOnly: true },
     { prefix: 's', kind: 'sentence', numericOnly: true },
+    { prefix: 'h', kind: 'highlight', numericOnly: true },
 ];
 
 const CITATION_INDEX_PREFIXES: Partial<Record<LocatorKind, string>> = {
@@ -422,6 +426,15 @@ export function normalizeCitationTag(rawAttrs: Record<string, string>): Normaliz
                 ref: { kind: 'external_file', ext_key: extKey, ...(loc ? { loc } : {}) },
             };
         }
+        // Web pages are documents cited with id= (`web-<KEY>`), like ext- files.
+        const webId = webPageId(rawIdentity);
+        if (webId) {
+            return {
+                ok: true,
+                rawAttrs,
+                ref: { kind: 'external', external_id: webId, ...(loc ? { loc } : {}) },
+            };
+        }
         const parsed = parseZoteroId(zoteroIdentity.value);
         if (!parsed) {
             return {
@@ -450,7 +463,7 @@ export function normalizeCitationTag(rawAttrs: Record<string, string>): Normaliz
         return {
             ok: true,
             rawAttrs,
-            ref: { kind: 'external', external_id: rawIdentity, ...(loc ? { loc } : {}) },
+            ref: { kind: 'external', external_id: webPageId(rawIdentity) ?? rawIdentity, ...(loc ? { loc } : {}) },
         };
     }
 

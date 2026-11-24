@@ -18,7 +18,7 @@ import { extractSchemaVersionsDeclaration } from './documentExtraction/shared/ex
  * release opt-in. Withholding the declaration is the whole gate: the backend
  * offers the matching capabilities only to a client that declares them.
  */
-const WITHHELD_FEATURES: string[] = isExternalRecordsEnabled() ? [] : [CLIENT_FEATURES.EXTERNAL_RECORDS];
+const WITHHELD_FEATURES: string[] = isExternalRecordsEnabled() ? [] : [CLIENT_FEATURES.EXTERNAL_RECORDS, CLIENT_FEATURES.WEB_PAGES];
 
 function resolveZoteroClientIdentity(): ClientIdentity {
     const clientFeatures = ZOTERO_PLUGIN_FEATURES.filter((feature) => !WITHHELD_FEATURES.includes(feature));

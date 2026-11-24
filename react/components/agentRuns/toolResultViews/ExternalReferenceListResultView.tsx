@@ -22,6 +22,7 @@ import type { SearchDetailsDisclosure } from '../ToolResultView';
 import ExternalReferenceListItem from '../../externalReferences/ExternalReferenceListItem';
 import PubMedReferenceListItem from '../../externalReferences/PubMedReferenceListItem';
 import TrialReferenceListItem from '../../externalReferences/TrialReferenceListItem';
+import WebPageListItem from '../../externalReferences/WebPageListItem';
 
 /** Compact citation-style label for a work: "Vaswani et al. (2017)". */
 function workShortLabel(work: ExternalReference): string {
@@ -340,6 +341,9 @@ export const ExternalReferenceListResultView: React.FC<{
                         break;
                     case 'trial':
                         row = <TrialReferenceListItem {...rowProps} />;
+                        break;
+                    case 'webpage':
+                        row = <WebPageListItem {...rowProps} highlights={item.source_id ? searchInfo?.highlights?.[item.source_id] : null} />;
                         break;
                     default:
                         row = <ExternalReferenceListItem {...rowProps} />;

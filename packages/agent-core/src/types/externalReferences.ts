@@ -108,13 +108,25 @@ export interface TrialDetails {
     data_as_of?: string | null;
 }
 
+/** Native fields of a web page found by web search (`source: "exa"`, id `web-…`). */
+export interface WebPageDetails {
+    kind: "webpage";
+    /** Registrable domain, e.g. "who.int". */
+    site?: string | null;
+    /** Publisher name, e.g. "World Health Organization", when known. */
+    site_name?: string | null;
+    content_type?: "html" | "pdf" | null;
+    /** Favicon URL. */
+    favicon?: string | null;
+}
+
 /** Details of a kind this client does not know; kept verbatim and never rendered. */
 export interface UnknownDetails {
     kind?: string | null;
     [field: string]: unknown;
 }
 
-export type ExternalReferenceDetails = WorkDetails | TrialDetails | UnknownDetails;
+export type ExternalReferenceDetails = WorkDetails | TrialDetails | WebPageDetails | UnknownDetails;
 
 /** `details` as work details, or null for any other (or unknown) kind. */
 export function workDetails(ref: Pick<ExternalReference, "details"> | null | undefined): WorkDetails | null {
@@ -126,6 +138,12 @@ export function workDetails(ref: Pick<ExternalReference, "details"> | null | und
 export function trialDetails(ref: Pick<ExternalReference, "details"> | null | undefined): TrialDetails | null {
     const details = ref?.details;
     return details && typeof details === "object" && details.kind === "trial" ? details as TrialDetails : null;
+}
+
+/** `details` as web page details, or null for any other (or unknown) kind. */
+export function webPageDetails(ref: Pick<ExternalReference, "details"> | null | undefined): WebPageDetails | null {
+    const details = ref?.details;
+    return details && typeof details === "object" && details.kind === "webpage" ? details as WebPageDetails : null;
 }
 
 export interface ExternalReference {
@@ -141,7 +159,7 @@ export interface ExternalReference {
      * "openlibrary", "crossref", ... An open string: unknown values are valid.
      */
     source: string;
-    /** Global external id: W…, pmid:N, NCT…, openlibrary:…, isbn:…, doi:…. */
+    /** Global external id: W…, pmid:N, NCT…, openlibrary:…, isbn:…, doi:…, web-…. */
     source_id?: string;
     /** When `source` returned this data (ISO timestamp); absent on older records. */
     retrieved_at?: string | null;
