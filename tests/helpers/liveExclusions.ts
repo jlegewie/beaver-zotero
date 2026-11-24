@@ -10,14 +10,17 @@
  * tests, or note tests failing because the user library is excluded.
  *
  * These helpers clear the set for the duration of a run and put it back
- * afterwards. Writes go through `/beaver/test/excluded-libraries`, which mutates
- * the in-memory profile only — nothing is persisted to the backend, so a run
- * that dies before teardown is undone by restarting Zotero.
+ * afterwards. Writes go through `/beaver/test/excluded-libraries`, which sets an
+ * in-memory override that profile reads keep until teardown drops it — nothing
+ * is persisted to the backend, so a run that dies before teardown is undone by
+ * restarting Zotero. The override must outlast profile reads: clearing the set
+ * lets background lanes send the excluded library to the backend, which answers
+ * `library_excluded` and makes the instance reload the saved profile.
  */
 
 import {
     getExcludedLibraries,
-    restoreExcludedLibraries,
+    resetExcludedLibraries,
     setExcludedLibraries,
     type ExcludedLibraryEntry,
 } from './cacheInspector';
@@ -55,14 +58,23 @@ export async function clearExclusions(): Promise<ExclusionSnapshot> {
     return original;
 }
 
-/** Put back a set captured by `clearExclusions()`. Safe to call with null. */
-export async function restoreExclusions(snapshot: ExclusionSnapshot): Promise<void> {
-    if (!snapshot) return;
+/**
+ * End the run's override, so the instance goes back to the saved set. Done even
+ * when `clearExclusions()` changed nothing: a suite may have left an override.
+ */
+export async function restoreExclusions(): Promise<void> {
+    if (!(await isZoteroAvailable())) return;
     try {
-        await restoreExcludedLibraries(snapshot);
-    } catch {
-        // Best effort: the set is in-memory only, so a failure here is undone
-        // by the next Zotero restart rather than corrupting anything.
+        const reset = await resetExcludedLibraries();
+        if (!reset?.ok) throw new Error(reset?.error ?? 'unknown error');
+    } catch (error) {
+        // Without a confirmed reset the run's override may still be in place,
+        // and it outlasts profile reads.
+        console.warn(
+            `\n[live-teardown] Could not reset the excluded-libraries override: ${error}.\n`
+            + `            The run's set may still be active. Retry with POST `
+            + `/beaver/test/excluded-libraries {"action":"reset"}, or restart Zotero.\n`,
+        );
     }
 }
 

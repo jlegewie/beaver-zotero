@@ -172,7 +172,7 @@ import {
 import type { CreateItemResultData } from '@beaver/agent-core/types/agentActions/items';
 import { appendRunIfMissing, continuationOfferFor, findResumeChainRoot, findRunForResume, hasOnlyThinkingParts, lingeringCompletedRun, resolveErrorRunId, toRunError } from '@beaver/agent-core/run-state/runResumeHelpers';
 import { prewarmMuPDFWorker } from '../../src/beaver-extract';
-import { getRunSession, type RunSession } from './runSession';
+import { getRunSession, type RetryCommit, type RunSession } from './runSession';
 import type { UndoConfirmResult } from './runHost';
 
 // =============================================================================
@@ -462,6 +462,45 @@ function abandonReplacementIfThreadChanged(
 }
 
 /**
+ * Open the span in which a retry commits its removal.
+ *
+ * Once the truncate request is sent, the server may delete the replaced runs
+ * whatever this client does next, so a Stop can no longer cancel the retry:
+ * abandoning it there would leave the removed runs on screen and the prompt
+ * that replaces them nowhere. A Stop in this span is held instead, and
+ * `settleRetryCommit` applies it to the replacement run, which then ends as a
+ * stopped message the user can retry or edit. A removal the server refuses
+ * or never confirms ends the retry as usual, and the held Stop with it.
+ */
+function beginRetryCommit(session: RunSession, runId: string): RetryCommit {
+    const commit: RetryCommit = { runId, stopRequested: false };
+    session.retryCommit = commit;
+    return commit;
+}
+
+function endRetryCommit(session: RunSession, commit: RetryCommit | undefined): void {
+    if (commit && session.retryCommit === commit) session.retryCommit = null;
+}
+
+/**
+ * Close the commit span once the replacement run is the active run, and apply
+ * a Stop held during it. The replacement has not connected yet, so stopping it
+ * is local only. Returns true when the replacement was stopped and must not be
+ * sent.
+ */
+function settleRetryCommit(
+    session: RunSession,
+    set: Setter,
+    commit: RetryCommit | undefined,
+): boolean {
+    endRetryCommit(session, commit);
+    if (!commit?.stopRequested) return false;
+    logger(`Retry of run ${commit.runId}: applying the Stop held while its removal committed`, 1);
+    set(abandonActiveRunLocallyAtom);
+    return true;
+}
+
+/**
  * Create the initial AgentRun shell when user presses send.
  * This happens BEFORE WebSocket connection.
  */
@@ -705,6 +744,7 @@ async function startAutoRetryRunOwned(
     if (retryCommitInFlight(get, logPrefix)) return;
 
     let newRunId: string | null = null;
+    let commit: RetryCommit | undefined;
 
     try {
         // Which chat this replacement belongs to, captured before every await
@@ -802,6 +842,7 @@ async function startAutoRetryRunOwned(
                     .filter(run => !persistedRunIds || persistedRunIds.has(run.id));
                 const expectedTailRunId = survivingRuns.at(-1)?.id ?? null;
                 const persistedRemovals = runIdsToRemove.filter(id => !persistedRunIds || persistedRunIds.has(id));
+                commit = beginRetryCommit(session, failedRunId);
                 const outcome = persistedRemovals.length ? await truncateThreadOnServer(
                     threadId,
                     persistedRemovals,
@@ -848,7 +889,6 @@ async function startAutoRetryRunOwned(
         }
 
         set(prepareForNewRunAtom);
-        prewarmMuPDFWorker();
         set(isWSChatPendingAtom, true);
 
         const modelOptions = buildModelSelectionOptions(model);
@@ -869,6 +909,8 @@ async function startAutoRetryRunOwned(
         newRunId = newRun.id;
         set(activeRunAtom, newRun);
         set(retryPendingRunIdAtom, null);
+        if (settleRetryCommit(session, set, commit)) return;
+        prewarmMuPDFWorker();
 
         await executeWSRequest(session, newRun, request, get, set);
     } catch (error) {
@@ -883,6 +925,8 @@ async function startAutoRetryRunOwned(
         set(activeRunAtom, prev => (newRunId && prev?.id === newRunId ? null : prev));
         set(retryPendingRunIdAtom, prev => (prev === failedRunId ? null : prev));
         set(isWSChatPendingAtom, false);
+    } finally {
+        endRetryCommit(session, commit);
     }
 }
 
@@ -2471,6 +2515,7 @@ async function startRegenerateRunOwned(
     session.host.dismissDiffPreview();
 
     let newRunId: string | null = null;
+    let commit: RetryCommit | undefined;
 
     try {
         // Which chat this replacement belongs to. Must precede every await in
@@ -2713,6 +2758,7 @@ async function startRegenerateRunOwned(
         // run that died before the thread event).
         set(retryPendingRunIdAtom, runId);
         set(isWSChatPendingAtom, true);
+        commit = beginRetryCommit(session, runId);
         if (threadId) {
             // The run the client expects to survive as the thread's last —
             // the backend refuses when its survivor differs (rewritten by
@@ -2799,7 +2845,6 @@ async function startRegenerateRunOwned(
 
         // Reset WS state and set pending
         set(prepareForNewRunAtom);
-        prewarmMuPDFWorker();
         set(isWSChatPendingAtom, true);
 
         // Build model selection options
@@ -2829,6 +2874,8 @@ async function startRegenerateRunOwned(
         newRunId = newRun.id;
         set(activeRunAtom, newRun);
         set(retryPendingRunIdAtom, null);
+        if (settleRetryCommit(session, set, commit)) return;
+        prewarmMuPDFWorker();
 
         // Execute the WebSocket request
         await executeWSRequest(session, newRun, request, get, set);
@@ -2845,6 +2892,7 @@ async function startRegenerateRunOwned(
         set(retryPendingRunIdAtom, prev => (prev === runId ? null : prev));
         set(isWSChatPendingAtom, false);
     } finally {
+        endRetryCommit(session, commit);
         if (get(retryPendingRunIdAtom) === runId) {
             set(retryPendingRunIdAtom, null);
             set(isWSChatPendingAtom, false);
@@ -3036,6 +3084,15 @@ export const abandonActiveRunLocallyAtom = atom(null, (get, set) => {
  */
 export const closeWSConnectionAtom = atom(null, async (get, set) => {
     const session = getRunSession();
+    // A retry whose removal is committing cannot be called off any more; the
+    // Stop is applied to its replacement once that is in place (see
+    // `beginRetryCommit`).
+    const commit = session.retryCommit;
+    if (commit && get(retryPendingRunIdAtom) === commit.runId) {
+        commit.stopRequested = true;
+        logger(`closeWSConnectionAtom: retry of run ${commit.runId} is committing its removal; holding the Stop`, 1);
+        return;
+    }
     // A run stopped while it reconnects is stopped once the server has it
     // back. Until the server confirms, the chat waits for it.
     const activeRun = get(activeRunAtom);

@@ -11,12 +11,9 @@ import {
     clearExclusions,
     describeExclusions,
     restoreExclusions,
-    type ExclusionSnapshot,
 } from './liveExclusions';
 import { post } from './zoteroHttpClient';
 import { isZoteroAvailable } from './zoteroAvailability';
-
-let snapshot: ExclusionSnapshot = null;
 
 /**
  * Fail the run when a named instance isn't answering.
@@ -101,7 +98,7 @@ async function requireExpectedWindowCount(): Promise<void> {
 export async function setup(): Promise<void> {
     await requireNamedInstance();
     await requireExpectedWindowCount();
-    snapshot = await clearExclusions();
+    const snapshot = await clearExclusions();
     if (snapshot) {
         console.warn(
             `\n[live-setup] Temporarily re-enabled excluded libraries for this run: `
@@ -112,6 +109,5 @@ export async function setup(): Promise<void> {
 }
 
 export async function teardown(): Promise<void> {
-    await restoreExclusions(snapshot);
-    snapshot = null;
+    await restoreExclusions();
 }

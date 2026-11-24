@@ -24,6 +24,12 @@ import type { RunHost } from './runHost';
 
 type Store = ReturnType<typeof createStore>;
 
+/** A retry committing its removal, and whether the user pressed Stop meanwhile. */
+export interface RetryCommit {
+    runId: string;
+    stopRequested: boolean;
+}
+
 export class RunSession {
     /**
      * Measures how long the stream has been quiet. Every handler that
@@ -68,6 +74,13 @@ export class RunSession {
 
     /** Identifies the latest wait on a stop handoff, so an older one cannot end a newer. */
     cancelHandoffSeq = 0;
+
+    /**
+     * The retry whose removal is being committed, from the truncate request
+     * until its replacement run is in place. A Stop pressed in that span is
+     * held here and applied to the replacement.
+     */
+    retryCommit: RetryCommit | null = null;
 
     constructor(
         /** The store the session's run state is written to. */
