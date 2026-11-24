@@ -648,7 +648,8 @@ config = {
     "mcpServers": {
         "zotero-worktree": {
             "command": "npx",
-            "args": ["@introfini/mcp-server-zotero-dev"],
+            # Pinned so a new release never runs unreviewed; bump deliberately.
+            "args": ["-y", "@introfini/mcp-server-zotero-dev@1.1.5"],
             "env": {
                 "ZOTERO_RDP_PORT": rdp_port,
                 "ZOTERO_DATA_DIR": datadir,
