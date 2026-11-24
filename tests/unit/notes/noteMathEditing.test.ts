@@ -153,6 +153,44 @@ describe('legacy dollar-math anchors', () => {
         }
     });
 
+    it.each([
+        ['str_replace', 'Inline $x$ and display:', 'Inline $y$ and **display**:', `Inline ${inline('y')} and <strong>display</strong>:`],
+        ['str_replace_all', 'Inline $x$ and display:', 'Inline $y$ and __display__:', `Inline ${inline('y')} and <strong>display</strong>:`],
+        ['insert_after', 'Inline $x$ and display:', ' **more**', `Inline ${inline('x')} and display: <strong>more</strong>`],
+        ['insert_before', 'Inline $x$ and display:', '**Lead** ', `<strong>Lead</strong> Inline ${inline('x')} and display:`],
+    ] as const)('writes Markdown emphasis in new_string as HTML when a legacy anchor matches (%s)', (operation, anchor, replacement, expected) => {
+        const ctx = context(`<p>Inline ${inline('x')} and display:</p>`);
+        const { target, applied } = resolveAndExecute(ctx, edit(anchor, replacement, operation));
+        expect(target.strategy).toBe('legacy_math');
+        expect(applied.newStrippedHtml).toContain(expected);
+        expect(applied.newStrippedHtml).not.toMatch(/\*\*|__/);
+    });
+
+    it('leaves code in new_string as written when a legacy anchor matches', () => {
+        const ctx = context(`<p>Inline ${inline('x')} and display:</p>`);
+        const replacement = 'Inline $x$ and **display** with <code>__init__</code>, `**kwargs` and ``__a__``:';
+        const { applied } = resolveAndExecute(ctx, edit('Inline $x$ and display:', replacement));
+        expect(applied.newStrippedHtml).toContain(
+            `Inline ${inline('x')} and <strong>display</strong> with <code>__init__</code>, \`**kwargs\` and \`\`__a__\`\`:`,
+        );
+    });
+
+    it.each([
+        ['insert_after', 'Value $x$ **', 'text**', `Value ${inline('x')} **text**`],
+        ['insert_before', '** after $x$', '**text ', `**text ** after ${inline('x')}`],
+    ] as const)('keeps an insert anchor as written when a marker in it pairs with the inserted text (%s)', (operation, anchor, inserted, expected) => {
+        const ctx = context(`<p>${anchor.replace('$x$', inline('x'))}</p>`);
+        const { applied } = resolveAndExecute(ctx, edit(anchor, inserted, operation));
+        expect(applied.newStrippedHtml).toBe(`<div data-schema-version="9"><p>${expected}</p>\n</div>`);
+    });
+
+    it('keeps literal asterisks when the legacy anchor itself matched them as text', () => {
+        const ctx = context(`<p>Value ${inline('x')} **raw**</p>`);
+        const { target, applied } = resolveAndExecute(ctx, edit('Value $x$ **raw**', 'Value $y$ **raw**'));
+        expect(target.strategy).toBe('legacy_math');
+        expect(applied.newStrippedHtml).toContain(`Value ${inline('y')} **raw**`);
+    });
+
     it('keeps legacy math support after a literal exact match is unavailable', () => {
         const ctx = context(`<p>The value is ${inline('x')}.</p>`);
         const input: MatchInput = { ...ctx, oldString: 'The value is $x$.', newString: 'New value.', operation: 'str_replace' };
