@@ -88,6 +88,8 @@
       "no_input": 2,
       "credits": 0.0
     },
+    "rereads": null,
+    "trial_rows": null,
     "user_instructions_prefill": "",
     "timeout_seconds": 600.0
   },

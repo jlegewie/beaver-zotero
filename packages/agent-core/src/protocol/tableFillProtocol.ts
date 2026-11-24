@@ -145,6 +145,11 @@ export interface TableFillPlanSummary {
     prices: TableFillPricing;
     /** The table's pending work as planned. */
     pending: PendingWork;
+    /**
+     * Rows the plan reads again although they hold answers in other columns,
+     * for a question no row has answered yet (see `rereadRows`).
+     */
+    rereads: number;
     /** The balance when planned, from the account snapshot; null when unknown. */
     balance: number | null;
     /** Epoch ms after which the plan can no longer start. */
@@ -160,7 +165,9 @@ export type TableFillPlanError =
     | "invalid_column"
     | TableFillWriteRefusal
     | "pricing_unavailable"
-    | "signed_out";
+    | "signed_out"
+    /** A trial of a plan no longer kept (it expired, or ran). */
+    | "plan_not_found";
 
 export type TableFillPlanResult =
     | { ok: true; plan: TableFillPlanSummary }
@@ -300,6 +307,8 @@ export interface TableFillWirePlan {
     credits: number;
     prices: TableFillPricing;
     pending: PendingWork;
+    /** Rows read again although answered in other columns; see {@link TableFillPlanSummary.rereads}. */
+    rereads: number;
     balance: number | null;
     /** Epoch ms. */
     expires_at: number;

@@ -78,6 +78,7 @@ const plan: TableFillPlanSummary = {
     credits: 0.4,
     prices: { document: 0.2, title_abstract: 0.05 },
     pending: { rows: 2, cells: 2, new_rows: 2, columns: [], retry_rows: 0, blocked_rows: 0 },
+    rereads: 0,
     balance: 0.2,
     expires_at: Date.now() + 60_000,
 };
@@ -105,6 +106,7 @@ let root: Root;
 const fills = {
     plan: vi.fn(async () => ({ ok: true, plan })),
     start: vi.fn(async () => ({ ok: true, job: running })),
+    trial: vi.fn((): any => ({ ok: true, plan: { ...plan, plan_id: 'trial-1', scope: { kind: 'pending', limit: 5 }, rows: 5, documents: 5 } })),
     stop: vi.fn(() => true),
     dismiss: vi.fn(),
     jobForTable: vi.fn(() => null),
@@ -302,22 +304,20 @@ describe('the Fill menu and plans asked for elsewhere in the tab', () => {
         expect(fills.plan).toHaveBeenCalledWith(ref, { kind: 'cells', rows: ['b', 'c'] });
     });
 
-    it("starts the trial from a whole fill's plan without a second confirmation", async () => {
-        fills.plan
-            .mockResolvedValueOnce({ ok: true, plan: { ...plan, rows: 7, documents: 7 } })
-            .mockResolvedValueOnce({ ok: true, plan: { ...plan, plan_id: 'trial-1', scope: { kind: 'pending', limit: 5 }, rows: 5, documents: 5 } });
+    it("starts the first five rows of the plan shown, without a second confirmation", async () => {
+        fills.plan.mockResolvedValueOnce({ ok: true, plan: { ...plan, rows: 7, documents: 7 } });
         render(React.createElement(TableFillButton, { tableRef: ref, table: spec(rows), job: null, improvableRows: new Set<string>() }));
         await act(async () => buttonNamed('Fill 7 rows')!.click());
         await act(async () => buttonNamed('Try 5 first')!.click());
-        expect(fills.plan).toHaveBeenLastCalledWith(ref, { kind: 'pending', limit: 5 });
+        expect(fills.plan).toHaveBeenCalledTimes(1);
+        expect(fills.trial).toHaveBeenCalledWith('plan-1', 5);
         expect(fills.start).toHaveBeenCalledWith('trial-1');
         expect(container.querySelector('[role="dialog"]')).toBeNull();
     });
 
     it('keeps the whole plan with the reason when the trial cannot be planned', async () => {
-        fills.plan
-            .mockResolvedValueOnce({ ok: true, plan: { ...plan, rows: 7, documents: 7 } })
-            .mockResolvedValueOnce({ ok: false, message: 'The table changed.' } as any);
+        fills.plan.mockResolvedValueOnce({ ok: true, plan: { ...plan, rows: 7, documents: 7 } });
+        fills.trial.mockReturnValueOnce({ ok: false, message: 'The table changed.' });
         render(React.createElement(TableFillButton, { tableRef: ref, table: spec(rows), job: null, improvableRows: new Set<string>() }));
         await act(async () => buttonNamed('Fill 7 rows')!.click());
         await act(async () => buttonNamed('Try 5 first')!.click());
@@ -335,6 +335,47 @@ describe('the Fill menu and plans asked for elsewhere in the tab', () => {
         render(React.createElement(TableFillButton, { ref: handle, tableRef: ref, table: spec(rows), job: running, improvableRows: new Set<string>() }));
         await act(async () => handle.current!.openPlan({ kind: 'cells', columns: ['method'] }));
         expect(fills.plan).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe('the refill alert', () => {
+    const rows = ['a', 'b', 'c', 'd', 'e', 'f', 'g'].map((id) => row(id, { method: answered }));
+    const alert = () => container.querySelector('.bt-fill-refill');
+    const open = async (shown: Partial<TableFillPlanSummary>) => {
+        fills.plan.mockResolvedValueOnce({ ok: true, plan: { ...plan, rows: 7, documents: 7, credits: 1.4, ...shown } });
+        render(React.createElement(TableFillButton, { tableRef: ref, table: spec(rows), job: null, improvableRows: new Set<string>() }));
+        await act(async () => container.querySelector<HTMLButtonElement>('button.bt-fill-main')!.click());
+    };
+
+    it('says a changed column costs a whole fill, and puts the trial forward', async () => {
+        await open({ rereads: 7 });
+        expect(alert()?.textContent).toBe(
+            'Each paper is read again, so filling one column costs as much as filling all of them. Finish your column changes first, then try 5 rows to check the answers.',
+        );
+        expect(buttonNamed('Try 5 first')!.className).toContain('variant-outline');
+    });
+
+    it('leaves the trial out of the alert when the fill is too small for one', async () => {
+        await open({ rereads: 3, rows: 3, documents: 3 });
+        expect(alert()?.textContent).toBe(
+            'Each paper is read again, so filling one column costs as much as filling all of them. Finish your column changes first.',
+        );
+        expect(buttonNamed('Try 5 first')).toBeUndefined();
+    });
+
+    it('stays away from a fill that reads no answered paper again, and leaves the trial quiet', async () => {
+        await open({ rereads: 0 });
+        expect(alert()).toBeNull();
+        expect(buttonNamed('Try 5 first')!.className).toContain('variant-ghost-secondary');
+    });
+
+    it('stays away from a retry of failed rows and from a trial', async () => {
+        await open({ rereads: 2, scope: { kind: 'retry_failed' } });
+        expect(alert()).toBeNull();
+        act(() => root.unmount());
+        root = createRoot(container);
+        await open({ rereads: 5, rows: 5, scope: { kind: 'pending', limit: 5 } });
+        expect(alert()).toBeNull();
     });
 });
 

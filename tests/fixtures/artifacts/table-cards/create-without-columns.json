@@ -54,6 +54,8 @@
     "criteria": [],
     "columns": [],
     "cost": null,
+    "rereads": null,
+    "trial_rows": null,
     "user_instructions_prefill": "",
     "timeout_seconds": 600.0
   }

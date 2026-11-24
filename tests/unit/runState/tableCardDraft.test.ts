@@ -21,6 +21,7 @@ import {
     draftCost,
     fillScopeLine,
     tableFillCardResponse,
+    fillCardTrialRows,
     balanceNotice,
     columnProblem,
     costBreakdown,
@@ -689,6 +690,17 @@ describe('table card draft', () => {
             expect(fillScopeLine(request)).toBe('Fill 2 columns');
             expect(fillScopeLine({ ...request, columns: request.columns.slice(0, 1) })).toBe('Fill 1 column');
             expect(costReceipt(request.cost)).toEqual({ papers: '32 items', credits: '6.1 credits' });
+        });
+
+        it('approves only the trial the request offered with trial', () => {
+            const { request, reply } = fillFixture('fill-trial');
+            expect(fillCardTrialRows(request)).toBe(5);
+            expect(tableFillCardResponse(request, true)).toEqual(reply);
+            expect(tableFillCardResponse(request)).not.toHaveProperty('trial');
+            // No trial on offer, or none smaller than the fill: the approval fills the plan.
+            expect(fillCardTrialRows({ ...request, trial_rows: null })).toBeNull();
+            expect(tableFillCardResponse({ ...request, trial_rows: null }, true)).not.toHaveProperty('trial');
+            expect(fillCardTrialRows({ ...request, cost: { ...request.cost, rows: 5 } })).toBeNull();
         });
 
         it('declines with the instructions typed', () => {

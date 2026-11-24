@@ -92,21 +92,30 @@ export interface TableCardFillWarningsProps {
     prices: TableFillPricing | null;
     /** Rendered at the end of the card's scrolling content rather than in its footer. */
     inBody?: boolean;
+    /** A fill card's alert that the fill reads answered papers again (`refillNotice`). */
+    refill?: string | null;
 }
 
 /**
- * The bands for the two facts about a fill that change what the user does: a
- * balance that does not reach (with Add credits), and items without full
- * text. Renders nothing when neither applies.
+ * The bands for the facts about a fill that change what the user does: a
+ * fill that reads answered papers again (a fill card's `refill`), a balance
+ * that does not reach (with Add credits), and items without full text.
+ * Renders nothing when none applies.
  */
-export const TableCardFillWarnings: React.FC<TableCardFillWarningsProps> = ({ cost, prices, inBody = false }) => {
+export const TableCardFillWarnings: React.FC<TableCardFillWarningsProps> = ({ cost, prices, inBody = false, refill = null }) => {
     const balance = useCreditBalance();
     const accountBalance = useAccountCreditBalance();
     const balanceWarning = balanceNotice(cost, balance, prices, accountBalance ?? balance);
     const readWarning = costNotice(cost);
-    if (!balanceWarning && !readWarning) return null;
+    if (!refill && !balanceWarning && !readWarning) return null;
     const bands = (
         <>
+            {refill && (
+                <div className="table-card-footer-band table-card-footer-band-warning" role="note">
+                    <Icon icon={SecurityWarningIcon} className="table-card-warning-icon" />
+                    <span className="table-card-notice-text">{refill}</span>
+                </div>
+            )}
             {balanceWarning && (
                 <div className="table-card-footer-band table-card-footer-band-warning" role="alert">
                     <Icon icon={SecurityWarningIcon} className="table-card-warning-icon" />

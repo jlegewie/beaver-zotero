@@ -6467,7 +6467,8 @@
           "blocked_rows": 1
         },
         "balance": 12.5,
-        "expires_at": 1793530800000
+        "expires_at": 1793530800000,
+        "rereads": 2
       }
     }
   },
@@ -6532,7 +6533,8 @@
           "blocked_rows": 1
         },
         "balance": 12.5,
-        "expires_at": 1793530800000
+        "expires_at": 1793530800000,
+        "rereads": 0
       }
     }
   },
@@ -6555,6 +6557,81 @@
       "conflict": false,
       "error_code": "unknown_column",
       "error": "Column gone does not exist."
+    }
+  },
+  {
+    "name": "fill-plan-trial",
+    "request": {
+      "event": "artifact_request",
+      "request_id": "fill-plan-trial",
+      "op": "fill_plan",
+      "key": "u-ABCDEFGH",
+      "plan_id": "plan-1",
+      "limit": 5
+    },
+    "response": {
+      "type": "artifact_response",
+      "request_id": "fill-plan-trial",
+      "op": "fill_plan",
+      "ok": true,
+      "plan": {
+        "plan_id": "plan-1-trial",
+        "rows": 5,
+        "cells": 5,
+        "documents": 5,
+        "document_kinds": {
+          "pdf": 5
+        },
+        "title_abstract": 0,
+        "no_input": 0,
+        "unavailable": 0,
+        "columns": [
+          "design"
+        ],
+        "credits": 1.0,
+        "prices": {
+          "document": 0.2,
+          "title_abstract": 0.05
+        },
+        "pending": {
+          "rows": 26,
+          "cells": 26,
+          "new_rows": 0,
+          "columns": [
+            {
+              "id": "design",
+              "header": "Design",
+              "reason": "new",
+              "cells": 26
+            }
+          ],
+          "retry_rows": 0,
+          "blocked_rows": 0
+        },
+        "rereads": 5,
+        "balance": 12.5,
+        "expires_at": 1793530800000
+      }
+    }
+  },
+  {
+    "name": "fill-plan-trial-not-found",
+    "request": {
+      "event": "artifact_request",
+      "request_id": "fill-plan-trial-not-found",
+      "op": "fill_plan",
+      "key": "u-ABCDEFGH",
+      "plan_id": "plan-gone",
+      "limit": 5
+    },
+    "response": {
+      "type": "artifact_response",
+      "request_id": "fill-plan-trial-not-found",
+      "op": "fill_plan",
+      "ok": false,
+      "conflict": false,
+      "error_code": "plan_not_found",
+      "error": "This fill plan is no longer available."
     }
   },
   {

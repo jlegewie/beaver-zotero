@@ -123,6 +123,30 @@ export function pendingLines(
     return lines;
 }
 
+/**
+ * The alert on a fill that reads answered papers again for a new or changed
+ * question: a paper costs the same however many columns are filled. With a
+ * trial on offer (`trialRows`), it points to it. The cost stands beside it,
+ * so it names no number of credits.
+ */
+export function refillNotice(trialRows: number | null): string {
+    const head = "Each paper is read again, so filling one column costs as much as filling all of them.";
+    return trialRows
+        ? `${head} Finish your column changes first, then try ${trialRows} rows to check the answers.`
+        : `${head} Finish your column changes first.`;
+}
+
+/**
+ * Whether a plan shows {@link refillNotice}: it reads answered rows again
+ * for a new or changed question. Never on a trial, which is the advice, or
+ * on a retry of failed rows.
+ */
+export function showsRefillNotice(plan: Pick<TableFillPlanSummary, "scope" | "rereads">): boolean {
+    if (plan.scope.kind === "retry_failed") return false;
+    if (plan.scope.kind === "pending" && plan.scope.limit) return false;
+    return (plan.rereads ?? 0) > 0;
+}
+
 /** "Reads 46 papers: 43 from the PDF, 3 from title and abstract". */
 export function planRowLine(
     plan: Pick<

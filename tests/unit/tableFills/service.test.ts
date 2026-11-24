@@ -263,6 +263,63 @@ describe("the Fill menu's scopes", () => {
     });
 });
 
+describe("a trial of a plan", () => {
+    const answered = (id: string): Cell => ({ outcome: "answered", provenance: "model", value: { kind: "text", text: "x" }, documents: [`u-PDF${id}`] });
+    /** Rows answered in Method, with Design added since. */
+    const filled = (ids: string[]) => ids.map((id) => itemRow(id, { documents: [`u-PDF${id}`], cells: { method: answered(id) } }));
+
+    it("counts the answered rows a new column reads again, and none on a first fill", async () => {
+        const first = harness(["a", "b"].map((id) => itemRow(id)));
+        const fresh = await first.fills.plan(TARGET);
+        expect(fresh.ok && fresh.plan.rereads).toBe(0);
+        const { fills } = harness([...filled(["a", "b", "c"]), itemRow("d")]);
+        const planned = await fills.plan(TARGET);
+        expect(planned.ok && planned.plan).toMatchObject({ rows: 4, rereads: 3 });
+    });
+
+    it("counts the answered rows of a fill of named rows or of one column", async () => {
+        const { fills } = harness(filled(["a", "b", "c"]));
+        const planned = await fills.plan(TARGET, { kind: "cells", rows: ["a"], columns: ["design"] });
+        expect(planned.ok && planned.plan).toMatchObject({ rows: 1, rereads: 1 });
+        const column = await fills.plan(TARGET, { kind: "cells", columns: ["design"] });
+        expect(column.ok && column.plan).toMatchObject({ rows: 3, rereads: 3 });
+    });
+
+    it("does not count an answered row the fill cannot read: it is only marked", async () => {
+        const { state, fills } = harness(filled(["a", "b"]));
+        // Row b's item is in an excluded library: planned as unavailable, never read.
+        state.excluded.add("KBXXXXXX");
+        const planned = await fills.plan(TARGET);
+        expect(planned.ok && planned.plan).toMatchObject({ rows: 2, unavailable: 1, rereads: 1 });
+    });
+
+    it("plans the first rows of a kept plan at its prices, and starts only those", async () => {
+        const { state, fills } = harness(filled(["a", "b", "c", "d", "e", "f", "g"]));
+        const planned = await fills.plan(TARGET);
+        if (!planned.ok) throw new Error(planned.message);
+        expect(planned.plan).toMatchObject({ rows: 7, credits: 1.4, rereads: 7 });
+        const trial = fills.trial(planned.plan.plan_id, 5);
+        if (!trial.ok) throw new Error(trial.message);
+        expect(trial.plan).toMatchObject({ rows: 5, cells: 5, credits: 1, rereads: 5, scope: { kind: "pending", limit: 5 } });
+        expect(trial.plan.plan_id).not.toBe(planned.plan.plan_id);
+        expect(fills.plannedColumns(trial.plan.plan_id)).toEqual(["design"]);
+        const started = await fills.start(trial.plan.plan_id);
+        if (!started.ok) throw new Error(started.message);
+        await fills.wait(started.job.job_id);
+        expect(state.requests.map((r) => r.row_id)).toEqual(["a", "b", "c", "d", "e"]);
+        expect(state.table.rows[5].cells.design).toBeUndefined();
+    });
+
+    it("keeps an explicit selection's scope, and refuses a plan no longer kept", async () => {
+        const { fills } = harness(filled(["a", "b", "c", "d", "e", "f", "g"]));
+        const planned = await fills.plan(TARGET, { kind: "cells", columns: ["design"] });
+        if (!planned.ok) throw new Error(planned.message);
+        const trial = fills.trial(planned.plan.plan_id, 5);
+        expect(trial.ok && trial.plan).toMatchObject({ rows: 5, scope: { kind: "cells", columns: ["design"] } });
+        expect(fills.trial("gone", 5)).toMatchObject({ ok: false, code: "plan_not_found" });
+    });
+});
+
 describe("a fill", () => {
     it("writes each answer with the planned revision, question hash and documents, and charges per row", async () => {
         const { state, fills, deps } = harness([itemRow("a"), itemRow("b")]);
@@ -1088,6 +1145,20 @@ describe("a chat run's fill_plan and fill", () => {
         expect(wire).toMatchObject({ rows: 1, documents: 1, columns: ["method"], credits: 0.2, prices: { document: 0.2, title_abstract: 0.05 } });
         expect(wire).not.toHaveProperty("table");
         expect(wire).not.toHaveProperty("scope");
+    });
+
+    it("answers the trial of a plan it showed: its first rows, with the answered rows it reads again", async () => {
+        const cell = (id: string): Cell => ({ outcome: "answered", provenance: "model", value: { kind: "text", text: "x" }, documents: [`u-PDF${id}`] });
+        const rows = ["a", "b", "c", "d", "e", "f", "g"].map((id) => itemRow(id, { documents: [`u-PDF${id}`], cells: { method: cell(id) } }));
+        const { fills } = harness(rows);
+        const whole = await plan(fills);
+        expect(whole).toMatchObject({ rows: 7, rereads: 7 });
+        const trial = await plan(fills, { plan_id: whole.plan_id, limit: 5 });
+        expect(trial).toMatchObject({ rows: 5, credits: 1, columns: ["design"], rereads: 5 });
+        expect(trial.plan_id).not.toBe(whole.plan_id);
+        // A plan of another table is not one this table can try.
+        const other = await fills.agent.plan(request("fill_plan", { key: "u-TABLE002", plan_id: whole.plan_id, limit: 5 }), { libraryID: 1, key: "TABLE002" });
+        expect(other).toMatchObject({ ok: false, error_code: "plan_not_found" });
     });
 
     it("answers a refused plan with its code", async () => {

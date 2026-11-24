@@ -1305,6 +1305,7 @@ describe('TableCard', () => {
     });
 
     describe('the fill card', () => {
+        const controls = () => [...container.querySelectorAll('.table-card-controls button')].map((b) => b.textContent?.trim());
         function renderFill(
             request: WSTableFillCardRequest,
             props: { disabled?: boolean; heldCaption?: string; onStop?: () => void } = {},
@@ -1408,6 +1409,44 @@ describe('TableCard', () => {
             await click('Stop');
             expect(onStop).toHaveBeenCalled();
             expect(sent).toEqual([]);
+        });
+
+        it('says a changed column reads every paper again, and approves only the trial with Try 5 first', async () => {
+            const { request, reply } = read('fill-trial');
+            renderFill(request);
+            const bands = Array.from(container.querySelectorAll('.table-card-footer-band-warning')).map((band) => band.textContent);
+            expect(bands).toEqual([
+                'Each paper is read again, so filling one column costs as much as filling all of them. Finish your column changes first, then try 5 rows to check the answers.',
+            ]);
+            expect(controls()).toEqual(['Cancel', 'Try 5 first', 'Fill table']);
+            expect(button('Try 5 first')!.className).toContain('variant-outline');
+            await click('Try 5 first');
+            expect(sent).toEqual([reply]);
+            // One answer per card.
+            expect(button('Fill table')!.disabled).toBe(true);
+        });
+
+        it('fills the whole plan with Fill table when a trial is on offer', async () => {
+            const { request } = read('fill-trial');
+            renderFill(request);
+            await click('Fill table');
+            expect(sent).toEqual([{ type: 'table_card_response', card_id: request.card_id, approved: true, choice: 'fill' }]);
+        });
+
+        it('without a trial on offer, leaves it out of the alert and the controls', () => {
+            const { request } = read('fill-trial');
+            renderFill({ ...request, trial_rows: null });
+            expect(container.querySelector('.table-card-footer-band-warning')?.textContent).toBe(
+                'Each paper is read again, so filling one column costs as much as filling all of them. Finish your column changes first.',
+            );
+            expect(controls()).toEqual(['Cancel', 'Fill table']);
+        });
+
+        it('keeps the trial quiet, without the alert, on a fill that reads no answered paper again', () => {
+            const { request } = read('fill-trial');
+            renderFill({ ...request, rereads: 0 });
+            expect(container.querySelector('.table-card-footer-band-warning')).toBeNull();
+            expect(button('Try 5 first')!.className).toContain('variant-ghost-secondary');
         });
 
         it('declines with instructions from the cancel view', async () => {

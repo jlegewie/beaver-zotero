@@ -100,13 +100,20 @@ export class AgentTableFills {
         private readonly now: () => number = () => Date.now(),
     ) {}
 
-    /** `fill_plan`: a plan for the table, kept by the service under its id. */
+    /**
+     * `fill_plan`: a plan for the table, kept by the service under its id.
+     * With `plan_id` and `limit`, the trial of that plan: its first `limit`
+     * rows (the fill card's "Try 5 first").
+     */
     async plan(request: ArtifactRequest, target: TableFillTarget): Promise<ArtifactResponse> {
         const scope: TableFillScope =
             request.rows || request.columns
                 ? { kind: 'cells', ...(request.rows ? { rows: request.rows } : {}), ...(request.columns ? { columns: request.columns as string[] } : {}) }
                 : { kind: 'pending' };
-        const result = await this.fills.plan(target, scope);
+        const result =
+            request.plan_id && request.limit
+                ? this.fills.trial(request.plan_id, request.limit, target)
+                : await this.fills.plan(target, scope);
         if (!result.ok) return failure(request, result.code);
         // The library may have been excluded while the plan was built.
         const gone = this.fills.tableRefusal(target);
@@ -129,6 +136,7 @@ export class AgentTableFills {
             credits: summary.credits,
             prices: summary.prices,
             pending: summary.pending,
+            rereads: summary.rereads,
             balance: summary.balance,
             expires_at: summary.expires_at,
         };

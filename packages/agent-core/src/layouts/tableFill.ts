@@ -344,6 +344,57 @@ export function pendingWork(spec: TableSpec): PendingWork {
     };
 }
 
+/** Whether a cell holds the filler's answer, or its finding that the paper does not say. */
+function isFillerAnswer(cell: Cell | undefined): boolean {
+    return (
+        cell?.provenance === "model" &&
+        (cell.outcome === "answered" || cell.outcome === "not_reported")
+    );
+}
+
+/**
+ * The rows of a fill that read a paper again although it already holds the
+ * filler's answers, for a question no row has a current answer to yet: a
+ * column added to a filled table, or a changed question (its old answers
+ * count). Each such row costs what its first fill did, whatever the number
+ * of columns.
+ *
+ * None for a first fill, for new rows, and for the cells an earlier fill or
+ * trial left of a question already answered elsewhere. `rows` are a plan's
+ * rows with the columns each answers.
+ */
+export function rereadRows(
+    spec: TableSpec,
+    rows: readonly { row: string; columns: readonly string[] }[],
+): string[] {
+    const fillable = spec.columns.filter(isFillableColumn);
+    const answered = new Set(
+        fillable
+            .filter((column) =>
+                spec.rows.some((row) => {
+                    const cell = row.cells[column.id];
+                    return isFillerAnswer(cell) && !isStale(row, cell);
+                }),
+            )
+            .map((column) => column.id),
+    );
+    const byId = new Map(spec.rows.map((row) => [row.id, row]));
+    return rows
+        .filter((planned) => {
+            const row = byId.get(planned.row);
+            return (
+                !!row &&
+                planned.columns.some((id) => !answered.has(id)) &&
+                // A user's correction keeps the answer it replaced: that paper was read.
+                fillable.some((column) => {
+                    const cell = row.cells[column.id];
+                    return isFillerAnswer(cell) || isFillerAnswer(cell?.replaced);
+                })
+            );
+        })
+        .map((planned) => planned.row);
+}
+
 /**
  * The rows a "Retry failed rows" fill names: rows whose last fill failed
  * with a failure a retry can change, in table order.
