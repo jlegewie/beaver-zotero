@@ -11,11 +11,11 @@ import {
     featureTaskUnavailableAtom,
     leaveFeatureTaskAtom,
     lookUpOcrPreparedPdfsAtom,
-    selectBeaverModelAtom,
     startFeatureTaskAtom,
     type FeatureCreditEntry,
 } from '../../atoms/featureCredits';
 import { activeFeatureTaskAtom } from '../../atoms/featureCreditRuns';
+import { selectBeaverModelAtom } from '../../atoms/models';
 import { currentMessagePillsAtom, pendingPillInsertsAtom } from '../../atoms/messageComposition';
 import { searchableLibraryIdsAtom } from '../../atoms/profile';
 import { completeCreditsFirstRunAtom } from '../../atoms/firstRun';

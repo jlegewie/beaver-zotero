@@ -1496,6 +1496,38 @@
     border-bottom: 1px solid var(--fill-quinary);
 }
 
+/* A research table Beaver can only read (own API key, Plus Tools off). */
+[id^="beaver-pane-"] .table-plus-tools-notice.composer-docked-bar {
+    background-color: var(--beaver-fill-bar);
+    border-bottom: 1px solid var(--fill-quinary);
+}
+/* On home the notice is the tray under the input (`.feature-credits-home`). */
+.beaver-root .table-plus-tools-notice.is-tray {
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 6px;
+    padding-top: calc(8px + var(--beaver-radius-card));
+    padding-bottom: 8px;
+}
+.beaver-root .table-plus-tools-notice-text {
+    min-width: 0;
+    font-size: 0.875rem;
+    line-height: 1.45;
+    color: var(--fill-secondary);
+}
+.beaver-root .table-plus-tools-notice.is-tray .table-plus-tools-notice-text {
+    padding-top: 2px;
+}
+.beaver-root .table-plus-tools-notice-link {
+    color: var(--fill-secondary);
+    text-decoration: underline;
+    transition: color 0.2s ease-in-out;
+}
+.beaver-root .table-plus-tools-notice-link:hover,
+.beaver-root .table-plus-tools-notice-link:focus-visible {
+    color: var(--fill-primary);
+}
+
 /* First-run "Next steps" panel. */
 [id^="beaver-pane-"] .next-steps-panel {
     border-bottom: 1px solid var(--fill-quarternary);

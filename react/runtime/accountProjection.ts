@@ -1,6 +1,7 @@
 import { backgroundProcessingStatusAtom, EMPTY_BACKGROUND_PROCESSING_STATUS } from '../atoms/backgroundProcessing';
 import { threadNavigationSeqAtom } from "../atoms/threads";
 import { preferencesRevisionAtom } from "../atoms/preferences";
+import { requestPlusToolsAtom } from "../atoms/ui";
 import {
     refreshCustomModelsAtom,
     resetUserModelStateAtom,
@@ -65,6 +66,10 @@ export function attachAccountProjection(runtime: WindowRuntime): void {
                 );
             if (change.key === "openAiApiKey")
                 store.set(openAiApiKeyAtom, getPref("openAiApiKey") || "");
+            // Plain atom written by its toggles in this window; a change made
+            // elsewhere (another window, Settings) reaches it here.
+            if (change.key === "requestPlusTools")
+                store.set(requestPlusToolsAtom, !!getPref("requestPlusTools"));
             if (change.key === "anthropicApiKey")
                 store.set(
                     anthropicApiKeyAtom,

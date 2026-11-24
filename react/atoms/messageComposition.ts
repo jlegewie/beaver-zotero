@@ -153,6 +153,31 @@ export const currentMessageItemsAtom = atom(
  * Set when a collection action is triggered (context menu, slash menu).
  * Cleared after the message is sent.
  */
+/**
+ * The names of the research tables the message carries: attached, or open in
+ * the tab whose context it sends.
+ */
+export const messageTableNamesAtom = atom<string[]>((get) => {
+    get(messageItemDataRevisionAtom);
+    const reader = get(currentReaderAttachmentAtom);
+    const candidates = reader ? [...get(currentMessageItemsAtom), reader] : get(currentMessageItemsAtom);
+    const names: string[] = [];
+    const seen = new Set<string>();
+    for (const item of candidates) {
+        const key = `${item.libraryID}-${item.key}`;
+        if (seen.has(key) || !isTableAttachment(item)) continue;
+        seen.add(key);
+        let title = '';
+        try {
+            title = String(item.getField('title') || '');
+        } catch {
+            // Item data not loaded yet: the table reads as untitled.
+        }
+        names.push(title || 'Untitled');
+    }
+    return names;
+});
+
 export const currentMessageCollectionsAtom = atom<CollectionReference[]>([]);
 
 /** Attach collections to the current message, keeping those it already carries. */

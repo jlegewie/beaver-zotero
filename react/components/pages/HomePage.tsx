@@ -9,6 +9,8 @@ import { featureCreditEntriesAtom, featureCreditsCardVisibleAtom, featureCredits
 import { isCreditsFirstRunAtom } from "../../atoms/firstRun";
 import { activeFeatureTaskAtom } from "../../atoms/featureCreditRuns";
 import InputArea from "../input/InputArea";
+import TablePlusToolsNotice from "../input/TablePlusToolsNotice";
+import { tablePlusToolsNoticeAtom } from "../../atoms/chatAccess";
 import DragDropWrapper from "../input/DragDropWrapper";
 import PopupOverlayContainer from "../PopupOverlayContainer";
 import { SettingsIcon }  from "../icons/icons";
@@ -46,8 +48,12 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false, inputRef }) => {
     const activeFeatureTask = useAtomValue(activeFeatureTaskAtom);
     const featureCreditsTeaserVisible = useAtomValue(featureCreditsTeaserVisibleAtom);
     const isCreditsFirstRun = useAtomValue(isCreditsFirstRunAtom);
+    // An attached research table Beaver can only read takes the tray under
+    // the input from the feature-credit list or line. Not from a setup card,
+    // which says itself which model its task needs.
+    const showTableNotice = useAtomValue(tablePlusToolsNoticeAtom) !== null && !activeFeatureTask;
     // A setup card stays while its task is open, even if the list is dismissed.
-    const showFeatureCredits = !allLibrariesExcluded && (featureCreditsVisible || !!activeFeatureTask);
+    const showFeatureCredits = !allLibrariesExcluded && !showTableNotice && (featureCreditsVisible || !!activeFeatureTask);
     // Someone who already uses Beaver first gets one line that leads to the
     // card, with the launcher and recent chats still on screen.
     const showTeaser = showFeatureCredits && featureCreditsTeaserVisible && !activeFeatureTask;
@@ -84,8 +90,9 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false, inputRef }) => {
                         launcher. */}
                     <div className="feature-credits-dock">
                         <DragDropWrapper>
-                            <InputArea inputRef={inputRef} verticalPosition="below" />
+                            <InputArea inputRef={inputRef} verticalPosition="below" hideTablePlusToolsNotice />
                         </DragDropWrapper>
+                        {showTableNotice && <TablePlusToolsNotice placement="tray" />}
                         {showFeatureCredits && (showTeaser ? <FeatureCreditsTeaser /> : <FeatureCreditsCard />)}
                     </div>
 

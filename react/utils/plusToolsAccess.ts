@@ -54,3 +54,22 @@ export function getPlusToolsAccess(input: PlusToolsAccessInput): PlusToolsAccess
     if (model === 'own' && !plusToolsPref) return { status: 'plus-tools-off', model };
     return { status: 'ready', model };
 }
+
+/**
+ * What the chat input tells a user whose message carries a research table that
+ * Beaver can only read: their own model with the Plus Tools preference off.
+ * Filling and editing a table are Plus Tools, so the run gets `read_table`
+ * alone. `switch-model-or-plus-tools` when the Beaver model or the Plus Tools
+ * preference is all that is missing, `get-credits` when there are no credits
+ * for either.
+ */
+export type TablePlusToolsNotice = { fix: 'switch-model-or-plus-tools' | 'get-credits'; tableCount: number };
+
+export function getTablePlusToolsNotice(access: PlusToolsAccess, tableCount: number): TablePlusToolsNotice | null {
+    if (tableCount === 0) return null;
+    if (access.status === 'plus-tools-off') return { fix: 'switch-model-or-plus-tools', tableCount };
+    if (access.status === 'no-credits' && access.model === 'own' && !access.plusToolsOn) {
+        return { fix: 'get-credits', tableCount };
+    }
+    return null;
+}

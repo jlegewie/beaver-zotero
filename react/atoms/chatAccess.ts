@@ -17,7 +17,13 @@ import {
 import { isLoadingThreadAtom } from './threads';
 import { isUsingBeaverCreditsAtom } from './models';
 import { requestPlusToolsAtom } from './ui';
-import { getPlusToolsAccess, type PlusToolsAccess } from '../utils/plusToolsAccess';
+import { messageTableNamesAtom } from './messageComposition';
+import {
+    getPlusToolsAccess,
+    getTablePlusToolsNotice,
+    type PlusToolsAccess,
+    type TablePlusToolsNotice,
+} from '../utils/plusToolsAccess';
 
 /**
  * What stands between the user and a chat, in the order the sidebar resolves
@@ -52,3 +58,18 @@ export const plusToolsAccessAtom = atom<PlusToolsAccess>((get) => getPlusToolsAc
     plusToolsPref: get(requestPlusToolsAtom),
     credits: get(remainingBeaverCreditsAtom),
 }));
+
+/**
+ * Dismissed for this window's session: the notice stays away until Beaver
+ * reloads, whatever is attached next.
+ */
+export const tablePlusToolsNoticeDismissedAtom = atom(false);
+
+/**
+ * The chat input's notice that Beaver can only read the research tables the
+ * message carries (see `getTablePlusToolsNotice`), or null.
+ */
+export const tablePlusToolsNoticeAtom = atom<TablePlusToolsNotice | null>((get) => {
+    if (get(tablePlusToolsNoticeDismissedAtom)) return null;
+    return getTablePlusToolsNotice(get(plusToolsAccessAtom), get(messageTableNamesAtom).length);
+});

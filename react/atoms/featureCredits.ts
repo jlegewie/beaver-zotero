@@ -10,7 +10,7 @@ import type { FeatureCreditTask } from '@beaver/agent-core/types/profile';
 import type { CollectionReference } from '@beaver/agent-core/types/zotero';
 import { profileWithPlanAtom } from './profile';
 import { libraryItemCountAtom, SMALL_LIBRARY_THRESHOLD } from './zoteroContext';
-import { beaverDefaultModelAtom, isUsingBeaverCreditsAtom, updateSelectedModelAtom } from './models';
+import { isUsingBeaverCreditsAtom, selectBeaverModelAtom } from './models';
 import { preferencesRevisionAtom } from './preferences';
 import { getPref, setPref } from '../../src/utils/prefs';
 import { actionRequirementBlockAtom, stageActionPillAtom } from './actions';
@@ -23,6 +23,7 @@ import {
     currentMessagePillsAtom,
     currentReaderAttachmentAtom,
     messageItemDataRevisionAtom,
+    messageTableNamesAtom,
     pendingPillInsertsAtom,
     removeAutomaticAttachmentsAtom,
 } from './messageComposition';
@@ -39,7 +40,6 @@ import {
 import { hasTextBesidesPills, textBesidesPills, type ActionRequirementBlock } from '../utils/actionRequirements';
 import { itemValidationResultsAtom, type ItemValidationState } from './itemValidation';
 import { getReadableContentKind } from '../../src/services/documentExtraction/attachmentResolution';
-import { isTableAttachment } from '../../src/services/artifacts/tableItemIdentity';
 import { activeFeatureTaskAtom } from './featureCreditRuns';
 import { isCreditsFirstRunAtom } from './firstRun';
 import { getDisplayNameFromItem } from '../utils/sourceUtils';
@@ -136,14 +136,6 @@ export const featureTaskUnavailableAtom = atom((get) => {
     const count = get(libraryItemCountAtom);
     const small = count !== null && count < SMALL_LIBRARY_THRESHOLD;
     return (definition: Pick<FeatureTaskDefinition, 'needsPapers'>): boolean => small && !!definition.needsPapers;
-});
-
-/** Switch the chat input to the Beaver model, as the setup card's link does. */
-export const selectBeaverModelAtom = atom(null, (get, set): boolean => {
-    const model = get(beaverDefaultModelAtom);
-    if (!model) return false;
-    set(updateSelectedModelAtom, { ...model, access_mode: 'app_key' });
-    return true;
 });
 
 /**
@@ -343,31 +335,6 @@ function withoutSourceSearch(content: string, search: string | null): string {
     const index = search ? content.lastIndexOf(search) : -1;
     return search && index >= 0 ? content.slice(0, index) + content.slice(index + search.length) : content;
 }
-
-/**
- * The names of the research tables the message carries: attached, or open in
- * the tab whose context it sends.
- */
-const messageTableNamesAtom = atom<string[]>((get) => {
-    get(messageItemDataRevisionAtom);
-    const reader = get(currentReaderAttachmentAtom);
-    const candidates = reader ? [...get(currentMessageItemsAtom), reader] : get(currentMessageItemsAtom);
-    const names: string[] = [];
-    const seen = new Set<string>();
-    for (const item of candidates) {
-        const key = `${item.libraryID}-${item.key}`;
-        if (seen.has(key) || !isTableAttachment(item)) continue;
-        seen.add(key);
-        let title = '';
-        try {
-            title = String(item.getField('title') || '');
-        } catch {
-            // Item data not loaded yet: the table reads as untitled.
-        }
-        names.push(title || 'Untitled');
-    }
-    return names;
-});
 
 /** The open setup card's steps, or null while no task's setup is open. */
 export const featureTaskSetupStepsAtom = atom<SetupStep[] | null>((get) => {
