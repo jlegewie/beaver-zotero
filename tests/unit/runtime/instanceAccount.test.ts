@@ -564,6 +564,39 @@ describe("instance account ownership", () => {
         writePending.resolve({});
         await write;
     });
+    describe("test exclusion override", () => {
+        const savedExcluded = () => {
+            const saved = profile();
+            saved.profile.excluded_libraries = [{ type: "user" }];
+            return saved;
+        };
+        beforeEach(() => {
+            vi.stubEnv("NODE_ENV", "development");
+            mocks.profile.mockResolvedValue(savedExcluded());
+        });
+        afterEach(() => {
+            vi.unstubAllEnvs();
+        });
+        it("outlasts profile reads until it is dropped", async () => {
+            await load();
+            expect(Zotero.Beaver.searchableLibraryIds).toEqual([]);
+            account.setExcludedLibrariesForTesting([]);
+            expect(Zotero.Beaver.searchableLibraryIds).toEqual([1]);
+            await account.refresh(true);
+            expect(Zotero.Beaver.searchableLibraryIds).toEqual([1]);
+            await account.clearExcludedLibrariesForTesting();
+            expect(Zotero.Beaver.searchableLibraryIds).toEqual([]);
+        });
+        it("gives way to exclusions the user saves", async () => {
+            mocks.profile.mockResolvedValue(profile());
+            await load();
+            account.setExcludedLibrariesForTesting([]);
+            mocks.profile.mockResolvedValue(savedExcluded());
+            await account.updateExcludedLibraries([{ type: "user" }]);
+            await account.refresh(true);
+            expect(Zotero.Beaver.searchableLibraryIds).toEqual([]);
+        });
+    });
     it("rejects concurrent settings writes and never rolls back into a different account", async () => {
         await load();
         const pending = deferred<any>();
