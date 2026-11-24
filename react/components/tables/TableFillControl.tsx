@@ -504,7 +504,8 @@ export interface TableFillBannerProps {
 /** The result of the last fill, over the grid, until dismissed. */
 export function TableFillBanner({ job, showingFailed, onShowFailed, onDismiss }: TableFillBannerProps): React.ReactElement {
     const failed = job.result?.failed_row_ids.length ?? 0;
-    const balance = useCreditBalance();
+    // The account's balance: "Get credits" only for an account with none.
+    const balance = useAccountCreditBalance();
     const outOfCredits = !!job.result && shownStop(job.result) === 'insufficient_credits';
     useRefreshBalanceOnFocus(outOfCredits);
     return (
