@@ -7,7 +7,7 @@
  * ordinary markdown.
  */
 
-import { codeRanges } from '@beaver/agent-export/parse/markdown';
+import { codeRanges } from '../parse/markdown';
 
 /**
  * An opening or closing legacy note tag.

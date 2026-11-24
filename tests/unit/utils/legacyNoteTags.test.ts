@@ -13,7 +13,7 @@ vi.mock('@beaver/agent-ui/chat/Citation', () => ({
     default: () => null,
 }));
 
-import { unwrapLegacyNoteTags } from '../../../react/utils/legacyNoteTags';
+import { unwrapLegacyNoteTags } from '@beaver/agent-export/render/legacyNoteTags';
 import MarkdownRenderer from '../../../react/components/messages/MarkdownRenderer';
 
 const render = (content: string): string =>

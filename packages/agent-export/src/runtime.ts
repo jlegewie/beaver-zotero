@@ -1,12 +1,14 @@
 /**
  * Entry point of the export runtime: the parts of the pipeline that carry
- * sizeable dependencies (remark, KaTeX, the docx writer) and the writers
- * (Word, HTML for PDF, Markdown, LaTeX, Excel). A host may load this lazily,
- * separately from its main bundle.
+ * sizeable dependencies (remark, KaTeX, the docx writer), the writers
+ * (Word, HTML for PDF, Markdown, LaTeX, Excel) and the note Markdown renderer.
+ * A host may load this lazily, separately from its main bundle.
  */
 
 export { parseExportSource } from './parse/parseExportDoc';
 export { parseNoteDoc } from './note/parseNoteDoc';
+export { codeRanges } from './parse/markdown';
+export { renderNoteMarkdownHtml } from './render/noteHtml';
 export type { ParseNoteDocOptions, PmMark, PmNode } from './note/parseNoteDoc';
 // This bundle carries its own copy of agent-core, so the host registers its
 // library identity resolvers here too (legacy `<libraryID>-KEY` citations).

@@ -177,6 +177,7 @@ import {
 import {
     handleTestSidebarWidthHandlerHttpRequest,
     handleTestWindowRuntimeHttpRequest,
+    handleTestMainWindowsHttpRequest,
 } from './handlers/testUiHandlers';
 
 
@@ -1103,6 +1104,11 @@ export function registerEndpoints(): (() => void) | undefined {
         // dispatcher install/unwrap/restore path against Zotero.Reader.
         endpoints['/beaver/test/window-runtime'] =
             createEndpoint(handleTestWindowRuntimeHttpRequest);
+
+        // Close every main window or open one again (dev-only; closing is
+        // macOS-only, where Zotero keeps running with no main window).
+        endpoints['/beaver/test/main-windows'] =
+            createEndpoint(handleTestMainWindowsHttpRequest);
 
         endpoints['/beaver/test/sidebar-width-handler'] =
             createEndpoint(handleTestSidebarWidthHandlerHttpRequest);

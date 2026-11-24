@@ -1,0 +1,530 @@
+[
+ {
+  "markdown": "# Heading 1",
+  "html": "<div class=\"markdown\"><h1>Heading 1</h1></div>"
+ },
+ {
+  "markdown": "## Heading *2* with `code`",
+  "html": "<div class=\"markdown\"><h2>Heading <em>2</em> with <code>code</code></h2></div>"
+ },
+ {
+  "markdown": "###### h6",
+  "html": "<div class=\"markdown\"><h6>h6</h6></div>"
+ },
+ {
+  "markdown": "Setext\n===",
+  "html": "<div class=\"markdown\"><h1>Setext</h1></div>"
+ },
+ {
+  "markdown": "Plain text with & ampersand, <less> and \"quotes\" and 'apostrophes' and > greater.",
+  "html": "<div class=\"markdown\"><p>Plain text with &amp; ampersand,  and &quot;quotes&quot; and &#x27;apostrophes&#x27; and &gt; greater.</p></div>"
+ },
+ {
+  "markdown": "**bold** __bold__ *em* _em_ ***both*** ~~strike~~ ~not strike~ P~lac~",
+  "html": "<div class=\"markdown\"><p><strong>bold</strong> <strong>bold</strong> <em>em</em> <em>em</em> <em><strong>both</strong></em> <del>strike</del> ~not strike~ P~lac~</p></div>"
+ },
+ {
+  "markdown": "- item 1\n- item 2\n  - nested\n    1. deep",
+  "html": "<div class=\"markdown\"><ul>\n<li>item 1</li>\n<li>item 2\n<ul>\n<li>nested\n<ol>\n<li>deep</li>\n</ol>\n</li>\n</ul>\n</li>\n</ul></div>"
+ },
+ {
+  "markdown": "1. one\n2. two\n\n3. loose",
+  "html": "<div class=\"markdown\"><ol>\n<li>\n<p>one</p>\n</li>\n<li>\n<p>two</p>\n</li>\n<li>\n<p>loose</p>\n</li>\n</ol></div>"
+ },
+ {
+  "markdown": "5. starts at five\n6. six",
+  "html": "<div class=\"markdown\"><ol start=\"5\">\n<li>starts at five</li>\n<li>six</li>\n</ol></div>"
+ },
+ {
+  "markdown": "- [ ] todo\n- [x] done",
+  "html": "<div class=\"markdown\"><ul class=\"contains-task-list\">\n<li class=\"task-list-item\"><input type=\"checkbox\" disabled=\"\"/> todo</li>\n<li class=\"task-list-item\"><input type=\"checkbox\" disabled=\"\" checked=\"\"/> done</li>\n</ul></div>"
+ },
+ {
+  "markdown": "| A | B | C |\n|:--|:-:|--:|\n| 1 | 2 | 3 |\n| x & y | `c` | **b** |",
+  "html": "<div class=\"markdown\">\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n<table><thead><tr><th style=\"text-align:left\">A</th><th style=\"text-align:center\">B</th><th style=\"text-align:right\">C</th></tr></thead><tbody><tr><td style=\"text-align:left\">1</td><td style=\"text-align:center\">2</td><td style=\"text-align:right\">3</td></tr><tr><td style=\"text-align:left\">x &amp; y</td><td style=\"text-align:center\"><code>c</code></td><td style=\"text-align:right\"><strong>b</strong></td></tr></tbody></table></div>"
+ },
+ {
+  "markdown": "| a |\n|---|\n| only |",
+  "html": "<div class=\"markdown\">\n\n\n\n\n\n\n\n\n\n\n<table><thead><tr><th>a</th></tr></thead><tbody><tr><td>only</td></tr></tbody></table></div>"
+ },
+ {
+  "markdown": "```js\nconst a = \"<b>\" && 1 < 2;\n```",
+  "html": "<div class=\"markdown\"><pre><code class=\"language-js\">const a = &quot;&lt;b&gt;&quot; &amp;&amp; 1 &lt; 2;\n</code></pre></div>"
+ },
+ {
+  "markdown": "```\n\nstarts with blank line\n```",
+  "html": "<div class=\"markdown\"><pre><code>\nstarts with blank line\n</code></pre></div>"
+ },
+ {
+  "markdown": "    indented code <x>",
+  "html": "<div class=\"markdown\"><pre><code>indented code &lt;x&gt;\n</code></pre></div>"
+ },
+ {
+  "markdown": "```plaintext\nplain fence\n```",
+  "html": "<div class=\"markdown\"><p>plain fence</p></div>"
+ },
+ {
+  "markdown": "Inline `a < b` code",
+  "html": "<div class=\"markdown\"><p>Inline <code>a &lt; b</code> code</p></div>"
+ },
+ {
+  "markdown": "> quote\n> > nested quote",
+  "html": "<div class=\"markdown\"><blockquote>\n<p>quote</p>\n<blockquote>\n<p>nested quote</p>\n</blockquote>\n</blockquote></div>"
+ },
+ {
+  "markdown": "---",
+  "html": "<div class=\"markdown\"><hr/></div>"
+ },
+ {
+  "markdown": "***",
+  "html": "<div class=\"markdown\"><hr/></div>"
+ },
+ {
+  "markdown": "[link](https://example.com \"Title 'q'\") and <https://auto.link> and www.example.com",
+  "html": "<div class=\"markdown\"><p><a href=\"https://example.com\" title=\"Title &#x27;q&#x27;\">link</a> and <a href=\"https://auto.link\">https://auto.link</a> and <a href=\"http://www.example.com\">www.example.com</a></p></div>"
+ },
+ {
+  "markdown": "[zotero](zotero://select/library/items/ABCD1234) [item](u-ABCD1234) [legacy](1-ABCD1234) [js](javascript:alert(1))",
+  "html": "<div class=\"markdown\"><p><a href=\"zotero://select/library/items/ABCD1234\">zotero</a> <a href=\"zotero://select/library/items/ABCD1234\">item</a> <a href=\"1-ABCD1234\">legacy</a> <a>js</a></p></div>"
+ },
+ {
+  "markdown": "![image](https://example.com/x.png \"t\") [![nested](https://e.com/i.png)](https://e.com)",
+  "html": "<div class=\"markdown\"><p><a href=\"https://example.com/x.png\" title=\"t\">image</a> <a href=\"https://e.com\">nested</a></p></div>"
+ },
+ {
+  "markdown": "Footnote ref[^1] and[^n].\n\n[^1]: The note.\n[^n]: Other *note*.",
+  "html": "<div class=\"markdown\"><p>Footnote ref<sup>1</sup> and<sup>2</sup>.</p>\n<h2>Notes</h2>\n<ol>\n<li>\n<p>The note.</p>\n</li>\n<li>\n<p>Other <em>note</em>.</p>\n</li>\n</ol></div>"
+ },
+ {
+  "markdown": "Math $E=mc^2$ and $$\\int_0^1 x dx$$ and \\(a<b\\) and \\[c>d\\]",
+  "html": "<div class=\"markdown\"><p>Math <span class=\"math\">$E=mc^2$</span> and</p>\n<pre class=\"math\">$$\\int_0^1 x dx$$</pre>\n<p>and <span class=\"math\">$a&lt;b$</span> and</p>\n<pre class=\"math\">$$c&gt;d$$</pre></div>"
+ },
+ {
+  "markdown": "$$\nx = \\frac{1}{2}\n$$",
+  "html": "<div class=\"markdown\"><pre class=\"math\">$$x = \\frac{1}{2}$$</pre></div>"
+ },
+ {
+  "markdown": "Line with two spaces  \nbreak",
+  "html": "<div class=\"markdown\"><p>Line with two spaces<br/>\nbreak</p></div>"
+ },
+ {
+  "markdown": "Backslash\\\nbreak",
+  "html": "<div class=\"markdown\"><p>Backslash<br/>\nbreak</p></div>"
+ },
+ {
+  "markdown": "<span style=\"color:red\" onclick=\"x()\">raw span</span> <b>bold</b> <kbd>Ctrl</kbd> <sub>2</sub><sup>3</sup>",
+  "html": "<div class=\"markdown\"><p><span>raw span</span> <b>bold</b> <kbd>Ctrl</kbd> <sub>2</sub><sup>3</sup></p></div>"
+ },
+ {
+  "markdown": "<details open><summary>Sum</summary>Body text</details>",
+  "html": "<div class=\"markdown\"><details open=\"\"><summary>Sum</summary>Body text</details></div>"
+ },
+ {
+  "markdown": "<div align=\"center\" class=\"x\" id=\"anchor\">div html</div>",
+  "html": "<div class=\"markdown\"><div align=\"center\" id=\"user-content-anchor\">div html</div></div>"
+ },
+ {
+  "markdown": "<table><tr><td colspan=\"2\" rowspan=\"1\" valign=\"top\" nowrap>cell</td></tr></table>",
+  "html": "<div class=\"markdown\"><table><tbody><tr><td colSpan=\"2\" rowspan=\"1\" vAlign=\"top\">cell</td></tr></tbody></table></div>"
+ },
+ {
+  "markdown": "<input type=\"checkbox\" checked disabled> raw input",
+  "html": "<div class=\"markdown\"><p><input type=\"checkbox\" disabled=\"\" checked=\"\"/> raw input</p></div>"
+ },
+ {
+  "markdown": "<br> <br/> <hr>",
+  "html": "<div class=\"markdown\"><p><br/> <br/> </p><hr/><p></p></div>"
+ },
+ {
+  "markdown": "<img src=\"https://e.com/a.png\" alt=\"alt text\" width=\"10\">",
+  "html": "<div class=\"markdown\"><a href=\"https://e.com/a.png\">alt text</a></div>"
+ },
+ {
+  "markdown": "<a href=\"https://x.com\" title=\"t\" target=\"_blank\" rel=\"noopener\">raw a</a>",
+  "html": "<div class=\"markdown\"><p><a href=\"https://x.com\" title=\"t\">raw a</a></p></div>"
+ },
+ {
+  "markdown": "<ol start=\"3\" reversed><li>three</li></ol>",
+  "html": "<div class=\"markdown\"><ol start=\"3\"><li>three</li></ol></div>"
+ },
+ {
+  "markdown": "<abbr title=\"HyperText\">HTML</abbr> <q cite=\"https://e.com\">q</q> <del datetime=\"2020\">del</del> <ins>ins</ins>",
+  "html": "<div class=\"markdown\"><p>HTML <q cite=\"https://e.com\">q</q> <del dateTime=\"2020\">del</del> <ins>ins</ins></p></div>"
+ },
+ {
+  "markdown": "<!-- comment --> after comment",
+  "html": "<div class=\"markdown\"> after comment</div>"
+ },
+ {
+  "markdown": "<script>alert(1)</script> after script",
+  "html": "<div class=\"markdown\"> after script</div>"
+ },
+ {
+  "markdown": "<style>p{}</style>",
+  "html": "<div class=\"markdown\">p{}</div>"
+ },
+ {
+  "markdown": "&copy; &amp; &#x27; &#39; &nbsp; &lt;tag&gt; &unknown;",
+  "html": "<div class=\"markdown\"><p>© &amp; &#x27; &#x27;   &lt;tag&gt; &amp;unknown;</p></div>"
+ },
+ {
+  "markdown": "Unicode: é, ü, 中文, emoji 🎉, zero​width, soft­hyphen, NFC é",
+  "html": "<div class=\"markdown\"><p>Unicode: é, ü, 中文, emoji 🎉, zerowidth, softhyphen, NFC é</p></div>"
+ },
+ {
+  "markdown": "<note title=\"Legacy\">legacy *body*</note>",
+  "html": "<div class=\"markdown\"><hr/>\n<h2>Legacy</h2>\n<p>legacy <em>body</em></p>\n<hr/></div>"
+ },
+ {
+  "markdown": "Cite <citation id=\"u-AAAA1111\" loc=\"page5\"/> and `<citation id=\"u-B\"/>` and \\<citation id=\"u-C\"/>",
+  "html": "<div class=\"markdown\"><p>Cite <citation id=\"u-AAAA1111\" loc=\"page5\"/> and <citation id=\"u-B\"/> and &lt;citation id=&quot;u-C&quot;/&gt;</p></div>"
+ },
+ {
+  "markdown": "<citation item_id=\"1-ABCD1234\" page=\"3\"/> legacy cite",
+  "html": "<div class=\"markdown\"><p><citation item_id=\"1-ABCD1234\" page=\"3\"/> legacy cite</p></div>"
+ },
+ {
+  "markdown": "<CITATION id=\"u-UP\"/> upper",
+  "html": "<div class=\"markdown\"><p></p></div>"
+ },
+ {
+  "markdown": "Trailing **unclosed bold",
+  "html": "<div class=\"markdown\"><p>Trailing <strong>unclosed bold</strong></p></div>"
+ },
+ {
+  "markdown": "Partial <span",
+  "html": "<div class=\"markdown\"><p>Partial</p></div>"
+ },
+ {
+  "markdown": "html <span class=\"language-js\">x</span>",
+  "html": "<div class=\"markdown\"><p>html <span>x</span></p></div>"
+ },
+ {
+  "markdown": "Term<br>with<br/>breaks",
+  "html": "<div class=\"markdown\"><p>Term<br/>with<br/>breaks</p></div>"
+ },
+ {
+  "markdown": "<p align=\"right\">para</p>",
+  "html": "<div class=\"markdown\"><p align=\"right\">para</p></div>"
+ },
+ {
+  "markdown": "<h2 class=\"sr-only\">sr</h2>",
+  "html": "<div class=\"markdown\"><h2 class=\"sr-only\">sr</h2></div>"
+ },
+ {
+  "markdown": "<section data-footnotes class=\"footnotes\">s</section>",
+  "html": "<div class=\"markdown\"></div>"
+ },
+ {
+  "markdown": "<pre>\nleading newline pre</pre>",
+  "html": "<div class=\"markdown\"><pre>leading newline pre</pre></div>"
+ },
+ {
+  "markdown": "<code class=\"language-math\">raw math code</code>",
+  "html": "<div class=\"markdown\"><p><span class=\"math\">$raw math code$</span></p></div>"
+ },
+ {
+  "markdown": "<a name=\"anchor\" id=\"x\">named</a>",
+  "html": "<div class=\"markdown\"><p><a name=\"user-content-anchor\" id=\"user-content-x\">named</a></p></div>"
+ },
+ {
+  "markdown": "<td>orphan td</td>",
+  "html": "<div class=\"markdown\">orphan td</div>"
+ },
+ {
+  "markdown": "<li class=\"task-list-item\">li</li>",
+  "html": "<div class=\"markdown\"><li class=\"task-list-item\">li</li></div>"
+ },
+ {
+  "markdown": "<font color=\"red\" size=\"3\">font</font> <center>c</center> <u>u</u> <s>s</s> <mark>m</mark>",
+  "html": "<div class=\"markdown\"><p>font </p>c u <s>s</s> m<p></p></div>"
+ },
+ {
+  "markdown": "Tab\tseparated\ttext",
+  "html": "<div class=\"markdown\"><p>Tab\tseparated\ttext</p></div>"
+ },
+ {
+  "markdown": "\\* escaped star \\_ \\` \\#",
+  "html": "<div class=\"markdown\"><p>* escaped star _ ` #</p></div>"
+ },
+ {
+  "markdown": "1) paren list\n2) two",
+  "html": "<div class=\"markdown\"><ol>\n<li>paren list</li>\n<li>two</li>\n</ol></div>"
+ },
+ {
+  "markdown": "+ plus list",
+  "html": "<div class=\"markdown\"><ul>\n<li>plus list</li>\n</ul></div>"
+ },
+ {
+  "markdown": "* star list\n\n* loose",
+  "html": "<div class=\"markdown\"><ul>\n<li>\n<p>star list</p>\n</li>\n<li>\n<p>loose</p>\n</li>\n</ul></div>"
+ },
+ {
+  "markdown": "<textarea>\nta</textarea> <select><option selected>o</option></select> <svg><circle r=\"1\"/></svg> <math><mi>x</mi></math>",
+  "html": "<div class=\"markdown\">ta o  x</div>"
+ },
+ {
+  "markdown": "<td align=\"left\" style=\"color:red\">aligned raw td</td>",
+  "html": "<div class=\"markdown\">aligned raw td</div>"
+ },
+ {
+  "markdown": "<span data-x=\"1\" aria-label=\"l\" tabindex=\"0\" dir=\"rtl\" lang=\"en\" hidden>attrs</span>",
+  "html": "<div class=\"markdown\"><p><span tabindex=\"0\" dir=\"rtl\" lang=\"en\">attrs</span></p></div>"
+ },
+ {
+  "markdown": "<ol start=\"x\"><li>bad start</li></ol> <table><col span=\"0\"><tr><td rowspan=\"x\">r</td></tr></table>",
+  "html": "<div class=\"markdown\"><ol><li>bad start</li></ol> <table><tbody><tr><td>r</td></tr></tbody></table></div>"
+ },
+ {
+  "markdown": "<a href=\"javascript:alert(1)\">js raw</a> <a href=\"zotero://open/library/items/ABC\">z</a> <a href=\"u-ABCD1234\">obj</a>",
+  "html": "<div class=\"markdown\"><p><a>js raw</a> <a href=\"zotero://open/library/items/ABC\">z</a> <a href=\"zotero://select/library/items/ABCD1234\">obj</a></p></div>"
+ },
+ {
+  "markdown": "<input type=\"text\" value=\"v\" disabled> <input type=\"checkbox\" value=\"v\" checked>",
+  "html": "<div class=\"markdown\"><p><input disabled=\"\" type=\"checkbox\" value=\"v\"/> <input type=\"checkbox\" disabled=\"\" checked=\"\" value=\"v\"/></p></div>"
+ },
+ {
+  "markdown": "<div itemscope itemtype=\"t\" itemprop=\"p\">micro</div> <bdo dir=\"ltr\">b</bdo> <dl><dt>t</dt><dd>d</dd></dl> <ruby>r<rt>t</rt></ruby>",
+  "html": "<div class=\"markdown\"><div itemscope=\"\" itemType=\"t\" itemProp=\"p\">micro</div> b <dl><dt>t</dt><dd>d</dd></dl> <ruby>r<rt>t</rt></ruby></div>"
+ },
+ {
+  "markdown": "[zotero](zotero://select/library/items/ABCD1234) [item](u-ABCD1234) [legacy](1-ABCD1234) [js](javascript:alert(1))\n- <div itemscope itemtype=\"t\" itemprop=\"p\">micro</div> <bdo dir=\"ltr\">b</bdo> <dl><dt>t</dt><dd>d</dd></dl> <ruby>r<rt>t</rt></ruby>\n> <!-- comment --> after comment\n| x |\n|---|\n| <textarea>\nta</textarea> <select><option selected>o</option></select> <svg><circle r=\"1\"/></svg> <math><mi>x</mi></math>\n\n",
+  "html": "<div class=\"markdown\"><p><a href=\"zotero://select/library/items/ABCD1234\">zotero</a> <a href=\"zotero://select/library/items/ABCD1234\">item</a> <a href=\"1-ABCD1234\">legacy</a> <a>js</a></p>\n<ul>\n<li>\n<div itemscope=\"\" itemType=\"t\" itemProp=\"p\">micro</div> b <dl><dt>t</dt><dd>d</dd></dl> <ruby>r<rt>t</rt></ruby>\n</li>\n</ul>\n<blockquote>\n after comment\n</blockquote>\n\n\n\n\n\n\n\n\n\n\n\n\n\n<table><thead><tr><th>x</th></tr></thead><tbody><tr><td>\n</td></tr><tr><td>ta&lt;/textarea&gt; &lt;select&gt;&lt;option selected&gt;o&lt;/option&gt;&lt;/select&gt; &lt;svg&gt;&lt;circle r=&quot;1&quot;/&gt;&lt;/svg&gt; &lt;math&gt;&lt;mi&gt;x&lt;/mi&gt;&lt;/math&gt;</td></tr></tbody></table></div>"
+ },
+ {
+  "markdown": "```plaintext\nplain fence\n```\n<div itemscope itemtype=\"t\" itemprop=\"p\">micro</div> <bdo dir=\"ltr\">b</bdo> <dl><dt>t</dt><dd>d</dd></dl> <ruby>r<rt>t</rt></ruby>\n\nBackslash\\\nbreak\n\n**bold** __bold__ *em* _em_ ***both*** ~~strike~~ ~not strike~ P~lac~\n> <td align=\"left\" style=\"color:red\">aligned raw td</td>\n> <section data-footnotes class=\"footnotes\">s</section>\n\n",
+  "html": "<div class=\"markdown\"><p>plain fence</p>\n<div itemscope=\"\" itemType=\"t\" itemProp=\"p\">micro</div> b <dl><dt>t</dt><dd>d</dd></dl> <ruby>r<rt>t</rt></ruby>\n<p>Backslash<br/>\nbreak</p>\n<p><strong>bold</strong> <strong>bold</strong> <em>em</em> <em>em</em> <em><strong>both</strong></em> <del>strike</del> ~not strike~ P~lac~</p>\n<blockquote>\naligned raw td\n\n</blockquote></div>"
+ },
+ {
+  "markdown": "<a href=\"https://x.com\" title=\"t\" target=\"_blank\" rel=\"noopener\">raw a</a>\n* star list\n\n* loose\n\n<td>orphan td</td>\n\n## Heading *2* with `code`\n> <section data-footnotes class=\"footnotes\">s</section>\n| x |\n|---|\n| ",
+  "html": "<div class=\"markdown\"><p><a href=\"https://x.com\" title=\"t\">raw a</a></p>\n<ul>\n<li>\n<p>star list</p>\n</li>\n<li>\n<p>loose</p>\n</li>\n</ul>\norphan td\n<h2>Heading <em>2</em> with <code>code</code></h2>\n<blockquote>\n\n</blockquote>\n\n\n\n\n\n\n\n\n\n\n\n<table><thead><tr><th>x</th></tr></thead><tbody><tr><td></td></tr></tbody></table></div>"
+ },
+ {
+  "markdown": "Tab\tseparated\ttext\n> ###### h6 | A | B | C |\n|:--|:-:|--:|\n| 1 | 2 | 3 |\n| x & y | `c` | **b** |\n- Backslash\\\nbreak\n<a name=\"anchor\" id=\"x\">named</a>\n1) paren list\n2) two\n- ",
+  "html": "<div class=\"markdown\"><p>Tab\tseparated\ttext</p>\n<blockquote>\n<h6>h6 | A | B | C |</h6>\n</blockquote>\n<p>|:--|:-:|--:|\n| 1 | 2 | 3 |\n| x &amp; y | <code>c</code> | <strong>b</strong> |</p>\n<ul>\n<li>Backslash<br/>\nbreak\n<a name=\"user-content-anchor\" id=\"user-content-x\">named</a></li>\n</ul>\n<ol>\n<li>paren list</li>\n<li>two</li>\n</ol>\n<ul>\n<li></li>\n</ul></div>"
+ },
+ {
+  "markdown": "<br> <br/> <hr>\n- <details open><summary>Sum</summary>Body text</details>\nTab\tseparated\ttext\n- ",
+  "html": "<div class=\"markdown\"><p><br/> <br/> </p><hr/><p></p>\n<ul>\n<li>\n<details open=\"\"><summary>Sum</summary>Body text</details>\n</li>\n</ul>\n<h2>Tab\tseparated\ttext</h2></div>"
+ },
+ {
+  "markdown": "<p align=\"right\">para</p>\n- <span style=\"color:red\" onclick=\"x()\">raw span</span> <b>bold</b> <kbd>Ctrl</kbd> <sub>2</sub><sup>3</sup>\n- > quote\n> > nested quote\n\n",
+  "html": "<div class=\"markdown\"><p align=\"right\">para</p>\n- <span>raw span</span> <b>bold</b> <kbd>Ctrl</kbd> <sub>2</sub><sup>3</sup>\n- &gt; quote\n&gt; &gt; nested quote</div>"
+ },
+ {
+  "markdown": "<abbr title=\"HyperText\">HTML</abbr> <q cite=\"https://e.com\">q</q> <del datetime=\"2020\">del</del> <ins>ins</ins> [zotero](zotero://select/library/items/ABCD1234) [item](u-ABCD1234) [legacy](1-ABCD1234) [js](javascript:alert(1)) **bold** __bold__ *em* _em_ ***both*** ~~strike~~ ~not strike~ P~lac~\n>     indented code <x>\n\n",
+  "html": "<div class=\"markdown\"><p>HTML <q cite=\"https://e.com\">q</q> <del dateTime=\"2020\">del</del> <ins>ins</ins> <a href=\"zotero://select/library/items/ABCD1234\">zotero</a> <a href=\"zotero://select/library/items/ABCD1234\">item</a> <a href=\"1-ABCD1234\">legacy</a> <a>js</a> <strong>bold</strong> <strong>bold</strong> <em>em</em> <em>em</em> <em><strong>both</strong></em> <del>strike</del> ~not strike~ P~lac~</p>\n<blockquote>\n<pre><code>indented code &lt;x&gt;\n</code></pre>\n</blockquote></div>"
+ },
+ {
+  "markdown": "<note title=\"Legacy\">legacy *body*</note>\n- <span data-x=\"1\" aria-label=\"l\" tabindex=\"0\" dir=\"rtl\" lang=\"en\" hidden>attrs</span>\n<img src=\"https://e.com/a.png\" alt=\"alt text\" width=\"10\"> <citation item_id=\"1-ABCD1234\" page=\"3\"/> legacy cite\n> Inline `a < b` code\nCite <citation id=\"u-AAAA1111\" loc=\"page5\"/> and `<citation id=\"u-B\"/>` and \\<citation id=\"u-C\"/>\n\n",
+  "html": "<div class=\"markdown\"><hr/>\n<h2>Legacy</h2>\n<p>legacy <em>body</em></p>\n<hr/>\n<ul>\n<li><span tabindex=\"0\" dir=\"rtl\" lang=\"en\">attrs</span>\n<a href=\"https://e.com/a.png\">alt text</a> <citation item_id=\"1-ABCD1234\" page=\"3\"/> legacy cite</li>\n</ul>\n<blockquote>\n<p>Inline <code>a &lt; b</code> code\nCite <citation id=\"u-AAAA1111\" loc=\"page5\"/> and <citation id=\"u-B\"/> and &lt;citation id=&quot;u-C&quot;/&gt;</p>\n</blockquote></div>"
+ },
+ {
+  "markdown": "<code class=\"language-math\">raw math code</code>\n> <table><tr><td colspan=\"2\" rowspan=\"1\" valign=\"top\" nowrap>cell</td></tr></table> <ol start=\"3\" reversed><li>three</li></ol>\n",
+  "html": "<div class=\"markdown\"><p><span class=\"math\">$raw math code$</span></p>\n<blockquote>\n<table><tbody><tr><td colSpan=\"2\" rowspan=\"1\" vAlign=\"top\">cell</td></tr></tbody></table> <ol start=\"3\"><li>three</li></ol>\n</blockquote></div>"
+ },
+ {
+  "markdown": "Tab\tseparated\ttext\nUnicode: é, ü, 中文, emoji 🎉, zero​width, soft­hyphen, NFC é\n\n+ plus list\n> ",
+  "html": "<div class=\"markdown\"><p>Tab\tseparated\ttext\nUnicode: é, ü, 中文, emoji 🎉, zerowidth, softhyphen, NFC é</p>\n<ul>\n<li>plus list</li>\n</ul>\n<blockquote>\n</blockquote></div>"
+ },
+ {
+  "markdown": "```js\nconst a = \"<b>\" && 1 < 2;\n```\n> [link](https://example.com \"Title 'q'\") and <https://auto.link> and www.example.com\n<input type=\"checkbox\" checked disabled> raw input\n> Line with two spaces  \nbreak\n\n",
+  "html": "<div class=\"markdown\"><pre><code class=\"language-js\">const a = &quot;&lt;b&gt;&quot; &amp;&amp; 1 &lt; 2;\n</code></pre>\n<blockquote>\n<p><a href=\"https://example.com\" title=\"Title &#x27;q&#x27;\">link</a> and <a href=\"https://auto.link\">https://auto.link</a> and <a href=\"http://www.example.com\">www.example.com</a>\n<input type=\"checkbox\" disabled=\"\" checked=\"\"/> raw input\nLine with two spaces<br/>\nbreak</p>\n</blockquote></div>"
+ },
+ {
+  "markdown": "1. one\n2. two\n\n3. loose\n| x |\n|---|\n| ***\n- Unicode: é, ü, 中文, emoji 🎉, zero​width, soft­hyphen, NFC é\n| x |\n|---|\n| <p align=\"right\">para</p>\n| x |\n|---|\n| ",
+  "html": "<div class=\"markdown\"><ol>\n<li>\n<p>one</p>\n</li>\n<li>\n<p>two</p>\n</li>\n<li>\n<p>loose\n| x |\n|---|\n| ***</p>\n</li>\n</ol>\n<ul>\n<li>Unicode: é, ü, 中文, emoji 🎉, zerowidth, softhyphen, NFC é\n| x |\n|---|\n| <p align=\"right\">para</p>\n| x |\n|---|\n| **</li>\n</ul></div>"
+ },
+ {
+  "markdown": "Inline `a < b` code <span style=\"color:red\" onclick=\"x()\">raw span</span> <b>bold</b> <kbd>Ctrl</kbd> <sub>2</sub><sup>3</sup>\n> <ol start=\"3\" reversed><li>three</li></ol>\n| x |\n|---|\n| ",
+  "html": "<div class=\"markdown\"><p>Inline <code>a &lt; b</code> code <span>raw span</span> <b>bold</b> <kbd>Ctrl</kbd> <sub>2</sub><sup>3</sup></p>\n<blockquote>\n<ol start=\"3\"><li>three</li></ol>\n</blockquote>\n\n\n\n\n\n\n\n\n\n\n\n<table><thead><tr><th>x</th></tr></thead><tbody><tr><td></td></tr></tbody></table></div>"
+ },
+ {
+  "markdown": "<ol start=\"3\" reversed><li>three</li></ol>\n| x |\n|---|\n| <span style=\"color:red\" onclick=\"x()\">raw span</span> <b>bold</b> <kbd>Ctrl</kbd> <sub>2</sub><sup>3</sup>\n- + plus list Math $E=mc^2$ and $$\\int_0^1 x dx$$ and \\(a<b\\) and \\[c>d\\]\n> * star list\n\n* loose\n| x |\n|---|\n| ",
+  "html": "<div class=\"markdown\"><ol start=\"3\"><li>three</li></ol>\n| x |\n|---|\n| <span>raw span</span> <b>bold</b> <kbd>Ctrl</kbd> <sub>2</sub><sup>3</sup>\n- + plus list Math $E=mc^2$ and \n$$\n\\int_0^1 x dx\n$$\n and $ad\n$$\n<blockquote>\n<ul>\n<li>star list</li>\n</ul>\n</blockquote>\n<ul>\n<li>loose\n| x |\n|---|\n|</li>\n</ul></div>"
+ },
+ {
+  "markdown": "> quote\n> > nested quote Setext\n===\n\n",
+  "html": "<div class=\"markdown\"><blockquote>\n<p>quote</p>\n<blockquote>\n<p>nested quote Setext\n===</p>\n</blockquote>\n</blockquote></div>"
+ },
+ {
+  "markdown": "<li class=\"task-list-item\">li</li>\n<script>alert(1)</script> after script\n```\n\nstarts with blank line\n```\n- <CITATION id=\"u-UP\"/> upper\n| x |\n|---|\n| <textarea>\nta</textarea> <select><option selected>o</option></select> <svg><circle r=\"1\"/></svg> <math><mi>x</mi></math>\n",
+  "html": "<div class=\"markdown\"><li class=\"task-list-item\">li</li>\n after script\n```\n<p>starts with blank line</p>\n<pre><code>- &lt;CITATION id=&quot;u-UP&quot;/&gt; upper\n| x |\n|---|\n| &lt;textarea&gt;\nta&lt;/textarea&gt; &lt;select&gt;&lt;option selected&gt;o&lt;/option&gt;&lt;/select&gt; &lt;svg&gt;&lt;circle r=&quot;1&quot;/&gt;&lt;/svg&gt; &lt;math&gt;&lt;mi&gt;x&lt;/mi&gt;&lt;/math&gt;\n</code></pre></div>"
+ },
+ {
+  "markdown": "5. starts at five\n6. six\n> Math $E=mc^2$ and $$\\int_0^1 x dx$$ and \\(a<b\\) and \\[c>d\\]\nhtml <span class=\"language-js\">x</span>\n\nTab\tseparated\ttext ***\n- ",
+  "html": "<div class=\"markdown\"><ol start=\"5\">\n<li>starts at five</li>\n<li>six</li>\n</ol>\n<blockquote>\n<p>Math <span class=\"math\">$E=mc^2$</span> and</p>\n</blockquote>\n<pre class=\"math\">$$\\int_0^1 x dx$$</pre>\n<p>and <span class=\"math\">$a&lt;b$</span> and</p>\n<pre class=\"math\">$$c&gt;d$$</pre>\n<p>html <span>x</span></p>\n<p>Tab\tseparated\ttext ***</p>\n<ul>\n<li>**</li>\n</ul></div>"
+ },
+ {
+  "markdown": "<style>p{}</style>\n| x |\n|---|\n| <input type=\"checkbox\" checked disabled> raw input\n| x |\n|---|\n| **bold** __bold__ *em* _em_ ***both*** ~~strike~~ ~not strike~ P~lac~\n- <CITATION id=\"u-UP\"/> upper\n\n",
+  "html": "<div class=\"markdown\">p{}\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n<table><thead><tr><th>x</th></tr></thead><tbody><tr><td><input type=\"checkbox\" disabled=\"\" checked=\"\"/> raw input</td></tr><tr><td>x</td></tr><tr><td>---</td></tr><tr><td><strong>bold</strong> <strong>bold</strong> <em>em</em> <em>em</em> <em><strong>both</strong></em> <del>strike</del> ~not strike~ P~lac~</td></tr></tbody></table>\n<ul>\n<li></li>\n</ul></div>"
+ },
+ {
+  "markdown": "<code class=\"language-math\">raw math code</code>\n- Setext\n===\n| x |\n|---|\n| <img src=\"https://e.com/a.png\" alt=\"alt text\" width=\"10\"> <font color=\"red\" size=\"3\">font</font> <center>c</center> <u>u</u> <s>s</s> <mark>m</mark>\n> | a |\n|---|\n| only |\n| x |\n|---|\n| ",
+  "html": "<div class=\"markdown\"><p><span class=\"math\">$raw math code$</span></p>\n<ul>\n<li>Setext\n===\n| x |\n|---|\n| <a href=\"https://e.com/a.png\">alt text</a> font c u <s>s</s> m</li>\n</ul>\n<blockquote>\n<p>| a |\n|---|\n| only |\n| x |\n|---|\n|</p>\n</blockquote></div>"
+ },
+ {
+  "markdown": "1. one\n2. two\n\n3. loose\nPlain text with & ampersand, <less> and \"quotes\" and 'apostrophes' and > greater.\n> <code class=\"language-math\">raw math code</code>\n- ",
+  "html": "<div class=\"markdown\"><ol>\n<li>\n<p>one</p>\n</li>\n<li>\n<p>two</p>\n</li>\n<li>\n<p>loose\nPlain text with &amp; ampersand,  and &quot;quotes&quot; and &#x27;apostrophes&#x27; and &gt; greater.</p>\n</li>\n</ol>\n<blockquote>\n<p><span class=\"math\">$raw math code$</span></p>\n</blockquote>\n<ul>\n<li></li>\n</ul></div>"
+ },
+ {
+  "markdown": "<details open><summary>Sum</summary>Body text</details>\n> <table><tr><td colspan=\"2\" rowspan=\"1\" valign=\"top\" nowrap>cell</td></tr></table>\n",
+  "html": "<div class=\"markdown\"><details open=\"\"><summary>Sum</summary>Body text</details>\n&gt; <table><tbody><tr><td colSpan=\"2\" rowspan=\"1\" vAlign=\"top\">cell</td></tr></tbody></table></div>"
+ },
+ {
+  "markdown": "| a |\n|---|\n| only |\n- &copy; &amp; &#x27; &#39; &nbsp; &lt;tag&gt; &unknown;\nTrailing **unclosed bold\n\n",
+  "html": "<div class=\"markdown\">\n\n\n\n\n\n\n\n\n\n\n<table><thead><tr><th>a</th></tr></thead><tbody><tr><td>only</td></tr></tbody></table>\n<ul>\n<li>© &amp; &#x27; &#x27;   &lt;tag&gt; &amp;unknown;\nTrailing **unclosed bold</li>\n</ul>\n<p>**</p></div>"
+ },
+ {
+  "markdown": "1. one\n2. two\n\n3. loose\n| x |\n|---|\n| | A | B | C |\n|:--|:-:|--:|\n| 1 | 2 | 3 |\n| x & y | `c` | **b** |\n- item 1\n- item 2\n  - nested\n    1. deep\n> <table><tr><td colspan=\"2\" rowspan=\"1\" valign=\"top\" nowrap>cell</td></tr></table>\n> ###### h6\n\n# Heading 1\n\n",
+  "html": "<div class=\"markdown\"><ol>\n<li>\n<p>one</p>\n</li>\n<li>\n<p>two</p>\n</li>\n<li>\n<p>loose\n| x |\n|---|\n| | A | B | C |\n|:--|:-:|--:|\n| 1 | 2 | 3 |\n| x &amp; y | <code>c</code> | <strong>b</strong> |</p>\n</li>\n</ol>\n<ul>\n<li>item 1</li>\n<li>item 2\n<ul>\n<li>nested\n<ol>\n<li>deep</li>\n</ol>\n</li>\n</ul>\n</li>\n</ul>\n<blockquote>\n<table><tbody><tr><td colSpan=\"2\" rowspan=\"1\" vAlign=\"top\">cell</td></tr></tbody></table>\n###### h6\n</blockquote>\n<h1>Heading 1</h1></div>"
+ },
+ {
+  "markdown": "Plain text with & ampersand, <less> and \"quotes\" and 'apostrophes' and > greater.\n| x |\n|---|\n| ![image](https://example.com/x.png \"t\") [![nested](https://e.com/i.png)](https://e.com)\n\n```plaintext\nplain fence\n```\n<br> <br/> <hr>\n- ",
+  "html": "<div class=\"markdown\"><p>Plain text with &amp; ampersand,  and &quot;quotes&quot; and &#x27;apostrophes&#x27; and &gt; greater.</p>\n\n\n\n\n\n\n\n\n\n\n\n<table><thead><tr><th>x</th></tr></thead><tbody><tr><td><a href=\"https://example.com/x.png\" title=\"t\">image</a> <a href=\"https://e.com\">nested</a></td></tr></tbody></table>\n<h2>plain fence\n<br/> <br/> <hr/></h2></div>"
+ },
+ {
+  "markdown": "<p align=\"right\">para</p>\n- | a |\n|---|\n| only |\n<td>orphan td</td>\n> <a href=\"https://x.com\" title=\"t\" target=\"_blank\" rel=\"noopener\">raw a</a>\n\n<h2 class=\"sr-only\">sr</h2>\n> Plain text with & ampersand, <less> and \"quotes\" and 'apostrophes' and > greater.\n\n",
+  "html": "<div class=\"markdown\"><p align=\"right\">para</p>\n- | a |\n|---|\n| only |\norphan td\n&gt; <a href=\"https://x.com\" title=\"t\">raw a</a>\n<h2 class=\"sr-only\">sr</h2>\n&gt; Plain text with &amp; ampersand,  and &quot;quotes&quot; and &#x27;apostrophes&#x27; and &gt; greater.</div>"
+ },
+ {
+  "markdown": "```plaintext\nplain fence\n```\n<citation item_id=\"1-ABCD1234\" page=\"3\"/> legacy cite\n- \\* escaped star \\_ \\` \\#\n- ",
+  "html": "<div class=\"markdown\"><p>plain fence\n<citation item_id=\"1-ABCD1234\" page=\"3\"/> legacy cite</p>\n<ul>\n<li>* escaped star _ ` #</li>\n<li></li>\n</ul></div>"
+ },
+ {
+  "markdown": "<ol start=\"3\" reversed><li>three</li></ol>\n\n<CITATION id=\"u-UP\"/> upper\n- <!-- comment --> after comment\n> <div itemscope itemtype=\"t\" itemprop=\"p\">micro</div> <bdo dir=\"ltr\">b</bdo> <dl><dt>t</dt><dd>d</dd></dl> <ruby>r<rt>t</rt></ruby>\n- html <span class=\"language-js\">x</span>\n| x |\n|---|\n| Footnote ref[^1] and[^n].\n\n[^1]: The note.\n[^n]: Other *note*.\n| x |\n|---|\n| ",
+  "html": "<div class=\"markdown\"><ol start=\"3\"><li>three</li></ol>\n<p></p>\n<ul>\n<li>\n after comment\n</li>\n</ul>\n<blockquote>\n<div itemscope=\"\" itemType=\"t\" itemProp=\"p\">micro</div> b <dl><dt>t</dt><dd>d</dd></dl> <ruby>r<rt>t</rt></ruby>\n</blockquote>\n<ul>\n<li>html <span>x</span>\n| x |\n|---|\n| Footnote ref<sup>1</sup> and<sup>2</sup>.</li>\n</ul>\n<h2>Notes</h2>\n<ol>\n<li>\n<p>The note.</p>\n</li>\n<li>\n<p>Other <em>note</em>.\n| x |\n|---|\n|</p>\n</li>\n</ol></div>"
+ },
+ {
+  "markdown": "+ plus list\n| x |\n|---|\n| <span data-x=\"1\" aria-label=\"l\" tabindex=\"0\" dir=\"rtl\" lang=\"en\" hidden>attrs</span>\n| x |\n|---|\n| <script>alert(1)</script> after script\n\nTerm<br>with<br/>breaks\n\n",
+  "html": "<div class=\"markdown\"><ul>\n<li>plus list\n| x |\n|---|\n| <span tabindex=\"0\" dir=\"rtl\" lang=\"en\">attrs</span>\n| x |\n|---|\n|  after script</li>\n</ul>\n<p>Term<br/>with<br/>breaks</p></div>"
+ },
+ {
+  "markdown": "###### h6\n| x |\n|---|\n| # Heading 1\n| x |\n|---|\n| Tab\tseparated\ttext\n\n<table><tr><td colspan=\"2\" rowspan=\"1\" valign=\"top\" nowrap>cell</td></tr></table>\n\n<abbr title=\"HyperText\">HTML</abbr> <q cite=\"https://e.com\">q</q> <del datetime=\"2020\">del</del> <ins>ins</ins>\n\n",
+  "html": "<div class=\"markdown\"><h6>h6</h6>\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n<table><thead><tr><th>x</th></tr></thead><tbody><tr><td># Heading 1</td></tr><tr><td>x</td></tr><tr><td>---</td></tr><tr><td>Tab\tseparated\ttext</td></tr></tbody></table>\n<table><tbody><tr><td colSpan=\"2\" rowspan=\"1\" vAlign=\"top\">cell</td></tr></tbody></table>\n<p>HTML <q cite=\"https://e.com\">q</q> <del dateTime=\"2020\">del</del> <ins>ins</ins></p></div>"
+ },
+ {
+  "markdown": "```plaintext\nplain fence\n``` <a name=\"anchor\" id=\"x\">named</a>\n> <td align=\"left\" style=\"color:red\">aligned raw td</td> ",
+  "html": "<div class=\"markdown\"><p>plain fence <a name=\"user-content-anchor\" id=\"user-content-x\">named</a></p>\n<blockquote>\naligned raw td \n</blockquote></div>"
+ },
+ {
+  "markdown": "<script>alert(1)</script> after script\n- - [ ] todo\n- [x] done\n- <abbr title=\"HyperText\">HTML</abbr> <q cite=\"https://e.com\">q</q> <del datetime=\"2020\">del</del> <ins>ins</ins>\n\n***\n\n```js\nconst a = \"<b>\" && 1 < 2;\n```\n[zotero](zotero://select/library/items/ABCD1234) [item](u-ABCD1234) [legacy](1-ABCD1234) [js](javascript:alert(1))\n- ",
+  "html": "<div class=\"markdown\"> after script\n<ul class=\"contains-task-list\">\n<li>\n<ul class=\"contains-task-list\">\n<li class=\"task-list-item\"><input type=\"checkbox\" disabled=\"\"/> todo</li>\n</ul>\n</li>\n<li class=\"task-list-item\"><input type=\"checkbox\" disabled=\"\" checked=\"\"/> done</li>\n<li>HTML <q cite=\"https://e.com\">q</q> <del dateTime=\"2020\">del</del> <ins>ins</ins></li>\n</ul>\n<hr/>\n<pre><code class=\"language-js\">const a = &quot;&lt;b&gt;&quot; &amp;&amp; 1 &lt; 2;\n</code></pre>\n<p><a href=\"zotero://select/library/items/ABCD1234\">zotero</a> <a href=\"zotero://select/library/items/ABCD1234\">item</a> <a href=\"1-ABCD1234\">legacy</a> <a>js</a></p>\n<ul>\n<li>**</li>\n</ul></div>"
+ },
+ {
+  "markdown": "<!-- comment --> after comment\n- <textarea>\nta</textarea> <select><option selected>o</option></select> <svg><circle r=\"1\"/></svg> <math><mi>x</mi></math>\n| x |\n|---|\n| <span data-x=\"1\" aria-label=\"l\" tabindex=\"0\" dir=\"rtl\" lang=\"en\" hidden>attrs</span>\n- <section data-footnotes class=\"footnotes\">s</section>\n\n| A | B | C |\n|:--|:-:|--:|\n| 1 | 2 | 3 |\n| x & y | `c` | **b** | <span data-x=\"1\" aria-label=\"l\" tabindex=\"0\" dir=\"rtl\" lang=\"en\" hidden>attrs</span>\n- ",
+  "html": "<div class=\"markdown\"> after comment\n<ul>\n<li>\n\n\n</li></ul>\n<p>ta&lt;/textarea&gt; &lt;select&gt;&lt;option selected&gt;o&lt;/option&gt;&lt;/select&gt; &lt;svg&gt;&lt;circle r=&quot;1&quot;/&gt;&lt;/svg&gt; &lt;math&gt;&lt;mi&gt;x&lt;/mi&gt;&lt;/math&gt;</p>\n\n\n\n\n\n\n\n\n\n\n\n<table><thead><tr><th>x</th></tr></thead><tbody><tr><td><span tabindex=\"0\" dir=\"rtl\" lang=\"en\">attrs</span></td></tr></tbody></table>\n<ul>\n<li>\n\n</li>\n</ul>\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n<table><thead><tr><th style=\"text-align:left\">A</th><th style=\"text-align:center\">B</th><th style=\"text-align:right\">C</th></tr></thead><tbody><tr><td style=\"text-align:left\">1</td><td style=\"text-align:center\">2</td><td style=\"text-align:right\">3</td></tr><tr><td style=\"text-align:left\">x &amp; y</td><td style=\"text-align:center\"><code>c</code></td><td style=\"text-align:right\"><strong>b</strong></td></tr></tbody></table>\n<ul>\n<li></li>\n</ul></div>"
+ },
+ {
+  "markdown": "```\n\nstarts with blank line\n```\n> <a name=\"anchor\" id=\"x\">named</a>\n> ",
+  "html": "<div class=\"markdown\"><pre><code>\nstarts with blank line\n</code></pre>\n<blockquote>\n<p><a name=\"user-content-anchor\" id=\"user-content-x\">named</a></p>\n</blockquote></div>"
+ },
+ {
+  "markdown": "<details open><summary>Sum</summary>Body text</details>\n\n```plaintext\nplain fence\n```\n> html <span class=\"language-js\">x</span> Cite <citation id=\"u-AAAA1111\" loc=\"page5\"/> and `<citation id=\"u-B\"/>` and \\<citation id=\"u-C\"/>\n[link](https://example.com \"Title 'q'\") and <https://auto.link> and www.example.com\n\n",
+  "html": "<div class=\"markdown\"><details open=\"\"><summary>Sum</summary>Body text</details>\n<p>plain fence</p>\n<blockquote>\n<p>html <span>x</span> Cite <citation id=\"u-AAAA1111\" loc=\"page5\"/> and <citation id=\"u-B\"/> and &lt;citation id=&quot;u-C&quot;/&gt;\n<a href=\"https://example.com\" title=\"Title &#x27;q&#x27;\">link</a> and <a href=\"https://auto.link\">https://auto.link</a> and <a href=\"http://www.example.com\">www.example.com</a></p>\n</blockquote></div>"
+ },
+ {
+  "markdown": "<span data-x=\"1\" aria-label=\"l\" tabindex=\"0\" dir=\"rtl\" lang=\"en\" hidden>attrs</span>\n\n<span style=\"color:red\" onclick=\"x()\">raw span</span> <b>bold</b> <kbd>Ctrl</kbd> <sub>2</sub><sup>3</sup> <code class=\"language-math\">raw math code</code>\n| x |\n|---|\n| 5. starts at five\n6. six\n1. one\n2. two\n\n3. loose\n> ![image](https://example.com/x.png \"t\") [![nested](https://e.com/i.png)](https://e.com)\n- ",
+  "html": "<div class=\"markdown\"><p><span tabindex=\"0\" dir=\"rtl\" lang=\"en\">attrs</span></p>\n<p><span>raw span</span> <b>bold</b> <kbd>Ctrl</kbd> <sub>2</sub><sup>3</sup> <span class=\"math\">$raw math code$</span></p>\n\n\n\n\n\n\n\n\n\n\n\n<table><thead><tr><th>x</th></tr></thead><tbody><tr><td>5. starts at five</td></tr></tbody></table>\n<ol start=\"6\">\n<li>\n<p>six</p>\n</li>\n<li>\n<p>one</p>\n</li>\n<li>\n<p>two</p>\n</li>\n<li>\n<p>loose</p>\n</li>\n</ol>\n<blockquote>\n<p><a href=\"https://example.com/x.png\" title=\"t\">image</a> <a href=\"https://e.com\">nested</a></p>\n</blockquote>\n<ul>\n<li></li>\n</ul></div>"
+ },
+ {
+  "markdown": "> quote\n> > nested quote\n> <input type=\"text\" value=\"v\" disabled> <input type=\"checkbox\" value=\"v\" checked>\n| x |\n|---|\n| <CITATION id=\"u-UP\"/> upper\n> &copy; &amp; &#x27; &#39; &nbsp; &lt;tag&gt; &unknown;\n| x |\n|---|\n| <CITATION id=\"u-UP\"/> upper\n- <td>orphan td</td>\n- ",
+  "html": "<div class=\"markdown\"><blockquote>\n<p>quote</p>\n<blockquote>\n<p>nested quote\n<input disabled=\"\" type=\"checkbox\" value=\"v\"/> <input type=\"checkbox\" disabled=\"\" checked=\"\" value=\"v\"/>\n| x |\n|---|\n| </p>\n</blockquote>\n</blockquote>\n<ul>\n<li>\norphan td\n</li>\n<li></li>\n</ul></div>"
+ },
+ {
+  "markdown": "[link](https://example.com \"Title 'q'\") and <https://auto.link> and www.example.com\n| x |\n|---|\n| 1) paren list\n2) two\n| x |\n|---|\n| ",
+  "html": "<div class=\"markdown\"><p><a href=\"https://example.com\" title=\"Title &#x27;q&#x27;\">link</a> and <a href=\"https://auto.link\">https://auto.link</a> and <a href=\"http://www.example.com\">www.example.com</a></p>\n\n\n\n\n\n\n\n\n\n\n\n<table><thead><tr><th>x</th></tr></thead><tbody><tr><td>1) paren list</td></tr></tbody></table>\n<ol start=\"2\">\n<li>two\n| x |\n|---|\n|</li>\n</ol></div>"
+ },
+ {
+  "markdown": "| A | B | C |\n|:--|:-:|--:|\n| 1 | 2 | 3 |\n| x & y | `c` | **b** |\n- ***\n| x |\n|---|\n| <citation item_id=\"1-ABCD1234\" page=\"3\"/> legacy cite\n<ol start=\"x\"><li>bad start</li></ol> <table><col span=\"0\"><tr><td rowspan=\"x\">r</td></tr></table>\n- ```js\nconst a = \"<b>\" && 1 < 2;\n```\n> ",
+  "html": "<div class=\"markdown\">\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n<table><thead><tr><th style=\"text-align:left\">A</th><th style=\"text-align:center\">B</th><th style=\"text-align:right\">C</th></tr></thead><tbody><tr><td style=\"text-align:left\">1</td><td style=\"text-align:center\">2</td><td style=\"text-align:right\">3</td></tr><tr><td style=\"text-align:left\">x &amp; y</td><td style=\"text-align:center\"><code>c</code></td><td style=\"text-align:right\"><strong>b</strong></td></tr></tbody></table>\n<ul>\n<li>\n<hr/>\n</li>\n</ul>\n\n\n\n\n\n\n\n\n\n\n\n<table><thead><tr><th>x</th></tr></thead><tbody><tr><td><citation item_id=\"1-ABCD1234\" page=\"3\"/> legacy cite</td></tr></tbody></table>\n<ol><li>bad start</li></ol> <table><tbody><tr><td>r</td></tr></tbody></table>\n- ```js\nconst a = &quot;<b>&quot; &amp;&amp; 1 &lt; 2;\n```\n&gt; **</b></div>"
+ },
+ {
+  "markdown": "Setext\n=== html <span class=\"language-js\">x</span>\n> ",
+  "html": "<div class=\"markdown\"><p>Setext\n=== html <span>x</span></p>\n<blockquote>\n</blockquote></div>"
+ },
+ {
+  "markdown": "&copy; &amp; &#x27; &#39; &nbsp; &lt;tag&gt; &unknown;\n- <script>alert(1)</script> after script\n\n",
+  "html": "<div class=\"markdown\"><p>© &amp; &#x27; &#x27;   &lt;tag&gt; &amp;unknown;</p>\n<ul>\n<li>\n after script\n</li>\n</ul></div>"
+ },
+ {
+  "markdown": "Line with two spaces  \nbreak\n\nTrailing **unclosed bold\n| A | B | C |\n|:--|:-:|--:|\n| 1 | 2 | 3 |\n| x & y | `c` | **b** |\n\nTab\tseparated\ttext\n- ",
+  "html": "<div class=\"markdown\"><p>Line with two spaces<br/>\nbreak</p>\n<p>Trailing **unclosed bold</p>\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n<table><thead><tr><th style=\"text-align:left\">A</th><th style=\"text-align:center\">B</th><th style=\"text-align:right\">C</th></tr></thead><tbody><tr><td style=\"text-align:left\">1</td><td style=\"text-align:center\">2</td><td style=\"text-align:right\">3</td></tr><tr><td style=\"text-align:left\">x &amp; y</td><td style=\"text-align:center\"><code>c</code></td><td style=\"text-align:right\"><strong>b</strong></td></tr></tbody></table>\n<p>Tab\tseparated\ttext</p>\n<ul>\n<li>**</li>\n</ul></div>"
+ },
+ {
+  "markdown": "+ plus list\n| x |\n|---|\n| ```\n\nstarts with blank line\n```\n| x |\n|---|\n| ```\n\nstarts with blank line\n``` [zotero](zotero://select/library/items/ABCD1234) [item](u-ABCD1234) [legacy](1-ABCD1234) [js](javascript:alert(1))\n- 1. one\n2. two\n\n3. loose\n\n<table><tr><td colspan=\"2\" rowspan=\"1\" valign=\"top\" nowrap>cell</td></tr></table>\n",
+  "html": "<div class=\"markdown\"><ul>\n<li>plus list\n| x |\n|---|\n| ```</li>\n</ul>\n<p>starts with blank line</p>\n<pre><code>| x |\n|---|\n| ```\n\nstarts with blank line\n``` [zotero](zotero://select/library/items/ABCD1234) [item](u-ABCD1234) [legacy](1-ABCD1234) [js](javascript:alert(1))\n- 1. one\n2. two\n\n3. loose\n\n&lt;table&gt;&lt;tr&gt;&lt;td colspan=&quot;2&quot; rowspan=&quot;1&quot; valign=&quot;top&quot; nowrap&gt;cell&lt;/td&gt;&lt;/tr&gt;&lt;/table&gt;\n</code></pre></div>"
+ },
+ {
+  "markdown": "Trailing **unclosed bold\n> Plain text with & ampersand, <less> and \"quotes\" and 'apostrophes' and > greater.\n- <br> <br/> <hr>\n- [ ] todo\n- [x] done\n- Plain text with & ampersand, <less> and \"quotes\" and 'apostrophes' and > greater.\n- \\* escaped star \\_ \\` \\#\n- ",
+  "html": "<div class=\"markdown\"><p>Trailing **unclosed bold</p>\n<blockquote>\n<p>Plain text with &amp; ampersand,  and &quot;quotes&quot; and &#x27;apostrophes&#x27; and &gt; greater.</p>\n</blockquote>\n<ul class=\"contains-task-list\">\n<li><br/> <br/> <hr/></li>\n<li class=\"task-list-item\"><input type=\"checkbox\" disabled=\"\"/> todo</li>\n<li class=\"task-list-item\"><input type=\"checkbox\" disabled=\"\" checked=\"\"/> done</li>\n<li>Plain text with &amp; ampersand,  and &quot;quotes&quot; and &#x27;apostrophes&#x27; and &gt; greater.</li>\n<li>* escaped star _ ` #</li>\n<li>**</li>\n</ul></div>"
+ },
+ {
+  "markdown": "- [ ] todo\n- [x] done\n1. one\n2. two\n\n3. loose\n\n# Heading 1\n\n<style>p{}</style>\n\n",
+  "html": "<div class=\"markdown\"><ul class=\"contains-task-list\">\n<li class=\"task-list-item\"><input type=\"checkbox\" disabled=\"\"/> todo</li>\n<li class=\"task-list-item\"><input type=\"checkbox\" disabled=\"\" checked=\"\"/> done</li>\n</ul>\n<ol>\n<li>\n<p>one</p>\n</li>\n<li>\n<p>two</p>\n</li>\n<li>\n<p>loose</p>\n</li>\n</ol>\n<h1>Heading 1</h1>\np{}</div>"
+ },
+ {
+  "markdown": "###### h6\n| x |\n|---|\n| | a |\n|---|\n| only | 1. one\n2. two\n\n3. loose\n| x |\n|---|\n| <pre>\nleading newline pre</pre>\n\n",
+  "html": "<div class=\"markdown\"><h6>h6</h6>\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n<table><thead><tr><th>x</th></tr></thead><tbody><tr><td></td></tr><tr><td>---</td></tr><tr><td>only</td></tr></tbody></table>\n<ol start=\"2\">\n<li>\n<p>two</p>\n</li>\n<li>\n<p>loose\n| x |\n|---|\n| </p><pre>\n\nleading newline pre</pre><p></p>\n</li>\n</ol></div>"
+ },
+ {
+  "markdown": "Tab\tseparated\ttext\n    indented code <x>\n| x |\n|---|\n| <a href=\"javascript:alert(1)\">js raw</a> <a href=\"zotero://open/library/items/ABC\">z</a> <a href=\"u-ABCD1234\">obj</a> <pre>\nleading newline pre</pre>\n- ",
+  "html": "<div class=\"markdown\"><p>Tab\tseparated\ttext\nindented code </p>\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n<table><thead><tr><th>x</th></tr></thead><tbody><tr><td><a>js raw</a> <a href=\"zotero://open/library/items/ABC\">z</a> <a href=\"zotero://select/library/items/ABCD1234\">obj</a> <pre></pre></td></tr><tr><td>leading newline pre</td></tr></tbody></table>\n<ul>\n<li></li>\n</ul></div>"
+ },
+ {
+  "markdown": "Partial <span\n> $$\nx = \\frac{1}{2}\n$$\n> | A | B | C |\n|:--|:-:|--:|\n| 1 | 2 | 3 |\n| x & y | `c` | **b** | <input type=\"text\" value=\"v\" disabled> <input type=\"checkbox\" value=\"v\" checked>\n| x |\n|---|\n| [link](https://example.com \"Title 'q'\") and <https://auto.link> and www.example.com\n\nFootnote ref[^1] and[^n].\n\n[^1]: The note.\n[^n]: Other *note*.\n- ",
+  "html": "<div class=\"markdown\"><p>Partial &lt;span</p>\n<blockquote>\n</blockquote>\n<pre class=\"math\">$$x = \\frac{1}{2}$$</pre>\n<blockquote>\n<p>| A | B | C |\n|:--|:-:|--:|\n| 1 | 2 | 3 |\n| x &amp; y | <code>c</code> | <strong>b</strong> | <input disabled=\"\" type=\"checkbox\" value=\"v\"/> <input type=\"checkbox\" disabled=\"\" checked=\"\" value=\"v\"/>\n| x |\n|---|\n| <a href=\"https://example.com\" title=\"Title &#x27;q&#x27;\">link</a> and <a href=\"https://auto.link\">https://auto.link</a> and <a href=\"http://www.example.com\">www.example.com</a></p>\n</blockquote>\n<p>Footnote ref<sup>1</sup> and<sup>2</sup>.</p>\n<ul>\n<li></li>\n</ul>\n<h2>Notes</h2>\n<ol>\n<li>\n<p>The note.</p>\n</li>\n<li>\n<p>Other <em>note</em>.</p>\n</li>\n</ol></div>"
+ },
+ {
+  "markdown": "Backslash\\\nbreak\n> * star list\n\n* loose\n- + plus list\n> <br> <br/> <hr>\n\n<textarea>\nta</textarea> <select><option selected>o</option></select> <svg><circle r=\"1\"/></svg> <math><mi>x</mi></math> ",
+  "html": "<div class=\"markdown\"><p>Backslash<br/>\nbreak</p>\n<blockquote>\n<ul>\n<li>star list</li>\n</ul>\n</blockquote>\n<ul>\n<li>loose</li>\n</ul>\n<ul>\n<li>\n<ul>\n<li>plus list</li>\n</ul>\n</li>\n</ul>\n<blockquote>\n<p><br/> <br/> </p><hr/><p></p>\n</blockquote>\nta o  x </div>"
+ },
+ {
+  "markdown": "- [ ] todo\n- [x] done\n<pre>\nleading newline pre</pre>\n| x |\n|---|\n| Unicode: é, ü, 中文, emoji 🎉, zero​width, soft­hyphen, NFC é\n- ",
+  "html": "<div class=\"markdown\"><ul class=\"contains-task-list\">\n<li class=\"task-list-item\"><input type=\"checkbox\" disabled=\"\"/> todo</li>\n<li class=\"task-list-item\"><input type=\"checkbox\" disabled=\"\" checked=\"\"/> done</li>\n</ul>\n<pre>leading newline pre</pre>\n\n\n\n\n\n\n\n\n\n\n\n<table><thead><tr><th>x</th></tr></thead><tbody><tr><td>Unicode: é, ü, 中文, emoji 🎉, zerowidth, softhyphen, NFC é</td></tr></tbody></table>\n<ul>\n<li></li>\n</ul></div>"
+ },
+ {
+  "markdown": "---\n| x |\n|---|\n| <script>alert(1)</script> after script # Heading 1\n<ol start=\"3\" reversed><li>three</li></ol> Partial <span\n| x |\n|---|\n| ",
+  "html": "<div class=\"markdown\"><hr/>\n\n\n\n\n\n\n\n\n\n\n\n<table><thead><tr><th>x</th></tr></thead><tbody><tr><td> after script # Heading 1</td></tr></tbody></table>\n<ol start=\"3\"><li>three</li></ol> Partial </div>"
+ },
+ {
+  "markdown": "## Heading *2* with `code` # Heading 1\nPlain text with & ampersand, <less> and \"quotes\" and 'apostrophes' and > greater.\n\n",
+  "html": "<div class=\"markdown\"><h2>Heading <em>2</em> with <code>code</code> # Heading 1</h2>\n<p>Plain text with &amp; ampersand,  and &quot;quotes&quot; and &#x27;apostrophes&#x27; and &gt; greater.</p></div>"
+ },
+ {
+  "markdown": "| a |\n|---|\n| only |\n\n<note title=\"Legacy\">legacy *body*</note>\n\n<citation item_id=\"1-ABCD1234\" page=\"3\"/> legacy cite\n| x |\n|---|\n| <td align=\"left\" style=\"color:red\">aligned raw td</td>\n> Line with two spaces  \nbreak\n- ",
+  "html": "<div class=\"markdown\">\n\n\n\n\n\n\n\n\n\n\n<table><thead><tr><th>a</th></tr></thead><tbody><tr><td>only</td></tr></tbody></table>\n<hr/>\n<h2>Legacy</h2>\n<p>legacy <em>body</em></p>\n<hr/>\n<p><citation item_id=\"1-ABCD1234\" page=\"3\"/> legacy cite</p>\n\n\n\n\n\n\n\n\n\n\n\n<table><thead><tr><th>x</th></tr></thead><tbody><tr><td></td><td style=\"text-align:left\">aligned raw td</td></tr></tbody></table>\n<blockquote>\n<p>Line with two spaces<br/>\nbreak</p>\n</blockquote>\n<ul>\n<li></li>\n</ul></div>"
+ },
+ {
+  "markdown": "Trailing **unclosed bold\n> <h2 class=\"sr-only\">sr</h2>\n\nSetext\n===\n\nBackslash\\\nbreak\n<ol start=\"x\"><li>bad start</li></ol> <table><col span=\"0\"><tr><td rowspan=\"x\">r</td></tr></table>\n",
+  "html": "<div class=\"markdown\"><p>Trailing **unclosed bold</p>\n<blockquote>\n<h2 class=\"sr-only\">sr</h2>\n</blockquote>\n<h1>Setext</h1>\n<p>Backslash<br/>\nbreak</p>\n<ol><li>bad start</li></ol> <table><tbody><tr><td>r</td></tr></tbody></table>\n**</div>"
+ },
+ {
+  "markdown": "* star list\n\n* loose Trailing **unclosed bold\nFootnote ref[^1] and[^n].\n\n[^1]: The note.\n[^n]: Other *note*.\n| x |\n|---|\n| <h2 class=\"sr-only\">sr</h2>\n- Cite <citation id=\"u-AAAA1111\" loc=\"page5\"/> and `<citation id=\"u-B\"/>` and \\<citation id=\"u-C\"/>\n- Backslash\\\nbreak\n",
+  "html": "<div class=\"markdown\"><ul>\n<li>\n<p>star list</p>\n</li>\n<li>\n<p>loose Trailing **unclosed bold\nFootnote ref<sup>1</sup> and<sup>2</sup>.</p>\n</li>\n</ul>\n<ul>\n<li>Cite <citation id=\"u-AAAA1111\" loc=\"page5\"/> and <citation id=\"u-B\"/> and &lt;citation id=&quot;u-C&quot;/&gt;</li>\n<li>Backslash<br/>\nbreak\n**</li>\n</ul>\n<h2>Notes</h2>\n<ol>\n<li>\n<p>The note.</p>\n</li>\n<li>\n<p>Other <em>note</em>.\n| x |\n|---|\n| </p><h2 class=\"sr-only\">sr</h2><p></p></li>\n</ol></div>"
+ },
+ {
+  "markdown": "<div itemscope itemtype=\"t\" itemprop=\"p\">micro</div> <bdo dir=\"ltr\">b</bdo> <dl><dt>t</dt><dd>d</dd></dl> <ruby>r<rt>t</rt></ruby>\n\n<details open><summary>Sum</summary>Body text</details>\n> ###### h6\n| x |\n|---|\n| ",
+  "html": "<div class=\"markdown\"><div itemscope=\"\" itemType=\"t\" itemProp=\"p\">micro</div> b <dl><dt>t</dt><dd>d</dd></dl> <ruby>r<rt>t</rt></ruby>\n<details open=\"\"><summary>Sum</summary>Body text</details>\n&gt; ###### h6\n| x |\n|---|\n| </div>"
+ },
+ {
+  "markdown": "<h2 class=\"sr-only\">sr</h2> **bold** __bold__ *em* _em_ ***both*** ~~strike~~ ~not strike~ P~lac~\n- <input type=\"checkbox\" checked disabled> raw input\n\n<img src=\"https://e.com/a.png\" alt=\"alt text\" width=\"10\">\n\n***\n| x |\n|---|\n| ",
+  "html": "<div class=\"markdown\"><h2 class=\"sr-only\">sr</h2> **bold** __bold__ *em* _em_ ***both*** ~~strike~~ ~not strike~ P~lac~\n- <input type=\"checkbox\" disabled=\"\" checked=\"\"/> raw input\n<a href=\"https://e.com/a.png\">alt text</a>\n<hr/>\n\n\n\n\n\n\n\n\n\n\n\n<table><thead><tr><th>x</th></tr></thead><tbody><tr><td>**</td></tr></tbody></table></div>"
+ },
+ {
+  "markdown": "[zotero](zotero://select/library/items/ABCD1234) [item](u-ABCD1234) [legacy](1-ABCD1234) [js](javascript:alert(1))\n\n```plaintext\nplain fence\n```\n\n<p align=\"right\">para</p>\n- Partial <span <script>alert(1)</script> after script\n\n<img src=\"https://e.com/a.png\" alt=\"alt text\" width=\"10\">\n- ",
+  "html": "<div class=\"markdown\"><p><a href=\"zotero://select/library/items/ABCD1234\">zotero</a> <a href=\"zotero://select/library/items/ABCD1234\">item</a> <a href=\"1-ABCD1234\">legacy</a> <a>js</a></p>\n<p>plain fence</p>\n<p align=\"right\">para</p>\n- Partial <span>alert(1) after script\n<a href=\"https://e.com/a.png\">alt text</a>\n- </span></div>"
+ },
+ {
+  "markdown": "# Heading 1\n> <details open><summary>Sum</summary>Body text</details>\n\nBackslash\\\nbreak ",
+  "html": "<div class=\"markdown\"><h1>Heading 1</h1>\n<blockquote>\n<details open=\"\"><summary>Sum</summary>Body text</details>\n</blockquote>\n<p>Backslash<br/>\nbreak</p></div>"
+ },
+ {
+  "markdown": "```js\nconst a = \"<b>\" && 1 < 2;\n``` Line with two spaces  \nbreak\n> + plus list\n- ",
+  "html": "<div class=\"markdown\"><pre><code class=\"language-js\">const a = &quot;&lt;b&gt;&quot; &amp;&amp; 1 &lt; 2;\n``` Line with two spaces  \nbreak\n&gt; + plus list\n- \n</code></pre></div>"
+ },
+ {
+  "markdown": "![image](https://example.com/x.png \"t\") [![nested](https://e.com/i.png)](https://e.com)\n| x |\n|---|\n| 5. starts at five\n6. six\n\n<code class=\"language-math\">raw math code</code>\n- html <span class=\"language-js\">x</span>\n\n",
+  "html": "<div class=\"markdown\"><p><a href=\"https://example.com/x.png\" title=\"t\">image</a> <a href=\"https://e.com\">nested</a></p>\n\n\n\n\n\n\n\n\n\n\n\n<table><thead><tr><th>x</th></tr></thead><tbody><tr><td>5. starts at five</td></tr></tbody></table>\n<ol start=\"6\">\n<li>six</li>\n</ol>\n<p><span class=\"math\">$raw math code$</span></p>\n<ul>\n<li>html <span>x</span></li>\n</ul></div>"
+ }
+]
