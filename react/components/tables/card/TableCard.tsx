@@ -869,8 +869,8 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
     const held = disabled && !!heldCaption;
     const blocked = isLast && !!blockerReason && !disabled;
     const fillFacts = isLast && !held && !blocked && fillNow && cost && !upperBound ? cost : null;
-    // On Sources, where papers are added, and again before Create.
-    const fewPapers = !held && (draft.step === 'sources' || (isLast && !blocked)) ? singlePaperHint(draft, request) : null;
+    // Only on Sources, where papers are added.
+    const fewPapers = !held && draft.step === 'sources' ? singlePaperHint(draft, request) : null;
     const bands = held ? (
         <div className="table-card-footer-band table-card-footer-band-pending" role="status">
             <Spinner size={12} />
@@ -893,26 +893,13 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
                 </button>
             )}
         </div>
-    ) : (fillFacts && !shortWindow) || fewPapers ? (
-        <>
-            {fillFacts && !shortWindow && <TableCardFillWarnings cost={fillFacts} prices={prices} />}
-            {fewPapers && (
-                <div className="table-card-footer-band table-card-footer-band-info font-color-secondary" role="status">
-                    <Icon icon={InformationCircleIcon} className="table-card-warning-icon" />
-                    <span className="table-card-notice-text">{fewPapers}</span>
-                    {/* Before Create, papers are added back on Sources. */}
-                    {draft.step !== 'sources' && !disabled && (
-                        <button
-                            type="button"
-                            className="table-card-warning-action"
-                            onClick={() => setDraft((prev) => goToStep(prev, 'sources'))}
-                        >
-                            Add papers
-                        </button>
-                    )}
-                </div>
-            )}
-        </>
+    ) : fillFacts && !shortWindow ? (
+        <TableCardFillWarnings cost={fillFacts} prices={prices} />
+    ) : fewPapers ? (
+        <div className="table-card-footer-band font-color-secondary" role="status">
+            <Icon icon={InformationCircleIcon} className="table-card-warning-icon" />
+            <span className="table-card-notice-text">{fewPapers}</span>
+        </div>
     ) : null;
 
     // The decision row: whether Create table also runs, and what that costs,
