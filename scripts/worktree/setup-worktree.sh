@@ -269,6 +269,8 @@ bootstrap_lite_worktree() {
       echo "==> Running npm install (this can take a few minutes)"
     fi
     (cd "$WT" && npm install)
+    # .npmrc disables dependency install scripts; build the ones tests need.
+    (cd "$WT" && npm run --if-present rebuild:native)
   fi
 }
 

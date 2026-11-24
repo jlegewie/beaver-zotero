@@ -36,6 +36,7 @@
         "bench:pdf": "BEAVER_BENCH=1 vitest run --config vitest.live.config.ts tests/live/markdownEnginesBench.live.test.ts",
         "test:watch": "vitest",
         "update-deps": "npm update --save",
+        "rebuild:native": "npm rebuild better-sqlite3 --ignore-scripts=false",
         "build-react": "webpack --config webpack.config.js --mode=development",
         "build-react:dev": "webpack --config webpack.config.js --mode=development",
         "build-react:prod": "webpack --config webpack.config.js --mode=production",

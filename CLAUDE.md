@@ -27,6 +27,24 @@ Notes:
   `npm start` runs the copy step before the watchers, then keeps it watching.
 - **Never create commits** unless explicitly asked.
 
+### Dependencies and install scripts
+
+`.npmrc` sets `ignore-scripts=true`, so `npm ci` / `npm install` run no dependency
+install scripts (and no root `pre*`/`post*` hooks). After installing, run
+`npm run rebuild:native` to build the dependencies that need theirs — today only
+`better-sqlite3`, which the unit tests' SQLite doubles load. Tests failing with
+`Could not locate the bindings file` mean that step was skipped.
+
+- A new dependency that needs its install script goes on the `npm rebuild` line of
+  `rebuild:native` in `package.json`. Check first whether it works without one:
+  esbuild, `@swc/core` and sharp ship prebuilt platform packages, and their scripts
+  only verify them.
+- `min-release-age=7` makes npm resolve only versions at least 7 days old (npm ≥ 11.10;
+  `npm ci` installs the lockfile as is). To take a fresh security fix, pass
+  `--min-release-age=0` for that one install.
+- Dependabot uses the same 7-day cooldown, for npm and for the SHA-pinned actions.
+  Pin new workflow actions to a full commit SHA with the tag in a trailing comment.
+
 ### Build vs. watch — do not mix them
 
 **Never run `npm run build:dev` while `npm start` is running.** `build:dev` calls
