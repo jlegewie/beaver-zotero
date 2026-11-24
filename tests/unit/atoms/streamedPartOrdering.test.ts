@@ -168,6 +168,25 @@ describe('streamed parts and the other WebSocket callbacks', () => {
         expect(streamedText(archived[0])).toBe('An answer that was cut off here');
     });
 
+    it('keeps a tool call with no items to load when the run is stopped as it arrives', () => {
+        // Not awaited: with no item data to load, the call is queued before
+        // anything else can run, so the stop that follows still archives it.
+        void callbacks.onPart({
+            event: 'part',
+            run_id: 'run-1',
+            message_index: 0,
+            part_index: 0,
+            part: { part_kind: 'tool-call', tool_name: 'search', tool_call_id: 'call-1', args: {} },
+        } as unknown as WSPartEvent);
+
+        store.set(abandonActiveRunLocallyAtom);
+
+        const archived = store.get(threadRunsAtom);
+        expect(archived).toHaveLength(1);
+        const message = archived[0].model_messages[0];
+        expect(message?.kind === 'response' ? message.parts[0]?.part_kind : undefined).toBe('tool-call');
+    });
+
     it('applies every queued part, in the order they arrived', async () => {
         await callbacks.onPart(textPart('The'));
         await callbacks.onPart(textPart('The whole'));
