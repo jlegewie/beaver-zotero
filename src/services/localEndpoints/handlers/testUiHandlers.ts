@@ -1,7 +1,7 @@
 /**
  * Dev-only HTTP handlers for UI lifecycle state: the cleanup of
  * `Zotero.Reader.onChangeSidebarWidth` wrappers left by earlier plugin
- * versions, and window runtime commands.
+ * versions, window runtime commands, and closing or reopening main windows.
  */
 import {
     restoreReaderSidebarWidthHandler,
@@ -128,3 +128,39 @@ export async function handleTestWindowRuntimeHttpRequest(request: any) {
         throw error;
     }
 }
+
+async function waitForCondition(check: () => boolean, timeoutMs: number): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    while (!check()) {
+        if (Date.now() >= deadline) return false;
+        await Zotero.Promise.delay(100);
+    }
+    return true;
+}
+
+function readyMainWindows(): number {
+    return Zotero.Beaver.runtime.getSnapshot().filter(window => window.kind === 'main' && window.status === 'ready').length;
+}
+
+/**
+ * Close every main window, or open one again, for checks that must run with
+ * no window. Closing is refused except on macOS: elsewhere, closing the last
+ * main window quits Zotero. Without an `action`, reports the current state.
+ */
+export async function handleTestMainWindowsHttpRequest(request: any) {
+    const timeoutMs = Number(request?.timeout_ms) || 20_000;
+    const state = () => ({ mainWindows: Zotero.getMainWindows().length, readyMainWindows: readyMainWindows(), canClose: !!Zotero.isMac });
+    if (request?.action === 'close') {
+        if (!Zotero.isMac) return { error: 'unsupported_platform', ...state() };
+        for (const win of Zotero.getMainWindows()) win.close();
+        const ok = await waitForCondition(() => Zotero.getMainWindows().length === 0 && readyMainWindows() === 0, timeoutMs);
+        return { ok, ...state() };
+    }
+    if (request?.action === 'open') {
+        if (Zotero.getMainWindows().length === 0) Zotero.openMainWindow();
+        const ok = await waitForCondition(() => readyMainWindows() > 0, timeoutMs);
+        return { ok, ...state() };
+    }
+    return state();
+}
+
