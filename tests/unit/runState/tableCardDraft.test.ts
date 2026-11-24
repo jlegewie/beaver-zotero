@@ -665,6 +665,13 @@ describe('table card draft', () => {
                 "Your 0 credits aren't enough to fill this item.",
             );
             expect(balanceNotice(cost, null, PRICES)).toBeNull();
+            // Running fills hold part of the account's balance: the warning says how much, at most.
+            expect(balanceNotice(cost, 1.4, PRICES, 6)).toBe(
+                'Fills already running may use up to 4.6 of your 6 credits; the rest covers about 7 of 12 items.',
+            );
+            expect(balanceNotice(cost, 0.1, PRICES, 3)).toBe(
+                "Fills already running may use up to 2.9 of your 3 credits; the rest isn't enough to fill these items.",
+            );
         });
     });
 

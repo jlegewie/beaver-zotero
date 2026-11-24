@@ -897,9 +897,19 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
         <>
             {fillFacts && !shortWindow && <TableCardFillWarnings cost={fillFacts} prices={prices} />}
             {fewPapers && (
-                <div className="table-card-footer-band font-color-secondary" role="status">
+                <div className="table-card-footer-band table-card-footer-band-info font-color-secondary" role="status">
                     <Icon icon={InformationCircleIcon} className="table-card-warning-icon" />
                     <span className="table-card-notice-text">{fewPapers}</span>
+                    {/* Before Create, papers are added back on Sources. */}
+                    {draft.step !== 'sources' && !disabled && (
+                        <button
+                            type="button"
+                            className="table-card-warning-action"
+                            onClick={() => setDraft((prev) => goToStep(prev, 'sources'))}
+                        >
+                            Add papers
+                        </button>
+                    )}
                 </div>
             )}
         </>

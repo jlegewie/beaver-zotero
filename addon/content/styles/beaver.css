@@ -5071,6 +5071,12 @@
     font-weight: 600;
 }
 
+/* An info band's link reads as the way to act on the note, not more of it. */
+[id^="beaver-pane-"] .table-card-footer-band-info .table-card-warning-action {
+    color: var(--fill-primary);
+    font-weight: 600;
+}
+
 /* In a short window the fill warnings close the scrolling content instead,
  * flush with the card's edges and the footer below them. */
 [id^="beaver-pane-"] .table-card-body-bands {

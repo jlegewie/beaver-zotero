@@ -101,7 +101,8 @@ export interface TableCardFillWarningsProps {
  */
 export const TableCardFillWarnings: React.FC<TableCardFillWarningsProps> = ({ cost, prices, inBody = false }) => {
     const balance = useCreditBalance();
-    const balanceWarning = balanceNotice(cost, balance, prices);
+    const accountBalance = useAccountCreditBalance();
+    const balanceWarning = balanceNotice(cost, balance, prices, accountBalance ?? balance);
     const readWarning = costNotice(cost);
     if (!balanceWarning && !readWarning) return null;
     const bands = (
@@ -111,7 +112,7 @@ export const TableCardFillWarnings: React.FC<TableCardFillWarningsProps> = ({ co
                     <Icon icon={SecurityWarningIcon} className="table-card-warning-icon" />
                     <span className="table-card-notice-text">{balanceWarning}</span>
                     <button type="button" className="table-card-warning-action" onClick={() => openPreferencesWindow('billing')}>
-                        {creditsActionLabel(balance)}
+                        {creditsActionLabel(accountBalance ?? balance)}
                     </button>
                 </div>
             )}

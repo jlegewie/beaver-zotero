@@ -375,7 +375,10 @@ function FillPopover({
     // A balance short of one item would stop the fill before it answers
     // anything: the way to credits replaces Fill.
     const noCredits = shownPlan ? noCreditsText(shownPlan, balance, accountBalance ?? balance) : null;
-    const reach = shownPlan && !noCredits ? balanceLine({ ...shownPlan, balance }) : null;
+    const reach = shownPlan && !noCredits ? balanceLine({ ...shownPlan, balance }, accountBalance ?? balance) : null;
+    // "Get credits" only for an account with none: credits that running fills
+    // hold are still the user's.
+    const creditsLabel = creditsActionLabel(accountBalance ?? balance);
     useRefreshBalanceOnFocus(!!(noCredits || reach));
     let body: React.ReactNode;
     let action: React.ReactNode = null;
@@ -437,7 +440,7 @@ function FillPopover({
                     <div className="bt-fill-reach bt-fill-reach-action">
                         <span>{reach}.</span>
                         <button type="button" className="text-link bt-fill-reach-link" onClick={openBilling}>
-                            {creditsActionLabel(balance)}
+                            {creditsLabel}
                         </button>
                     </div>
                 ) : null}
@@ -451,7 +454,7 @@ function FillPopover({
         if (noCredits) {
             action = (
                 <Button variant="solid" onClick={openBilling}>
-                    {creditsActionLabel(balance)}
+                    {creditsLabel}
                 </Button>
             );
         } else {

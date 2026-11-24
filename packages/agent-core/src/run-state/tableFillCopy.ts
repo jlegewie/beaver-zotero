@@ -217,22 +217,41 @@ function papersRead(plan: Pick<TableFillPlanSummary, "rows" | "documents" | "tit
 }
 
 /**
+ * What running fills may still charge, when `balance` is `accountBalance` less
+ * that: "Fills already running may use up to 4.7 of your 5 credits". Null
+ * when they hold nothing, or less than the display precision (rounding residue).
+ * It is an upper bound: a row that fails, or reads only an abstract, charges less.
+ */
+export function runningFillsText(balance: number, accountBalance: number | null): string | null {
+    const account = accountBalance ?? balance;
+    const held = account - balance;
+    if (held < 0.005) return null;
+    return `Fills already running may use up to ${formatCredits(held)} of your ${creditsText(account)}`;
+}
+
+/**
  * How far the balance reaches, when the fill costs more than it: "Your 6
- * credits cover about 30 of 46 papers". Null when the balance covers it or
- * is unknown.
+ * credits cover about 30 of 46 papers". With running fills holding part of the
+ * account's balance (`accountBalance`), it says so first: "Fills already
+ * running may use up to 4.7 of your 5 credits; the rest covers about 2 of 3
+ * items". Null when the balance covers it or is unknown.
  */
 export function balanceLine(
     plan: Pick<
         TableFillPlanSummary,
         "credits" | "balance" | "documents" | "title_abstract" | "prices"
     >,
+    accountBalance: number | null = plan.balance,
 ): string | null {
     if (plan.balance == null || plan.credits <= plan.balance) return null;
     const paying = plan.documents + plan.title_abstract;
     const perPaper = paying > 0 ? plan.credits / paying : plan.prices.document;
     const covered = perPaper > 0 ? Math.floor(plan.balance / perPaper + 1e-9) : paying;
+    const reach = `about ${Math.min(covered, paying)} of ${paying} items`;
+    const running = runningFillsText(plan.balance, accountBalance);
+    if (running) return `${running}; the rest covers ${reach}`;
     const balance = creditsText(plan.balance);
-    return `Your ${balance} ${balance.endsWith("credit") ? "covers" : "cover"} about ${Math.min(covered, paying)} of ${paying} items`;
+    return `Your ${balance} ${balance.endsWith("credit") ? "covers" : "cover"} ${reach}`;
 }
 
 /** The price of the cheapest item a plan pays for; null when it pays for none. */
@@ -248,8 +267,11 @@ function cheapestItem(
 /**
  * Why a plan cannot start when the balance cannot pay for a single item it
  * fills, so the fill would stop before answering anything: "Filling uses
- * Beaver credits: 0.2 per item. You have 0 credits." Null when the balance
- * pays for an item, is unknown, or the plan costs nothing.
+ * Beaver credits: 0.2 per item. You have 0 credits." When running fills hold
+ * the account's credits, that is the reason, and waiting for them is a way
+ * out: "… Fills already running may use up to 2 of your 2.02 credits. Wait
+ * for them to finish or add credits." Null when the balance pays for an item,
+ * is unknown, or the plan costs nothing.
  */
 export function noCreditsText(
     plan: Pick<TableFillPlanSummary, "credits" | "documents" | "title_abstract" | "prices">,
@@ -260,13 +282,10 @@ export function noCreditsText(
     if (balance == null || plan.credits <= 0) return null;
     const cheapest = cheapestItem(plan);
     if (cheapest == null || balance + 1e-9 >= cheapest) return null;
-    const price = plan.documents ? plan.prices.document : plan.prices.title_abstract;
-    const account = accountBalance ?? balance;
-    const held = account - balance;
-    // "You have" is the account's balance; what running fills will still use is said apart.
-    // Below the display precision (rounding residue) there is nothing to say.
-    const running = held >= 0.005 ? ` Fills already running will use ${creditsText(held)} of it.` : '';
-    return `Filling uses Beaver credits: ${formatCredits(price)} per item. You have ${creditsText(account)}.${running}`;
+    const price = `Filling uses Beaver credits: ${formatCredits(plan.documents ? plan.prices.document : plan.prices.title_abstract)} per item.`;
+    const running = runningFillsText(balance, accountBalance);
+    if (running) return `${price} ${running}. Wait for them to finish or add credits.`;
+    return `${price} You have ${creditsText(accountBalance ?? balance)}.`;
 }
 
 /** What a table can still do without credits. */
