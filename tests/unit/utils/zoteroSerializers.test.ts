@@ -163,6 +163,22 @@ describe('zoteroSerializers portable id emission', () => {
             expect(result.annotation_id).toBe('99-ANNOT9999');
         });
     });
+
+    describe('serializeAnnotation created_by', () => {
+        // Which author names count as Beaver's is covered by isBeaverAuthoredAnnotation's tests.
+        function createdBy(authorName: string | undefined): string | undefined {
+            return serializeAnnotation(baseItem({ annotationAuthorName: authorName }) as any).created_by;
+        }
+
+        it('reads an annotation with Beaver\'s author name as Beaver-made', () => {
+            expect(createdBy('Beaver')).toBe('beaver');
+        });
+
+        it('reads an annotation with no author or another author as the user\'s', () => {
+            expect(createdBy(undefined)).toBe('user');
+            expect(createdBy('Dr. Annotator')).toBe('user');
+        });
+    });
 });
 
 describe('itemSearchResultFromZoteroItem trash state', () => {

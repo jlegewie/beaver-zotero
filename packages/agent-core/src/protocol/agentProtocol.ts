@@ -1653,6 +1653,13 @@ export interface AnnotationResultItem {
     tags?: string[];
     /** Annotation author, when Zotero stores one. */
     author?: string | null;
+    /**
+     * Who made the annotation: `beaver` when its author marks it as Beaver's,
+     * otherwise `user` (the user, a group member, or the file itself). The
+     * author name is a preference and may be empty, so a Beaver annotation can
+     * read as `user`, which errs toward leaving it alone.
+     */
+    created_by?: 'beaver' | 'user';
     /** Parent attachment id ("library_id-zotero_key"). */
     attachment_id?: string | null;
     /** Bibliographic regular item id ("library_id-zotero_key"). */
