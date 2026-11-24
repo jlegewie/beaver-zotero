@@ -1,9 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const state = vi.hoisted(() => ({ runtime: { id: 'window-A', status: 'ready' }, values: new Map<unknown, any>(), writes: vi.fn(), prepare: vi.fn(async (_content: string, context: any) => context) }));
+const state = vi.hoisted(() => ({ runtime: { id: 'window-A', status: 'ready' }, values: new Map<unknown, any>(), writes: vi.fn(), renderNoteMarkdown: vi.fn((content: string) => `<p>${content}</p>`) }));
 vi.mock('../../../react/store', () => ({ store: { get: (atom: unknown) => state.values.get(atom), set: state.writes } }));
-vi.mock('../../../react/utils/citationRenderContext', () => ({ prepareCitationRenderContext: state.prepare }));
-vi.mock('../../../react/utils/citationRenderers', () => ({ renderToHTML: (_text: string, _mode: string, context: any) => JSON.stringify(context) }));
 vi.mock('../../../react/utils/attachmentResolvedEvent', () => ({ emitAttachmentResolved: vi.fn() }));
 vi.mock('../../../react/atoms/threads', () => ({ currentThreadIdAtom: Symbol('thread') }));
 vi.mock('../../../react/runtime/windowRuntime', () => ({ tryGetWindowRuntime: () => state.runtime }));
@@ -15,7 +13,6 @@ vi.mock('../../../src/services/deferredToolPolicy', async importOriginal => {
 import { emitAttachmentResolved } from '../../../react/utils/attachmentResolvedEvent';
 import { captureOperationContext } from '../../../react/runtime/operationContext';
 import { activeRunAtom } from '@beaver/agent-core/run-state/atoms';
-import { citationMapAtom } from '@beaver/agent-core/citations/atoms';
 import { externalReferenceMappingAtom, externalReferenceItemMappingAtom } from '@beaver/agent-core/citations/externalReferences';
 import { currentThreadIdAtom } from '../../../react/atoms/threads';
 import { runApprovalPolicyAtom } from '../../../react/atoms/runApprovalPolicy';
@@ -24,11 +21,13 @@ beforeEach(() => {
     vi.clearAllMocks();
     state.values.clear();
     state.runtime.status = 'ready';
-    (Zotero as any).Beaver = { account: { getGeneration: () => 4, getSnapshot: () => ({ session: { user: { id: 'account-A' } } }) } };
+    (Zotero as any).Beaver = {
+        account: { getGeneration: () => 4, getSnapshot: () => ({ session: { user: { id: 'account-A' } } }) },
+        exporter: { renderNoteMarkdown: state.renderNoteMarkdown },
+    };
     state.values.set(activeRunAtom, { id: 'run-A' });
     state.values.set(currentThreadIdAtom, 'thread-A');
     state.values.set(runApprovalPolicyAtom, { runId: 'run-A', fullAccess: true, approvedResources: new Set() });
-    state.values.set(citationMapAtom, { a: { citation_id: 'citation-A' } });
     state.values.set(externalReferenceMappingAtom, { a: { title: 'Reference A' } });
     state.values.set(externalReferenceItemMappingAtom, { a: { zotero_key: 'ITEMAAAA' } });
 });
@@ -54,19 +53,23 @@ describe('explicit data operation context', () => {
         expect(emitAttachmentResolved).not.toHaveBeenCalled();
     });
 
-    it('keeps captured citations and identity when the local chat changes during async work', async () => {
+    it('keeps captured reference mappings and identity when the local chat changes during async work', async () => {
         const context = captureOperationContext(true);
         state.values.set(activeRunAtom, { id: 'run-B' });
-        state.values.set(citationMapAtom, { b: { citation_id: 'citation-B' } });
+        state.values.set(externalReferenceMappingAtom, { b: { title: 'Reference B' } });
         expect(context.threadId).toBe('thread-A');
         expect(context.runId).toBe('run-A');
-        expect(await context.renderMarkdown!('text')).toContain('citation-A');
-        expect(await context.renderMarkdown!('text')).not.toContain('citation-B');
+        expect(context.externalRefs).toEqual({ a: { title: 'Reference A' } });
         context.grantCreatedNote!(1, 'NEWNOTE1');
         expect(state.writes).not.toHaveBeenCalled();
     });
 
-    it('never gives an originless request the local chat’s full access or citations', async () => {
+    it('renders note Markdown in the plugin realm', async () => {
+        expect(await captureOperationContext(true).renderMarkdown!('text')).toBe('<p>text</p>');
+        expect(state.renderNoteMarkdown).toHaveBeenCalledExactlyOnceWith('text');
+    });
+
+    it('never gives an originless request the local chat’s full access or reference mappings', async () => {
         const local = captureOperationContext(true);
         const remote = captureOperationContext();
         expect(local.preference!('edit_metadata')).toBe('always_apply');
@@ -74,6 +77,7 @@ describe('explicit data operation context', () => {
         expect(remote.fullAccess).toBe(false);
         expect(remote.owner).toBeUndefined();
         expect(remote.threadId).toBeNull();
-        expect(await remote.renderMarkdown!('text')).not.toContain('citation-A');
+        expect(remote.externalRefs).toEqual({});
+        expect(remote.externalItemMapping).toEqual({});
     });
 });

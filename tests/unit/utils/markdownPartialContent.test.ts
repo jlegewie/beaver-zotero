@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { processPartialContent } from '../../../react/utils/markdownPartialContent';
+import { processPartialContent } from '@beaver/agent-export/render/partialContent';
 
 describe('processPartialContent', () => {
     it('preserves completed display math followed by prose', () => {

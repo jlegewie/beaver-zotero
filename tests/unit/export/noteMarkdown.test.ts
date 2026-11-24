@@ -1,31 +1,21 @@
-// @vitest-environment jsdom
-
 /**
- * Note Markdown renders through the real chat Markdown pipeline with its
- * citations left as `<citation …/>` tags for the plugin realm to expand.
- * Whether a tag is a citation or a code example is decided by the Markdown
- * grammar itself, so examples in any form of code stay code.
+ * Note Markdown renders through the chat's Markdown pipeline, without React or
+ * a window, with its citations left as `<citation …/>` tags for the plugin
+ * realm to expand. Whether a tag is a citation or a code example is decided by
+ * the Markdown grammar itself, so examples in any form of code stay code.
  */
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
+import { codeRanges } from '@beaver/agent-export/parse/markdown';
+import { renderNoteMarkdownHtml } from '@beaver/agent-export/render/noteHtml';
+import { renderNoteMarkdown } from '../../../src/services/export/noteMarkdown';
 
-vi.mock('@beaver/agent-ui/chat/Citation', () => ({
-    // A citation that reached the chat renderer would show up as this marker.
-    default: () => 'CHAT-CITATION',
-}));
-vi.mock('../../../react/utils/citationRenderContext', () => ({
-    prepareCitationRenderContext: vi.fn(async (_content: string, context: unknown) => context),
-}));
+const render = async (content: string) => renderNoteMarkdown({ codeRanges, renderNoteMarkdownHtml }, content);
 
-import { renderNoteMarkdownToHTML } from '../../../react/utils/noteMarkdownRender';
-
-const render = (content: string) => renderNoteMarkdownToHTML(content, {});
-
-describe('renderNoteMarkdownToHTML', () => {
+describe('renderNoteMarkdown', () => {
     it('returns citations as canonical tags, never through the chat citation renderer', async () => {
         const html = await render("**Claim** <citation id='u-AAAA1111' loc='page5'/> and `<citation id=\"u-BBBB2222\"/>`.");
 
         expect(html).toContain('<strong>Claim</strong> <citation id="u-AAAA1111" loc="page5"/> and <citation id="u-BBBB2222"/>.');
-        expect(html).not.toContain('CHAT-CITATION');
     });
 
     it.each([
@@ -41,7 +31,6 @@ describe('renderNoteMarkdownToHTML', () => {
         expect(html).toContain('&lt;citation id=&quot;u-EXAMPLE1&quot;/&gt;');
         expect(html).toContain('Real <citation id="u-AAAA1111"/>.');
         expect(html.match(/<citation /g)).toHaveLength(1);
-        expect(html).not.toContain('CHAT-CITATION');
     });
 
     it('keeps a Markdown-escaped tag as text, as Markdown shows it', async () => {
@@ -49,13 +38,19 @@ describe('renderNoteMarkdownToHTML', () => {
 
         expect(html).toContain('Write &lt;citation id=&quot;u-EXAMPLE1&quot;/&gt; to cite.');
         expect(html.match(/<citation /g)).toHaveLength(1);
-        expect(html).not.toContain('CHAT-CITATION');
     });
 
     it('keeps a tag after an escaped backslash a citation', async () => {
         const html = await render('Path \\\\<citation id="u-AAAA1111"/>.');
 
         expect(html).toContain('Path \\<citation id="u-AAAA1111"/>.');
+    });
+
+    it('keeps the text after a citation tag split by an invisible character', async () => {
+        const html = await render('Claim <cita\u200Btion id="u-AAAA1111"/> tail. More.');
+
+        expect(html).toContain('tail. More.');
+        expect(html).not.toContain('<citation');
     });
 
     it('treats a nested list paragraph indented four spaces as prose, not code', async () => {
@@ -65,7 +60,7 @@ describe('renderNoteMarkdownToHTML', () => {
     });
 });
 
-describe('renderNoteMarkdownToHTML footnotes', () => {
+describe('renderNoteMarkdown footnotes', () => {
     it('writes footnotes as endnotes a note can hold', async () => {
         const html = await render('Claim.[^a] Another <citation id="u-AAAA1111"/>.[^2]\n\n[^a]: First *note* <citation id="u-BBBB2222" loc="page4"/>.\n[^2]: Second note.\n');
 

@@ -46,16 +46,18 @@ export type CodeRangeFinder = (text: string) => Array<[number, number]>;
 
 /**
  * Swap each citation tag for a placeholder: a citation placeholder, or a
- * literal one for a tag inside `codeRanges` or, with `markdownEscapes`, one
+ * literal one for a tag inside code or, with `markdownEscapes`, one
  * written as `\<citation …>`. Markdown shows an escaped tag as text, so its
  * literal absorbs the escaping backslash and comes back as that text.
  */
-function maskTags(text: string, codeRanges: Array<[number, number]>, markdownEscapes: boolean): MaskedNoteCitations {
+function maskTags(text: string, findCodeRanges: CodeRangeFinder, markdownEscapes: boolean): MaskedNoteCitations {
     let prefix = 'BEAVERNOTECITATION';
     for (let n = 1; text.includes(prefix); n++) {
         prefix = `BEAVERNOTECITATION${n}N`;
     }
-    const inCode = (offset: number) => codeRanges.some(([start, end]) => offset >= start && offset < end);
+    // Finding code parses the whole text, so it waits for the first tag.
+    let codeRanges: Array<[number, number]> | undefined;
+    const inCode = (offset: number) => (codeRanges ??= findCodeRanges(text)).some(([start, end]) => offset >= start && offset < end);
     const tags: string[] = [];
     const literals: string[] = [];
     const literal = (tag: string) => `\u27E6${prefix}L${literals.push(tag) - 1}\u27E7`;
@@ -90,7 +92,7 @@ function maskTags(text: string, codeRanges: Array<[number, number]>, markdownEsc
  */
 export function maskNoteCitationTags(content: string, findCodeRanges: CodeRangeFinder): MaskedNoteCitations {
     const unwrapped = unwrapBacktickedCitations(content);
-    return maskTags(unwrapped, findCodeRanges(unwrapped), true);
+    return maskTags(unwrapped, findCodeRanges, true);
 }
 
 /**
@@ -98,7 +100,7 @@ export function maskNoteCitationTags(content: string, findCodeRanges: CodeRangeF
  * examples there are already escaped text, so every tag is a citation.
  */
 export function maskRenderedCitationTags(html: string): MaskedNoteCitations {
-    return maskTags(html, [], false);
+    return maskTags(html, () => [], false);
 }
 
 /** Escape text for HTML, the way the Markdown renderer escapes code text. */

@@ -11,6 +11,8 @@ function fakeRuntime() {
     return {
         parseExportSource: vi.fn(),
         parseNoteDoc: vi.fn(),
+        codeRanges: vi.fn(),
+        renderNoteMarkdownHtml: vi.fn(),
         writeDocx: vi.fn(),
         writeHtml: vi.fn(),
         writeMarkdown: vi.fn(),
