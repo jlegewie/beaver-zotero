@@ -157,6 +157,7 @@ function harness(
                 return () => listeners.delete(listener);
             },
             refreshProfile: vi.fn(),
+            applyBalance: vi.fn(),
         },
         publish: (snapshot) => state.snapshots.push(snapshot),
         newId: () => `id-${++id}`,
@@ -1500,5 +1501,99 @@ describe("job calls", () => {
         expect(JSON.stringify(h.fills.agent.jobResult(ended))).not.toContain("SECRET22");
         h.deps.writeRefusal = () => "library_excluded";
         expect(h.fills.agent.jobResult(ended).result).toMatchObject({ failed_row_ids: [], pending: null });
+    });
+});
+
+describe("credits a fill holds", () => {
+    it("holds its plan while it runs and nothing once it ends", async () => {
+        const h = harness([itemRow("a"), itemRow("b")]);
+        const gate = deferred<void>();
+        h.state.respond = async (request) => {
+            await gate.promise;
+            return answer(request);
+        };
+        const { job } = await planAndStart(h.fills);
+        expect(h.fills.committedCredits()).toBeCloseTo(0.4);
+
+        // Another table planned meanwhile sees the balance less what the running fill holds.
+        const other = await h.fills.plan({ libraryID: 1, key: "TABLE002" });
+        expect(other.ok && other.plan.balance).toBeCloseTo(9.6);
+
+        gate.resolve();
+        const done = await h.fills.wait(job.job_id);
+        // The profile is read again when the fill ends: it holds nothing more.
+        expect(done?.state).toBe("done");
+        expect(h.fills.committedCredits()).toBe(0);
+        expect(h.deps.account.refreshProfile).toHaveBeenCalled();
+    });
+
+    it("holds nothing of a new account's balance after an account switch", async () => {
+        const h = harness([itemRow("a"), itemRow("b")]);
+        const gate = deferred<void>();
+        h.state.respond = async (request) => {
+            await gate.promise;
+            return answer(request);
+        };
+        const { job } = await planAndStart(h.fills);
+        await until(() => h.state.requests.length === 1, "first request");
+        h.switchAccount();
+        // The row in flight is the old account's.
+        expect(h.fills.committedCredits()).toBe(0);
+        gate.resolve();
+        await h.fills.wait(job.job_id);
+    });
+
+    it("drops the queued rows a stop discards", async () => {
+        const h = harness([itemRow("a"), itemRow("b"), itemRow("c")]);
+        const gate = deferred<void>();
+        h.state.respond = async (request) => {
+            await gate.promise;
+            return answer(request);
+        };
+        const { job } = await planAndStart(h.fills);
+        await until(() => h.state.requests.length === 1, "first request");
+        expect(h.fills.committedCredits()).toBeCloseTo(0.6);
+        h.fills.stop(job.job_id);
+        // Only the row in flight can still be charged.
+        expect(h.fills.committedCredits()).toBeCloseTo(0.2);
+        gate.resolve();
+        await h.fills.wait(job.job_id);
+    });
+});
+
+describe("the balance each answered row reports", () => {
+    it("updates the account and holds only the rows still to come", async () => {
+        const h = harness([itemRow("a"), itemRow("b")]);
+        const second = deferred<void>();
+        let left = 9.8;
+        h.state.respond = async (request) => {
+            if (request.row_id === "b") await second.promise;
+            const response = { ...answer(request), available_subscription_credits: left, available_purchased_credits: 0 };
+            left -= 0.2;
+            return response;
+        };
+        const { job } = await planAndStart(h.fills);
+        await until(() => h.state.requests.length === 2, "second request");
+        expect(h.deps.account.applyBalance).toHaveBeenCalledWith({ subscription: 9.8, purchased: 0 }, 1);
+        // Row a's charge is in the account's balance now: only row b is held.
+        expect(h.fills.committedCredits()).toBeCloseTo(0.2);
+        second.resolve();
+        await h.fills.wait(job.job_id);
+        expect(h.fills.committedCredits()).toBe(0);
+    });
+
+    it("holds a charge whose response reported no balance (an older backend)", async () => {
+        const h = harness([itemRow("a"), itemRow("b")]);
+        const second = deferred<void>();
+        h.state.respond = async (request) => {
+            if (request.row_id === "b") await second.promise;
+            return answer(request);
+        };
+        const { job } = await planAndStart(h.fills);
+        await until(() => h.state.requests.length === 2, "second request");
+        expect(h.deps.account.applyBalance).not.toHaveBeenCalled();
+        expect(h.fills.committedCredits()).toBeCloseTo(0.4);
+        second.resolve();
+        await h.fills.wait(job.job_id);
     });
 });

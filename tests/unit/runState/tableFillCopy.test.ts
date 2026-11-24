@@ -167,6 +167,13 @@ describe("table fill copy", () => {
         // The cheapest item the plan pays for sets the bar: 0.05 for title and abstract.
         expect(noCreditsText(plan(), 0)).toBe("Filling uses Beaver credits: 0.2 per item. You have 0 credits.");
         expect(noCreditsText(plan(), 0.04)).not.toBeNull();
+        // Short because running fills will use the account's credits: "You have" stays the account's.
+        expect(noCreditsText(plan(), 0, 1)).toBe(
+            "Filling uses Beaver credits: 0.2 per item. You have 1 credit. Fills already running will use 1 credit of it.",
+        );
+        expect(noCreditsText(plan(), 0, 0.15)).toBe(
+            "Filling uses Beaver credits: 0.2 per item. You have 0.15 credits. Fills already running will use 0.15 credits of it.",
+        );
         expect(noCreditsText(plan(), 0.05)).toBeNull();
         // Only documents: one costs 0.2.
         expect(noCreditsText(plan({ title_abstract: 0 }), 0.1)).toBe(

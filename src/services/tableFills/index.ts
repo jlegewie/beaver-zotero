@@ -111,6 +111,7 @@ const deps: TableFillDeps = {
         generation: () => Zotero.Beaver.account?.getGeneration() ?? -1,
         signedIn: () => !!Zotero.Beaver.account?.getSnapshot().session,
         balance: balanceOf,
+        applyBalance: (balance, generation) => Zotero.Beaver.account?.applyCreditBalance(balance, generation),
         subscribe: (listener) => Zotero.Beaver.account?.subscribe(() => listener()) ?? (() => {}),
         refreshProfile: () => void Zotero.Beaver.account?.refresh(true).catch(() => {}),
     },

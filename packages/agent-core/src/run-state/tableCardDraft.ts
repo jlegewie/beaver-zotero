@@ -453,6 +453,15 @@ export function cardRowCount(draft: TableCardDraft, request: WSTableCreateCardRe
 }
 
 /**
+ * A note for a table of one paper: it saves that paper's answers, but a table
+ * shows what it is for once papers can be compared. Null for any other size.
+ */
+export function singlePaperHint(draft: TableCardDraft, request: WSTableCreateCardRequest): string | null {
+    if (cardRowCount(draft, request) !== 1) return null;
+    return 'A table compares papers side by side. Add a few related papers to see how they differ.';
+}
+
+/**
  * The papers the card reports: the table's rows, or, when the cap cut a source
  * short, at least that source's full size — the rows alone would understate
  * what the user asked for.

@@ -254,12 +254,19 @@ function cheapestItem(
 export function noCreditsText(
     plan: Pick<TableFillPlanSummary, "credits" | "documents" | "title_abstract" | "prices">,
     balance: number | null,
+    /** The account's balance, when `balance` is less what running fills may still charge. */
+    accountBalance: number | null = balance,
 ): string | null {
     if (balance == null || plan.credits <= 0) return null;
     const cheapest = cheapestItem(plan);
     if (cheapest == null || balance + 1e-9 >= cheapest) return null;
     const price = plan.documents ? plan.prices.document : plan.prices.title_abstract;
-    return `Filling uses Beaver credits: ${formatCredits(price)} per item. You have ${creditsText(balance)}.`;
+    const account = accountBalance ?? balance;
+    const held = account - balance;
+    // "You have" is the account's balance; what running fills will still use is said apart.
+    // Below the display precision (rounding residue) there is nothing to say.
+    const running = held >= 0.005 ? ` Fills already running will use ${creditsText(held)} of it.` : '';
+    return `Filling uses Beaver credits: ${formatCredits(price)} per item. You have ${creditsText(account)}.${running}`;
 }
 
 /** What a table can still do without credits. */

@@ -40,6 +40,7 @@ import {
     draftSourceEntries,
     draftSourcesKey,
     setDraftPreview,
+    singlePaperHint,
     nextStep,
     overCapMessage,
     overCapSources,
@@ -688,5 +689,16 @@ describe('table card draft', () => {
             const draft = setInstructions(initialTableCardDraft(request), 'Try three papers first');
             expect(tableCardDecline(draft, request)).toEqual(reply);
         });
+    });
+});
+
+describe('a table of one paper', () => {
+    it('notes that a table compares papers once one paper is left, and only then', () => {
+        const { request } = fixture('create-merge-across-sources');
+        let draft = initialTableCardDraft(request);
+        expect(singlePaperHint(draft, request)).toBeNull();
+        draft = removeItem(draft, request.sources[0].ids![0]);
+        draft = setDraftPreview(draft, { sourcesKey: draftSourcesKey(draft), rows: 1, duplicates: 0, documents: 1, title_abstract: 0, no_input: 0 });
+        expect(singlePaperHint(draft, request)).toMatch(/compares papers side by side/);
     });
 });

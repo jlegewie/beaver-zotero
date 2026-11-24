@@ -1,11 +1,12 @@
 import React from 'react';
 import { atom, useAtomValue } from 'jotai';
 import type { TableCardCost } from '@beaver/agent-core/protocol/tableCardProtocol';
-import type { TableFillPricing } from '@beaver/agent-core/protocol/tableFillProtocol';
+import { balanceAfterCommitted, type TableFillPricing } from '@beaver/agent-core/protocol/tableFillProtocol';
 import { balanceNotice, costBreakdown, costNotice, costReceipt } from '@beaver/agent-core/run-state/tableCardDraft';
 import { creditsActionLabel } from '@beaver/agent-core/run-state/tableFillCopy';
 import { isImeKeyEvent } from '@beaver/agent-ui/primitives/ime';
 import { profileWithPlanAtom, remainingBeaverCreditsAtom } from '../../../atoms/profile';
+import { committedFillCreditsAtom } from '../../../atoms/tableChatFills';
 import { Icon, InformationCircleIcon, SecurityWarningIcon } from '../../icons/icons';
 import { openPreferencesWindow } from '../../../ui/openPreferencesWindow';
 import { useSurfaceWindow } from '../../../runtime/SurfaceWindowContext';
@@ -41,10 +42,24 @@ export function useFillPricing(): TableFillPricing | null {
     return prices;
 }
 
-/** The spendable balance as a number, so a reader re-renders only when it changes. */
-const creditBalanceAtom = atom((get) => (get(profileWithPlanAtom) ? get(remainingBeaverCreditsAtom) : null));
+/**
+ * The spendable balance as a number, so a reader re-renders only when it
+ * changes. Each answered fill row updates the profile's balance; what running
+ * fills may still charge is taken off here.
+ */
+const creditBalanceAtom = atom((get) =>
+    get(profileWithPlanAtom) ? balanceAfterCommitted(get(remainingBeaverCreditsAtom), get(committedFillCreditsAtom)) : null,
+);
 
-/** The user's credit balance, or null while the profile is not loaded. */
+/** The account's credit balance, or null while the profile is not loaded. */
+const accountBalanceAtom = atom((get) => (get(profileWithPlanAtom) ? get(remainingBeaverCreditsAtom) : null));
+
+/** The account's credit balance, running fills included, or null while the profile is not loaded. */
+export function useAccountCreditBalance(): number | null {
+    return useAtomValue(accountBalanceAtom);
+}
+
+/** The credits the user can spend on a new fill, or null while the profile is not loaded. */
 export function useCreditBalance(): number | null {
     return useAtomValue(creditBalanceAtom);
 }

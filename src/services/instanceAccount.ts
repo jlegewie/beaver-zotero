@@ -873,6 +873,27 @@ export class InstanceAccount {
             );
         }
     }
+    /**
+     * The spendable credits a table fill response reported after its charge.
+     * Newer than the profile: a read already in flight is discarded and read
+     * again (`updateProfile`). Only ever lowers the balance, so a response
+     * that arrives after a later one (rows run in parallel) is ignored; a
+     * purchase shows with the next profile read.
+     */
+    applyCreditBalance(balance: { subscription: number; purchased: number }, generation: number): void {
+        const profile = this.snapshot.data?.profile;
+        if (!profile || generation !== this.snapshot.generation) return;
+        const current = (profile.available_subscription_credits ?? 0) + (profile.available_purchased_credits ?? 0);
+        if (balance.subscription + balance.purchased >= current - 1e-9) return;
+        this.updateProfile(
+            {
+                ...profile,
+                available_subscription_credits: balance.subscription,
+                available_purchased_credits: balance.purchased,
+            },
+            generation,
+        );
+    }
     revokeSearchIndexAccess(): void {
         if (!this.snapshot.data) return;
         this.updateProfile(

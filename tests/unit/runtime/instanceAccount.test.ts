@@ -430,6 +430,39 @@ describe("instance account ownership", () => {
             account.getSnapshot().data?.profile.has_completed_onboarding,
         ).toBe(true);
     });
+    it("takes a fill's reported balance over a profile read already in flight", async () => {
+        const withCredits = (subscription: number) => {
+            const data = profile();
+            data.profile.available_subscription_credits = subscription;
+            data.profile.available_purchased_credits = 0;
+            return data;
+        };
+        mocks.profile.mockResolvedValue(withCredits(5));
+        await load();
+        const old = deferred<any>();
+        mocks.profile.mockReturnValueOnce(old.promise).mockResolvedValue(withCredits(4.8));
+        const reading = account.refresh();
+        account.applyCreditBalance({ subscription: 4.8, purchased: 0 }, account.getGeneration());
+        expect(account.getSnapshot().data?.profile.available_subscription_credits).toBe(4.8);
+        // The read started before the charge: it is discarded, not applied.
+        old.resolve(withCredits(5));
+        await reading;
+        expect(account.getSnapshot().data?.profile.available_subscription_credits).toBe(4.8);
+    });
+    it("ignores a reported balance that is higher, or for another account", async () => {
+        const data = profile();
+        data.profile.available_subscription_credits = 3;
+        data.profile.available_purchased_credits = 1;
+        mocks.profile.mockResolvedValue(data);
+        await load();
+        const generation = account.getGeneration();
+        // A response that arrived after a later one: it reports more than the profile shows.
+        account.applyCreditBalance({ subscription: 3.2, purchased: 1 }, generation);
+        account.applyCreditBalance({ subscription: 2, purchased: 1 }, generation + 1);
+        expect(account.getSnapshot().data?.profile.available_subscription_credits).toBe(3);
+        account.applyCreditBalance({ subscription: 2.8, purchased: 1 }, generation);
+        expect(account.getSnapshot().data?.profile.available_subscription_credits).toBe(2.8);
+    });
     it("discards a profile response from the previous account, including an ABA switch", async () => {
         await load();
         const pending = deferred<any>();

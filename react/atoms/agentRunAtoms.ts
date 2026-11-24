@@ -1934,6 +1934,9 @@ export function createWSCallbacks(
             // The completion card shows when this run ends.
             if (data.featureCredit) {
                 set(recordFeatureCreditGrantAtom, { runId: data.runId, ...data.featureCredit });
+                // The granted credits pay for this run's fills: a card shown
+                // during the run needs the balance that includes them.
+                void Zotero.Beaver?.account?.refresh(true).catch(() => {});
             }
         },
 

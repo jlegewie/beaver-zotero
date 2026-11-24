@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { TableFillJobSnapshot } from '@beaver/agent-core/protocol/tableFillProtocol';
+import { balanceAfterCommitted } from '@beaver/agent-core/protocol/tableFillProtocol';
 import { fillForToolCall, recordChatFill, type ChatFill } from '@beaver/agent-core/run-state/tableChatFills';
 
 function snapshot(overrides: Partial<TableFillJobSnapshot> & { thread?: string; call?: string; run?: string } = {}): TableFillJobSnapshot {
@@ -46,5 +47,14 @@ describe('chat fills', () => {
         expect(fillForToolCall(fills, 'call-2', 'run-1')).toBeNull();
         // A model that reuses tool call ids: the same id in another run is another call.
         expect(fillForToolCall(fills, 'call-1', 'run-2')).toBeNull();
+    });
+});
+
+describe('credits fills hold', () => {
+    it('takes what fills hold off the balance, never below zero', () => {
+        expect(balanceAfterCommitted(5, 1.5)).toBe(3.5);
+        expect(balanceAfterCommitted(0.6, 0.4)).toBe(0.2);
+        expect(balanceAfterCommitted(1, 1.5)).toBe(0);
+        expect(balanceAfterCommitted(null, 1.5)).toBeNull();
     });
 });

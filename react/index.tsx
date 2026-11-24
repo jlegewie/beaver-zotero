@@ -85,6 +85,7 @@ import { BeaverTemporaryAnnotations } from './utils/annotationUtils';
 import { undoEditNoteOrBatchAction } from './utils/editNoteActions';
 import { addPopupMessageAtom } from './utils/popupMessageUtils';
 import { selectItemById } from './utils/selectItem';
+import { watchChatFills } from './atoms/tableChatFills';
 
 // Configure the PDF package (webpack bundle copy). The esbuild bundle
 // configures its own copy from `src/hooks.ts`. Both must run because each
@@ -303,6 +304,9 @@ export function renderTableTab(
             return () => { selectionListeners.delete(listener); };
         },
     };
+    // A table window's renderer has no chat: it follows fill jobs here, so its
+    // balance leaves out what fills in other windows hold.
+    watchChatFills();
     mountSurface(domElement, <TableTabView tableRef={tableRef} options={options} warnings={warnings} commandsRef={commands} />);
     return {
         setWarning(next) {
