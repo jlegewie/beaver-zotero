@@ -251,6 +251,8 @@ export function expandBase(input: MatchInput): BaseExpansion {
  * Skipped entirely: italic (ambiguous with bold), links, lists, tables, code,
  * math, smart-punctuation drift. Splits on `<...>` boundaries so content inside
  * HTML tag attributes (e.g. `<citation label="**x**"/>`) is never transformed.
+ * Code is left as written: text inside `<code>` / `<pre>` elements and
+ * backtick code spans, where `__init__` is a name, not bold.
  *
  * ATX headings follow CommonMark: up to 3 leading spaces, one or more
  * spaces/tabs after the `#`s, optional closing `#+` fence preceded by
@@ -265,9 +267,18 @@ function convertMarkdownToHtml(s: string): string {
     // Text at even indices, tags at odd indices — same pattern as noteHtmlEntities.
     const parts = s.split(/(<[^>]*>)/);
     let changed = false;
-    for (let i = 0; i < parts.length; i += 2) {
+    let codeDepth = 0;
+    for (let i = 0; i < parts.length; i++) {
+        if (i % 2 === 1) {
+            const codeTag = /^<(\/?)(?:code|pre)\b/i.exec(parts[i]);
+            if (codeTag) codeDepth = Math.max(0, codeDepth + (codeTag[1] ? -1 : 1));
+            continue;
+        }
+        if (codeDepth > 0) continue;
         const before = parts[i];
-        let after = before;
+        // Set backtick code spans aside while converting, then put them back.
+        const codeSpans: string[] = [];
+        let after = before.replace(/(`+)[^`\n]*?\1/g, (span) => `${codeSpans.push(span) - 1}`);
         // ATX headings: `# h` through `###### h`, each on its own line.
         // `\r?` lets `$` (which matches before `\n`) absorb a stray `\r` from
         // CRLF input so the captured text never contains a trailing `\r`.
@@ -280,6 +291,7 @@ function convertMarkdownToHtml(s: string): string {
         // markers can't straddle paragraph breaks.
         after = after.replace(/\*\*([^\n*]+?)\*\*/g, '<strong>$1</strong>');
         after = after.replace(/__([^\n_]+?)__/g, '<strong>$1</strong>');
+        after = after.replace(/(\d+)/g, (_m, index) => codeSpans[Number(index)]);
         if (after !== before) {
             parts[i] = after;
             changed = true;
@@ -1503,6 +1515,25 @@ function runStrategies(
 }
 
 /**
+ * new_string for the legacy math pass. An anchor that matches only once its
+ * `$…$` is read as math was written as Markdown, so new_string's bold and
+ * headings are Markdown too, as in `markdown_to_html`; otherwise `**text**`
+ * would be saved as literal asterisks. An anchor whose own `**` matched literal
+ * note text keeps new_string literal. A copied insert anchor is kept as
+ * written, so a marker in it cannot pair with one in the inserted text.
+ */
+function legacyMarkdownReplacement({ oldString, newString, operation }: MatchInput): string {
+    if (convertMarkdownToHtml(oldString) !== oldString) return newString;
+    if (operation === 'insert_after' && newString.startsWith(oldString)) {
+        return oldString + convertMarkdownToHtml(newString.substring(oldString.length));
+    }
+    if (operation === 'insert_before' && newString.endsWith(oldString)) {
+        return convertMarkdownToHtml(newString.substring(0, newString.length - oldString.length)) + oldString;
+    }
+    return convertMarkdownToHtml(newString);
+}
+
+/**
  * Prefer every literal normalization strategy before retrying the same chain
  * with legacy dollar expansion. Mutation strategies re-expand their rewritten
  * anchors under the current pass's policy. Markdown rendering remains last.
@@ -1517,8 +1548,14 @@ export function findBestMatch(
     if (literal) return literal;
 
     if (input.oldString.includes('$')) {
-        const legacyInput: StrategyInput = { ...input, oldMathContext: 'legacy-old' };
-        const legacyBase = { ...base, expandedOld: expandOldAnchor(legacyInput, input.oldString) };
+        const newString = legacyMarkdownReplacement(input);
+        const legacyInput: StrategyInput = { ...input, newString, oldMathContext: 'legacy-old' };
+        const legacyBase = {
+            expandedOld: expandOldAnchor(legacyInput, input.oldString),
+            expandedNew: newString === input.newString ? base.expandedNew : expandToRawHtml(
+                newString, input.metadata, 'new', input.externalRefContext, input.pageLabels, input.resolvedLocatorPages,
+            ),
+        };
         const legacy = runStrategies(legacyInput, legacyBase);
         if (legacy) {
             return { ...legacy, strategy: legacy.strategy === 'exact' ? 'legacy_math' : legacy.strategy };
