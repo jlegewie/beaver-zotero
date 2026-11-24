@@ -161,12 +161,28 @@ describe("table fill copy", () => {
         expect(planTitle(plan({ rows: 5, documents: 5, title_abstract: 0 }))).toBe("Fill 5 items");
         expect(balanceLine(plan({ credits: 9.2, balance: 1, documents: 46, title_abstract: 0 }))).toBe("Your 1 credit covers about 5 of 46 items");
         expect(balanceLine(plan({ balance: null }))).toBeNull();
+        // Running fills hold part of the account's balance: the line says so before the reach.
+        expect(balanceLine(plan({ credits: 0.45, balance: 0.3, documents: 2, title_abstract: 1 }), 5)).toBe(
+            "Fills already running may use up to 4.7 of your 5 credits; the rest covers about 2 of 3 items",
+        );
+        expect(balanceLine(plan({ credits: 0.45, balance: 0.3, documents: 2, title_abstract: 1 }), 0.3)).toBe(
+            "Your 0.3 credits cover about 2 of 3 items",
+        );
     });
 
     it("says why a plan cannot start only when the balance cannot pay for one item", () => {
         // The cheapest item the plan pays for sets the bar: 0.05 for title and abstract.
         expect(noCreditsText(plan(), 0)).toBe("Filling uses Beaver credits: 0.2 per item. You have 0 credits.");
         expect(noCreditsText(plan(), 0.04)).not.toBeNull();
+        // Short because running fills hold the account's credits: says how much, at most, and that waiting helps.
+        expect(noCreditsText(plan(), 0, 1)).toBe(
+            "Filling uses Beaver credits: 0.2 per item. Fills already running may use up to 1 of your 1 credit. Wait for them to finish or add credits.",
+        );
+        expect(noCreditsText(plan(), 0.02, 2.02)).toBe(
+            "Filling uses Beaver credits: 0.2 per item. Fills already running may use up to 2 of your 2.02 credits. Wait for them to finish or add credits.",
+        );
+        // A hold below the display precision is rounding residue, not a running fill.
+        expect(noCreditsText(plan(), 0.01, 0.012)).toBe("Filling uses Beaver credits: 0.2 per item. You have 0.01 credits.");
         expect(noCreditsText(plan(), 0.05)).toBeNull();
         // Only documents: one costs 0.2.
         expect(noCreditsText(plan({ title_abstract: 0 }), 0.1)).toBe(

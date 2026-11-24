@@ -37,6 +37,7 @@ import {
 } from '@beaver/agent-core/layouts/tableFill';
 import {
     TABLE_FILL_CHANGED_EVENT,
+    balanceAfterCommitted,
     type TableFillCells,
     type TableFillColumn,
     type TableFillJobSnapshot,
@@ -118,6 +119,8 @@ export interface TableFillDeps {
         signedIn(): boolean;
         /** Available credits from the account snapshot; null when unknown. */
         balance(): number | null;
+        /** The balance a fill response reported after its charge, for the account of `generation`. */
+        applyBalance(balance: { subscription: number; purchased: number }, generation: number): void;
         subscribe(listener: () => void): () => void;
         refreshProfile(): void;
     };
@@ -244,6 +247,8 @@ class FillJob {
     private rowsFailed = 0;
     private requestRowsDone = 0;
     private charged = 0;
+    /** Charges whose response reported no balance (an older backend): the account snapshot does not show them. */
+    private unreported = 0;
     private balanceAtStart: number | null;
     private stopReason?: TableFillNotStartedReason;
     /**
@@ -259,7 +264,7 @@ class FillJob {
      * Rows started and not settled, with the columns they fill. `saving`: its
      * writes wait for a commit, and the row stays until that commit settles.
      */
-    private working = new Map<string, { columns: string[]; saving: boolean }>();
+    private working = new Map<string, { columns: string[]; saving: boolean; price: number }>();
     private commitTimer?: ReturnType<typeof setTimeout>;
     private commitChain: Promise<void> = Promise.resolve();
     /** A commit landed, so the snapshot is behind until the job renders it. */
@@ -307,6 +312,22 @@ class FillJob {
 
     get running(): boolean {
         return this.state !== 'done';
+    }
+
+    /**
+     * Credits the job holds while it runs: what its queued and in-flight rows
+     * may still charge. Each answered row's response updates the account's
+     * balance, so its charge is not held here, except a charge the response
+     * reported no balance for. The profile is read again when the job ends,
+     * so a finished job holds none.
+     */
+    get committed(): number {
+        // A job of a previous account spends nothing of this one's balance.
+        if (!this.running || this.generation !== this.deps.account.generation()) return 0;
+        let pending = 0;
+        for (const row of this.queue) pending += rowPrice(row, this.plan.summary.prices);
+        for (const row of this.working.values()) if (!row.saving) pending += row.price;
+        return this.unreported + pending;
     }
 
     get done(): Promise<void> {
@@ -473,7 +494,7 @@ class FillJob {
             const row = this.queue.shift();
             if (!row) return;
             this.inFlight += 1;
-            this.working.set(row.row, { columns: row.columns, saving: false });
+            this.working.set(row.row, { columns: row.columns, saving: false, price: rowPrice(row, this.plan.summary.prices) });
             this.publish();
             try {
                 await this.processRow(row);
@@ -510,7 +531,7 @@ class FillJob {
             this.addNotStarted('changed', 1);
             return;
         }
-        this.working.set(row.row, { columns: row.columns, saving: false });
+        this.working.set(row.row, { columns: row.columns, saving: false, price: rowPrice(row, this.plan.summary.prices) });
         let document: SerializedFillDocument | undefined;
         if (read && row.document) {
             if (!read.ok) {
@@ -644,7 +665,15 @@ class FillJob {
     }
 
     private applyResponse(row: RowPlan, response: TableFillResponse): void {
-        this.charged += Number(response.charged) || 0;
+        const charged = Number(response.charged) || 0;
+        this.charged += charged;
+        const subscription = response.available_subscription_credits;
+        const purchased = response.available_purchased_credits;
+        if (typeof subscription === 'number' && typeof purchased === 'number') {
+            this.deps.account.applyBalance({ subscription, purchased }, this.generation);
+        } else {
+            this.unreported += charged;
+        }
         this.result.credits_charged = round(this.charged);
         this.requestRowsDone += 1;
         const writes: CellWrite[] = [];
@@ -1015,7 +1044,8 @@ export class InstanceTableFills {
             credits,
             prices: { ...prices },
             pending: pendingWork(spec),
-            balance: this.deps.account.balance(),
+            // Less what running fills may still charge.
+            balance: balanceAfterCommitted(this.deps.account.balance(), this.committedCredits()),
             expires_at: now + this.settings.planTtlMs,
         };
         this.prunePlans();
@@ -1140,6 +1170,13 @@ export class InstanceTableFills {
         if (!job || !job.running) return false;
         job.stop('stopped');
         return true;
+    }
+
+    /** Credits the running jobs hold (see `FillJob.committed`); a running job holds its table's lease. */
+    committedCredits(): number {
+        let committed = 0;
+        for (const job of this.leases.values()) committed += job.committed;
+        return committed;
     }
 
     /** Every job still kept: the running ones and the finished ones still shown. */

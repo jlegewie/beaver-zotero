@@ -40,6 +40,7 @@ import {
     draftSourceEntries,
     draftSourcesKey,
     setDraftPreview,
+    singlePaperHint,
     nextStep,
     overCapMessage,
     overCapSources,
@@ -664,6 +665,13 @@ describe('table card draft', () => {
                 "Your 0 credits aren't enough to fill this item.",
             );
             expect(balanceNotice(cost, null, PRICES)).toBeNull();
+            // Running fills hold part of the account's balance: the warning says how much, at most.
+            expect(balanceNotice(cost, 1.4, PRICES, 6)).toBe(
+                'Fills already running may use up to 4.6 of your 6 credits; the rest covers about 7 of 12 items.',
+            );
+            expect(balanceNotice(cost, 0.1, PRICES, 3)).toBe(
+                "Fills already running may use up to 2.9 of your 3 credits; the rest isn't enough to fill these items.",
+            );
         });
     });
 
@@ -688,5 +696,16 @@ describe('table card draft', () => {
             const draft = setInstructions(initialTableCardDraft(request), 'Try three papers first');
             expect(tableCardDecline(draft, request)).toEqual(reply);
         });
+    });
+});
+
+describe('a table of one paper', () => {
+    it('notes that a table compares papers once one paper is left, and only then', () => {
+        const { request } = fixture('create-merge-across-sources');
+        let draft = initialTableCardDraft(request);
+        expect(singlePaperHint(draft, request)).toBeNull();
+        draft = removeItem(draft, request.sources[0].ids![0]);
+        draft = setDraftPreview(draft, { sourcesKey: draftSourcesKey(draft), rows: 1, duplicates: 0, documents: 1, title_abstract: 0, no_input: 0 });
+        expect(singlePaperHint(draft, request)).toMatch(/compares papers side by side/);
     });
 });

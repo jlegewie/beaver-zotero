@@ -78,6 +78,12 @@ export interface TableFillResponse {
     row_failure?: RowFailure | null;
     /** Credits this request charged. */
     charged: number;
+    /**
+     * The account's spendable credits after the charge, on an answered row;
+     * absent from older backends and null when the backend could not read them.
+     */
+    available_subscription_credits?: number | null;
+    available_purchased_credits?: number | null;
 }
 
 /** The error codes of the endpoint, in `{"detail": {"code", "message"?}}`. */
@@ -309,6 +315,12 @@ export interface TableFillProgress {
     credits_charged: number;
     credits_planned: number;
     seconds_left: number | null;
+}
+
+/** A balance less the credits fill jobs hold; null while the balance is unknown. */
+export function balanceAfterCommitted(balance: number | null, committed: number): number | null {
+    // Rounded to the credit precision: 0.6 - 0.4 must leave 0.2, not 0.19999….
+    return balance == null ? null : Math.max(0, Math.round((balance - committed) * 1e6) / 1e6);
 }
 
 /** The progress counts of a snapshot. */

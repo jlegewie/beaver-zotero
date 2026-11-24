@@ -39,7 +39,7 @@ import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
 import { openPreferencesWindow } from '../../ui/openPreferencesWindow';
 import { useAtom } from 'jotai';
 import { tableNoCreditsNoticeDismissedAtom } from '../../atoms/preferences';
-import { useCreditBalance } from './card/TableCardCost';
+import { useAccountCreditBalance, useCreditBalance } from './card/TableCardCost';
 
 /** Opens Plan & Usage, where credits are bought. */
 function openBilling(): void {
@@ -369,12 +369,16 @@ function FillPopover({
     // The live balance, so credits bought while the popover is open turn
     // "Get credits" back into Fill; the plan's own when the profile is unknown.
     const liveBalance = useCreditBalance();
+    const accountBalance = useAccountCreditBalance();
     const shownPlan = popover.state === 'ready' || popover.state === 'starting' ? popover.plan : null;
     const balance = shownPlan ? (liveBalance ?? shownPlan.balance) : null;
     // A balance short of one item would stop the fill before it answers
     // anything: the way to credits replaces Fill.
-    const noCredits = shownPlan ? noCreditsText(shownPlan, balance) : null;
-    const reach = shownPlan && !noCredits ? balanceLine({ ...shownPlan, balance }) : null;
+    const noCredits = shownPlan ? noCreditsText(shownPlan, balance, accountBalance ?? balance) : null;
+    const reach = shownPlan && !noCredits ? balanceLine({ ...shownPlan, balance }, accountBalance ?? balance) : null;
+    // "Get credits" only for an account with none: credits that running fills
+    // hold are still the user's.
+    const creditsLabel = creditsActionLabel(accountBalance ?? balance);
     useRefreshBalanceOnFocus(!!(noCredits || reach));
     let body: React.ReactNode;
     let action: React.ReactNode = null;
@@ -436,7 +440,7 @@ function FillPopover({
                     <div className="bt-fill-reach bt-fill-reach-action">
                         <span>{reach}.</span>
                         <button type="button" className="text-link bt-fill-reach-link" onClick={openBilling}>
-                            {creditsActionLabel(balance)}
+                            {creditsLabel}
                         </button>
                     </div>
                 ) : null}
@@ -450,7 +454,7 @@ function FillPopover({
         if (noCredits) {
             action = (
                 <Button variant="solid" onClick={openBilling}>
-                    {creditsActionLabel(balance)}
+                    {creditsLabel}
                 </Button>
             );
         } else {
@@ -500,7 +504,8 @@ export interface TableFillBannerProps {
 /** The result of the last fill, over the grid, until dismissed. */
 export function TableFillBanner({ job, showingFailed, onShowFailed, onDismiss }: TableFillBannerProps): React.ReactElement {
     const failed = job.result?.failed_row_ids.length ?? 0;
-    const balance = useCreditBalance();
+    // The account's balance: "Get credits" only for an account with none.
+    const balance = useAccountCreditBalance();
     const outOfCredits = !!job.result && shownStop(job.result) === 'insufficient_credits';
     useRefreshBalanceOnFocus(outOfCredits);
     return (
@@ -530,7 +535,8 @@ export function TableFillBanner({ job, showingFailed, onShowFailed, onDismiss }:
  * dismisses it.
  */
 export function useNoCreditsNotice(enabled: boolean): React.ReactElement | null {
-    const balance = useCreditBalance();
+    // The account's own balance: credits that running fills hold are not "none".
+    const balance = useAccountCreditBalance();
     const [dismissed, dismiss] = useAtom(tableNoCreditsNoticeDismissedAtom);
     const shown = enabled && !dismissed && hasNoCredits(balance);
     useRefreshBalanceOnFocus(shown);

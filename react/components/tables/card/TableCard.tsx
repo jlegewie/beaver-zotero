@@ -30,6 +30,7 @@ import {
     draftSourceEntries,
     draftSourcesKey,
     setDraftPreview,
+    singlePaperHint,
     nextStep,
     overCapMessage,
     overCapSources,
@@ -74,6 +75,7 @@ import {
     CheckmarkCircleIcon,
     FolderIcon,
     Icon,
+    InformationCircleIcon,
     LibraryIcon,
     PlusSignIcon,
     SecurityWarningIcon,
@@ -867,6 +869,8 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
     const held = disabled && !!heldCaption;
     const blocked = isLast && !!blockerReason && !disabled;
     const fillFacts = isLast && !held && !blocked && fillNow && cost && !upperBound ? cost : null;
+    // Only on Sources, where papers are added.
+    const fewPapers = !held && draft.step === 'sources' ? singlePaperHint(draft, request) : null;
     const bands = held ? (
         <div className="table-card-footer-band table-card-footer-band-pending" role="status">
             <Spinner size={12} />
@@ -891,6 +895,11 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
         </div>
     ) : fillFacts && !shortWindow ? (
         <TableCardFillWarnings cost={fillFacts} prices={prices} />
+    ) : fewPapers ? (
+        <div className="table-card-footer-band font-color-secondary" role="status">
+            <Icon icon={InformationCircleIcon} className="table-card-warning-icon" />
+            <span className="table-card-notice-text">{fewPapers}</span>
+        </div>
     ) : null;
 
     // The decision row: whether Create table also runs, and what that costs,

@@ -31,7 +31,7 @@ import {
     normalizeSelectLabel,
 } from '../layouts/table';
 import type { TableFillPricing } from '../protocol/tableFillProtocol';
-import { balanceLine, creditsText, formatCredits } from './tableFillCopy';
+import { balanceLine, creditsText, formatCredits, runningFillsText } from './tableFillCopy';
 
 export type TableCardStep = 'sources' | 'screening' | 'columns';
 
@@ -450,6 +450,15 @@ export function cardRowCount(draft: TableCardDraft, request: WSTableCreateCardRe
     if (preview) return preview.rows;
     const distinct = distinctItemCount(draft);
     return distinct ?? cardTotals(draft).count;
+}
+
+/**
+ * A note for a table of one paper: it saves that paper's answers, but a table
+ * shows what it is for once papers can be compared. Null for any other size.
+ */
+export function singlePaperHint(draft: TableCardDraft, request: WSTableCreateCardRequest): string | null {
+    if (cardRowCount(draft, request) !== 1) return null;
+    return 'A table compares papers side by side. With a few related papers, it shows how they differ.';
 }
 
 /**
@@ -998,19 +1007,31 @@ export function costBreakdown(cost: TableCardCost, prices: TableFillPricing | nu
  * credits aren't enough to fill these papers." Null when the balance covers
  * the fill, or is unknown. A fill stops at the first paper it cannot pay for.
  */
-export function balanceNotice(cost: TableCardCost, balance: number | null, prices: TableFillPricing | null): string | null {
-    const reach = balanceLine({
-        credits: cost.credits,
-        balance,
-        documents: cost.documents,
-        title_abstract: cost.title_abstract,
-        prices: prices ?? { document: cost.credits, title_abstract: cost.credits },
-    });
+export function balanceNotice(
+    cost: TableCardCost,
+    balance: number | null,
+    prices: TableFillPricing | null,
+    /** The account's balance, when `balance` is less what running fills may still charge. */
+    accountBalance: number | null = balance,
+): string | null {
+    const reach = balanceLine(
+        {
+            credits: cost.credits,
+            balance,
+            documents: cost.documents,
+            title_abstract: cost.title_abstract,
+            prices: prices ?? { document: cost.credits, title_abstract: cost.credits },
+        },
+        accountBalance,
+    );
     if (!reach || balance == null) return null;
     const paying = cost.documents + cost.title_abstract;
     // The same average per paper the estimate uses.
     const perPaper = paying > 0 ? cost.credits / paying : Infinity;
     if (balance + 1e-9 >= perPaper) return `${reach}.`;
+    const these = paying === 1 ? 'this item' : 'these items';
+    const running = runningFillsText(balance, accountBalance);
+    if (running) return `${running}; the rest isn't enough to fill ${these}.`;
     const text = creditsText(balance);
-    return `Your ${text} ${text.endsWith('credit') ? "isn't" : "aren't"} enough to fill ${paying === 1 ? 'this item' : 'these items'}.`;
+    return `Your ${text} ${text.endsWith('credit') ? "isn't" : "aren't"} enough to fill ${these}.`;
 }
