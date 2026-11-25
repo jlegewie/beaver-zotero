@@ -330,6 +330,9 @@ const Citation: React.FC<CitationProps> = (props) => {
 
     // Rendering for export to Zotero note (using CSL JSON for citations)
     if (exportRendering) {
+        // A citation that resolved to nothing gives a reader nothing to follow:
+        // leave it out, as Copy does, rather than export its raw id.
+        if (isInvalid) return null;
         displayText = authorYearFormat ? ` (${displayText})` : ` [${displayText}]`;
 
         // A web page, in the library or not: a link to the page with its title
@@ -347,6 +350,9 @@ const Citation: React.FC<CitationProps> = (props) => {
                 </span>
             );
         }
+        // A web page outside the library that this thread has no record of: its
+        // id means nothing to a reader.
+        if (webPage && !mappedZoteroItem) return null;
 
         // External works not in the library: a host-native citation when the
         // host can build one, otherwise a link to the work.

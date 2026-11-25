@@ -118,3 +118,63 @@ describe('Citation under the isolated note-export store', () => {
         expect(renderCitation(empty)).not.toContain('https://example.org/state-of-oa');
     });
 });
+
+describe('web page citations in note export', () => {
+    const WEB_ID = 'web-MJNNMKH4ED';
+    const page = {
+        source: 'exa',
+        source_id: WEB_ID,
+        title: 'Obesity and overweight',
+        url: 'https://www.who.int/news-room/fact-sheets/detail/obesity-and-overweight',
+        details: { kind: 'webpage', site: 'who.int' },
+        library_items: [],
+    } as unknown as ExternalReference;
+
+    function renderWebCitation(store: ReturnType<typeof createStore>, webId: string): string {
+        return renderToStaticMarkup(
+            React.createElement(Provider, { store }, React.createElement(Citation, {
+                'data-external-id': webId,
+                'data-loc': 'h3',
+                'data-loc-kind': 'highlight',
+                'data-loc-value': '3',
+                exportRendering: true,
+            })),
+        );
+    }
+
+    it('exports a page as a link with its title and site', () => {
+        const store = createStore();
+        store.set(citationsAtom, [{
+            citation_id: 'c1',
+            run_id: 'run-1',
+            citation_type: 'external_reference',
+            requested_ref: { kind: 'external', external_id: WEB_ID },
+            resolved_ref: { kind: 'external', external_id: WEB_ID, source: 'exa' },
+            raw_tag: `<citation id="${WEB_ID}" loc="h3"/>`,
+        } as CitationMetadata]);
+        store.set(externalReferenceMappingAtom, { [WEB_ID]: page });
+
+        const html = renderWebCitation(store, WEB_ID);
+        expect(html).toContain(page.url);
+        expect(html).toContain('who.int');
+    });
+
+    it.each(['web-AAAAAAAAAA', 'web-KGXW3ODFN'])('leaves out an invalid citation instead of its raw id (%s)', (typed) => {
+        const store = createStore();
+        store.set(citationsAtom, [{
+            citation_id: 'c1',
+            run_id: 'run-1',
+            citation_type: 'external_reference',
+            invalid: true,
+            invalid_reason: 'external_reference_not_found',
+            requested_ref: { kind: 'external', external_id: typed },
+            raw_tag: `<citation id="${typed}" loc="h3"/>`,
+        } as CitationMetadata]);
+
+        expect(renderWebCitation(store, typed)).toBe('');
+    });
+
+    it('leaves out a web page the thread has no record of', () => {
+        expect(renderWebCitation(createStore(), WEB_ID)).toBe('');
+    });
+});
