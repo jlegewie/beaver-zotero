@@ -84,6 +84,20 @@ describe('textFragmentUrl', () => {
         expect(result).toBe(`${url}#:~:text=One%20two%20three%20four%20five,words%20of%20the%20passage%20here.&text=Separate.`);
     });
 
+    it('never joins two sentences into one term, since a heading or list item is its own block', () => {
+        // A date line, a heading and a bullet: the start term stays inside the date line.
+        expect(textFragmentUrl(url, [
+            { partId: 's1', text: '7 October 2026' },
+            { partId: 's2', text: 'Key facts' },
+            { partId: 's3', text: 'Of these, 940 million were living with obesity.' },
+        ])).toBe(`${url}#:~:text=7%20October%202026,million%20were%20living%20with%20obesity.`);
+        // Two short list items are a range, not one exact match across both.
+        expect(textFragmentUrl(url, [
+            { partId: 's19', text: 'overweight is a BMI of 25; and' },
+            { partId: 's20', text: 'obesity is a BMI of 30.' },
+        ])).toBe(`${url}#:~:text=overweight%20is%20a%20BMI%20of,is%20a%20BMI%20of%2030.`);
+    });
+
     it('keeps an existing fragment and leaves PDFs and empty text alone', () => {
         expect(textFragmentUrl('https://a.org/x#intro', [{ text: 'Hello world.' }])).toBe('https://a.org/x#intro:~:text=Hello%20world.');
         expect(textFragmentUrl('https://a.org/report.pdf', [{ text: 'Hello.' }])).toBe('https://a.org/report.pdf');

@@ -408,8 +408,10 @@ export function toolCallSearchText(part: ToolCallPart, view?: ToolResultView | n
             return TRIAL_TERM_KEYS.map((key) => text(args[key])).filter(Boolean).join(' · ') || null;
         case 'pubmed_search':
         case 'external_search':
-        case 'web_search':
             return text(args.query) || null;
+        case 'web_search':
+            // The prefix steers the search engine toward official pages; it isn't what the user asked.
+            return text(args.query).replace(OFFICIAL_ANSWER_PREFIX, '').trim() || null;
         case 'openalex_search_by_topic':
         case 'openalex_search_by_keywords':
             return text(args.query) || openAlexListingLabel(args, view ?? null);
@@ -419,6 +421,9 @@ export function toolCallSearchText(part: ToolCallPart, view?: ToolResultView | n
             return null;
     }
 }
+
+/** The sentence Exa recommends opening an official-answer query with. */
+const OFFICIAL_ANSWER_PREFIX = /^prefer a specific primary or official answer page\.\s*/i;
 
 function truncate(str: string, maxLength: number): string {
     if (str.length <= maxLength) return str;

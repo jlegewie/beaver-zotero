@@ -262,28 +262,33 @@ function followsDirectly(previous: string | null | undefined, next: string | nul
 
 /**
  * Open `url` at the cited passage: a `#:~:text=` fragment per run of
- * consecutive sentences, matching the first and last words of the run (or
- * the whole run when short). Browsers that support text fragments highlight
- * the passage when it is still on the page; otherwise the page simply opens.
- * Returns the URL unchanged when nothing can be matched, and for PDFs, whose
- * viewers ignore text fragments.
+ * consecutive sentences. A short single sentence is matched whole; otherwise
+ * the run is matched from the first words of its first sentence to the last
+ * words of its last. Browsers match each of those terms within one block of
+ * text, and a sentence can sit in a different block from its neighbours (a
+ * heading, a list item), so a term never joins two sentences. Browsers that
+ * support text fragments highlight the passage when it is still on the page;
+ * otherwise the page simply opens. Returns the URL unchanged when nothing can
+ * be matched, and for PDFs, whose viewers ignore text fragments.
  */
 export function textFragmentUrl(url: string, sentences: CitedSentence[], options: { isPdf?: boolean } = {}): string {
     if (options.isPdf || urlNamesPdf(url)) return url;
-    const runs: string[][] = [];
+    const runs: string[][][] = [];
     let previousId: string | null | undefined;
     for (const sentence of sentences) {
         const words = fragmentWords(sentence.text ?? '');
         if (!words.length) continue;
         const run = runs[runs.length - 1];
-        if (run && followsDirectly(previousId, sentence.partId)) run.push(...words);
-        else runs.push([...words]);
+        if (run && followsDirectly(previousId, sentence.partId)) run.push(words);
+        else runs.push([words]);
         previousId = sentence.partId;
     }
-    const directives = runs.map((words) => {
-        if (words.length <= FRAGMENT_EXACT_WORDS) return `text=${encodeFragmentTerm(words)}`;
-        const start = encodeFragmentTerm(words.slice(0, FRAGMENT_EDGE_WORDS));
-        const end = encodeFragmentTerm(words.slice(-FRAGMENT_EDGE_WORDS));
+    const directives = runs.map((run) => {
+        const first = run[0];
+        const last = run[run.length - 1];
+        if (run.length === 1 && first.length <= FRAGMENT_EXACT_WORDS) return `text=${encodeFragmentTerm(first)}`;
+        const start = encodeFragmentTerm(first.slice(0, FRAGMENT_EDGE_WORDS));
+        const end = encodeFragmentTerm(last.slice(-FRAGMENT_EDGE_WORDS));
         return `text=${start},${end}`;
     });
     if (!directives.length) return url;

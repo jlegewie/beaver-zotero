@@ -153,7 +153,8 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                             {/* Left column - numeric citation */}
                             {!authorYearFormat &&
                                 <div className="p-2">
-                                    <div className={`source-citation text-sm ${showAsExternal ? 'mt-020 source-citation-external' : ''}`}>
+                                    {/* A web page's marker stays blue once imported, as in the text. */}
+                                    <div className={`source-citation text-sm ${showAsExternal ? 'mt-020' : ''} ${showAsExternal || (isExternal && webPageId(externalRef?.source_id)) ? 'source-citation-external' : ''}`}>
                                         {citation.numericCitation}
                                     </div>
                                 </div>

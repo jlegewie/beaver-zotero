@@ -24,7 +24,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { Provider, createStore } from 'jotai';
 import { citationsAtom } from '@beaver/agent-core/citations/atoms';
-import { externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
+import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
 import type { Citation as CitationMetadata } from '@beaver/agent-core/types/citations';
 import type { ExternalReference } from '@beaver/agent-core/types/externalReferences';
 import Citation from '@beaver/agent-ui/chat/Citation';
@@ -119,7 +119,7 @@ describe('Citation under the isolated note-export store', () => {
     });
 });
 
-describe('web page citations in note export', () => {
+describe('web page citations', () => {
     const WEB_ID = 'web-MJNNMKH4ED';
     const page = {
         source: 'exa',
@@ -176,5 +176,31 @@ describe('web page citations in note export', () => {
 
     it('leaves out a web page the thread has no record of', () => {
         expect(renderWebCitation(createStore(), WEB_ID)).toBe('');
+    });
+
+    it('keeps the external style once the page is in the library, since the click still opens the browser', () => {
+        const store = createStore();
+        store.set(citationsAtom, [{
+            citation_id: 'c1',
+            run_id: 'run-1',
+            citation_type: 'external_reference',
+            requested_ref: { kind: 'external', external_id: WEB_ID },
+            resolved_ref: { kind: 'external', external_id: WEB_ID, source: 'exa' },
+            raw_tag: `<citation id="${WEB_ID}" loc="s3"/>`,
+            locations: [{ part_id: 's3', text: 'In 2024, 1 in 7 people were living with obesity.' }],
+        } as unknown as CitationMetadata]);
+        store.set(externalReferenceMappingAtom, { [WEB_ID]: page });
+        store.set(externalReferenceItemMappingAtom, { [WEB_ID]: { library_id: 1, zotero_key: 'ABCD1234' } });
+
+        const html = renderToStaticMarkup(
+            React.createElement(Provider, { store }, React.createElement(Citation, {
+                'data-external-id': WEB_ID,
+                'data-loc': 's3',
+                'data-loc-kind': 'sentence',
+                'data-loc-value': '3',
+            })),
+        );
+        expect(html).toContain('external-citation');
+        expect(html).not.toContain('with-locator');
     });
 });

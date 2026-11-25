@@ -125,6 +125,16 @@ describe('web page tool labels', () => {
         expect(getToolCallLabel(part, 'completed', { view })).toBe('Web search: obesity prevalence (2 results)');
     });
 
+    it('leaves the official-answer prefix out of a web search label', () => {
+        const part = toolCall({
+            tool_name: 'web_search',
+            args: { query: 'Prefer a specific primary or official answer page. WHO adult obesity prevalence' },
+        });
+        expect(getToolCallLabel(part, 'in_progress')).toBe('Web search: WHO adult obesity prevalence');
+        const bare = toolCall({ tool_name: 'web_search', args: { query: 'Prefer a specific primary or official answer page.' } });
+        expect(getToolCallLabel(bare, 'in_progress')).toBe('Web search');
+    });
+
     it('labels a web read with the site, without its synthetic page range', () => {
         const part = toolCall({ tool_name: 'read', args: { file: 'web-MJNNMKH4ED', pages: '1-3' } });
         const view = { view_type: 'external_reference_list' as const, tool_name: 'read', references: [page] };

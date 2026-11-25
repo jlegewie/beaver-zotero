@@ -495,8 +495,9 @@ const Citation: React.FC<CitationProps> = (props) => {
     // The locator style promises navigation to a place inside the document.
     // While the modifier is held the click reveals the work instead, so the
     // marker drops to the plain style — which is already exactly how a citation
-    // whose click reveals its item is drawn.
-    const citationClassBase = isExternal && !mappedZoteroItem
+    // whose click reveals its item is drawn. A web page keeps the external
+    // style once imported: its click still opens the page in the browser.
+    const citationClassBase = (isExternal && !mappedZoteroItem) || webPage
         ? "zotero-citation external-citation"
         : (hasLocator || isAnnotationCitation || hasSnapshotSymbolicLocator || isTableCitation) && !isExternalFile && !showItemInfo
         ? "zotero-citation with-locator"
