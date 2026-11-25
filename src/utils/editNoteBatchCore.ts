@@ -33,6 +33,7 @@ import {
     describeRejectedFallback,
     expandBase,
     findBestMatch,
+    findMarkdownRenderBestMatch,
     findMarkdownRenderMatch,
     truncateForWarning,
     type MatchDiagnostics,
@@ -78,9 +79,11 @@ export interface BatchEditSpec {
     /** Validator-supplied raw context anchors used to disambiguate multi-matches. */
     targetBeforeContext?: string;
     targetAfterContext?: string;
-    /** Handler-rendered Markdown fallback fields (populated async before resolution). */
-    renderedOldSimplified?: string;
-    renderedNewSimplified?: string;
+    /**
+     * Handler-supplied Markdown fallback. Called only when the normal matcher
+     * misses, so an edit that matches as written renders nothing.
+     */
+    renderMarkdownFallback?: () => Pick<MatchInput, 'renderedOldSimplified' | 'renderedNewSimplified'>;
 }
 
 /** Inputs shared by every edit in one resolution pass. */
@@ -329,14 +332,17 @@ function buildMatchInput(ctx: ResolveBatchContext, spec: BatchEditSpec): MatchIn
         externalRefContext: ctx.externalRefContext,
         pageLabels: ctx.pageLabels,
         resolvedLocatorPages: ctx.resolvedLocatorPages,
-        renderedOldSimplified: spec.renderedOldSimplified,
-        renderedNewSimplified: spec.renderedNewSimplified,
     };
 }
 
+/** The match input with the spec's Markdown fallback rendered in. */
+function withMarkdownRender(matchInput: MatchInput, spec: BatchEditSpec): MatchInput {
+    return { ...matchInput, ...spec.renderMarkdownFallback?.() };
+}
+
 /**
- * Run the ranked matcher pipeline (`expandBase` → `findBestMatch`, with the
- * handler-rendered Markdown fallback threaded in via `renderedOldSimplified`).
+ * Run the ranked matcher pipeline (`expandBase` → `findBestMatch`, then the
+ * handler-rendered Markdown fallback, rendered only once the others missed).
  * Returns the match or a per-edit failure with a zero-match hint.
  */
 function matchEdit(
@@ -349,14 +355,15 @@ function matchEdit(
     let match: MatchResult | null = null;
     try {
         const base = expandBase(matchInput);
-        match = findBestMatch(matchInput, base, diagnostics);
+        match = findBestMatch(matchInput, base, diagnostics)
+            ?? findMarkdownRenderBestMatch(withMarkdownRender(matchInput, spec), base, diagnostics);
     } catch (e: any) {
         if (e?.code === 'ambiguous_match') {
             return failure(spec.index, e.message, 'ambiguous_match');
         }
         // Base old/new expansion threw. The Markdown-render fallback does not
         // need the base, so try it before surfacing expansion_failed.
-        match = findMarkdownRenderMatch(matchInput);
+        match = findMarkdownRenderMatch(withMarkdownRender(matchInput, spec));
         if (!match) {
             return failure(
                 spec.index,

@@ -11,6 +11,7 @@ import { contextMainWindow, resolveChatWindow } from "../runtime/navigation";
 import { attachViewRowDrag, detachViewRowDrag } from "../modules/viewRowDrag";
 import { loadRendererBundle } from "./rendererBundle";
 import { SIDEBAR_MOUNT_ID, SIDEBAR_ROOT_ID } from "./libraryPane";
+import { BEAVER_WINDOW_NAME, findBeaverWindow } from "./beaverWindowLookup";
 
 let keyboardManager: KeyboardManager | null = null;
 
@@ -49,7 +50,6 @@ interface BeaverWindow extends Window {
 }
 
 // Window name for the separate Beaver window
-const BEAVER_WINDOW_NAME = 'beaver-separate-window';
 
 // Window name for the separate Beaver preferences window
 const BEAVER_PREFERENCES_WINDOW_NAME = 'beaver-preferences-window';
@@ -564,21 +564,7 @@ export class BeaverUIFactory {
      * Find an existing Beaver separate window
      */
     static findBeaverWindow(): Window | undefined {
-        const pending = Zotero.Beaver?.runtime?.standaloneWindow;
-        if (pending && !pending.closed) return pending;
-        try {
-            const wm = Services.wm;
-            const enumerator = wm.getEnumerator('beaver:window');
-            while (enumerator.hasMoreElements()) {
-                const win = enumerator.getNext() as Window;
-                if (!win.closed && win.name === BEAVER_WINDOW_NAME) {
-                    return win;
-                }
-            }
-        } catch (e) {
-            // Silently handle errors
-        }
-        return undefined;
+        return findBeaverWindow();
     }
 
     /** Open Beaver in a separate window, or focus the one already open. */

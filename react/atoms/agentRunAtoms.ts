@@ -2,10 +2,10 @@
  * Chat runs as the window sees them.
  *
  * Execution lives in the run engine (`src/services/agentRuns/runEngine`), whose atoms
- * this module re-exports. What stays here is the window's half of a send:
- * assembling the prompt from the composer and the window's context, and
- * clearing the composer once the run is accepted. Importing this module
- * installs this renderer's run session (`react/runtime/windowRunSession`).
+ * this module re-exports; it runs in the plugin realm, in this window's run
+ * session, which the window reaches through its port. What stays here is the
+ * window's half of a send: assembling the prompt from the composer and the
+ * window's context, and clearing the composer once the run is accepted.
  */
 
 import { atom, Getter, Setter } from 'jotai';
@@ -62,21 +62,50 @@ import { isTargetInLibraries } from '../utils/zoteroReferences';
 import { prewarmMuPDFWorker } from '../../src/beaver-extract';
 import { isRejectedItemValidation, itemValidationResultsAtom } from './itemValidation';
 import '../runtime/windowRunSession';
-import { getRunSession, runSessionStore } from '../../src/services/agentRuns/runSession';
+import { getSessionPort } from '../../src/services/agentRuns/runSession';
+import type { WriterScope } from '../../src/services/agentRuns/sessionPort';
+import { sessionAtomName } from '../../src/services/agentRuns/sessionState';
+import { runSessionStore } from '../runtime/runSessionStore';
+import { dismissDiffPreview } from '../utils/noteEditorDiffPreview';
 import {
     buildModelSelectionOptions,
     isWSChatPendingAtom,
-    messageParksResume,
     parkResumeForMessageAtom,
     prepareForNewRunAtom,
     resetWSStateAtom,
-    retryCommitInFlight,
-    startMessageRun,
-    withThreadWriter,
     wsErrorAtom,
 } from '../../src/services/agentRuns/runEngine';
 
 export * from '../../src/services/agentRuns/runEngine';
+
+/**
+ * Run a window operation under the chat's writer lease, held by the session:
+ * it claims the chat and reads admission first. `operation` gets the
+ * window's setter and the session's, both guarded by the lease (they throw
+ * once it is lost or the window navigates), and the lease's scope.
+ */
+export function withThreadWriter<T>(
+    set: Setter,
+    operation: (set: Setter, sessionSet: Setter, scope: WriterScope) => Promise<T>,
+): Promise<T | undefined> {
+    return getSessionPort().withThreadWriter((scope) => {
+        const guardedSet = ((...args: Parameters<Setter>) => {
+            scope.assertCurrent();
+            return (set as (...a: unknown[]) => unknown)(...args);
+        }) as Setter;
+        const sessionSet = ((atom: object, ...args: unknown[]) =>
+            scope.set(sessionAtomName(atom), ...args)) as unknown as Setter;
+        return operation(guardedSet, sessionSet, scope);
+    });
+}
+
+/**
+ * Whether a message sent now must first park the running resume: it carries
+ * some of a parked run's answers and waits for the rest of the cards.
+ */
+export function messageParksResume(): boolean {
+    return getSessionPort().messageParksResume();
+}
 
 // =============================================================================
 // Prompt assembly
@@ -151,10 +180,11 @@ const sendWSMessage = async (
         get: Getter,
         set: Setter,
         sessionSet: Setter,
+        scope: WriterScope,
         message: string,
         options?: SendWSMessageOptions,
     ) => {
-        const session = getRunSession();
+        const port = getSessionPort();
         const accountGeneration = getCredentialGeneration();
         const inAccount = (target: Setter): Setter => ((...args: Parameters<Setter>) => {
             assertCredentialGeneration(accountGeneration);
@@ -174,13 +204,13 @@ const sendWSMessage = async (
             logger('sendWSMessageAtom: Blocked - already have request in progress', 1);
             return;
         }
-        if (retryCommitInFlight(get, 'sendWSMessageAtom')) return;
+        if (port.retryCommitInFlight('sendWSMessageAtom')) return;
 
         // A first message ends a feature-credits first run, as picking a task does.
         void set(completeCreditsFirstRunAtom, featureTask ?? 'chat');
 
         // Dismiss any open diff preview before sending
-        session.host.dismissDiffPreview();
+        dismissDiffPreview();
 
         // Reset state
         sessionSet(prepareForNewRunAtom);
@@ -473,7 +503,7 @@ const sendWSMessage = async (
                 return;
             }
 
-            await startMessageRun(session, session.store.get, sessionSet, {
+            await scope.startMessageRun({
                 prompt: userPrompt,
                 threadId,
                 userId,
@@ -510,11 +540,11 @@ const sendWSMessage = async (
     };
 
 export const sendWSMessageAtom = atom(null, (get, set, message: string, options?: SendWSMessageOptions) => {
-    const send = () => withThreadWriter(set, (guardedSet, guardedSessionSet) =>
-        sendWSMessage(get, guardedSet, guardedSessionSet, message, options));
+    const send = () => withThreadWriter(set, (guardedSet, guardedSessionSet, scope) =>
+        sendWSMessage(get, guardedSet, guardedSessionSet, scope, message, options));
     // Claims the writer in the same tick as the click unless a resume must
     // be parked first, so a second click finds it taken.
-    if (!messageParksResume(get)) return send();
+    if (!messageParksResume()) return send();
     return set(parkResumeForMessageAtom).then((parkedResume) => (parkedResume ? send() : undefined));
 });
 

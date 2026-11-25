@@ -5,17 +5,18 @@ import {
     scheduleResumeAfterRun,
 } from '../../src/services/syncPause';
 import { isWSChatPendingAtom } from '../atoms/agentRunAtoms';
-import { getWindowRuntime } from '../runtime/windowRuntime';
+import { getSessionPort } from '../../src/services/agentRuns/runSession';
 import { store } from '../store';
 
 /** Release Zotero sync suppression when mutating agent runs finish. */
 export function useSyncSuppression(): void {
     useEffect(() => {
-        const runtimeId = getWindowRuntime().id;
+        // The key the session's data provider pauses sync under.
+        const sessionOwner = getSessionPort().owner;
         let owner: string | undefined;
         const apply = () => {
             const runId = store.get(activeRunAtom)?.id;
-            const next = runId ? `chat:${runtimeId}:${runId}` : undefined;
+            const next = runId ? `chat:${sessionOwner}:${runId}` : undefined;
             if (owner && next !== owner) scheduleResumeAfterRun(owner);
             owner = next;
             if (!owner) return;

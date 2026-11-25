@@ -1164,6 +1164,14 @@ export function registerEndpoints(): (() => void) | undefined {
         endpoints['/beaver/test/undo-action'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/undo-action', request));
         endpoints['/beaver/test/chat-drop-connection'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/chat-drop-connection', request));
         endpoints['/beaver/test/run-snapshot'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/run-snapshot', request));
+        // The instance's run sessions (plugin realm); with `sessionId`, one
+        // session's state.
+        endpoints['/beaver/test/runs'] = createEndpoint(async (request: { sessionId?: string } | undefined) => {
+            const runs = Zotero.Beaver.agentRuns;
+            if (!runs) return { error: 'agent_runs_unavailable' };
+            if (request?.sessionId) return runs.snapshot(request.sessionId) ?? { error: 'session_not_found' };
+            return { sessions: runs.list() };
+        });
         endpoints['/beaver/test/chat-stop'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/chat-stop', request));
         endpoints['/beaver/test/chat-continue'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/chat-continue', request));
 

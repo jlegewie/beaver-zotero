@@ -95,9 +95,10 @@ vi.mock('../../../react/atoms/agentRunAtoms', () => ({
 import { diffPreviewNoteKeyAtom } from '../../../react/utils/diffPreviewCoordinator';
 import { noteLibraryIdFromActionData, updateDiffPreviewForNote } from '../../../react/utils/diffPreviewCoordinator';
 import { installStoreRunSession } from '../../helpers/runSession';
+import { pendingApprovalsAtom as realPendingApprovalsAtom } from '@beaver/agent-core/run-state/pendingApprovals';
 
-// Now create the real atom and assign it
-const pendingApprovalsAtom = atom<Map<string, any>>(new Map());
+// The session's own approvals atom: the coordinator reaches it by name.
+const pendingApprovalsAtom = realPendingApprovalsAtom as unknown as ReturnType<typeof atom<Map<string, any>>>;
 testPendingApprovalsAtom.ref = pendingApprovalsAtom;
 
 // ---------------------------------------------------------------------------

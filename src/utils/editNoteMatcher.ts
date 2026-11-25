@@ -1565,6 +1565,19 @@ export function findBestMatch(
 }
 
 /**
+ * The Markdown-render step that ends {@link findBestMatch}, with the same
+ * safeguards. For a caller that renders the Markdown only after
+ * `findBestMatch` (run without rendered fields) missed.
+ */
+export function findMarkdownRenderBestMatch(
+    matchInput: MatchInput,
+    base: BaseExpansion,
+    diagnostics?: MatchDiagnostics,
+): MatchResult | null {
+    return runStrategies({ ...matchInput, diagnostics }, base, [markdownRenderStrategy]);
+}
+
+/**
  * Run only the handler-rendered Markdown fallback. This is used when base
  * old_string expansion fails before the ranked matcher can run.
  */

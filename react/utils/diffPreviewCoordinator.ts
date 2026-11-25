@@ -31,7 +31,7 @@ import { logger } from '@beaver/agent-core/platform/logger';
 import { getPref } from '../../src/utils/prefs';
 import { store } from '../store';
 import { pendingApprovalsAtom } from '../agents/agentActions';
-import { runSessionStore } from '../../src/services/agentRuns/runSession';
+import { runSessionStore } from '../runtime/runSessionStore';
 import { sendApprovalResponseAtom } from '../atoms/agentRunAtoms';
 import { buildPreviewableEditOperations } from './editNotePreviewOperations';
 import { resolveLibraryRef } from '../../src/utils/libraryIdentity';

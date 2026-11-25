@@ -6,14 +6,14 @@ import { createThreadStore as createStore } from '../../helpers/threadRepository
 // supabase-backed services; stub everything the thread atoms touch.
 // =============================================================================
 
-const attachCollectionsMock = vi.fn();
-const cancelMock = vi.fn();
-const leaveRunMock = vi.fn(() => false);
-const canLeaveReconnectingRunMock = vi.fn(() => false);
-const parkableRunIdMock = vi.fn((): string | null => null);
-const parkRunMock = vi.fn(async () => 'ended');
-const getThreadRunsMock = vi.fn();
-const getThreadMock = vi.fn();
+const attachCollectionsMock = vi.hoisted(() => vi.fn());
+const cancelMock = vi.hoisted(() => vi.fn());
+const leaveRunMock = vi.hoisted(() => vi.fn(() => false));
+const canLeaveReconnectingRunMock = vi.hoisted(() => vi.fn(() => false));
+const parkableRunIdMock = vi.hoisted(() => vi.fn((): string | null => null));
+const parkRunMock = vi.hoisted(() => vi.fn(async () => 'ended'));
+const getThreadRunsMock = vi.hoisted(() => vi.fn());
+const getThreadMock = vi.hoisted(() => vi.fn());
 vi.mock('@beaver/agent-core/transport/agentService', () => ({
     agentRunService: {
         getThreadRuns: (...args: unknown[]) => getThreadRunsMock(...args),
@@ -43,12 +43,12 @@ vi.mock('../../../src/utils/zoteroUtils', () => ({
     currentZoteroInstanceRef: vi.fn(() => ({ zoteroUserId: '111', zoteroLocalId: 'CURKEY' })),
 }));
 
-const getPrefMock = vi.fn();
+const getPrefMock = vi.hoisted(() => vi.fn());
 vi.mock('../../../src/utils/prefs', () => ({
     getPref: (...args: unknown[]) => getPrefMock(...args),
 }));
 
-const confirmMock = vi.fn();
+const confirmMock = vi.hoisted(() => vi.fn());
 vi.mock('@beaver/agent-ui/host', () => ({
     getHost: () => ({ dialogs: { confirm: confirmMock } }),
 }));
@@ -127,35 +127,23 @@ vi.mock('@beaver/agent-core/citations/externalReferences', async () => {
     };
 });
 
-vi.mock('@beaver/agent-core/run-state/atoms', async () => {
-    const { atom } = await import('jotai');
-    return {
-        threadRunsAtom: atom<unknown[]>([]),
-        activeRunAtom: atom<unknown | null>(null),
-        // threads.ts re-exports these three from the run state, so the stub must
-        // provide them
-        currentThreadIdAtom: atom<string | null>(null),
-        currentThreadNameAtom: atom<string | null>(null),
-        isLoadingThreadAtom: atom<boolean>(false),
-        resetRunSelectorCaches: () => {},
-    };
-});
+vi.mock('@beaver/agent-core/run-state/atoms', async (importOriginal) => ({
+    ...(await importOriginal<object>()),
+    resetRunSelectorCaches: () => {},
+}));
 
-vi.mock('../../../react/atoms/agentRunAtoms', async () => {
+vi.mock('../../../react/atoms/agentRunAtoms', async (importOriginal) => {
     const { atom } = await import('jotai');
     return {
+        ...(await importOriginal<object>()),
         abandonActiveRunLocallyAtom: atom(null, () => {}),
-        canLeaveReconnectingRun: () => canLeaveReconnectingRunMock(),
-        isWSChatPendingAtom: atom(false),
-        isWSConnectedAtom: atom(false),
-        isWSReadyAtom: atom(false),
-        parkableRunId: () => parkableRunIdMock(),
     };
 });
 
-vi.mock('../../../src/services/agentRuns/parkedRuns', async () => {
+vi.mock('../../../src/services/agentRuns/parkedRuns', async (importOriginal) => {
     const { atom } = await import('jotai');
     return {
+        ...(await importOriginal<object>()),
         clearParkedAnswersAtom: atom(null, () => {}),
         syncParkedCardsAtom: atom(null, () => {}),
     };
@@ -168,14 +156,15 @@ vi.mock('../../../react/agents/agentActions', async () => {
         isCreateItemAgentAction: vi.fn(() => false),
         validateAppliedAgentAction: vi.fn(async () => 'valid' as const),
         undoAgentActionAtom: atom(null, () => {}),
-        clearAllPendingApprovalsAtom: atom(null, () => {}),
+        // Session state: the session's own action, which the window reaches by name.
+        clearAllPendingApprovalsAtom: (await import('../../../src/services/agentRuns/pendingApprovals')).clearAllPendingApprovalsAtom,
         resetAgentActionSelectorCaches: vi.fn(),
     };
 });
 
-vi.mock('@beaver/agent-core/run-state/pendingQuestions', async () => {
+vi.mock('@beaver/agent-core/run-state/pendingQuestions', async (importOriginal) => {
     const { atom } = await import('jotai');
-    return { clearAllPendingQuestionsAtom: atom(null, () => {}) };
+    return { ...(await importOriginal<object>()), clearAllPendingQuestionsAtom: atom(null, () => {}) };
 });
 
 vi.mock('../../../react/agents/toolResultProcessing', () => ({
@@ -219,6 +208,8 @@ import { jobWaitAtom } from '../../../src/services/agentRuns/jobWait';
 import { chatFillsAtom, recordChatFill } from '@beaver/agent-core/run-state/tableChatFills';
 import type { TableFillJobSnapshot } from '@beaver/agent-core/protocol/tableFillProtocol';
 import { installStoreRunSession } from '../../helpers/runSession';
+import { agentService } from '@beaver/agent-core/transport/agentService';
+import { getSessionPort } from '../../../src/services/agentRuns/runSession';
 
 const run = (status: string) => ({ id: 'run-1', status });
 
@@ -239,7 +230,10 @@ describe('interrupt-active-run confirm', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         store = createStore();
-        installStoreRunSession(store);
+        installStoreRunSession(store, { agentService });
+        const port = getSessionPort();
+        vi.spyOn(port, 'canLeaveReconnectingRun').mockImplementation(() => canLeaveReconnectingRunMock());
+        vi.spyOn(port, 'parkableRunId').mockImplementation(() => parkableRunIdMock());
         getPrefMock.mockReturnValue(false);
         confirmMock.mockReturnValue(true);
         leaveRunMock.mockReturnValue(false);

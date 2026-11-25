@@ -1,4 +1,4 @@
-vi.mock('../../../src/services/localEndpoints/operation', () => ({ captureInstanceOperation: () => ({ fullAccess: false, renderMarkdown: async (text: string) => text }) }));
+vi.mock('../../../src/services/localEndpoints/operation', () => ({ captureInstanceOperation: () => ({ fullAccess: false }) }));
 /**
  * Unit tests for MCP tool handlers defined in react/hooks/useMcpServer.ts
  *
@@ -1335,9 +1335,6 @@ describe('MCP Tool Handlers (via useMcpServer)', () => {
                 library: 'My Library',
                 collection: 'COL1',
             });
-            // Validation renders the content to check its citations, so it
-            // needs the operation's render seam, as execution does.
-            expect(validateReq.operation?.renderMarkdown).toBeTypeOf('function');
 
             const executeReq = mockExecuteCreateNoteAction.mock.calls[0][0];
             expect(executeReq.event).toBe('agent_action_execute');

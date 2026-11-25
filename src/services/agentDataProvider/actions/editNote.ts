@@ -72,7 +72,7 @@ import { dismissNotePreviews } from '../../notePreviews';
 import type { ActionExecuteRequest, ActionValidateRequest, OperationContext } from '../operationContext';
 import { TimeoutContext, TimeoutError, checkAborted } from '../timeout';
 import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
-import { getExternalRefContext } from './noteCitationRendering';
+import { getExternalRefContext, renderWithCitationTags } from './noteCitationRendering';
 import { actionError, assertLibraryNotExcluded, assertLibraryRefNotExcluded, toExecuteResponse } from './actionExecution';
 import { sha256Hex } from '../../../utils/hash';
 
@@ -102,44 +102,43 @@ function containsCitationTag(...parts: string[]): boolean {
 }
 
 /**
- * Render Markdown-shaped edit strings through the same static renderer used by
+ * Render Markdown-shaped edit strings through the same renderer used by
  * create_note, then simplify the rendered HTML into the matcher's input format.
- * The helper is only called after the normal synchronous matcher misses.
+ * Call it only after the normal matcher misses: it is the one place an edit
+ * renders Markdown.
  */
-export async function buildMarkdownRenderFields(
+export function buildMarkdownRenderFields(
     oldString: string,
     newString: string,
     operation: EditNoteOperation,
-    libraryId: number, context?: OperationContext): Promise<Pick<MatchInput, 'renderedOldSimplified' | 'renderedNewSimplified'>> {
+    libraryId: number,
+): Pick<MatchInput, 'renderedOldSimplified' | 'renderedNewSimplified'> {
     if (!oldString || !looksLikeMarkdownForRender(oldString)) return {};
 
     try {
-        if (!context?.renderMarkdown) return {};
         // The renderer leaves citations as the tags the model wrote, so the
         // strategy expands them like any other edit (old_string tags resolve
         // by `ref`, new ones are built from the model's page numbers). They
         // are masked while the HTML is simplified.
-        const render = async (content: string) => {
-            const masked = maskRenderedCitationTags(await context.renderMarkdown!(content));
+        const render = (content: string) => {
+            const masked = maskRenderedCitationTags(renderWithCitationTags(content));
             return unmaskNoteCitationTags(simplifyNoteHtml(masked.text, libraryId).simplified, masked);
         };
 
-        const renderedOldSimplified = (await render(oldString));
+        const renderedOldSimplified = render(oldString);
         let renderedNewSimplified: string;
         if (operation === 'insert_after') {
             const injected = newString.startsWith(oldString)
                 ? newString.substring(oldString.length)
                 : newString;
-            renderedNewSimplified = renderedOldSimplified
-                + (await render(injected));
+            renderedNewSimplified = renderedOldSimplified + render(injected);
         } else if (operation === 'insert_before') {
             const injected = newString.endsWith(oldString)
                 ? newString.substring(0, newString.length - oldString.length)
                 : newString;
-            renderedNewSimplified = (await render(injected))
-                + renderedOldSimplified;
+            renderedNewSimplified = render(injected) + renderedOldSimplified;
         } else {
-            renderedNewSimplified = (await render(newString));
+            renderedNewSimplified = render(newString);
         }
 
         return { renderedOldSimplified, renderedNewSimplified };
@@ -149,17 +148,14 @@ export async function buildMarkdownRenderFields(
     }
 }
 
-async function findMarkdownRenderFallbackMatch(
+function findMarkdownRenderFallbackMatch(
     matchInput: MatchInput,
     oldString: string,
     newString: string,
     operation: EditNoteOperation,
-    libraryId: number, context?: OperationContext): Promise<ReturnType<typeof findBestMatch>> {
-    const rendered = await buildMarkdownRenderFields(
-        oldString,
-        newString,
-        operation,
-        libraryId, context);
+    libraryId: number,
+): ReturnType<typeof findBestMatch> {
+    const rendered = buildMarkdownRenderFields(oldString, newString, operation, libraryId);
     if (!rendered.renderedOldSimplified) return null;
     return findMarkdownRenderMatch({ ...matchInput, ...rendered });
 }
@@ -594,12 +590,12 @@ async function validateEditNoteAction(
     try {
         base = expandBase(matchInput);
     } catch (e: any) {
-        match = await findMarkdownRenderFallbackMatch(
+        match = findMarkdownRenderFallbackMatch(
             matchInput,
             old_string ?? '',
             new_string,
             operation,
-            resolvedLibraryId, request.operation);
+            resolvedLibraryId);
         if (!match) {
             return {
                 type: 'agent_action_validate_response',
@@ -630,12 +626,12 @@ async function validateEditNoteAction(
             };
         }
         if (!match) {
-            match = await findMarkdownRenderFallbackMatch(
+            match = findMarkdownRenderFallbackMatch(
                 matchInput,
                 old_string ?? '',
                 new_string,
                 operation,
-                resolvedLibraryId, request.operation);
+                resolvedLibraryId);
         }
     }
     if (!match) {
@@ -1098,12 +1094,12 @@ export async function applyEditNote(
     try {
         base = expandBase(matchInput);
     } catch (e: any) {
-        match = await findMarkdownRenderFallbackMatch(
+        match = findMarkdownRenderFallbackMatch(
             matchInput,
             old_string ?? '',
             new_string,
             operation,
-            resolvedLibraryId, operationContext);
+            resolvedLibraryId);
         if (!match) {
             throw actionError('expansion_failed', buildExpansionErrorMessage(e, simplified, old_string));
         }
@@ -1122,12 +1118,12 @@ export async function applyEditNote(
             throw actionError('ambiguous_match', error.message);
         }
         if (!match) {
-            match = await findMarkdownRenderFallbackMatch(
+            match = findMarkdownRenderFallbackMatch(
                 matchInput,
                 old_string ?? '',
                 new_string,
                 operation,
-                resolvedLibraryId, operationContext);
+                resolvedLibraryId);
         }
     }
     if (!match) {

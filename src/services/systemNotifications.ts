@@ -29,16 +29,15 @@
  *
  * Clicking a notification focuses the Zotero/Beaver window and opens the
  * Beaver sidebar so the user lands directly on the pending approval or reply.
+ *
+ * The decision runs where the run does, in the plugin realm, once per event.
+ * Each call names the window that shows the run (`NotificationTarget`).
  */
-
-import { tryGetWindowRuntime } from '../../react/runtime/windowRuntime';
 
 import { config } from "../../package.json";
 import { logger } from "@beaver/agent-core/platform/logger";
 import { getPref } from "../utils/prefs";
-import { store } from "../../react/store";
-import { isSidebarVisibleAtom } from "../../react/atoms/ui";
-import { BeaverUIFactory } from "../ui/ui";
+import { findBeaverWindow } from "../ui/beaverWindowLookup";
 import {
     WSAskUserQuestionRequest,
     WSBatchApprovalRequest,
@@ -47,6 +46,14 @@ import {
 } from "@beaver/agent-core/protocol/agentProtocol";
 
 type BeaverVisibility = "beaver-visible" | "zotero-focused" | "zotero-unfocused";
+
+/** The window that shows a run, as notifications need it. */
+export interface NotificationTarget {
+    /** The main window whose Beaver surface shows the run, if it is still open. */
+    hostWindow(): Window | null | undefined;
+    /** Whether that window's Beaver sidebar is open. */
+    sidebarVisible(): boolean;
+}
 
 const NOTIFICATION_ICON = `chrome://${config.addonRef}/content/icons/beaver.png`;
 
@@ -68,16 +75,16 @@ const MAX_BODY_CHARS = 160;
 // them for a short window and surface a single notification with a count.
 const COALESCE_WINDOW_MS = 400;
 
-let queuedApprovals: WSDeferredApprovalRequest[] = [];
-let coalesceTimer: ReturnType<typeof setTimeout> | null = null;
+/** Approvals waiting to be surfaced together, per window that shows them. */
+const queuedApprovals = new Map<NotificationTarget, WSDeferredApprovalRequest[]>();
 
 /**
  * Determine whether the user can currently see the Beaver UI.
  */
-function getBeaverVisibility(): BeaverVisibility {
+function getBeaverVisibility(target: NotificationTarget): BeaverVisibility {
     let mainWindowFocused = false;
     try {
-        const mainWindow = tryGetWindowRuntime()?.hostWindow;
+        const mainWindow = target.hostWindow();
         mainWindowFocused = mainWindow?.document?.hasFocus?.() === true;
     } catch {
         // Ignore — treat as not focused
@@ -85,15 +92,20 @@ function getBeaverVisibility(): BeaverVisibility {
 
     let beaverWindowFocused = false;
     try {
-        const beaverWindow = BeaverUIFactory.findBeaverWindow();
+        const beaverWindow = findBeaverWindow();
         beaverWindowFocused = beaverWindow != null && !beaverWindow.closed &&
-            beaverWindow.__beaverOwnerWindowRef?.deref() === tryGetWindowRuntime()?.hostWindow &&
+            beaverWindow.__beaverOwnerWindowRef?.deref() === target.hostWindow() &&
             beaverWindow.document?.hasFocus?.() === true;
     } catch {
         // Ignore — treat as not focused
     }
 
-    const sidebarVisible = store.get(isSidebarVisibleAtom) === true;
+    let sidebarVisible = false;
+    try {
+        sidebarVisible = target.sidebarVisible();
+    } catch {
+        // A closed window shows nothing.
+    }
 
     // Scenario A: the approval UI is in front of the user.
     if (beaverWindowFocused || (mainWindowFocused && sidebarVisible)) {
@@ -114,12 +126,12 @@ function getBeaverVisibility(): BeaverVisibility {
  * OS-native notification: the user opted in, and the Beaver UI is not already
  * in front of them.
  */
-function shouldNotifySystem(): boolean {
+function shouldNotifySystem(target: NotificationTarget): boolean {
     if (getPref("enableSystemNotifications") !== true) {
         return false;
     }
 
-    switch (getBeaverVisibility()) {
+    switch (getBeaverVisibility(target)) {
         case "beaver-visible":
             // Scenario A: the pending UI is already on screen — nothing to do.
             return false;
@@ -176,16 +188,16 @@ function describeApprovals(events: WSDeferredApprovalRequest[]): { title: string
  * Focus the Beaver UI: raise the separate window if open, otherwise focus the
  * main Zotero window and open the sidebar.
  */
-function focusBeaver(): void {
+function focusBeaver(target: NotificationTarget): void {
     try {
-        const beaverWindow = BeaverUIFactory.findBeaverWindow();
-        if (beaverWindow && !beaverWindow.closed && beaverWindow.__beaverOwnerWindowRef?.deref() === tryGetWindowRuntime()?.hostWindow) {
+        const beaverWindow = findBeaverWindow();
+        if (beaverWindow && !beaverWindow.closed && beaverWindow.__beaverOwnerWindowRef?.deref() === target.hostWindow()) {
             beaverWindow.focus();
             return;
         }
 
-        const mainWindow = tryGetWindowRuntime()?.hostWindow;
-        if (!mainWindow) return;
+        const mainWindow = target.hostWindow();
+        if (!mainWindow || mainWindow.closed) return;
         mainWindow.focus();
 
         const eventBus = (mainWindow as any).__beaverEventBus;
@@ -206,7 +218,7 @@ function focusBeaver(): void {
  * groups replaceable notifications: a later notification with the same name
  * replaces the earlier one instead of stacking.
  */
-function showNotification(title: string, body: string, name: string): void {
+function showNotification(title: string, body: string, name: string, target: NotificationTarget): void {
     try {
         const alertsService = (Components.classes as any)["@mozilla.org/alerts-service;1"]
             .getService(Components.interfaces.nsIAlertsService);
@@ -214,7 +226,7 @@ function showNotification(title: string, body: string, name: string): void {
         const listener = {
             observe(_subject: unknown, topic: string) {
                 if (topic === "alertclickcallback") {
-                    focusBeaver();
+                    focusBeaver(target);
                     // Dismiss the notification so it does not linger (e.g. in the
                     // macOS Notification Center) after the user has acted on it.
                     try {
@@ -249,38 +261,43 @@ function showNotification(title: string, body: string, name: string): void {
 /**
  * Show an OS-native notification for one or more pending approval requests.
  */
-function showSystemNotification(events: WSDeferredApprovalRequest[]): void {
+function showSystemNotification(events: WSDeferredApprovalRequest[], target: NotificationTarget): void {
     if (events.length === 0) return;
     const { title, body } = describeApprovals(events);
-    showNotification(title, body, APPROVAL_NOTIFICATION_NAME);
+    showNotification(title, body, APPROVAL_NOTIFICATION_NAME, target);
 }
 
 /**
  * Surface the approvals collected during the coalescing window as one
  * notification, then reset for the next batch.
  */
-function flushQueuedApprovals(): void {
-    coalesceTimer = null;
-    const events = queuedApprovals;
-    queuedApprovals = [];
-    showSystemNotification(events);
+function flushQueuedApprovals(target: NotificationTarget): void {
+    const events = queuedApprovals.get(target) ?? [];
+    queuedApprovals.delete(target);
+    // The window that showed them closed meanwhile: nothing is left to open.
+    if (!target.hostWindow()) return;
+    showSystemNotification(events, target);
 }
 
 /**
  * Decide whether to surface a system notification for a pending approval
  * request, based on whether the user can currently see the Beaver UI.
  */
-export function notifyApprovalRequest(event: WSDeferredApprovalRequest): void {
-    if (!shouldNotifySystem()) {
+export function notifyApprovalRequest(target: NotificationTarget, event: WSDeferredApprovalRequest): void {
+    if (!shouldNotifySystem(target)) {
         return;
     }
 
-    // Coalesce a burst of parallel approvals into a single notification. The
-    // window opens on the first queued request and flushes everything together.
-    queuedApprovals.push(event);
-    if (coalesceTimer === null) {
-        coalesceTimer = setTimeout(flushQueuedApprovals, COALESCE_WINDOW_MS);
+    // Coalesce a burst of parallel approvals of one window into a single
+    // notification. The coalescing window opens on the first queued request
+    // and flushes everything together.
+    const queued = queuedApprovals.get(target);
+    if (queued) {
+        queued.push(event);
+        return;
     }
+    queuedApprovals.set(target, [event]);
+    setTimeout(() => flushQueuedApprovals(target), COALESCE_WINDOW_MS);
 }
 
 /**
@@ -309,13 +326,13 @@ function describeQuestions(event: WSAskUserQuestionRequest): { title: string; bo
  * Surface a system notification when the agent asks the user a question
  * and the user can't currently see the Beaver UI.
  */
-export function notifyUserQuestion(event: WSAskUserQuestionRequest): void {
-    if (!shouldNotifySystem()) {
+export function notifyUserQuestion(target: NotificationTarget, event: WSAskUserQuestionRequest): void {
+    if (!shouldNotifySystem(target)) {
         return;
     }
 
     const { title, body } = describeQuestions(event);
-    showNotification(title, body, QUESTION_NOTIFICATION_NAME);
+    showNotification(title, body, QUESTION_NOTIFICATION_NAME, target);
 }
 
 /** Shorten a body to one notification-sized line. */
@@ -333,8 +350,8 @@ function truncateBody(text: string): string {
  * The title and body are the backend's own copy — this path composes no
  * wording of its own, exactly as the card does.
  */
-export function notifyCreditConfirmation(event: WSCreditConfirmationRequest): void {
-    if (!shouldNotifySystem()) {
+export function notifyCreditConfirmation(target: NotificationTarget, event: WSCreditConfirmationRequest): void {
+    if (!shouldNotifySystem(target)) {
         return;
     }
 
@@ -343,6 +360,7 @@ export function notifyCreditConfirmation(event: WSCreditConfirmationRequest): vo
         event.title,
         truncateBody(event.message),
         CREDIT_CONFIRMATION_NOTIFICATION_NAME,
+        target,
     );
 }
 
@@ -358,8 +376,8 @@ export function notifyCreditConfirmation(event: WSCreditConfirmationRequest): vo
  * block, and appending it here would both invent a combined sentence and risk
  * eliding a destruction claim mid-word at the one-line limit.
  */
-export function notifyBatchApproval(event: WSBatchApprovalRequest): void {
-    if (!shouldNotifySystem()) {
+export function notifyBatchApproval(target: NotificationTarget, event: WSBatchApprovalRequest): void {
+    if (!shouldNotifySystem(target)) {
         return;
     }
 
@@ -367,6 +385,7 @@ export function notifyBatchApproval(event: WSBatchApprovalRequest): void {
         event.title,
         truncateBody(event.message),
         BATCH_APPROVAL_NOTIFICATION_NAME,
+        target,
     );
 }
 
@@ -375,14 +394,14 @@ export function notifyBatchApproval(event: WSBatchApprovalRequest): void {
  * currently see the Beaver UI (working in another app, or Zotero focused but
  * the sidebar hidden). Clicking opens Beaver on the completed response.
  */
-export function notifyRunComplete(): void {
+export function notifyRunComplete(target: NotificationTarget): void {
     if (getPref("enableResponseCompleteNotifications") !== true) {
         return;
     }
 
     // Only scenario C (Zotero in the background) is notified: in A the
     // response is on screen, and in B the run status popup reports it.
-    if (getBeaverVisibility() !== "zotero-unfocused") {
+    if (getBeaverVisibility(target) !== "zotero-unfocused") {
         return;
     }
 
@@ -390,5 +409,6 @@ export function notifyRunComplete(): void {
         "Beaver finished",
         "Your response is ready. Click to open Beaver.",
         RUN_COMPLETE_NOTIFICATION_NAME,
+        target,
     );
 }

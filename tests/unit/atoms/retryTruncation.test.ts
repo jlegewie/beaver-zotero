@@ -68,12 +68,6 @@ vi.mock('@beaver/agent-core/transport/threadService', () => ({
 vi.mock('@beaver/agent-core/run-state/loadThreadRuns', () => ({
     loadThreadRuns: loadThreadRunsMock,
 }));
-vi.mock('../../../react/utils/editMetadataActions', () => ({
-    undoEditMetadataAction: undoEditMetadataMock,
-}));
-vi.mock('../../../react/utils/mergeItemsActions', () => ({
-    undoMergeItemsAction: undoMergeItemsMock,
-}));
 vi.mock('@beaver/agent-core/transport/clientIdentity', () => ({
     resolveClientIdentity: vi.fn(() => ({
         frontendVersion: '0.0.0-test',
@@ -241,6 +235,16 @@ describe('retry via synchronous truncation', () => {
         });
         undoEditMetadataMock.mockResolvedValue(undefined);
         undoMergeItemsMock.mockResolvedValue(undefined);
+        // The session undoes through the instance's library operations.
+        (globalThis as any).Zotero.Beaver = {
+            ...((globalThis as any).Zotero.Beaver ?? {}),
+            libraryOperations: {
+                run: (name: string, args: unknown[]) =>
+                    name === 'undoEditMetadataAction' ? undoEditMetadataMock(...args)
+                        : name === 'undoMergeItemsAction' ? undoMergeItemsMock(...args)
+                            : Promise.resolve(undefined),
+            },
+        };
         cleanupAnnotationsMock.mockResolvedValue(undefined);
         cancelMock.mockResolvedValue(undefined);
         // 'Undo && Retry' = 0, cancel = 1, 'Retry' (skip undo) = 2.
@@ -281,6 +285,7 @@ describe('retry via synchronous truncation', () => {
             const presence = new ThreadPresence();
             presence.reset(getCredentialGeneration());
             (Zotero as any).Beaver = {
+                ...(Zotero as any).Beaver,
                 presence,
                 threads: { invalidateViews: vi.fn() },
             };

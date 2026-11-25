@@ -96,7 +96,7 @@ import {
     runApprovalPolicyAtom,
 } from '../../../../src/services/agentRuns/runApprovalPolicy';
 import { dismissActiveEditNotePreview } from '../editNotePreviewLifecycle';
-import { agentService } from '@beaver/agent-core/transport/agentService';
+import { getSessionPort } from '../../../../src/services/agentRuns/runSession';
 import { useSessionSetAtom } from '../../../hooks/useSessionSetAtom';
 
 export { STATUS_CONFIGS, getOverallStatus } from './agentActionViewHelpers';
@@ -444,7 +444,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
     const isReplyHeld = isRunReconnecting && !actionInFinalState
         && (isProcessingApproval || isExternallyProcessing)
         && answeredActionId !== null
-        && agentService.isApprovalAnswerHeld(answeredActionId);
+        && getSessionPort().isApprovalAnswerHeld(answeredActionId);
     // Shown only once the reconnect has outlasted a blip.
     const reconnectCaption = !reconnectShown
         ? null

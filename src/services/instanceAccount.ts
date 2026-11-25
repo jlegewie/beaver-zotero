@@ -1004,6 +1004,9 @@ export function createInstanceAccount(): InstanceAccount {
     setCredentialAdapter({
         auth: service.auth,
         getGeneration: () => service.getGeneration(),
+        // Chat runs execute here: a rejected session asks the user to verify,
+        // as it does from a window.
+        reportSessionRejected: generation => { void service.reportSessionRejected(generation); },
     });
     return service;
 }

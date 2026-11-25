@@ -15,19 +15,8 @@ const { requestJobResumeMock, stopMock, releaseMock, hooks } = vi.hoisted(() => 
     },
 }));
 
-vi.mock('../../../react/atoms/agentRunAtoms', () => ({
-    requestJobResume: requestJobResumeMock,
-}));
 vi.mock('../../../react/atoms/tableChatFills', () => ({ watchChatFills: vi.fn() }));
 vi.mock('../../../react/runtime/windowRuntime', () => ({ tryGetWindowRuntime: () => ({ id: 'window-1' }) }));
-vi.mock('@beaver/agent-core/transport/agentService', () => ({
-    agentService: {
-        onJobWait: (listener: (wait: unknown) => void) => {
-            hooks.onJobWait = listener;
-            return () => undefined;
-        },
-    },
-}));
 
 import type { AgentRun, ParkedDeferral } from '@beaver/agent-core/agents/types';
 import type { TableFillJobSnapshot } from '@beaver/agent-core/protocol/tableFillProtocol';
@@ -38,6 +27,16 @@ import { jobWaitAtom, openAnswerRunIdAtom, settleJobWait } from '../../../src/se
 import { runningChatJobsAtom, stopChatJobsAtom, watchJobCalls } from '../../../react/atoms/jobCalls';
 import { isThreadParkedAtom } from '../../../src/services/agentRuns/parkedRuns';
 import { chatStore } from '../../helpers/runSession';
+import { getSessionPort } from '../../../src/services/agentRuns/runSession';
+
+// The session's job waits and resumes are observed at its port.
+chatStore();
+const port = getSessionPort();
+vi.spyOn(port, 'onJobWait').mockImplementation((listener) => {
+    hooks.onJobWait = listener as (wait: unknown) => void;
+    return () => undefined;
+});
+vi.spyOn(port, 'requestJobResume').mockImplementation(() => requestJobResumeMock());
 
 const THREAD = 'thread-1';
 

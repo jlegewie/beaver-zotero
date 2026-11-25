@@ -15,13 +15,12 @@ import { threadNavigationSeqAtom } from "../atoms/threads";
 import { accountGenerationAtom } from "../atoms/profile";
 import { store } from "../store";
 import type { WindowRuntime } from "../../src/runtime/instance";
-import { currentWriter } from "../../src/services/agentRuns/threadWriter";
-import { getRunSession } from "../../src/services/agentRuns/runSession";
+import { getSessionPort } from "../../src/services/agentRuns/runSession";
+import { runSessionStore } from "./runSessionStore";
 import {
     admissionUnreachableThreadAtom,
     currentReason,
     readAdmission,
-    reconcileThread,
     serverThreadBlockedAtom,
     setAdmission,
     threadAdmissionAtom,
@@ -128,26 +127,27 @@ export function attachThreadAdmission(runtime: WindowRuntime): void {
             try {
                 // Poll the cheap activity read, and load the history only
                 // once the server no longer reports the thread active.
-                if (!currentWriter(getRunSession()) && id) {
+                if (!getSessionPort().hasWriter() && id) {
                     const snapshot = await readAdmission(id, POLL_TIMEOUT_MS);
-                    const session = getRunSession();
-                    if (current() && !currentWriter(session)) {
+                    const port = getSessionPort();
+                    const chat = runSessionStore();
+                    if (current() && !port.hasWriter()) {
                         if (snapshot.activity.state === "active")
                             setAdmission(
-                                session.store.set,
+                                chat.set,
                                 id,
                                 snapshot.tailRunId,
                                 snapshot.activity,
                                 undefined,
-                                currentReason(session.store.get, id),
+                                currentReason(chat.get, id),
                             );
                         else
-                            await reconcileThread(session, session.store.get, session.store.set, current);
+                            await port.reconcileThread(current);
                     }
                     if (current()) {
                         failures = 0;
-                        if (session.store.get(admissionUnreachableThreadAtom) !== null)
-                            session.store.set(admissionUnreachableThreadAtom, null);
+                        if (chat.get(admissionUnreachableThreadAtom) !== null)
+                            chat.set(admissionUnreachableThreadAtom, null);
                     }
                 }
             } catch {
@@ -157,7 +157,7 @@ export function attachThreadAdmission(runtime: WindowRuntime): void {
                     (++failures >= UNREACHABLE_AFTER_FAILURES ||
                         resolutionOverdue(id))
                 )
-                    getRunSession().store.set(admissionUnreachableThreadAtom, id);
+                    runSessionStore().set(admissionUnreachableThreadAtom, id);
             }
         };
         // Settled in a later microtask, so `inFlight` is assigned first even
@@ -176,7 +176,7 @@ export function attachThreadAdmission(runtime: WindowRuntime): void {
             // Each wait starts from a quick first read and a clean count.
             delay = 500;
             failures = 0;
-            const chat = getRunSession().store;
+            const chat = runSessionStore();
             if (chat.get(admissionUnreachableThreadAtom) !== null)
                 chat.set(admissionUnreachableThreadAtom, null);
         }
@@ -199,8 +199,8 @@ export function attachThreadAdmission(runtime: WindowRuntime): void {
         stop();
         delay = 500;
         failures = 0;
-        getRunSession().settlingThreads.clear();
-        const chat = getRunSession().store;
+        getSessionPort().clearSettlingThreads();
+        const chat = runSessionStore();
         chat.set(threadAdmissionAtom, null);
         chat.set(threadConflictAtom, null);
         chat.set(admissionUnreachableThreadAtom, null);

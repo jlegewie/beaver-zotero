@@ -36,13 +36,11 @@ import {
 import { setModelsAtom } from "../atoms/models";
 import {
     clearThreadAtom,
-    abandonActiveRunLocallyAtom,
 } from "../atoms/agentRunAtoms";
 import {
     clearComposerAtom,
     clearMessageContextAtom,
 } from "../atoms/messageComposition";
-import { agentService } from "@beaver/agent-core/transport/agentService";
 import {
     firstRunNextStepsDismissedAtom,
     firstRunPreviewAtom,
@@ -83,7 +81,6 @@ export function attachAccountProjection(runtime: WindowRuntime): void {
     let revision = -1;
     let modelsKey = "";
     let keysGeneration = -1;
-    let previousScope: number[] = [];
     const unsubscribe = account.subscribe((snapshot) => {
         if (
             runtime.status === "closing" ||
@@ -92,19 +89,14 @@ export function attachAccountProjection(runtime: WindowRuntime): void {
         )
             return;
         store.set(cloudConsentAtom, snapshot.cloudConsent ?? 'pending');
-        const scope = Zotero.Beaver.searchableLibraryIds ?? [];
-        if (previousScope.some((id) => !scope.includes(id))) {
-            agentService.close(1000, "Library access changed");
-            store.set(abandonActiveRunLocallyAtom);
-        }
-        previousScope = [...scope];
+        // A library leaving the scope, or another account, also ends the
+        // session's run; the instance does that (`addon.agentRuns`).
         if (generation !== snapshot.generation) {
             store.set(backgroundProcessingStatusAtom, EMPTY_BACKGROUND_PROCESSING_STATUS);
             modelsKey = "";
-            agentService.close(1000, "Account changed");
-            store.set(abandonActiveRunLocallyAtom);
             store.set(threadNavigationSeqAtom, (value) => value + 1);
-            store.set(clearThreadAtom);
+            // A table window has no chat to clear.
+            if (runtime.kind !== "table") store.set(clearThreadAtom);
             if (generation !== -1) store.set(resetUserModelStateAtom);
             store.set(clearComposerAtom);
             store.set(clearMessageContextAtom);

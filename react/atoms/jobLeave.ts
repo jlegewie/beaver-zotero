@@ -18,7 +18,7 @@ import { getHost } from '@beaver/agent-ui/host';
 import { getTablesApi } from '../../src/services/artifacts/tablesApi';
 import { store } from '../store';
 import { jobWaitAtom, type JobWait } from '../../src/services/agentRuns/jobWait';
-import { runSessionStore } from '../../src/services/agentRuns/runSession';
+import { runSessionStore } from '../runtime/runSessionStore';
 
 /** Whether the fill's table is open, outside `except` (a window about to close). */
 function tableShown(fill: TableFillJobSnapshot, except?: Window | null): boolean {

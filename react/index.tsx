@@ -29,7 +29,7 @@ import { createZoteroDataProvider, registerZoteroDataProvider } from '../src/ser
 import { configurePDFForBeaver } from '../src/utils/configurePDFForBeaver';
 import { registerZoteroLibraryIdentity } from '../src/utils/libraryIdentity';
 import type { AgentAction } from './agents/agentActions';
-import { closeWSConnectionForShutdownAtom } from './atoms/agentRunAtoms';
+import { attachWindowRunSession } from './runtime/windowRunSession';
 import { buildZoteroApplicationState } from './atoms/applicationState';
 import { sessionAtom } from './atoms/auth';
 import { isBackgroundWorkerRunningAtom } from './atoms/backgroundExtraction';
@@ -367,26 +367,13 @@ export async function cleanupTemporaryAnnotations() {
     await BeaverTemporaryAnnotations.cleanupAll();
 }
 
-/**
- * Close this window's agent connection. Called synchronously from esbuild
- * shutdown hooks — must not add an await to teardown.
- *
- * `rememberInterruptedThread` records the cut-off thread for the next session
- * to offer. The caller decides — see `onMainWindowUnload`: closing one of
- * several windows leaves Beaver running, so an offer announcing that it closed
- * would be plainly wrong.
- */
-export function closeAgentConnection(
-    reason: string,
-    options?: { rememberInterruptedThread?: boolean },
-) {
-    store.set(closeWSConnectionForShutdownAtom, reason, options);
-}
-
 /** Called by the plugin before mounting any surface. */
 export function initializeRuntime(runtime: WindowRuntime) {
     registerWindowTestCommands(runtime, inspectRuntime);
     initializeWindowRuntime(runtime);
+    // Before anything that reads or clears the chat: its state is the session's.
+    // A table window shows one table and has no chat, so it runs no session.
+    if (runtime.kind !== "table") attachWindowRunSession(runtime);
     Zotero.Beaver.runtime.addWindowCleanup(runtime, registerTableLocalCommands(runtime.hostWindow, runtime.id, { activateCitation: activateStoredCitation }));
     runtime.hostWindow.__beaverJotaiStore = store;
     if (!getTransportConfigurationError()) attachAccountProjection(runtime);
