@@ -234,6 +234,12 @@ export interface OrganizeItemsResultData {
      * only in case, spacing, hyphens or a plural ending. Advisory.
      */
     similar_existing_tags?: Array<{ tag: string; library_ref: string | null; existing: string[] }>;
+    /**
+     * Added tags that did not exist in their library before this write; an
+     * empty list means every added tag already existed. Absent when no tag was
+     * added or the pre-write lookup failed.
+     */
+    tags_created?: Array<{ tag: string; library_ref: string | null }>;
 }
 
 // =============================================================================
