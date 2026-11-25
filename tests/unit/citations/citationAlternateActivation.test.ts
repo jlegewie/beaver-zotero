@@ -19,6 +19,8 @@ import { createRoot } from 'react-dom/client';
 import { Provider, createStore } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { citationsAtom } from '@beaver/agent-core/citations/atoms';
+import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
+import type { ExternalReference } from '@beaver/agent-core/types/externalReferences';
 import type { Citation as CitationMetadata } from '@beaver/agent-core/types/citations';
 import type { ClientHost } from '@beaver/agent-ui/host';
 import { setHost } from '@beaver/agent-ui/host';
@@ -93,9 +95,14 @@ function citationTag(itemKey: string, withLocator = true) {
 }
 
 /** Render the given citations into a new root, and return their markers. */
-function mount(citations: CitationMetadata[], tags: React.ReactNode[]): HTMLElement[] {
+function mount(
+    citations: CitationMetadata[],
+    tags: React.ReactNode[],
+    setup?: (store: ReturnType<typeof createStore>) => void,
+): HTMLElement[] {
     const store = createStore();
     store.set(citationsAtom, citations);
+    setup?.(store);
 
     const container = document.createElement('div');
     document.body.appendChild(container);
@@ -248,6 +255,92 @@ describe('held-modifier marker styling', () => {
         });
 
         expect(marker.className).toContain('with-locator');
+    });
+});
+
+describe('an imported web page', () => {
+    const WEB_ID = 'web-MJNNMKH4ED';
+    const PAGE_URL = 'https://www.who.int/news-room/fact-sheets/detail/obesity-and-overweight';
+
+    /**
+     * A sentence citation of a web page that has since been imported to the
+     * library. It carries no page number, as a search-highlight sentence doesn't.
+     */
+    function mountImportedPage(webPage: object | null = { url: PAGE_URL, title: 'Obesity and overweight', site: 'who.int', content_type: 'html' }): HTMLElement {
+        const citation = {
+            citation_id: 'c-web',
+            run_id: 'run-1',
+            citation_type: 'external_reference',
+            // As the backend resolves every web page citation.
+            content_kind: 'snapshot',
+            requested_ref: { kind: 'external', external_id: WEB_ID },
+            resolved_ref: { kind: 'external', external_id: WEB_ID, source: 'exa' },
+            display_name: 'who.int, 2026',
+            locations: [{ part_id: 's3', text: 'In 2024, 1 in 7 people were living with obesity.' }],
+            ...(webPage ? { web_page: webPage } : {}),
+        } as unknown as CitationMetadata;
+        const tag = React.createElement(Citation, {
+            'data-external-id': WEB_ID,
+            'data-loc': 's3',
+            'data-loc-kind': 'sentence',
+            'data-loc-value': '3',
+        });
+        return mount([citation], [tag], (store) => {
+            // The thread's page record, when it has one, is the imported item's: never the source.
+            store.set(externalReferenceMappingAtom, {
+                [WEB_ID]: { source: 'zotero', source_id: WEB_ID, url: 'https://www.who.int/', title: 'WHO' } as unknown as ExternalReference,
+            });
+            store.set(externalReferenceItemMappingAtom, { [WEB_ID]: { library_id: LIBRARY_ID, zotero_key: ITEM_KEY } });
+        })[0];
+    }
+
+    // Its click opens the browser, so it keeps the external style; while the
+    // modifier turns the click into a reveal, it drops to the plain style.
+    it('is external by default and plain while the modifier is held', () => {
+        const marker = mountImportedPage();
+        expect(marker.className).toContain('external-citation');
+
+        holdModifier();
+        expect(marker.className).not.toContain('external-citation');
+        expect(marker.className).not.toContain('with-locator');
+
+        releaseModifier();
+        expect(marker.className).toContain('external-citation');
+    });
+
+    it('opens the page its citation names at the cited sentence on a plain click', () => {
+        const openExternalUrl = vi.fn();
+        setHost({ navigation: { activateCitation, openExternalUrl } } as unknown as ClientHost);
+        const marker = mountImportedPage();
+        act(() => {
+            marker.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        });
+
+        expect(activateCitation).not.toHaveBeenCalled();
+        expect(openExternalUrl).toHaveBeenCalledWith(`${PAGE_URL}#:~:text=In%202024%2C%201%20in%207%20people%20were%20living%20with%20obesity.`);
+    });
+
+    it('reveals the imported item on a modified click', () => {
+        const marker = mountImportedPage();
+        act(() => {
+            marker.dispatchEvent(new MouseEvent('click', { bubbles: true, ...ACCEL_DOWN }));
+        });
+
+        expect(activateCitation).toHaveBeenCalledTimes(1);
+        expect(activateCitation.mock.calls[0][0]).toMatchObject({ intent: 'item', hasMappedItem: true });
+    });
+
+    // A citation that names no page opens nothing, rather than another record of the id.
+    it('does nothing on a plain click when the citation names no page', () => {
+        const openExternalUrl = vi.fn();
+        setHost({ navigation: { activateCitation, openExternalUrl } } as unknown as ClientHost);
+        const marker = mountImportedPage(null);
+        act(() => {
+            marker.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        });
+
+        expect(activateCitation).not.toHaveBeenCalled();
+        expect(openExternalUrl).not.toHaveBeenCalled();
     });
 });
 

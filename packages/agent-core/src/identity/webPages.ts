@@ -14,6 +14,7 @@
  */
 
 import { webPageId } from '../citations/externalRecords';
+import type { WebPageCitation } from '../types/citations';
 
 const HTTP_URL = /^https?:\/\//i;
 const DEFAULT_PORTS: Record<string, number> = { http: 80, https: 443 };
@@ -347,16 +348,10 @@ export interface WebCitationExport {
 }
 
 /** The export form of a cited web page, or null when the page's URL is unknown. */
-export function webCitationExport(page: {
-    url?: string | null;
-    title?: string | null;
-    details?: { kind?: string | null; site?: unknown; site_name?: unknown } | null;
-} | null | undefined): WebCitationExport | null {
+export function webCitationExport(page: WebPageCitation | null | undefined): WebCitationExport | null {
     const url = page?.url?.trim();
     if (!url || !isHttpUrl(url)) return null;
-    const details = page?.details?.kind === 'webpage' ? page.details : null;
-    const siteValue = details?.site_name || details?.site;
-    const site = typeof siteValue === 'string' && siteValue.trim() ? siteValue.trim() : null;
+    const site = page?.site?.trim() || null;
     const title = page?.title?.trim() || site || url;
     return { url, title, site: site && site !== title ? site : null };
 }

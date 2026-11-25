@@ -18,6 +18,7 @@ interface CopyButtonProps {
     ariaLabel?: string;
     /** Button variant */
     variant?: 'solid' | 'surface' | 'outline' | 'subtle' | 'ghost';
+    disabled?: boolean;
 }
 
 /**
@@ -31,7 +32,8 @@ const CopyButton: React.FC<CopyButtonProps> = ({
     formatContent = (text) => text,
     title = 'Copy to clipboard',
     ariaLabel = 'Copy to clipboard',
-    variant = 'ghost'
+    variant = 'ghost',
+    disabled = false,
 }) => {
     const [justCopied, setJustCopied] = useState(false);
 
@@ -61,6 +63,7 @@ const CopyButton: React.FC<CopyButtonProps> = ({
             ariaLabel={ariaLabel}
             title={title}
             variant={variant}
+            disabled={disabled}
         />
     );
 };

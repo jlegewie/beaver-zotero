@@ -151,7 +151,9 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
             {
                 label: 'Copy',
                 icon: CopyIcon,
-                onClick: () => handleCopy()
+                onClick: () => handleCopy(),
+                // Web citations are written from their resolved page.
+                disabled: isResolvingCitations,
             },
             {
                 label: 'Copy link to message',
@@ -386,6 +388,7 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
                             content={buildRunContent}
                             formatContent={renderToMarkdownAsync}
                             className="scale-11"
+                            disabled={isResolvingCitations}
                         />
                     </Tooltip>
                 </div>

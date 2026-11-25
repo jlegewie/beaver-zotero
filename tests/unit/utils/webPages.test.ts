@@ -121,9 +121,9 @@ describe('web page exports', () => {
 
     it('exports a cited page as its title, URL and site', async () => {
         const { webCitationExport } = await import('@beaver/agent-core/identity/webPages');
-        expect(webCitationExport({ url: 'https://www.who.int/x', title: 'Obesity', details: { kind: 'webpage', site: 'who.int', site_name: 'World Health Organization' } }))
+        expect(webCitationExport({ url: 'https://www.who.int/x', title: 'Obesity', site: 'World Health Organization' }))
             .toEqual({ url: 'https://www.who.int/x', title: 'Obesity', site: 'World Health Organization' });
-        expect(webCitationExport({ url: 'https://who.int/x', details: { kind: 'webpage', site: 'who.int' } }))
+        expect(webCitationExport({ url: 'https://who.int/x', site: 'who.int' }))
             .toEqual({ url: 'https://who.int/x', title: 'who.int', site: null });
         expect(webCitationExport({ title: 'No URL' })).toBeNull();
     });

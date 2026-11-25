@@ -170,6 +170,22 @@ export interface TableCitation {
 }
 
 /**
+ * The cited web page, as the citation shows and opens it. Renderers use this
+ * alone, never the conversation's page records, which a later turn or an
+ * import may lack or replace.
+ */
+export interface WebPageCitation {
+    /** The page's URL; the click opens it. */
+    url?: string;
+    /** The page's title. */
+    title?: string;
+    /** Publisher name when known, else the domain ("World Health Organization", "who.int"). */
+    site?: string;
+    /** "pdf" for a PDF, whose viewers cannot be opened at a sentence. */
+    content_type?: "html" | "pdf";
+}
+
+/**
  * V2 self-contained citation (mirrors the backend Citation model).
  *
  * Renders without live Zotero access: identity lives exclusively in
@@ -219,6 +235,8 @@ export interface Citation {
     invalid_reason?: string;
     /** A cell or row citation's preview (`citation_type` "table"). */
     table?: TableCitation;
+    /** A web page citation's page (`web-` ids). */
+    web_page?: WebPageCitation;
 
     /** The agent run ID of the citation (stamped client-side). */
     run_id?: string;

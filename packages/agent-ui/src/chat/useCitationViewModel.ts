@@ -1,9 +1,8 @@
 import { useMemo } from 'react';
 import { useAtomValue } from 'jotai';
 import { citationByKeyAtom, pageLabelsByAttachmentIdAtom } from '@beaver/agent-core/citations/atoms';
-import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
+import { externalReferenceItemMappingAtom } from '@beaver/agent-core/citations/externalReferences';
 import { webPageId } from '@beaver/agent-core/citations/externalRecords';
-import { webPageDetails } from '@beaver/agent-core/types/externalReferences';
 import { urlNamesPdf } from '@beaver/agent-core/identity/webPages';
 import {
     Citation,
@@ -29,9 +28,7 @@ import { getHost } from '../host';
 
 /** A cited web page, as the citation shows and opens it. */
 export interface CitationWebPage {
-    /** Canonical `web-<KEY>` id. */
-    webId: string;
-    /** The page's URL; null when this conversation has no record of the page. */
+    /** The page's URL; null when the citation names none (not yet resolved). */
     url: string | null;
     /** A PDF: browsers ignore text fragments in it. */
     isPdf: boolean;
@@ -234,7 +231,6 @@ export function useCitationViewModel(props: Record<string, unknown>): CitationVi
 
     const citationDataByCitationKey = useAtomValue(citationByKeyAtom);
     const externalReferenceToZoteroItem = useAtomValue(externalReferenceItemMappingAtom);
-    const externalReferences = useAtomValue(externalReferenceMappingAtom);
     const labelsByAttachmentId = useAtomValue(pageLabelsByAttachmentIdAtom);
 
     // Whether page locators should render using the PDF's page labels (e.g.,
@@ -345,20 +341,19 @@ export function useCitationViewModel(props: Record<string, unknown>): CitationVi
         ? externalReferenceToZoteroItem[externalSourceId]
         : undefined;
 
-    // A web page (`web-` id): where the page lives, from the thread's record of it.
+    // A web page (`web-` id): as the resolved citation recorded it, so it
+    // renders the same in every thread and after an import.
     const webPage = useMemo((): CitationWebPage | null => {
-        const webId = isExternal ? webPageId(externalSourceId) : null;
-        if (!webId) return null;
-        const record = externalReferences[webId] ?? (externalSourceId ? externalReferences[externalSourceId] : undefined);
-        const details = webPageDetails(record);
+        if (!isExternal || !webPageId(externalSourceId)) return null;
+        const page = metadata?.web_page;
+        const url = page?.url || null;
         return {
-            webId,
-            url: record?.url || null,
-            isPdf: details?.content_type === 'pdf' || (!!record?.url && urlNamesPdf(record.url)),
-            title: record?.title || null,
-            site: details?.site_name || details?.site || null,
+            url,
+            isPdf: page?.content_type === 'pdf' || (!!url && urlNamesPdf(url)),
+            title: page?.title || null,
+            site: page?.site || null,
         };
-    }, [isExternal, externalSourceId, externalReferences]);
+    }, [isExternal, externalSourceId, metadata]);
 
     // Compute effective libraryID and itemKey (accounting for mapped external citations).
     const effectiveLibraryID = libraryID || mappedZoteroItem?.library_id || 0;

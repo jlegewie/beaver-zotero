@@ -142,6 +142,7 @@ describe('web page citations', () => {
         );
     }
 
+    // From the citation alone: the thread need not have a record of the page.
     it('exports a page as a link with its title and site', () => {
         const store = createStore();
         store.set(citationsAtom, [{
@@ -151,8 +152,8 @@ describe('web page citations', () => {
             requested_ref: { kind: 'external', external_id: WEB_ID },
             resolved_ref: { kind: 'external', external_id: WEB_ID, source: 'exa' },
             raw_tag: `<citation id="${WEB_ID}" loc="h3"/>`,
+            web_page: { url: page.url, title: page.title, site: 'who.int' },
         } as CitationMetadata]);
-        store.set(externalReferenceMappingAtom, { [WEB_ID]: page });
 
         const html = renderWebCitation(store, WEB_ID);
         expect(html).toContain(page.url);
@@ -174,7 +175,7 @@ describe('web page citations', () => {
         expect(renderWebCitation(store, typed)).toBe('');
     });
 
-    it('leaves out a web page the thread has no record of', () => {
+    it('leaves out a web page citation that names no page', () => {
         expect(renderWebCitation(createStore(), WEB_ID)).toBe('');
     });
 

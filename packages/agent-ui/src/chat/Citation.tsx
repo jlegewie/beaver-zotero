@@ -210,9 +210,9 @@ function activateCitationViewModel(
     // A web page opens in the browser at the cited sentences. They are
     // sentences of Beaver's copy of the page, never a Zotero snapshot's, so a
     // reader never opens; the alternate click reveals an imported page.
-    const pageUrl = webPageUrl(vm);
-    if (pageUrl && intent === 'passage') {
-        getHost().navigation?.openExternalUrl(pageUrl);
+    if (vm.webPage && intent === 'passage') {
+        const pageUrl = webPageUrl(vm);
+        if (pageUrl) getHost().navigation?.openExternalUrl(pageUrl);
         return;
     }
     void getHost().navigation?.activateCitation({
@@ -362,9 +362,7 @@ const Citation: React.FC<CitationProps> = (props) => {
 
         // A web page, in the library or not: a link to the page with its title
         // and site. Its sentences are Beaver's copy of the page, not a Zotero item's.
-        const exportedPage = webPage && externalSourceId
-            ? webCitationExport(externalReferenceMap[webPage.webId] ?? externalReferenceMap[externalSourceId])
-            : null;
+        const exportedPage = webPage ? webCitationExport(citationMetadata?.web_page) : null;
         if (exportedPage) {
             return (
                 <span>
@@ -375,9 +373,9 @@ const Citation: React.FC<CitationProps> = (props) => {
                 </span>
             );
         }
-        // A web page outside the library that this thread has no record of: its
-        // id means nothing to a reader.
-        if (webPage && !mappedZoteroItem) return null;
+        // A web page citation that names no page: its id means nothing to a
+        // reader, and Copy leaves it out too.
+        if (webPage) return null;
 
         // External works not in the library: a host-native citation when the
         // host can build one, otherwise a link to the work.
@@ -496,8 +494,9 @@ const Citation: React.FC<CitationProps> = (props) => {
     // While the modifier is held the click reveals the work instead, so the
     // marker drops to the plain style — which is already exactly how a citation
     // whose click reveals its item is drawn. A web page keeps the external
-    // style once imported: its click still opens the page in the browser.
-    const citationClassBase = (isExternal && !mappedZoteroItem) || webPage
+    // style once imported, since its click still opens the page in the
+    // browser, until the modifier turns the click into a reveal.
+    const citationClassBase = (isExternal && !mappedZoteroItem) || (webPage && !showItemInfo)
         ? "zotero-citation external-citation"
         : (hasLocator || isAnnotationCitation || hasSnapshotSymbolicLocator || isTableCitation) && !isExternalFile && !showItemInfo
         ? "zotero-citation with-locator"
@@ -527,12 +526,22 @@ const Citation: React.FC<CitationProps> = (props) => {
         </span>
     );
 
+    const pageTitle = !showItemInfo ? webPage?.title : null;
     const citationPreview = (
         <span className="block" style={{ overflow: 'hidden' }}>
             <span className="px-3 py-15 display-flex flex-row border-bottom-quinary gap-2">
-                <span className="font-color-primary text-sm" style={{ minWidth: 0, wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
-                    {/* A page's title names it better than its site and year. */}
-                    {(!showItemInfo && webPage?.title) || citation}
+                {/* A page's title names it better than its site and year; a long
+                    one is cut to two lines so the cited passage stays in view. */}
+                <span
+                    className="font-color-primary text-sm"
+                    style={{
+                        minWidth: 0,
+                        wordBreak: 'break-word',
+                        overflowWrap: 'anywhere',
+                        ...(pageTitle ? { display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2, overflow: 'hidden' } : {}),
+                    }}
+                >
+                    {pageTitle || citation}
                 </span>
                 <span className="flex-1" />
                 {!showItemInfo && hasLocatorDisplay && (

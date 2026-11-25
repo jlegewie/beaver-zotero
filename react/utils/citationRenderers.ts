@@ -114,8 +114,10 @@ export function renderToMarkdown(
 
         // 0. A web page links to itself, in the library or not: ([Title](URL), site).
         // Its sentences are Beaver's copy of the page, not a Zotero item's.
-        const page = webPageId(externalId) ? webCitationExport(externalReferenceMapping[externalId!]) : null;
-        if (page) return webCitationMarkdown(page);
+        if (webPageId(externalId)) {
+            const page = webCitationExport(meta?.web_page);
+            return page ? webCitationMarkdown(page) : '';
+        }
 
         // 1. External reference (not mapped to Zotero) ---------------------------------------------------
         if (isExternalReference && !isExternalReferenceMappedToZoteroItem) {
