@@ -3,7 +3,6 @@ import { createElement } from 'react';
 import { PopupMessage } from '../types/popupMessage';
 import { popupMessagesAtom } from '../atoms/ui';
 import { localZoteroLibrariesAtom } from '../atoms/profile';
-import { v4 as uuidv4 } from 'uuid';
 import { CSSItemTypeIcon } from '../components/icons/icons';
 import { RegularItemsSummaryContent } from '../components/ui/popup/RegularItemsSummaryContent';
 import { truncateText } from '@beaver/agent-ui/utils/stringUtils';
@@ -23,7 +22,7 @@ import {
 export const addPopupMessageAtom = atom(
     null,
     (get, set, newMessage: Omit<PopupMessage, 'id'> & { id?: string }) => {
-        const id = newMessage.id ?? uuidv4();
+        const id = newMessage.id ?? crypto.randomUUID();
         const messageWithDefaults: PopupMessage = {
             id,
             expire: true, // Default expire to true

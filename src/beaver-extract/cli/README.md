@@ -376,7 +376,7 @@ for graphics-layer fills and thin stroked divider lines.
 | `BEAVER_EXTRACT_FIXTURES_DIR`     | `tests/fixtures/pdfs/extract` (legacy) | Absolute path to the private fixtures checkout (`beaver-extract-fixtures`). When set, `fixture`/`ocr-fixture` default `--root` to it, and the smoke tier + bench script load fixtures from there. |
 
 Both the CLI (`src/beaver-extract/cli/main.ts`) and the smoke vitest config
-preload `.env` via `dotenv/config`, so setting `BEAVER_EXTRACT_FIXTURES_DIR`
+preload `.env` via Node's `process.loadEnvFile`, so setting `BEAVER_EXTRACT_FIXTURES_DIR`
 (or `BEAVER_EXTRACT_WASM_DIR`) in the repo's `.env` is enough — no shell
 export needed. The in-process CLI test seam (`runCli`) skips this so tests
 drive env explicitly.

@@ -10,7 +10,22 @@ updates:
     # version has time to be found and pulled. Matches min-release-age in .npmrc.
     cooldown:
       default-days: 7
+    # Keep a range that already allows the new version and update only the
+    # lockfile. packages/*/package.json repeat some root ranges, and the package
+    # gates fail when the two differ.
+    versioning-strategy: increase-if-necessary
+    ignore:
+      # rehype-katex 7 requires katex 0.16; moving past it means replacing
+      # rehype-katex and the bundled KaTeX stylesheet and fonts.
+      - dependency-name: "katex"
+        versions: [">=0.17.0"]
     groups:
+      # The chat composer. Its updates need live typing and IME testing, so
+      # they don't hold up the routine group below.
+      lexical:
+        patterns:
+          - "lexical"
+          - "@lexical/*"
       all-non-major:
         update-types:
           - "minor"

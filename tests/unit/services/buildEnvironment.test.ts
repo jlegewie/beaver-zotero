@@ -91,11 +91,9 @@ describe("worktree backend override", () => {
 
     function files(local = "") {
         const read = vi.mocked(fs.readFileSync).mockImplementation((path) => {
-            return Buffer.from(
-                String(path).endsWith(".local")
-                    ? local
-                    : "API_BASE_URL=https://default.example.test\nSUPABASE_URL=https://auth.example.test",
-            );
+            return String(path).endsWith(".local")
+                ? local
+                : "API_BASE_URL=https://default.example.test\nSUPABASE_URL=https://auth.example.test";
         });
         return read;
     }

@@ -1,6 +1,5 @@
 import type { SearchPreparationRow } from './searchIndexState';
 import { buildUntagJobInput, indexCleanupIdentity } from './backgroundProcessing/utils';
-import { v4 as uuidv4 } from 'uuid';
 import { ProcessingProgressStore, type ProcessingProgressScope } from './backgroundProcessing/progress';
 import { ThreadData } from '../../react/atoms/threads';
 import { getPref } from '../utils/prefs';
@@ -1259,7 +1258,7 @@ export class BeaverDB {
      * @returns The complete ThreadData for the newly created thread
      */
     public async createThread(user_id: string, name: string = ''): Promise<ThreadData> {
-        const id = uuidv4();
+        const id = crypto.randomUUID();
         const now = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
         const dbName = name || null; // Convert empty string to null for database
         

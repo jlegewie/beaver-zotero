@@ -34,7 +34,6 @@ import { getCredentialGeneration, assertCredentialGeneration } from '@beaver/age
 import { getLibraryRevocations } from '../agentDataProvider/utils';
 import { getSearchIndexState } from '../searchIndexState';
 import { atom, Getter, Setter, type WritableAtom } from 'jotai/vanilla';
-import { v4 as uuidv4 } from 'uuid';
 import { CONNECT_MAX_ATTEMPTS, connectWithRetry, reattachWithRetry } from '@beaver/agent-core/transport/connectWithRetry';
 import { reportConnectionFailure } from '@beaver/agent-core/transport/clients/diagnosticsService';
 import {
@@ -540,7 +539,7 @@ function createAgentRunShell(
     },
 ): { run: AgentRun; request: AgentRunRequest } {
     const { runIdOverride, permissionsOverride, retryTrigger } = options ?? {};
-    const runId = runIdOverride ?? uuidv4();
+    const runId = runIdOverride ?? crypto.randomUUID();
 
     // Get user preferences for charging permissions, then apply any partial override.
     // What a request may spend is one run-level preference: the credit limit,
