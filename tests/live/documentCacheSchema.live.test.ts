@@ -9,7 +9,7 @@
  * `document_cache_payloads`.
  *
  * These tests run against the real Zotero SQLite database (not the unit-test
- * better-sqlite3 mock), so they are the regression net for:
+ * SQLite mock), so they are the regression net for:
  *   - the reordered `SELECT` column indices on both tables
  *     (`getResultByIndex` mapping in `selectDocumentCacheMetadata` /
  *     `selectDocumentCachePayloads`)

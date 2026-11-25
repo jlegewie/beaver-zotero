@@ -30,15 +30,15 @@ Notes:
 ### Dependencies and install scripts
 
 `.npmrc` sets `ignore-scripts=true`, so `npm ci` / `npm install` run no dependency
-install scripts (and no root `pre*`/`post*` hooks). After installing, run
-`npm run rebuild:native` to build the dependencies that need theirs — today only
-`better-sqlite3`, which the unit tests' SQLite doubles load. Tests failing with
-`Could not locate the bindings file` mean that step was skipped.
+install scripts (and no root `pre*`/`post*` hooks), and no dependency needs one:
+esbuild, `@swc/core` and sharp ship prebuilt platform packages, and their scripts only
+verify them. The unit tests' SQLite doubles use Node's built-in `node:sqlite`
+(Node ≥ 22.16).
 
-- A new dependency that needs its install script goes on the `npm rebuild` line of
-  `rebuild:native` in `package.json`. Check first whether it works without one:
-  esbuild, `@swc/core` and sharp ship prebuilt platform packages, and their scripts
-  only verify them.
+- Prefer dependencies that work without their install script. One that needs it (a
+  native addon built on install) must be rebuilt explicitly with
+  `npm rebuild <name> --ignore-scripts=false`, in CI and in
+  `scripts/worktree/setup-worktree.sh`.
 - `min-release-age=7` makes npm resolve only versions at least 7 days old (npm ≥ 11.10;
   `npm ci` installs the lockfile as is). To take a fresh security fix, pass
   `--min-release-age=0` for that one install.
@@ -469,7 +469,7 @@ Three tiers — **`tests/README.md` has the details, templates, and shared-state
 - Vitest does not load `.env`; pass `ZOTERO_HTTP_PORT` explicitly.
 - **Don't pipe a live run through `tail`/`head`** — the pipe buffers the whole run (~5 min).
   Redirect to a file and read that.
-- Unit-test essentials: `MockDBConnection` (better-sqlite3) for real SQLite semantics,
+- Unit-test essentials: `MockDBConnection` (`node:sqlite`) for real SQLite semantics,
   `tests/helpers/factories.ts` for items, `vi.clearAllMocks()` in `beforeEach`, and transitive
   mocks (`supabaseClient`, `zoteroUtils`, `react/atoms/profile`, `react/store`) for anything
   importing `agentDataProvider`. Behavior-driven test names.

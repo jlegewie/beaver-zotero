@@ -131,11 +131,10 @@ const realPathUtils = {
 /**
  * The four `BeaverDB` methods the shadow uses, in memory.
  *
- * A real `MockDBConnection` would be better, but its `better-sqlite3` binary is
- * built for a different Node than the one this suite runs under. The SQL itself
- * is exercised in `tests/unit/services/database.tableShadow.test.ts`; what is
- * modelled here is the contract those queries provide — the unique key on
- * (library, key, version), and "most recently written first".
+ * The SQL itself is exercised against real SQLite in
+ * `tests/unit/services/database.tableShadow.test.ts`; what is modelled here is
+ * the contract those queries provide — the unique key on (library, key,
+ * version), and "most recently written first".
  */
 class FakeShadowDB {
     private rows: TableShadowRecord[] = [];

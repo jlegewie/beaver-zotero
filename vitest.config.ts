@@ -12,6 +12,13 @@ export default defineConfig({
         // Worker threads start far faster than forked processes, and module
         // collection dominates this suite's runtime.
         pool: 'threads',
+        poolOptions: {
+            threads: {
+                // Node 22 flags `node:sqlite`, which backs MockDBConnection, as
+                // experimental and warns once in every worker that loads it.
+                execArgv: ['--disable-warning=ExperimentalWarning'],
+            },
+        },
         include: ['tests/unit/**/*.test.ts'],
         setupFiles: ['tests/setup.ts'],
         // Keeps native addons loaded in the main process; see the file.
