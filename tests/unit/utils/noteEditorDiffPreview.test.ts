@@ -69,6 +69,7 @@ import {
     setOnBannerAction,
     isDiffPreviewPendingFor,
     isDiffPreviewPending,
+    takePreviewRefusedDuringWrite,
 } from '../../../react/utils/noteEditorDiffPreview';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { store } from '../../../react/store';
@@ -323,6 +324,19 @@ describe('showDiffPreview approveAll revision-guard flow', () => {
         } finally {
             vi.useRealTimers();
         }
+    });
+
+    it('records a preview a running library write refused, and shows it after the write', async () => {
+        vi.useFakeTimers();
+        makeHarness(NOTE);
+        const notePreviews = (Zotero as any).Beaver.notePreviews;
+        notePreviews.setMutationActive(true);
+        expect(await showDiffPreview(1, 'NOTE0001', EDITS)).toBe(false);
+        notePreviews.setMutationActive(false);
+
+        expect(takePreviewRefusedDuringWrite()).toEqual({ libraryId: 1, zoteroKey: 'NOTE0001' });
+        expect(takePreviewRefusedDuringWrite()).toBeNull();
+        expect(await showDiffPreview(1, 'NOTE0001', EDITS)).toBe(true);
     });
 
     it('uses the chrome embedder to select its editor when iframe top is a content window', async () => {

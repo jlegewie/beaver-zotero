@@ -39,4 +39,21 @@ describe('editor preview ownership', () => {
         await previews.dismissNote(1, 'NOTE');
         expect(other).toHaveBeenCalledOnce();
     });
+
+    it('tells listeners when a library write ends, not when one starts', () => {
+        const previews = new NotePreviews();
+        const settled = vi.fn();
+        const stop = previews.whenWritesSettle(settled);
+        previews.setMutationActive(true);
+        expect(previews.isWriting()).toBe(true);
+        expect(previews.claim({}, { owner: 'A', libraryId: 1, key: 'NOTE', dismiss: vi.fn() })).toBeNull();
+        expect(settled).not.toHaveBeenCalled();
+        previews.setMutationActive(false);
+        previews.setMutationActive(false);
+        expect(settled).toHaveBeenCalledOnce();
+        stop();
+        previews.setMutationActive(true);
+        previews.setMutationActive(false);
+        expect(settled).toHaveBeenCalledOnce();
+    });
 });

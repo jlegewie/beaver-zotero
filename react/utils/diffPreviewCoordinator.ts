@@ -23,6 +23,7 @@ import {
     isDiffPreviewSupported,
     isNoteInSelectedTab,
     getPreviewNoteKey,
+    takePreviewRefusedDuringWrite,
     setOnBannerAction,
     setOnDismiss,
     type EditOperation,
@@ -35,6 +36,7 @@ import { runSessionStore } from '../runtime/runSessionStore';
 import { sendApprovalResponseAtom } from '../atoms/agentRunAtoms';
 import { buildPreviewableEditOperations } from './editNotePreviewOperations';
 import { resolveLibraryRef } from '../../src/utils/libraryIdentity';
+import type { WindowRuntime } from '../../src/runtime/instance';
 
 /**
  * Convenience gate that combines the user preference and the runtime
@@ -188,6 +190,21 @@ async function handleBannerAction(action: string): Promise<void> {
         });
     }
     logger(`diffPreviewCoordinator: banner ${action} — ${editNoteIds.length} edit(s)`, 1);
+}
+
+/**
+ * Show a preview a library write refused, once writing stops. Approvals open
+ * their preview when they arrive, and nothing else would ask again. Registered
+ * per window; it stops with the window.
+ */
+export function attachDeferredDiffPreview(runtime: WindowRuntime): void {
+    const notePreviews = Zotero.Beaver?.notePreviews;
+    if (!notePreviews) return;
+    const stop = notePreviews.whenWritesSettle(() => {
+        const refused = takePreviewRefusedDuringWrite();
+        if (refused) updateDiffPreviewForNote(refused.libraryId, refused.zoteroKey);
+    });
+    Zotero.Beaver.runtime.addWindowCleanup(runtime, stop);
 }
 
 /** The preview has ended: no note is previewed any more. */

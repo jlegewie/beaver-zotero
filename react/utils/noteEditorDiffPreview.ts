@@ -170,6 +170,18 @@ interface DiffPreviewState {
 }
 
 let releaseEditorClaim: (() => void) | undefined;
+/**
+ * The note whose preview could not be claimed because a library write was
+ * running; it is shown once writing stops (`takePreviewRefusedDuringWrite`).
+ */
+let refusedDuringWrite: { libraryId: number; zoteroKey: string } | null = null;
+
+/** The note whose preview a library write refused, cleared as it is read. */
+export function takePreviewRefusedDuringWrite(): { libraryId: number; zoteroKey: string } | null {
+    const refused = refusedDuringWrite;
+    refusedDuringWrite = null;
+    return refused;
+}
 let activePreview: DiffPreviewState | null = null;
 
 /**
@@ -376,7 +388,16 @@ export async function showDiffPreview(
         const release = Zotero.Beaver.notePreviews.claim(inst, {
             owner, libraryId, key: zoteroKey, dismiss: dismissDiffPreview,
         });
-        if (!release) return false;
+        if (!release) {
+            if (Zotero.Beaver.notePreviews.isWriting()) {
+                logger(`showDiffPreview: deferring ${noteKey} until the running library write ends`, 1);
+                refusedDuringWrite = { libraryId, zoteroKey };
+            }
+            return false;
+        }
+        if (refusedDuringWrite?.libraryId === libraryId && refusedDuringWrite.zoteroKey === zoteroKey) {
+            refusedDuringWrite = null;
+        }
         releaseEditorClaim = release;
         myRelease = release;
 

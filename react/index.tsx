@@ -30,6 +30,7 @@ import { configurePDFForBeaver } from '../src/utils/configurePDFForBeaver';
 import { registerZoteroLibraryIdentity } from '../src/utils/libraryIdentity';
 import type { AgentAction } from './agents/agentActions';
 import { attachWindowRunSession } from './runtime/windowRunSession';
+import { attachDeferredDiffPreview } from './utils/diffPreviewCoordinator';
 import { buildZoteroApplicationState } from './atoms/applicationState';
 import { sessionAtom } from './atoms/auth';
 import { isBackgroundWorkerRunningAtom } from './atoms/backgroundExtraction';
@@ -383,6 +384,7 @@ export function initializeRuntime(runtime: WindowRuntime) {
     // A table window shows one table: it has no chat, so it follows no thread.
     if (runtime.kind === "table") return;
     attachThreadProjection(runtime);
+    attachDeferredDiffPreview(runtime);
     attachThreadAdmission(runtime);
 }
 
