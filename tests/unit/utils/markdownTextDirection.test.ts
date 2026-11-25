@@ -101,8 +101,22 @@ describe('MarkdownRenderer text direction', () => {
         expect(html).toContain(`<p dir="rtl">${HEBREW}</p>`);
     });
 
-    it('never adds a direction to an export render, which is saved into a note', () => {
-        expect(render(`${PERSIAN}\n\n- ${HEBREW}`, true)).not.toContain('dir=');
+    it('directs an export render, which is saved into a note, where the note keeps a direction', () => {
+        const html = render(`${PERSIAN}\n\n- ${HEBREW}\n\n> ${ARABIC}`, true);
+        expect(html).toContain(`<p dir="rtl">${PERSIAN}</p>`);
+        expect(html).toContain('<ul dir="rtl">');
+        expect(html).toContain('<blockquote>');
+    });
+
+    it('keeps the section headings of a chat saved as a note in the reader\'s direction', () => {
+        const html = render(`## User\n\n> ${PERSIAN}\n\n---\n\n## Beaver\n\n${ARABIC}`, true);
+        expect(html).toContain('<h2>User</h2>');
+        expect(html).toContain('<h2>Beaver</h2>');
+        expect(html).toContain(`<p dir="rtl">${ARABIC}</p>`);
+    });
+
+    it('adds no direction to an export render without right-to-left text', () => {
+        expect(render('# Results\n\nEnglish text.\n\n- item', true)).not.toContain('dir=');
     });
 });
 
@@ -137,8 +151,8 @@ describe('MarkdownRenderer text direction when the host directs all text', () =>
         expect(render(PERSIAN)).toContain('<p dir="rtl">');
     });
 
-    it('leaves the export render alone', () => {
+    it('directs an English export render too', () => {
         directAllText();
-        expect(render('An English paragraph.', true)).not.toContain('dir=');
+        expect(render('An English paragraph.', true)).toContain('<p dir="ltr">An English paragraph.</p>');
     });
 });

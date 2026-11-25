@@ -30,7 +30,7 @@ export function captureOperationContext(local = false): OperationContext {
         },
         externalRefs: local ? { ...store.get(externalReferenceMappingAtom) } : {},
         externalItemMapping: local ? { ...store.get(externalReferenceItemMappingAtom) } : {},
-        renderMarkdown: async content => Zotero.Beaver.exporter.renderNoteMarkdown(content),
+        renderMarkdown: async (content, options) => Zotero.Beaver.exporter.renderNoteMarkdown(content, options),
         grantCreatedNote: (libraryId, zoteroKey) => {
             if (runtime?.status !== 'closing' && runId && generation === Zotero.Beaver.account?.getGeneration() && store.get(activeRunAtom)?.id === runId) {
                 store.set(grantCreatedNoteEditsForRunAtom, { runId, libraryId, zoteroKey });

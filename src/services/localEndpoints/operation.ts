@@ -11,6 +11,6 @@ export function captureInstanceOperation(): OperationContext {
             const prefs = loadPreferences();
             return prefs.groupPreferences[prefs.toolToGroup[tool] ?? tool] ?? 'always_ask';
         },
-        renderMarkdown: async content => Zotero.Beaver.exporter.renderNoteMarkdown(content),
+        renderMarkdown: async (content, options) => Zotero.Beaver.exporter.renderNoteMarkdown(content, options),
     };
 }

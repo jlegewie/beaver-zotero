@@ -51,7 +51,8 @@ describe('renderNoteMarkdown', () => {
             { renderMarkdown },
         );
 
-        expect(renderMarkdown).toHaveBeenCalledTimes(1);
+        // A created note's blocks get their own text direction.
+        expect(renderMarkdown).toHaveBeenCalledExactlyOnceWith(expect.any(String), { directions: 'note' });
         expect(html).toBe(
             '<p><strong>Claim</strong> <span class="citation">u-AAAA1111</span></p>'
             + '<p>More <span class="citation">u-BBBB2222</span>.</p>',
@@ -176,7 +177,7 @@ describe('checkNoteMarkdownCitations', () => {
 
         await expect(checkNoteMarkdownCitations('`x <citation id="u-EXAMPLE1"/>`', { renderMarkdown: renderCode }))
             .resolves.toEqual({ error: null, warnings: [] });
-        expect(renderCode).toHaveBeenCalledWith('`x <citation id="u-EXAMPLE1"/>`');
+        expect(renderCode).toHaveBeenCalledWith('`x <citation id="u-EXAMPLE1"/>`', undefined);
         expect(expandNoteCitationTags).not.toHaveBeenCalled();
     });
 

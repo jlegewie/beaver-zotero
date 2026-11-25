@@ -81,6 +81,8 @@ export interface BatchEditSpec {
     /** Handler-rendered Markdown fallback fields (populated async before resolution). */
     renderedOldSimplified?: string;
     renderedNewSimplified?: string;
+    directedRenderedOldSimplified?: string;
+    directedRenderedNewSimplified?: string;
 }
 
 /** Inputs shared by every edit in one resolution pass. */
@@ -331,6 +333,8 @@ function buildMatchInput(ctx: ResolveBatchContext, spec: BatchEditSpec): MatchIn
         resolvedLocatorPages: ctx.resolvedLocatorPages,
         renderedOldSimplified: spec.renderedOldSimplified,
         renderedNewSimplified: spec.renderedNewSimplified,
+        directedRenderedOldSimplified: spec.directedRenderedOldSimplified,
+        directedRenderedNewSimplified: spec.directedRenderedNewSimplified,
     };
 }
 

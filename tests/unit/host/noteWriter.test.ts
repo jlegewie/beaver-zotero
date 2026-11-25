@@ -45,6 +45,7 @@ vi.mock("../../../react/store", () => ({
 }));
 
 import { zoteroNoteWriter } from "../../../react/host/zotero/noteWriter";
+import { generateNoteTitle } from "../../../react/utils/noteActions";
 
 describe("zoteroNoteWriter", () => {
   beforeEach(() => {
@@ -87,6 +88,16 @@ describe("zoteroNoteWriter", () => {
       parentReference: null,
     });
     mocks.isLibraryEditable.mockReturnValue(true);
+  });
+
+  it.each([
+    ["directed content", '<h2 dir="rtl">روش</h2><p dir="rtl">متن</p>', true],
+    ["undirected content", "<h2>Methods</h2><p>Text</p>", false],
+  ])("directs a response note's title only with %s", async (_case, contentHtml, directed) => {
+    await zoteroNoteWriter.saveNote({
+      contentHtml, asChild: false, format: { kind: "agent-run", responseIndex: 2, runId: "run-1" },
+    });
+    expect(generateNoteTitle).toHaveBeenCalledWith(2, directed);
   });
 
   it("returns a portable library_ref for a manually saved group note", async () => {

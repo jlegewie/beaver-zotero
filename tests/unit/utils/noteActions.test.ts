@@ -15,6 +15,7 @@ vi.mock('../../../react/atoms/threads', () => ({
 import {
     buildProvenanceNoteHTML,
     createProvenanceNote,
+    generateNoteTitle,
 } from '../../../react/utils/noteActions';
 import { store } from '../../../react/store';
 
@@ -25,6 +26,25 @@ class MockNoteItem {
     setNote = vi.fn();
     saveTx = vi.fn(async () => 123);
 }
+
+describe('generateNoteTitle', () => {
+    it('writes no direction unless the note is directed', () => {
+        vi.mocked(store.get).mockReturnValue('نقد پژوهش' as never);
+        expect(generateNoteTitle(1)).toMatch(/^<h1>نقد پژوهش - Message 1 \(/);
+    });
+
+    it('directs the title of a directed note by its thread name', () => {
+        vi.mocked(store.get).mockReturnValue('نقد پژوهش' as never);
+        expect(generateNoteTitle(1, true)).toMatch(/^<h1 dir="rtl">نقد پژوهش - Message 1/);
+        vi.mocked(store.get).mockReturnValue('Arabic NLP critique' as never);
+        expect(generateNoteTitle(2, true)).toMatch(/^<h1 dir="ltr">Arabic NLP critique - Message 2/);
+    });
+
+    it('leaves the fallback title, which is interface text, undirected', () => {
+        vi.mocked(store.get).mockReturnValue('' as never);
+        expect(generateNoteTitle(1, true)).toMatch(/^<h1>Beaver Response/);
+    });
+});
 
 describe('buildProvenanceNoteHTML', () => {
     it('includes marker, escaped reason, and a conversation link', () => {

@@ -137,6 +137,14 @@ export interface MatchInput {
      * Populated together with renderedOldSimplified.
      */
     renderedNewSimplified?: string;
+    /**
+     * The same two renders with the block directions a note write gives them
+     * (`dir` on paragraphs, headings and lists), tried after the plain ones:
+     * a note Beaver wrote with right-to-left text stores those directions.
+     * Absent when the directed render adds none.
+     */
+    directedRenderedOldSimplified?: string;
+    directedRenderedNewSimplified?: string;
 }
 
 export interface BaseExpansion {
@@ -1277,49 +1285,54 @@ function preserveMathInsertAnchor(input: MatchInput, result: MatchResult): Match
     };
 }
 
+/** Match one handler-rendered old_string, replacing it with its rendered new_string. */
+function matchRendered(input: StrategyInput, renderedOld: string | undefined, renderedNew: string | undefined): MatchResult | null {
+    if (!renderedOld) return null;
+
+    let expandedOld: string;
+    try {
+        expandedOld = expandOldAnchor(input, renderedOld);
+    } catch {
+        return null;
+    }
+
+    const matchCount = countOccurrences(input.strippedHtml, expandedOld);
+    if (matchCount === 0) return null;
+
+    const replacement = renderedNew ?? renderedOld;
+    let expandedNew: string;
+    try {
+        expandedNew = expandToRawHtml(
+            replacement,
+            input.metadata,
+            'new',
+            input.externalRefContext,
+            input.pageLabels,
+            input.resolvedLocatorPages,
+        );
+    } catch {
+        return null;
+    }
+
+    if (input.operation === 'insert_after' && !expandedNew.startsWith(expandedOld)) return null;
+    if (input.operation === 'insert_before' && !expandedNew.endsWith(expandedOld)) return null;
+
+    return {
+        strategy: 'markdown_render',
+        oldString: renderedOld,
+        newString: replacement,
+        expandedOld,
+        expandedNew,
+        matchCount,
+        normalizeAnchor: identity,
+    };
+}
+
 const markdownRenderStrategy: Strategy = {
     name: 'markdown_render',
     tryMatch(input) {
-        const renderedOld = input.renderedOldSimplified;
-        if (!renderedOld) return null;
-
-        let expandedOld: string;
-        try {
-            expandedOld = expandOldAnchor(input, renderedOld);
-        } catch {
-            return null;
-        }
-
-        const matchCount = countOccurrences(input.strippedHtml, expandedOld);
-        if (matchCount === 0) return null;
-
-        const renderedNew = input.renderedNewSimplified ?? renderedOld;
-        let expandedNew: string;
-        try {
-            expandedNew = expandToRawHtml(
-                renderedNew,
-                input.metadata,
-                'new',
-                input.externalRefContext,
-                input.pageLabels,
-                input.resolvedLocatorPages,
-            );
-        } catch {
-            return null;
-        }
-
-        if (input.operation === 'insert_after' && !expandedNew.startsWith(expandedOld)) return null;
-        if (input.operation === 'insert_before' && !expandedNew.endsWith(expandedOld)) return null;
-
-        return {
-            strategy: 'markdown_render',
-            oldString: renderedOld,
-            newString: renderedNew,
-            expandedOld,
-            expandedNew,
-            matchCount,
-            normalizeAnchor: identity,
-        };
+        return matchRendered(input, input.renderedOldSimplified, input.renderedNewSimplified)
+            ?? matchRendered(input, input.directedRenderedOldSimplified, input.directedRenderedNewSimplified);
     },
 };
 

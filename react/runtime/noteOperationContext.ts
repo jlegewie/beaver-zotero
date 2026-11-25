@@ -14,6 +14,6 @@ export function captureNoteOperationContext(threadId?: string): OperationContext
         threadId: threadId ?? store.get(currentThreadIdAtom),
         externalRefs: { ...store.get(externalReferenceMappingAtom) },
         externalItemMapping: { ...store.get(externalReferenceItemMappingAtom) },
-        renderMarkdown: async content => Zotero.Beaver.exporter.renderNoteMarkdown(content),
+        renderMarkdown: async (content, options) => Zotero.Beaver.exporter.renderNoteMarkdown(content, options),
     };
 }

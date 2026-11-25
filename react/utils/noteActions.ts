@@ -1,5 +1,6 @@
 import { currentThreadNameAtom } from "../atoms/threads";
 import { store } from "../store";
+import { plainTextDirection } from "@beaver/agent-export/render/textDirection";
 export { buildProvenanceNoteHTML, createProvenanceNote, getBeaverNoteFooterHTML, wrapWithSchemaVersion, type ProvenanceNoteOptions, type ProvenanceNoteParent } from '../../src/utils/noteProvenance';
 
 /**
@@ -25,12 +26,18 @@ function escapeHtml(str: string): string {
     * For single responses: "Thread Name (Chat 2, Apr 1, 2026, 4:23 PM)"
     * Date/time is locale-aware (e.g. 24h clock in Europe).
     * @param responseIndex - 1-based index of the response in the thread (omit for full-thread saves)
+    * @param directed - The note's blocks carry text directions
     */
-export function generateNoteTitle(responseIndex?: number): string {
-    const threadName = store.get(currentThreadNameAtom) || 'Beaver Response';
+export function generateNoteTitle(responseIndex?: number, directed = false): string {
+    const savedName = store.get(currentThreadNameAtom);
+    const threadName = savedName || 'Beaver Response';
     const now = new Date();
     const dateStr = now.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
     const timeStr = now.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
     const indexPart = responseIndex != null ? ` - Message ${responseIndex}` : '';
-    return `<h1>${escapeHtml(threadName)}${indexPart} (${dateStr} at ${timeStr})</h1>`;
+    // In a directed note the title reads in its thread name's direction, as
+    // the title of a saved thread does.
+    const direction = directed && savedName ? plainTextDirection(savedName) : null;
+    const dir = direction ? ` dir="${direction}"` : '';
+    return `<h1${dir}>${escapeHtml(threadName)}${indexPart} (${dateStr} at ${timeStr})</h1>`;
 }
