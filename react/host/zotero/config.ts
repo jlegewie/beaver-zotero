@@ -29,4 +29,10 @@ export const zoteroConfig: ConfigHost = {
     isImeTracingEnabled() {
         return getPref('debugImeTrace') === true;
     },
+    directsAllText() {
+        // Zotero's own switch for direction-aware item fields: on for anyone who
+        // picked a right-to-left language in Zotero, or who enabled
+        // bidirectional text in the Advanced preferences.
+        return Zotero.Prefs.get('bidi.browser.ui', true) === true;
+    },
 };

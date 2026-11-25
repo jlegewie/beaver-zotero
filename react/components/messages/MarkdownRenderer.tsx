@@ -90,6 +90,8 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = React.memo(function Ma
     // change must re-parse exactly once. The parsing happens after the
     // `processedMarkdown` memo below, which is why that one stays independent of
     // the query.
+    // Read on each render, as other host display settings are.
+    const directsAllText = getHost().config?.directsAllText?.() === true;
     const rehypePlugins = React.useMemo(() => {
         // The note rules (Zotero math and endnotes) are the ones the note
         // renderer in the plugin realm uses, so an export matches a note write.
@@ -97,14 +99,16 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = React.memo(function Ma
         // keeps the markup the note renderer in the plugin realm writes.
         const plugins: RehypePlugins = [
             ...markdownSanitizePlugins,
-            ...(exportRendering ? noteRehypePlugins : [rehypeKatex, rehypeTextDirection]),
+            ...(exportRendering
+                ? noteRehypePlugins
+                : [rehypeKatex, [rehypeTextDirection, { all: directsAllText }]] as RehypePlugins),
         ];
         // Always last. The transformer inserts markup the sanitize schema does
         // not allow, so sanitizing after it would strip the highlights, and it
         // can only recognize (and skip) KaTeX output once KaTeX has produced it.
         if (findQuery) plugins.push([rehypeFindHighlight, findQuery]);
         return plugins;
-    }, [findQuery, exportRendering]);
+    }, [findQuery, exportRendering, directsAllText]);
 
     // Heavy preprocessing: skip when content/flags are unchanged (e.g. parent re-render).
     const processedMarkdown = React.useMemo(() => prepareMarkdownSource(content, {

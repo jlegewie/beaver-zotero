@@ -1887,12 +1887,13 @@
 
 /* Placeholder overlay - absolutely positioned and click-through. It sits on
    the left in every UI direction: the empty paragraph Lexical renders
-   (`dir="auto"`, no letters) starts its caret there, and the hint is English. */
+   (`dir="auto"`, no letters) starts its caret there. The hint reads in the
+   direction of its own text. */
 [id^="beaver-pane-"] .beaver-lexical-placeholder {
     position: absolute;
     top: 1px;
     left: 0;
-    direction: ltr;
+    unicode-bidi: plaintext;
     pointer-events: none;
     color: var(--fill-tertiary);
     font-size: 13px;

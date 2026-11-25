@@ -5,13 +5,14 @@
  */
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@beaver/agent-ui/chat/Citation', () => ({
     default: () => React.createElement('span', { className: 'zotero-citation' }, '1'),
 }));
 
 import MarkdownRenderer from '../../../react/components/messages/MarkdownRenderer';
+import { setHost } from '@beaver/agent-ui/host';
 
 function render(content: string, exportRendering = false): string {
     return renderToStaticMarkup(
@@ -102,5 +103,42 @@ describe('MarkdownRenderer text direction', () => {
 
     it('never adds a direction to an export render, which is saved into a note', () => {
         expect(render(`${PERSIAN}\n\n- ${HEBREW}`, true)).not.toContain('dir=');
+    });
+});
+
+describe('MarkdownRenderer text direction when the host directs all text', () => {
+    afterEach(() => setHost({}));
+
+    const directAllText = () => setHost({ config: { directsAllText: () => true } } as never);
+
+    it('directs English blocks, so they read left to right in a right-to-left interface', () => {
+        directAllText();
+        const html = render('An English paragraph.\n\n- item one\n- item two');
+        expect(html).toContain('<p dir="ltr">An English paragraph.</p>');
+        expect(html).toContain('<ul dir="ltr">');
+    });
+
+    it('keeps code and math left to right below no directed block', () => {
+        directAllText();
+        const html = render('```\nconst a = 1;\n```\n\n$$\nx^2\n$$');
+        expect(html).toContain('<pre dir="ltr">');
+        expect(html).toMatch(/<span class="katex-display" dir="ltr">/);
+    });
+
+    it('directs a reply without letters left to right', () => {
+        directAllText();
+        const html = render('- `npm test`\n- `npm run build`\n\n2019–2021');
+        expect(html).toContain('<ul dir="ltr">');
+        expect(html).toContain('<p dir="ltr">2019–2021</p>');
+    });
+
+    it('still directs right-to-left blocks by their letters', () => {
+        directAllText();
+        expect(render(PERSIAN)).toContain('<p dir="rtl">');
+    });
+
+    it('leaves the export render alone', () => {
+        directAllText();
+        expect(render('An English paragraph.', true)).not.toContain('dir=');
     });
 });

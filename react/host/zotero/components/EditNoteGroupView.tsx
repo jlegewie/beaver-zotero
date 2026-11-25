@@ -858,7 +858,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
                                 {/* Progress takes the title's place, as on the other action cards. */}
                                 {progressMessage ? (
                                     <span className="font-color-secondary ml-15 shimmer-text">{progressMessage}</span>
-                                ) : noteTitle && <span className="font-color-secondary ml-15">{noteTitle}</span>}
+                                ) : noteTitle && <span className="font-color-secondary ml-15" dir="auto">{noteTitle}</span>}
                             </div>
                             {unconfirmedNote && (
                                 <span className="font-color-secondary text-sm" role="status">{unconfirmedNote}</span>

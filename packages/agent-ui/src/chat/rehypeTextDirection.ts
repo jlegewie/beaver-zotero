@@ -9,8 +9,10 @@
  * its marker on the side its list leaves no room for. Code and math are always
  * laid out left to right inside right-to-left text.
  *
- * A tree without right-to-left letters is returned untouched, so markdown in
- * left-to-right scripts renders exactly as it would without this plugin.
+ * By default a tree without right-to-left letters is returned untouched, so
+ * markdown in left-to-right scripts renders exactly as it would without this
+ * plugin. With `all`, every block is directed: in a right-to-left interface an
+ * English reply then still reads left to right.
  */
 
 import { classNames, type HastNode } from './hast';
@@ -35,20 +37,29 @@ const DIRECTED_BLOCKS = new Set([
     'blockquote', 'ul', 'ol', 'table', 'th', 'td',
 ]);
 
+export interface TextDirectionOptions {
+    /** Direct every block, not only those of trees with right-to-left letters. */
+    all?: boolean;
+}
+
 /**
  * Rehype transformer that sets `dir` on blocks of a tree containing
- * right-to-left letters.
+ * right-to-left letters (or of every tree, with `all`).
  *
  * Wire it after the math plugin (it recognizes KaTeX output) and before the
  * find highlighter.
  */
-export function rehypeTextDirection(): (tree: HastNode) => void {
+export function rehypeTextDirection(options: TextDirectionOptions = {}): (tree: HastNode) => void {
+    const all = options.all === true;
     return (tree: HastNode) => {
-        if (!containsRtlScript(tree)) return;
+        if (!all && !containsRtlScript(tree)) return;
         const counts = new Map<HastNode, LetterCounts>();
         const treeCounts = countLetters(tree, counts);
-        if (treeCounts.rtl === 0) return;
-        applyDirections(tree, null, majorityDirection(treeCounts), counts);
+        if (!all && treeCounts.rtl === 0) return;
+        // With `all`, a reply without letters (commands, numbers) reads left
+        // to right rather than taking the interface's direction.
+        const fallback = majorityDirection(treeCounts) ?? (all ? 'ltr' : null);
+        applyDirections(tree, null, fallback, counts, all);
     };
 }
 
@@ -108,22 +119,27 @@ function majorityDirection(counts: LetterCounts): Direction | null {
  *     none (the surrounding UI's direction applies).
  * @param fallback The whole tree's direction, for a block without letters (a
  *     formula on its own, a row of numbers) that no ancestor directs.
+ * @param all Every tree is directed, so the surrounding UI may itself be right
+ *     to left: code and math then get a direction below no directed ancestor
+ *     too.
  */
 function applyDirections(
     node: HastNode,
     inherited: Direction | null,
     fallback: Direction | null,
     counts: Map<HastNode, LetterCounts>,
+    all: boolean,
 ): void {
     for (const child of node.children ?? []) {
         if (child.type !== 'element') continue;
         const existing = child.properties?.dir;
         if (existing === 'ltr' || existing === 'rtl') {
-            applyDirections(child, existing, fallback, counts);
+            applyDirections(child, existing, fallback, counts, all);
             continue;
         }
         if (isOpaque(child)) {
-            if (inherited === 'rtl' && child.tagName !== 'citation') setDirection(child, 'ltr');
+            const mayBeRtl = inherited === 'rtl' || (all && inherited === null);
+            if (mayBeRtl && child.tagName !== 'citation') setDirection(child, 'ltr');
             continue;
         }
         const blockCounts = counts.get(child);
@@ -131,7 +147,7 @@ function applyDirections(
             ? majorityDirection(blockCounts) ?? (inherited ? null : fallback)
             : null;
         if (direction) setDirection(child, direction);
-        applyDirections(child, direction ?? inherited, fallback, counts);
+        applyDirections(child, direction ?? inherited, fallback, counts, all);
     }
 }
 
