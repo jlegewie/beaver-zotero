@@ -276,10 +276,14 @@ export const checkExternalReferencesAtom = atom(
                 await loadFullItemDataWithAllTypes(foundItems);
             }
             
-            // Update cache with all results (including failed ones as null)
-            const updates = Object.fromEntries(results.filter((r): r is [string, ZoteroItemReference | null] => r !== null));
+            // Update cache with all results (including failed ones as null). A
+            // search that found nothing never replaces an item recorded while it
+            // ran (an import, or the item an applied import names).
+            const current = get(externalReferenceItemMappingAtom);
+            const updates = Object.fromEntries(results.filter((r): r is [string, ZoteroItemReference | null] =>
+                r !== null && (r[1] !== null || !current[r[0]])));
             set(externalReferenceItemMappingAtom, {
-                ...get(externalReferenceItemMappingAtom),
+                ...current,
                 ...updates
             });
             

@@ -355,13 +355,3 @@ export function webCitationExport(page: WebPageCitation | null | undefined): Web
     const title = page?.title?.trim() || site || url;
     return { url, title, site: site && site !== title ? site : null };
 }
-
-const HTML_ENTITIES: Record<string, string> = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#x27;': "'", '&#39;': "'" };
-
-/**
- * Search highlights as a row shows them: without their sentence tags
- * (`<h3>…</h3>`), and with the text the backend escaped for them unescaped.
- */
-export function stripHighlightTags(text: string): string {
-    return text.replace(/<\/?h\d+>/g, '').replace(/&(?:amp|lt|gt|quot|#x27|#39);/g, (entity) => HTML_ENTITIES[entity]);
-}

@@ -114,4 +114,20 @@ describe("checkExternalReferencesAtom", () => {
     await store.set(checkExternalReferencesAtom, [openalex]);
     expect(mocks.findExistingReference).not.toHaveBeenCalled();
   });
+
+  // Reopening a thread starts the search and maps its applied imports while it
+  // runs; a search that finds nothing must not erase that.
+  it("keeps an item recorded while the search ran when the search finds nothing", async () => {
+    const store = createStore();
+    let finishSearch: (value: null) => void = () => {};
+    mocks.findExistingReference.mockReturnValue(new Promise((resolve) => { finishSearch = resolve; }));
+    const page: ExternalReference = { source: "exa", source_id: "web-NR67MTOGP2", url: "https://www.ipcc.ch/report.pdf" };
+
+    const checking = store.set(checkExternalReferencesAtom, [page]);
+    store.set(externalReferenceItemMappingAtom, { "web-NR67MTOGP2": { library_id: 7, zotero_key: "KX5JEL2Z" } });
+    finishSearch(null);
+    await checking;
+
+    expect(store.get(externalReferenceItemMappingAtom)["web-NR67MTOGP2"]).toMatchObject({ zotero_key: "KX5JEL2Z" });
+  });
 });

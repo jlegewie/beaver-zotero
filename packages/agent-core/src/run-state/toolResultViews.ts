@@ -244,11 +244,6 @@ export interface SearchViewInfo {
     /** e.g. "Source: ClinicalTrials.gov". */
     attribution?: string | null;
     search_url?: string | null;
-    /**
-     * Web search: each page's highlights as the model saw them, by `web-` id,
-     * with complete sentences tagged `<h3>…</h3>` (`stripHighlightTags`).
-     */
-    highlights?: Record<string, string> | null;
 }
 
 /** View data of an `info_type` this client does not know; never rendered. */

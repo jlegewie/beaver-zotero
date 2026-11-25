@@ -133,12 +133,6 @@ describe('web page exports', () => {
         expect(webCitationMarkdown({ url: 'https://x.org/a', title: 'Paths like C:\\ and [brackets] *stars*', site: 'x_org' }))
             .toBe('([Paths like C:\\\\ and \\[brackets\\] \\*stars\\*](https://x.org/a), x\\_org)');
     });
-
-    it('strips highlight sentence tags', async () => {
-        const { stripHighlightTags } = await import('@beaver/agent-core/identity/webPages');
-        expect(stripHighlightTags('<h1>One.</h1> two … <h12>Three.</h12>')).toBe('One. two … Three.');
-        expect(stripHighlightTags('<h1>R&amp;D &lt;5% &amp;lt;</h1>')).toBe('R&D <5% &lt;');
-    });
 });
 
 describe('web citation Markdown math', () => {
