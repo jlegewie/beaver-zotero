@@ -73,6 +73,7 @@ import {
     isFullAccessGrantedForRun,
     runApprovalPolicyAtom,
 } from '../../../react/atoms/runApprovalPolicy';
+import { installWindowStoreRunSession } from '../../helpers/windowRunSession';
 
 function approval(actionId: string, actionType: string, actionData: Record<string, any> = {}) {
     return [actionId, {
@@ -98,6 +99,7 @@ describe('answering the pending approvals the user decided on', () => {
 
     it('carries the typed instructions with an approval, not only with a decline', () => {
         const store = createStore();
+        installWindowStoreRunSession(store);
         store.set(pendingApprovalsAtom, new Map([
             approval('action-1', 'organize_items'),
             approval('action-2', 'organize_items'),
@@ -121,6 +123,7 @@ describe('answering the pending approvals the user decided on', () => {
 
     it('carries them with a decline too', () => {
         const store = createStore();
+        installWindowStoreRunSession(store);
         store.set(pendingApprovalsAtom, new Map([approval('action-1', 'edit_metadata')]));
 
         store.set(answerPendingApprovalsAtom, {
@@ -139,6 +142,7 @@ describe('answering the pending approvals the user decided on', () => {
 
     it('sends no instructions when the composer holds only whitespace', () => {
         const store = createStore();
+        installWindowStoreRunSession(store);
         store.set(pendingApprovalsAtom, new Map([approval('action-1', 'edit_metadata')]));
 
         store.set(answerPendingApprovalsAtom, {
@@ -152,6 +156,7 @@ describe('answering the pending approvals the user decided on', () => {
 
     it('does nothing when no card is waiting', () => {
         const store = createStore();
+        installWindowStoreRunSession(store);
 
         expect(store.set(answerPendingApprovalsAtom, {
             actionIds: ['action-1'],
@@ -166,6 +171,7 @@ describe('answering the pending approvals the user decided on', () => {
         // user pressed and was never on screen for them to read, so it must not
         // inherit their verdict — it gets its own card instead.
         const store = createStore();
+        installWindowStoreRunSession(store);
         store.set(pendingApprovalsAtom, new Map([approval('seen-1', 'organize_items')]));
         const decidedOn = ['seen-1'];
 
@@ -187,6 +193,7 @@ describe('answering the pending approvals the user decided on', () => {
 
     it('does not answer a card that was already answered on its own', () => {
         const store = createStore();
+        installWindowStoreRunSession(store);
         store.set(pendingApprovalsAtom, new Map([approval('action-2', 'organize_items')]));
 
         const answered = store.set(answerPendingApprovalsAtom, {
@@ -207,6 +214,7 @@ describe('the claim that holds while a verdict is delivered', () => {
         // claim the later click would overtake the earlier one and be the one
         // that decided the changes.
         const store = createStore();
+        installWindowStoreRunSession(store);
 
         expect(store.set(beginApprovalVerdictAtom)).toBe(true);
         expect(store.set(beginApprovalVerdictAtom)).toBe(false);
@@ -234,6 +242,7 @@ describe('granting full access for a run', () => {
 
     it('approves every library change already waiting, whatever tool asked', () => {
         const store = createStore();
+        installWindowStoreRunSession(store);
         store.set(activeRunAtom, { id: 'run-1' } as any);
         store.set(pendingApprovalsAtom, new Map([
             approval('tags-1', 'organize_items'),
@@ -250,6 +259,7 @@ describe('granting full access for a run', () => {
 
     it('leaves a spend confirmation waiting for its own answer', () => {
         const store = createStore();
+        installWindowStoreRunSession(store);
         store.set(activeRunAtom, { id: 'run-1' } as any);
         store.set(pendingApprovalsAtom, new Map([
             approval('tags-1', 'organize_items'),
@@ -266,6 +276,7 @@ describe('granting full access for a run', () => {
 
     it('answers nothing when the grant is switched back off', () => {
         const store = createStore();
+        installWindowStoreRunSession(store);
         store.set(activeRunAtom, { id: 'run-1' } as any);
         store.set(setRunPermissionModeAtom, { runId: 'run-1', fullAccess: true });
         store.set(pendingApprovalsAtom, new Map([approval('tags-1', 'organize_items')]));
@@ -283,6 +294,7 @@ describe('granting full access for a run', () => {
         // the composer's banner over nothing and sweep approvals belonging to a
         // run the user granted nothing.
         const store = createStore();
+        installWindowStoreRunSession(store);
         store.set(activeRunAtom, null);
         store.set(pendingApprovalsAtom, new Map([approval('tags-1', 'organize_items')]));
 
@@ -296,6 +308,7 @@ describe('granting full access for a run', () => {
 
     it('still lets the user take a live grant back', () => {
         const store = createStore();
+        installWindowStoreRunSession(store);
         store.set(activeRunAtom, { id: 'run-1' } as any);
         store.set(setRunPermissionModeAtom, { runId: 'run-1', fullAccess: true });
 
@@ -309,6 +322,7 @@ describe('granting full access for a run', () => {
 
     it('does not rebind the policy when revoking against another run', () => {
         const store = createStore();
+        installWindowStoreRunSession(store);
         store.set(activeRunAtom, { id: 'run-1' } as any);
         store.set(setRunPermissionModeAtom, { runId: 'run-1', fullAccess: true });
 

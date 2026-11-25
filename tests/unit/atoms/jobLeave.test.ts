@@ -24,6 +24,7 @@ import { chatFillsAtom, recordChatFill } from '@beaver/agent-core/run-state/tabl
 import { store } from '../../../react/store';
 import { jobWaitAtom } from '../../../react/atoms/jobWait';
 import { confirmLeaveJobWaitAtom, fillLeaveStops, leaveJobWait } from '../../../react/atoms/jobLeave';
+import { chatStore } from '../../helpers/runSession';
 
 const THREAD = 'thread-1';
 const TABLE = { libraryID: 1, key: 'TABLE001' };
@@ -63,9 +64,9 @@ beforeEach(() => {
     vi.clearAllMocks();
     isShownMock.mockReturnValue(false);
     confirmMock.mockReturnValue(true);
-    store.set(currentThreadIdAtom, THREAD);
+    chatStore().set(currentThreadIdAtom, THREAD);
     store.set(chatFillsAtom, recordChatFill(new Map(), snapshot()));
-    store.set(jobWaitAtom, { threadId: THREAD, runId: 'run-1', toolCallId: 'call-1', jobId: 'job-1' });
+    chatStore().set(jobWaitAtom, { threadId: THREAD, runId: 'run-1', toolCallId: 'call-1', jobId: 'job-1' });
 });
 
 describe('leaving a chat that waits on a fill', () => {
@@ -109,7 +110,7 @@ describe('leaving a chat that waits on a fill', () => {
 
     it('asks nothing and leaves the result alone for a fill that ended or is winding down after Stop', () => {
         for (const state of ['done', 'stopping'] as const) {
-            store.set(jobWaitAtom, { threadId: THREAD, runId: 'run-1', toolCallId: 'call-1', jobId: 'job-1' });
+            chatStore().set(jobWaitAtom, { threadId: THREAD, runId: 'run-1', toolCallId: 'call-1', jobId: 'job-1' });
             store.set(chatFillsAtom, recordChatFill(new Map(), snapshot({ state })));
             expect(store.set(confirmLeaveJobWaitAtom, { leave: 'new_chat', window })).toBe(true);
             leaveJobWait();

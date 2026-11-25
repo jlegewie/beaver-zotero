@@ -23,6 +23,7 @@ import { ArrowUpRightIcon, Icon, Spinner, StopStrokeIcon, TableIcon } from '../.
 import AutoGrowTextarea from './AutoGrowTextarea';
 import { ColumnSummary } from './TableColumnsStep';
 import { TableCardFillWarnings, TableCardReceipt, useFillPricing, useShortWindow } from './TableCardCost';
+import { useSessionSetAtom } from '../../../hooks/useSessionSetAtom';
 
 const BLOCK_GAP = '0.85rem';
 
@@ -53,7 +54,7 @@ export const TableFillCard: React.FC<TableFillCardProps> = ({ request, onSubmit,
     // by card, so switching sidebars keeps them.
     const cardId = request.card_id;
     const drafts = useAtomValue(tableCardDraftsAtom);
-    const setDrafts = useSetAtom(tableCardDraftsAtom);
+    const setDrafts = useSessionSetAtom(tableCardDraftsAtom);
     const initialDraft = useMemo(() => initialTableCardDraft(request), [request]);
     const draft = drafts.get(cardId) ?? initialDraft;
     const setDraft = useCallback(
@@ -120,7 +121,7 @@ export const TableFillCard: React.FC<TableFillCardProps> = ({ request, onSubmit,
         <div className="table-card-header">
             <div className="display-flex flex-row items-start min-w-0" style={{ gap: '0.45rem' }}>
                 <Icon icon={TableIcon} className="font-color-secondary flex-none table-card-title-icon" />
-                <span className="table-card-title flex-1 min-w-0 truncate" title={title}>
+                <span className="table-card-title flex-1 min-w-0 truncate" title={title} dir="auto">
                     {title}
                 </span>
                 <button

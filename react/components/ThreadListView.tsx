@@ -263,7 +263,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                         />
                     ) : (
                         <div className="thread-list-item-title">
-                            <div className="thread-list-item-name truncate">
+                            <div className="thread-list-item-name truncate" dir="auto">
                                 {highlightMatch(threadName, activeQuery)}
                             </div>
                             {thread.awaitingInput && <AwaitingInputDot awaiting={thread.awaitingInput} />}

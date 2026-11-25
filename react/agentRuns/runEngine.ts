@@ -3,13 +3,16 @@
  *
  * It owns connecting and reattaching, stream events, decision cards, stop,
  * retry, resume and parked-run resumes, and settlement with the server. It
- * writes run state through `(get, set)` and reaches the window it runs for
- * only through the session's host (`RunHost`): selections, notices, dialogs,
- * and the window-side work that follows stream events. What the engine keeps
- * between events lives on its `RunSession`, never at module level.
+ * writes only its session's store, applying each event as it arrives, and
+ * reaches the window it runs for only through the session's host (`RunHost`):
+ * selections, notices, dialogs, agent actions, and the window-side work that
+ * follows stream events. What the engine keeps between events lives on its
+ * `RunSession`, never at module level.
  *
- * Window code imports these atoms through `react/atoms/agentRunAtoms`, which
- * assembles prompts from the composer and installs the renderer's session.
+ * Every action atom exported here runs on the session's store, whichever
+ * store it is called on. Window code imports them through
+ * `react/atoms/agentRunAtoms`, which assembles prompts from the composer and
+ * installs the renderer's session.
  */
 
 import { isThreadConflict } from "@beaver/agent-core/types/apiErrors";
@@ -30,7 +33,7 @@ import { viewedHistoryRevisionAtom } from '../runtime/threadProjection';
 import { getCredentialGeneration, assertCredentialGeneration } from '@beaver/agent-core/transport/credentials';
 import { getLibraryRevocations } from '../../src/services/agentDataProvider/utils';
 import { getSearchIndexState } from '../../src/services/searchIndexState';
-import { atom, Getter, Setter } from 'jotai';
+import { atom, Getter, Setter, type WritableAtom } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
 import { CONNECT_MAX_ATTEMPTS, connectWithRetry, reattachWithRetry } from '@beaver/agent-core/transport/connectWithRetry';
 import { reportConnectionFailure } from '@beaver/agent-core/transport/clients/diagnosticsService';
@@ -87,6 +90,7 @@ import {
     allRunsAtom,
     currentThreadIdAtom,
     currentThreadNameAtom,
+    updateRunWithPart,
     updateRunWithToolReturn,
     updateRunComplete,
     updateRunWithToolCallProgress,
@@ -96,15 +100,11 @@ import {
     wsRetryAtom,
 } from '@beaver/agent-core/run-state/atoms';
 import { isJobDeferral } from '@beaver/agent-core/protocol/jobCallProtocol';
-import { chatFillsAtom } from '@beaver/agent-core/run-state/tableChatFills';
 import { jobWaitAtom, settleJobWait } from '../atoms/jobWait';
-import { citationsAtom, processCitationsAtom, mergePageLabelsByAttachmentIdAtom } from '@beaver/agent-core/citations/atoms';
+import { citationsAtom } from '@beaver/agent-core/citations/atoms';
 import type { Citation } from '@beaver/agent-core/types/citations';
 import {
-    addAgentActionsAtom,
-    upsertAgentActionsAtom,
     toAgentAction,
-    threadAgentActionsAtom,
     isItemCreatingAgentAction,
     itemActionExternalId,
     addPendingApprovalAtom,
@@ -112,7 +112,6 @@ import {
     removePendingApprovalsAtom,
     pendingApprovalsAtom,
     clearAllPendingApprovalsAtom,
-    recordUndeliveredActionsAtom,
     retryUnrecordedActionsNow,
 } from '../agents/agentActions';
 import {
@@ -172,12 +171,27 @@ import {
 import type { CreateItemResultData } from '@beaver/agent-core/types/agentActions/items';
 import { appendRunIfMissing, continuationOfferFor, findResumeChainRoot, findRunForResume, hasOnlyThinkingParts, lingeringCompletedRun, resolveErrorRunId, toRunError } from '@beaver/agent-core/run-state/runResumeHelpers';
 import { prewarmMuPDFWorker } from '../../src/beaver-extract';
-import { getRunSession, type RetryCommit, type RunSession } from './runSession';
+import { getRunSession, sessionOf, type RetryCommit, type RunSession } from './runSession';
 import type { UndoConfirmResult } from './runHost';
 
 // =============================================================================
 // Helper Functions
 // =============================================================================
+
+/**
+ * An action atom that runs on a session's store: the session's own when the
+ * engine calls it there, the installed one when a window calls it on its
+ * store. Its body finds that session with `sessionOf(get)`. Each of its writes
+ * is a write of that store, so windows see it as it happens.
+ */
+function sessionAction<Args extends unknown[], Result>(
+    write: (get: Getter, set: Setter, ...args: Args) => Result,
+): WritableAtom<null, Args, Result> {
+    return atom(null, (get, _set, ...args: Args) => {
+        const { store } = sessionOf(get);
+        return write(store.get, store.set, ...args);
+    });
+}
 
 /**
  * Get the user's API key for a model.
@@ -431,7 +445,7 @@ function abandonReplacementIfThreadChanged(
         popupText: string;
     },
 ): boolean {
-    const current = session.host.navigationSeq(get);
+    const current = session.host.navigationSeq();
     if (current === options.navSeqBeforeAwait) return false;
     logger(
         `${options.logPrefix}: chat changed while the replacement was in flight ` +
@@ -618,13 +632,13 @@ async function startContinuationRunOwned(
     let newRunId: string | null = null;
 
     try {
-        const model = session.host.getModel(get);
+        const model = session.host.getModel();
         if (!model) {
             logger(`${options.logPrefix}: No model selected`, 1);
             return;
         }
 
-        const userId = session.host.getUserId(get);
+        const userId = session.host.getUserId();
         if (!userId) {
             logger(`${options.logPrefix}: No user ID found`, 1);
             return;
@@ -749,15 +763,15 @@ async function startAutoRetryRunOwned(
     try {
         // Which chat this replacement belongs to, captured before every await
         // in the function. See `abandonReplacementIfThreadChanged`.
-        const navSeqBeforeAwait = session.host.navigationSeq(get);
+        const navSeqBeforeAwait = session.host.navigationSeq();
 
-        const model = session.host.getModel(get);
+        const model = session.host.getModel();
         if (!model) {
             logger(`${logPrefix}: No model selected`, 1);
             return;
         }
 
-        const userId = session.host.getUserId(get);
+        const userId = session.host.getUserId();
         if (!userId) {
             logger(`${logPrefix}: No user ID found`, 1);
             return;
@@ -882,9 +896,8 @@ async function startAutoRetryRunOwned(
             }
 
             set(threadRunsAtom, prev => prev.filter(r => !runIdsToRemove.includes(r.id)));
-            set(threadAgentActionsAtom, prev => prev.filter(a => !runIdsToRemove.includes(a.run_id)));
+            session.host.removeRunActions(set, runIdsToRemove);
             set(citationsAtom, prev => prev.filter(c => !runIdsToRemove.includes(c.run_id ?? '')));
-            set(processCitationsAtom);
             session.host.citationsChanged(set);
         }
 
@@ -986,7 +999,7 @@ export function canLeaveReconnectingRun(get: Getter, session: RunSession = getRu
  * scheduled and has not finished. Added when `onError` decides to replace the
  * run, removed once the replacement has started or given up.
  */
-const scheduledAutoResumeRunIdsAtom = atom<Set<string>>(new Set<string>());
+export const scheduledAutoResumeRunIdsAtom = atom<Set<string>>(new Set<string>());
 
 /** Read-only view of the runs currently being replaced automatically. */
 export const autoReplacementPendingRunIdsAtom = atom(
@@ -1000,8 +1013,8 @@ export const autoReplacementPendingRunIdsAtom = atom(
 /**
  * Reset all WebSocket state atoms
  */
-export const resetWSStateAtom = atom(null, (_get, set) => {
-    const session = getRunSession();
+export const resetWSStateAtom = sessionAction((get, set) => {
+    const session = sessionOf(get);
     set(isWSChatPendingAtom, false);
     set(isWSConnectedAtom, false);
     set(isWSReadyAtom, false);
@@ -1024,7 +1037,7 @@ export const resetWSStateAtom = atom(null, (_get, set) => {
  * (`keepParkedCards`): they stay answerable while it runs. Any other run
  * closes them, and drops answers still waiting to be sent.
  */
-export const prepareForNewRunAtom = atom(null, (_get, set, options?: { keepParkedCards?: boolean }) => {
+export const prepareForNewRunAtom = sessionAction((_get, set, options?: { keepParkedCards?: boolean }) => {
     set(resetWSStateAtom);
     // A resume reconciles the card maps instead, so cards still open keep
     // their components and drafts.
@@ -1255,7 +1268,6 @@ function applyRunCitations(
         ...prev,
         ...citations.map(c => ({ ...c, run_id: runId }))
     ]);
-    set(processCitationsAtom);
     session.host.citationsChanged(set);
 
     // Preload PDF page labels for cited attachments so the rendering path can
@@ -1264,13 +1276,13 @@ function applyRunCitations(
     //
     // The preload usually settles after the run, when this window no longer
     // holds the thread writer and the callback setter drops writes. The labels
-    // are render state keyed by attachment, not thread history, so they go to
-    // this renderer's store directly (still scoped to the account).
+    // are the window's render state keyed by attachment, not thread history,
+    // so they are kept regardless (still scoped to the account).
     const generation = getCredentialGeneration();
     session.host.preloadPageLabels(citations)
         .then((labelsByAttachmentId) => {
             if (generation !== getCredentialGeneration()) return;
-            session.store.set(mergePageLabelsByAttachmentIdAtom, labelsByAttachmentId);
+            session.host.mergePageLabels(labelsByAttachmentId);
         })
         .catch((err) =>
             logger(`WS: Failed to preload page labels: ${err}`, 1)
@@ -1293,7 +1305,7 @@ export function createWSCallbacks(
     restoreComposer?: () => void,
     session: RunSession = getRunSession(),
 ): WSCallbacks {
-    const navigation = session.host.navigationSeq(session.store.get);
+    const navigation = session.host.navigationSeq();
     const composerRunId = session.store.get(activeRunAtom)?.id;
     const generation = getCredentialGeneration();
     const writer = currentWriter();
@@ -1435,10 +1447,10 @@ export function createWSCallbacks(
     const revocationsAtRunStart = getLibraryRevocations();
     const recordUndeliveredActions = (info: WSUndeliveredActionsInfo) => {
         logger(`WS onUndeliveredActions: run ${info.runId}: ${info.actions.map((action) => action.actionId).join(', ')}`, 1);
-        void session.store.set(recordUndeliveredActionsAtom, info, revocationsAtRunStart);
+        session.host.recordUndeliveredActions(info, revocationsAtRunStart);
     };
 
-    const callbacks = flushPartsBeforeOtherEvents(session, {
+    const callbacks: WSCallbacks = {
         onReady: (data: WSReadyData) => {
             logger('WS onReady:', data, 1);
             set(isWSReadyAtom, true);
@@ -1477,15 +1489,13 @@ export function createWSCallbacks(
                     part: event.part,
                 });
                 // Awaited only when there is item data to load, so a call with
-                // none reaches the queue in the same task, as it always has.
+                // none is applied in the same task.
                 const loading = session.host.enrichToolCall(event.part);
                 if (loading) await loading;
             }
-            // Queued rather than applied now: the store write, and the render
-            // it triggers, happen once per animation frame however fast parts
-            // arrive. Every other callback here flushes the queue first, so
-            // ordering with the rest of the stream is unchanged.
-            session.partQueue.queue(event);
+            // Applied at once: the session has no renderer. Windows pace how
+            // often they render what streamed (see `runProjection`).
+            set(activeRunAtom, (prev) => prev ? updateRunWithPart(prev, event) : prev);
         },
 
         onToolReturn: async (event: WSToolReturnEvent) => {
@@ -1632,7 +1642,7 @@ export function createWSCallbacks(
             if (event.agent_actions && event.agent_actions.length > 0) {
                 logger(`WS onRunComplete: Processing ${event.agent_actions.length} agent actions`, 1);
                 const actions = event.agent_actions.map(toAgentAction);
-                set(addAgentActionsAtom, actions);
+                session.host.addAgentActions(set, actions);
                 // Load item data for the actions, then auto-apply annotations if enabled
                 await session.host.prepareAgentActions(event.run_id, actions);
             }
@@ -1730,7 +1740,7 @@ export function createWSCallbacks(
                 set(unmarkApprovalStaleAtom, actionId);
             }
             // The window keeps waiting on a fill only when the run parked on it.
-            settleJobWait(completed);
+            settleJobWait(session.store, completed);
             settleRunCards(session.store.get, set);
             if (completed?.parked) scheduleParkedAnswerFlush(session);
             else set(clearParkedAnswersAtom);
@@ -1748,7 +1758,7 @@ export function createWSCallbacks(
                 const id = session.store.get(currentThreadIdAtom);
                 if (id && event.type === "thread_busy")
                     setAdmission(set, id, session.store.get(threadAdmissionAtom)?.tailRunId ?? null, 'unknown');
-                if (restore && navigation === session.host.navigationSeq(session.store.get)
+                if (restore && navigation === session.host.navigationSeq()
                     && composerRunId === session.store.get(activeRunAtom)?.id
                     && (!event.run_id || event.run_id === composerRunId)) {
                     restore();
@@ -1802,8 +1812,8 @@ export function createWSCallbacks(
                 // device, say): show the thread as the server has it. Cards
                 // still open there stay answerable.
                 const threadId = session.store.get(currentThreadIdAtom);
-                const userId = session.host.getUserId(session.store.get);
-                if (threadId && userId && navigation === session.host.navigationSeq(session.store.get)) {
+                const userId = session.host.getUserId();
+                if (threadId && userId && navigation === session.host.navigationSeq()) {
                     session.host.notify(set, {
                         type: 'warning',
                         title: 'Answer not sent',
@@ -1873,6 +1883,12 @@ export function createWSCallbacks(
 
         onRetry: (event: WSRetryEvent) => {
             logger('WS onRetry:', event, 1);
+            // A reset clears what streamed before the retry shows, so the
+            // window never shows the retry over the discarded response.
+            if (event.reset) {
+                logger(`WS onRetry: resetting run messages for run ${event.run_id}`, 1);
+                set(activeRunAtom, (prev) => prev ? resetRunMessages(prev) : prev);
+            }
             set(wsRetryAtom, {
                 runId: event.run_id,
                 attempt: event.attempt,
@@ -1885,12 +1901,6 @@ export function createWSCallbacks(
             // already-showing indicator for a second, and leaving the old clock
             // would count seconds from the last token rather than from now.
             session.streamActivity.startWait(event.run_id);
-
-            // If reset is true, clear any partial content that was streamed
-            if (event.reset) {
-                logger(`WS onRetry: resetting run messages for run ${event.run_id}`, 1);
-                set(activeRunAtom, (prev) => prev ? resetRunMessages(prev) : prev);
-            }
         },
 
         onAgentActions: async (event: WSAgentActionsEvent) => {
@@ -1899,7 +1909,7 @@ export function createWSCallbacks(
                 actionsCount: event.actions.length,
             }, 1);
             const actions = event.actions.map(toAgentAction);
-            set(upsertAgentActionsAtom, actions);
+            session.host.upsertAgentActions(set, actions);
 
             // Mark external references as imported for applied item-creating actions
             // This handles cases where actions are applied via PendingActionsBar
@@ -2145,11 +2155,11 @@ export function createWSCallbacks(
             set(wsReconnectingAtom, null);
             endRunOnLostConnection(info.evidence, true, reattachFailureOutcome(info));
             // The server may still finish the run, or has saved it already.
-            if (navigation === session.host.navigationSeq(session.store.get)) awaitServerSettlement(session, set, 'reattach_failed');
+            if (navigation === session.host.navigationSeq()) awaitServerSettlement(session, set, 'reattach_failed');
         },
 
         onUndeliveredActions: (info: WSUndeliveredActionsInfo) => recordUndeliveredActions(info),
-    });
+    };
     /**
      * A run the user stopped while it was reconnecting may still have finished
      * on the server, or still be running there. Once the reattach is over, the
@@ -2161,7 +2171,7 @@ export function createWSCallbacks(
         const settledAfterHeldStop = session.heldStopRunIds.delete(runId)
             && session.store.get(threadAdmissionAtom)?.activity.state === 'idle';
         if (
-            navigation !== session.host.navigationSeq(session.store.get) ||
+            navigation !== session.host.navigationSeq() ||
             currentWriter() ||
             isRunActive(session.store.get(activeRunAtom)) ||
             !session.store.get(threadRunsAtom).some((run) => run.id === runId) ||
@@ -2207,30 +2217,6 @@ export function createWSCallbacks(
         };
     }
     return guarded as unknown as WSCallbacks;
-}
-
-/**
- * Wrap every callback except `onPart` so it applies the queued part events
- * before it runs.
- *
- * Part events are buffered for a frame (see `streamingPartQueue`), so anything
- * else arriving on the socket — a tool return, the run completing — would
- * otherwise see run state missing the text that arrived just before it. Wrapping
- * the whole object rather than each handler keeps a callback added later from
- * silently missing the flush.
- */
-function flushPartsBeforeOtherEvents(session: RunSession, callbacks: WSCallbacks): WSCallbacks {
-    const wrapped: Record<string, unknown> = { ...callbacks };
-
-    for (const [name, callback] of Object.entries(callbacks)) {
-        if (name === 'onPart' || typeof callback !== 'function') continue;
-        wrapped[name] = (...args: unknown[]) => {
-            session.partQueue.flush();
-            return (callback as (...callbackArgs: unknown[]) => unknown)(...args);
-        };
-    }
-
-    return wrapped as unknown as WSCallbacks;
 }
 
 /** Test-only: reset the session's shutdown latch between cases. */
@@ -2523,25 +2509,21 @@ async function startRegenerateRunOwned(
         // sequence captured after that flush would already carry a switch made
         // during it, blinding every later check. See
         // `abandonReplacementIfThreadChanged`.
-        const navSeqBeforeAwait = session.host.navigationSeq(get);
+        const navSeqBeforeAwait = session.host.navigationSeq();
 
         // Get current model
-        const model = session.host.getModel(get);
+        const model = session.host.getModel();
         if (!model) {
             logger(`${logPrefix}: No model selected`, 1);
             return;
         }
 
         // Get user ID
-        const userId = session.host.getUserId(get);
+        const userId = session.host.getUserId();
         if (!userId) {
             logger(`${logPrefix}: No user ID found`, 1);
             return;
         }
-
-        // Before the run is read or archived: whichever run this ends up
-        // touching, it must carry the streamed text queued for the frame.
-        session.partQueue.flush();
 
         // Fold a terminal run out of the active slot into thread history
         // before the removed set is computed: a failed run being replaced
@@ -2622,7 +2604,7 @@ async function startRegenerateRunOwned(
                 undefined, waitReason);
             const generation = getCredentialGeneration();
             const current = () =>
-                navSeqBeforeAwait === session.host.navigationSeq(get) &&
+                navSeqBeforeAwait === session.host.navigationSeq() &&
                 generation === getCredentialGeneration() &&
                 ownsWriter(currentWriter());
             const deadline = Date.now() + 130000;
@@ -2644,7 +2626,7 @@ async function startRegenerateRunOwned(
                 if (!current()) return;
                 delay = Math.min(delay * 2, 3000);
             }
-            if (!(await reconcileThread(get, set, current, settledHistory))) return;
+            if (!(await reconcileThread(session, get, set, current, settledHistory))) return;
             threadRuns = get(threadRunsAtom);
             const persisted = new Set(threadRuns.map(run => run.id));
             persistedRunIds = persisted;
@@ -2738,7 +2720,7 @@ async function startRegenerateRunOwned(
         }
 
         // Find applied actions for runs being removed
-        const allAgentActions = get(threadAgentActionsAtom);
+        const allAgentActions = session.host.agentActions();
         const actionsInRemovedRuns = allAgentActions.filter(a => runIdsToRemove.includes(a.run_id));
 
         // Prompt the user to confirm undoing applied actions. The dialog is
@@ -2829,9 +2811,7 @@ async function startRegenerateRunOwned(
         );
 
         // Clear agent actions for removed runs
-        set(threadAgentActionsAtom, (prev) =>
-            prev.filter(a => !runIdsToRemove.includes(a.run_id))
-        );
+        session.host.removeRunActions(set, runIdsToRemove);
 
         // Drop stashed edits for removed runs; those messages are gone.
         session.host.dropPromptEditDrafts(set, runIdsToRemove);
@@ -2840,7 +2820,6 @@ async function startRegenerateRunOwned(
         set(citationsAtom, (prev) =>
             prev.filter(c => !runIdsToRemove.includes(c.run_id ?? ''))
         );
-        set(processCitationsAtom);
         session.host.citationsChanged(set);
 
         // Reset WS state and set pending
@@ -2903,10 +2882,9 @@ async function startRegenerateRunOwned(
 /**
  * Regenerate a response from a specific run (retry button and error card).
  */
-export const regenerateFromRunAtom = atom(
-    null,
+export const regenerateFromRunAtom = sessionAction(
     async (get, set, params: { runId: string; window?: Window }) => {
-        const session = getRunSession();
+        const session = sessionOf(get);
         await startRegenerateRun(session, get, set, params.runId, {
             window: params.window,
             logPrefix: 'regenerateFromRunAtom',
@@ -2920,10 +2898,9 @@ export const regenerateFromRunAtom = atom(
  * Regenerate from a run with an edited user prompt.
  * Same flow as regenerateFromRunAtom, with a replacement prompt.
  */
-export const regenerateWithEditedPromptAtom = atom(
-    null,
+export const regenerateWithEditedPromptAtom = sessionAction(
     async (get, set, params: { runId: string; editedPrompt: BeaverAgentPrompt; window?: Window }) => {
-        const session = getRunSession();
+        const session = sessionOf(get);
         await startRegenerateRun(session, get, set, params.runId, {
             logPrefix: 'regenerateWithEditedPromptAtom',
             window: params.window,
@@ -2945,10 +2922,9 @@ export const regenerateWithEditedPromptAtom = atom(
  * The backend will continue from where it left off and the UI will hide the error run
  * when displaying the resumed run.
  */
-export const autoResumeErroredRunAtom = atom(
-    null,
+export const autoResumeErroredRunAtom = sessionAction(
     async (get, set, failedRunId: string) => {
-        const session = getRunSession();
+        const session = sessionOf(get);
         try {
             await startContinuationRun(session, get, set, failedRunId, {
                 requireResumable: false,
@@ -2974,10 +2950,9 @@ export const autoResumeErroredRunAtom = atom(
  * calls) at the time of the error — nothing user-visible to preserve, so we
  * restart cleanly instead of resuming.
  */
-export const autoRetryErroredRunAtom = atom(
-    null,
+export const autoRetryErroredRunAtom = sessionAction(
     async (get, set, failedRunId: string) => {
-        const session = getRunSession();
+        const session = sessionOf(get);
         try {
             await startAutoRetryRun(session, get, set, failedRunId);
         } finally {
@@ -2990,14 +2965,13 @@ export const autoRetryErroredRunAtom = atom(
     }
 );
 
-export const resumeFromRunAtom = atom(
-    null,
+export const resumeFromRunAtom = sessionAction(
     async (
         get,
         set,
         params: string | { runId: string; userMessage?: string },
     ) => {
-        const session = getRunSession();
+        const session = sessionOf(get);
         // A bare id from the callers that have nothing to add (the error
         // card's resume button), or the object form from the continue card,
         // which may carry what the user typed.
@@ -3018,12 +2992,8 @@ export const resumeFromRunAtom = atom(
  * Archive the active run as canceled and clear live-run UI state.
  * Store-only — does not touch the socket.
  */
-export const abandonActiveRunLocallyAtom = atom(null, (get, set) => {
-    const session = getRunSession();
-    // The run below is archived exactly as it stands and its slot is cleared,
-    // so the streamed text still sitting in the frame queue has to be applied
-    // first — after the slot is null there is nothing left to apply it to.
-    session.partQueue.flush();
+export const abandonActiveRunLocallyAtom = sessionAction((get, set) => {
+    const session = sessionOf(get);
     const writer = currentWriter();
     const ownedWriter = !!writer && ownsWriter(writer);
     releaseWriter();
@@ -3082,8 +3052,8 @@ export const abandonActiveRunLocallyAtom = atom(null, (get, set) => {
  * User-initiated close: cancel on the backend, then close.
  * Local bookkeeping is shared with shutdown via `abandonActiveRunLocallyAtom`.
  */
-export const closeWSConnectionAtom = atom(null, async (get, set) => {
-    const session = getRunSession();
+export const closeWSConnectionAtom = sessionAction(async (get, set) => {
+    const session = sessionOf(get);
     // A retry whose removal is committing cannot be called off any more; the
     // Stop is applied to its replacement once that is in place (see
     // `beginRetryCommit`).
@@ -3123,15 +3093,14 @@ export const closeWSConnectionAtom = atom(null, async (get, set) => {
  *
  * `reason` is logged server-side as the disconnect path.
  */
-export const closeWSConnectionForShutdownAtom = atom(
-    null,
+export const closeWSConnectionForShutdownAtom = sessionAction(
     (
         get,
         set,
         reason: string,
         options?: { rememberInterruptedThread?: boolean },
     ) => {
-        const session = getRunSession();
+        const session = sessionOf(get);
         // Latch first: a send still preparing has nothing to close or abandon.
         session.clientShutDown = true;
         // A window closing while Zotero runs on leaves the fill it waits on to
@@ -3166,7 +3135,7 @@ function rememberInterruptedThread(session: RunSession, get: Getter): void {
     if (!activeRun || !isRunActive(activeRun)) return;
 
     const threadId = get(currentThreadIdAtom) || activeRun.thread_id;
-    const userId = session.host.getUserId(get);
+    const userId = session.host.getUserId();
     if (!threadId || !userId) return;
 
     saveInterruptedThread({
@@ -3183,8 +3152,7 @@ function rememberInterruptedThread(session: RunSession, get: Getter): void {
  */
 export const approvalResponseIntentsAtom = atom<Map<string, boolean>>(new Map());
 
-export const removeApprovalResponseIntentAtom = atom(
-    null,
+export const removeApprovalResponseIntentAtom = sessionAction(
     (_get, set, actionId: string) => {
         set(approvalResponseIntentsAtom, (prev) => {
             if (!prev.has(actionId)) return prev;
@@ -3195,8 +3163,7 @@ export const removeApprovalResponseIntentAtom = atom(
     },
 );
 
-export const clearApprovalResponseIntentsAtom = atom(
-    null,
+export const clearApprovalResponseIntentsAtom = sessionAction(
     (_get, set) => {
         set(approvalResponseIntentsAtom, new Map());
     },
@@ -3214,8 +3181,7 @@ export const clearApprovalResponseIntentsAtom = atom(
  */
 export const staleApprovalActionIdsAtom = atom<Set<string>>(new Set<string>());
 
-export const markApprovalStaleAtom = atom(
-    null,
+export const markApprovalStaleAtom = sessionAction(
     (_get, set, actionId: string) => {
         set(staleApprovalActionIdsAtom, (prev) => {
             if (prev.has(actionId)) return prev;
@@ -3226,16 +3192,14 @@ export const markApprovalStaleAtom = atom(
     },
 );
 
-export const clearStaleApprovalsAtom = atom(
-    null,
+export const clearStaleApprovalsAtom = sessionAction(
     (_get, set) => {
         set(staleApprovalActionIdsAtom, new Set<string>());
     },
 );
 
 /** The approval can be answered again: its run parked on it. */
-export const unmarkApprovalStaleAtom = atom(
-    null,
+export const unmarkApprovalStaleAtom = sessionAction(
     (_get, set, actionId: string) => {
         set(staleApprovalActionIdsAtom, (prev) => {
             if (!prev.has(actionId)) return prev;
@@ -3260,11 +3224,10 @@ export const unmarkApprovalStaleAtom = atom(
  * backend cannot answer a message it never received, so the card would
  * otherwise sit on a spinner until the thread is reloaded.
  */
-export const sendApprovalResponseAtom = atom(
-    null,
+export const sendApprovalResponseAtom = sessionAction(
     (get, set, { actionId, approved, userInstructions }: { actionId: string; approved: boolean; userInstructions?: string | null }) => {
-        const session = getRunSession();
-        const actionChanges = approved ? session.host.actionChanges(get, actionId) : undefined;
+        const session = sessionOf(get);
+        const actionChanges = approved ? session.host.actionChanges(actionId) : undefined;
         const toolcallId = get(pendingApprovalsAtom).get(actionId)?.toolcallId;
         const answer = deferredApprovalResponse(actionId, approved, userInstructions, actionChanges);
         const recordIntent = () => set(approvalResponseIntentsAtom, (prev) => {
@@ -3308,14 +3271,14 @@ export const approvalVerdictInFlightAtom = atom(false);
  * Synchronous, deliberately: a React re-render is too late to stop a second
  * click in the same tick as the first.
  */
-export const beginApprovalVerdictAtom = atom(null, (get, set): boolean => {
+export const beginApprovalVerdictAtom = sessionAction((get, set): boolean => {
     if (get(approvalVerdictInFlightAtom)) return false;
     set(approvalVerdictInFlightAtom, true);
     return true;
 });
 
 /** Release the claim. Callers must do this on every exit, including failure. */
-export const releaseApprovalVerdictAtom = atom(null, (_get, set) => {
+export const releaseApprovalVerdictAtom = sessionAction((_get, set) => {
     set(approvalVerdictInFlightAtom, false);
 });
 
@@ -3347,8 +3310,7 @@ export const releaseApprovalVerdictAtom = atom(null, (_get, set) => {
  *
  * Returns how many approvals were answered.
  */
-export const answerPendingApprovalsAtom = atom(
-    null,
+export const answerPendingApprovalsAtom = sessionAction(
     (
         get,
         set,
@@ -3398,8 +3360,7 @@ export const answerPendingApprovalsAtom = atom(
  * Returns how many pending approvals were approved, for the caller's logging
  * and its "waiting for the backend" state.
  */
-export const setRunPermissionModeAtom = atom(
-    null,
+export const setRunPermissionModeAtom = sessionAction(
     (
         get,
         set,
@@ -3443,15 +3404,14 @@ export const setRunPermissionModeAtom = atom(
  * Send the user's answers (or a skip) for an ask_user_question request and
  * remove the pending question so the composer re-enables immediately.
  */
-export const sendAskUserQuestionResponseAtom = atom(
-    null,
+export const sendAskUserQuestionResponseAtom = sessionAction(
     (get, set, { questionId, toolcallId, answers, cancelled }: {
         questionId: string;
         toolcallId: string;
         answers: AskUserQuestionAnswer[];
         cancelled?: boolean;
     }) => {
-        const session = getRunSession();
+        const session = sessionOf(get);
         const answer = askUserQuestionResponse(questionId, answers, cancelled ?? false);
         if (answerParkedCard(session, get, set, toolcallId, answer)) {
             set(removePendingQuestionAtom, toolcallId);
@@ -3474,14 +3434,13 @@ export const sendAskUserQuestionResponseAtom = atom(
  * reach the run, so leaving it up would strand the user on a card that can
  * never be answered.
  */
-export const sendCreditConfirmationResponseAtom = atom(
-    null,
-    (_get, set, { confirmationId, approved, userInstructions }: {
+export const sendCreditConfirmationResponseAtom = sessionAction(
+    (get, set, { confirmationId, approved, userInstructions }: {
         confirmationId: string;
         approved: boolean;
         userInstructions?: string | null;
     }) => {
-        const session = getRunSession();
+        const session = sessionOf(get);
         if (!ownsWriter(currentWriter())) return;
         logger(`sendCreditConfirmationResponseAtom: Sending credit confirmation response for ${confirmationId}: ${approved}`, 1);
         const delivered = session.agentService.sendCreditConfirmationResponse(
@@ -3503,15 +3462,14 @@ export const sendCreditConfirmationResponseAtom = atom(
  * reach the run, so leaving it up would strand the user on a card that can
  * never be answered.
  */
-export const sendBatchApprovalResponseAtom = atom(
-    null,
+export const sendBatchApprovalResponseAtom = sessionAction(
     (get, set, { approvalId, approved, mode, userInstructions }: {
         approvalId: string;
         approved: boolean;
         mode: BatchApprovalMode;
         userInstructions?: string | null;
     }) => {
-        const session = getRunSession();
+        const session = sessionOf(get);
         const toolcallId = get(pendingBatchApprovalsAtom).get(approvalId)?.toolcallId;
         const answer = batchApprovalResponse(approvalId, approved, mode, userInstructions);
         if (toolcallId && answerParkedCard(session, get, set, toolcallId, answer)) {
@@ -3541,10 +3499,9 @@ export const sendBatchApprovalResponseAtom = atom(
  * The card is removed even when the send fails: the answer can no longer
  * reach the run, so leaving it up would strand the user on it.
  */
-export const sendTableCardResponseAtom = atom(
-    null,
+export const sendTableCardResponseAtom = sessionAction(
     (get, set, response: WSTableCardResponse) => {
-        const session = getRunSession();
+        const session = sessionOf(get);
         const toolcallId = get(pendingTableCardsAtom).get(response.card_id)?.toolcall_id;
         // The card's edits are kept until its call resolves: if the answer
         // does not reach a run (the run parks first, or the resume fails),
@@ -3642,10 +3599,10 @@ function scheduleParkedAnswerFlush(session: RunSession): void {
  * window waits on ended, and its call is parked. Read as the resume goes
  * out, so the result is filtered by the library scope as it is then.
  */
-function jobResumeAnswer(get: Getter): { toolCallId: string; answer: ParkedCardAnswer } | null {
+function jobResumeAnswer(session: RunSession, get: Getter): { toolCallId: string; answer: ParkedCardAnswer } | null {
     const wait = get(jobWaitAtom);
     if (!wait || wait.threadId !== get(currentThreadIdAtom)) return null;
-    const snapshot = get(chatFillsAtom).get(wait.jobId)?.snapshot;
+    const snapshot = session.host.chatFillSnapshot(wait.jobId);
     if (snapshot?.state !== 'done' || !snapshot.result) return null;
     const parked = get(openParkedRunAtom)?.deferrals.some(
         (deferral) => deferral.tool_call_id === wait.toolCallId && isJobDeferral(deferral),
@@ -3697,10 +3654,10 @@ function parkedResumeBlocked(session: RunSession, get: Getter): boolean {
  * Send the answers queued for the open parked run in one resume. Answers to
  * cards that are no longer open (answered elsewhere, superseded) are dropped.
  */
-export const flushParkedAnswersAtom = atom(null, async (get, set) => {
-    const session = getRunSession();
+export const flushParkedAnswersAtom = sessionAction(async (get, set) => {
+    const session = sessionOf(get);
     const queue = get(parkedAnswerQueueAtom);
-    const job = jobResumeAnswer(get);
+    const job = jobResumeAnswer(session, get);
     if ((queue.size === 0 && !job) || parkedResumeBlocked(session, get)) return;
     const threadId = get(currentThreadIdAtom);
     const open = get(openParkedRunAtom);
@@ -3721,7 +3678,7 @@ export const flushParkedAnswersAtom = atom(null, async (get, set) => {
     session.parkedResumeStarting = true;
     let started = false;
     try {
-        started = (await withThreadWriter(get, set, guardedSet =>
+        started = (await withThreadWriter(set, guardedSet =>
             startParkedResumeOwned(session, get, guardedSet, open, answers, jobCallId), session)) ?? false;
     } finally {
         session.parkedResumeStarting = false;
@@ -3767,8 +3724,8 @@ async function startParkedResumeOwned(
         logger(`${logPrefix}: Blocked — the active run is reconnecting`, 1);
         return false;
     }
-    const model = session.host.getModel(get);
-    const userId = session.host.getUserId(get);
+    const model = session.host.getModel();
+    const userId = session.host.getUserId();
     const threadId = get(currentThreadIdAtom) || open.threadId;
     if (!model || !userId || !threadId) {
         logger(`${logPrefix}: No model, user or thread`, 1);
@@ -3858,8 +3815,8 @@ export function messageParksResume(get: Getter): boolean {
  * any message written past a parked run does. Returns whether the message
  * may be sent.
  */
-export const parkResumeForMessageAtom = atom(null, async (get, set): Promise<boolean> => {
-    const session = getRunSession();
+export const parkResumeForMessageAtom = sessionAction(async (get, set): Promise<boolean> => {
+    const session = sessionOf(get);
     if (!messageParksResume(get)) return true;
     if (session.parkingResumeForMessage) return false;
     const runId = parkableRunId(get, session);
@@ -3873,17 +3830,17 @@ export const parkResumeForMessageAtom = atom(null, async (get, set): Promise<boo
         return false;
     }
     session.parkingResumeForMessage = true;
-    const navigation = session.host.navigationSeq(get);
+    const navigation = session.host.navigationSeq();
     try {
         const outcome = await session.agentService.parkRun(runId, PARK_FOR_MESSAGE_WAIT_MS);
         // The message was written for the chat the user has since left.
-        if (navigation !== session.host.navigationSeq(get)) return false;
+        if (navigation !== session.host.navigationSeq()) return false;
         if (outcome === 'ended') return true;
         // The run ended without telling this client how, or was stopped:
         // show the chat as the server has it.
         logger(`parkResumeForMessage: Parking run ${runId} ended as "${outcome}"; reloading the chat`, 1);
         const threadId = get(currentThreadIdAtom);
-        const userId = session.host.getUserId(get);
+        const userId = session.host.getUserId();
         if (threadId && userId) void Promise.resolve().then(() => session.host.reloadThread(threadId, userId));
         session.host.notify(set, {
             type: 'warning',
@@ -3898,15 +3855,15 @@ export const parkResumeForMessageAtom = atom(null, async (get, set): Promise<boo
 });
 
 async function startContinuationRun(session: RunSession, get: Getter, set: Setter, failedRunId: string, options: StartContinuationRunOptions): Promise<void> {
-    return withThreadWriter(get, set, guardedSet => startContinuationRunOwned(session, get, guardedSet, failedRunId, options), session);
+    return withThreadWriter(set, guardedSet => startContinuationRunOwned(session, get, guardedSet, failedRunId, options), session);
 }
 
 async function startAutoRetryRun(session: RunSession, get: Getter, set: Setter, failedRunId: string): Promise<void> {
-    return withThreadWriter(get, set, guardedSet => startAutoRetryRunOwned(session, get, guardedSet, failedRunId), session);
+    return withThreadWriter(set, guardedSet => startAutoRetryRunOwned(session, get, guardedSet, failedRunId), session);
 }
 
 async function startRegenerateRun(session: RunSession, get: Getter, set: Setter, runId: string, options: RegenerateRunOptions): Promise<void> {
-    return withThreadWriter(get, set, guardedSet => startRegenerateRunOwned(session, get, guardedSet, runId, options), session);
+    return withThreadWriter(set, guardedSet => startRegenerateRunOwned(session, get, guardedSet, runId, options), session);
 }
 
 function settleWriter(session: RunSession, get: Getter, writer: WriterLease | undefined): void {
@@ -3916,13 +3873,19 @@ function settleWriter(session: RunSession, get: Getter, writer: WriterLease | un
     const id = get(currentThreadIdAtom);
     if (id) session.store.set(viewedHistoryRevisionAtom, Zotero.Beaver.presence.getSnapshot().history[id] ?? 0);
 }
-/** Admit before preparation; nested composer/run phases retain the same lease. */
+/**
+ * Admit before preparation; nested composer/run phases retain the same lease.
+ *
+ * `operation` receives `set` and the session's store setter, both guarded by
+ * the lease: window code prepares with the first and writes the chat's state
+ * with the second.
+ */
 export async function withThreadWriter<T>(
-    get: Getter,
     set: Setter,
-    operation: (set: Setter) => Promise<T>,
+    operation: (set: Setter, sessionSet: Setter) => Promise<T>,
     session: RunSession = getRunSession(),
 ): Promise<T | undefined> {
+    const get = session.store.get;
     const id = get(currentThreadIdAtom);
     const presence = Zotero.Beaver?.presence;
     if (
@@ -3948,12 +3911,14 @@ export async function withThreadWriter<T>(
         return;
     }
     if (writer) writer.preparing++;
-    const nav = session.host.navigationSeq(get);
-    const guardedSet = ((...args: any[]) => {
+    const nav = session.host.navigationSeq();
+    const guard = (target: Setter): Setter => ((...args: any[]) => {
         assertWriter(writer);
-        if (writer && nav !== session.host.navigationSeq(get)) throw Object.assign(new Error('Chat changed'), { code: 'thread_operation_canceled' });
-        return (set as any)(...args);
+        if (writer && nav !== session.host.navigationSeq()) throw Object.assign(new Error('Chat changed'), { code: 'thread_operation_canceled' });
+        return (target as any)(...args);
     }) as Setter;
+    const guardedSet = guard(set);
+    const guardedSessionSet = guard(session.store.set);
     try {
         if (writer?.admission) {
             // A second submission while the first is still reading admission
@@ -3973,9 +3938,9 @@ export async function withThreadWriter<T>(
                 const snapshot = await readAdmission(id);
                 assertCredentialGeneration(generation);
                 assertWriter(writer);
-                if (nav !== session.host.navigationSeq(get)) return false;
+                if (nav !== session.host.navigationSeq()) return false;
                 const previous = get(threadAdmissionAtom);
-                guardedSet(threadAdmissionAtom, snapshot);
+                guardedSessionSet(threadAdmissionAtom, snapshot);
                 if (
                     snapshot.activity.state === "active" ||
                     (previous?.threadId === id &&
@@ -3983,7 +3948,7 @@ export async function withThreadWriter<T>(
                         previous.unconfirmedRunId !== snapshot.tailRunId)
                 ) {
                     if (snapshot.activity.state !== "active")
-                        guardedSet(threadConflictAtom, "thread_tail_mismatch");
+                        guardedSessionSet(threadConflictAtom, "thread_tail_mismatch");
                     return false;
                 }
                 return true;
@@ -3995,10 +3960,10 @@ export async function withThreadWriter<T>(
                 if (writer.admission === admission) writer.admission = undefined;
             }
         }
-        return await operation(guardedSet);
+        return await operation(guardedSet, guardedSessionSet);
     } catch (error) {
         if ((error as { code?: string })?.code !== 'thread_operation_canceled') {
-            if (ownsWriter(writer) && nav === session.host.navigationSeq(get))
+            if (ownsWriter(writer) && nav === session.host.navigationSeq())
                 session.host.notify(set, {
                     type: "error",
                     title: "Chat could not be checked",

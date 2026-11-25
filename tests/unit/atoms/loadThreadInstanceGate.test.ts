@@ -223,6 +223,7 @@ import { currentMessageContentAtom, readerActionContextAtom } from '../../../rea
 import { threadRunsAtom } from '@beaver/agent-core/run-state/atoms';
 import { citationsAtom } from '@beaver/agent-core/citations/atoms';
 import { ApiError } from '@beaver/agent-core/types/apiErrors';
+import { installStoreRunSession } from '../../helpers/runSession';
 
 const CURRENT = { zoteroUserId: '111', zoteroLocalId: 'CURKEY' };
 const FOREIGN = { zoteroUserId: '999', zoteroLocalId: 'FOREIGNKEY' };
@@ -237,6 +238,7 @@ describe('loadThreadAtom instance-mismatch gate', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         store = createStore();
+        installStoreRunSession(store);
         getPrefMock.mockReturnValue(true); // statefulChat
         currentZoteroInstanceRefMock.mockReturnValue(CURRENT);
         confirmMock.mockReturnValue(true);
@@ -463,6 +465,7 @@ describe('finished-chat staged loading', () => {
     const request = () => ({ user_id: 'u1', threadId: nextThreadId(), threadIdentity: CURRENT, canCommit: () => true });
     const destination = () => {
         const store = createStore();
+        installStoreRunSession(store);
         store.set(currentThreadIdAtom, 'destination');
         store.set(currentMessageContentAtom, 'keep me');
         return store;
@@ -605,6 +608,7 @@ describe('committed hydration while replacement navigation is pending', () => {
         ['guarded refusal', false], ['guarded refusal', true],
     ] as const)('retains coherent history after %s (hydration finishes first: %s)', async (outcome, hydrationFirst) => {
         const store = createStore();
+        installStoreRunSession(store);
         store.set(threadRunsAtom, [{ id: 'previous-chat-run' }] as any);
         store.set(citationsAtom, [{ id: 'previous-chat-citation' }] as any);
         const committedId = nextThreadId();
@@ -652,6 +656,7 @@ describe('committed hydration while replacement navigation is pending', () => {
 
     it.each(['ordinary', 'guarded'] as const)('rejects late hydration once a %s replacement commits', async kind => {
         const store = createStore();
+        installStoreRunSession(store);
         let finishHydration!: (value: unknown) => void;
         getThreadRunsMock.mockReturnValueOnce(new Promise(resolve => { finishHydration = resolve; }));
         const oldId = nextThreadId();

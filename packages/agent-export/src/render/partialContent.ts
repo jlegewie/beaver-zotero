@@ -1,13 +1,19 @@
 /**
+ * Invisible characters removed from model text, where they can split a
+ * citation tag and keep it from being recognized. A zero-width non-joiner or
+ * joiner directly after an Arabic-script letter is spelling, not noise
+ * (the Persian word for "gives" has one between its two halves), so it stays.
+ */
+const INVISIBLE_CHARACTERS = /(?<!(?=\p{Script=Arabic})\p{L}\p{M}*)[\u200C\u200D]|[\u200B\uFEFF\u00AD]/gu;
+
+/**
  * Remove or complete incomplete markdown fragments that commonly appear while
  * model text is still streaming.
  */
 export function processPartialContent(content: string, exportRendering: boolean): string {
     let processed = content;
 
-    processed = exportRendering
-        ? processed.normalize("NFC").replace(/[\u200B-\u200D\uFEFF\u00AD]/g, '')
-        : processed.normalize("NFKC").replace(/[\u200B-\u200D\uFEFF\u00AD]/g, '');
+    processed = processed.normalize(exportRendering ? "NFC" : "NFKC").replace(INVISIBLE_CHARACTERS, '');
 
     const boldMarkers = (processed.match(/\*\*/g) || []).length;
     if (boldMarkers % 2 === 1 && !processed.endsWith('**')) {

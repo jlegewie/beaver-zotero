@@ -74,7 +74,8 @@ import {
 import { agentService } from '@beaver/agent-core/transport/agentService';
 import { logger } from '@beaver/agent-core/platform/logger';
 import type { AgentRun } from '@beaver/agent-core/agents/types';
-import { flushPendingPartEvents } from '../../utils/streamingPartQueue';
+import { flushRunProjection } from '../../runtime/windowRunSession';
+import { runSessionStore } from '../../agentRuns/runSession';
 import { admissionUnreachableAtom, threadAdmissionAtom } from '../../runtime/threadAdmission';
 import {
     closeWSConnectionAtom,
@@ -158,9 +159,9 @@ function serializeApproval(a: PendingApproval) {
 
 /** Snapshot of thread/run/approval identity — the return shape of /current-ids. */
 function currentIds() {
-    // See getJotaiState: apply the frame-queued parts so the snapshot matches
+    // See getJotaiState: apply the streamed text not rendered yet, so the snapshot matches
     // what has actually streamed in.
-    flushPendingPartEvents();
+    flushRunProjection();
     const activeRun = store.get(activeRunAtom);
     const runs = store.get(threadRunsAtom);
     const approvals: Map<string, PendingApproval> = store.get(pendingApprovalsAtom);
@@ -570,7 +571,7 @@ export async function handleTestApproveActionHttpRequest(request: any) {
             userInstructions: request?.userInstructions ?? null,
         });
         // As the card's buttons do once they send the answer.
-        store.set(removePendingApprovalAtom, actionId);
+        runSessionStore().set(removePendingApprovalAtom, actionId);
     }
 
     let settle: SettleReason | null = null;
@@ -691,7 +692,7 @@ export async function handleTestTableCardHttpRequest(request: any) {
     draft = { ...draft, step: 'columns' };
     const drafts = new Map(store.get(tableCardDraftsAtom));
     drafts.set(card.card_id, draft);
-    store.set(tableCardDraftsAtom, drafts);
+    runSessionStore().set(tableCardDraftsAtom, drafts);
     const prices = await Zotero.Beaver.tableFills?.pricing().catch(() => null) ?? null;
     const cost = draftCost(draft, card, prices);
     if (request?.costOnly === true) return { ok: true, cardId, scope: card.scope, cost, ...currentIds() };
@@ -1041,7 +1042,7 @@ function summarizeRun(run: AgentRun) {
  * check that a write was applied exactly once.
  */
 export async function handleTestRunSnapshotHttpRequest(request: any) {
-    flushPendingPartEvents();
+    flushRunProjection();
     const runs = [...store.get(threadRunsAtom)];
     const active = store.get(activeRunAtom);
     if (active && !runs.some((run) => run.id === active.id)) runs.push(active);

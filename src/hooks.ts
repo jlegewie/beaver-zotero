@@ -11,6 +11,7 @@ import { cleanupReaderToolbarMenu, initReaderToolbarMenu } from "./modules/reade
 import { cleanupNoteEditorExportMenu, initNoteEditorExportMenu } from "./modules/noteEditorExportMenu";
 import { cleanupContextMenus, initContextMenus } from "./modules/zoteroContextMenu";
 import { attachTableOpenLabels, detachTableOpenLabels } from "./modules/tableOpenMenuLabel";
+import { attachMenuIntegrityCheck, MENU_INTEGRITY_CHECKS_ENABLED } from "./modules/zoteroMenuIntegrity";
 import {
     registerTablesApi,
     unregisterTablesApi
@@ -601,6 +602,7 @@ async function onMainWindowLoad(win: Window): Promise<void> {
 
     BeaverUIFactory.registerChatPanel(win);
     attachTableOpenLabels(win, (ref) => openTable(ref, { openIn: 'window' }));
+    if (MENU_INTEGRITY_CHECKS_ENABLED) addon.runtime.addWindowCleanup(runtime, attachMenuIntegrityCheck(win));
 
     // Tabs a cold start's session restore lost to a saved Beaver tab, then
     // the Beaver tabs a quit, plugin reload or last-window close left for this

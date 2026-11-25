@@ -52,7 +52,7 @@ const defaultArgs = JSON.stringify({
   code: 'return { version: Zotero.version, httpPort: Zotero.Server.port, hasBeaver: !!Zotero.Beaver };',
 });
 
-const child = spawn('npx', ['-y', '@introfini/mcp-server-zotero-dev'], {
+const child = spawn('npx', ['-y', '@introfini/mcp-server-zotero-dev@1.1.5'], {
   env: { ...process.env, ZOTERO_RDP_PORT: String(rdpPort) },
   stdio: ['pipe', 'pipe', 'inherit'],
 });

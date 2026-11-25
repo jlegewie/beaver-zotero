@@ -30,6 +30,7 @@ import { logger } from '@beaver/agent-core/platform/logger';
 import { getPref } from '../../src/utils/prefs';
 import { store } from '../store';
 import { pendingApprovalsAtom } from '../agents/agentActions';
+import { runSessionStore } from '../agentRuns/runSession';
 import { sendApprovalResponseAtom } from '../atoms/agentRunAtoms';
 import { buildPreviewableEditOperations } from './editNotePreviewOperations';
 import { resolveLibraryRef } from '../../src/utils/libraryIdentity';
@@ -107,7 +108,9 @@ export function updateDiffPreviewForNote(libraryId: number, zoteroKey: string): 
     if (!isDiffPreviewLive()) return;
     const store = getStore();
     const noteKey = makeNoteKey(libraryId, zoteroKey);
-    const allApprovals: Map<string, any> = store.get(pendingApprovalsAtom);
+    // The session's, not the window's copy: this runs while an approval is
+    // being added or removed, before the window has the change.
+    const allApprovals: Map<string, any> = runSessionStore().get(pendingApprovalsAtom);
 
     const edits: EditOperation[] = [];
     for (const [, pa] of allApprovals) {
@@ -162,7 +165,8 @@ async function handleBannerAction(action: string): Promise<void> {
     // then batch-remove from the map in one update. Using removePendingApprovalAtom
     // per item would trigger updateDiffPreviewForNote on each removal, which
     // re-shows the preview for the remaining (already-handled) edits.
-    const allApprovals: Map<string, any> = store.get(pendingApprovalsAtom);
+    const chat = runSessionStore();
+    const allApprovals: Map<string, any> = chat.get(pendingApprovalsAtom);
     const editNoteIds: string[] = [];
     for (const [, pa] of allApprovals) {
         if (pa.actionType !== 'edit_note' && pa.actionType !== 'edit_note_batch') continue;
@@ -176,13 +180,18 @@ async function handleBannerAction(action: string): Promise<void> {
         editNoteIds.push(pa.actionId);
     }
     if (editNoteIds.length > 0) {
-        store.set(pendingApprovalsAtom, (prev: Map<string, any>) => {
+        chat.set(pendingApprovalsAtom, (prev: Map<string, any>) => {
             const next = new Map(prev);
             for (const id of editNoteIds) next.delete(id);
             return next;
         });
     }
     logger(`diffPreviewCoordinator: banner ${action} — ${editNoteIds.length} edit(s)`, 1);
+}
+
+/** The preview has ended: no note is previewed any more. */
+export function clearDiffPreviewNoteKey(): void {
+    getStore().set(diffPreviewNoteKeyAtom, null);
 }
 
 // Register the banner handler at module load

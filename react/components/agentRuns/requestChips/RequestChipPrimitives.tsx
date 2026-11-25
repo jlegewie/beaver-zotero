@@ -147,7 +147,7 @@ function ChipShell({
             ) : (
                 icon
             )}
-            <span className={`truncate${invalid ? ' font-color-red' : ''}`}>{label}</span>
+            <span className={`truncate${invalid ? ' font-color-red' : ''}`} dir="auto">{label}</span>
             {trailing}
         </ChipButton>
     );

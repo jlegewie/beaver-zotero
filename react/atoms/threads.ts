@@ -14,7 +14,8 @@ import {
     userScrolledAtom,
 } from "./ui";
 
-import { citationsAtom, citationMapAtom, processCitationsAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from "@beaver/agent-core/citations/atoms";
+import { citationsAtom, citationMapAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from "@beaver/agent-core/citations/atoms";
+import { runSessionStore } from "../agentRuns/runSession";
 import { maybeShowCitationTipAtom } from "./citationTip";
 import { preloadPageLabelsForCitations } from "../utils/pageLabels";
 import { agentService } from "@beaver/agent-core/transport/agentService";
@@ -246,11 +247,12 @@ async function cancelActiveRunIfNeeded(
     parkRunId: string | null = null,
 ): Promise<void> {
     const hadActiveWork = get(isWSChatPendingAtom) || get(activeRunAtom);
+    const chat = runSessionStore();
     // Navigation revokes socket callbacks, so cleanup must be synchronous and
     // complete even when the connection's close notification is ignored.
     set(abandonActiveRunLocallyAtom);
-    set(activeRunAtom, null);
-    set(clearParkedAnswersAtom);
+    chat.set(activeRunAtom, null);
+    chat.set(clearParkedAnswersAtom);
 
     if (parkRunId) {
         // The run is waiting only on cards: it parks, and they stay
@@ -262,15 +264,15 @@ async function cancelActiveRunIfNeeded(
         // run parked: refetch them again so they show the chat as waiting.
         if (outcome === 'ended' || outcome === 'sent') Zotero.Beaver?.threads?.invalidateViews();
         if (!isCurrent()) return;
-        set(isWSConnectedAtom, false);
-        set(isWSReadyAtom, false);
+        chat.set(isWSConnectedAtom, false);
+        chat.set(isWSReadyAtom, false);
         return;
     }
 
     if (leaveRunId && agentService.leaveRun(leaveRunId)) {
         logger(`cancelActiveRunIfNeeded: Leaving run ${leaveRunId} to the server after it lost its connection`, 1);
-        set(isWSConnectedAtom, false);
-        set(isWSReadyAtom, false);
+        chat.set(isWSConnectedAtom, false);
+        chat.set(isWSReadyAtom, false);
         return;
     }
 
@@ -279,8 +281,8 @@ async function cancelActiveRunIfNeeded(
         // Cancel the WebSocket connection
         await agentService.cancel();
         if (!isCurrent()) return;
-        set(isWSConnectedAtom, false);
-        set(isWSReadyAtom, false);
+        chat.set(isWSConnectedAtom, false);
+        chat.set(isWSReadyAtom, false);
     }
 }
 
@@ -350,19 +352,20 @@ export const newThreadAtom = atom(
 
             if (!isCurrent()) return;
             const isLibraryTab = get(isLibraryTabAtom);
-            set(currentThreadIdAtom, null);
-            set(currentThreadNameAtom, null);
+            const chat = runSessionStore();
+            chat.set(currentThreadIdAtom, null);
+            chat.set(currentThreadNameAtom, null);
 
             // Clear agent-based atoms
-            set(threadRunsAtom, []);
-            set(activeRunAtom, null);
+            chat.set(threadRunsAtom, []);
+            chat.set(activeRunAtom, null);
             set(threadAgentActionsAtom, []);
-            set(clearAllPendingApprovalsAtom);
-            set(clearAllPendingQuestionsAtom);
-            set(clearAllPendingCreditConfirmationsAtom);
-            set(clearAllPendingBatchApprovalsAtom);
-            set(clearAllPendingTableCardsAtom);
-            set(clearParkedAnswersAtom);
+            chat.set(clearAllPendingApprovalsAtom);
+            chat.set(clearAllPendingQuestionsAtom);
+            chat.set(clearAllPendingCreditConfirmationsAtom);
+            chat.set(clearAllPendingBatchApprovalsAtom);
+            chat.set(clearAllPendingTableCardsAtom);
+            chat.set(clearParkedAnswersAtom);
 
             set(isWebSearchEnabledAtom, false);
 
@@ -372,7 +375,7 @@ export const newThreadAtom = atom(
             set(currentMessageViewsAtom, []);
             set(currentMessageExternalFilesAtom, []);
             set(removePopupMessagesByTypeAtom, ['items_summary']);
-            set(citationsAtom, []);
+            chat.set(citationsAtom, []);
             set(resetCitationMarkersAtom);
             resetThreadSelectorCaches();
             if (!options?.preserveDraft) set(clearComposerAtom);
@@ -476,6 +479,10 @@ export const loadThreadAtom = atom(
             : get(threadLoadRequestSeqAtom) === request &&
                 (!canCommit || canCommit()) && get(threadNavigationSeqAtom) === previousNavigation;
         const liveSet = set;
+        // The chat's state is written to the run session's store, the
+        // window's own state to `set`.
+        const chat = runSessionStore();
+        let chatSet = chat.set;
         // Queue writes, including action atoms, while hydration can still fail.
         // No destination state is replaced until the final admission/draft check.
         const staged: Array<() => void> = [];
@@ -483,6 +490,9 @@ export const loadThreadAtom = atom(
             set = ((...args: any[]) => {
                 staged.push(() => (liveSet as any)(...args));
             }) as typeof set;
+            chatSet = ((...args: any[]) => {
+                staged.push(() => (chat.set as any)(...args));
+            }) as typeof chatSet;
         }
         // Hydration callbacks can finish after this navigation is superseded.
         const guardedSet = ((...args: any[]) => isCurrent() ? (set as any)(...args) : undefined) as typeof set;
@@ -576,20 +586,20 @@ export const loadThreadAtom = atom(
             set(userScrolledAtom, false);
             set(isAtBottomAtom, true);
             // Set the current thread ID and name
-            if (canCommit) set(activeRunAtom, null);
-            set(currentThreadIdAtom, threadId);
-            set(currentThreadNameAtom, resolvedName);
+            if (canCommit) chatSet(activeRunAtom, null);
+            chatSet(currentThreadIdAtom, threadId);
+            chatSet(currentThreadNameAtom, resolvedName);
             set(clearExternalReferenceCacheAtom);
             if (!preserveDraft) set(isWebSearchEnabledAtom, false);
             set(resetCitationMarkersAtom);
 
             // Clear all pending approvals/questions when loading a different thread
-            set(clearAllPendingApprovalsAtom);
-            set(clearAllPendingQuestionsAtom);
-            set(clearAllPendingCreditConfirmationsAtom);
-            set(clearAllPendingBatchApprovalsAtom);
-            set(clearAllPendingTableCardsAtom);
-            set(clearParkedAnswersAtom);
+            chatSet(clearAllPendingApprovalsAtom);
+            chatSet(clearAllPendingQuestionsAtom);
+            chatSet(clearAllPendingCreditConfirmationsAtom);
+            chatSet(clearAllPendingBatchApprovalsAtom);
+            chatSet(clearAllPendingTableCardsAtom);
+            chatSet(clearParkedAnswersAtom);
             // Legacy non-stateful path: fetch the name from the local DB when
             // not provided (the stateful path already resolved it above).
             const threadNamePromise = !resolvedName && !statefulChat
@@ -628,8 +638,8 @@ export const loadThreadAtom = atom(
 
             if (!isCurrent()) return false;
             if (canCommit && activity.state !== "idle") return false;
-            setAdmission(set, threadId, tailRunId, activity);
-            set(threadConflictAtom, null);
+            setAdmission(chatSet, threadId, tailRunId, activity);
+            chatSet(threadConflictAtom, null);
             // Protocol deep-links can request a run that does not exist in the target thread.
             // Clear the pending scroll target deterministically once thread data is loaded.
             const pendingRunId = get(pendingScrollToRunAtom);
@@ -687,8 +697,7 @@ export const loadThreadAtom = atom(
                 }
 
                 // Update citation state (synchronous: markers + citation tip)
-                set(citationsAtom, citationMetadata);
-                set(processCitationsAtom);
+                chatSet(citationsAtom, citationMetadata);
                 set(maybeShowCitationTipAtom);
 
                 // Preload PDF page labels in the background so subsequent
@@ -706,9 +715,9 @@ export const loadThreadAtom = atom(
                 // in the store while this load ran, would populate them again.
                 if (canCommit) staged.push(resetThreadSelectorCaches);
                 else resetThreadSelectorCaches();
-                set(threadRunsAtom, processedRuns);
+                chatSet(threadRunsAtom, processedRuns);
                 // The cards of a run that parked waiting on the user.
-                set(syncParkedCardsAtom);
+                chatSet(syncParkedCardsAtom);
 
                 // Reconcile toolcall_id mismatches between REST API and model messages
                 if (agent_actions && agent_actions.length > 0) {
@@ -783,9 +792,9 @@ export const loadThreadAtom = atom(
                 // No runs found, clear state
                 if (canCommit) staged.push(resetThreadSelectorCaches);
                 else resetThreadSelectorCaches();
-                set(threadRunsAtom, []);
+                chatSet(threadRunsAtom, []);
                 set(threadAgentActionsAtom, []);
-                set(citationsAtom, []);
+                chatSet(citationsAtom, []);
             }
 
             // Resolve thread name if fetched asynchronously
@@ -793,7 +802,7 @@ export const loadThreadAtom = atom(
                 const fetchedName = await threadNamePromise;
                 if (!isCurrent()) return false;
                 if (fetchedName) {
-                    set(currentThreadNameAtom, fetchedName);
+                    chatSet(currentThreadNameAtom, fetchedName);
                 }
             }
             if (canCommit) {
@@ -811,12 +820,12 @@ export const loadThreadAtom = atom(
                 // See the identity fetch above: a 404 here is a deletion made
                 // on another device.
                 Zotero.Beaver.threads.markThreadDeleted(threadId);
-                set(currentThreadIdAtom, null);
+                chatSet(currentThreadIdAtom, null);
                 if (!canCommit) resetThreadSelectorCaches();
-                set(threadRunsAtom, []);
-                set(activeRunAtom, null);
+                chatSet(threadRunsAtom, []);
+                chatSet(activeRunAtom, null);
                 set(threadAgentActionsAtom, []);
-                set(citationsAtom, []);
+                chatSet(citationsAtom, []);
             } else {
                 console.error('Error loading thread:', error);
             }
@@ -831,11 +840,12 @@ export const loadThreadAtom = atom(
             liveSet(threadNavigationSeqAtom, navigation);
             staged.forEach(apply => apply());
             set = liveSet;
+            chatSet = chat.set;
             if (!preserveDraft) void BeaverTemporaryAnnotations.cleanupAll().catch(error => {
                 logger(`loadThreadAtom: Error cleaning up temporary annotations: ${error}`);
             });
         }
-        if (loaded) set(viewedHistoryRevisionAtom, loadedHistoryRevision);
+        if (loaded) chatSet(viewedHistoryRevisionAtom, loadedHistoryRevision);
         if (preserveDraft || !loaded) return loaded;
         // Clear sources for now
         set(currentMessageItemsAtom, []);

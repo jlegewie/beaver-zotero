@@ -19,6 +19,7 @@
  */
 
 import { store } from '../../store';
+import { runSessionStore } from '../../agentRuns/runSession';
 import { activeRunAtom, threadRunsAtom } from '@beaver/agent-core/run-state/atoms';
 import { batchProgressAtom } from '../../atoms/agentRunAtoms';
 import { isRunActive } from '@beaver/agent-core/agents/types';
@@ -119,7 +120,7 @@ export async function handleBatchProgressPreview(
     const population = body?.population && typeof body.population === 'object' ? body.population : null;
     const runs = withoutPreview(store.get(threadRunsAtom) as AgentRun[]);
     const staged = previewRun(stamp, runStatus, items, population);
-    store.set(threadRunsAtom, [...runs, staged]);
+    runSessionStore().set(threadRunsAtom, [...runs, staged]);
 
     // Report what each surface draws, not what it was handed.
     const groups = selectBatchPanelGroups(store.get(batchProgressAtom));
@@ -145,6 +146,6 @@ export async function handleBatchProgressPreview(
 /** Remove the staged stamp. */
 export async function handleBatchProgressClear(): Promise<{ ok: boolean }> {
     const runs = withoutPreview(store.get(threadRunsAtom) as AgentRun[]);
-    store.set(threadRunsAtom, runs);
+    runSessionStore().set(threadRunsAtom, runs);
     return { ok: true };
 }

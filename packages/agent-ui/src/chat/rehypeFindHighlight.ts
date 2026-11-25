@@ -1,19 +1,5 @@
 import { FIND_HIT_ATTR, FIND_HIT_CLASS, findMatchRanges, type FindQuery } from './findContext';
-
-/**
- * The hast shapes this transformer touches. `@types/hast` is deliberately not
- * available here — the package pins its ambient types to react + react-dom — so
- * the handful of fields used are declared locally. One permissive interface
- * covers roots (`type: 'root'`), elements (`type: 'element'`) and text nodes
- * (`type: 'text'`).
- */
-interface HastNode {
-    type: string;
-    tagName?: string;
-    value?: string;
-    properties?: Record<string, unknown>;
-    children?: HastNode[];
-}
+import { classNames, type HastNode } from './hast';
 
 /** Class-name substrings whose subtrees must never be marked. */
 const SKIPPED_CLASS_PARTS = ['katex', 'math'];
@@ -48,14 +34,6 @@ function isSkipped(node: HastNode): boolean {
     return classNames(node).some((name) =>
         SKIPPED_CLASS_PARTS.some((part) => name.includes(part))
     );
-}
-
-/** Element class names, whether hast stored them as an array or a string. */
-function classNames(node: HastNode): string[] {
-    const className = node.properties?.className;
-    if (Array.isArray(className)) return className.map((name) => String(name));
-    if (typeof className === 'string') return className.split(/\s+/);
-    return [];
 }
 
 /** Recursively split the text nodes below `parent` on find matches. */

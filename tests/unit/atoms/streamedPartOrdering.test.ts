@@ -2,14 +2,13 @@ import { setCredentialAdapter } from '@beaver/agent-core/transport/credentials';
 /**
  * Ordering between streamed parts and everything else on the socket.
  *
- * Part events are buffered for an animation frame before they reach
- * `activeRunAtom` (see `streamingPartQueue`), so every other callback has to
- * apply that buffer before it reads or writes run state. A tool return, a run
- * completing, or an error that ran ahead of the buffer would archive a run
- * missing the text the reader had already watched arrive.
+ * The session applies each part as it arrives; the window renders streamed
+ * text once per animation frame (see `runProjection`). Every other change
+ * reaches the window at once, together with the text that streamed before it,
+ * so a run completing, a card, or a stop never shows ahead of that text.
  *
- * The frame is never allowed to run here: anything these tests observe in the
- * run got there because a callback flushed the queue, not because time passed.
+ * The frame is never allowed to run here: anything the window shows got there
+ * because an urgent change applied it, not because time passed.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -73,8 +72,11 @@ import type {
 } from '@beaver/agent-core/protocol/agentProtocol';
 import type { AgentRun } from '@beaver/agent-core/agents/types';
 import { activeRunAtom, threadRunsAtom } from '@beaver/agent-core/run-state/atoms';
+import { isWSReadyAtom } from '../../../react/agentRuns/runEngine';
 import { abandonActiveRunLocallyAtom, createWSCallbacks } from '../../../react/atoms/agentRunAtoms';
 import { store } from '../../../react/store';
+import { flushRunProjection } from '../../../react/runtime/windowRunSession';
+import { chatStore } from '../../helpers/runSession';
 
 /** A window whose animation frames never run. */
 const frozenWindow = {
@@ -115,28 +117,34 @@ describe('streamed parts and the other WebSocket callbacks', () => {
     let callbacks: ReturnType<typeof createWSCallbacks>;
 
     beforeEach(() => {
-        callbacks = createWSCallbacks(store.set);
+        callbacks = createWSCallbacks(chatStore().set);
         vi.mocked(Zotero.getMainWindow).mockReturnValue(frozenWindow as unknown as Window);
-        store.set(threadRunsAtom, []);
-        store.set(activeRunAtom, streamingRun());
+        chatStore().set(threadRunsAtom, []);
+        chatStore().set(activeRunAtom, streamingRun());
+        // A run set up from scratch is not more of the previous test's stream.
+        flushRunProjection();
     });
 
-    it('holds a streamed part until something flushes it', async () => {
+    it('applies a part to the session at once and shows it on the next frame', async () => {
         await callbacks.onPart(textPart('Half an ans'));
 
+        expect(streamedText(chatStore().get(activeRunAtom))).toBe('Half an ans');
         expect(streamedText(store.get(activeRunAtom))).toBeUndefined();
     });
 
-    it('applies queued parts before a tool call progress event', async () => {
+    it('shows the streamed text together with the next change that is not streaming', async () => {
         await callbacks.onPart(textPart('Half an ans'));
-
         callbacks.onToolCallProgress({
             event: 'tool_call_progress',
             run_id: 'run-1',
             tool_call_id: 'call-1',
             progress: 'searching',
         } as WSToolCallProgressEvent);
+        expect(streamedText(store.get(activeRunAtom))).toBeUndefined();
 
+        callbacks.onReady?.({} as never);
+
+        expect(store.get(isWSReadyAtom)).toBe(true);
         expect(streamedText(store.get(activeRunAtom))).toBe('Half an ans');
     });
 
@@ -199,7 +207,7 @@ describe('streamed parts and the other WebSocket callbacks', () => {
             progress: 'searching',
         } as WSToolCallProgressEvent);
 
-        expect(streamedText(store.get(activeRunAtom))).toBe('The whole answer.');
+        expect(streamedText(chatStore().get(activeRunAtom))).toBe('The whole answer.');
     });
 });
 

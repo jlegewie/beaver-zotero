@@ -33,6 +33,7 @@ import { jobWaitAtom } from './jobWait';
 import { leaveJobWait } from './jobLeave';
 import { isThreadParkedAtom } from './parkedRuns';
 import { watchChatFills } from './tableChatFills';
+import { runSessionStore } from '../agentRuns/runSession';
 
 // ---------------------------------------------------------------------------
 // The composer's Stop
@@ -96,7 +97,7 @@ export const runningChatJobsAtom = selectAtom(chatJobsAtom, (jobs) => jobs, same
  * Returns false when Stop should stop the run instead: a live run (a resume
  * can run while the chat reads as parked) stops its fills as it stops.
  */
-export const stopChatJobsAtom = atom(null, (get, set): boolean => {
+export const stopChatJobsAtom = atom(null, (get): boolean => {
     if (!get(isThreadParkedAtom) || isRunActive(get(activeRunAtom))) return false;
     const jobs = get(runningChatJobsAtom);
     if (!jobs.length) return false;
@@ -104,7 +105,7 @@ export const stopChatJobsAtom = atom(null, (get, set): boolean => {
         logger(`jobCalls: stopping fill ${job.jobId} from the composer`, 1);
         Zotero.Beaver.tableFills?.stop(job.jobId);
     }
-    set(jobWaitAtom, null);
+    runSessionStore().set(jobWaitAtom, null);
     return true;
 });
 
@@ -127,7 +128,7 @@ export function watchJobCalls(): void {
         const unsubscribeWaits = agentService.onJobWait((wait) => {
             const threadId = wait.threadId ?? store.get(currentThreadIdAtom);
             if (!threadId || threadId !== store.get(currentThreadIdAtom)) return;
-            store.set(jobWaitAtom, { threadId, runId: wait.runId, toolCallId: wait.toolCallId, jobId: wait.jobId });
+            runSessionStore().set(jobWaitAtom, { threadId, runId: wait.runId, toolCallId: wait.toolCallId, jobId: wait.jobId });
         });
         Zotero.Beaver.runtime.addWindowCleanup(runtime, unsubscribeWaits);
         // The fill this window waits on may have ended, or its run's park
