@@ -205,7 +205,7 @@ describe('the menu entries', () => {
         const item = menu.menus[0];
         expect(item).toMatchObject({ l10nID: 'beaver-create-table', icon: 'chrome://beaver/content/icons/table.svg' });
 
-        const { own, menuElem } = popupWith({ className: 'zotero-menuitem-create-report' });
+        const { own, menuElem } = popupWith({ className: 'zotero-menuitem-removeLibrary' });
         const one = menuState();
         item.onShowing(null, { ...one, menuElem, collectionTreeRows: [collectionRow('COLL0001', 'Cash')] });
         expect(own.nextElementSibling).toBe(menuElem);
@@ -228,6 +228,77 @@ describe('the menu entries', () => {
         item.onCommand({ target: { ownerDocument: { defaultView: win } } }, { collectionTreeRows: [collectionRow('COLL0001', 'Cash', 1, 7)] });
         await vi.waitFor(() => expect(mocks.createTable).toHaveBeenCalled());
         expect(mocks.createTable.mock.calls[0][0]).toMatchObject({ libraryID: 1, collectionID: 7, title: 'Cash' });
+    });
+
+    it("leaves Zotero's collection menu entries their own ids and commands", () => {
+        // The end of Zotero's collection menu. Each time it opens, Zotero gives
+        // the n-th child the id of its n-th option, then MenuManager appends the
+        // plugin entries and runs their onShowing.
+        const zoteroEntries = [
+            ['exportFile', 'zotero-menuitem-export'],
+            ['loadReport', 'zotero-menuitem-create-report'],
+            ['emptyTrash', 'zotero-menuitem-delete-from-lib'],
+            ['removeLibrary', 'zotero-menuitem-removeLibrary'],
+        ];
+        const popup = document.createElement('div');
+        for (const [, className] of zoteroEntries) {
+            const entry = document.createElement('div');
+            entry.className = className;
+            popup.append(entry);
+        }
+        const separator = document.createElement('div');
+        separator.className = 'zotero-custom-menu-item zotero-custom-menu-group-separator';
+        const menuElem = document.createElement('div');
+        menuElem.className = 'zotero-custom-menu-item';
+        const numberZoteroEntries = () => zoteroEntries.forEach(([id], i) => { popup.children[i].id = id; });
+
+        initContextMenus();
+        const item = registered.find((m) => m.menuID === 'beaver-new-table-collection-menu').menus[0];
+        for (let opening = 0; opening < 3; opening++) {
+            numberZoteroEntries();
+            popup.append(separator, menuElem);
+            item.onShowing(null, { ...menuState(), menuElem, collectionTreeRows: [collectionRow('COLL0001', 'Cash')] });
+        }
+
+        for (const [id, className] of zoteroEntries) {
+            expect(popup.querySelector(`#${id}`)?.className).toBe(className);
+        }
+        expect(menuElem.id).toBe('');
+        expect(popup.querySelector('.zotero-menuitem-removeLibrary')?.nextElementSibling).toBe(menuElem);
+    });
+
+    it("removes Beaver's menu entries, the table entries included, when it shuts down", () => {
+        initContextMenus();
+        const menus = ['zotero-itemmenu', 'zotero-collectionmenu', 'menu_FilePopup'].map((id) => {
+            const popup = document.createElement('div');
+            popup.id = id;
+            document.body.append(popup);
+            return popup;
+        });
+        const entry = (popup: HTMLElement, l10nID: string) => {
+            const elem = document.createElement('div');
+            elem.className = 'zotero-custom-menu-item';
+            elem.setAttribute('data-l10n-id', l10nID);
+            popup.append(elem);
+            return elem;
+        };
+        const [itemMenu, collectionMenu, fileMenu] = menus;
+        const beaverEntries = [
+            entry(itemMenu, 'beaver-context-menu-submenu'),
+            entry(itemMenu, 'beaver-note-export-submenu'),
+            entry(collectionMenu, 'beaver-create-table'),
+            entry(fileMenu, 'beaver-new-table'),
+        ];
+        const otherPlugin = entry(collectionMenu, 'other-plugin-entry');
+        Z.getMainWindows = () => [window];
+        try {
+            cleanupContextMenus();
+            expect(beaverEntries.filter((elem) => elem.isConnected)).toEqual([]);
+            expect(otherPlugin.isConnected).toBe(true);
+        } finally {
+            delete Z.getMainWindows;
+            menus.forEach((popup) => popup.remove());
+        }
     });
 
     it('leaves the Beaver Actions submenu to actions', () => {
