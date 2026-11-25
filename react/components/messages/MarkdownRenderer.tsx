@@ -19,6 +19,7 @@ import { resolveObjectIdReference } from '@beaver/agent-core/identity/libraryRef
 import { parseItemLinkHref, type ItemLinkTarget } from '@beaver/agent-core/identity/itemLinks';
 import { useFindQuery } from '@beaver/agent-ui/chat/findContext';
 import { rehypeFindHighlight } from '@beaver/agent-ui/chat/rehypeFindHighlight';
+import { rehypeTextDirection } from '@beaver/agent-ui/chat/rehypeTextDirection';
 
 /**
  * Follow a link to a Zotero object. The object id is resolved here, at click
@@ -92,9 +93,11 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = React.memo(function Ma
     const rehypePlugins = React.useMemo(() => {
         // The note rules (Zotero math and endnotes) are the ones the note
         // renderer in the plugin realm uses, so an export matches a note write.
+        // Right-to-left text gets block directions on screen only: a note
+        // keeps the markup the note renderer in the plugin realm writes.
         const plugins: RehypePlugins = [
             ...markdownSanitizePlugins,
-            ...(exportRendering ? noteRehypePlugins : [rehypeKatex]),
+            ...(exportRendering ? noteRehypePlugins : [rehypeKatex, rehypeTextDirection]),
         ];
         // Always last. The transformer inserts markup the sanitize schema does
         // not allow, so sanitizing after it would strip the highlights, and it
