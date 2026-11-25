@@ -2,7 +2,6 @@
 'use strict';
 
 const React = require('react');
-const { element, string, object } = require('prop-types');
 
 const Icon = (props) => {
 	props = Object.assign({}, props);
@@ -12,13 +11,6 @@ const Icon = (props) => {
 	return <span {...props}></span>;
 };
 
-Icon.propTypes = {
-	children: element,
-	className: string,
-	name: string.isRequired,
-	style: object
-}
-
 const CSSIcon = (props) => {
 	props = Object.assign({}, props);
 	props.className = `icon icon-css icon-${props.name} ${props.className || ""}`;
@@ -27,25 +19,11 @@ const CSSIcon = (props) => {
 	return <span {...props}></span>;
 };
 
-CSSIcon.propTypes = {
-	children: element,
-	className: string,
-	name: string.isRequired,
-	style: object
-};
-
 const CSSItemTypeIcon = (props) => {
 	props = Object.assign({}, props);
 	let itemType = props.itemType;
 	delete props.itemType;
 	return <CSSIcon name="item-type" data-item-type={itemType} {...props} />;
-};
-
-CSSItemTypeIcon.propTypes = {
-	children: element,
-	className: string,
-	itemType: string.isRequired,
-	style: object
 };
 
 module.exports = { Icon, CSSIcon, CSSItemTypeIcon };

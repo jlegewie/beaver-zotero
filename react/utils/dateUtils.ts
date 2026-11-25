@@ -1,13 +1,11 @@
 import { format, isToday, isYesterday, isThisWeek, isThisMonth, parseISO } from 'date-fns';
-import { toZonedTime } from 'date-fns-tz';
 
 // Re-export date-fns functions
 export { isToday, isYesterday, isThisWeek, isThisMonth };
 
 /**
- * Converts a UTC date string to a local Date object
- * @param utcDateString - UTC date string (ISO format)
- * @returns Date object in local timezone
+ * Parses a date string (ISO 8601 or anything `Date` accepts). A `Date` is an
+ * instant; the date-fns helpers read it in the local time zone.
  */
 export function convertUTCToLocal(dateString: string): Date {
     // Handle both ISO strings and other date formats
@@ -23,9 +21,7 @@ export function convertUTCToLocal(dateString: string): Date {
         // Fallback to regular Date constructor
         date = new Date(dateString);
     }
-
-    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    return toZonedTime(date, timeZone);
+    return date;
 }
 
 /**

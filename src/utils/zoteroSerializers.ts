@@ -5,7 +5,6 @@ import { logger } from '@beaver/agent-core/platform/logger';
 import { AnnotationResultItem, NoteResultItem } from '@beaver/agent-core/protocol/agentProtocol';
 import type { ItemSearchResult } from '@beaver/agent-core/transport/clients/searchService';
 import { AttachmentDataHashedFields, AttachmentDataWithMimeType, AttachmentStub, BibliographicIdentifier, CollectionSummary, ItemData, ItemDataHashedFields, ItemStub, ItemSummary, ZoteroCollection, ZoteroCreator, ZoteroLibrary } from '@beaver/agent-core/types/zotero';
-import { v4 as uuidv4 } from 'uuid';
 import { getContentKind } from '../services/documentExtraction/attachmentResolution';
 import { skippedItemsManager } from '../services/skippedItemsManager';
 import { calculateObjectHash } from '../utils/hash';
@@ -408,7 +407,7 @@ export async function serializeItemSummary(item: Zotero.Item): Promise<ItemSumma
  */
 export function itemSearchResultFromZoteroItem(item: Zotero.Item): ItemSearchResult {
     return {
-        id: uuidv4(),
+        id: crypto.randomUUID(),
         library_id: item.libraryID,
         zotero_key: item.key,
         library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,

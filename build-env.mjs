@@ -1,11 +1,11 @@
 import { readFileSync } from "node:fs";
 import process from "node:process";
 import { URL } from "node:url";
-import dotenv from "dotenv";
+import { parseEnv } from "node:util";
 
 function readEnvironmentFile(name) {
     try {
-        return dotenv.parse(readFileSync(new URL(name, import.meta.url)));
+        return parseEnv(readFileSync(new URL(name, import.meta.url), "utf8"));
     } catch (error) {
         if (error.code !== "ENOENT") throw error;
         return {};
