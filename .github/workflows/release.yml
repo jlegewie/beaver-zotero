@@ -5,46 +5,75 @@ on:
     tags:
       - v**
 
-permissions:
-  contents: write
-  issues: write
-  pull-requests: write
+# Each job states the permissions it needs.
+permissions: {}
 
 jobs:
   release:
     runs-on: ubuntu-latest
-    env:
-      GITHUB_TOKEN: ${{ secrets.GitHub_TOKEN }}
-      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-      API_BASE_URL: ${{ secrets.API_BASE_URL }}
-      WEBAPP_BASE_URL: ${{ secrets.WEBAPP_BASE_URL }}
+    permissions:
+      contents: write # create the release, upload the XPI and update manifests
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # The changelog is built from the commits since the previous tag.
           fetch-depth: 0
+          # `zotero-plugin release` only talks to the GitHub API in CI; it never
+          # pushes.
+          persist-credentials: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
+          # No dependency cache in the release build.
+          package-manager-cache: false
 
+      # Install scripts are disabled by .npmrc; the release build needs none.
       - name: Install deps
-        run: npm install
+        run: npm ci
 
       - name: Build and verify XPI
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          API_BASE_URL: ${{ secrets.API_BASE_URL }}
+          WEBAPP_BASE_URL: ${{ secrets.WEBAPP_BASE_URL }}
         run: npm run build
 
+      # Rebuilds before publishing, so it needs the build configuration too.
       - name: Release to GitHub
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          API_BASE_URL: ${{ secrets.API_BASE_URL }}
+          WEBAPP_BASE_URL: ${{ secrets.WEBAPP_BASE_URL }}
         run: |
           NODE_ENV=production npm run release
           sleep 1s
 
-      - name: Notify release
-        uses: apexskier/github-release-commenter@v1
-        continue-on-error: true
+  # Separate job so the token that can comment never shares a runner with the
+  # dependency install and build.
+  notify:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write # comment on released issues
+      pull-requests: write # comment on released pull requests
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          comment-template: |
-            :rocket: _This ticket has been resolved in {release_tag}. See {release_link} for release notes._
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Notify release
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: .github/scripts/comment-released.sh

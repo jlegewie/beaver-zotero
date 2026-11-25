@@ -311,7 +311,7 @@ export const ReviewActionRow: React.FC<ReviewActionRowProps> = ({
                             }}
                         >
                             <span className="font-color-primary font-medium">{label}</span>
-                            {title && <span className="font-color-secondary ml-15">{title}</span>}
+                            {title && <span className="font-color-secondary ml-15" dir="auto">{title}</span>}
                         </div>
                         {unconfirmedNote && (
                             <span className="font-color-secondary text-sm" role="status">{unconfirmedNote}</span>

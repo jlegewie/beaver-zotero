@@ -6,15 +6,20 @@ on:
       - main
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   checks:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: npm
@@ -60,10 +65,12 @@ jobs:
     name: unit-tests (${{ matrix.shard }}/3)
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: npm
@@ -71,5 +78,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # better-sqlite3 backs the SQLite test doubles; see .npmrc.
+      - name: Build native dependencies
+        run: npm run rebuild:native
+
       - name: Unit tests
-        run: npx vitest run --shard=${{ matrix.shard }}/3
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: npx vitest run --shard="$SHARD/3"

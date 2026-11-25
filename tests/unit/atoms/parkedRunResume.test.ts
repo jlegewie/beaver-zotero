@@ -104,6 +104,7 @@ import { selectedModelAtom } from '../../../react/atoms/models';
 import { sessionAtom } from '../../../react/atoms/auth';
 import { jobWaitAtom } from '../../../react/atoms/jobWait';
 import { chatFillsAtom, recordChatFill } from '@beaver/agent-core/run-state/tableChatFills';
+import { chatStore } from '../../helpers/runSession';
 
 const THREAD = 'thread-1';
 
@@ -225,18 +226,18 @@ function resetChat(): void {
     isConnectedMock.mockReturnValue(true);
     store.set(sessionAtom, { user: { id: 'user-1' } } as any);
     store.set(selectedModelAtom, { id: 'model-1', name: 'Model', provider: 'test' } as any);
-    store.set(threadRunsAtom, []);
-    store.set(activeRunAtom, null);
-    store.set(currentThreadIdAtom, THREAD);
-    store.set(threadAdmissionAtom, { threadId: THREAD, tailRunId: null, activity: { state: 'idle', run_id: null } });
-    store.set(wsErrorAtom, null);
-    store.set(isWSChatPendingAtom, false);
-    store.set(pendingApprovalsAtom, new Map());
-    store.set(pendingQuestionsAtom, new Map());
-    store.set(pendingCreditConfirmationsAtom, new Map());
-    store.set(pendingTableCardsAtom, new Map());
-    store.set(tableCardDraftsAtom, new Map());
-    store.set(clearParkedAnswersAtom);
+    chatStore().set(threadRunsAtom, []);
+    chatStore().set(activeRunAtom, null);
+    chatStore().set(currentThreadIdAtom, THREAD);
+    chatStore().set(threadAdmissionAtom, { threadId: THREAD, tailRunId: null, activity: { state: 'idle', run_id: null } });
+    chatStore().set(wsErrorAtom, null);
+    chatStore().set(isWSChatPendingAtom, false);
+    chatStore().set(pendingApprovalsAtom, new Map());
+    chatStore().set(pendingQuestionsAtom, new Map());
+    chatStore().set(pendingCreditConfirmationsAtom, new Map());
+    chatStore().set(pendingTableCardsAtom, new Map());
+    chatStore().set(tableCardDraftsAtom, new Map());
+    chatStore().set(clearParkedAnswersAtom);
 }
 
 /** A live run that parks on two approvals (one never shown live) and a question. */
@@ -244,7 +245,7 @@ async function parkRun(): Promise<{ runId: string; callbacks: WSCallbacks }> {
     const connected = nextConnection();
     await store.set(sendWSMessageAtom, 'hello');
     const { callbacks } = await connected;
-    store.set(isWSReadyAtom, true);
+    chatStore().set(isWSReadyAtom, true);
     const runId = store.get(activeRunAtom)!.id;
     streamToolCalls(callbacks, runId, ['call-1', 'call-2', 'call-3']);
     callbacks.onDeferredApprovalRequest?.(approval('call-1').request as any);
@@ -275,7 +276,7 @@ describe('answering the cards of a parked run', () => {
         const resumed = nextConnection();
 
         store.set(sendApprovalResponseAtom, { actionId: 'action-call-1', approved: true });
-        store.set(removePendingApprovalAtom, 'action-call-1');
+        chatStore().set(removePendingApprovalAtom, 'action-call-1');
         const { request } = await resumed;
 
         expect(sendApprovalResponseMock).not.toHaveBeenCalled();
@@ -301,7 +302,7 @@ describe('answering the cards of a parked run', () => {
         await parkRun();
         const firstResume = nextConnection();
         store.set(sendApprovalResponseAtom, { actionId: 'action-call-1', approved: true });
-        store.set(removePendingApprovalAtom, 'action-call-1');
+        chatStore().set(removePendingApprovalAtom, 'action-call-1');
         const { callbacks } = await firstResume;
         const resumeRunId = store.get(activeRunAtom)!.id;
 
@@ -312,7 +313,7 @@ describe('answering the cards of a parked run', () => {
             answers: [{ item_id: 'q0', selected_option_ids: ['q0-o0'] }],
         });
         store.set(sendApprovalResponseAtom, { actionId: 'action-call-2', approved: false });
-        store.set(removePendingApprovalAtom, 'action-call-2');
+        chatStore().set(removePendingApprovalAtom, 'action-call-2');
         await Promise.resolve();
         expect(connectMock).toHaveBeenCalledTimes(2);
         expect(sendQuestionResponseMock).not.toHaveBeenCalled();
@@ -338,11 +339,11 @@ describe('answering the cards of a parked run', () => {
         await parkRun();
         const firstResume = nextConnection();
         store.set(sendApprovalResponseAtom, { actionId: 'action-call-1', approved: true });
-        store.set(removePendingApprovalAtom, 'action-call-1');
+        chatStore().set(removePendingApprovalAtom, 'action-call-1');
         const { callbacks } = await firstResume;
         const resumeRunId = store.get(activeRunAtom)!.id;
         store.set(sendApprovalResponseAtom, { actionId: 'action-call-2', approved: true });
-        store.set(removePendingApprovalAtom, 'action-call-2');
+        chatStore().set(removePendingApprovalAtom, 'action-call-2');
 
         const secondResume = nextConnection();
         await returnTool(callbacks, resumeRunId, 'call-1');
@@ -362,7 +363,7 @@ describe('answering the cards of a parked run', () => {
         const { runId } = await parkRun();
         const resumed = nextConnection();
         store.set(sendApprovalResponseAtom, { actionId: 'action-call-1', approved: true });
-        store.set(removePendingApprovalAtom, 'action-call-1');
+        chatStore().set(removePendingApprovalAtom, 'action-call-1');
         const { callbacks } = await resumed;
 
         callbacks.onError({ event: 'error', type: 'internal_error', message: 'boom', try_auto_resume: true } as any);
@@ -384,7 +385,7 @@ describe('answering the cards of a parked run', () => {
         streamToolCalls(callbacks, runId, ['call-1']);
         callbacks.onTableCardRequest?.(tableCard('call-1').request as any);
         const draft = { title: 'Edited title' } as any;
-        store.set(tableCardDraftsAtom, new Map([['card-call-1', draft]]));
+        chatStore().set(tableCardDraftsAtom, new Map([['card-call-1', draft]]));
         const card = store.get(pendingTableCardsAtom).get('card-call-1');
 
         await finish(callbacks, runId, parked([tableCard('call-1')]));
@@ -407,7 +408,7 @@ describe('answering the cards of a parked run', () => {
         await parkRun();
         const resumed = nextConnection();
         store.set(sendApprovalResponseAtom, { actionId: 'action-call-1', approved: true });
-        store.set(removePendingApprovalAtom, 'action-call-1');
+        chatStore().set(removePendingApprovalAtom, 'action-call-1');
         await resumed;
 
         // The parked run's other cards are on screen, but the resume waits on none of them yet.
@@ -452,7 +453,7 @@ describe('an answer given while the run parks', () => {
         const connected = nextConnection();
         await store.set(sendWSMessageAtom, 'hello');
         const { callbacks } = await connected;
-        store.set(isWSReadyAtom, true);
+        chatStore().set(isWSReadyAtom, true);
         const runId = store.get(activeRunAtom)!.id;
         streamToolCalls(callbacks, runId, ['call-1', 'call-3']);
         callbacks.onDeferredApprovalRequest?.(approval('call-1').request as any);
@@ -462,7 +463,7 @@ describe('an answer given while the run parks', () => {
 
     function approveLive(): void {
         store.set(sendApprovalResponseAtom, { actionId: 'action-call-1', approved: true });
-        store.set(removePendingApprovalAtom, 'action-call-1');
+        chatStore().set(removePendingApprovalAtom, 'action-call-1');
     }
 
     it('keeps an approval the run parks on waiting, and resumes the parked run with it', async () => {
@@ -597,9 +598,9 @@ describe('a resume waiting for the cards it shows again', () => {
         await parkRun();
         const resumed = nextConnection();
         store.set(sendApprovalResponseAtom, { actionId: 'action-call-1', approved: true });
-        store.set(removePendingApprovalAtom, 'action-call-1');
+        chatStore().set(removePendingApprovalAtom, 'action-call-1');
         const { callbacks } = await resumed;
-        store.set(isWSReadyAtom, true);
+        chatStore().set(isWSReadyAtom, true);
         return { callbacks, resumeRunId: store.get(activeRunAtom)!.id };
     }
 
@@ -675,7 +676,7 @@ describe('a resume waiting for the cards it shows again', () => {
 
         const resumed = nextConnection();
         store.set(sendApprovalResponseAtom, { actionId: 'action-call-1', approved: true });
-        store.set(removePendingApprovalAtom, 'action-call-1');
+        chatStore().set(removePendingApprovalAtom, 'action-call-1');
         const { callbacks: resumeCallbacks } = await resumed;
         store.set(sendTableCardResponseAtom, { type: 'table_card_response', card_id: 'card-call-2', approved: true } as any);
         expect([...store.get(parkedAnswerQueueAtom).keys()]).toEqual(['call-2']);
@@ -778,16 +779,16 @@ describe('parkableRunId', () => {
         connectMock.mockReset();
         isConnectedMock.mockReturnValue(true);
         store.set(sessionAtom, { user: { id: 'user-1' } } as any);
-        store.set(threadRunsAtom, []);
-        store.set(activeRunAtom, null);
-        store.set(currentThreadIdAtom, THREAD);
-        store.set(threadAdmissionAtom, { threadId: THREAD, tailRunId: null, activity: { state: 'idle', run_id: null } });
-        store.set(isWSChatPendingAtom, false);
-        store.set(pendingApprovalsAtom, new Map());
-        store.set(pendingQuestionsAtom, new Map());
-        store.set(pendingCreditConfirmationsAtom, new Map());
-        store.set(clearParkedAnswersAtom);
-        store.set(liveCardAnswersAtom, new Map());
+        chatStore().set(threadRunsAtom, []);
+        chatStore().set(activeRunAtom, null);
+        chatStore().set(currentThreadIdAtom, THREAD);
+        chatStore().set(threadAdmissionAtom, { threadId: THREAD, tailRunId: null, activity: { state: 'idle', run_id: null } });
+        chatStore().set(isWSChatPendingAtom, false);
+        chatStore().set(pendingApprovalsAtom, new Map());
+        chatStore().set(pendingQuestionsAtom, new Map());
+        chatStore().set(pendingCreditConfirmationsAtom, new Map());
+        chatStore().set(clearParkedAnswersAtom);
+        chatStore().set(liveCardAnswersAtom, new Map());
     });
 
     async function liveRunWaitingOnACard(): Promise<string> {
@@ -807,7 +808,7 @@ describe('parkableRunId', () => {
 
     it('does not park a run waiting on a credit confirmation too', async () => {
         await liveRunWaitingOnACard();
-        store.set(pendingCreditConfirmationsAtom, new Map([['confirmation-1', {} as any]]));
+        chatStore().set(pendingCreditConfirmationsAtom, new Map([['confirmation-1', {} as any]]));
 
         expect(parkableRunId(store.get)).toBeNull();
     });
@@ -849,7 +850,7 @@ describe('resuming with a fill result', () => {
         const connected = nextConnection();
         await store.set(sendWSMessageAtom, 'fill it');
         const { callbacks } = await connected;
-        store.set(isWSReadyAtom, true);
+        chatStore().set(isWSReadyAtom, true);
         const runId = store.get(activeRunAtom)!.id;
         streamToolCalls(callbacks, runId, ['call-1']);
         await finish(callbacks, runId, parked([fillJob('call-1')]));
@@ -873,7 +874,7 @@ describe('resuming with a fill result', () => {
 
     /** This window waits on the fill of `call-1`, and the fill ended (or, with `running`, runs on). */
     function waitOnFill(runId: string, threadId = store.get(currentThreadIdAtom)!, state: 'done' | 'running' = 'done') {
-        store.set(jobWaitAtom, { threadId, runId, toolCallId: 'call-1', jobId: 'job-1' });
+        chatStore().set(jobWaitAtom, { threadId, runId, toolCallId: 'call-1', jobId: 'job-1' });
         store.set(chatFillsAtom, recordChatFill(new Map(), {
             job_id: 'job-1',
             plan_id: 'plan-1',
@@ -905,7 +906,7 @@ describe('resuming with a fill result', () => {
         const connected = nextConnection();
         await store.set(sendWSMessageAtom, 'fill it');
         const { callbacks } = await connected;
-        store.set(isWSReadyAtom, true);
+        chatStore().set(isWSReadyAtom, true);
         const runId = store.get(activeRunAtom)!.id;
         streamToolCalls(callbacks, runId, ['call-1']);
         waitOnFill(runId);
@@ -924,12 +925,12 @@ describe('resuming with a fill result', () => {
         vi.useFakeTimers();
         try {
             // The server still holds the chat for the run that just parked.
-            store.set(threadConflictAtom, 'thread_busy');
+            chatStore().set(threadConflictAtom, 'thread_busy');
             requestJobResume();
             await vi.advanceTimersByTimeAsync(0);
             expect(connectMock).toHaveBeenCalledTimes(1);
             expect(store.get(jobWaitAtom)).not.toBeNull();
-            store.set(threadConflictAtom, null);
+            chatStore().set(threadConflictAtom, null);
             const resumed = nextConnection();
             await vi.advanceTimersByTimeAsync(1000);
             const { request } = await resumed;
@@ -946,7 +947,7 @@ describe('resuming with a fill result', () => {
         await Promise.resolve();
         waitOnFill(runId);
         // Stop clears the wait before the resume goes out.
-        store.set(jobWaitAtom, null);
+        chatStore().set(jobWaitAtom, null);
         requestJobResume();
         await Promise.resolve();
         waitOnFill(runId, 'another-thread');
@@ -960,11 +961,11 @@ describe('resuming with a fill result', () => {
         const connected = nextConnection();
         await store.set(sendWSMessageAtom, 'fill it');
         const { callbacks } = await connected;
-        store.set(isWSReadyAtom, true);
+        chatStore().set(isWSReadyAtom, true);
         const runId = store.get(activeRunAtom)!.id;
         streamToolCalls(callbacks, runId, ['call-1']);
         // The fill card was answered live; the call was then handed over to the fill.
-        store.set(liveCardAnswersAtom, new Map([['call-1', { answer: { type: 'table_card_response' } as any, parking: false }]]));
+        chatStore().set(liveCardAnswersAtom, new Map([['call-1', { answer: { type: 'table_card_response' } as any, parking: false }]]));
         await finish(callbacks, runId, parked([fillJob('call-1')]));
         await Promise.resolve();
         await Promise.resolve();

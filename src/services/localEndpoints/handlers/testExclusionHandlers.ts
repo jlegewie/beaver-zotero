@@ -26,8 +26,9 @@ function libraryIdToExcludedEntry(libraryId: number): ExcludedLibrary | null {
  * `{ action: 'get' }` returns the current excluded entries plus the resulting
  * searchable/local library ids. `{ action: 'set', exclude_library_ids: [...] }`
  * (or `{ excluded_libraries: [...] }` for verbatim restore) overwrites the
- * instance account's temporary exclusion override; nothing is persisted to the backend. Tests capture the original
- * via `get` and restore it in teardown.
+ * instance account's temporary exclusion override, which profile reads keep
+ * until `{ action: 'reset' }` drops it and reloads the saved profile. Nothing is
+ * persisted to the backend.
  */
 export async function handleTestExcludedLibrariesHttpRequest(request: any) {
     const action = request?.action ?? 'get';
@@ -58,6 +59,12 @@ export async function handleTestExcludedLibrariesHttpRequest(request: any) {
         }
 
         Zotero.Beaver.account!.setExcludedLibrariesForTesting(entries);
+        return { ok: true, has_profile: true, ...currentExclusionState() };
+    }
+
+    if (action === 'reset') {
+        if (!profile) return { ok: false, has_profile: false, error: 'No profile loaded' };
+        await Zotero.Beaver.account!.clearExcludedLibrariesForTesting();
         return { ok: true, has_profile: true, ...currentExclusionState() };
     }
 

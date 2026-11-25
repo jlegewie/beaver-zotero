@@ -14,6 +14,8 @@ export default defineConfig({
         pool: 'threads',
         include: ['tests/unit/**/*.test.ts'],
         setupFiles: ['tests/setup.ts'],
+        // Keeps native addons loaded in the main process; see the file.
+        globalSetup: ['tests/helpers/nativeAddonsGlobalSetup.ts'],
         testTimeout: 10000,
     },
     resolve: {

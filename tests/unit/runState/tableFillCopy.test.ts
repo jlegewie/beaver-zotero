@@ -20,9 +20,11 @@ import {
     resultSummary,
     resultNeedsAttention,
     readsAsStopped,
+    refillNotice,
     resultText,
     resultTone,
     runningLabel,
+    showsRefillNotice,
     timeLeftText,
 } from "@beaver/agent-core/run-state/tableFillCopy";
 
@@ -365,5 +367,24 @@ describe("resultNeedsAttention", () => {
     it("is true when answers were left for the next fill, and false for an empty count", () => {
         expect(resultNeedsAttention(done({ skipped_cells: { column_changed: 2 } }))).toBe(true);
         expect(resultNeedsAttention(done({ skipped_cells: { column_changed: 0 } }))).toBe(false);
+    });
+});
+
+describe("the refill alert", () => {
+    it("says a changed column costs a whole fill, and points to the trial when one is offered", () => {
+        expect(refillNotice(5)).toBe(
+            "Each paper is read again, so filling one column costs as much as filling all of them. Finish your column changes first, then try 5 rows to check the answers.",
+        );
+        expect(refillNotice(null)).toBe(
+            "Each paper is read again, so filling one column costs as much as filling all of them. Finish your column changes first.",
+        );
+    });
+
+    it("shows for a plan that reads answered rows again, never on a retry or a trial", () => {
+        expect(showsRefillNotice({ scope: { kind: "pending" }, rereads: 26 })).toBe(true);
+        expect(showsRefillNotice({ scope: { kind: "cells", columns: ["c1"] }, rereads: 26 })).toBe(true);
+        expect(showsRefillNotice({ scope: { kind: "pending" }, rereads: 0 })).toBe(false);
+        expect(showsRefillNotice({ scope: { kind: "retry_failed" }, rereads: 3 })).toBe(false);
+        expect(showsRefillNotice({ scope: { kind: "pending", limit: 5 }, rereads: 5 })).toBe(false);
     });
 });

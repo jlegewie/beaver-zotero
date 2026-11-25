@@ -34,7 +34,7 @@ import { menuDivider, saveAsNoteMenuItem } from '../../../utils/saveNoteMenu';
 import { getBeaverNoteFooterHTML } from '../../../utils/noteActions';
 import { addPopupMessageAtom } from '../../../utils/popupMessageUtils';
 import { selectItem, selectItemById } from '../../../utils/selectItem';
-import { flushPendingPartEvents } from '../../../utils/streamingPartQueue';
+import { flushRunProjection } from '../../../runtime/windowRunSession';
 import { extractThreadContent, ExtractThreadContentOptions } from '../../../utils/threadContent';
 import { confirmAndDeleteThread, renameThread } from '../../../utils/threadActions';
 import { resolveToolCallLabelEnrichMap } from '../../../utils/toolCallLabelEnrich';
@@ -141,7 +141,7 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
         // Streamed parts are applied a frame after they arrive, so a thread
         // copied or saved mid-response would otherwise stop a frame short of
         // what is on screen.
-        flushPendingPartEvents();
+        flushRunProjection();
         const { threadId, threadName } = getThreadMeta();
         const runs = store.get(allRunsAtom);
         const toolResultsMap = store.get(toolResultsMapAtom);
@@ -252,7 +252,7 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
         const exportThread = documentExport?.exportThreadToFile;
         if (!exportThread) return;
         // As for copying: include the streamed parts not yet applied.
-        flushPendingPartEvents();
+        flushRunProjection();
         const runs = store.get(allRunsAtom);
         if (runs.length === 0) return;
         await exportWithFeedback(

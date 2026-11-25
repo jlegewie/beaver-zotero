@@ -22,10 +22,12 @@ import {
     planSourcesLine,
     planTitle,
     pricingSentence,
+    refillNotice,
     resultNeedsAttention,
     resultText,
     runningLabel,
     shownStop,
+    showsRefillNotice,
     timeLeftText,
 } from '@beaver/agent-core/run-state/tableFillCopy';
 import { ArrowDownIcon, CancelIcon, Icon, PlayIcon, Spinner, StopIcon } from '@beaver/agent-ui/icons';
@@ -234,10 +236,10 @@ export const TableFillButton = React.forwardRef<TableFillButtonHandle, TableFill
     );
 
     /**
-     * Starts the plan shown, or (`trial`) plans and starts its first five
-     * rows: the user has already seen the whole fill's cost, which bounds
-     * the trial's, so the trial needs no second confirmation. A refusal
-     * leaves the shown plan in place with the reason.
+     * Starts the plan shown, or (`trial`) the plan of its first five rows:
+     * the user has already seen the whole fill's cost, which bounds the
+     * trial's, so the trial needs no second confirmation. A refusal leaves
+     * the shown plan in place with the reason.
      */
     const start = React.useCallback(
         async (trial: boolean) => {
@@ -253,8 +255,7 @@ export const TableFillButton = React.forwardRef<TableFillButtonHandle, TableFill
             try {
                 let planId = shown.plan.plan_id;
                 if (trial) {
-                    const planned = await fills.plan(tableRef, { kind: 'pending', limit: TRIAL_ROWS });
-                    if (mine !== request.current) return;
+                    const planned = fills.trial(planId, TRIAL_ROWS);
                     if (!planned.ok) return fail(planned.message);
                     planId = planned.plan.plan_id;
                 }
@@ -401,6 +402,9 @@ function FillPopover({
         const sentences = lines.filter((line) => !line.label);
         const sources = planSourcesLine(plan);
         const starting = popover.state === 'starting';
+        // A whole pending fill can be tried on its first rows first.
+        const trialOffered = popover.scope.kind === 'pending' && !popover.scope.limit && plan.rows > TRIAL_ROWS;
+        const refill = showsRefillNotice(plan) ? refillNotice(trialOffered && !noCredits ? TRIAL_ROWS : null) : null;
         body = (
             <>
                 <div className="bt-fill-head">
@@ -427,6 +431,11 @@ function FillPopover({
                             </dl>
                         ) : null}
                         {sources ? <div className="bt-fill-note">{sources}</div> : null}
+                    </div>
+                ) : null}
+                {refill ? (
+                    <div className="bt-fill-refill" role="note">
+                        {refill}
                     </div>
                 ) : null}
                 {noCredits ? (
@@ -458,11 +467,11 @@ function FillPopover({
                 </Button>
             );
         } else {
-            // A whole pending fill can be tried on its first rows first.
-            if (popover.scope.kind === 'pending' && !popover.scope.limit && plan.rows > TRIAL_ROWS)
+            // Beside the refill alert, the trial is the way it points to.
+            if (trialOffered)
                 trial = (
                     <Button
-                        variant="ghost-secondary"
+                        variant={refill ? 'outline' : 'ghost-secondary'}
                         onClick={onTrial}
                         disabled={starting}
                         loading={starting && popover.trial}

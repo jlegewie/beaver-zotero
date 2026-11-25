@@ -2,8 +2,10 @@ import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { tableCardDraftsAtom } from '@beaver/agent-core/run-state/pendingTableCards';
 import type { WSTableCardResponse, WSTableFillCardRequest } from '@beaver/agent-core/protocol/tableCardProtocol';
+import { refillNotice } from '@beaver/agent-core/run-state/tableFillCopy';
 import {
     FILL_TABLE_LABEL,
+    fillCardTrialRows,
     fillScopeLine,
     initialTableCardDraft,
     setCancelling,
@@ -21,6 +23,7 @@ import { ArrowUpRightIcon, Icon, Spinner, StopStrokeIcon, TableIcon } from '../.
 import AutoGrowTextarea from './AutoGrowTextarea';
 import { ColumnSummary } from './TableColumnsStep';
 import { TableCardFillWarnings, TableCardReceipt, useFillPricing, useShortWindow } from './TableCardCost';
+import { useSessionSetAtom } from '../../../hooks/useSessionSetAtom';
 
 const BLOCK_GAP = '0.85rem';
 
@@ -40,16 +43,18 @@ export interface TableFillCardProps {
  * parts as the create card's: a band for what the user must know first (a
  * held answer, a balance that does not reach, items without full text), the
  * decision row with the receipt and its pricing popover, and the controls:
- * Cancel, which asks what Beaver should do instead, and Fill table. Approving
- * approves exactly the plan it shows: edits made meanwhile can only drop work
- * from it.
+ * Cancel, which asks what Beaver should do instead, "Try 5 first" when the
+ * backend offers a trial, and Fill table. Approving approves exactly the plan
+ * it shows, and the trial its first rows: edits made meanwhile can only drop
+ * work from it. A fill that reads answered papers again for a new or changed
+ * question says so in a band, and the trial stands out beside it.
  */
 export const TableFillCard: React.FC<TableFillCardProps> = ({ request, onSubmit, disabled = false, heldCaption, onStop }) => {
     // Cancel view and typed instructions live in the renderer's store, keyed
     // by card, so switching sidebars keeps them.
     const cardId = request.card_id;
     const drafts = useAtomValue(tableCardDraftsAtom);
-    const setDrafts = useSetAtom(tableCardDraftsAtom);
+    const setDrafts = useSessionSetAtom(tableCardDraftsAtom);
     const initialDraft = useMemo(() => initialTableCardDraft(request), [request]);
     const draft = drafts.get(cardId) ?? initialDraft;
     const setDraft = useCallback(
@@ -69,13 +74,15 @@ export const TableFillCard: React.FC<TableFillCardProps> = ({ request, onSubmit,
     const decidedRef = useRef(false);
     const locked = isDecided || disabled;
     const hasInstructions = draft.instructions.trim().length > 0;
+    const trialRows = fillCardTrialRows(request);
+    const refill = (request.rereads ?? 0) > 0 ? refillNotice(trialRows) : null;
 
     const decide = useCallback(
-        (approve: boolean) => {
+        (approve: boolean, trial = false) => {
             if (decidedRef.current || disabled) return;
             decidedRef.current = true;
             setIsDecided(true);
-            onSubmit(approve ? tableFillCardResponse(request) : tableCardDecline(draft, request));
+            onSubmit(approve ? tableFillCardResponse(request, trial) : tableCardDecline(draft, request));
         },
         [disabled, draft, onSubmit, request],
     );
@@ -114,7 +121,7 @@ export const TableFillCard: React.FC<TableFillCardProps> = ({ request, onSubmit,
         <div className="table-card-header">
             <div className="display-flex flex-row items-start min-w-0" style={{ gap: '0.45rem' }}>
                 <Icon icon={TableIcon} className="font-color-secondary flex-none table-card-title-icon" />
-                <span className="table-card-title flex-1 min-w-0 truncate" title={title}>
+                <span className="table-card-title flex-1 min-w-0 truncate" title={title} dir="auto">
                     {title}
                 </span>
                 <button
@@ -203,7 +210,7 @@ export const TableFillCard: React.FC<TableFillCardProps> = ({ request, onSubmit,
             <span className="table-card-notice-text">{heldCaption}</span>
         </div>
     ) : shortWindow ? null : (
-        <TableCardFillWarnings cost={request.cost} prices={prices} />
+        <TableCardFillWarnings cost={request.cost} prices={prices} refill={refill} />
     );
 
     return (
@@ -235,7 +242,7 @@ export const TableFillCard: React.FC<TableFillCardProps> = ({ request, onSubmit,
                         ))}
                     </div>
                 </div>
-                {!held && shortWindow && <TableCardFillWarnings cost={request.cost} prices={prices} inBody />}
+                {!held && shortWindow && <TableCardFillWarnings cost={request.cost} prices={prices} refill={refill} inBody />}
             </div>
 
             <div className="table-card-footer table-card-footer-stack">
@@ -258,15 +265,28 @@ export const TableFillCard: React.FC<TableFillCardProps> = ({ request, onSubmit,
                     <div className="flex-1" />
                     {/* While the answer is held, Stop takes the way forward's place. */}
                     {stopButton || (
-                        <Button
-                            variant="solid"
-                            onClick={() => decide(true)}
-                            disabled={locked}
-                            className="flex-none whitespace-nowrap"
-                            style={{ padding: '3px 8px' }}
-                        >
-                            {FILL_TABLE_LABEL}
-                        </Button>
+                        <>
+                            {trialRows && (
+                                <Button
+                                    variant={refill ? 'outline' : 'ghost-secondary'}
+                                    onClick={() => decide(true, true)}
+                                    disabled={locked}
+                                    className="flex-none whitespace-nowrap"
+                                    title={`Fill the first ${trialRows} rows now to check the answers`}
+                                >
+                                    Try {trialRows} first
+                                </Button>
+                            )}
+                            <Button
+                                variant="solid"
+                                onClick={() => decide(true)}
+                                disabled={locked}
+                                className="flex-none whitespace-nowrap"
+                                style={{ padding: '3px 8px' }}
+                            >
+                                {FILL_TABLE_LABEL}
+                            </Button>
+                        </>
                     )}
                 </div>
             </div>

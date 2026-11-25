@@ -94,6 +94,7 @@ vi.mock('../../../react/atoms/agentRunAtoms', () => ({
 
 import { diffPreviewNoteKeyAtom } from '../../../react/utils/diffPreviewCoordinator';
 import { noteLibraryIdFromActionData, updateDiffPreviewForNote } from '../../../react/utils/diffPreviewCoordinator';
+import { installStoreRunSession } from '../../helpers/runSession';
 
 // Now create the real atom and assign it
 const pendingApprovalsAtom = atom<Map<string, any>>(new Map());
@@ -153,6 +154,7 @@ describe('diffPreviewCoordinator — handleBannerAction', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         storeRef.current = createStore();
+        installStoreRunSession(storeRef.current);
         capturedHandlers.previewNoteKey = null;
         approvalResponses.length = 0;
     });

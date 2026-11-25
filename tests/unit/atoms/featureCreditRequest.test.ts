@@ -72,6 +72,7 @@ import { isWSChatPendingAtom, sendWSMessageAtom } from '../../../react/atoms/age
 import { sessionAtom } from '../../../react/atoms/auth';
 import { pendingFeatureCreditsAtom } from '../../../react/atoms/featureCreditRuns';
 import { activeRunAtom } from '@beaver/agent-core/run-state/atoms';
+import { chatStore } from '../../helpers/runSession';
 
 describe('feature credits on the chat request', () => {
     beforeEach(() => {
@@ -79,15 +80,15 @@ describe('feature credits on the chat request', () => {
         connectMock.mockResolvedValue(undefined);
         resolveClientIdentityMock.mockReturnValue(FIXTURE_IDENTITY);
         store.set(sessionAtom, { user: { id: 'user-1' } } as any);
-        store.set(isWSChatPendingAtom, false);
-        store.set(activeRunAtom, null);
+        chatStore().set(isWSChatPendingAtom, false);
+        chatStore().set(activeRunAtom, null);
         store.set(pendingFeatureCreditsAtom, new Map());
         firstRunChoices.length = 0;
     });
 
     it('reports every message as a first-run choice: its task, or a message of the user\'s own', async () => {
         await store.set(sendWSMessageAtom, '/annotate the methods', { featureTask: 'annotate' });
-        store.set(isWSChatPendingAtom, false);
+        chatStore().set(isWSChatPendingAtom, false);
         await store.set(sendWSMessageAtom, 'hello');
         expect(firstRunChoices).toEqual(['annotate', 'chat']);
     });

@@ -68,6 +68,7 @@ import {
     wsErrorAtom,
 } from '../../../react/atoms/agentRunAtoms';
 import { sessionAtom } from '../../../react/atoms/auth';
+import { chatStore } from '../../helpers/runSession';
 
 /** An abrupt drop before the handshake finished — the case worth retrying. */
 const PRE_READY_DROP: ConnectionFailureEvidence = {
@@ -116,10 +117,10 @@ describe('what a connection reports about how it was opened', () => {
             clientType: 'zotero-plugin',
             clientFeatures: [],
         });
-        store.set(wsErrorAtom, null);
-        store.set(wsReconnectingAtom, null);
-        store.set(isWSChatPendingAtom, false);
-        store.set(isWSReadyAtom, false);
+        chatStore().set(wsErrorAtom, null);
+        chatStore().set(wsReconnectingAtom, null);
+        chatStore().set(isWSChatPendingAtom, false);
+        chatStore().set(isWSReadyAtom, false);
         store.set(sessionAtom, { user: { id: 'user-1' } } as any);
     });
 
@@ -145,7 +146,7 @@ describe('what a connection reports about how it was opened', () => {
         expect(reportConnectionFailureMock).not.toHaveBeenCalled();
 
         // Now that connection drops, with the run under way.
-        store.set(isWSReadyAtom, true);
+        chatStore().set(isWSReadyAtom, true);
         lastCallbacks.onClose?.(1006, '', false, MID_RUN_DROP);
 
         expect(reportConnectionFailureMock).toHaveBeenCalledTimes(1);
@@ -166,9 +167,9 @@ describe('the composer lock across a retried connect', () => {
             clientType: 'zotero-plugin',
             clientFeatures: [],
         });
-        store.set(wsErrorAtom, null);
-        store.set(wsReconnectingAtom, null);
-        store.set(isWSChatPendingAtom, false);
+        chatStore().set(wsErrorAtom, null);
+        chatStore().set(wsReconnectingAtom, null);
+        chatStore().set(isWSChatPendingAtom, false);
         store.set(sessionAtom, { user: { id: 'user-1' } } as any);
     });
 
@@ -212,12 +213,12 @@ describe('the composer lock across a retried connect', () => {
         // run is in the middle of.
         failEveryAttempt((attempt) => {
             if (attempt !== 1) return;
-            store.set(activeRunAtom, {
+            chatStore().set(activeRunAtom, {
                 id: 'run-taking-over',
                 status: 'in_progress',
             } as any);
-            store.set(isWSChatPendingAtom, true);
-            store.set(wsReconnectingAtom, { attempt: 2, maxAttempts: 4 });
+            chatStore().set(isWSChatPendingAtom, true);
+            chatStore().set(wsReconnectingAtom, { attempt: 2, maxAttempts: 4 });
         });
 
         await store.set(sendWSMessageAtom, 'hello');
@@ -235,11 +236,11 @@ describe('the composer lock across a retried connect', () => {
         // to release the lock just the same.
         failEveryAttempt((attempt) => {
             if (attempt !== 4) return;
-            store.set(activeRunAtom, {
+            chatStore().set(activeRunAtom, {
                 id: 'run-taking-over',
                 status: 'in_progress',
             } as any);
-            store.set(isWSChatPendingAtom, true);
+            chatStore().set(isWSChatPendingAtom, true);
         });
 
         await store.set(sendWSMessageAtom, 'hello');
@@ -253,7 +254,7 @@ describe('the composer lock across a retried connect', () => {
         // abandons after its backoff instead of trying again. Nothing downstream
         // ends a run that is already gone, so this path owes the release itself.
         failEveryAttempt((attempt) => {
-            if (attempt === 1) store.set(activeRunAtom, null);
+            if (attempt === 1) chatStore().set(activeRunAtom, null);
         });
 
         await store.set(sendWSMessageAtom, 'hello');

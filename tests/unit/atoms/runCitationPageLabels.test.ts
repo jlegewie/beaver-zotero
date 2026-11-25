@@ -32,11 +32,12 @@ import type { WSRunCitationsEvent } from '@beaver/agent-core/protocol/agentProto
 import { citationsAtom, pageLabelsByAttachmentIdAtom } from '@beaver/agent-core/citations/atoms';
 import { createWSCallbacks } from '../../../react/atoms/agentRunAtoms';
 import { store } from '../../../react/store';
+import { chatStore } from '../../helpers/runSession';
 
 describe('run citation page labels', () => {
     beforeEach(() => {
         vi.clearAllMocks();
-        store.set(citationsAtom, []);
+        chatStore().set(citationsAtom, []);
         store.set(pageLabelsByAttachmentIdAtom, {});
     });
 
@@ -47,7 +48,7 @@ describe('run citation page labels', () => {
         // The run's setter, revoked once the run settles.
         let revoked = false;
         const runSet = ((...args: Parameters<Setter>) => {
-            if (!revoked) return (store.set as any)(...args);
+            if (!revoked) return (chatStore().set as any)(...args);
         }) as Setter;
         const callbacks = createWSCallbacks(runSet);
 

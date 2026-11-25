@@ -447,6 +447,7 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
 
     // Resolved by Zotero from the requested and available UI locales.
     const interfaceLanguage = typeof Zotero.locale === 'string' && Zotero.locale ? Zotero.locale : undefined;
+    const timeZone = getSystemTimeZone();
 
     return {
         current_view: currentView,
@@ -476,7 +477,18 @@ export async function buildZoteroApplicationState(get: Getter): Promise<Applicat
         ...(indexingStatus ? { indexing_status: indexingStatus } : {}),
         ...(libraries ? { libraries } : {}),
         ...(interfaceLanguage ? { interface_language: interfaceLanguage } : {}),
+        ...(timeZone ? { time_zone: timeZone } : {}),
     };
+}
+
+/** IANA name of the system time zone, or undefined when it cannot be resolved. */
+function getSystemTimeZone(): string | undefined {
+    try {
+        const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        return typeof timeZone === 'string' && timeZone ? timeZone : undefined;
+    } catch {
+        return undefined;
+    }
 }
 
 /** Builds the `application_state` for an agent run from host UI context. */

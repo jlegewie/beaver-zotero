@@ -29,6 +29,7 @@ import { applyMutations, type CellWrite, type SkippedCell, type TableMutation } 
 import {
     cellsToFill,
     pendingWork,
+    rereadRows,
     retryableFailedRows,
     rowFailure,
     selectedColumns,
@@ -61,6 +62,7 @@ import {
     rowsToLookUp,
     type DocumentUpdate,
     type PlannedColumn,
+    type PlannedFill,
     type RowLookup,
     type RowPlan,
 } from './planner';
@@ -174,6 +176,8 @@ interface StoredPlan {
     rows: RowPlan[];
     columns: Map<string, PlannedColumn>;
     documentUpdates: DocumentUpdate[];
+    /** The rows read again although answered elsewhere (see `rereadRows`). */
+    rereads: ReadonlySet<string>;
 }
 
 function tableKey(target: TableFillTarget): string {
@@ -1027,40 +1031,86 @@ export class InstanceTableFills {
                 delete row.document;
             }
         }
-        const count = (mode: RowPlan['mode']) => planned.rows.filter((row) => row.mode === mode).length;
-        const credits = round(planned.rows.reduce((sum, row) => sum + rowPrice(row, prices), 0));
-        const now = this.deps.now();
+        return {
+            ok: true,
+            plan: this.keep(
+                {
+                    generation,
+                    target: { ...target },
+                    table,
+                    context,
+                    selection: scope.kind === 'pending' ? {} : { rows: selection.rows, columns: selection.columns },
+                    rows: planned.rows,
+                    columns: new Map(planned.columns.map((column) => [column.request.id, column])),
+                    documentUpdates: planned.documentUpdates,
+                    // Only rows the fill reads: unavailable and no-input rows are only marked.
+                    rereads: new Set(
+                        rereadRows(spec, planned.rows.filter((row) => row.mode === 'document' || row.mode === 'metadata')),
+                    ),
+                },
+                { title: spec.title ?? '', scope, cells: planned.cells, prices, pending: pendingWork(spec) },
+            ),
+        };
+    }
+
+    /**
+     * A trial of a kept plan: its first `limit` rows, in its order, at its
+     * prices, kept as a new plan for {@link start}. The plan it comes from
+     * stays as it is, so the trial is a part of what the user was shown.
+     * With `target`, a plan of another table is not found.
+     */
+    trial(planId: string, limit: number, target?: TableFillTarget): TableFillPlanResult {
+        this.prunePlans();
+        const plan = this.plans.get(planId);
+        if (!plan || (target && tableKey(plan.target) !== tableKey(target))) return { ok: false, code: 'plan_not_found', message: 'This fill plan is no longer available. Plan the fill again.' };
+        if (this.disposed || !this.deps.account.signedIn() || plan.generation !== this.deps.account.generation())
+            return { ok: false, code: 'signed_out', message: 'The account changed since the fill was planned.' };
+        const trial = trialPlan(plan, limit);
+        const scope: TableFillScope =
+            plan.summary.scope.kind === 'pending' ? { kind: 'pending', limit: trial.rows.length } : plan.summary.scope;
+        return {
+            ok: true,
+            plan: this.keep(
+                {
+                    ...plan,
+                    rows: trial.rows,
+                    documentUpdates: trial.documentUpdates,
+                    rereads: new Set(trial.rows.map((row) => row.row).filter((row) => plan.rereads.has(row))),
+                },
+                { ...plan.summary, title: plan.summary.table.title, scope, cells: trial.cells },
+            ),
+        };
+    }
+
+    /** Prices a plan's rows and keeps it under a new id until it expires. */
+    private keep(
+        plan: Omit<StoredPlan, 'summary'>,
+        parts: Pick<TableFillPlanSummary, 'scope' | 'cells' | 'prices' | 'pending'> & { title: string },
+    ): TableFillPlanSummary {
+        const rows = plan.rows;
+        const count = (mode: RowPlan['mode']) => rows.filter((row) => row.mode === mode).length;
         const summary: TableFillPlanSummary = {
             plan_id: this.deps.newId(),
-            table: { ...target, title: spec.title ?? '' },
-            scope,
-            rows: planned.rows.length,
-            cells: planned.cells,
+            table: { ...plan.target, title: parts.title },
+            scope: parts.scope,
+            rows: rows.length,
+            cells: parts.cells,
             documents: count('document'),
-            document_kinds: documentKinds(planned.rows),
+            document_kinds: documentKinds(rows),
             title_abstract: count('metadata'),
             no_input: count('no_input'),
             unavailable: count('unavailable'),
-            credits,
-            prices: { ...prices },
-            pending: pendingWork(spec),
+            credits: round(rows.reduce((sum, row) => sum + rowPrice(row, parts.prices), 0)),
+            prices: { ...parts.prices },
+            pending: parts.pending,
+            rereads: plan.rereads.size,
             // Less what running fills may still charge.
             balance: balanceAfterCommitted(this.deps.account.balance(), this.committedCredits()),
-            expires_at: now + this.settings.planTtlMs,
+            expires_at: this.deps.now() + this.settings.planTtlMs,
         };
         this.prunePlans();
-        this.plans.set(summary.plan_id, {
-            summary,
-            generation,
-            target: { ...target },
-            table,
-            context,
-            selection: scope.kind === 'pending' ? {} : { rows: selection.rows, columns: selection.columns },
-            rows: planned.rows,
-            columns: new Map(planned.columns.map((column) => [column.request.id, column])),
-            documentUpdates: planned.documentUpdates,
-        });
-        return { ok: true, plan: summary };
+        this.plans.set(summary.plan_id, { ...plan, summary });
+        return summary;
     }
 
     private prunePlans(): void {
@@ -1262,7 +1312,10 @@ export class InstanceTableFills {
  * only their own document changes. Validation at start re-selects on the
  * table as it is then and keeps only these rows, so nothing is added.
  */
-export function trialPlan(planned: ReturnType<typeof buildPlan>, limit: number): ReturnType<typeof buildPlan> {
+export function trialPlan<T extends Pick<PlannedFill, 'rows' | 'documentUpdates'>>(
+    planned: T,
+    limit: number,
+): T & { cells: number } {
     const rows = planned.rows.slice(0, Math.max(1, Math.floor(limit)));
     const kept = new Set(rows.map((row) => row.row));
     return {

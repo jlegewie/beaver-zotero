@@ -1653,6 +1653,13 @@ export interface AnnotationResultItem {
     tags?: string[];
     /** Annotation author, when Zotero stores one. */
     author?: string | null;
+    /**
+     * Who made the annotation: `beaver` when its author marks it as Beaver's,
+     * otherwise `user` (the user, a group member, or the file itself). The
+     * author name is a preference and may be empty, so a Beaver annotation can
+     * read as `user`, which errs toward leaving it alone.
+     */
+    created_by?: 'beaver' | 'user';
     /** Parent attachment id ("library_id-zotero_key"). */
     attachment_id?: string | null;
     /** Bibliographic regular item id ("library_id-zotero_key"). */
@@ -3267,6 +3274,12 @@ export const CLIENT_FEATURES = {
      * `tables` capability.
      */
     TABLES: 'tables',
+    /**
+     * The fill card shows the trial a request offers (`trial_rows`) and
+     * answers it with `trial`, and `fill_plan` plans a kept plan's first rows
+     * (`plan_id` with `limit`). Without it the backend offers no trial.
+     */
+    TABLE_FILL_TRIAL: 'table_fill_trial',
 } as const;
 
 /** Client type identifier for the Zotero plugin. */
@@ -3486,6 +3499,11 @@ export interface ApplicationStateInput {
      * (e.g. 'en-US', 'de', 'zh-CN'). Omitted when the host does not report one.
      */
     interface_language?: string;
+    /**
+     * IANA time zone of the user's system (e.g. 'America/New_York'). The
+     * backend dates the conversation in this zone, or in UTC when omitted.
+     */
+    time_zone?: string;
 }
 
 /** Frontend embedding index status reported with each agent run. */

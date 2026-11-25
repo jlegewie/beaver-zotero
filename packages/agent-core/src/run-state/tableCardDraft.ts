@@ -860,13 +860,21 @@ export function tableCardResponse(
  * The approval of a fill card: nothing on it is editable, so it names only
  * the run. It approves exactly the plan the card shows.
  */
-export function tableFillCardResponse(request: WSTableFillCardRequest): WSTableCardResponse {
+export function tableFillCardResponse(request: WSTableFillCardRequest, trial = false): WSTableCardResponse {
     return {
         type: 'table_card_response',
         card_id: request.card_id,
         approved: true,
         choice: 'fill',
+        // Only a trial the request offered: an older backend would fill everything.
+        ...(trial && fillCardTrialRows(request) ? { trial: true } : {}),
     };
+}
+
+/** The rows the fill card's trial fills; null when it offers none or the fill is no larger. */
+export function fillCardTrialRows(request: WSTableFillCardRequest): number | null {
+    const rows = request.trial_rows;
+    return typeof rows === 'number' && rows > 0 && request.cost.rows > rows ? rows : null;
 }
 
 /** The fill card's one primary button. */

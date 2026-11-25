@@ -48,7 +48,7 @@ const WindowHeader: React.FC<WindowHeaderProps> = ({ showChat }) => {
                             />
                         </Tooltip>
                         <div className="beaver-window-header-title-group">
-                            <h1 className="beaver-window-header-title" title={title}>{title}</h1>
+                            <h1 className="beaver-window-header-title" title={title} dir="auto">{title}</h1>
                             {threadId && (
                                 <ThreadMenuButton className="scale-14 beaver-window-header-thread-menu" ariaLabel="Chat actions" inWindow />
                             )}

@@ -269,6 +269,8 @@ bootstrap_lite_worktree() {
       echo "==> Running npm install (this can take a few minutes)"
     fi
     (cd "$WT" && npm install)
+    # .npmrc disables dependency install scripts; build the ones tests need.
+    (cd "$WT" && npm run --if-present rebuild:native)
   fi
 }
 
@@ -646,7 +648,8 @@ config = {
     "mcpServers": {
         "zotero-worktree": {
             "command": "npx",
-            "args": ["@introfini/mcp-server-zotero-dev"],
+            # Pinned so a new release never runs unreviewed; bump deliberately.
+            "args": ["-y", "@introfini/mcp-server-zotero-dev@1.1.5"],
             "env": {
                 "ZOTERO_RDP_PORT": rdp_port,
                 "ZOTERO_DATA_DIR": datadir,

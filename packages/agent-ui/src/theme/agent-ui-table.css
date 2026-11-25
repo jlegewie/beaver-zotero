@@ -371,8 +371,10 @@
     color: var(--fill-secondary);
 }
 
-/* The balance falls short of the fill: the only time it is shown. */
-.beaver-root .bt-fill-reach {
+/* The balance falls short of the fill: the only time it is shown. The same
+   band says that a changed column reads every paper again. */
+.beaver-root .bt-fill-reach,
+.beaver-root .bt-fill-refill {
     padding: 0.4rem 0.55rem;
     border-radius: 0.4rem;
     background: var(--tag-orange-quinary, var(--fill-quinary));

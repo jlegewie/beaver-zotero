@@ -9,6 +9,7 @@ import type { WindowRuntime } from "../../src/runtime/instance";
 import type { ThreadPresenceSnapshot } from "../../src/services/threads/threadPresence";
 import { store } from "../store";
 import { recentThreadsAtom } from "../atoms/threads";
+import { runSessionStore } from "../agentRuns/runSession";
 import {
     threadEntitiesAtom,
     threadViewsAtom,
@@ -60,7 +61,7 @@ export function attachThreadProjection(runtime: WindowRuntime): void {
         );
         const id = store.get(currentThreadIdAtom);
         const entity = id ? snapshot.entities.get(id) : undefined;
-        if (entity) store.set(currentThreadNameAtom, entity.name);
+        if (entity) runSessionStore().set(currentThreadNameAtom, entity.name);
     });
     const removePresence = instance.presence.subscribe((snapshot) => {
         if (runtime.status !== "closing")
@@ -69,7 +70,7 @@ export function attachThreadProjection(runtime: WindowRuntime): void {
     const view = () => {
         const id = store.get(currentThreadIdAtom);
         instance.presence.view(runtime.id, id);
-        store.set(
+        runSessionStore().set(
             viewedHistoryRevisionAtom,
             id ? (instance.presence.getSnapshot().history[id] ?? 0) : 0,
         );

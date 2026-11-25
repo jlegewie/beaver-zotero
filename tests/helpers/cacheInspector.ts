@@ -1184,6 +1184,11 @@ export async function restoreExcludedLibraries(
     });
 }
 
+/** Drop the in-memory override; the instance reloads the saved profile's set. */
+export async function resetExcludedLibraries(): Promise<ExclusionStateResponse> {
+    return post('/beaver/test/excluded-libraries', { action: 'reset' });
+}
+
 // -------------------------------------------------------------------------
 // Exclusion-gated handlers without a production HTTP route
 // -------------------------------------------------------------------------

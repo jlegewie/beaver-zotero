@@ -86,6 +86,7 @@ import { initialTableCardDraft } from '@beaver/agent-core/run-state/tableCardDra
 import { TableCard } from '../../../react/components/tables/card/TableCard';
 import { TableFillCard } from '../../../react/components/tables/card/TableFillCard';
 import { searchableLibraryIdsAtom } from '../../../react/atoms/profile';
+import { installStoreRunSession } from '../../helpers/runSession';
 
 const FIXTURES = join(__dirname, '../../fixtures/artifacts/table-cards');
 const read = (name: string) => JSON.parse(readFileSync(join(FIXTURES, `${name}.json`), 'utf8'));
@@ -98,7 +99,14 @@ let root: Root | null = null;
 let container: HTMLDivElement;
 let sent: WSTableCardResponse[];
 
+/** A store that is also the run session's, as the card writes its draft there. */
+function withRunSession(store = createStore()) {
+    installStoreRunSession(store);
+    return store;
+}
+
 function render(request: WSTableCreateCardRequest, store = createStore()) {
+    withRunSession(store);
     sent = [];
     act(() => {
         root = createRoot(container);
@@ -570,7 +578,7 @@ describe('TableCard', () => {
         };
         // My Library is excluded; the sources span it and a group, so the
         // backend would fall back to My Library and refuse.
-        const store = createStore();
+        const store = withRunSession();
         store.set(searchableLibraryIdsAtom, [5]);
         render(fixture('create-items'), store);
         await act(async () => { mocks.target.pickCollection(42); });
@@ -620,7 +628,7 @@ describe('TableCard', () => {
     });
 
     it('keeps edits when the card is unmounted and mounted again in the same window', async () => {
-        const store = createStore();
+        const store = withRunSession();
         render(fixture('create-items'), store);
         expect(container.querySelector('input[aria-label="Table title"]')).toBeNull();
         await clickElement(container.querySelector('button[aria-label="Edit title"]'));
@@ -637,7 +645,7 @@ describe('TableCard', () => {
     });
 
     it('drops a count that lands after its card unmounted and the source changed', async () => {
-        const store = createStore();
+        const store = withRunSession();
         const finishers: Array<(value: unknown) => void> = [];
         mocks.resolveLibraryScope.mockImplementation(() => new Promise((resolve) => finishers.push(resolve)));
         render(fixture('create-items'), store);
@@ -1090,7 +1098,7 @@ describe('TableCard', () => {
         });
 
         it('keeps the checkbox as the user left it when the card mounts again', async () => {
-            const store = createStore();
+            const store = withRunSession();
             render(costedFixture('create-items'), store);
             await click('Next');
             await clickElement(runOption());
@@ -1184,7 +1192,7 @@ describe('TableCard', () => {
                 get: (id: number) => (id === 42 ? { id: 42, key: 'LABCOLL1', libraryID: 5, name: 'Lab papers' } : false),
                 getByLibraryAndKey: () => false,
             };
-            const store = createStore();
+            const store = withRunSession();
             store.set(searchableLibraryIdsAtom, [5]);
             render(costedFixture('create-items'), store);
             await act(async () => { mocks.target.pickCollection(42); });
@@ -1273,7 +1281,7 @@ describe('TableCard', () => {
             const onStop = vi.fn();
             const request = costedFixture('create-items');
             // The card was answered up to its last step before the connection dropped.
-            const store = createStore();
+            const store = withRunSession();
             store.set(tableCardDraftsAtom, new Map([[request.card_id, { ...initialTableCardDraft(request), step: 'columns' as const }]]));
             sent = [];
             act(() => {
@@ -1305,6 +1313,7 @@ describe('TableCard', () => {
     });
 
     describe('the fill card', () => {
+        const controls = () => [...container.querySelectorAll('.table-card-controls button')].map((b) => b.textContent?.trim());
         function renderFill(
             request: WSTableFillCardRequest,
             props: { disabled?: boolean; heldCaption?: string; onStop?: () => void } = {},
@@ -1315,7 +1324,7 @@ describe('TableCard', () => {
                 root.render(
                     React.createElement(
                         Provider,
-                        { store: createStore() },
+                        { store: withRunSession() },
                         React.createElement(TableFillCard, { request, onSubmit: (r: WSTableCardResponse) => sent.push(r), ...props }),
                     ),
                 );
@@ -1408,6 +1417,44 @@ describe('TableCard', () => {
             await click('Stop');
             expect(onStop).toHaveBeenCalled();
             expect(sent).toEqual([]);
+        });
+
+        it('says a changed column reads every paper again, and approves only the trial with Try 5 first', async () => {
+            const { request, reply } = read('fill-trial');
+            renderFill(request);
+            const bands = Array.from(container.querySelectorAll('.table-card-footer-band-warning')).map((band) => band.textContent);
+            expect(bands).toEqual([
+                'Each paper is read again, so filling one column costs as much as filling all of them. Finish your column changes first, then try 5 rows to check the answers.',
+            ]);
+            expect(controls()).toEqual(['Cancel', 'Try 5 first', 'Fill table']);
+            expect(button('Try 5 first')!.className).toContain('variant-outline');
+            await click('Try 5 first');
+            expect(sent).toEqual([reply]);
+            // One answer per card.
+            expect(button('Fill table')!.disabled).toBe(true);
+        });
+
+        it('fills the whole plan with Fill table when a trial is on offer', async () => {
+            const { request } = read('fill-trial');
+            renderFill(request);
+            await click('Fill table');
+            expect(sent).toEqual([{ type: 'table_card_response', card_id: request.card_id, approved: true, choice: 'fill' }]);
+        });
+
+        it('without a trial on offer, leaves it out of the alert and the controls', () => {
+            const { request } = read('fill-trial');
+            renderFill({ ...request, trial_rows: null });
+            expect(container.querySelector('.table-card-footer-band-warning')?.textContent).toBe(
+                'Each paper is read again, so filling one column costs as much as filling all of them. Finish your column changes first.',
+            );
+            expect(controls()).toEqual(['Cancel', 'Fill table']);
+        });
+
+        it('keeps the trial quiet, without the alert, on a fill that reads no answered paper again', () => {
+            const { request } = read('fill-trial');
+            renderFill({ ...request, rereads: 0 });
+            expect(container.querySelector('.table-card-footer-band-warning')).toBeNull();
+            expect(button('Try 5 first')!.className).toContain('variant-ghost-secondary');
         });
 
         it('declines with instructions from the cancel view', async () => {

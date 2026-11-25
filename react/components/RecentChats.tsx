@@ -167,7 +167,7 @@ const RecentChats: React.FC = () => {
                     }}
                 >
                     <span className="recent-chats-item-title">
-                        <span className="recent-chats-item-name truncate">
+                        <span className="recent-chats-item-name truncate" dir="auto">
                             {thread.name || 'Unnamed conversation'}
                         </span>
                         {thread.awaitingInput && <AwaitingInputDot awaiting={thread.awaitingInput} />}

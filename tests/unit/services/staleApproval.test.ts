@@ -73,6 +73,7 @@ import {
     staleApprovalActionIdsAtom,
 } from '../../../react/atoms/agentRunAtoms';
 import { shouldRecoverApproval } from '../../../react/host/zotero/components/useApprovalRecovery';
+import { installWindowStoreRunSession } from '../../helpers/windowRunSession';
 
 class MockWebSocket {
     static CONNECTING = 0;
@@ -393,6 +394,7 @@ describe('sendApprovalResponseAtom delivery handling', () => {
         // The backend cannot answer a message it never received, so the card
         // has to be told to recover rather than wait for a reply.
         const store = createStore();
+        installWindowStoreRunSession(store);
         vi.spyOn(agentService, 'sendApprovalResponse').mockReturnValue(false);
 
         store.set(sendApprovalResponseAtom, { actionId: 'action-1', approved: true });
@@ -402,6 +404,7 @@ describe('sendApprovalResponseAtom delivery handling', () => {
 
     it('leaves a delivered approval alone so the run can resolve it', () => {
         const store = createStore();
+        installWindowStoreRunSession(store);
         vi.spyOn(agentService, 'sendApprovalResponse').mockReturnValue(true);
 
         store.set(sendApprovalResponseAtom, { actionId: 'action-1', approved: true });
@@ -414,6 +417,7 @@ describe('sendApprovalResponseAtom delivery handling', () => {
 describe('stale approval state', () => {
     it('accumulates stale action ids', () => {
         const store = createStore();
+        installWindowStoreRunSession(store);
 
         store.set(markApprovalStaleAtom, 'action-1');
         store.set(markApprovalStaleAtom, 'action-2');
@@ -425,6 +429,7 @@ describe('stale approval state', () => {
 
     it('keeps the same set when re-marking an id, so views do not re-render', () => {
         const store = createStore();
+        installWindowStoreRunSession(store);
         store.set(markApprovalStaleAtom, 'action-1');
         const before = store.get(staleApprovalActionIdsAtom);
 
@@ -435,6 +440,7 @@ describe('stale approval state', () => {
 
     it('clears the set when a new run starts', () => {
         const store = createStore();
+        installWindowStoreRunSession(store);
         store.set(markApprovalStaleAtom, 'action-1');
 
         store.set(clearStaleApprovalsAtom);

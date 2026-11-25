@@ -82,6 +82,7 @@ import {
     sendBatchApprovalResponseAtom,
 } from '../../../react/atoms/agentRunAtoms';
 import { store } from '../../../react/store';
+import { installWindowStoreRunSession } from '../../helpers/windowRunSession';
 
 class MockWebSocket {
     static CONNECTING = 0;
@@ -359,6 +360,7 @@ describe('AgentService batch approval transport', () => {
 describe('pendingBatchApprovals atoms', () => {
     it('adds a pending approval keyed by approvalId', () => {
         const store = createStore();
+        installWindowStoreRunSession(store);
         store.set(addPendingBatchApprovalAtom, approvalEvent());
 
         const map = store.get(pendingBatchApprovalsAtom);
@@ -385,6 +387,7 @@ describe('pendingBatchApprovals atoms', () => {
 
     it('removes a pending approval by id (the stale-notice path)', () => {
         const store = createStore();
+        installWindowStoreRunSession(store);
         store.set(addPendingBatchApprovalAtom, approvalEvent());
         store.set(addPendingBatchApprovalAtom, approvalEvent({ approval_id: 'appr-2' }));
 
@@ -397,6 +400,7 @@ describe('pendingBatchApprovals atoms', () => {
 
     it('remove is a no-op for an unknown approvalId', () => {
         const store = createStore();
+        installWindowStoreRunSession(store);
         store.set(addPendingBatchApprovalAtom, approvalEvent());
         const before = store.get(pendingBatchApprovalsAtom);
 
@@ -408,6 +412,7 @@ describe('pendingBatchApprovals atoms', () => {
 
     it('clears all pending approvals (run end / disconnect / thread switch)', () => {
         const store = createStore();
+        installWindowStoreRunSession(store);
         store.set(addPendingBatchApprovalAtom, approvalEvent());
         store.set(addPendingBatchApprovalAtom, approvalEvent({ approval_id: 'appr-2' }));
 
@@ -424,6 +429,7 @@ describe('sendBatchApprovalResponseAtom', () => {
 
     it('sends the decision and retires the card', () => {
         const store = createStore();
+        installWindowStoreRunSession(store);
         const send = vi.spyOn(agentService, 'sendBatchApprovalResponse').mockReturnValue(true);
         store.set(addPendingBatchApprovalAtom, approvalEvent());
 
@@ -442,6 +448,7 @@ describe('sendBatchApprovalResponseAtom', () => {
         // The run can no longer be told, so keeping the card up would strand the
         // user on a card that can never be answered.
         const store = createStore();
+        installWindowStoreRunSession(store);
         vi.spyOn(agentService, 'sendBatchApprovalResponse').mockReturnValue(false);
         store.set(addPendingBatchApprovalAtom, approvalEvent());
 
@@ -472,9 +479,11 @@ function toolReturnEvent(toolCallId: string): WSToolReturnEvent {
 }
 
 describe('batch approval WebSocket callbacks', () => {
-    const callbacks = createWSCallbacks(store.set);
+    let callbacks: ReturnType<typeof createWSCallbacks>;
 
     beforeEach(() => {
+        installWindowStoreRunSession(store);
+        callbacks = createWSCallbacks(store.set);
         store.set(clearAllPendingBatchApprovalsAtom);
     });
 
@@ -528,6 +537,10 @@ describe('batch approval WebSocket callbacks', () => {
 });
 
 describe('stopping a run with a batch approval pending', () => {
+    beforeEach(() => {
+        installWindowStoreRunSession(store);
+    });
+
     afterEach(() => {
         vi.restoreAllMocks();
     });
@@ -548,6 +561,7 @@ describe('stopping a run with a batch approval pending', () => {
 
 describe('run-lifecycle clear sites', () => {
     beforeEach(() => {
+        installWindowStoreRunSession(store);
         store.set(clearAllPendingBatchApprovalsAtom);
     });
 

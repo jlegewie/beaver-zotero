@@ -4,6 +4,7 @@ import { AgentRunStatus, ToolCallPart, isEmptyWriteReturn, isNotFoundWriteReturn
 import { getToolCallStatusFromResult, toolResultAtom } from '@beaver/agent-core/run-state/atoms';
 import { isTableToolName, isTableWriteToolName, tableResultMessages } from '@beaver/agent-core/run-state/tableResults';
 import { getToolCallLabelParts, type ToolCallLabelEnrich } from '@beaver/agent-core/run-state/toolLabels';
+import { activityLabelParts } from '@beaver/agent-export/activity';
 import { parseArgs } from '@beaver/agent-core/run-state/toolCallRequest';
 import {
     isExternalReferenceListView,
@@ -364,6 +365,9 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
         noChange: isNoChangeReturn,
         notFound: isNoChangeReturn && isNotFoundWriteReturn(result),
     });
+    // What the call acted on (an item title, a query) is content, so it takes
+    // the direction of its own text, apart from the action before it.
+    const { action: labelAction, detail: labelDetail } = activityLabelParts(label);
 
     // Use global Jotai atom for expansion state (persists across re-renders and syncs between panes)
     const expansionKey = `${runId}:${responseIndex}:${part.tool_call_id}`;
@@ -541,7 +545,7 @@ export const ToolCallPartView: React.FC<ToolCallPartViewProps> = ({ part, runId,
                             flex containers, which clips the text without the "…". */}
                         <div className="display-flex flex-row gap-1 min-w-0">
                             <div className={`min-w-0 truncate ${effectiveLabelColor} ${isShimmering ? 'shimmer-text' : ''}`}>
-                                {label}
+                                {labelAction ? <>{labelAction} <span dir="auto">{labelDetail}</span></> : label}
                             </div>
                             {/* The count stays whole while the text before it shortens. */}
                             {labelSuffix && (

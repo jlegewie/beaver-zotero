@@ -97,6 +97,7 @@ import {
 } from '../../../atoms/runApprovalPolicy';
 import { dismissActiveEditNotePreview } from '../editNotePreviewLifecycle';
 import { agentService } from '@beaver/agent-core/transport/agentService';
+import { useSessionSetAtom } from '../../../hooks/useSessionSetAtom';
 
 export { STATUS_CONFIGS, getOverallStatus } from './agentActionViewHelpers';
 export type { ActionStatus } from './agentActionViewHelpers';
@@ -213,7 +214,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
         isAwaitingApproval ? pendingApprovalsCoveredByFullAccessCountAtom : noPendingApprovalsCoveredCountAtom,
     );
     const removeApprovalResponseIntent = useSetAtom(removeApprovalResponseIntentAtom);
-    const removePendingApproval = useSetAtom(removePendingApprovalAtom);
+    const removePendingApproval = useSessionSetAtom(removePendingApprovalAtom);
     const applyAgentActions = useSetAtom(applyAgentActionsAtom);
     const refreshMergeProposals = useSetAtom(refreshMergeProposalsAtom);
     const rejectAgentActions = useSetAtom(rejectAgentActionsAtom);
@@ -776,7 +777,7 @@ export const AgentActionView: React.FC<AgentActionViewProps> = ({
                                 {headerProgress ? (
                                     <span className={`font-color-secondary ml-15${isAwaitingToolReturn ? '' : ' shimmer-text'}`}>{headerProgress}</span>
                                 ) : actionTitle && (
-                                    <span className="font-color-secondary ml-15">
+                                    <span className="font-color-secondary ml-15" dir="auto">
                                         {fullTextSummary ? `${actionTitle} (${fullTextSummary})` : actionTitle}
                                     </span>
                                 )}

@@ -34,6 +34,23 @@ describe("artifact request envelopes", () => {
     ])("rejects malformed envelopes without dispatch", (request) => {
         expect(validateArtifactRequest(request)).toBe("invalid_request");
     });
+    it("takes a trial of a plan only with both the plan and a row limit, and nothing else to select", () => {
+        const plan = { event: "artifact_request", request_id: "p", op: "fill_plan", key: "u-ABCDEFGH" };
+        expect(validateArtifactRequest({ ...plan, plan_id: "plan-1", limit: 5 })).toBeNull();
+        for (const bad of [
+            { plan_id: "plan-1" },
+            { limit: 5 },
+            { plan_id: "plan-1", limit: 0 },
+            { plan_id: "plan-1", limit: 2.5 },
+            { plan_id: "plan-1", limit: "5" },
+            { plan_id: "plan-1", limit: 5, rows: ["r1"] },
+            { plan_id: "plan-1", limit: 5, columns: ["c1"] },
+        ])
+            expect(validateArtifactRequest({ ...plan, ...bad })).toBe("invalid_request");
+        expect(
+            validateArtifactRequest({ event: "artifact_request", request_id: "f", op: "fill", plan_id: "p", tool_call_id: "c", wait: true, limit: 5 }),
+        ).toBe("invalid_request");
+    });
     it("distinguishes unsupported operations", () => {
         expect(validateArtifactRequest({ ...read, op: "future" })).toBe(
             "unsupported_op",

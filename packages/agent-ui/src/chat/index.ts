@@ -91,3 +91,4 @@ export type { FindMatchRange, FindQuery, FindQueryProviderProps } from './findCo
 export { FindHighlight, highlightText } from './highlightText';
 
 export { rehypeFindHighlight } from './rehypeFindHighlight';
+export { rehypeTextDirection } from './rehypeTextDirection';

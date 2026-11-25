@@ -130,6 +130,13 @@ export class InstanceAccount {
     private commands: Promise<unknown> = Promise.resolve();
     private pendingAuth = 0;
     private settingsPending: number | null = null;
+    /**
+     * Development only: the exclusion set the live-test harness put in place,
+     * for the account generation it was set under. Profile reads keep it until
+     * the harness drops it or the user saves exclusions; otherwise a background
+     * lane that the cleared set re-enables would reload the saved set mid-run.
+     */
+    private testExclusions: { generation: number; entries: ExcludedLibrary[] } | null = null;
     private nextSettingsOperation = 0;
     private signedOut = false;
     private tokenRefresh?: Promise<any>;
@@ -756,6 +763,8 @@ export class InstanceAccount {
                 if (data.profile.user_id !== this.snapshot.session?.user.id)
                     throw new Error("Profile identity mismatch");
                 this.snapshot.data = copy(data);
+                if (this.testExclusions?.generation === generation)
+                    this.snapshot.data.profile.excluded_libraries = copy(this.testExclusions.entries);
                 this.snapshot.libraries = copy(libraries);
                 this.snapshot.scopeReady = true;
                 this.snapshot.status = { kind: "ok" };
@@ -839,6 +848,7 @@ export class InstanceAccount {
         );
         try {
             await accountService.updateExcludedLibraries(next);
+            if (generation === this.snapshot.generation) this.testExclusions = null;
         } catch (error) {
             if (generation === this.snapshot.generation && this.snapshot.data) {
                 this.updateProfile(
@@ -920,9 +930,11 @@ export class InstanceAccount {
         if (this.snapshot.status.kind !== "ok")
             throw new Error(this.snapshot.status.message);
     }
+    /** Development only: override the exclusion set until `clearExcludedLibrariesForTesting`. */
     setExcludedLibrariesForTesting(entries: ExcludedLibrary[]): void {
         if (process.env.NODE_ENV !== "development" || !this.snapshot.data)
             throw new Error("Test access override unavailable");
+        this.testExclusions = { generation: this.snapshot.generation, entries: copy(entries) };
         this.updateProfile(
             {
                 ...this.snapshot.data.profile,
@@ -930,6 +942,13 @@ export class InstanceAccount {
             },
             this.snapshot.generation,
         );
+    }
+    /** Development only: drop the test override and reload the saved profile. */
+    async clearExcludedLibrariesForTesting(): Promise<void> {
+        if (process.env.NODE_ENV !== "development")
+            throw new Error("Test access override unavailable");
+        this.testExclusions = null;
+        await this.invalidateProfile();
     }
     /** Apply an account-matching profile update synchronously to every renderer. */
     private updateProfile(

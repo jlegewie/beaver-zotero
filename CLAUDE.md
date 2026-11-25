@@ -27,6 +27,24 @@ Notes:
   `npm start` runs the copy step before the watchers, then keeps it watching.
 - **Never create commits** unless explicitly asked.
 
+### Dependencies and install scripts
+
+`.npmrc` sets `ignore-scripts=true`, so `npm ci` / `npm install` run no dependency
+install scripts (and no root `pre*`/`post*` hooks). After installing, run
+`npm run rebuild:native` to build the dependencies that need theirs — today only
+`better-sqlite3`, which the unit tests' SQLite doubles load. Tests failing with
+`Could not locate the bindings file` mean that step was skipped.
+
+- A new dependency that needs its install script goes on the `npm rebuild` line of
+  `rebuild:native` in `package.json`. Check first whether it works without one:
+  esbuild, `@swc/core` and sharp ship prebuilt platform packages, and their scripts
+  only verify them.
+- `min-release-age=7` makes npm resolve only versions at least 7 days old (npm ≥ 11.10;
+  `npm ci` installs the lockfile as is). To take a fresh security fix, pass
+  `--min-release-age=0` for that one install.
+- Dependabot uses the same 7-day cooldown, for npm and for the SHA-pinned actions.
+  Pin new workflow actions to a full commit SHA with the tag in a trailing comment.
+
 ### Build vs. watch — do not mix them
 
 **Never run `npm run build:dev` while `npm start` is running.** `build:dev` calls
@@ -359,6 +377,33 @@ use `Zotero.platformMajorVersion` (140 on Zotero 10, 153 on Zotero 11), never `Z
 
 Lint enforces the first, second and fourth. Testing against a Zotero 11 build is described
 in `tests/README.md`.
+
+### Zotero-owned UI and state
+
+Beaver shares Zotero's windows and objects. Zotero's code reads what it builds under rules it
+rarely states: it may assign menu ids by position, find children by index or class, or rewrite
+attributes each time a menu opens. A change that looks cosmetic from Beaver's side can break
+the Zotero feature next to it. For example, an item placed among Zotero's collection-menu
+entries takes over the id, and so the command, of the entry it displaces.
+
+- Prefer the plugin APIs (e.g. `Zotero.MenuManager`, `Zotero.ItemPaneManager`,
+  `Zotero.Reader.registerEventListener`) and the places they put things.
+- Before you move, insert into, relabel, or set attributes on an element Zotero built, or
+  patch a Zotero object or pref, read the Zotero code that builds and reads it, in every
+  supported version. Search for its id, its class, and index access (`childNodes[`,
+  `children[`). Say in the PR what that code relies on and why the change keeps it.
+- Test Zotero's own feature next to the change, not only Beaver's: open the surface at least
+  twice, and again after the plugin is disabled and re-enabled.
+- Everything Beaver adds to a Zotero surface is removed when the plugin shuts down.
+  `MenuManager.unregisterMenu` leaves its DOM behind, so `removeStaleMenuDOM`
+  (`src/modules/zoteroContextMenu.ts`) removes every Beaver MenuManager entry. It finds them by
+  the registration class Zotero 9+ adds and, for Zotero 8, by an l10n id starting with
+  `beaver-`, which every entry other than a separator must therefore use (a unit test checks
+  it; a separator, which Zotero gives no l10n id, goes with the submenu around it).
+- Development and staging builds check each menu that opens for duplicate ids and for plugin
+  entries carrying an id, and log what they find to the error console
+  (`src/modules/zoteroMenuIntegrity.ts`). `/beaver/test/menu-integrity` runs the same check
+  over repeated openings for live tests.
 
 ## Library exclusions (enforce in every data / write / index path)
 

@@ -120,7 +120,7 @@ const Header: React.FC<{
     <div className="beaver-run-status-popup__header">
         <div className="beaver-run-status-popup__leading">{leading}</div>
         <div className="beaver-run-status-popup__text">
-            <div className="beaver-run-status-popup__title font-color-primary" title={title}>
+            <div className="beaver-run-status-popup__title font-color-primary" title={title} dir="auto">
                 {title}
             </div>
             {detail !== null && (

@@ -106,6 +106,7 @@ import TableCardStepper from './TableCardStepper';
 import InlineEditableText, { type InlineEditableTextHandle } from './InlineEditableText';
 import TableColumnsStep, { type TableColumnsStepHandle } from './TableColumnsStep';
 import TableSourceCard from './TableSourceCard';
+import { useSessionSetAtom } from '../../../hooks/useSessionSetAtom';
 
 const STEP_LABELS: Record<TableCardStep, string> = {
     sources: 'Sources',
@@ -216,7 +217,7 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
     // (switching sidebars, closing Beaver) keeps the user's edits.
     const cardId = request.card_id;
     const drafts = useAtomValue(tableCardDraftsAtom);
-    const setDrafts = useSetAtom(tableCardDraftsAtom);
+    const setDrafts = useSessionSetAtom(tableCardDraftsAtom);
     const initialDraft = useMemo(() => initialTableCardDraft(request), [request]);
     const draft = drafts.get(cardId) ?? initialDraft;
     const setDraft = useCallback(
