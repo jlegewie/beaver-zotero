@@ -84,8 +84,8 @@ function useLauncherSize(ref: React.RefObject<HTMLElement | null>): LauncherSize
  * HomePage launcher shown under the input area. Each button lists its
  * category's actions that work anywhere (via CategoryPanel), so the lists
  * never change with the Zotero selection; actions for the selection live in
- * the context bar under the composer. Uncategorized actions are not listed
- * here — they stay available from the context bar and the slash menu.
+ * the actions tray under the input. Uncategorized actions are not listed
+ * here — they stay available from the actions tray and the slash menu.
  */
 const HomeLauncher: React.FC<{ style?: React.CSSProperties }> = ({ style }) => {
     // Only the user changes this while the UI is mounted. `null` = collapsed.

@@ -2,7 +2,7 @@ import React, { useState, useRef, useCallback, useMemo } from 'react';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
 import { PlusSignIcon } from '../components/icons/icons';
 import { categoryIcon } from '../components/icons/categoryIcons';
-import { CSSIcon, CSSItemTypeIcon } from '../components/icons/zotero';
+import GroupIcon from '../components/icons/GroupIcon';
 import { currentMessageContentAtom } from '../atoms/messageComposition';
 import { actionGroupsAtom, resolveActionForStagingAtom } from '../atoms/actions';
 import type { ActionBinding } from '../utils/actionVisibility';
@@ -161,9 +161,7 @@ export function useSlashMenu(
                 headerItem.customContent = (
                     <span className="display-flex items-center gap-1 truncate">
                         <span className="scale-80 flex-shrink-0">
-                            {group.iconInfo.type === 'item-type'
-                                ? <CSSItemTypeIcon itemType={group.iconInfo.name} className="icon-16" />
-                                : <CSSIcon name={group.iconInfo.name} className="icon-16" />}
+                            <GroupIcon info={group.iconInfo} />
                         </span>
                         <span className="truncate">{group.label}</span>
                     </span>

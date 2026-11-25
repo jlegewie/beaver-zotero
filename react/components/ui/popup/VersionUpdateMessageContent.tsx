@@ -1,8 +1,9 @@
 import React, { useMemo } from 'react';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { plusToolsAccessAtom } from '../../../atoms/chatAccess';
 import { openQuickPromptAtom } from '../../../atoms/quickPrompt';
-import { actionsAtom } from '../../../atoms/actions';
+import { actionGroupsAtom, actionsAtom } from '../../../atoms/actions';
+import { bindingForAction } from '../../../utils/actionVisibility';
 import { featureCreditEntriesAtom, featureTaskUnavailableAtom } from '../../../atoms/featureCredits';
 import { useStartFeatureTaskInNewChat } from '../../../hooks/useStartFeatureTaskInNewChat';
 import { requestPlusToolsAtom } from '../../../atoms/ui';
@@ -165,7 +166,7 @@ const FloatingVersionCard: React.FC<{
     const action = resolveVersionUpdateAction(primaryAction, access, earnableFeatureTasks);
     const startFeatureTask = useStartFeatureTaskInNewChat();
     const openQuickPrompt = useSetAtom(openQuickPromptAtom);
-    const actions = useAtomValue(actionsAtom);
+    const store = useStore();
     const setRequestPlusTools = useSetAtom(requestPlusToolsAtom);
     const { runAction } = useActionRunner();
     const surfaceWindow = useSurfaceWindow();
@@ -194,10 +195,11 @@ const FloatingVersionCard: React.FC<{
                 // selected collection or items), so skip the open-time
                 // auto-populate of the selection.
                 eventManager.dispatch('toggleChat', { forceOpen: true, skipAutoPopulate: true });
-                // No-op while a response is running in this window: Beaver
-                // just opens.
-                const definition = actions.find((a) => a.id === action.actionId);
-                if (definition) runAction(definition, surfaceWindow);
+                // Bind after opening, which can clear items left in the
+                // composer. No-op while a response is running in this window:
+                // Beaver just opens.
+                const definition = store.get(actionsAtom).find((a) => a.id === action.actionId);
+                if (definition) runAction(definition, bindingForAction(definition, store.get(actionGroupsAtom)), surfaceWindow);
                 return;
             }
             default:

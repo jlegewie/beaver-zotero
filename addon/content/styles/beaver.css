@@ -3519,9 +3519,10 @@
 
 /* ── Slide presence ──
  * Content that slides out from behind what sits above it (`useSlidePresence`).
- * The slot's one grid row grows from nothing to the content's height while the
- * content moves down by its own height, so it appears to slide out rather than
- * unroll. The clip hides whatever is still above the slot's top edge. */
+ * The slot's one grid row grows from nothing to the content's height. The
+ * content keeps its full height and sits at the bottom of the clip, so it
+ * appears to slide out rather than unroll; the clip hides the part still above
+ * the slot's top edge. */
 .beaver-root .slide-presence {
     display: grid;
     grid-template-rows: 0fr;
@@ -3533,40 +3534,41 @@
 }
 
 .beaver-root .slide-presence-clip {
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
     min-height: 0;
     overflow: hidden;
 }
 
 .beaver-root .slide-presence-clip > * {
-    transform: translateY(-100%);
-    transition: transform 0.2s ease-out;
-}
-
-.beaver-root .slide-presence[data-open="true"] .slide-presence-clip > * {
-    transform: none;
+    flex-shrink: 0;
 }
 
 /* Still ends with a transition, so the content unmounts once closed. */
 @media (prefers-reduced-motion: reduce) {
-    .beaver-root .slide-presence,
-    .beaver-root .slide-presence-clip > * {
+    .beaver-root .slide-presence {
         transition-duration: 1ms;
     }
 }
 
-/* ── Home actions tray ── */
+/* ── Home actions tray ──
+ * Right-aligned, so the start of the line stays free for other content, and
+ * capped so a long title doesn't run across a wide window. */
 .beaver-root .home-actions-tray {
     flex-direction: row;
     align-items: center;
+    justify-content: flex-end;
 }
 
-/* The button's tooltip wraps it in its own element; both must be allowed to
- * shrink for a long label to truncate. The wrapper's negative margin keeps
- * the icon where it would sit without the button's hover padding. */
-.beaver-root .home-actions-tray > * {
+/* The button's tooltip wraps it in its own element (the menu and tooltip
+ * render after it); both must be allowed to shrink for a long label to
+ * truncate. The wrapper's negative margin keeps the caret where it would sit
+ * without the button's hover padding. */
+.beaver-root .home-actions-tray > :first-child {
     min-width: 0;
-    max-width: calc(100% + 6px);
-    margin: -3px 0 -3px -6px;
+    max-width: min(calc(100% + 6px), 18rem);
+    margin: -3px -6px -3px 0;
 }
 
 .beaver-root .home-actions-tray button.home-actions-tray-button {
@@ -3587,6 +3589,32 @@
 
 .beaver-root .home-actions-tray-caret {
     opacity: 0.6;
+}
+
+/* The menu's title: what the actions act on, with the object's own icon and
+ * full label (including "attached"), which the tray line leaves out. Ruled
+ * off from the actions like the menu's other divider. */
+.beaver-root .home-actions-menu-header {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 4px 8px 8px;
+    border-bottom: 1px solid var(--fill-quinary);
+    min-width: 0;
+}
+
+.beaver-root .home-actions-menu-header-lead {
+    font-size: 0.875rem;
+    color: var(--fill-secondary);
+}
+
+.beaver-root .home-actions-menu-header-name {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    font-weight: 500;
+    color: var(--fill-primary);
 }
 
 /* ── Home launcher: category buttons ──

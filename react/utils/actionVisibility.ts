@@ -9,7 +9,7 @@
  * Category never affects visibility — it only sets the icon.
  *
  * `computeActionGroups` builds one group per source in priority order. The
- * first context group is what the homepage context bar acts on; the slash menu
+ * first context group is what the homepage actions tray acts on; the slash menu
  * lists them all. Each group binds a picked action to its source.
  */
 
@@ -111,6 +111,12 @@ export interface ActionBinding {
 export interface ActionGroup {
     id: 'reader' | 'note' | 'manual' | 'selected' | 'collection' | 'global';
     label: string;
+    /** The label without the "attached" wording, for a surface that shows
+     *  where the items come from another way. Set on the attached-items group. */
+    shortLabel?: string;
+    /** A short reference to what the group acts on ("this item", "these
+     *  collections"). Set on every group except the global one. */
+    subject?: string;
     actions: Action[];
     /** Icon to display in group headers */
     iconInfo?: GroupIconInfo;
@@ -143,14 +149,15 @@ function itemGroup(
     id: 'reader' | 'manual' | 'selected',
     items: Zotero.Item[],
     allActions: Action[],
-    label: string,
+    labels: Pick<ActionGroup, 'label' | 'shortLabel'>,
     bind: (action: Action) => ActionBinding,
 ): ActionGroup | null {
     const kinds = summarizeItemSelection(items);
     if (!hasItemTargets(kinds)) return null;
     const actions = allActions.filter(a => actsOnSelection(a.targets, kinds));
     if (actions.length === 0) return null;
-    return { id, label, actions, iconInfo: getIconInfoForItem(items[0]), bind };
+    const subject = id === 'reader' ? 'this file' : items.length === 1 ? 'this item' : 'these items';
+    return { id, ...labels, subject, actions, iconInfo: getIconInfoForItem(items[0]), bind };
 }
 
 /**
@@ -172,7 +179,7 @@ export function computeActionGroups(allActions: Action[], ctx: ActionContext): A
     // the live reader context resolves both (see resolveTargetContext).
     const readerAtt = ctx.zotero.type === 'reader' ? ctx.zotero.readerAttachment : null;
     if (readerAtt && itemTargetKind(readerAtt) === 'attachment') {
-        push(itemGroup('reader', [readerAtt], allActions, getItemLabel(readerAtt), action => ({
+        push(itemGroup('reader', [readerAtt], allActions, { label: getItemLabel(readerAtt) }, action => ({
             targetType: resolveItemTargets(action.targets, [readerAtt]).targetType ?? undefined,
         })));
     }
@@ -185,6 +192,7 @@ export function computeActionGroups(allActions: Action[], ctx: ActionContext): A
             groups.push({
                 id: 'note',
                 label: noteItem ? getNoteLabel(noteItem) : 'Note',
+                subject: 'this note',
                 actions: noteActions,
                 iconInfo: { type: 'css-icon', name: 'note' },
                 bind: () => ({ targetType: 'note' }),
@@ -196,7 +204,7 @@ export function computeActionGroups(allActions: Action[], ctx: ActionContext): A
     // adds nothing; one that needs their paper or file attaches it.
     const manual = usableItems(ctx.manualItems);
     if (manual.length > 0) {
-        push(itemGroup('manual', manual, allActions, getManualLabel(manual), action => {
+        push(itemGroup('manual', manual, allActions, getManualLabels(manual), action => {
             const resolved = resolveItemTargets(action.targets, manual);
             const manualIds = new Set(manual.map(i => i.id));
             if (resolved.items.every(i => manualIds.has(i.id))) return {};
@@ -208,7 +216,7 @@ export function computeActionGroups(allActions: Action[], ctx: ActionContext): A
     if (ctx.zotero.type === 'items_selected') {
         const selected = usableItems(ctx.zotero.selectedItems);
         if (selected.length > 0 && !sameItemSet(manual, selected)) {
-            push(itemGroup('selected', selected, allActions, getSelectedLabel(selected), action => {
+            push(itemGroup('selected', selected, allActions, { label: getSelectedLabel(selected) }, action => {
                 const resolved = resolveItemTargets(action.targets, selected);
                 return {
                     targetType: resolved.targetType ?? undefined,
@@ -226,6 +234,7 @@ export function computeActionGroups(allActions: Action[], ctx: ActionContext): A
             groups.push({
                 id: 'collection',
                 label: getCollectionLabel(collectionTarget),
+                subject: getCollectionSubject(collectionTarget),
                 actions: collectionActions,
                 iconInfo: getCollectionIconInfo(collectionTarget),
                 bind: () => ({ targetType: 'collection' }),
@@ -243,7 +252,7 @@ export function computeActionGroups(allActions: Action[], ctx: ActionContext): A
     return groups;
 }
 
-/** The context the homepage context bar acts on: the first context group. */
+/** The context the homepage actions tray acts on: the first context group. */
 export function primaryActionGroup(groups: ActionGroup[]): ActionGroup | null {
     return groups.find(g => g.id !== 'global') ?? null;
 }
@@ -261,12 +270,15 @@ export function bindingForAction(action: Action, groups: ActionGroup[]): ActionB
 // Label helpers
 // ---------------------------------------------------------------------------
 
-function getManualLabel(items: Zotero.Item[]): string {
-    if (items.length <= MAX_LABEL_ITEMS) return `${getItemLabel(items[0])} (attached)`;
-    if (items.every(i => i.isAttachment())) return `${items.length} attached attachments`;
-    if (items.every(i => i.isRegularItem())) return `${items.length} attached items`;
-    if (items.every(i => i.isNote())) return `${items.length} attached notes`;
-    return `${items.length} attached items`;
+function getManualLabels(items: Zotero.Item[]): Pick<ActionGroup, 'label' | 'shortLabel'> {
+    if (items.length <= MAX_LABEL_ITEMS) {
+        const name = getItemLabel(items[0]);
+        return { label: `${name} (attached)`, shortLabel: name };
+    }
+    const kind = items.every(i => i.isAttachment()) ? 'attachments'
+        : items.every(i => i.isNote()) ? 'notes'
+        : 'items';
+    return { label: `${items.length} attached ${kind}`, shortLabel: `${items.length} ${kind}` };
 }
 
 function getSelectedLabel(items: Zotero.Item[]): string {
@@ -294,6 +306,12 @@ function getCollectionLabel({ collections, views }: CollectionTargetSelection): 
     }
     if (views.length === 0) return `${collections.length} collections selected`;
     return `${collections.length + views.length} views selected`;
+}
+
+function getCollectionSubject({ collections, views }: CollectionTargetSelection): string {
+    if (collections.length + views.length > 1) return 'these collections';
+    if (views.length === 1) return views[0].type === 'search' ? 'this saved search' : 'this view';
+    return 'this collection';
 }
 
 /** Collections-pane icon for a collection-target selection. */

@@ -54,7 +54,7 @@ const TablePlusToolsNotice: React.FC<TablePlusToolsNoticeProps> = ({ placement }
             role="status"
             className={placement === 'band'
                 ? 'composer-docked-bar table-plus-tools-notice display-flex flex-row items-start px-3 py-15 gap-2'
-                : 'feature-credits-card feature-credits-home table-plus-tools-notice is-tray'}
+                : 'home-tray table-plus-tools-notice is-tray'}
         >
             {placement === 'band' && <Icon icon={AlertIcon} className="font-color-secondary scale-10 mt-010" />}
             <span className="table-plus-tools-notice-text">

@@ -10,7 +10,7 @@
  * at least one eligible item of an accepted kind is in context, where a paper
  * and its file stand in for each other. Only `targets` decides where an action
  * appears; `category` sets its icon. At invocation a single *resolved* target
- * type is chosen by the entry point (context bar, slash-menu group, context
+ * type is chosen by the entry point (actions tray, slash-menu group, context
  * menu) and carried on the pill / wire — the list exists only at the
  * declaration layer.
  *

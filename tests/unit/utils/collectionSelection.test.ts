@@ -286,3 +286,18 @@ describe('actions that accept a selection or no context', () => {
         expect(bindingForAction(TABLE_ACTION, nothing)).toEqual({ targetType: 'global' });
     });
 });
+
+describe('collection group subject', () => {
+    const subject = (view: LibraryViewInfo) => activeGroup(ctx(view))?.subject;
+
+    it('refers to one collection, saved search or view by its kind', () => {
+        expect(subject(libraryView([collection(1, 'Methods')]))).toBe('this collection');
+        expect(subject(viewSelection([view('search', 'Recent PDFs')]))).toBe('this saved search');
+        expect(subject(viewSelection([view('unfiled', 'Unfiled Items')]))).toBe('this view');
+    });
+
+    it('refers to several rows as collections', () => {
+        expect(subject(libraryView([collection(1, 'Methods'), collection(2, 'Theory')]))).toBe('these collections');
+        expect(subject(libraryView([collection(1, 'Methods')], 2, 'collection', [view('search', 'Recent PDFs')]))).toBe('these collections');
+    });
+});

@@ -2,7 +2,7 @@
  * Which selected Zotero items an action acts on.
  *
  * This is the one rule every action surface applies to item selections: the
- * homepage context bar, the slash menu, the library context menu and the
+ * homepage actions tray, the slash menu, the library context menu and the
  * reader toolbar. A paper and its file stand in for each other, so an action
  * never disappears because the user selected the parent row instead of the
  * PDF, or the PDF instead of the parent:

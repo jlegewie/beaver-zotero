@@ -19,7 +19,7 @@ interface CategoryPanelProps {
 /**
  * Homepage launcher panel for one category: the category's actions that work
  * without a selection. Actions for what is selected in Zotero live in the
- * context bar under the composer, so this list never changes with the
+ * actions tray under the input, so this list never changes with the
  * selection.
  */
 const CategoryPanel: React.FC<CategoryPanelProps> = ({ category, style }) => {
