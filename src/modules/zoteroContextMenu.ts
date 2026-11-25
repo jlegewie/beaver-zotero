@@ -253,8 +253,7 @@ export function initContextMenus(): void {
 export function cleanupContextMenus(): void {
     stopPrefObserver();
 
-    // MenuManager's auto-cleanup doesn't seem remove DOM (selector mismatch).
-    // We unregister from cache and manually remove stale DOM elements.
+    // Unregistering leaves the entries' DOM behind; remove it ourselves.
     unregisterMenus();
     removeStaleMenuDOM();
     detachAllTableOpenLabels();
@@ -711,41 +710,48 @@ async function dispatchAction(action: Action, context: any, menu: 'item' | 'coll
 }
 
 // ---------------------------------------------------------------------------
-// DOM cleanup (workaround for Zotero MenuManager _key vs mainKey mismatch)
+// DOM cleanup
 // ---------------------------------------------------------------------------
 
 const CUSTOM_MENU_CLASS = 'zotero-custom-menu-item';
 
-/** l10n id prefixes of every entry Beaver registers with MenuManager. */
-const BEAVER_MENU_L10N_PREFIXES = ['beaver-context-menu-', 'beaver-note-export-', 'beaver-create-table', 'beaver-new-table'];
+/** The l10n id prefix every entry Beaver registers with MenuManager uses. */
+const BEAVER_MENU_L10N_PREFIX = 'beaver-';
 
 /**
- * Removes Beaver's MenuManager entries from the main windows' menus, which
- * `unregisterMenu` leaves in place. A leftover entry that onShowing had moved
- * among Zotero's own collection-menu entries would take over one of their ids
- * at the next opening (see `COLLECTION_MENU_LAST_ZOTERO_ENTRY`).
+ * Whether `el`, an element with the MenuManager entry class, is an entry
+ * Beaver registered, in this session or an earlier one. Zotero 9+ marks each
+ * entry with the class `<pluginID>-<menuID>` (CSS-escaped) of its
+ * registration; Zotero 8 marks it only with a random key, so every Beaver
+ * entry also carries an l10n id that starts with `beaver-`. Other plugins'
+ * entries match neither.
+ */
+function isBeaverMenuElement(el: Element): boolean {
+    const registrationPrefix = `${PLUGIN_ID}-`;
+    const classes = (el.getAttribute('class') ?? '').split(/\s+/);
+    if (classes.some((name) => name.replace(/\\/g, '').startsWith(registrationPrefix))) return true;
+    return (el.getAttribute('data-l10n-id') ?? '').startsWith(BEAVER_MENU_L10N_PREFIX);
+}
+
+/**
+ * Removes every Beaver MenuManager entry from the main windows' menus.
+ * `unregisterMenu` leaves an entry's DOM in place (Zotero removes it only
+ * when it unregisters a whole plugin, by which time Beaver has unregistered
+ * its menus itself). Runs at startup too, for entries an earlier version
+ * left behind. A leftover entry that onShowing had moved among Zotero's own
+ * collection-menu entries would take over one of their ids at the next
+ * opening (see `COLLECTION_MENU_LAST_ZOTERO_ENTRY`).
  */
 function removeStaleMenuDOM(): void {
-    // Scoped to Beaver's own l10n IDs so we never wipe other plugins' menu
-    // items (they share CUSTOM_MENU_CLASS via Zotero's MenuManager).
     try {
         for (const win of Zotero.getMainWindows()) {
             if (!win?.document || win.closed) continue;
-
-            const selector = BEAVER_MENU_L10N_PREFIXES
-                .map((prefix) => `.${CUSTOM_MENU_CLASS}[data-l10n-id^="${prefix}"]`)
-                .join(', ');
-            for (const popupId of ['zotero-itemmenu', 'zotero-collectionmenu', 'menu_FilePopup']) {
-                const popup = win.document.getElementById(popupId);
-                if (!popup) continue;
-                const stale = popup.querySelectorAll(selector);
-                if (stale.length > 0) {
-                    stale.forEach((el: Element) => el.remove());
-                }
+            for (const el of Array.from(win.document.querySelectorAll(`.${CUSTOM_MENU_CLASS}`)) as Element[]) {
+                if (isBeaverMenuElement(el)) el.remove();
             }
         }
     } catch (_e) {
-        // Best-effort — popup may not exist
+        // Best-effort: a window may be closing.
     }
 }
 

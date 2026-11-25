@@ -1,12 +1,14 @@
 /**
  * Dev-only HTTP handlers for UI lifecycle state: the cleanup of
  * `Zotero.Reader.onChangeSidebarWidth` wrappers left by earlier plugin
- * versions, window runtime commands, and closing or reopening main windows.
+ * versions, window runtime commands, closing or reopening main windows, and
+ * the check of Zotero's context menus.
  */
 import {
     restoreReaderSidebarWidthHandler,
     unwrapReaderWidthHandler,
 } from '../../../runtime/readerWidth';
+import { isProbedMenu, probeMenuIntegrity } from '../../../modules/zoteroMenuIntegrity';
 
 const ORIGINAL_HANDLER_PROP = '__beaverOriginalSidebarWidthHandler';
 
@@ -164,3 +166,24 @@ export async function handleTestMainWindowsHttpRequest(request: any) {
     return state();
 }
 
+
+/**
+ * Opens Zotero's collection and item context menus through the handlers a
+ * right-click runs, `openings` times each (default 3), and returns what
+ * `findMenuIntegrityProblems` finds while each is open. The menus act on the
+ * main window's current selection. `menuManager` says whether this Zotero
+ * has the MenuManager that adds Beaver's entries (Zotero 8+).
+ */
+export async function handleTestMenuIntegrityHttpRequest(request: any) {
+    const runtime = Zotero.Beaver.runtime.resolveWindow(request?.windowId);
+    if (!runtime || runtime.kind !== 'main') return { error: 'window_unavailable' };
+    const menus = request?.menus ?? ['collection', 'item'];
+    if (!Array.isArray(menus) || menus.length === 0 || !menus.every(isProbedMenu)) {
+        return { error: 'menus must be a non-empty list of "collection" and "item"' };
+    }
+    const requested = Number(request?.openings);
+    const openings = Number.isInteger(requested) && requested > 0 ? Math.min(requested, 10) : 3;
+    const results = await probeMenuIntegrity(runtime.hostWindow, menus, openings);
+    const menuManager = typeof (Zotero as any).MenuManager?.registerMenu === 'function';
+    return { windowId: runtime.id, menuManager, results };
+}

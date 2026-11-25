@@ -267,38 +267,69 @@ describe('the menu entries', () => {
         expect(popup.querySelector('.zotero-menuitem-removeLibrary')?.nextElementSibling).toBe(menuElem);
     });
 
-    it("removes Beaver's menu entries, the table entries included, when it shuts down", () => {
+    it("removes every Beaver menu entry at shutdown, wherever MenuManager put it, and no other plugin's", () => {
         initContextMenus();
-        const menus = ['zotero-itemmenu', 'zotero-collectionmenu', 'menu_FilePopup'].map((id) => {
-            const popup = document.createElement('div');
-            popup.id = id;
-            document.body.append(popup);
-            return popup;
-        });
-        const entry = (popup: HTMLElement, l10nID: string) => {
+        const popup = (id: string) => {
             const elem = document.createElement('div');
-            elem.className = 'zotero-custom-menu-item';
-            elem.setAttribute('data-l10n-id', l10nID);
-            popup.append(elem);
+            elem.id = id;
+            document.body.append(elem);
             return elem;
         };
-        const [itemMenu, collectionMenu, fileMenu] = menus;
+        const menus = [popup('zotero-itemmenu'), popup('zotero-collectionmenu'), popup('menu_FilePopup'), popup('some-other-popup')];
+        const [itemMenu, collectionMenu, fileMenu, otherPopup] = menus;
+        // MenuManager's overflow submenu, inside the item menu.
+        const overflow = document.createElement('div');
+        overflow.className = 'zotero-custom-menu-item zotero-custom-menu-group-submenu';
+        itemMenu.append(overflow);
+        const entry = (parent: HTMLElement, classes: string[], l10nID?: string) => {
+            const elem = document.createElement('div');
+            elem.classList.add('zotero-custom-menu-item', ...classes);
+            if (l10nID) elem.setAttribute('data-l10n-id', l10nID);
+            parent.append(elem);
+            return elem;
+        };
         const beaverEntries = [
-            entry(itemMenu, 'beaver-context-menu-submenu'),
-            entry(itemMenu, 'beaver-note-export-submenu'),
-            entry(collectionMenu, 'beaver-create-table'),
-            entry(fileMenu, 'beaver-new-table'),
+            // Zotero 9+: the registration class, CSS-escaped as Zotero writes it.
+            entry(collectionMenu, ['zotero-custom-menu-AbC1-1', 'beaver\\@jlegewie\\.com-beaver-new-table-collection-menu'], 'beaver-create-table'),
+            entry(overflow, ['zotero-custom-menu-AbC1-2', 'beaver\\@jlegewie\\.com-beaver-item-context-menu'], 'beaver-context-menu-submenu'),
+            entry(otherPopup, ['zotero-custom-menu-AbC1-3', 'beaver\\@jlegewie\\.com-a-menu-an-older-version-registered']),
+            // Zotero 8: a random key only; the l10n id identifies the entry.
+            entry(fileMenu, ['zotero-custom-menu-AbC1-4'], 'beaver-new-table'),
+            entry(itemMenu, ['zotero-custom-menu-AbC1-5'], 'beaver-note-export-submenu'),
         ];
-        const otherPlugin = entry(collectionMenu, 'other-plugin-entry');
+        const otherPlugin = [
+            entry(collectionMenu, ['zotero-custom-menu-XyZ9-1', 'other\\@plugin\\.org-its-menu'], 'other-plugin-entry'),
+            entry(itemMenu, ['zotero-custom-menu-XyZ9-2'], 'other-plugin-entry'),
+        ];
         Z.getMainWindows = () => [window];
         try {
             cleanupContextMenus();
             expect(beaverEntries.filter((elem) => elem.isConnected)).toEqual([]);
-            expect(otherPlugin.isConnected).toBe(true);
+            expect(otherPlugin.every((elem) => elem.isConnected)).toBe(true);
+            expect(overflow.isConnected).toBe(true);
         } finally {
             delete Z.getMainWindows;
-            menus.forEach((popup) => popup.remove());
+            menus.forEach((elem) => elem.remove());
         }
+    });
+
+    it('gives every menu entry Beaver registers an l10n id the shutdown cleanup recognizes on Zotero 8', () => {
+        // Zotero 8 marks entries only with a random key, so the cleanup finds
+        // Beaver's by this prefix; an entry without it would outlive the plugin.
+        initContextMenus();
+        const entries: any[] = [];
+        const walk = (menus: any[] | undefined) => {
+            for (const menu of menus ?? []) {
+                entries.push(menu);
+                walk(menu.menus);
+            }
+        };
+        for (const registration of registered) walk(registration.menus);
+        expect(entries.length).toBeGreaterThan(5);
+        const unmarked = entries
+            .filter((menu) => menu.menuType !== 'separator')
+            .filter((menu) => typeof menu.l10nID !== 'string' || !menu.l10nID.startsWith('beaver-'));
+        expect(unmarked).toEqual([]);
     });
 
     it('leaves the Beaver Actions submenu to actions', () => {

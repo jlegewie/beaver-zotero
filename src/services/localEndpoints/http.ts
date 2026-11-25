@@ -178,6 +178,7 @@ import {
     handleTestSidebarWidthHandlerHttpRequest,
     handleTestWindowRuntimeHttpRequest,
     handleTestMainWindowsHttpRequest,
+    handleTestMenuIntegrityHttpRequest,
 } from './handlers/testUiHandlers';
 
 
@@ -1109,6 +1110,11 @@ export function registerEndpoints(): (() => void) | undefined {
         // macOS-only, where Zotero keeps running with no main window).
         endpoints['/beaver/test/main-windows'] =
             createEndpoint(handleTestMainWindowsHttpRequest);
+
+        // Open Zotero's collection and item context menus as a right-click
+        // does and report duplicate or displaced ids (dev-only).
+        endpoints['/beaver/test/menu-integrity'] =
+            createEndpoint(handleTestMenuIntegrityHttpRequest);
 
         endpoints['/beaver/test/sidebar-width-handler'] =
             createEndpoint(handleTestSidebarWidthHandlerHttpRequest);
