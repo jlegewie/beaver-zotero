@@ -8,7 +8,7 @@
  * - Dropped buildClipboardSerializer (not needed for normalization)
  */
 
-import { DOMParser as ProseMirrorDOMParser, DOMSerializer, type Fragment, type Node as PMNode, type Schema, type Slice } from 'prosemirror-model';
+import { DOMParser as ProseMirrorDOMParser, DOMSerializer, Fragment, type Node as PMNode, type Schema, type Slice } from 'prosemirror-model';
 import { encodeObject, formatCitationItem } from './helpers';
 import type { Metadata } from './metadata';
 
@@ -25,7 +25,7 @@ export function buildToHTML(schema: Schema, doc: Document) {
             return '';
         }
 
-        const fragment = DOMSerializer.fromSchema(schema).serializeFragment(content, { document: doc });
+        const fragment = DOMSerializer.fromSchema(schema).serializeFragment(preserveSpaceRuns(content), { document: doc });
         const htmlDoc = doc.implementation.createHTMLDocument('New');
         const tmp = htmlDoc.body;
 
@@ -87,6 +87,33 @@ export function buildToHTML(schema: Schema, doc: Document) {
         html = html.normalize('NFC');
         return html;
     };
+}
+
+/**
+ * Rewrites each pair of spaces in text nodes as a space and a non-breaking
+ * space, as Zotero's note editor writes them, so a run of spaces survives HTML
+ * whitespace collapsing (TinyMCE and Google Docs paste use the same encoding).
+ * DOMSerializer writes text nodes itself, without calling the text node's
+ * `toDOM`, so the rewrite happens on the document before serializing. Atom
+ * nodes (math) render their own text and keep it unchanged.
+ */
+function preserveSpaceRuns(content: Fragment): Fragment {
+    let changed = false;
+    const children: PMNode[] = [];
+    content.forEach((child) => {
+        let next = child;
+        if (child.isText) {
+            const text = child.text!.replace(/ {2}/g, ' \u00a0');
+            if (text !== child.text) next = child.type.schema.text(text, child.marks);
+        }
+        else if (!child.isAtom && child.childCount) {
+            const inner = preserveSpaceRuns(child.content);
+            if (inner !== child.content) next = child.copy(inner);
+        }
+        if (next !== child) changed = true;
+        children.push(next);
+    });
+    return changed ? Fragment.fromArray(children) : content;
 }
 
 export function buildFromHTML(schema: Schema, doc: Document) {
