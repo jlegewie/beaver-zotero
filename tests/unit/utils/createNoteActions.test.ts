@@ -170,7 +170,7 @@ describe('executeCreateNoteAction', () => {
 
         await executeCreateNoteAction({ proposed_data: { title: 'Title', content: 'Body' } } as any, 'run-1');
 
-        expect((Zotero.Beaver as any).exporter.renderNoteMarkdown).toHaveBeenCalledExactlyOnceWith('<h1>Title</h1>\n\nBody');
+        expect((Zotero.Beaver as any).exporter.renderNoteMarkdown).toHaveBeenCalledExactlyOnceWith('<h1>Title</h1>\n\nBody', { directions: 'note' });
         expect(writeActive).toEqual([expect.any(String)]);
         expect(noteInstances[0].setNote.mock.calls[0][0]).toContain('<p><h1>Title</h1>\n\nBody</p>');
     });

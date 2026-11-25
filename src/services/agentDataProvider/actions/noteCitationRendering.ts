@@ -16,6 +16,7 @@ import { wrapWithSchemaVersion } from '../../../utils/noteProvenance';
 import { rebuildDataCitationItems } from '../../../utils/noteWrapper';
 import type { SimplificationMetadata } from '../../../utils/noteHtmlSimplifier';
 import { preloadStandaloneAttachmentLinks } from '../../../utils/zoteroLinkCitation';
+import type { NoteRenderOptions } from '../../export/noteMarkdown';
 import type { OperationContext } from '../operationContext';
 import { checkLibraryExcluded } from '../utils';
 
@@ -72,12 +73,12 @@ function resolveMappedExternalTags(
  * come back as canonical `<citation …/>` tags for the note citation builder;
  * tags inside code render as escaped code text.
  */
-export function renderWithCitationTags(markdown: string): string {
+export function renderWithCitationTags(markdown: string, options?: NoteRenderOptions): string {
     const exporter = Zotero.Beaver?.exporter;
     if (!exporter) {
         throw Object.assign(new Error('Note rendering is unavailable'), { code: 'capability_unavailable' });
     }
-    return exporter.renderNoteMarkdown(markdown);
+    return exporter.renderNoteMarkdown(markdown, options);
 }
 
 /**
@@ -108,7 +109,8 @@ export async function checkNoteMarkdownCitations(
 }
 
 /**
- * Render note Markdown (create_note content) to note HTML.
+ * Render note Markdown (create_note content) to note HTML, its blocks given
+ * their own text direction (see `NoteRenderOptions.directions`).
  *
  * The renderer leaves citations as `<citation …/>` tags (see
  * {@link renderWithCitationTags}); each is expanded here by the note
@@ -121,7 +123,7 @@ export async function renderNoteMarkdown(
     markdown: string,
     context?: OperationContext,
 ): Promise<{ html: string; warnings: string[] }> {
-    const masked = maskRenderedCitationTags(renderWithCitationTags(markdown));
+    const masked = maskRenderedCitationTags(renderWithCitationTags(markdown, { directions: 'note' }));
     if (masked.tags.length === 0) return { html: masked.text, warnings: [] };
 
     const externalRefContext = await getExternalRefContext(masked.tags.join('\n'), context);

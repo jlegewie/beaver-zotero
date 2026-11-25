@@ -9,7 +9,7 @@ import type { ActionExecuteRequest, ActionValidateRequest } from '../operationCo
 import { TimeoutContext, TimeoutError, checkAborted } from '../timeout';
 import { excludedLibraryMessage, getDeferredToolPreference } from '../utils';
 import { actionError, assertLibraryNotExcluded, toExecuteResponse } from './actionExecution';
-import { similarExistingTags, snapshotSimilarTags } from './similarTags';
+import { createdTags, similarExistingTags, snapshotSimilarTags } from './similarTags';
 
 
 /**
@@ -666,6 +666,10 @@ async function organizeItems(
         skipped_items: skippedItems.length > 0 ? skippedItems : undefined,
         unchanged_items: unchangedItems.length > 0 ? unchangedItems : undefined,
         similar_existing_tags: similarTags.length > 0 ? similarTags : undefined,
+        // Added tags new to their library; an empty list means every added
+        // tag already existed. Omitted when no tag was added or the pre-write
+        // lookup failed.
+        tags_created: tagsAddedByLibrary.size > 0 ? createdTags(tagsAddedByLibrary, similarSnapshots) : undefined,
     };
 }
 

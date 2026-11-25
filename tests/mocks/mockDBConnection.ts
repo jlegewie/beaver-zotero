@@ -1,5 +1,5 @@
 /**
- * Mock Zotero.DBConnection backed by better-sqlite3.
+ * Mock Zotero.DBConnection backed by Node's built-in SQLite (`node:sqlite`).
  *
  * This gives us real SQLite semantics for testing the SQL in BeaverDB
  * without needing a running Zotero instance.
@@ -11,16 +11,16 @@
  *   - closeDatabase()
  */
 
-import Database from 'better-sqlite3';
+import { DatabaseSync } from 'node:sqlite';
 import { parseQueryAndParams } from './zoteroQueryParams';
 
 export class MockDBConnection {
-    private db: Database.Database;
+    private db: DatabaseSync;
 
     constructor(filename = ':memory:') {
-        this.db = new Database(filename);
+        this.db = new DatabaseSync(filename);
         // Enable WAL mode to mimic Zotero's default
-        this.db.pragma('journal_mode = WAL');
+        this.db.exec('PRAGMA journal_mode = WAL');
     }
 
     /**
@@ -45,34 +45,25 @@ export class MockDBConnection {
             throw new Error('Please enter a LIKE clause with bindings');
         }
 
-        // Reader PRAGMAs like table_info return rows in Zotero's queryAsync, so
-        // they go through the reader path; assignment PRAGMAs fall through to
-        // run() (better-sqlite3 marks the difference via stmt.reader).
-        if (this.db.prepare(sql).reader) {
-            const stmt = this.db.prepare(sql);
-            const rows = stmt.all(...params);
+        // all() also runs statements that return no rows (INSERT, UPDATE,
+        // CREATE, `PRAGMA foreign_keys = ON`), which then yield an empty array.
+        const rows = this.db.prepare(sql).all(...params);
 
-            if (options?.onRow) {
-                // Simulate Zotero's onRow callback with getResultByIndex
-                for (const row of rows) {
-                    const values = Object.values(row);
-                    const proxy = {
-                        getResultByIndex(i: number) {
-                            return values[i];
-                        },
-                    };
-                    options.onRow(proxy);
-                }
-                return [];
+        if (options?.onRow) {
+            // Simulate Zotero's onRow callback with getResultByIndex
+            for (const row of rows) {
+                const values = Object.values(row);
+                const proxy = {
+                    getResultByIndex(i: number) {
+                        return values[i];
+                    },
+                };
+                options.onRow(proxy);
             }
-
-            return rows;
+            return [];
         }
 
-        // INSERT, UPDATE, DELETE, CREATE, DROP, etc.
-        const stmt = this.db.prepare(sql);
-        stmt.run(...params);
-        return [];
+        return rows;
     }
 
     /** Transactions run one at a time, like Zotero's. */
@@ -109,8 +100,8 @@ export class MockDBConnection {
         this.db.close();
     }
 
-    /** Helper: get the raw better-sqlite3 instance for assertions. */
-    getRawDB(): Database.Database {
+    /** Helper: get the raw `DatabaseSync` handle for assertions. */
+    getRawDB(): DatabaseSync {
         return this.db;
     }
 }

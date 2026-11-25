@@ -27,6 +27,8 @@ import { renderNoteMarkdownHtml } from '@beaver/agent-export/render/noteHtml';
 import { renderToHTML } from '../../../react/utils/citationRenderers';
 import { maskNoteCitationTags, unmaskNoteCitationTags } from '../../../src/utils/noteCitationMask';
 import { renderNoteMarkdown } from '../../../src/services/export/noteMarkdown';
+import type { TextDirectionOptions } from '@beaver/agent-export/render/textDirection';
+import { setHost } from '@beaver/agent-ui/host';
 import pinnedRenders from './fixtures/noteMarkdownRender.json';
 
 /** The chat's React renderer, as note writes used it. */
@@ -35,8 +37,8 @@ function renderWithReact(content: string): string {
     return unmaskNoteCitationTags(renderToHTML(masked.text, 'markdown', {}), masked);
 }
 
-function renderInstance(content: string): string {
-    return renderNoteMarkdown({ codeRanges, renderNoteMarkdownHtml }, content);
+function renderInstance(content: string, textDirection?: TextDirectionOptions): string {
+    return renderNoteMarkdown({ codeRanges, renderNoteMarkdownHtml }, content, textDirection);
 }
 
 const SNIPPETS = [
@@ -126,4 +128,44 @@ describe('note Markdown rendering without React', () => {
         }
         expect(mismatches.slice(0, 3)).toEqual([]);
     }, 60_000);
+});
+
+/**
+ * A note being written gets block directions in both renderers: "Save as
+ * note" renders with React, `create_note` in the plugin realm.
+ */
+describe('note Markdown rendering with text direction', () => {
+    const RTL_SNIPPETS = [
+        '# عنوان پژوهش', 'این پژوهش نشان می\u200Cدهد که روش **پیشنهادی** دقیق\u200Cتر است.',
+        'The term «استبداد» means tyranny.', '- یک\n- دو\n  - سه', '1. אחד\n2. שתיים',
+        '> نقل قول\n>\n> English in a quote', '| ستون | Value |\n|---|---|\n| سال | 2020 |',
+        'متن `code()` و $x^2$', '```\nconst a = 1;\n```', '$$\nx^2\n$$', 'فوت[^1]\n\n[^1]: یادداشت.',
+        '2019–2021', 'Plain English paragraph.', '<p dir="ltr">متن</p>',
+    ];
+
+    it('matches the React render for right-to-left and mixed notes', () => {
+        const next = random(7);
+        const pick = <T,>(list: T[]) => list[Math.floor(next() * list.length)];
+        const mismatches: string[] = [];
+        for (let n = 0; n < 100; n++) {
+            const parts: string[] = [];
+            for (let k = 0; k < 1 + Math.floor(next() * 5); k++) parts.push(pick(RTL_SNIPPETS), '\n\n');
+            const markdown = parts.join('');
+            if (renderInstance(markdown, { all: false }) !== renderWithReact(markdown)) mismatches.push(markdown);
+        }
+        expect(mismatches.slice(0, 3)).toEqual([]);
+        expect(renderWithReact(RTL_SNIPPETS[1])).toContain('dir="rtl"');
+    });
+
+    it('matches the React render when the writer reads both directions', () => {
+        setHost({ config: { directsAllText: () => true } } as never);
+        try {
+            for (const snippet of [...RTL_SNIPPETS, ...SNIPPETS]) {
+                expect(renderInstance(snippet, { all: true })).toBe(renderWithReact(snippet));
+            }
+            expect(renderWithReact('Plain English paragraph.')).toContain('<p dir="ltr">');
+        } finally {
+            setHost({});
+        }
+    });
 });

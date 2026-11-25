@@ -1,9 +1,9 @@
 /**
- * The hast shapes the chat's rehype transformers touch. `@types/hast` is
- * deliberately not available here (the package pins its ambient types to
- * react + react-dom), so the few fields used are declared locally. One
+ * The hast shapes the render modules read and write. `@types/hast` is not a
+ * dependency of this package, so the few fields used are declared locally. One
  * permissive interface covers roots (`type: 'root'`), elements
- * (`type: 'element'`) and text nodes (`type: 'text'`).
+ * (`type: 'element'`), text nodes (`type: 'text'`) and raw HTML
+ * (`type: 'raw'`).
  */
 export interface HastNode {
     type: string;
@@ -19,4 +19,11 @@ export function classNames(node: HastNode): string[] {
     if (Array.isArray(className)) return className.map((name) => String(name));
     if (typeof className === 'string') return className.split(/\s+/);
     return [];
+}
+
+/** Text content of a hast node tree. */
+export function hastTextContent(node: HastNode): string {
+    if (node.type === 'text') return node.value || '';
+    if (node.children) return node.children.map(hastTextContent).join('');
+    return '';
 }

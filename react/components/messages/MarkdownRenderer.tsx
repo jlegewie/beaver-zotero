@@ -19,7 +19,11 @@ import { resolveObjectIdReference } from '@beaver/agent-core/identity/libraryRef
 import { parseItemLinkHref, type ItemLinkTarget } from '@beaver/agent-core/identity/itemLinks';
 import { useFindQuery } from '@beaver/agent-ui/chat/findContext';
 import { rehypeFindHighlight } from '@beaver/agent-ui/chat/rehypeFindHighlight';
-import { rehypeTextDirection } from '@beaver/agent-ui/chat/rehypeTextDirection';
+import { rehypeTextDirection } from '@beaver/agent-export/render/textDirection';
+import { NOTE_SECTION_LABELS } from '../../utils/threadContent';
+
+/** An export render is a chat saved as a note, whose section headings are interface text. */
+const NOTE_LABELS = Object.values(NOTE_SECTION_LABELS);
 
 /**
  * Follow a link to a Zotero object. The object id is resolved here, at click
@@ -93,14 +97,14 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = React.memo(function Ma
     // Read on each render, as other host display settings are.
     const directsAllText = getHost().config?.directsAllText?.() === true;
     const rehypePlugins = React.useMemo(() => {
-        // The note rules (Zotero math and endnotes) are the ones the note
-        // renderer in the plugin realm uses, so an export matches a note write.
-        // Right-to-left text gets block directions on screen only: a note
-        // keeps the markup the note renderer in the plugin realm writes.
+        // The note rules (Zotero math, endnotes and block directions) are the
+        // ones the note renderer in the plugin realm uses, so an export matches
+        // a note write. An export renders a new note, so its blocks are
+        // directed like the agent's `create_note`.
         const plugins: RehypePlugins = [
             ...markdownSanitizePlugins,
             ...(exportRendering
-                ? noteRehypePlugins
+                ? noteRehypePlugins({ all: directsAllText, labels: NOTE_LABELS })
                 : [rehypeKatex, [rehypeTextDirection, { all: directsAllText }]] as RehypePlugins),
         ];
         // Always last. The transformer inserts markup the sanitize schema does

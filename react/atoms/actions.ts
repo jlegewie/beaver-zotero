@@ -5,7 +5,6 @@
  */
 
 import { atom } from 'jotai';
-import { v4 as uuidv4 } from 'uuid';
 import { Action, ActionOverride, ActionTargetType, generateActionId, sameTargets, stripBuiltinOnlyFields } from '@beaver/agent-core/types/actions';
 import { ALL_BUILTIN_ACTIONS } from '../types/builtinActions';
 import {

@@ -15,21 +15,38 @@ import remarkRehype from 'remark-rehype';
 import { urlAttributes } from 'html-url-attributes';
 import {
     exportUrlTransform,
-    type HastNode,
     markdownRemarkPlugins,
     markdownSanitizePlugins,
     noteRehypePlugins,
     prepareMarkdownSource,
 } from './markdownPipeline';
+import type { HastNode } from './hast';
 import { hastToStaticMarkup } from './reactStaticMarkup';
+import type { TextDirectionOptions } from './textDirection';
 
-const processor = unified()
-    .use(remarkParse)
-    .use(markdownRemarkPlugins)
-    .use(remarkRehype, { allowDangerousHtml: true })
-    .use(markdownSanitizePlugins)
-    .use(noteRehypePlugins)
-    .freeze();
+/** Section labels are only written by the chat's export render, so a note render directs by `all` alone. */
+type NoteTextDirection = Pick<TextDirectionOptions, 'all'>;
+
+function createProcessor(textDirection?: NoteTextDirection) {
+    return unified()
+        .use(remarkParse)
+        .use(markdownRemarkPlugins)
+        .use(remarkRehype, { allowDangerousHtml: true })
+        .use(markdownSanitizePlugins)
+        .use(noteRehypePlugins(textDirection))
+        .freeze();
+}
+
+type NoteProcessor = ReturnType<typeof createProcessor>;
+
+/** The frozen pipelines, by text direction mode, built on first use. */
+const processors: Partial<Record<'none' | 'rtl' | 'all', NoteProcessor>> = {};
+
+function processorFor(textDirection?: NoteTextDirection): NoteProcessor {
+    const mode = !textDirection ? 'none' : textDirection.all ? 'all' : 'rtl';
+    // Only `all` shapes the cached pipeline, so nothing else is passed on.
+    return processors[mode] ??= createProcessor(textDirection && { all: textDirection.all === true });
+}
 
 const hasOwn = (object: object, key: string) => Object.prototype.hasOwnProperty.call(object, key);
 
@@ -59,6 +76,16 @@ function postProcess(node: HastNode): void {
     }
 }
 
+export interface NoteMarkdownHtmlOptions {
+    /**
+     * Give blocks their own text direction, as a note being written gets (see
+     * `rehypeNoteTextDirection`). `all` is the writer's preference for
+     * directing text without right-to-left letters too. Without it, blocks
+     * take the reader's interface direction.
+     */
+    textDirection?: NoteTextDirection;
+}
+
 /**
  * Render note Markdown to note HTML.
  *
@@ -68,7 +95,12 @@ function postProcess(node: HastNode): void {
  * `preprocessCitations` (the chat's citation preprocessing) closes it so it
  * cannot swallow the text after it, and it renders nothing.
  */
-export function renderNoteMarkdownHtml(markdown: string, preprocessCitations: (text: string) => string): string {
+export function renderNoteMarkdownHtml(
+    markdown: string,
+    preprocessCitations: (text: string) => string,
+    options: NoteMarkdownHtmlOptions = {},
+): string {
+    const processor = processorFor(options.textDirection);
     const source = prepareMarkdownSource(markdown, { exportRendering: true, preprocessCitations });
     const tree = processor.runSync(processor.parse(source), source) as unknown as HastNode;
     postProcess(tree);

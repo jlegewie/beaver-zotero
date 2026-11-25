@@ -560,9 +560,8 @@ describe('DocumentCache size budget', () => {
     });
 
     it('orders the eviction scan from an index instead of sorting the table', async () => {
-        // EXPLAIN is not a SELECT, so it cannot go through queryAsync's reader
-        // path; reach the better-sqlite3 handle directly for the plan.
-        const rows = (conn as any).db
+        const rows = conn
+            .getRawDB()
             .prepare(
                 `EXPLAIN QUERY PLAN
                  SELECT id FROM document_cache_payloads

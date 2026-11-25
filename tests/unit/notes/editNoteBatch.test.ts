@@ -1486,8 +1486,12 @@ describe('Markdown edits render through the plugin exporter', () => {
         const response = await handleAgentActionValidateRequest(makeValidateRequest([markdownEdit]));
 
         expect(response.valid).toBe(true);
-        expect(renderNoteMarkdown.mock.calls.map(([content]) => content)).toEqual([
-            markdownEdit.old_string, markdownEdit.new_string,
+        // As written, then old_string with every block directed (this stub
+        // adds no direction, so its replacement is not rendered again).
+        expect(renderNoteMarkdown.mock.calls).toEqual([
+            [markdownEdit.old_string, {}],
+            [markdownEdit.new_string, {}],
+            [markdownEdit.old_string, { directions: 'all' }],
         ]);
         expect(response.normalized_action_data?.edits[0]).toMatchObject({
             old_string: RENDERED_OLD,
@@ -1501,7 +1505,7 @@ describe('Markdown edits render through the plugin exporter', () => {
         const response = await handleAgentActionExecuteRequest(makeExecuteRequest([markdownEdit]));
 
         expect(response.success).toBe(true);
-        expect(renderNoteMarkdown).toHaveBeenCalledTimes(2);
+        expect(renderNoteMarkdown).toHaveBeenCalledTimes(3);
         expect(item.setNote.mock.calls[0][0]).toContain(RENDERED_NEW);
     });
 
@@ -1514,7 +1518,7 @@ describe('Markdown edits render through the plugin exporter', () => {
             proposed_data: { library_id: 1, zotero_key: 'NOTE0001', edits: [markdownEdit] },
         } as any);
 
-        expect(renderNoteMarkdown).toHaveBeenCalledTimes(2);
+        expect(renderNoteMarkdown).toHaveBeenCalledTimes(3);
         expect(item.setNote.mock.calls[0][0]).toContain(RENDERED_NEW);
     });
 
@@ -1531,7 +1535,7 @@ describe('Markdown edits render through the plugin exporter', () => {
 
         expect(response.success).toBe(true);
         expect(renderNoteMarkdown.mock.calls.map(([content]) => content)).toEqual([
-            markdownEdit.old_string, markdownEdit.new_string,
+            markdownEdit.old_string, markdownEdit.new_string, markdownEdit.old_string,
         ]);
         expect(item.setNote.mock.calls[0][0]).toContain('Plain **words** here.');
     });

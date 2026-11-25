@@ -13,8 +13,5 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 
 export default function setup(): void {
-    // better-sqlite3 loads its library on the first database, not on import.
-    const Database = require('better-sqlite3');
-    new Database(':memory:').close();
     require('sharp');
 }

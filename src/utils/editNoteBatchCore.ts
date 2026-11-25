@@ -80,10 +80,14 @@ export interface BatchEditSpec {
     targetBeforeContext?: string;
     targetAfterContext?: string;
     /**
-     * Handler-supplied Markdown fallback. Called only when the normal matcher
-     * misses, so an edit that matches as written renders nothing.
+     * Handler-supplied Markdown fallback: the edit's strings rendered as
+     * written and with every block directed. Called only when the normal
+     * matcher misses, so an edit that matches as written renders nothing.
      */
-    renderMarkdownFallback?: () => Pick<MatchInput, 'renderedOldSimplified' | 'renderedNewSimplified'>;
+    renderMarkdownFallback?: () => Pick<
+        MatchInput,
+        'renderedOldSimplified' | 'renderedNewSimplified' | 'directedRenderedOldSimplified' | 'directedRenderedNewSimplified'
+    >;
 }
 
 /** Inputs shared by every edit in one resolution pass. */

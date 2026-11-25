@@ -1,5 +1,25 @@
 import { FIND_HIT_ATTR, FIND_HIT_CLASS, findMatchRanges, type FindQuery } from './findContext';
-import { classNames, type HastNode } from './hast';
+
+/**
+ * The hast fields this transformer touches. `@types/hast` is not available
+ * here (the package pins its ambient types to react + react-dom), so they are
+ * declared locally.
+ */
+interface HastNode {
+    type: string;
+    tagName?: string;
+    value?: string;
+    properties?: Record<string, unknown>;
+    children?: HastNode[];
+}
+
+/** Element class names, whether hast stored them as an array or a string. */
+function classNames(node: HastNode): string[] {
+    const className = node.properties?.className;
+    if (Array.isArray(className)) return className.map((name) => String(name));
+    if (typeof className === 'string') return className.split(/\s+/);
+    return [];
+}
 
 /** Class-name substrings whose subtrees must never be marked. */
 const SKIPPED_CLASS_PARTS = ['katex', 'math'];

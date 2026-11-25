@@ -78,10 +78,6 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # better-sqlite3 backs the SQLite test doubles; see .npmrc.
-      - name: Build native dependencies
-        run: npm run rebuild:native
-
       - name: Unit tests
         env:
           SHARD: ${{ matrix.shard }}
