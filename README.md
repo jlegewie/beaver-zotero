@@ -126,7 +126,7 @@ npm ci
 npm run build
 ```
 
-Dependency install scripts are disabled in `.npmrc`. The build doesn't need them; to run the unit tests, also run `npm run rebuild:native`.
+Dependency install scripts are disabled in `.npmrc`; neither the build nor the tests need them. The unit tests need Node 22.16 or later, for `node:sqlite`.
 
 The build requires environment variables for the Supabase URL, anon key, and API endpoints. Create a `.env.production` file or set them in your environment:
 

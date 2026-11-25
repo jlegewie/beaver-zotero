@@ -47,7 +47,8 @@ vi.mock('../../../src/utils/prefs', () => ({
 
 import { TABLE_SPEC_VERSION, type TableSpec } from '@beaver/agent-core/layouts/table';
 import { summarize } from '@beaver/agent-core/layouts/tableMutations';
-import type { TableShadowRecord } from '../../../src/services/database';
+import { BeaverDB } from '../../../src/services/database';
+import { MockDBConnection } from '../../mocks/mockDBConnection';
 import { buildTableDocument } from '../../../src/services/artifacts/tableDocument';
 import { TABLE_TAG } from '../../../src/services/artifacts/tableItem';
 import {
@@ -83,7 +84,8 @@ let profileDir: string;
 let storageDir: string;
 let htmlPath: string;
 let item: any;
-let db: FakeShadowDB;
+let conn: MockDBConnection;
+let db: BeaverDB;
 let savedIOUtils: any;
 let savedPathUtils: any;
 let savedZotero: any;
@@ -127,63 +129,6 @@ const realPathUtils = {
     filename: (path: string) => basename(path),
     parent: (path: string) => dirname(path),
 };
-
-/**
- * The four `BeaverDB` methods the shadow uses, in memory.
- *
- * A real `MockDBConnection` would be better, but its `better-sqlite3` binary is
- * built for a different Node than the one this suite runs under. The SQL itself
- * is exercised in `tests/unit/services/database.tableShadow.test.ts`; what is
- * modelled here is the contract those queries provide — the unique key on
- * (library, key, version), and "most recently written first".
- */
-class FakeShadowDB {
-    private rows: TableShadowRecord[] = [];
-
-    async upsertTableShadow(input: TableShadowRecord): Promise<void> {
-        const existing = this.rows.findIndex(
-            (row) =>
-                row.libraryId === input.libraryId &&
-                row.zoteroKey === input.zoteroKey &&
-                row.version === input.version
-        );
-        if (existing >= 0) this.rows[existing] = { ...input };
-        else this.rows.push({ ...input });
-    }
-
-    async getTableShadows(libraryId: number, zoteroKey: string): Promise<TableShadowRecord[]> {
-        return this.rows
-            .filter((row) => row.libraryId === libraryId && row.zoteroKey === zoteroKey)
-            .sort(
-                (a, b) =>
-                    b.writtenAt.localeCompare(a.writtenAt) || b.version - a.version
-            )
-            .map((row) => ({ ...row }));
-    }
-
-    async deleteTableShadowVersions(
-        libraryId: number,
-        zoteroKey: string,
-        versions: number[]
-    ): Promise<TableShadowRecord[]> {
-        const doomed = this.rows.filter(
-            (row) =>
-                row.libraryId === libraryId &&
-                row.zoteroKey === zoteroKey &&
-                versions.includes(row.version)
-        );
-        this.rows = this.rows.filter((row) => !doomed.includes(row));
-        return doomed.map((row) => ({ ...row }));
-    }
-
-    async deleteTableShadows(libraryId: number, zoteroKey: string): Promise<TableShadowRecord[]> {
-        const doomed = await this.getTableShadows(libraryId, zoteroKey);
-        this.rows = this.rows.filter(
-            (row) => !(row.libraryId === libraryId && row.zoteroKey === zoteroKey)
-        );
-        return doomed;
-    }
-}
 
 async function sha256(text: string): Promise<string> {
     const digest = await crypto.subtle.digest(
@@ -318,7 +263,9 @@ beforeEach(async () => {
     storageDir = await mkdtemp(join(tmpdir(), 'beaver-table-'));
     htmlPath = join(storageDir, 'demo-table.html');
 
-    db = new FakeShadowDB();
+    conn = new MockDBConnection();
+    db = new BeaverDB(conn);
+    await db.initDatabase('0.23.0');
 
     (globalThis as any).IOUtils = { ...realIOUtils };
     (globalThis as any).PathUtils = { ...realPathUtils };
@@ -396,6 +343,7 @@ afterEach(async () => {
     // A debounced render still pending would write into the deleted directory.
     await rm(storageDir, { recursive: true, force: true });
     await rm(profileDir, { recursive: true, force: true });
+    await conn.closeDatabase();
 });
 
 // ---------------------------------------------------------------------------

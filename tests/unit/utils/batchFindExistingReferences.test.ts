@@ -1,7 +1,7 @@
 /**
  * Unit tests for `batchFindExistingReferences`.
  *
- * These tests exercise the real SQL (via better-sqlite3 in MockDBConnection)
+ * These tests exercise the real SQL (via SQLite in MockDBConnection)
  * against a seeded minimal Zotero schema. Tests cover:
  *   - exact-match title fast path
  *   - keyword LIKE fallback
