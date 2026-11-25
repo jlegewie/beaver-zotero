@@ -540,9 +540,9 @@ export interface ConfigHost {
      */
     isImeTracingEnabled?(): boolean;
     /**
-     * Whether rendered chat text gets an explicit direction even when it has no
-     * right-to-left letters, so English text reads left to right in a
-     * right-to-left interface. Optional: a host that omits it (or omits this
+     * Whether rendered chat text, and a note saved from the chat, gets an
+     * explicit direction even when it has no right-to-left letters, so English
+     * text reads left to right in a right-to-left interface. Optional: a host that omits it (or omits this
      * whole slice) directs only text containing right-to-left letters.
      */
     directsAllText?(): boolean;

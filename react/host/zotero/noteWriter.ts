@@ -23,7 +23,9 @@ function assembleNoteHtml(request: SaveNoteRequest): string {
     const runId = request.format.runId;
 
     if (request.format.kind === 'agent-run') {
-        const titleHtml = generateNoteTitle(request.format.responseIndex);
+        // The rendered content carries block directions when its note is directed.
+        const directed = /<(?:p|h[1-6]|ul|ol|pre)\b[^>]*\sdir="(?:ltr|rtl)"/.test(request.contentHtml);
+        const titleHtml = generateNoteTitle(request.format.responseIndex, directed);
         const brandingHtml = threadId ? getBeaverNoteFooterHTML(threadId, runId) : '';
         return `${titleHtml}${brandingHtml}<hr>${request.contentHtml}<hr>${brandingHtml}`;
     }

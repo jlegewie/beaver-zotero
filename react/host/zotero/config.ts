@@ -1,4 +1,5 @@
 import { getPref } from '../../../src/utils/prefs';
+import { directsAllText } from '../../../src/utils/textDirectionPref';
 import type { ConfigHost } from '@beaver/agent-ui/host/types';
 
 /** Zotero implementation of {@link ConfigHost} — reads Beaver prefs. */
@@ -29,10 +30,5 @@ export const zoteroConfig: ConfigHost = {
     isImeTracingEnabled() {
         return getPref('debugImeTrace') === true;
     },
-    directsAllText() {
-        // Zotero's own switch for direction-aware item fields: on for anyone who
-        // picked a right-to-left language in Zotero, or who enabled
-        // bidirectional text in the Advanced preferences.
-        return Zotero.Prefs.get('bidi.browser.ui', true) === true;
-    },
+    directsAllText,
 };

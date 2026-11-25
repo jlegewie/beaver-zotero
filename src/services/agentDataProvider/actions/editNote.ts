@@ -69,6 +69,7 @@ import {
 } from '../../../utils/noteWrapper';
 import { maskRenderedCitationTags, unmaskNoteCitationTags } from '../../../utils/noteCitationMask';
 import { dismissNotePreviews } from '../../notePreviews';
+import type { NoteRenderOptions } from '../../export/noteMarkdown';
 import type { ActionExecuteRequest, ActionValidateRequest, OperationContext } from '../operationContext';
 import { TimeoutContext, TimeoutError, checkAborted } from '../timeout';
 import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
@@ -101,52 +102,75 @@ function containsCitationTag(...parts: string[]): boolean {
     return parts.some((part) => CITATION_TAG_RE.test(part));
 }
 
+/** The rendered Markdown fields of a `MatchInput`. */
+export type MarkdownRenderFields = Pick<
+    MatchInput,
+    'renderedOldSimplified' | 'renderedNewSimplified' | 'directedRenderedOldSimplified' | 'directedRenderedNewSimplified'
+>;
+
 /**
  * Render Markdown-shaped edit strings through the same static renderer used by
  * create_note, then simplify the rendered HTML into the matcher's input format.
  * The helper is only called after the normal synchronous matcher misses.
+ *
+ * Each string renders twice: as written, and with a direction on every block.
+ * A note Beaver wrote with right-to-left text has a `dir` on every block (its
+ * English blocks too), so only the directed render of a block-level anchor is
+ * found there, and its replacement then keeps the note's directions.
  */
 export async function buildMarkdownRenderFields(
     oldString: string,
     newString: string,
     operation: EditNoteOperation,
-    libraryId: number, context?: OperationContext): Promise<Pick<MatchInput, 'renderedOldSimplified' | 'renderedNewSimplified'>> {
+    libraryId: number, context?: OperationContext): Promise<MarkdownRenderFields> {
     if (!oldString || !looksLikeMarkdownForRender(oldString)) return {};
+    if (!context?.renderMarkdown) return {};
+    const renderMarkdown = context.renderMarkdown;
 
-    try {
-        if (!context?.renderMarkdown) return {};
-        // The renderer leaves citations as the tags the model wrote, so the
-        // strategy expands them like any other edit (old_string tags resolve
-        // by `ref`, new ones are built from the model's page numbers). They
-        // are masked while the HTML is simplified.
-        const render = async (content: string) => {
-            const masked = maskRenderedCitationTags(await context.renderMarkdown!(content));
-            return unmaskNoteCitationTags(simplifyNoteHtml(masked.text, libraryId).simplified, masked);
-        };
-
-        const renderedOldSimplified = (await render(oldString));
-        let renderedNewSimplified: string;
+    // The renderer leaves citations as the tags the model wrote, so the
+    // strategy expands them like any other edit (old_string tags resolve
+    // by `ref`, new ones are built from the model's page numbers). They
+    // are masked while the HTML is simplified.
+    const renderer = (options: NoteRenderOptions) => async (content: string) => {
+        const masked = maskRenderedCitationTags(await renderMarkdown(content, options));
+        return unmaskNoteCitationTags(simplifyNoteHtml(masked.text, libraryId).simplified, masked);
+    };
+    const renderReplacement = async (render: (content: string) => Promise<string>, renderedOld: string) => {
         if (operation === 'insert_after') {
             const injected = newString.startsWith(oldString)
                 ? newString.substring(oldString.length)
                 : newString;
-            renderedNewSimplified = renderedOldSimplified
-                + (await render(injected));
-        } else if (operation === 'insert_before') {
+            return renderedOld + (await render(injected));
+        }
+        if (operation === 'insert_before') {
             const injected = newString.endsWith(oldString)
                 ? newString.substring(0, newString.length - oldString.length)
                 : newString;
-            renderedNewSimplified = (await render(injected))
-                + renderedOldSimplified;
-        } else {
-            renderedNewSimplified = (await render(newString));
+            return (await render(injected)) + renderedOld;
         }
+        return render(newString);
+    };
 
-        return { renderedOldSimplified, renderedNewSimplified };
+    let fields: MarkdownRenderFields;
+    try {
+        const render = renderer({});
+        const renderedOld = await render(oldString);
+        fields = { renderedOldSimplified: renderedOld, renderedNewSimplified: await renderReplacement(render, renderedOld) };
     } catch (e: any) {
         logger(`buildMarkdownRenderFields: Failed to render Markdown fallback: ${e?.message || String(e)}`, 1);
         return {};
     }
+    try {
+        const render = renderer({ directions: 'all' });
+        const renderedOld = await render(oldString);
+        if (renderedOld !== fields.renderedOldSimplified) {
+            fields.directedRenderedOldSimplified = renderedOld;
+            fields.directedRenderedNewSimplified = await renderReplacement(render, renderedOld);
+        }
+    } catch (e: any) {
+        logger(`buildMarkdownRenderFields: Failed to render directed Markdown fallback: ${e?.message || String(e)}`, 1);
+    }
+    return fields;
 }
 
 async function findMarkdownRenderFallbackMatch(

@@ -14,7 +14,8 @@ import type { WriteDocxResult, WriteHtmlResult, WriteLatexResult, WriteMarkdownR
 import type { Row, TableSpec } from '@beaver/agent-core/layouts/table';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { loadExportRuntime, type ExportRuntime } from './exportRuntime';
-import { renderNoteMarkdown } from './noteMarkdown';
+import { renderNoteMarkdown, type NoteRenderOptions } from './noteMarkdown';
+import { directsAllText } from '../../utils/textDirectionPref';
 import { formatExportCitations } from './exportCitations';
 import { loadNoteImages } from './noteImages';
 import { readNoteForExport } from './noteExportSource';
@@ -355,8 +356,11 @@ export class InstanceExport {
      * Needs no window; loads the export runtime on first use. Renderers call it
      * through `Zotero.Beaver.exporter`, so every note write renders here.
      */
-    renderNoteMarkdown(content: string): string {
-        return renderNoteMarkdown(this.getRuntime(), content);
+    renderNoteMarkdown(content: string, options: NoteRenderOptions = {}): string {
+        const textDirection = options.directions === 'all' ? { all: true }
+            : options.directions === 'note' ? { all: directsAllText() }
+            : undefined;
+        return renderNoteMarkdown(this.getRuntime(), content, textDirection);
     }
 
     private async choosePath(exportFormat: ExportFormat, title: string, context: ExportContext): Promise<string | null> {

@@ -75,6 +75,7 @@ import { actionError, assertLibraryNotExcluded, assertLibraryRefNotExcluded, toE
 import {
     assertEditableNote,
     buildMarkdownRenderFields,
+    type MarkdownRenderFields,
     getExternalRefContext,
 } from './editNote';
 import { sha256Hex } from '../../../utils/hash';
@@ -234,7 +235,7 @@ export async function prepareSpecs(
 
         const isStrReplaceFamily = operation !== 'rewrite' && operation !== 'append';
         let oldString = edit.old_string ?? '';
-        let rendered: { renderedOldSimplified?: string; renderedNewSimplified?: string } = {};
+        let rendered: MarkdownRenderFields = {};
         if (isStrReplaceFamily) {
             oldString = applyOldStringEnrichment(oldString, metadata, labels.pageLabels) ?? oldString;
             rendered = await buildMarkdownRenderFields(oldString, edit.new_string, operation, libraryId, context);

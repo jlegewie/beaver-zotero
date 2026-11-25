@@ -1,5 +1,6 @@
 import type { DeferredToolPreference, WSAgentActionExecuteRequest, WSAgentActionValidateRequest } from '@beaver/agent-core/protocol/agentProtocol';
 import type { ExternalRefContext } from '../../utils/noteCitationExpand';
+import type { NoteRenderOptions } from '../export/noteMarkdown';
 
 /** Captured by the originating client; absent grants never borrow another chat's policy. */
 export interface OperationContext {
@@ -19,7 +20,7 @@ export interface OperationContext {
      * come back as canonical `<citation …/>` tags for the note citation
      * builder; tags inside code render as escaped code text.
      */
-    renderMarkdown?: (content: string) => Promise<string>;
+    renderMarkdown?: (content: string, options?: NoteRenderOptions) => Promise<string>;
     grantCreatedNote?: (libraryId: number, key: string) => void;
 }
 

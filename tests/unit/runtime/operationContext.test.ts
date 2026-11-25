@@ -65,8 +65,8 @@ describe('explicit data operation context', () => {
     });
 
     it('renders note Markdown in the plugin realm', async () => {
-        expect(await captureOperationContext(true).renderMarkdown!('text')).toBe('<p>text</p>');
-        expect(state.renderNoteMarkdown).toHaveBeenCalledExactlyOnceWith('text');
+        expect(await captureOperationContext(true).renderMarkdown!('text', { directions: 'note' })).toBe('<p>text</p>');
+        expect(state.renderNoteMarkdown).toHaveBeenCalledExactlyOnceWith('text', { directions: 'note' });
     });
 
     it('never gives an originless request the local chat’s full access or reference mappings', async () => {

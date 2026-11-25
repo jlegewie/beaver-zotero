@@ -512,7 +512,7 @@ describe('validateEditNoteAction — success', () => {
         }));
 
         expect(response.valid).toBe(true);
-        expect(renderToHTML).toHaveBeenCalledTimes(2);
+        expect(renderToHTML).toHaveBeenCalledTimes(3); // old as written and directed, new once (the directed old adds nothing)
         expect(prepareCitationRenderContext).not.toHaveBeenCalled();
         expect(response.normalized_action_data).toMatchObject({
             old_string: renderedOld,
@@ -586,7 +586,7 @@ describe('validateEditNoteAction — success', () => {
         }));
 
         expect(response.valid).toBe(true);
-        expect(renderToHTML).toHaveBeenCalledTimes(2);
+        expect(renderToHTML).toHaveBeenCalledTimes(3); // old as written and directed, new once (the directed old adds nothing)
         expect(response.normalized_action_data).toMatchObject({
             old_string: renderedOld,
             new_string: renderedNew,
@@ -969,7 +969,7 @@ describe('executeEditNoteAction — success', () => {
         }));
 
         expect(response.success).toBe(true);
-        expect(renderToHTML).toHaveBeenCalledTimes(2);
+        expect(renderToHTML).toHaveBeenCalledTimes(4); // prepared: old and new, each as written and directed
         expect(item.setNote).toHaveBeenCalled();
         expect(item.setNote.mock.calls[0][0]).toContain(renderedNew);
     });
