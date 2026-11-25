@@ -43,8 +43,8 @@ export function buildAnnotationNoteCitation(
     annotation: Zotero.Item,
     options?: NoteCitationItemOptions,
 ): BuiltNoteCitation | null {
-    const attachment = annotation.parentID ? Zotero.Items.get(annotation.parentID) : null;
-    const parent = attachment?.parentID ? Zotero.Items.get(attachment.parentID) : null;
+    const attachment = annotation.parentID ? Zotero.Items.get(annotation.parentID) || null : null;
+    const parent = attachment?.parentID ? Zotero.Items.get(attachment.parentID) || null : null;
     if (!parent || !parent.isRegularItem()) return null;
     // "-" is Zotero's label for a page that prints no number: cite no page,
     // as for any such page (`citationPageLocator`).

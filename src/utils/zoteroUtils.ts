@@ -348,7 +348,7 @@ export async function loadParentData(items: Zotero.Item[]): Promise<void> {
     // Load all unique parents in parallel
     if (parentIdsToLoad.size > 0) {
         const parentLoadPromises = Array.from(parentIdsToLoad).map(
-            parentId => Zotero.Items.getAsync(parentId).then(p => p?.loadAllData())
+            parentId => Zotero.Items.getAsync(parentId).then(p => p ? p.loadAllData() : undefined)
         );
         await Promise.all(parentLoadPromises);
     }
@@ -431,10 +431,11 @@ export function buildNoteCitation(
         if (!item.parentID) {
             throw new Error('Cannot cite standalone attachments - they must have a parent item');
         }
-        itemToCite = Zotero.Items.get(item.parentID);
-        if (!itemToCite || !itemToCite.isRegularItem()) {
+        const parent = Zotero.Items.get(item.parentID);
+        if (!parent || !parent.isRegularItem()) {
             throw new Error('Attachment parent is not a regular item');
         }
+        itemToCite = parent;
     }
     if (!itemToCite.isRegularItem()) {
         throw new Error('Item is not a regular item and cannot be cited');

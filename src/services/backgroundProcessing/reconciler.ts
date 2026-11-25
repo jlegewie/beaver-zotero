@@ -202,7 +202,7 @@ export class ReconcilerService {
             if (this.cancelled(generation)) return;
             if (event.event === 'delete') continue;
             const item = await Zotero.Items.getAsync(event.id);
-            if (item?.isRegularItem() && isBackgroundProcessingLibraryEnabled(item.libraryID)) {
+            if (item && item.isRegularItem() && isBackgroundProcessingLibraryEnabled(item.libraryID)) {
                 parentIds.push(event.id);
             }
         }
@@ -241,7 +241,7 @@ export class ReconcilerService {
                 }
                 if (!ref?.libraryID || !ref.key || !isBackgroundProcessingLibraryEnabled(ref.libraryID)) continue;
                 const item = event.event === 'delete' ? null : await Zotero.Items.getAsync(event.id);
-                if (item?.isRegularItem()) continue;
+                if (item && item.isRegularItem()) continue;
                 if (item && item.parentID) await Zotero.Items.getAsync(item.parentID);
                 if (!isBackgroundProcessingLibraryEnabled(ref.libraryID)) continue;
                 const kind = item && safeIsInTrash(item) === false ? getReadableContentKind(item) : null;

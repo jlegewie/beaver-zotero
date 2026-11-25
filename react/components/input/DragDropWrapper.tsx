@@ -552,6 +552,7 @@ const DragDropWrapper: React.FC<DragDropWrapperProps> = ({
             const annotationData = JSON.parse(e.dataTransfer.getData('zotero/annotation'));
             for (const data of annotationData) {
                 const attachment = Zotero.Items.get(data.attachmentItemID);
+                if (!attachment) continue;
                 const item = await Zotero.Items.getByLibraryAndKeyAsync(attachment.libraryID, data.id);
                 // Skip if item is not an annotation or has an invalid annotation type
                 if(!item || !item.isAnnotation() || !isValidAnnotationType(item.annotationType)) return;

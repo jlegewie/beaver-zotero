@@ -117,11 +117,10 @@ function currentPlacement(
     item: Zotero.Item,
     isHighlight: boolean,
 ): AnnotationPlacement {
-    const { annotationSortIndex } = item as unknown as ZoteroAnnotationItem;
     return {
         ...(isHighlight ? { text: item.annotationText ?? "" } : {}),
         pageLabel: item.annotationPageLabel ?? "",
-        sortIndex: annotationSortIndex ?? "",
+        sortIndex: item.annotationSortIndex ?? "",
         position: item.annotationPosition ?? "",
     };
 }

@@ -109,7 +109,7 @@ export const findExistingReference = async (libraryID: number, data: FindReferen
                     if (item) {
                         await Zotero.Items.loadDataTypes([item], ["itemData", "creators", "childItems"]);
                     }
-                    return item;
+                    return item || null;
                 }
             }
         }
@@ -142,7 +142,7 @@ export const findExistingReference = async (libraryID: number, data: FindReferen
                     if (item) {
                         await Zotero.Items.loadDataTypes([item], ["itemData", "creators", "childItems"]);
                     }
-                    return item;
+                    return item || null;
                 }
             }
         }

@@ -65,9 +65,8 @@ export async function collectDemoItems(limit: number): Promise<DemoItem[]> {
             .map((c: any) => c.lastName || c.name)
             .filter(Boolean);
         const attachments = item.getAttachments() as number[];
-        const pdf = attachments
-            .map((id) => Zotero.Items.get(id))
-            .find((attachment) => attachment?.attachmentContentType === 'application/pdf');
+        const pdf = Zotero.Items.get(attachments)
+            .find((attachment) => attachment.attachmentContentType === 'application/pdf');
         return {
             libraryID: item.libraryID,
             key: item.key,

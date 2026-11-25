@@ -1175,7 +1175,9 @@ async function withCreationOperation<T>(
                     'Multiple imports have this operation identity.',
                     'operation_pending'
                 );
-            return replay(await Zotero.Items.getAsync(ids[0]), requestHash);
+            const item = await Zotero.Items.getAsync(ids[0]);
+            if (!item) throw new TableItemError('The table this operation created is gone.', 'not_found');
+            return replay(item, requestHash);
         }
         requireWritable({ libraryID, key: '' });
         return create({ libraryID, requestHash, url });

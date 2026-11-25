@@ -248,7 +248,7 @@ function selectedCollectionReferences(): CollectionReference[] {
         .filter(info => searchableLibraryIds.includes(info.libraryId));
     const references: CollectionReference[] = [];
     for (const info of selected) {
-        const collection = Zotero.Collections.get(info.collectionId) as Zotero.Collection | undefined;
+        const collection = Zotero.Collections.get(info.collectionId);
         if (collection) references.push(collectionToReference(collection));
     }
     return references;
