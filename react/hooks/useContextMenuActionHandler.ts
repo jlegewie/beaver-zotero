@@ -101,7 +101,7 @@ export function useContextMenuActionHandler() {
                 let contextCollections: CollectionReference[] = [];
                 if (targetType === 'collection' && allowedCollections.length > 0) {
                     const cols = allowedCollections
-                        .map(c => Zotero.Collections.get(c.collectionId) as Zotero.Collection | undefined)
+                        .map(c => Zotero.Collections.get(c.collectionId))
                         .filter((col): col is Zotero.Collection => !!col);
                     if (cols.length > 0) {
                         contextCollections = cols.map(collectionToReference);

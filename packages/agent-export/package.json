@@ -12,7 +12,7 @@
     }
   },
   "dependencies": {
-    "docx": "^9.8.1",
+    "docx": "^9.15.4",
     "hast-util-to-jsx-runtime": "^2.3.6",
     "html-url-attributes": "^3.0.1",
     "jszip": "^3.10.1",

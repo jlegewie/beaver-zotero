@@ -962,6 +962,16 @@ describe('attachment change reconciliation', () => {
         expect(await db.peekBackgroundJobs()).toEqual([expect.objectContaining({ jobType: 'fulltext_untag' })]);
     });
 
+    it('retires the state of a changed attachment that Zotero no longer returns', async () => {
+        await seed(false);
+        // Zotero answers `false`, not null, for an item id it does not know.
+        vi.mocked(Zotero.Items.getAsync).mockResolvedValue(false as any);
+        await notify('modify');
+        expect(await db.getAttachmentProcessingState(1, item.key)).toBeNull();
+        expect(mocks.invalidate).toHaveBeenCalledWith(1, item.key);
+        expect(await db.peekBackgroundJobs()).toEqual([expect.objectContaining({ jobType: 'fulltext_untag' })]);
+    });
+
     describe('Beaver tables', () => {
         function makeTable() {
             Object.assign(item, {

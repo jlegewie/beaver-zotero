@@ -50,7 +50,7 @@ import { hexDigits } from '../note/colors';
 import { trailingText } from '../note/inlineText';
 import { latexToOmml } from '../math/latexToOmml';
 import { activityLabelParts } from '../activity';
-import { escapeXml, parseXml, stripInvalidXmlChars, type XmlNode } from '../math/xml';
+import { escapeXml, parseXml, stripInvalidXmlChars, type XmlElement } from '../math/xml';
 import { assignNotePlacements, sectionFootnoteDefinitions, type NotePlacement } from '../citations/noteIndices';
 import { parseCslHtml, type StyledSegment } from '../citations/inlineHtml';
 import { BIBLIOGRAPHY_FIELD_CODE, citationFieldCode, documentPreferenceProperties } from './zoteroFields';
@@ -132,14 +132,11 @@ const TASKS_DONE = 'beaver-tasks-done';
 /** Elements whose text is content, kept even when it is only spaces. */
 const TEXT_ELEMENTS = new Set(['w:t', 'm:t', 'w:instrText']);
 
-function xmlComponent(node: XmlNode, parentName: string): ImportedXmlComponent | string | null {
-    if (node.type === 'text') {
-        return node.value.trim() || TEXT_ELEMENTS.has(parentName) ? node.value : null;
-    }
+function xmlComponent(node: XmlElement): ImportedXmlComponent {
     const component = new ImportedXmlComponent(node.name, Object.keys(node.attributes).length > 0 ? node.attributes : undefined);
     for (const child of node.children) {
-        const converted = xmlComponent(child, node.name);
-        if (converted !== null) component.push(converted);
+        if (child.type === 'element') component.push(xmlComponent(child));
+        else if (child.value.trim() || TEXT_ELEMENTS.has(node.name)) component.push(child.value);
     }
     return component;
 }
@@ -149,11 +146,13 @@ function xmlComponent(node: XmlNode, parentName: string): ImportedXmlComponent |
  * here: nothing resolves namespaces, and the document root declares both.
  * Parsed here rather than with `ImportedXmlComponent.fromXmlString`, which
  * drops text that is only whitespace — the em spaces of `\quad` included.
+ * docx's `ParagraphChild` type lists only its own run classes, but a
+ * paragraph serializes any XML component it is given.
  */
 function rawXml(xml: string): Child {
-    const element = parseXml(xml).find(node => node.type === 'element');
+    const element = parseXml(xml).find((node): node is XmlElement => node.type === 'element');
     if (!element) throw new Error('Raw XML has no element');
-    return xmlComponent(element, '') as Child;
+    return xmlComponent(element) as unknown as Child;
 }
 
 /** Field begin/end runs, so link handling can keep a field's runs together. */

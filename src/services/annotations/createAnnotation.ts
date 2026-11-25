@@ -480,10 +480,7 @@ export function applyAnnotationPlacement(
 ): void {
     if (placement.text !== undefined) item.annotationText = placement.text;
     item.annotationPageLabel = placement.pageLabel;
-    const sortIndexField: Pick<ZoteroAnnotationItem, "annotationSortIndex"> = {
-        annotationSortIndex: placement.sortIndex,
-    };
-    Object.assign(item, sortIndexField);
+    item.annotationSortIndex = placement.sortIndex;
     item.annotationPosition = placement.position;
 }
 

@@ -625,11 +625,7 @@ async function resolveTarget(
  * because the approval card renders from them.
  */
 function capturePlacement(target: ResolvedTarget): void {
-    // Zotero's upstream typing declares annotationSortIndex as a number; it is
-    // a formatted string, which ZoteroAnnotationItem corrects.
-    const { annotationSortIndex } =
-        target.item as unknown as ZoteroAnnotationItem;
-    target.before.sort_index = annotationSortIndex ?? "";
+    target.before.sort_index = target.item.annotationSortIndex ?? "";
     target.before.position = target.item.annotationPosition ?? "";
 }
 

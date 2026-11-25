@@ -39,6 +39,12 @@ interface DevToolsMenuButtonProps {
  * TEMPORARY: Button component for dev testing functions - REMOVE BEFORE RELEASE
  * Shows PDF extraction testing and semantic search options in a dropdown menu
  */
+/** The item if it is a PDF, otherwise its first PDF attachment. */
+function selectedPdf(item: Zotero.Item): Zotero.Item | undefined {
+    if (item.isPDFAttachment()) return item;
+    return Zotero.Items.get(item.getAttachments()).find(attachment => attachment.isPDFAttachment());
+}
+
 const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({ 
     className = '',
     ariaLabel = 'Dev Tools Menu',
@@ -144,20 +150,10 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
             return;
         }
 
-        let pdfItem = selectedItems[0];
-
-        // If it's a parent item, try to get the first PDF attachment
-        if (!pdfItem.isPDFAttachment()) {
-            const attachmentIDs = pdfItem.getAttachments();
-            const pdfAttachment = attachmentIDs
-                .map(id => Zotero.Items.get(id))
-                .find(item => item.isPDFAttachment());
-            
-            if (!pdfAttachment) {
-                console.log("[PDF Test] Selected item is not a PDF and has no PDF attachments");
-                return;
-            }
-            pdfItem = pdfAttachment;
+        const pdfItem = selectedPdf(selectedItems[0]);
+        if (!pdfItem) {
+            console.log("[PDF Test] Selected item is not a PDF and has no PDF attachments");
+            return;
         }
 
         console.log("[PDF Test] Starting line-based extraction for:", pdfItem.getField("title") || pdfItem.getDisplayTitle());
@@ -526,20 +522,10 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
             return;
         }
 
-        let pdfItem = selectedItems[0];
-
-        // If it's a parent item, try to get the first PDF attachment
-        if (!pdfItem.isPDFAttachment()) {
-            const attachmentIDs = pdfItem.getAttachments();
-            const pdfAttachment = attachmentIDs
-                .map(id => Zotero.Items.get(id))
-                .find(item => item.isPDFAttachment());
-            
-            if (!pdfAttachment) {
-                console.log("[OCR Detection Test] Selected item is not a PDF and has no PDF attachments");
-                return;
-            }
-            pdfItem = pdfAttachment;
+        const pdfItem = selectedPdf(selectedItems[0]);
+        if (!pdfItem) {
+            console.log("[OCR Detection Test] Selected item is not a PDF and has no PDF attachments");
+            return;
         }
 
         const title = pdfItem.getField("title") || pdfItem.getDisplayTitle();
@@ -624,20 +610,10 @@ const DevToolsMenuButton: React.FC<DevToolsMenuButtonProps> = ({
             return;
         }
 
-        let pdfItem = selectedItems[0];
-
-        // If it's a parent item, try to get the first PDF attachment
-        if (!pdfItem.isPDFAttachment()) {
-            const attachmentIDs = pdfItem.getAttachments();
-            const pdfAttachment = attachmentIDs
-                .map(id => Zotero.Items.get(id))
-                .find(item => item.isPDFAttachment());
-            
-            if (!pdfAttachment) {
-                console.log("[PDF Search Test] Selected item is not a PDF and has no PDF attachments");
-                return;
-            }
-            pdfItem = pdfAttachment;
+        const pdfItem = selectedPdf(selectedItems[0]);
+        if (!pdfItem) {
+            console.log("[PDF Search Test] Selected item is not a PDF and has no PDF attachments");
+            return;
         }
 
         const title = pdfItem.getField("title") || pdfItem.getDisplayTitle();
