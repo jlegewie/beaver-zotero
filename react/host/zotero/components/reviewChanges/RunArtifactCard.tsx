@@ -70,7 +70,7 @@ export const RunArtifactCard: React.FC<RunArtifactCardProps> = ({
         <>
             <Icon icon={icon} className="run-artifact-glyph" />
             <span className="run-artifact-lines">
-                <span className="run-artifact-headline truncate" title={headline}>{headline}</span>
+                <span className="run-artifact-headline truncate" title={headline} dir="auto">{headline}</span>
                 {(condition || warning) && (
                     <span className="run-artifact-condition">
                         {condition}

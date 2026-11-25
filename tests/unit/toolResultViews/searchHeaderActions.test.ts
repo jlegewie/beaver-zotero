@@ -129,6 +129,14 @@ it("keeps the result count whole, outside the text that shortens", async () => {
     expect(text.nextElementSibling?.className).toContain("flex-none");
 });
 
+it("gives what the call acted on its own text direction, apart from the action", async () => {
+    const el = await renderCard(pubmedView([record]));
+    const text = el.querySelector('button[aria-controls="tool-result-call"] .truncate')!;
+    const detail = text.querySelector('span[dir="auto"]')!;
+    expect(detail.textContent).toBe("semaglutide obesity");
+    expect(text.textContent).toBe("PubMed search: semaglutide obesity");
+});
+
 it("offers the details toggle for a search that has only a site link", async () => {
     const view = pubmedView([record]);
     view.tool_info = { ...view.tool_info, query: null, query_translation: null } as any;
