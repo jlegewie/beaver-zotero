@@ -54,6 +54,7 @@ export { default as MoreHorizontalIcon } from './MoreHorizontalIcon';
 export { default as ArrowRightIcon } from './ArrowRightIcon';
 export { default as RepeatIcon } from './RepeatIcon';
 export { default as GlobalSearchIcon } from './GlobalSearchIcon';
+export { default as GlobeIcon } from './GlobeIcon';
 export { default as CopyIcon } from './CopyIcon';
 export { default as BookCopyIcon } from './BookCopyIcon';
 export { default as TableIcon } from './TableIcon';

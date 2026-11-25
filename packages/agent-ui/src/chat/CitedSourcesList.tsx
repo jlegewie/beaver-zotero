@@ -192,9 +192,10 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                                                 buttonVariant: 'ghost-secondary',
                                                 revealButtonMode: 'icon-only',
                                                 importButtonMode: 'none',
-                                                detailsButtonMode: 'icon-only',
+                                                // A web page has no abstract or PDF of its own.
+                                                detailsButtonMode: webPageId(externalRef.source_id) ? 'none' : 'icon-only',
                                                 webButtonMode: 'icon-only',
-                                                pdfButtonMode: 'icon-only',
+                                                pdfButtonMode: webPageId(externalRef.source_id) ? 'none' : 'icon-only',
                                                 showCitationCount: false,
                                                 className: 'scale-12',
                                             })

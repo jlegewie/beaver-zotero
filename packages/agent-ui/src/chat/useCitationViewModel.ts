@@ -4,6 +4,7 @@ import { citationByKeyAtom, pageLabelsByAttachmentIdAtom } from '@beaver/agent-c
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
 import { webPageId } from '@beaver/agent-core/citations/externalRecords';
 import { webPageDetails } from '@beaver/agent-core/types/externalReferences';
+import { urlNamesPdf } from '@beaver/agent-core/identity/webPages';
 import {
     Citation,
     getCitationPages,
@@ -37,10 +38,6 @@ export interface CitationWebPage {
     title: string | null;
     /** Publisher name or site, e.g. "World Health Organization", "who.int". */
     site: string | null;
-    /** Date the cited copy was fetched (YYYY-MM-DD). */
-    retrieved: string | null;
-    /** The citation names only search-highlight sentences (no retrieval date). */
-    searchExcerpt: boolean;
 }
 
 /**
@@ -348,25 +345,20 @@ export function useCitationViewModel(props: Record<string, unknown>): CitationVi
         ? externalReferenceToZoteroItem[externalSourceId]
         : undefined;
 
-    // A web page (`web-` id): where the page lives and which copy was cited,
-    // from the thread's record of the page and the citation itself.
+    // A web page (`web-` id): where the page lives, from the thread's record of it.
     const webPage = useMemo((): CitationWebPage | null => {
         const webId = isExternal ? webPageId(externalSourceId) : null;
         if (!webId) return null;
         const record = externalReferences[webId] ?? (externalSourceId ? externalReferences[externalSourceId] : undefined);
         const details = webPageDetails(record);
-        const locations = metadata?.locations ?? [];
         return {
             webId,
             url: record?.url || null,
-            isPdf: details?.content_type === 'pdf',
+            isPdf: details?.content_type === 'pdf' || (!!record?.url && urlNamesPdf(record.url)),
             title: record?.title || null,
             site: details?.site_name || details?.site || null,
-            retrieved: metadata?.retrieved || null,
-            // Cites only sentences of search highlights (h ids), whose age is unknown.
-            searchExcerpt: locations.length > 0 && locations.every((location) => /^h\d/.test(location.part_id)),
         };
-    }, [isExternal, externalSourceId, externalReferences, metadata]);
+    }, [isExternal, externalSourceId, externalReferences]);
 
     // Compute effective libraryID and itemKey (accounting for mapped external citations).
     const effectiveLibraryID = libraryID || mappedZoteroItem?.library_id || 0;

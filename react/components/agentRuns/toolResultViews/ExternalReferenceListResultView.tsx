@@ -343,7 +343,12 @@ export const ExternalReferenceListResultView: React.FC<{
                         row = <TrialReferenceListItem {...rowProps} />;
                         break;
                     case 'webpage':
-                        row = <WebPageListItem {...rowProps} highlights={item.source_id ? searchInfo?.highlights?.[item.source_id] : null} />;
+                        // Hairlines between pages, as between items in a library list.
+                        row = (
+                            <div className={index < references.length - 1 ? 'border-bottom-quinary' : ''}>
+                                <WebPageListItem {...rowProps} />
+                            </div>
+                        );
                         break;
                     default:
                         row = <ExternalReferenceListItem {...rowProps} />;

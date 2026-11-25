@@ -19,7 +19,7 @@ import { getHost } from '../host';
 import type { CitationExportRender, CitationReaderTarget } from '../host/types';
 import { useCitationViewModel, type CitationViewModel } from './useCitationViewModel';
 import { hasAlternateModifier, useAlternateActivation } from './useAlternateActivation';
-import { Icon, LibraryIcon, PdfIcon, FileIcon, GlobalSearchIcon, NoteIcon, HighlighterIcon, TextAlignLeftIcon, ExternalLinkIcon, TableIcon, ArrowUpRightIcon } from '../icons';
+import { Icon, LibraryIcon, PdfIcon, FileIcon, GlobalSearchIcon, NoteIcon, HighlighterIcon, TextAlignLeftIcon, ExternalLinkIcon, TableIcon, ArrowUpRightIcon, GlobeIcon } from '../icons';
 const TOOLTIP_WIDTH = '250px';
 
 /**
@@ -168,6 +168,32 @@ export function citationTargetFlags(vm: CitationViewModel): CitationTargetFlags 
  */
 export const CitationReaderTargetContext = React.createContext<CitationReaderTarget | undefined>(undefined);
 
+/** The cited web page's URL, with a text fragment for the cited sentences when a browser can find them. */
+function webPageUrl(vm: CitationViewModel): string | null {
+    const page = vm.webPage;
+    if (!page?.url) return null;
+    const sentences = (vm.metadata?.locations ?? []).map((location) => ({ partId: location.part_id, text: location.text }));
+    return textFragmentUrl(page.url, sentences, { isPdf: page.isPdf });
+}
+
+/** What the click on a web citation does: "Highlights passage on who.int". */
+function webPageAction(vm: CitationViewModel): string {
+    const page = vm.webPage;
+    const url = webPageUrl(vm);
+    if (!page?.url || !url) return '';
+    let site = page.site;
+    if (!site) {
+        try {
+            site = new URL(page.url).hostname.replace(/^www\./, '');
+        } catch {
+            site = null;
+        }
+    }
+    const where = site ? ` on ${site}` : ' in browser';
+    if (url !== page.url) return `Highlights passage${where}`;
+    return page.isPdf ? `Opens PDF${where}` : `Opens page${where}`;
+}
+
 /**
  * Hand a ready citation to the host's activation: the cited passage, or the
  * cited work when `alternate` asks for it and that changes anything.
@@ -184,10 +210,9 @@ function activateCitationViewModel(
     // A web page opens in the browser at the cited sentences. They are
     // sentences of Beaver's copy of the page, never a Zotero snapshot's, so a
     // reader never opens; the alternate click reveals an imported page.
-    const page = vm.webPage;
-    if (page?.url && intent === 'passage') {
-        const sentences = (vm.metadata.locations ?? []).map((location) => ({ partId: location.part_id, text: location.text }));
-        getHost().navigation?.openExternalUrl(textFragmentUrl(page.url, sentences, { isPdf: page.isPdf }));
+    const pageUrl = webPageUrl(vm);
+    if (pageUrl && intent === 'passage') {
+        getHost().navigation?.openExternalUrl(pageUrl);
         return;
     }
     void getHost().navigation?.activateCitation({
@@ -505,7 +530,8 @@ const Citation: React.FC<CitationProps> = (props) => {
         <span className="block" style={{ overflow: 'hidden' }}>
             <span className="px-3 py-15 display-flex flex-row border-bottom-quinary gap-2">
                 <span className="font-color-primary text-sm" style={{ minWidth: 0, wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
-                    {citation}
+                    {/* A page's title names it better than its site and year. */}
+                    {(!showItemInfo && webPage?.title) || citation}
                 </span>
                 <span className="flex-1" />
                 {!showItemInfo && hasLocatorDisplay && (
@@ -539,21 +565,6 @@ const Citation: React.FC<CitationProps> = (props) => {
                 </>
             ) : (
                 <>
-                {webPage && (webPage.title || webPage.site) && (
-                    <span className="px-3 py-15 block border-bottom-quinary">
-                        {webPage.title && (
-                            <span className="font-color-primary text-sm block" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
-                                {webPage.title}
-                            </span>
-                        )}
-                        <span className="font-color-secondary text-xs block" style={{ wordBreak: 'break-word' }}>
-                            {[
-                                webPage.site,
-                                webPage.searchExcerpt ? 'Search excerpt' : webPage.retrieved ? `Retrieved ${webPage.retrieved}` : '',
-                            ].filter(Boolean).join(' · ')}
-                        </span>
-                    </span>
-                )}
                 {showPreviewText && (
                     <span className="font-color-secondary text-sm px-3 py-15 block" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>
                         {previewText}
@@ -563,9 +574,9 @@ const Citation: React.FC<CitationProps> = (props) => {
                     webPage.url && (
                         <span className={`px-3 py-15 block ${showPreviewText ? 'border-top-quinary' : ''}`}>
                             <span className="display-flex flex-row items-center gap-15">
-                                <Icon icon={ExternalLinkIcon} className="font-color-secondary scale-90" style={{ flexShrink: 0 }} />
-                                <span className="text-sm font-color-secondary" style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={webPage.url}>
-                                    {webPage.url.replace(/^https?:\/\//i, '')}
+                                <Icon icon={webPage.isPdf ? PdfIcon : GlobeIcon} className="font-color-secondary" style={{ flexShrink: 0 }} />
+                                <span className="text-sm font-color-secondary" style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {webPageAction(vm)}
                                 </span>
                             </span>
                         </span>

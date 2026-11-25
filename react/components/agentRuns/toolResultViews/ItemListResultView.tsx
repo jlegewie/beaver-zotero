@@ -14,6 +14,7 @@ import { getHost } from '@beaver/agent-ui/host';
 import { useItemContextMenu } from '@beaver/agent-ui/chat/useItemContextMenu';
 import { EXTERNAL_LIBRARY_ID } from '../../../../src/services/externalFiles';
 import { AnnotationResultRow } from './AnnotationResultRow';
+import { WebPageRowLayout } from '../../externalReferences/WebPageListItem';
 
 /**
  * Shared renderer for hydrated item, annotation and web page rows.
@@ -181,30 +182,15 @@ const ItemRow: React.FC<{
 };
 
 /** A web page the tool read: its title and site; the click opens the page in the browser. */
-const WebPageRow: React.FC<{ row: WebPageRowView } & RowEventProps> = ({ row, isHovered, onMouseEnter, onMouseLeave }) => {
-    const url = row.url;
-    return (
-        <div
-            className={`display-flex flex-row items-start gap-25 p-2 transition-colors ${url ? 'cursor-pointer' : ''} ${isHovered ? 'bg-quinary' : ''} ${row.status === 'error' ? 'opacity-50' : ''}`}
-            onClick={url ? () => getHost().navigation?.openExternalUrl(url) : undefined}
-            onMouseEnter={onMouseEnter}
-            onMouseLeave={onMouseLeave}
-            title={url}
-        >
-            <div className="display-flex items-center justify-center flex-shrink-0 rounded-md ml-05 mt-010">
-                <CSSItemTypeIcon itemType="webpage" className="scale-90" />
-            </div>
-            <div className="display-flex flex-col flex-1 gap-05 min-w-0 font-color-primary">
-                <div className="truncate font-color-primary" style={{ fontSize: '0.925rem' }}>
-                    {row.display_name}
-                </div>
-                {row.site && row.site !== row.display_name && (
-                    <div className="truncate text-sm font-color-secondary">{row.site}</div>
-                )}
-            </div>
-        </div>
-    );
-};
+const WebPageRow: React.FC<{ row: WebPageRowView } & RowEventProps> = ({ row, ...events }) => (
+    <WebPageRowLayout
+        title={row.display_name}
+        meta={row.site && row.site !== row.display_name ? row.site : null}
+        url={row.url}
+        faded={row.status === 'error'}
+        {...events}
+    />
+);
 
 /** A stable key for a row: its library object, or its web page. */
 function rowKey(row: ItemListView['items'][number], index: number): string {
