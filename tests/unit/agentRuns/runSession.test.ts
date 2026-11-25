@@ -48,8 +48,8 @@ import type { AgentService } from '@beaver/agent-core/transport/agentService';
 import { activeRunAtom } from '@beaver/agent-core/run-state/atoms';
 // Installs the renderer's own session, which neither session below may touch.
 import { createWSCallbacks, isWSReadyAtom, staleApprovalActionIdsAtom } from '../../../react/atoms/agentRunAtoms';
-import { RunSession, getRunSession } from '../../../react/agentRuns/runSession';
-import type { RunHost } from '../../../react/agentRuns/runHost';
+import { RunSession, getRunSession } from '../../../src/services/agentRuns/runSession';
+import type { RunHost } from '../../../src/services/agentRuns/runHost';
 
 function streamingRun(id: string): AgentRun {
     return {

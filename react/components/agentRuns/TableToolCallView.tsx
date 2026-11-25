@@ -26,7 +26,7 @@ import {
     TableIcon,
 } from '../icons/icons';
 import { toolExpandedAtom, setToolExpandedAtom } from '../../atoms/messageUIState';
-import { chatFillTableKey, jobWaitAtom, openAnswerRunIdAtom } from '../../atoms/jobWait';
+import { chatFillTableKey, jobWaitAtom, openAnswerRunIdAtom } from '../../../src/services/agentRuns/jobWait';
 
 interface TableToolCallViewProps {
     part: ToolCallPart;

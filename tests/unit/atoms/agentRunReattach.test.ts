@@ -115,7 +115,7 @@ import {
     regenerateWithEditedPromptAtom,
     resumeFromRunAtom,
 } from '../../../react/atoms/agentRunAtoms';
-import { threadAdmissionAtom } from '../../../react/runtime/threadAdmission';
+import { threadAdmissionAtom } from '../../../src/services/agentRuns/threadAdmission';
 import { reattachResolutionAtom } from '@beaver/agent-core/run-state/runResolution';
 import { popupMessagesAtom } from '../../../react/atoms/ui';
 import { chatStore } from '../../helpers/runSession';

@@ -13,7 +13,7 @@
  * for the cancel of a run stopped while reconnecting.
  */
 
-import { atom, type createStore, type Getter } from 'jotai';
+import { atom, type createStore, type Getter } from 'jotai/vanilla';
 import type { AgentService } from '@beaver/agent-core/transport/agentService';
 import {
     createStreamActivityTracker,
@@ -21,6 +21,7 @@ import {
     type StreamActivityTracker,
 } from '@beaver/agent-core/run-state/streamActivity';
 import type { RunHost } from './runHost';
+import type { WriterLease } from './threadWriter';
 
 type Store = ReturnType<typeof createStore>;
 
@@ -84,6 +85,16 @@ export class RunSession {
      * held here and applied to the replacement.
      */
     retryCommit: RetryCommit | null = null;
+
+    /**
+     * Chats whose next reconcile settles a run the session lost track of.
+     * Their local history may hold failed or stopped runs the server never
+     * saved.
+     */
+    readonly settlingThreads = new Set<string>();
+
+    /** The session's claim on writing to its chat, while it holds one (`threadWriter.ts`). */
+    writerLease: WriterLease | undefined = undefined;
 
     constructor(
         /** The session's private store: the authority for its chat state (`sessionStateAtoms`). */

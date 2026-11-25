@@ -20,7 +20,7 @@ import {
     removeApprovalResponseIntentAtom,
     sendApprovalResponseAtom,
 } from '../../../atoms/agentRunAtoms';
-import { pendingParkedAnswerIdsAtom } from '../../../atoms/parkedRuns';
+import { pendingParkedAnswerIdsAtom } from '../../../../src/services/agentRuns/parkedRuns';
 import {
     agentActionItemTitleAtom,
     getAgentActionItemTitleKey,
@@ -94,7 +94,7 @@ import {
     isCoveredByFullAccess,
     isFullAccessGrantedForRun,
     runApprovalPolicyAtom,
-} from '../../../atoms/runApprovalPolicy';
+} from '../../../../src/services/agentRuns/runApprovalPolicy';
 import { dismissActiveEditNotePreview } from '../editNotePreviewLifecycle';
 import { agentService } from '@beaver/agent-core/transport/agentService';
 import { useSessionSetAtom } from '../../../hooks/useSessionSetAtom';

@@ -316,6 +316,6 @@ process.env.NODE_ENV = 'test';
 // ---------------------------------------------------------------------------
 // Run projection — a window write of state the run session owns throws here,
 // so a window writer that bypasses the session fails its test (see
-// `react/agentRuns/runProjection.ts`).
+// `react/runtime/runProjection.ts`).
 // ---------------------------------------------------------------------------
 (globalThis as any).__beaverStrictRunProjection = true;

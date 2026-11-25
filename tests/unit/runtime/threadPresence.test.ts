@@ -66,35 +66,27 @@ describe("instance thread admission", () => {
             presence,
             threads: { invalidateViews: vi.fn() },
         };
+        const session = (windowId: string) =>
+            ({ host: { windowId: () => windowId }, writerLease: undefined }) as any;
         vi.resetModules();
-        const firstRuntime =
-            await import("../../../react/runtime/windowRuntime");
-        const first = await import("../../../react/runtime/threadWriter");
         const firstAtoms = await import("@beaver/agent-core/run-state/atoms");
-        firstRuntime.initializeWindowRuntime({
-            id: "a",
-            status: "ready",
-        } as any);
         vi.resetModules();
-        const secondRuntime =
-            await import("../../../react/runtime/windowRuntime");
-        const second = await import("../../../react/runtime/threadWriter");
         const secondAtoms = await import("@beaver/agent-core/run-state/atoms");
-        secondRuntime.initializeWindowRuntime({
-            id: "b",
-            status: "ready",
-        } as any);
         expect(firstAtoms.currentThreadIdAtom).not.toBe(
             secondAtoms.currentThreadIdAtom,
         );
-        const lease = first.acquireWriter("t", 3)!;
-        expect(second.acquireWriter("t", 3)).toBeNull();
-        expect(second.currentWriter()).toBeUndefined();
-        first.releaseWriter(lease);
-        const successor = second.acquireWriter("t", 3)!;
-        first.releaseWriter(lease);
-        expect(second.ownsWriter(successor)).toBe(true);
+        // Each session holds its own lease, through one module.
+        const writer = await import("../../../src/services/agentRuns/threadWriter");
+        const a = session("a");
+        const b = session("b");
+        const lease = writer.acquireWriter(a, "t", 3)!;
+        expect(writer.acquireWriter(b, "t", 3)).toBeNull();
+        expect(writer.currentWriter(b)).toBeUndefined();
+        writer.releaseWriter(a, lease);
+        const successor = writer.acquireWriter(b, "t", 3)!;
+        writer.releaseWriter(a, lease);
+        expect(writer.ownsWriter(b, successor)).toBe(true);
         presence.detach("b");
-        expect(second.ownsWriter(successor)).toBe(false);
+        expect(writer.ownsWriter(b, successor)).toBe(false);
     });
 });

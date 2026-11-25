@@ -19,7 +19,7 @@
  */
 
 import { store } from '../../store';
-import { runSessionStore } from '../../agentRuns/runSession';
+import { runSessionStore } from '../../../src/services/agentRuns/runSession';
 import { activeRunAtom, threadRunsAtom } from '@beaver/agent-core/run-state/atoms';
 import { batchProgressAtom } from '../../atoms/agentRunAtoms';
 import { isRunActive } from '@beaver/agent-core/agents/types';

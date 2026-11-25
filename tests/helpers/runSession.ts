@@ -9,17 +9,23 @@
 import { vi } from 'vitest';
 import { createStore } from 'jotai';
 import type { AgentService } from '@beaver/agent-core/transport/agentService';
-import { RunSession, getRunSession, installRunSession, runSessionStore } from '../../react/agentRuns/runSession';
-import type { RunHost } from '../../react/agentRuns/runHost';
-import { attachRunProjection } from '../../react/agentRuns/runProjection';
-import { sessionStateAtoms } from '../../react/agentRuns/sessionState';
+import { RunSession, getRunSession, installRunSession, runSessionStore } from '../../src/services/agentRuns/runSession';
+import type { RunHost } from '../../src/services/agentRuns/runHost';
+import { attachRunProjection } from '../../react/runtime/runProjection';
+import { sessionStateAtoms } from '../../src/services/agentRuns/sessionState';
 import { store as windowStore } from '../../react/store';
 
 type Store = ReturnType<typeof createStore>;
 
-/** A host whose methods are `vi.fn()`s, except those given. */
+/**
+ * A host whose methods are `vi.fn()`s, except those given. `upgradeToolReturn`
+ * returns the part it gets, as a host with nothing to upgrade does.
+ */
 export function fakeRunHost(overrides: Partial<RunHost> = {}): RunHost {
-    const methods: Record<string, unknown> = { ...overrides };
+    const methods: Record<string, unknown> = {
+        upgradeToolReturn: vi.fn(async (part: unknown) => part),
+        ...overrides,
+    };
     return new Proxy({} as RunHost, {
         get: (_target, name: string) => (methods[name] ??= vi.fn()),
     });

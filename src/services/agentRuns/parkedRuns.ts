@@ -8,7 +8,7 @@
  * resumes it.
  */
 
-import { atom } from 'jotai';
+import { atom } from 'jotai/vanilla';
 import { isRunActive, type ParkedCardAnswer } from '@beaver/agent-core/agents/types';
 import { activeRunAtom, toolResultsMapAtom } from '@beaver/agent-core/run-state/atoms';
 import { openParkedRunAtom, parkedCardRequests } from '@beaver/agent-core/run-state/parkedRun';
@@ -21,7 +21,7 @@ import {
     tableCardDraftsAtom,
 } from '@beaver/agent-core/run-state/pendingTableCards';
 import { isCreateCard, isFillCard } from '@beaver/agent-core/protocol/tableCardProtocol';
-import { addPendingApprovalAtom, pendingApprovalsAtom, removePendingApprovalsAtom } from '../agents/agentActions';
+import { addPendingApprovalAtom, pendingApprovalsAtom, removePendingApprovalsAtom } from './pendingApprovals';
 
 /** An answer to a parked card, waiting to be sent in the next resume. */
 export interface QueuedParkedAnswer {

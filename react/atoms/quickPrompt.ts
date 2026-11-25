@@ -12,7 +12,7 @@ import { activeRunAtom } from '@beaver/agent-core/run-state/atoms';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { isWSChatPendingAtom } from './agentRunAtoms';
 import { chatAccessGateAtom } from './chatAccess';
-import { jobWaitAtom } from './jobWait';
+import { jobWaitAtom } from '../../src/services/agentRuns/jobWait';
 import { addItemsToCurrentMessageItemsAtom, currentReaderAttachmentAtom } from './messageComposition';
 import { newThreadAtom } from './threads';
 import {

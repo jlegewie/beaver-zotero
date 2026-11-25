@@ -52,7 +52,7 @@ import { isWSChatPendingAtom } from '../../../react/atoms/agentRunAtoms';
 import { chatAccessGateAtom } from '../../../react/atoms/chatAccess';
 import { isSidebarVisibleAtom, isThreadListViewAtom } from '../../../react/atoms/ui';
 import { currentReaderAttachmentAtom } from '../../../react/atoms/messageComposition';
-import { jobWaitAtom } from '../../../react/atoms/jobWait';
+import { jobWaitAtom } from '../../../src/services/agentRuns/jobWait';
 import {
     closeQuickPromptAtom,
     hasActiveWorkAtom,

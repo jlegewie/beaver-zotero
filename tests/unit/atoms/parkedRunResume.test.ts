@@ -97,12 +97,12 @@ import {
     parkedAnswerQueueAtom,
     pendingParkedAnswerIdsAtom,
     resumeLiveCardsAtom,
-} from '../../../react/atoms/parkedRuns';
-import { threadAdmissionAtom, threadConflictAtom } from '../../../react/runtime/threadAdmission';
+} from '../../../src/services/agentRuns/parkedRuns';
+import { threadAdmissionAtom, threadConflictAtom } from '../../../src/services/agentRuns/threadAdmission';
 import { threadNavigationSeqAtom } from '../../../react/atoms/threads';
 import { selectedModelAtom } from '../../../react/atoms/models';
 import { sessionAtom } from '../../../react/atoms/auth';
-import { jobWaitAtom } from '../../../react/atoms/jobWait';
+import { jobWaitAtom } from '../../../src/services/agentRuns/jobWait';
 import { chatFillsAtom, recordChatFill } from '@beaver/agent-core/run-state/tableChatFills';
 import { chatStore } from '../../helpers/runSession';
 

@@ -8,7 +8,7 @@
  */
 import type { createStore } from 'jotai';
 import { agentService } from '@beaver/agent-core/transport/agentService';
-import { RunSession, installRunSession } from '../../react/agentRuns/runSession';
+import { RunSession, installRunSession } from '../../src/services/agentRuns/runSession';
 import { createWindowRunHost } from '../../react/runtime/windowRunHost';
 
 export function installWindowStoreRunSession(store: ReturnType<typeof createStore>): RunSession {

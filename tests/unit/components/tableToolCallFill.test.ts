@@ -13,7 +13,7 @@ import type { TableFillJobSnapshot } from '@beaver/agent-core/protocol/tableFill
 import { threadRunsAtom, type ToolResult } from '@beaver/agent-core/run-state/atoms';
 import { chatFillsAtom, recordChatFill } from '@beaver/agent-core/run-state/tableChatFills';
 import { TableToolCallView } from '../../../react/components/agentRuns/TableToolCallView';
-import { jobWaitAtom } from '../../../react/atoms/jobWait';
+import { jobWaitAtom } from '../../../src/services/agentRuns/jobWait';
 import { setHost } from '@beaver/agent-ui/host';
 import { ArrowUpRightIcon } from '@beaver/agent-ui/icons';
 import { renderToStaticMarkup } from 'react-dom/server';

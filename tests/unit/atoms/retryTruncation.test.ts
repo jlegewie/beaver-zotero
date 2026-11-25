@@ -1,12 +1,10 @@
-import { viewedHistoryRevisionAtom } from "../../../react/runtime/threadProjection";
+import { viewedHistoryRevisionAtom } from "../../../src/services/agentRuns/threadAdmission";
 import { ThreadPresence } from "../../../src/services/threads/threadPresence";
 import { getCredentialGeneration } from "@beaver/agent-core/transport/credentials";
 import { initializeWindowRuntime } from "../../../react/runtime/windowRuntime";
-import { currentWriter, releaseWriter } from "../../../react/runtime/threadWriter";
-import {
-    threadAdmissionAtom,
-    threadConflictAtom,
-} from "../../../react/runtime/threadAdmission";
+import { currentWriter, releaseWriter } from "../../../src/services/agentRuns/threadWriter";
+import { getRunSession } from "../../../src/services/agentRuns/runSession";
+import { threadAdmissionAtom, threadConflictAtom } from "../../../src/services/agentRuns/threadAdmission";
 import { isProfileLoadedAtom } from '../../../react/atoms/profile';
 /**
  * A retry commits its removal on the backend before anything local changes:
@@ -224,7 +222,7 @@ const promptConfirmMock = vi.fn();
 
 describe('retry via synchronous truncation', () => {
     beforeEach(() => {
-        releaseWriter();
+        releaseWriter(getRunSession());
         runtimeState.value = undefined;
         delete (Zotero as any).Beaver?.presence;
         chatStore().set(viewedHistoryRevisionAtom, 0);
@@ -663,7 +661,7 @@ describe('retry via synchronous truncation', () => {
                 expect(store.get(activeRunAtom)).toBeNull();
                 expect(store.get(isWSChatPendingAtom)).toBe(false);
                 expect(store.get(retryPendingRunIdAtom)).toBeNull();
-                expect(currentWriter()).toBeUndefined();
+                expect(currentWriter(getRunSession())).toBeUndefined();
             });
 
             it("keeps a retried prompt as a stopped message when the only turn is removed", async () => {

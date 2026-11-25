@@ -23,7 +23,7 @@ import { activeRunAtom } from '@beaver/agent-core/run-state/atoms';
 import { citationsAtom, processCitationsAtom } from '@beaver/agent-core/citations/atoms';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { FrameScheduler } from '../utils/frameScheduler';
-import type { SessionStateAtom } from './sessionState';
+import type { SessionStateAtom } from '../../src/services/agentRuns/sessionState';
 
 type Store = ReturnType<typeof createStore>;
 

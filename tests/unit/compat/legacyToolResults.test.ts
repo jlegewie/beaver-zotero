@@ -248,6 +248,20 @@ describe('upgradeToolReturn', () => {
         expect(result.metadata!.view.view_type).toBe('item_list');
     });
 
+    it('returns a copy, leaving the given part as it was', async () => {
+        installItems([{ id: 1, key: 'AAAA1111', firstCreator: 'Smith', date: '2004-01-01', title: 'A Paper' }]);
+        const part = returnPart('zotero_search', {
+            tool_name: 'zotero_search',
+            total_count: 1,
+            items: [{ library_id: 1, zotero_key: 'AAAA1111' }],
+        });
+        const metadata = part.metadata;
+        const result = await upgradeToolReturn(part);
+        expect(result).not.toBe(part);
+        expect(part.metadata).toBe(metadata);
+        expect(part.metadata!.view).toBeUndefined();
+    });
+
     it('creates a metadata object when the part has none', async () => {
         installItems([{ id: 1, key: 'AAAA1111', firstCreator: 'Smith', date: '2004' }]);
         const part: ToolReturnPart = {

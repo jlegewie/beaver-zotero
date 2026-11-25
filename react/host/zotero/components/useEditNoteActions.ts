@@ -14,7 +14,7 @@ import {
     removeApprovalResponseIntentAtom,
     sendApprovalResponseAtom,
 } from '../../../atoms/agentRunAtoms';
-import { pendingParkedAnswerIdsAtom } from '../../../atoms/parkedRuns';
+import { pendingParkedAnswerIdsAtom } from '../../../../src/services/agentRuns/parkedRuns';
 import { getToolCallStatusFromResult, toolResultAtom, type ToolCallStatus } from '@beaver/agent-core/run-state/atoms';
 import { openNoteAndSearchEdit, openNoteByKey } from '../../../utils/sourceUtils';
 import {

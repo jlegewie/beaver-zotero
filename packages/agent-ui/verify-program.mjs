@@ -276,10 +276,11 @@ if (
 // their real importer. That is the stronger signal — a root that no longer needs
 // to be one only hides a file falling out of the closure.
 //
-// src/utils/creditThreshold.ts is a root for the opposite reason: it holds the
-// credit limit's bounds and parsing for every client to agree on, and no shared
-// component reads them — each client imports it directly from its own settings
-// UI. Nothing inside the package would otherwise make it reachable.
+// src/utils/creditThreshold.ts is a root for the opposite reason: it gives a
+// client's settings UI the credit limit's bounds and parsing (defined in the
+// core, so a client's run code reads the same ones), and no shared component
+// reads them — each client imports it directly from its own settings UI.
+// Nothing inside the package would otherwise make it reachable.
 const entryPaths = [
   "src/icons/index.tsx",
   "src/primitives/index.ts",

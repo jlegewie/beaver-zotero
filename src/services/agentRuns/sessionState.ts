@@ -3,7 +3,7 @@
  *
  * These atoms live in the session's private store, which is their authority.
  * A window holds copies of them for rendering, applied by the run projection
- * (`runProjection.ts`); it changes them only through the session's store
+ * (`react/runtime/runProjection.ts`); it changes them only through the session's store
  * (`runSessionStore()`). Everything else a run touches in the window (agent
  * actions, warnings, popups, citation markers, composer) stays the window's
  * and is reached through the run host.
@@ -12,7 +12,7 @@
  * from these.
  */
 
-import type { PrimitiveAtom } from 'jotai';
+import type { PrimitiveAtom } from 'jotai/vanilla';
 import {
     activeRunAtom,
     currentThreadIdAtom,
@@ -28,18 +28,18 @@ import { pendingCreditConfirmationsAtom } from '@beaver/agent-core/run-state/pen
 import { pendingTableCardsAtom, tableCardDraftsAtom } from '@beaver/agent-core/run-state/pendingTableCards';
 import { reattachResolutionAtom, runReplacementNotesAtom } from '@beaver/agent-core/run-state/runResolution';
 import { streamQuietAtom } from '@beaver/agent-core/run-state/streamActivity';
-import { pendingApprovalsAtom } from '../agents/agentActions';
+import { pendingApprovalsAtom } from './pendingApprovals';
 import {
     liveCardAnswersAtom,
     parkedAnswerQueueAtom,
     parkedAnswersInFlightAtom,
     resumeLiveCardsAtom,
     setAsideParkedCardsAtom,
-} from '../atoms/parkedRuns';
-import { runApprovalPolicyAtom } from '../atoms/runApprovalPolicy';
-import { jobWaitAtom } from '../atoms/jobWait';
-import { admissionUnreachableThreadAtom, threadAdmissionAtom, threadConflictAtom } from '../runtime/threadAdmission';
-import { viewedHistoryRevisionAtom } from '../runtime/threadProjection';
+} from './parkedRuns';
+import { runApprovalPolicyAtom } from './runApprovalPolicy';
+import { jobWaitAtom } from './jobWait';
+import { admissionUnreachableThreadAtom, threadAdmissionAtom, threadConflictAtom } from './threadAdmission';
+import { viewedHistoryRevisionAtom } from './threadAdmission';
 import {
     approvalResponseIntentsAtom,
     approvalVerdictInFlightAtom,

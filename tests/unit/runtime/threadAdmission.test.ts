@@ -21,10 +21,7 @@ vi.mock("../../../react/atoms/threads", async () => ({
 vi.mock("../../../react/atoms/profile", async () => ({
     accountGenerationAtom: (await import("jotai")).atom(0),
 }));
-vi.mock("../../../react/runtime/threadProjection", async () => ({
-    viewedHistoryRevisionAtom: (await import("jotai")).atom(0),
-}));
-vi.mock("../../../react/runtime/threadWriter", () => ({
+vi.mock("../../../src/services/agentRuns/threadWriter", () => ({
     currentWriter: () => state.writer,
 }));
 vi.mock("../../../react/agents/agentActions", async () => ({
@@ -45,16 +42,8 @@ vi.mock("@beaver/agent-core/run-state/loadThreadRuns", () => ({
 vi.mock("@beaver/agent-core/transport/agentService", () => ({
     agentRunService: { getThreadActivity: state.activity },
 }));
-import {
-    admissionUnreachableAtom,
-    attachThreadAdmission,
-    describeAdmissionWait,
-    keepLocalFailuresOnSettle,
-    refreshThreadAdmission,
-    threadAdmissionAtom,
-    serverThreadBlockedAtom,
-    UNREACHABLE_AFTER_FAILURES,
-} from "../../../react/runtime/threadAdmission";
+import { admissionUnreachableAtom, attachThreadAdmission, describeAdmissionWait, refreshThreadAdmission, UNREACHABLE_AFTER_FAILURES } from "../../../react/runtime/threadAdmission";
+import { keepLocalFailuresOnSettle, threadAdmissionAtom, serverThreadBlockedAtom } from "../../../src/services/agentRuns/threadAdmission";
 import {
     activeRunAtom,
     currentThreadIdAtom,
@@ -70,6 +59,7 @@ import {
 } from "@beaver/agent-core/transport/connectionFailure";
 import { threadNavigationSeqAtom } from "../../../react/atoms/threads";
 import { installStoreRunSession } from "../../helpers/runSession";
+import { getRunSession } from "../../../src/services/agentRuns/runSession";
 
 beforeEach(() => {
     vi.useFakeTimers();
@@ -367,7 +357,7 @@ describe("settling a run this window lost track of", () => {
             error: { type: "connection_error", message: "lost" },
         } as any);
         state.store.set(reattachResolutionAtom, { threadId: "thread", runId: "run", since: Date.now() });
-        keepLocalFailuresOnSettle("thread");
+        keepLocalFailuresOnSettle(getRunSession(), "thread");
         await settleWith([{ id: "run", status: "completed" }]);
         expect(state.store.get(activeRunAtom)).toBeNull();
         expect(state.store.get(runReplacementNotesAtom).get("run")).toBe(RUN_FINISHED_WHILE_DISCONNECTED_NOTE);
@@ -376,7 +366,7 @@ describe("settling a run this window lost track of", () => {
 
     it("notes a stopped run the server completed before the stop arrived", async () => {
         state.store.set(threadRunsAtom, [{ id: "run", status: "canceled" }] as any);
-        keepLocalFailuresOnSettle("thread");
+        keepLocalFailuresOnSettle(getRunSession(), "thread");
         await settleWith([{ id: "run", status: "completed" }]);
         expect(state.store.get(runReplacementNotesAtom).get("run")).toBe(RUN_FINISHED_BEFORE_STOP_NOTE);
     });

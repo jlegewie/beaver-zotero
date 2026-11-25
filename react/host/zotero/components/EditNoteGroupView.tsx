@@ -17,7 +17,7 @@ import {
     sendApprovalResponseAtom,
     staleApprovalActionIdsAtom,
 } from '../../../atoms/agentRunAtoms';
-import { pendingParkedAnswerIdsAtom } from '../../../atoms/parkedRuns';
+import { pendingParkedAnswerIdsAtom } from '../../../../src/services/agentRuns/parkedRuns';
 import {
     agentActionItemTitleAtom,
     getAgentActionItemTitleKey,
@@ -28,7 +28,7 @@ import {
 import {
     isFullAccessGrantedForRun,
     runApprovalPolicyAtom,
-} from '../../../atoms/runApprovalPolicy';
+} from '../../../../src/services/agentRuns/runApprovalPolicy';
 import {
     getStatusConfig,
     hasFailedUndo,

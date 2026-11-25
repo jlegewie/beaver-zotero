@@ -14,17 +14,19 @@
  * owns the chat, exactly as for the run's own state.
  */
 
-import { atom, type Setter } from 'jotai';
-import type { AgentAction } from '../agents/agentActions';
-import type { ModelConfig } from '../atoms/models';
+import { atom, type Setter } from 'jotai/vanilla';
+import type { AgentAction } from '@beaver/agent-core/agents/agentActionTypes';
+import type { ModelConfig } from '@beaver/agent-core/types/models';
 import type { Citation } from '@beaver/agent-core/types/citations';
 import type { AgentRun, ToolCallPart, ToolReturnPart } from '@beaver/agent-core/agents/types';
 import type {
     WSAskUserQuestionRequest,
     WSBatchApprovalRequest,
     WSCreditConfirmationRequest,
+    WSDeferredApprovalRequest,
     WSMissingZoteroDataEvent,
 } from '@beaver/agent-core/protocol/agentProtocol';
+import type { PendingApproval } from '@beaver/agent-core/run-state/pendingApprovals';
 import type { MergeItemsChoices } from '@beaver/agent-core/protocol/duplicates';
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import type { FeatureCreditGrant } from '@beaver/agent-core/protocol/agentProtocol';
@@ -100,12 +102,21 @@ export interface RunHost {
 
     // --- Window-side effects -----------------------------------------------
 
+    /** A write now waits for approval; `silent` for a parked card restored on load. */
+    approvalRequested(event: WSDeferredApprovalRequest, options: { silent: boolean }): void;
+    /** These approvals no longer wait. */
+    approvalsRemoved(removed: readonly PendingApproval[]): void;
+    /** No approval waits any more. */
+    approvalsCleared(): void;
     dismissDiffPreview(): void;
     /** Reload the chat from the server; resolves once the load has finished. */
     reloadThread(threadId: string, userId: string): Promise<unknown>;
     /** Forget edits the user started on prompts of runs that were removed. */
     dropPromptEditDrafts(set: Setter, runIds: readonly string[]): void;
-    /** A run reached the backend, so it is reachable and the session is valid. */
+    /**
+     * A run reached the backend, so it is reachable and the session is valid:
+     * refresh what waited on that, such as unrecorded action results.
+     */
     backendReachable(): void;
     recordFeatureCredit(set: Setter, grant: FeatureCreditGrant & { runId: string }): void;
     markHighTokenUsage(set: Setter, runId: string): void;
@@ -139,8 +150,11 @@ export interface RunHost {
     enrichToolCall(part: ToolCallPart): Promise<void> | undefined;
     /** Process a tool return for display before it is applied to the run. */
     processToolReturn(part: ToolReturnPart, set: Setter): Promise<void>;
-    /** Give a tool return without a valid view one built from its legacy result. */
-    upgradeToolReturn(part: ToolReturnPart, toolCallArgs: string | Record<string, any> | null): Promise<void>;
+    /**
+     * A tool return without a valid view, with one built from its legacy
+     * result; the same part when there is nothing to build. Never changes `part`.
+     */
+    upgradeToolReturn(part: ToolReturnPart, toolCallArgs: string | Record<string, any> | null): Promise<ToolReturnPart>;
     /** Load item data for new agent actions, then auto-apply annotations. */
     prepareAgentActions(runId: string, actions: AgentAction[]): Promise<void>;
     /** Open the tab of a table the run created. */

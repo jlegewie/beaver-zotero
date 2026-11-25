@@ -29,11 +29,11 @@ import { agentService } from '@beaver/agent-core/transport/agentService';
 import { tryGetWindowRuntime } from '../runtime/windowRuntime';
 import { store } from '../store';
 import { requestJobResume } from './agentRunAtoms';
-import { jobWaitAtom } from './jobWait';
+import { jobWaitAtom } from '../../src/services/agentRuns/jobWait';
 import { leaveJobWait } from './jobLeave';
-import { isThreadParkedAtom } from './parkedRuns';
+import { isThreadParkedAtom } from '../../src/services/agentRuns/parkedRuns';
 import { watchChatFills } from './tableChatFills';
-import { runSessionStore } from '../agentRuns/runSession';
+import { runSessionStore } from '../../src/services/agentRuns/runSession';
 
 // ---------------------------------------------------------------------------
 // The composer's Stop

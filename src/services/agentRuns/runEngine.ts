@@ -26,14 +26,14 @@ import {
     reconcileThread,
     keepLocalFailuresOnSettle,
     type AdmissionWaitReason,
-} from "../runtime/threadAdmission";
+} from './threadAdmission';
 import { reattachResolutionAtom } from "@beaver/agent-core/run-state/runResolution";
-import { acquireWriter, assertWriter, bindWriter, currentWriter, ownsWriter, releaseWriter, type WriterLease } from '../runtime/threadWriter';
-import { viewedHistoryRevisionAtom } from '../runtime/threadProjection';
+import { acquireWriter, assertWriter, bindWriter, currentWriter, ownsWriter, releaseWriter, type WriterLease } from './threadWriter';
+import { viewedHistoryRevisionAtom } from './threadAdmission';
 import { getCredentialGeneration, assertCredentialGeneration } from '@beaver/agent-core/transport/credentials';
-import { getLibraryRevocations } from '../../src/services/agentDataProvider/utils';
-import { getSearchIndexState } from '../../src/services/searchIndexState';
-import { atom, Getter, Setter, type WritableAtom } from 'jotai';
+import { getLibraryRevocations } from '../agentDataProvider/utils';
+import { getSearchIndexState } from '../searchIndexState';
+import { atom, Getter, Setter, type WritableAtom } from 'jotai/vanilla';
 import { v4 as uuidv4 } from 'uuid';
 import { CONNECT_MAX_ATTEMPTS, connectWithRetry, reattachWithRetry } from '@beaver/agent-core/transport/connectWithRetry';
 import { reportConnectionFailure } from '@beaver/agent-core/transport/clients/diagnosticsService';
@@ -80,9 +80,9 @@ import {
 } from '@beaver/agent-core/protocol/agentProtocol';
 import { threadService } from '@beaver/agent-core/transport/threadService';
 import { logger } from '@beaver/agent-core/platform/logger';
-import type { ModelConfig } from '../atoms/models';
-import { getPref } from '../../src/utils/prefs';
-import { saveInterruptedThread } from '../../src/utils/interruptedThreadPrefs';
+import type { ModelConfig } from '@beaver/agent-core/types/models';
+import { getPref } from '../../utils/prefs';
+import { saveInterruptedThread } from '../../utils/interruptedThreadPrefs';
 import { AgentRun, BeaverAgentPrompt, ParkedCardAnswer, ResumeTrigger, RetryTrigger, isContinuationPrompt, isRunActive, isRunFinished } from '@beaver/agent-core/agents/types';
 import {
     threadRunsAtom,
@@ -100,20 +100,21 @@ import {
     wsRetryAtom,
 } from '@beaver/agent-core/run-state/atoms';
 import { isJobDeferral } from '@beaver/agent-core/protocol/jobCallProtocol';
-import { jobWaitAtom, settleJobWait } from '../atoms/jobWait';
+import { jobWaitAtom, settleJobWait } from './jobWait';
 import { citationsAtom } from '@beaver/agent-core/citations/atoms';
 import type { Citation } from '@beaver/agent-core/types/citations';
 import {
     toAgentAction,
     isItemCreatingAgentAction,
     itemActionExternalId,
+} from '@beaver/agent-core/agents/agentActionTypes';
+import {
     addPendingApprovalAtom,
     removePendingApprovalAtom,
     removePendingApprovalsAtom,
     pendingApprovalsAtom,
     clearAllPendingApprovalsAtom,
-    retryUnrecordedActionsNow,
-} from '../agents/agentActions';
+} from './pendingApprovals';
 import {
     addPendingQuestionAtom,
     pendingQuestionsAtom,
@@ -153,11 +154,11 @@ import {
     releaseCardAnswerAtom,
     resumeLiveCardsAtom,
     syncParkedCardsAtom,
-} from '../atoms/parkedRuns';
+} from './parkedRuns';
 import { isCreateCard, isFillCard } from '@beaver/agent-core/protocol/tableCardProtocol';
 import type { WSTableCardRequest, WSTableCardResponse, WSTableCardStale } from '@beaver/agent-core/protocol/tableCardProtocol';
 import { tableRecordFromMetadata } from '@beaver/agent-core/run-state/tableResults';
-import { readCreditThreshold } from '../utils/creditThreshold';
+import { readCreditThreshold } from '../../utils/creditThreshold';
 import { isToolResultView } from '@beaver/agent-core/run-state/toolResultViews';
 import { selectLiveBatchProgress } from '@beaver/agent-core/run-state/batchProgress';
 import {
@@ -167,10 +168,10 @@ import {
     isFullAccessGrantedForRun,
     runApprovalPolicyAtom,
     setRunFullAccessAtom,
-} from '../atoms/runApprovalPolicy';
+} from './runApprovalPolicy';
 import type { CreateItemResultData } from '@beaver/agent-core/types/agentActions/items';
 import { appendRunIfMissing, continuationOfferFor, findResumeChainRoot, findRunForResume, hasOnlyThinkingParts, lingeringCompletedRun, resolveErrorRunId, toRunError } from '@beaver/agent-core/run-state/runResumeHelpers';
-import { prewarmMuPDFWorker } from '../../src/beaver-extract';
+import { prewarmMuPDFWorker } from '../../beaver-extract';
 import { getRunSession, sessionOf, type RetryCommit, type RunSession } from './runSession';
 import type { UndoConfirmResult } from './runHost';
 
@@ -824,10 +825,10 @@ async function startAutoRetryRunOwned(
                 if (Zotero.Beaver?.presence) {
                     const observed = get(threadAdmissionAtom);
                     const generation = getCredentialGeneration();
-                    const writer = currentWriter();
+                    const writer = currentWriter(session);
                     const history = await readAdmissionHistory(threadId);
                     assertCredentialGeneration(generation);
-                    assertWriter(writer);
+                    assertWriter(session, writer);
                     if (abandonReplacementIfThreadChanged(session, get, set, {
                         navSeqBeforeAwait,
                         pendingRetryRunId: failedRunId,
@@ -1172,7 +1173,7 @@ function awaitServerSettlement(session: RunSession, set: Setter, reason: Admissi
     const admission = session.store.get(threadAdmissionAtom);
     const known = admission?.threadId === threadId ? admission : null;
     // Failed and stopped requests the server never saved stay on screen.
-    keepLocalFailuresOnSettle(threadId);
+    keepLocalFailuresOnSettle(session, threadId);
     // The run this window lost shows a neutral "checking" state rather than
     // its connection error while the server is asked how it ended.
     const runId = session.store.get(activeRunAtom)?.id;
@@ -1308,13 +1309,13 @@ export function createWSCallbacks(
     const navigation = session.host.navigationSeq();
     const composerRunId = session.store.get(activeRunAtom)?.id;
     const generation = getCredentialGeneration();
-    const writer = currentWriter();
+    const writer = currentWriter(session);
     const callbackEpoch = ++session.writerCallbackEpoch;
     // Callbacks also write after awaits; entry validation alone cannot protect those writes.
     const originalSet = set;
     set = ((...args: Parameters<Setter>) => {
         assertCredentialGeneration(generation);
-        if (!ownsWriter(writer) || callbackEpoch !== session.writerCallbackEpoch) return;
+        if (!ownsWriter(session, writer) || callbackEpoch !== session.writerCallbackEpoch) return;
         return originalSet(...args);
     }) as Setter;
     /**
@@ -1460,9 +1461,8 @@ export function createWSCallbacks(
             // If the profile sync was stuck in transient/fatal (and its retry backoff or the OS
             // online event hasn't cleared it), force a refresh so the header indicator drops
             // promptly instead of lingering until the next backoff tick.
-            session.host.backendReachable();
             // So can an applied action's result that has yet to be recorded.
-            retryUnrecordedActionsNow();
+            session.host.backendReachable();
         },
 
         onRequestAck: (data: WSRequestAckData) => {
@@ -1528,14 +1528,15 @@ export function createWSCallbacks(
                     logger(`WS onToolReturn: No view model available for tool call ${event.part.tool_call_id}`, 1);
                     // A resumed call was made by an earlier run of the thread.
                     const toolCallArgs = findToolCallArgs(session.store.get(allRunsAtom), event.part.tool_call_id);
-                    await session.host.upgradeToolReturn(event.part, toolCallArgs);
+                    event = { ...event, part: await session.host.upgradeToolReturn(event.part, toolCallArgs) };
                 }
 
             }
 
-            // Update run with tool return (event.part now carries a synthesized
+            // Update run with tool return (its part carries a synthesized
             // `view` when the backend omitted one).
-            set(activeRunAtom, (prev) => prev ? updateRunWithToolReturn(prev, event) : prev);
+            const toolReturn = event;
+            set(activeRunAtom, (prev) => prev ? updateRunWithToolReturn(prev, toolReturn) : prev);
 
             // Remove pending approval for this specific tool call (if any)
             // Note: We find approval by toolCallId since that's what we have in the event
@@ -2172,7 +2173,7 @@ export function createWSCallbacks(
             && session.store.get(threadAdmissionAtom)?.activity.state === 'idle';
         if (
             navigation !== session.host.navigationSeq() ||
-            currentWriter() ||
+            currentWriter(session) ||
             isRunActive(session.store.get(activeRunAtom)) ||
             !session.store.get(threadRunsAtom).some((run) => run.id === runId) ||
             settledAfterHeldStop
@@ -2203,7 +2204,7 @@ export function createWSCallbacks(
         if (typeof callback !== 'function') continue;
         guarded[name] = (...args: unknown[]) => {
             if (generation !== getCredentialGeneration()) return;
-            if (!ownsWriter(writer) || callbackEpoch !== session.writerCallbackEpoch) {
+            if (!ownsWriter(session, writer) || callbackEpoch !== session.writerCallbackEpoch) {
                 const left = forLeftRun[name as keyof WSCallbacks] as ((...leftArgs: unknown[]) => unknown) | undefined;
                 left?.(...args);
                 return;
@@ -2245,7 +2246,7 @@ async function executeWSRequest(
     set: Setter,
     restoreComposer?: () => void,
 ): Promise<void> {
-    assertWriter(currentWriter());
+    assertWriter(session, currentWriter(session));
     const admission = get(threadAdmissionAtom);
     if (request.thread_id && admission?.threadId !== request.thread_id) {
         restoreComposer?.();
@@ -2261,7 +2262,7 @@ async function executeWSRequest(
         return;
     }
 
-    const requestWriter = currentWriter();
+    const requestWriter = currentWriter(session);
     // How many attempts this run's connection cost, once it has one.
     let attemptsMade: number | null = null;
 
@@ -2284,7 +2285,7 @@ async function executeWSRequest(
     };
 
     const searchIndexState = await getSearchIndexState();
-    assertWriter(requestWriter);
+    assertWriter(session, requestWriter);
     if (session.clientShutDown || supersededByLiveRun()) return;
     delete request.search_index_state;
     if (searchIndexState) request.search_index_state = searchIndexState;
@@ -2334,7 +2335,7 @@ async function executeWSRequest(
         isStillWanted: () => {
             const activeRun = session.store.get(activeRunAtom);
             return (
-                ownsWriter(requestWriter) && activeRun?.id === run.id &&
+                ownsWriter(session, requestWriter) && activeRun?.id === run.id &&
                 (activeRun.status === 'in_progress' || activeRun.status === 'awaiting_deferred')
             );
         },
@@ -2344,7 +2345,7 @@ async function executeWSRequest(
         endHandoff();
     });
 
-    if (!ownsWriter(requestWriter)) return;
+    if (!ownsWriter(session, requestWriter)) return;
     attemptsMade = result.attemptsMade;
 
     if (result.kind === 'connected') return;
@@ -2606,7 +2607,7 @@ async function startRegenerateRunOwned(
             const current = () =>
                 navSeqBeforeAwait === session.host.navigationSeq() &&
                 generation === getCredentialGeneration() &&
-                ownsWriter(currentWriter());
+                ownsWriter(session, currentWriter(session));
             const deadline = Date.now() + 130000;
             let delay = 250;
             let settledHistory: Awaited<ReturnType<typeof readAdmissionHistory>>;
@@ -2994,9 +2995,9 @@ export const resumeFromRunAtom = sessionAction(
  */
 export const abandonActiveRunLocallyAtom = sessionAction((get, set) => {
     const session = sessionOf(get);
-    const writer = currentWriter();
-    const ownedWriter = !!writer && ownsWriter(writer);
-    releaseWriter();
+    const writer = currentWriter(session);
+    const ownedWriter = !!writer && ownsWriter(session, writer);
+    releaseWriter(session);
     // The owner already has the canceled response locally. Other viewers must
     // refresh, but our own release must not make this chat read-only.
     const threadId = get(currentThreadIdAtom);
@@ -3106,7 +3107,7 @@ export const closeWSConnectionForShutdownAtom = sessionAction(
         // A window closing while Zotero runs on leaves the fill it waits on to
         // a table still on screen, or stops it. On a quit Zotero stops it.
         if (!Zotero.__beaverShuttingDown) session.host.leaveJobWaitOnClose();
-        if (!session.agentService.isConnected() && session.connectLoopsInFlight === 0) { releaseWriter(); return; }
+        if (!session.agentService.isConnected() && session.connectLoopsInFlight === 0) { releaseWriter(session); return; }
         // A run waiting only on cards parks rather than ending with the
         // client, so they can be answered next time. Best effort: the server
         // also parks such a run when its socket closes.
@@ -3239,7 +3240,7 @@ export const sendApprovalResponseAtom = sessionAction(
             recordIntent();
             return;
         }
-        if (!ownsWriter(currentWriter())) return;
+        if (!ownsWriter(session, currentWriter(session))) return;
         recordIntent();
         logger(`sendApprovalResponseAtom: Sending approval response for ${actionId}: ${approved}${userInstructions ? ' (with instructions)' : ''}`, 1);
         const delivered = session.agentService.sendApprovalResponse(actionId, approved, userInstructions, actionChanges);
@@ -3417,7 +3418,7 @@ export const sendAskUserQuestionResponseAtom = sessionAction(
             set(removePendingQuestionAtom, toolcallId);
             return;
         }
-        if (!ownsWriter(currentWriter())) return;
+        if (!ownsWriter(session, currentWriter(session))) return;
         logger(`sendAskUserQuestionResponseAtom: Sending question response for ${questionId}: ${cancelled ? 'cancelled' : `${answers.length} answer(s)`}`, 1);
         if (session.agentService.sendAskUserQuestionResponse(questionId, answers, cancelled ?? false)) {
             set(addLiveCardAnswerAtom, { toolCallId: toolcallId, answer });
@@ -3441,7 +3442,7 @@ export const sendCreditConfirmationResponseAtom = sessionAction(
         userInstructions?: string | null;
     }) => {
         const session = sessionOf(get);
-        if (!ownsWriter(currentWriter())) return;
+        if (!ownsWriter(session, currentWriter(session))) return;
         logger(`sendCreditConfirmationResponseAtom: Sending credit confirmation response for ${confirmationId}: ${approved}`, 1);
         const delivered = session.agentService.sendCreditConfirmationResponse(
             confirmationId,
@@ -3476,7 +3477,7 @@ export const sendBatchApprovalResponseAtom = sessionAction(
             set(removePendingBatchApprovalAtom, approvalId);
             return;
         }
-        if (!ownsWriter(currentWriter())) return;
+        if (!ownsWriter(session, currentWriter(session))) return;
         logger(`sendBatchApprovalResponseAtom: Sending batch approval response for ${approvalId}: ${approved} (${mode})`, 1);
         const delivered = session.agentService.sendBatchApprovalResponse(
             approvalId,
@@ -3516,7 +3517,7 @@ export const sendTableCardResponseAtom = sessionAction(
             retireCardKeepingEdits();
             return;
         }
-        if (!ownsWriter(currentWriter())) return;
+        if (!ownsWriter(session, currentWriter(session))) return;
         const delivered = session.agentService.sendTableCardResponse(response);
         if (!delivered) {
             logger(`sendTableCardResponseAtom: Table card response for ${response.card_id} was not sent`, 1);
@@ -3867,9 +3868,9 @@ async function startRegenerateRun(session: RunSession, get: Getter, set: Setter,
 }
 
 function settleWriter(session: RunSession, get: Getter, writer: WriterLease | undefined): void {
-    if (!writer || writer !== currentWriter() || writer.preparing || get(isWSChatPendingAtom) || isRunActive(get(activeRunAtom))
+    if (!writer || writer !== currentWriter(session) || writer.preparing || get(isWSChatPendingAtom) || isRunActive(get(activeRunAtom))
         || get(retryPendingRunIdAtom) || get(autoReplacementPendingRunIdsAtom).size) return;
-    releaseWriter(writer);
+    releaseWriter(session, writer);
     const id = get(currentThreadIdAtom);
     if (id) session.store.set(viewedHistoryRevisionAtom, Zotero.Beaver.presence.getSnapshot().history[id] ?? 0);
 }
@@ -3890,7 +3891,7 @@ export async function withThreadWriter<T>(
     const presence = Zotero.Beaver?.presence;
     if (
         get(threadConflictAtom) ||
-        (get(serverThreadBlockedAtom) && !ownsWriter(currentWriter()))
+        (get(serverThreadBlockedAtom) && !ownsWriter(session, currentWriter(session)))
     )
         return;
     if (presence && id) {
@@ -3900,12 +3901,12 @@ export async function withThreadWriter<T>(
             session.host.notify(set, { type: 'info', title: 'Responding in another window', text: 'Wait for that response to finish or go to its window.', expire: true });
             return;
         }
-        if (snapshot.deleted.includes(id) || (!ownsWriter(currentWriter()) && (snapshot.history[id] ?? 0) !== get(viewedHistoryRevisionAtom))) {
+        if (snapshot.deleted.includes(id) || (!ownsWriter(session, currentWriter(session)) && (snapshot.history[id] ?? 0) !== get(viewedHistoryRevisionAtom))) {
             session.host.notify(set, { type: 'warning', title: 'This chat was updated in another window', text: 'Refresh the chat before continuing. Your draft and attachments are preserved.', expire: false });
             return;
         }
     }
-    const writer = acquireWriter(id, getCredentialGeneration());
+    const writer = acquireWriter(session, id, getCredentialGeneration());
     if (writer === null) {
         session.host.notify(set, { type: 'info', title: 'Responding in another window', text: 'Wait for that response to finish or go to its window.', expire: true });
         return;
@@ -3913,7 +3914,7 @@ export async function withThreadWriter<T>(
     if (writer) writer.preparing++;
     const nav = session.host.navigationSeq();
     const guard = (target: Setter): Setter => ((...args: any[]) => {
-        assertWriter(writer);
+        assertWriter(session, writer);
         if (writer && nav !== session.host.navigationSeq()) throw Object.assign(new Error('Chat changed'), { code: 'thread_operation_canceled' });
         return (target as any)(...args);
     }) as Setter;
@@ -3937,7 +3938,7 @@ export async function withThreadWriter<T>(
                 const generation = getCredentialGeneration();
                 const snapshot = await readAdmission(id);
                 assertCredentialGeneration(generation);
-                assertWriter(writer);
+                assertWriter(session, writer);
                 if (nav !== session.host.navigationSeq()) return false;
                 const previous = get(threadAdmissionAtom);
                 guardedSessionSet(threadAdmissionAtom, snapshot);
@@ -3963,7 +3964,7 @@ export async function withThreadWriter<T>(
         return await operation(guardedSet, guardedSessionSet);
     } catch (error) {
         if ((error as { code?: string })?.code !== 'thread_operation_canceled') {
-            if (ownsWriter(writer) && nav === session.host.navigationSeq())
+            if (ownsWriter(session, writer) && nav === session.host.navigationSeq())
                 session.host.notify(set, {
                     type: "error",
                     title: "Chat could not be checked",

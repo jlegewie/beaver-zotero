@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 import type { WritableAtom } from 'jotai';
-import { runSessionStore } from '../agentRuns/runSession';
+import { runSessionStore } from '../../src/services/agentRuns/runSession';
 
 /**
  * `useSetAtom` for chat state the run session owns (`sessionStateAtoms`), or

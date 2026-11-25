@@ -151,7 +151,7 @@ vi.mock('../../../react/atoms/agentRunAtoms', async () => {
     };
 });
 
-vi.mock('../../../react/atoms/parkedRuns', async () => {
+vi.mock('../../../src/services/agentRuns/parkedRuns', async () => {
     const { atom } = await import('jotai');
     return {
         clearParkedAnswersAtom: atom(null, () => {}),
