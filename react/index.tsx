@@ -1,6 +1,6 @@
 import { regenerateFromRunAtom } from './atoms/agentRunAtoms';
 import { watchJobCalls } from './atoms/jobCalls';
-import { threadAdmissionAtom, threadConflictAtom } from './runtime/threadAdmission';
+import { threadAdmissionAtom, threadConflictAtom } from '../src/services/agentRuns/threadAdmission';
 import { openPreferencesWindow } from './ui/openPreferencesWindow';
 import { attachThreadAdmission } from "./runtime/threadAdmission";
 import { threadEntitiesAtom } from './atoms/threadList';

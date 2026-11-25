@@ -1,4 +1,4 @@
-import { serverThreadBlockedAtom, threadConflictAtom } from "./threadAdmission";
+import { serverThreadBlockedAtom, threadConflictAtom, viewedHistoryRevisionAtom } from "../../src/services/agentRuns/threadAdmission";
 import { tryGetWindowRuntime } from "./windowRuntime";
 import { atom } from "jotai";
 import {
@@ -9,7 +9,7 @@ import type { WindowRuntime } from "../../src/runtime/instance";
 import type { ThreadPresenceSnapshot } from "../../src/services/threads/threadPresence";
 import { store } from "../store";
 import { recentThreadsAtom } from "../atoms/threads";
-import { runSessionStore } from "../agentRuns/runSession";
+import { runSessionStore } from "../../src/services/agentRuns/runSession";
 import {
     threadEntitiesAtom,
     threadViewsAtom,
@@ -23,7 +23,6 @@ export const threadPresenceAtom = atom<ThreadPresenceSnapshot>({
     history: {},
     deleted: [],
 });
-export const viewedHistoryRevisionAtom = atom(0);
 export const otherThreadWriterAtom = atom((get) => {
     const id = get(currentThreadIdAtom);
     const owner = get(threadPresenceAtom).claims.find(

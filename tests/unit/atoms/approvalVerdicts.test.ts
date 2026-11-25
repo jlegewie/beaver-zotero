@@ -72,7 +72,7 @@ import { pendingApprovalsAtom } from '../../../react/agents/agentActions';
 import {
     isFullAccessGrantedForRun,
     runApprovalPolicyAtom,
-} from '../../../react/atoms/runApprovalPolicy';
+} from '../../../src/services/agentRuns/runApprovalPolicy';
 import { installWindowStoreRunSession } from '../../helpers/windowRunSession';
 
 function approval(actionId: string, actionType: string, actionData: Record<string, any> = {}) {

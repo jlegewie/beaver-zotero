@@ -1,6 +1,6 @@
 import { isUnconfirmedAction, type AgentAction } from '@beaver/agent-core/agents/agentActionTypes';
 import { textAnnotationStyle } from '@beaver/agent-core/types/agentActions/createAnnotations';
-import { getActionToolGroup } from '../../../atoms/runApprovalPolicy';
+import { getActionToolGroup } from '../../../../src/services/agentRuns/runApprovalPolicy';
 import { isStaleProposal } from '../../../../src/services/manualActions/staleProposal';
 
 /** A tool call the changes card lists, with all of its actions. */

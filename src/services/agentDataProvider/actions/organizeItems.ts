@@ -653,7 +653,8 @@ async function organizeItems(
         items_modified: itemsModified,
         current_state: Object.fromEntries([...itemSnapshots].map(([id, snapshot]) => [id, {
             tags: snapshot.tags.map(tag => tag.tag),
-            collections: snapshot.collections.map(id => Zotero.Collections.get(id)?.key).filter((key): key is string => !!key),
+            collections: snapshot.collections.map(id => Zotero.Collections.get(id))
+                .filter((collection): collection is Zotero.Collection => !!collection).map(collection => collection.key),
         }])),
         // Store actual changes (not requested changes) for safe undo
         tags_added: actualTagsAdded.size > 0 ? [...actualTagsAdded] : undefined,

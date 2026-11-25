@@ -143,7 +143,7 @@ describe('enrichMessageAttachmentStub', () => {
         vi.clearAllMocks();
     });
 
-    it('adds an item stub to legacy item attachments', () => {
+    it('returns a copy with an item stub for a legacy item attachment', () => {
         const item = createMockItem({
             key: 'ITEM1234',
             fields: { title: 'Display Title' },
@@ -155,9 +155,10 @@ describe('enrichMessageAttachmentStub', () => {
             zotero_key: 'ITEM1234',
         };
 
-        enrichMessageAttachmentStub(attachment, item);
+        const enriched = enrichMessageAttachmentStub(attachment, item) as ItemMetadataAttachment;
 
-        expect(attachment.item).toEqual({
+        expect(attachment.item).toBeUndefined();
+        expect(enriched.item).toEqual({
             item_id: '1-ITEM1234',
             item_type: 'book',
             title: 'Display Title',
@@ -167,7 +168,7 @@ describe('enrichMessageAttachmentStub', () => {
         expect(serializeItemStub).toHaveBeenCalledWith(item);
     });
 
-    it('adds attachment and parent item stubs to legacy source attachments', () => {
+    it('returns a copy with attachment and parent item stubs for a legacy source attachment', () => {
         const parent = createMockItem({
             key: 'PARENT12',
             fields: { title: 'Parent Item' },
@@ -186,16 +187,18 @@ describe('enrichMessageAttachmentStub', () => {
             include: 'fulltext',
         };
 
-        enrichMessageAttachmentStub(attachment, item as MockZoteroItem);
+        const enriched = enrichMessageAttachmentStub(attachment, item as MockZoteroItem) as SourceAttachment;
 
-        expect(attachment.attachment).toEqual({
+        expect(attachment.attachment).toBeUndefined();
+        expect(attachment.parent_item).toBeUndefined();
+        expect(enriched.attachment).toEqual({
             attachment_id: '1-SOURCE12',
             parent_item_id: '1-PARENT12',
             title: null,
             filename: null,
             content_kind: 'epub',
         });
-        expect(attachment.parent_item).toEqual({
+        expect(enriched.parent_item).toEqual({
             item_id: '1-PARENT12',
             item_type: 'journalArticle',
             title: 'Parent Item',
@@ -206,7 +209,7 @@ describe('enrichMessageAttachmentStub', () => {
         expect(serializeItemStub).toHaveBeenCalledWith(parent);
     });
 
-    it('leaves already-stubbed attachments unchanged', () => {
+    it('returns an already-stubbed attachment as it is', () => {
         const item = createMockAttachment({ key: 'SOURCE12' }) as unknown as MockZoteroItem;
         const attachment: SourceAttachment = {
             type: 'source',
@@ -231,7 +234,7 @@ describe('enrichMessageAttachmentStub', () => {
         const originalAttachmentStub = attachment.attachment;
         const originalParentStub = attachment.parent_item;
 
-        enrichMessageAttachmentStub(attachment, item);
+        expect(enrichMessageAttachmentStub(attachment, item)).toBe(attachment);
 
         expect(attachment.attachment).toBe(originalAttachmentStub);
         expect(attachment.parent_item).toBe(originalParentStub);

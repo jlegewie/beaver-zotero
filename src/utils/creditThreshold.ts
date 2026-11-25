@@ -6,8 +6,8 @@
  * reaches the whole setting through one module.
  */
 
-import { getPref } from '../../src/utils/prefs';
-import { clampCreditThreshold } from '@beaver/agent-ui/utils/creditThreshold';
+import { getPref } from './prefs';
+import { clampCreditThreshold } from '@beaver/agent-core/protocol/creditThreshold';
 
 export {
     MAX_CREDIT_THRESHOLD,
@@ -15,8 +15,8 @@ export {
     DEFAULT_CREDIT_THRESHOLD,
     clampCreditThreshold,
     parseCreditLimitEntry,
-} from '@beaver/agent-ui/utils/creditThreshold';
-export type { CreditLimitEntry } from '@beaver/agent-ui/utils/creditThreshold';
+} from '@beaver/agent-core/protocol/creditThreshold';
+export type { CreditLimitEntry } from '@beaver/agent-core/protocol/creditThreshold';
 
 /** The stored credit limit, bounded. */
 export function readCreditThreshold(): number {

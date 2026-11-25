@@ -1,5 +1,11 @@
-import type { ThreadClaim } from "../../src/services/threads/threadPresence";
-import { tryGetWindowRuntime } from "./windowRuntime";
+/**
+ * The session's lease on writing to a chat: its presence claim on the thread,
+ * held while it prepares a message, runs, and settles. Hosts without the
+ * Zotero instance's presence registry do not take part.
+ */
+
+import type { ThreadClaim } from "../threads/threadPresence";
+import type { RunSession } from "./runSession";
 
 export interface WriterLease {
     claim: ThreadClaim;
@@ -7,42 +13,48 @@ export interface WriterLease {
     /** The admission read in flight for this lease; resolves to whether writes may proceed. */
     admission?: Promise<boolean>;
 }
-let lease: WriterLease | undefined;
+
 let draftSeq = 0;
-export function currentWriter(): WriterLease | undefined {
-    return lease;
+
+export function currentWriter(session: RunSession): WriterLease | undefined {
+    return session.writerLease;
 }
-export function ownsWriter(value: WriterLease | undefined): boolean {
+
+export function ownsWriter(session: RunSession, value: WriterLease | undefined): boolean {
     if (!value) return !Zotero.Beaver?.presence;
     return (
-        lease === value &&
-        !!tryGetWindowRuntime() &&
+        session.writerLease === value &&
+        session.host.windowId() !== undefined &&
         Zotero.Beaver.presence.owns(value.claim)
     );
 }
+
 export function acquireWriter(
+    session: RunSession,
     threadId: string | null,
     generation: number,
 ): WriterLease | null | undefined {
     // Pure atom tests and hosts without the Zotero instance do not participate.
     if (!Zotero.Beaver?.presence) return undefined;
-    const runtime = tryGetWindowRuntime();
-    if (!runtime) return null;
+    const windowId = session.host.windowId();
+    if (windowId === undefined) return null;
+    const lease = session.writerLease;
     if (
         lease &&
-        ownsWriter(lease) &&
+        ownsWriter(session, lease) &&
         (!threadId || lease.claim.threadId === threadId)
     )
         return lease;
     const claim = Zotero.Beaver.presence.claim(
-        runtime.id,
-        threadId ?? `draft:${runtime.id}:${++draftSeq}`,
+        windowId,
+        threadId ?? `draft:${windowId}:${++draftSeq}`,
         generation,
     );
     if (!claim) return null;
-    lease = { claim, preparing: 0 };
-    return lease;
+    session.writerLease = { claim, preparing: 0 };
+    return session.writerLease;
 }
+
 export function bindWriter(
     value: WriterLease | undefined,
     threadId: string,
@@ -53,14 +65,16 @@ export function bindWriter(
     value.claim = bound;
     return true;
 }
-export function releaseWriter(value = lease): void {
-    if (!value || value !== lease) return;
-    lease = undefined; // Revoke callbacks before notifying viewers.
+
+export function releaseWriter(session: RunSession, value = session.writerLease): void {
+    if (!value || value !== session.writerLease) return;
+    session.writerLease = undefined; // Revoke callbacks before notifying viewers.
     Zotero.Beaver.presence.release(value.claim);
     Zotero.Beaver.threads.invalidateViews();
 }
-export function assertWriter(value: WriterLease | undefined): void {
-    if (!ownsWriter(value))
+
+export function assertWriter(session: RunSession, value: WriterLease | undefined): void {
+    if (!ownsWriter(session, value))
         throw Object.assign(new Error("Chat operation is no longer current"), {
             code: "thread_operation_canceled",
         });

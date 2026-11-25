@@ -16,8 +16,9 @@ vi.mock('../../../src/services/threads/finishedChat', () => ({
     isFinishedChat: (...args: any[]) => state.finished(...args), hasThreadWriter: () => false,
     RESPONSE_FINISH_MESSAGE: 'Available when this response finishes.',
 }));
-vi.mock('../../../react/runtime/threadWriter', () => ({ currentWriter: () => state.writer }));
-vi.mock('../../../react/runtime/threadAdmission', async () => ({ threadAdmissionAtom: (await import('jotai')).atom(null) }));
+vi.mock('../../../src/services/agentRuns/runSession', () => ({ getRunSession: () => ({}) }));
+vi.mock('../../../src/services/agentRuns/threadWriter', () => ({ currentWriter: () => state.writer }));
+vi.mock('../../../src/services/agentRuns/threadAdmission', async () => ({ threadAdmissionAtom: (await import('jotai')).atom(null) }));
 vi.mock('../../../react/runtime/threadProjection', async () => ({ threadPresenceAtom: (await import('jotai')).atom({ claims: [] }) }));
 vi.mock('../../../react/atoms/agentRunAtoms', async () => ({ isWSChatPendingAtom: (await import('jotai')).atom(false) }));
 vi.mock('../../../react/events/eventManager', () => ({ eventManager: { dispatch: vi.fn() } }));
@@ -114,7 +115,7 @@ it('rejects navigation during destination loading', async () => {
 
 it.each(['preparing', 'in_progress', 'awaiting_deferred', 'unknown', 'active'])('disables the menu while requested activity is %s', async phase => {
     const { canOpenFinishedChatAtom } = await import('../../../react/runtime/windowCommands');
-    const { threadAdmissionAtom } = await import('../../../react/runtime/threadAdmission');
+    const { threadAdmissionAtom } = await import('../../../src/services/agentRuns/threadAdmission');
     const { isWSChatPendingAtom } = await import('../../../react/atoms/agentRunAtoms');
     const { activeRunAtom } = await import('@beaver/agent-core/run-state/atoms');
     state.store.set(threadAdmissionAtom, { threadId: 'current', tailRunId: null, activity: { state: 'idle', run_id: null } });
@@ -127,7 +128,7 @@ it.each(['preparing', 'in_progress', 'awaiting_deferred', 'unknown', 'active'])(
 
 it('keeps failed availability checks separate from the displayed history tail', async () => {
     const { refreshFinishedChatAvailabilityAtom, canOpenFinishedChatAtom } = await import('../../../react/runtime/windowCommands');
-    const { threadAdmissionAtom } = await import('../../../react/runtime/threadAdmission');
+    const { threadAdmissionAtom } = await import('../../../src/services/agentRuns/threadAdmission');
     const admission = { threadId: 'current', tailRunId: 'displayed', activity: { state: 'idle', run_id: null } };
     state.store.set(threadAdmissionAtom, admission);
     state.finished.mockResolvedValue(false);
@@ -142,7 +143,7 @@ it.each(['navigation', 'account', 'admission'])('ignores availability received a
     const { refreshFinishedChatAvailabilityAtom, canOpenFinishedChatAtom } = await import('../../../react/runtime/windowCommands');
     const { threadNavigationSeqAtom } = await import('../../../react/atoms/threads');
     const { accountGenerationAtom } = await import('../../../react/atoms/profile');
-    const { threadAdmissionAtom } = await import('../../../react/runtime/threadAdmission');
+    const { threadAdmissionAtom } = await import('../../../src/services/agentRuns/threadAdmission');
     let finish!: (value: boolean) => void;
     state.finished.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
     const refresh = state.store.set(refreshFinishedChatAvailabilityAtom);

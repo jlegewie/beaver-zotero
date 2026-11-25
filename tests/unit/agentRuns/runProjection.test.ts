@@ -15,8 +15,8 @@ import { activeRunAtom, threadRunsAtom } from '@beaver/agent-core/run-state/atom
 import { citationKeyToMarkerAtom, citationsAtom } from '@beaver/agent-core/citations/atoms';
 import { pendingQuestionsAtom } from '@beaver/agent-core/run-state/pendingQuestions';
 import type { Citation } from '@beaver/agent-core/types/citations';
-import { attachRunProjection, type RunProjection } from '../../../react/agentRuns/runProjection';
-import type { SessionStateAtom } from '../../../react/agentRuns/sessionState';
+import { attachRunProjection, type RunProjection } from '../../../react/runtime/runProjection';
+import type { SessionStateAtom } from '../../../src/services/agentRuns/sessionState';
 
 const ATOMS: ReadonlyArray<readonly [string, SessionStateAtom]> = [
     ['threadRuns', threadRunsAtom],

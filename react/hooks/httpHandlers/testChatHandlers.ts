@@ -55,7 +55,7 @@ import { isCreateCard, isFillCard, type TableCardChoice } from '@beaver/agent-co
 import { chatFillsAtom } from '@beaver/agent-core/run-state/tableChatFills';
 import { openJobCallsAtom } from '@beaver/agent-core/run-state/jobCalls';
 import { jobIdOf } from '@beaver/agent-core/protocol/jobCallProtocol';
-import { jobWaitAtom } from '../../atoms/jobWait';
+import { jobWaitAtom } from '../../../src/services/agentRuns/jobWait';
 import { runningChatJobsAtom } from '../../atoms/jobCalls';
 import { resolveItems as resolveCardItems, resolveLibraryScope } from '../../components/tables/card/liveSources';
 import { sendComposedMessageAtom } from '../../atoms/actions';
@@ -75,8 +75,9 @@ import { agentService } from '@beaver/agent-core/transport/agentService';
 import { logger } from '@beaver/agent-core/platform/logger';
 import type { AgentRun } from '@beaver/agent-core/agents/types';
 import { flushRunProjection } from '../../runtime/windowRunSession';
-import { runSessionStore } from '../../agentRuns/runSession';
-import { admissionUnreachableAtom, threadAdmissionAtom } from '../../runtime/threadAdmission';
+import { runSessionStore } from '../../../src/services/agentRuns/runSession';
+import { admissionUnreachableAtom } from '../../runtime/threadAdmission';
+import { threadAdmissionAtom } from '../../../src/services/agentRuns/threadAdmission';
 import {
     closeWSConnectionAtom,
     isWSChatPendingAtom,
@@ -104,7 +105,7 @@ import { pendingQuestionsAtom } from '@beaver/agent-core/run-state/pendingQuesti
 import { pendingBatchApprovalsAtom } from '@beaver/agent-core/run-state/pendingBatchApprovals';
 import { openParkedRunAtom } from '@beaver/agent-core/run-state/parkedRun';
 import type { AskUserQuestionAnswer } from '@beaver/agent-core/protocol/agentProtocol';
-import { isResumeWaitingAtom, isThreadParkedAtom, pendingParkedAnswerIdsAtom, resumeLiveCardsAtom } from '../../atoms/parkedRuns';
+import { isResumeWaitingAtom, isThreadParkedAtom, pendingParkedAnswerIdsAtom, resumeLiveCardsAtom } from '../../../src/services/agentRuns/parkedRuns';
 import {
     currentMessageItemsAtom,
     currentMessageCollectionsAtom,

@@ -881,15 +881,15 @@ function dedupeByRef(specs: RowSpec[]): RowSpec[] {
 }
 
 /**
- * Upgrade a tool-return part in place: when it lacks `metadata.view` (legacy
- * backend / old thread), synthesize and attach the hydrated view so the shared
- * render layer can render it. Parts that already carry a `view` (new backend)
- * pass through untouched.
+ * Upgrade a tool-return part: when it lacks `metadata.view` (legacy backend /
+ * old thread), return a copy with a synthesized, hydrated view so the shared
+ * render layer can render it. Parts that already carry a `view` (new backend),
+ * and parts no view can be built for, are returned as they are. `part` itself
+ * is never changed: run state is shared by reference.
  *
- * @param part The tool-return part (mutated in place when a view is built).
+ * @param part The tool-return part.
  * @param toolCallArgs Args of the matching tool-call part — needed only for the
  *   annotation-list variant; safe to omit.
- * @returns The same part (for convenience).
  */
 export async function upgradeToolReturn(
     part: ToolReturnPart,
@@ -909,7 +909,5 @@ export async function upgradeToolReturn(
     const view = await buildLegacyView(part, toolCallArgs);
     if (!view) return part;
 
-    if (!part.metadata) part.metadata = {};
-    part.metadata.view = view;
-    return part;
+    return { ...part, metadata: { ...part.metadata, view } };
 }

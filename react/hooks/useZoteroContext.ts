@@ -188,7 +188,7 @@ export function useZoteroContext() {
         }
 
         let cancelled = false;
-        Zotero.Items.getAsync(selectedTab.data.itemID).then(async (item: Zotero.Item) => {
+        Zotero.Items.getAsync(selectedTab.data.itemID).then(async (item) => {
             if (!item || cancelled) return;
             await item.loadDataType('itemData');
             if (!cancelled && !mainWindow.closed && mainWindow.Zotero_Tabs.selectedID === selectedTab.id) setNoteItem(item);

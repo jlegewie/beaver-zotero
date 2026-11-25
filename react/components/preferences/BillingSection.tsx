@@ -15,7 +15,7 @@ import { getPref, setPref } from "../../../src/utils/prefs";
 import {
     parseCreditLimitEntry,
     readCreditThreshold,
-} from "../../utils/creditThreshold";
+} from "../../../src/utils/creditThreshold";
 import {
     BillingInterval,
     findIntervalCounterpart,

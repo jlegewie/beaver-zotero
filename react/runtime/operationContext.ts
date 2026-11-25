@@ -2,12 +2,12 @@ import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '
 import { activeRunAtom } from '@beaver/agent-core/run-state/atoms';
 import type { OperationContext } from '../../src/services/agentDataProvider/operationContext';
 import { loadPreferences } from '../../src/services/deferredToolPolicy';
-import { grantCreatedNoteEditsForRunAtom, isActionApprovedForCurrentRun, isFullAccessGrantedForRun, runApprovalPolicyAtom } from '../atoms/runApprovalPolicy';
+import { grantCreatedNoteEditsForRunAtom, isActionApprovedForCurrentRun, isFullAccessGrantedForRun, runApprovalPolicyAtom } from '../../src/services/agentRuns/runApprovalPolicy';
 import { currentThreadIdAtom } from '../atoms/threads';
 import { store } from '../store';
 import { captureAttachmentCompletion } from './attachmentCompletion';
 import { tryGetWindowRuntime } from './windowRuntime';
-import { runSessionStore } from '../agentRuns/runSession';
+import { runSessionStore } from '../../src/services/agentRuns/runSession';
 
 /** Originless requests receive empty citation/grant state; Markdown renders in the plugin realm. */
 export function captureOperationContext(local = false): OperationContext {

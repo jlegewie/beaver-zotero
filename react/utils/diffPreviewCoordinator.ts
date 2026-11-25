@@ -2,12 +2,13 @@
  * Diff Preview Coordinator
  *
  * Bridges the approval system (Jotai atoms) and the editor preview module.
- * Called imperatively from atom setters — no React effects needed.
+ * Called imperatively when the run session's approvals change (through the
+ * window's run host) — no React effects needed.
  *
  * Import graph (no cycles):
- *   agentActions.ts ──→ diffPreviewCoordinator.ts ──→ noteEditorDiffPreview.ts
- *   agentRunAtoms.ts ─→ (not imported directly)       ↓
- *                                                  noteHtmlSimplifier.ts
+ *   windowRunHost.ts ──→ diffPreviewCoordinator.ts ──→ noteEditorDiffPreview.ts
+ *   agentRunAtoms.ts ─→ (not imported directly)        ↓
+ *                                                   noteHtmlSimplifier.ts
  *
  * store.ts is imported eagerly but is safe in tests (it guards on
  * `typeof Zotero`).
@@ -30,7 +31,7 @@ import { logger } from '@beaver/agent-core/platform/logger';
 import { getPref } from '../../src/utils/prefs';
 import { store } from '../store';
 import { pendingApprovalsAtom } from '../agents/agentActions';
-import { runSessionStore } from '../agentRuns/runSession';
+import { runSessionStore } from '../../src/services/agentRuns/runSession';
 import { sendApprovalResponseAtom } from '../atoms/agentRunAtoms';
 import { buildPreviewableEditOperations } from './editNotePreviewOperations';
 import { resolveLibraryRef } from '../../src/utils/libraryIdentity';
@@ -102,7 +103,7 @@ export function noteLibraryIdFromActionData(actionData: any): number | null {
  * Gather all pending edit_note approvals for a note and show/update/dismiss
  * the in-editor diff preview accordingly. Fire-and-forget (async).
  *
- * Called from addPendingApprovalAtom and removePendingApprovalAtom.
+ * Called when an approval is added or removed (the window run host).
  */
 export function updateDiffPreviewForNote(libraryId: number, zoteroKey: string): void {
     if (!isDiffPreviewLive()) return;

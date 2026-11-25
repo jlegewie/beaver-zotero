@@ -36,8 +36,9 @@ vi.mock('../../../react/atoms/threads', async () => ({
 }));
 vi.mock('../../../react/atoms/auth', async () => ({ userIdAtom: (await import('jotai')).atom('user') }));
 vi.mock('../../../src/services/threads/finishedChat', () => ({ isFinishedChat: vi.fn(), hasThreadWriter: () => false, RESPONSE_FINISH_MESSAGE: '' }));
-vi.mock('../../../react/runtime/threadWriter', () => ({ currentWriter: () => null }));
-vi.mock('../../../react/runtime/threadAdmission', async () => ({ threadAdmissionAtom: (await import('jotai')).atom(null) }));
+vi.mock('../../../src/services/agentRuns/runSession', () => ({ getRunSession: () => ({}) }));
+vi.mock('../../../src/services/agentRuns/threadWriter', () => ({ currentWriter: () => null }));
+vi.mock('../../../src/services/agentRuns/threadAdmission', async () => ({ threadAdmissionAtom: (await import('jotai')).atom(null) }));
 vi.mock('../../../react/runtime/threadProjection', async () => ({ threadPresenceAtom: (await import('jotai')).atom({ claims: [] }) }));
 vi.mock('../../../react/atoms/agentRunAtoms', async () => ({ isWSChatPendingAtom: (await import('jotai')).atom(false) }));
 vi.mock('../../../react/events/eventManager', () => ({ eventManager: { dispatch: (...args: any[]) => state.dispatch(...args) } }));

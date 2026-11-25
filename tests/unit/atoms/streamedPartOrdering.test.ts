@@ -72,7 +72,7 @@ import type {
 } from '@beaver/agent-core/protocol/agentProtocol';
 import type { AgentRun } from '@beaver/agent-core/agents/types';
 import { activeRunAtom, threadRunsAtom } from '@beaver/agent-core/run-state/atoms';
-import { isWSReadyAtom } from '../../../react/agentRuns/runEngine';
+import { isWSReadyAtom } from '../../../src/services/agentRuns/runEngine';
 import { abandonActiveRunLocallyAtom, createWSCallbacks } from '../../../react/atoms/agentRunAtoms';
 import { store } from '../../../react/store';
 import { flushRunProjection } from '../../../react/runtime/windowRunSession';

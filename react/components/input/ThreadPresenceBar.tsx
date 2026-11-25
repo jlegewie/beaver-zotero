@@ -1,11 +1,5 @@
-import {
-    admissionUnreachableAtom,
-    describeAdmissionWait,
-    refreshThreadAdmission,
-    serverThreadBlockedAtom,
-    threadAdmissionAtom,
-    threadConflictAtom,
-} from "../../runtime/threadAdmission";
+import { admissionUnreachableAtom, describeAdmissionWait, refreshThreadAdmission } from "../../runtime/threadAdmission";
+import { serverThreadBlockedAtom, threadAdmissionAtom, threadConflictAtom } from "../../../src/services/agentRuns/threadAdmission";
 import React, { useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { otherThreadWriterAtom, threadDeletedAtom, threadHistoryStaleAtom } from '../../runtime/threadProjection';

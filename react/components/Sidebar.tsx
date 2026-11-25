@@ -6,7 +6,7 @@ import CreditConfirmationPanel from "./input/CreditConfirmationPanel"
 import TableCardPanel from "./tables/card/TableCardPanel"
 import { pendingApprovalsAtom } from '../agents/agentActions';
 import { pendingQuestionsAtom } from '@beaver/agent-core/run-state/pendingQuestions';
-import { isThreadParkedAtom, setAsideParkedCardsAtom } from '../atoms/parkedRuns';
+import { isThreadParkedAtom, setAsideParkedCardsAtom } from '../../src/services/agentRuns/parkedRuns';
 import { pendingBatchApprovalsAtom } from '@beaver/agent-core/run-state/pendingBatchApprovals';
 import { pendingCreditConfirmationsAtom } from '@beaver/agent-core/run-state/pendingCreditConfirmations';
 import { pendingTableCardsAtom } from '@beaver/agent-core/run-state/pendingTableCards';

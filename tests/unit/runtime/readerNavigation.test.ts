@@ -16,7 +16,7 @@ beforeEach(() => {
         Promise: { delay: vi.fn(async () => {}) },
         Reader: { open: vi.fn(async (itemID, _location, options) => ({ itemID, _window: options.window })), getByTabID: vi.fn() },
         Notes: { open: vi.fn(async () => undefined), _editorInstances: [] },
-        Items: { getAsync: vi.fn(async () => null) },
+        Items: { getAsync: vi.fn(async () => ({ isFileAttachment: () => false, isAttachment: () => false })) },
     });
 });
 it('passes A to native reader and note opening while B is active', async () => {
@@ -25,6 +25,12 @@ it('passes A to native reader and note opening while B is active', async () => {
     expect(Zotero.Reader.open).toHaveBeenCalledWith(42, { pageIndex: 3 }, { window: a });
     expect((Zotero as any).Notes.open).toHaveBeenCalledWith(17, undefined, { window: a });
     expect(b.focus).not.toHaveBeenCalled();
+});
+it('rejects an item Zotero no longer has before calling the native reader', async () => {
+    // Zotero returns `false` for an item id it does not know.
+    vi.mocked(Zotero.Items.getAsync).mockResolvedValue(false as any);
+    await expect(openReader(42, undefined, {}, a)).rejects.toThrow('Item 42 does not exist');
+    expect(Zotero.Reader.open).not.toHaveBeenCalled();
 });
 it('raises the reader window it opens or reuses', async () => {
     const readerWindow = { focus: vi.fn() };
@@ -398,5 +404,14 @@ describe('showing an attachment file', () => {
 
         expect(reveal).not.toHaveBeenCalled();
         expect(a.ZoteroPane.showAttachmentInFilesystem).toHaveBeenCalledWith(42);
+    });
+
+    it('shows nothing for an item Zotero no longer has', async () => {
+        vi.mocked(Zotero.Items.getAsync).mockResolvedValue(false as any);
+
+        await showAttachmentInFilesystem(42, a);
+
+        expect(reveal).not.toHaveBeenCalled();
+        expect(a.ZoteroPane.showAttachmentInFilesystem).not.toHaveBeenCalled();
     });
 });

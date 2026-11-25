@@ -9,7 +9,7 @@ import type { MessageAttachment, ViewAttachment } from '@beaver/agent-core/types
 import type { MenuPosition, SearchMenuCloseReason } from '../primitives/SearchMenu';
 import type { MenuItem } from '../primitives/ContextMenu';
 import type { AddSourcesMenuHandle, AddSourcesQuerySource } from '../composer/useAddSourcesMenu';
-import type { AgentActionType } from '@beaver/agent-core/protocol/agentProtocol';
+import type { PendingApproval } from '@beaver/agent-core/run-state/pendingApprovals';
 import type { BatchOutcomeTarget } from '@beaver/agent-core/run-state/batchProgress';
 import type { TableFillViewRequest } from '@beaver/agent-core/protocol/tableFillProtocol';
 
@@ -604,23 +604,10 @@ export interface ExternalReferenceActionsProps {
 }
 
 /**
- * A write the backend has deferred for user approval, as carried by the
- * `deferred_approval_request` wire event. Client-neutral by construction: the
- * shape is that event's payload, and `actionData` stays opaque — only the client
- * that renders and applies the action interprets it.
- *
- * Declared here because the shared render layer hands it to the host's in-stream
- * action UI below; each client's approval store imports this declaration rather
- * than restating it.
+ * A write the backend has deferred for user approval. The shared render layer
+ * hands it to the host's in-stream action UI below.
  */
-export interface PendingApproval {
-    actionId: string;
-    toolcallId: string;
-    actionType: AgentActionType;
-    actionData: Record<string, any>;
-    /** Prior value of the edited object, when the backend sent one (for diffs). */
-    currentValue?: any;
-}
+export type { PendingApproval };
 
 /**
  * The object an `edit_note` group writes to, resolved from the tool-call args.

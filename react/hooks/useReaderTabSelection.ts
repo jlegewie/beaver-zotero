@@ -475,7 +475,7 @@ export function useReaderTabSelection() {
 
                             try {
                                 const item = Zotero.Items.get(id);
-                                if(!item.isAnnotation() || !isValidAnnotationType(item.annotationType)) return;
+                                if (!item || !item.isAnnotation() || !isValidAnnotationType(item.annotationType)) return;
                                 if (item.parentID !== activeReaderItemID) return;
                                 // Skip Beaver's own writes. Author name is user-configurable and may be empty.
                                 if (wasWrittenByBeaver(item)) return;

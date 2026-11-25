@@ -40,7 +40,9 @@ export class AttachmentFileUnavailableError extends Error {
  */
 async function ensureAttachmentFileForReader(itemID: number, win: ReturnType<typeof Zotero.getMainWindow>): Promise<void> {
     const item = await Zotero.Items.getAsync(itemID);
-    if (!item?.isFileAttachment()) return;
+    // Zotero's reader fails on an unknown item before it can report it.
+    if (!item) throw new Error(`Item ${itemID} does not exist`);
+    if (!item.isFileAttachment()) return;
     const pane = win.ZoteroPane as any;
     const noLocate = !pane.collectionsView?.editable;
     const isLinkedFile = !item.isStoredFileAttachment();
@@ -263,7 +265,10 @@ export async function openNoteWindow(itemID: number, origin?: Window): Promise<v
  */
 export async function showAttachmentInFilesystem(itemID: number, origin?: Window): Promise<void> {
     try {
-        if (await revealExistingAttachmentFile(itemID)) return;
+        const attachment = await Zotero.Items.getAsync(itemID);
+        // A deleted item has no file to show; Zotero's handler assumes the item exists.
+        if (!attachment) return;
+        if (await revealExistingAttachmentFile(attachment)) return;
         const win = await resolveNavigationWindow(origin ?? getContextWindow());
         await (win.ZoteroPane as any).showAttachmentInFilesystem(itemID);
     } catch (error) {
@@ -272,9 +277,8 @@ export async function showAttachmentInFilesystem(itemID: number, origin?: Window
 }
 
 /** Reveal a file attachment whose file exists, as `ZoteroPane` does; `false` otherwise. */
-async function revealExistingAttachmentFile(itemID: number): Promise<boolean> {
-    const attachment = await Zotero.Items.getAsync(itemID);
-    if (!attachment?.isFileAttachment()) return false;
+async function revealExistingAttachmentFile(attachment: Zotero.Item): Promise<boolean> {
+    if (!attachment.isFileAttachment()) return false;
     const path = await attachment.getFilePathAsync();
     if (!path) return false;
     const file = Zotero.File.pathToFile(path);

@@ -12,8 +12,8 @@ vi.mock("@beaver/agent-core/run-state/jobCalls", async (importOriginal) => ({
     ...(await importOriginal<typeof import("@beaver/agent-core/run-state/jobCalls")>()),
     openJobCallsAtom: atom([]),
 }));
-vi.mock("../../../react/atoms/jobWait", async (importOriginal) => ({
-    ...(await importOriginal<typeof import("../../../react/atoms/jobWait")>()),
+vi.mock("../../../src/services/agentRuns/jobWait", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("../../../src/services/agentRuns/jobWait")>()),
     openAnswerRunIdAtom: atom(null),
 }));
 vi.mock("../../../react/agents/agentActions", () => ({

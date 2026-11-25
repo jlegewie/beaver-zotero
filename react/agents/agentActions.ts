@@ -3,17 +3,12 @@ import { selectAtom } from 'jotai/utils';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { isLibraryReferencePortable, resolveItemReference, resolveLibraryRef } from '../../src/utils/libraryIdentity';
 import { checkLibraryExcluded, getLibraryRevocations } from '../../src/services/agentDataProvider/utils';
-import { dismissDiffPreview } from '../utils/noteEditorDiffPreview';
-import { updateDiffPreviewForNote, noteLibraryIdFromActionData, clearDiffPreviewNoteKey } from '../utils/diffPreviewCoordinator';
 import { agentActionsService, AckActionLink } from '@beaver/agent-core/transport/clients/agentActionsService';
 import { assertCredentialGeneration, getCredentialGeneration } from '@beaver/agent-core/transport/credentials';
-import { notifyApprovalRequest } from '../../src/services/systemNotifications';
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import type { ActionStatus } from '@beaver/agent-core/types/agentActions/base';
-import type { WSDeferredApprovalRequest, AgentActionType, ExecutedAction, WSUndeliveredActionsInfo } from '@beaver/agent-core/protocol/agentProtocol';
-// Declared in the shared host contract, since the render layer hands it to the
-// host's in-stream action UI.
-import type { PendingApproval } from '@beaver/agent-ui/host';
+import type { ExecutedAction, WSUndeliveredActionsInfo } from '@beaver/agent-core/protocol/agentProtocol';
+import type { PendingApproval } from '@beaver/agent-core/run-state/pendingApprovals';
 import {
     AgentAction,
     CreateItemAgentAction,
@@ -31,11 +26,20 @@ import {
     isUnconfirmedAction,
 } from '@beaver/agent-core/agents/agentActionTypes';
 import { activeRunAtom, threadRunsAtom } from '@beaver/agent-core/run-state/atoms';
-import { getPendingApprovalIdsCoveredByFullAccess } from '../atoms/runApprovalPolicy';
+import { getPendingApprovalIdsCoveredByFullAccess } from '../../src/services/agentRuns/runApprovalPolicy';
+import { pendingApprovalsAtom } from '../../src/services/agentRuns/pendingApprovals';
 import { findPendingApprovalForToolcall } from '../components/agentRuns/editNoteShared';
 import { markExternalReferenceImportedAtom } from '../atoms/externalReferences';
 
 export * from '@beaver/agent-core/agents/agentActionTypes';
+// The approvals are run session state; window code reaches them here.
+export {
+    pendingApprovalsAtom,
+    addPendingApprovalAtom,
+    removePendingApprovalsAtom,
+    removePendingApprovalAtom,
+    clearAllPendingApprovalsAtom,
+} from '../../src/services/agentRuns/pendingApprovals';
 
 // =============================================================================
 // Applied Action Validation
@@ -1093,106 +1097,6 @@ export const clearAgentActionsAtom = atom(
 // =============================================================================
 // Deferred Tool Approval State
 // =============================================================================
-
-/**
- * Atom storing all pending approval requests, keyed by actionId.
- * Supports multiple parallel approvals for parallel tool calls.
- */
-export const pendingApprovalsAtom = atom<Map<string, PendingApproval>>(new Map());
-
-/**
- * Add a pending approval from a WS event, or from the stored card of a parked
- * run. Supports multiple concurrent approvals for parallel tool calls.
- *
- * `silent` skips the OS notification: a parked card restored on load is not
- * news to the user.
- */
-export const addPendingApprovalAtom = atom(
-    null,
-    (_, set, event: WSDeferredApprovalRequest, options?: { silent?: boolean }) => {
-        set(pendingApprovalsAtom, (prev) => {
-            const next = new Map(prev);
-            next.set(event.action_id, {
-                actionId: event.action_id,
-                toolcallId: event.toolcall_id,
-                actionType: event.action_type as AgentActionType,
-                actionData: event.action_data,
-                currentValue: event.current_value,
-            });
-            return next;
-        });
-
-        // Trigger in-editor diff preview for edit_note / edit_note_batch approvals
-        if (event.action_type === 'edit_note' || event.action_type === 'edit_note_batch') {
-            // The target may be named portably only, so resolve the library
-            // rather than reading the numeric id off the event.
-            const libraryId = noteLibraryIdFromActionData(event.action_data);
-            const zoteroKey = event.action_data?.zotero_key;
-            if (libraryId != null && zoteroKey) {
-                updateDiffPreviewForNote(libraryId, zoteroKey);
-            }
-        }
-
-        // Surface an OS-native notification if the user can't currently see
-        // the approval UI (e.g. working in another app).
-        if (!options?.silent) notifyApprovalRequest(event);
-    }
-);
-
-/**
- * Remove pending approvals in one map update, then refresh any affected note
- * previews from the final state. This avoids briefly re-showing a preview while
- * a same-group approval batch is being removed.
- */
-export const removePendingApprovalsAtom = atom(
-    null,
-    (get, set, actionIds: Iterable<string>) => {
-        const ids = new Set(actionIds);
-        if (ids.size === 0) return;
-
-        const prev = get(pendingApprovalsAtom);
-        const affectedNotes = new Map<string, { libraryId: number; zoteroKey: string }>();
-        for (const actionId of ids) {
-            const removed = prev.get(actionId);
-            if (removed?.actionType !== 'edit_note' && removed?.actionType !== 'edit_note_batch') continue;
-            const libraryId = noteLibraryIdFromActionData(removed.actionData);
-            const zoteroKey = removed.actionData?.zotero_key;
-            if (libraryId == null || !zoteroKey) continue;
-            affectedNotes.set(`${libraryId}-${zoteroKey}`, { libraryId, zoteroKey });
-        }
-
-        set(pendingApprovalsAtom, (p) => {
-            const next = new Map(p);
-            for (const actionId of ids) next.delete(actionId);
-            return next;
-        });
-
-        for (const { libraryId, zoteroKey } of affectedNotes.values()) {
-            updateDiffPreviewForNote(libraryId, zoteroKey);
-        }
-    }
-);
-
-/** Remove a specific pending approval by actionId (after user responds). */
-export const removePendingApprovalAtom = atom(
-    null,
-    (_get, set, actionId: string) => {
-        set(removePendingApprovalsAtom, [actionId]);
-    },
-);
-
-/**
- * Clear all pending approvals (e.g., when switching threads or on run complete).
- */
-export const clearAllPendingApprovalsAtom = atom(
-    null,
-    (_, set) => {
-        dismissDiffPreview();
-        // The preview is the window's, whichever store holds the approvals.
-        clearDiffPreviewNoteKey();
-        set(pendingApprovalsAtom, new Map());
-    }
-);
 
 // Note: the run-blocking ask_user_question state (PendingQuestion,
 // pendingQuestionsAtom, ...) lives in `./pendingQuestions.ts` — questions are

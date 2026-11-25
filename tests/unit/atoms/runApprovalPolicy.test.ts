@@ -14,7 +14,7 @@ import {
     RUN_APPROVAL_ACTION_TYPE_ALIASES,
     runApprovalPolicyAtom,
     setRunFullAccessAtom,
-} from '../../../react/atoms/runApprovalPolicy';
+} from '../../../src/services/agentRuns/runApprovalPolicy';
 
 describe('runApprovalPolicy', () => {
     it('approves every library-changing tool once a run has full access', () => {

@@ -210,6 +210,28 @@ describe('loadThreadRuns', () => {
         expect(events).toEqual(['start:a', 'end:a', 'start:b', 'end:b']);
     });
 
+    it('puts a part the handler replaces in place, copying only what contains it', async () => {
+        const untouched = makeRun('run-1', { model_messages: [toolReturnMessage([{ id: 'a' }])] });
+        const upgraded = makeRun('run-2', {
+            model_messages: [toolCallMessage([{ id: 'b', args: {} }]), toolReturnMessage([{ id: 'b' }, { id: 'c' }])],
+        });
+        getThreadRunsMock.mockResolvedValue({ runs: [untouched, upgraded], agent_actions: null });
+        const original = upgraded.model_messages[1];
+
+        const result = await loadThreadRuns('thread-1', {
+            onToolReturn: (part) => part.tool_call_id === 'b' ? { ...part, content: 'upgraded' } : undefined,
+        });
+
+        expect(result.runs[0]).toBe(untouched);
+        const [call, returns] = result.runs[1].model_messages;
+        expect(call).toBe(upgraded.model_messages[0]);
+        expect(returns.parts.map(part => (part as { content: unknown }).content)).toEqual(['upgraded', 'ok']);
+        expect(returns.parts[1]).toBe(original.parts[1]);
+        // The loaded history is left as the server sent it.
+        expect((original.parts[0] as { content: unknown }).content).toBe('ok');
+        expect(upgraded.model_messages[1]).toBe(original);
+    });
+
     it('returns empty state for a thread with no runs and never calls the handler', async () => {
         const onToolReturn = vi.fn();
 

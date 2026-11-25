@@ -1,8 +1,8 @@
 import type { AgentActionType } from '@beaver/agent-core/protocol/agentProtocol';
-import { atom } from 'jotai';
-import { DEFAULT_DEFERRED_TOOL_GROUPS, RUN_APPROVAL_ACTION_TYPE_ALIASES } from '../../src/services/deferredToolPolicy';
-import { resolveLibraryRef } from '../../src/utils/libraryIdentity';
-export { DEFAULT_DEFERRED_TOOL_GROUPS, RUN_APPROVAL_ACTION_TYPE_ALIASES } from '../../src/services/deferredToolPolicy';
+import { atom } from 'jotai/vanilla';
+import { DEFAULT_DEFERRED_TOOL_GROUPS, RUN_APPROVAL_ACTION_TYPE_ALIASES } from '../deferredToolPolicy';
+import { resolveLibraryRef } from '../../utils/libraryIdentity';
+export { DEFAULT_DEFERRED_TOOL_GROUPS, RUN_APPROVAL_ACTION_TYPE_ALIASES } from '../deferredToolPolicy';
 
 /**
  * Stable groups for actual deferred tool names. These seed persistent

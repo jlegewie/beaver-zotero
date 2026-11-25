@@ -1,6 +1,6 @@
 import { useAtomValue } from 'jotai';
 import { openParkedRunAtom } from '@beaver/agent-core/run-state/parkedRun';
-import { isThreadParkedAtom } from '../atoms/parkedRuns';
+import { isThreadParkedAtom } from '../../src/services/agentRuns/parkedRuns';
 
 /**
  * Whether a takeover card belongs to the thread's parked run and still waits

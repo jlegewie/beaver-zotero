@@ -5,13 +5,13 @@
  * importing the composer's job state.
  */
 
-import { atom } from 'jotai';
+import { atom } from 'jotai/vanilla';
 import { isJobDeferral } from '@beaver/agent-core/protocol/jobCallProtocol';
 import { openParkedRunAtom } from '@beaver/agent-core/run-state/parkedRun';
 import type { AgentRun } from '@beaver/agent-core/agents/types';
 import type { TableFillJobSnapshot } from '@beaver/agent-core/protocol/tableFillProtocol';
-import type { createStore } from 'jotai';
-import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
+import type { createStore } from 'jotai/vanilla';
+import { libraryRefForLibraryID } from '../../utils/libraryIdentity';
 
 /** The job call this window waits on: the run that waited, and its tool call. */
 export interface JobWait {

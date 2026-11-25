@@ -4,9 +4,10 @@ import { getCredentialGeneration } from "@beaver/agent-core/transport/credential
 import { atom, type Getter } from "jotai";
 import { isWSChatPendingAtom } from "../atoms/agentRunAtoms";
 import { accountGenerationAtom, searchableLibraryIdsAtom } from "../atoms/profile";
-import { threadAdmissionAtom, type AdmissionSnapshot } from "./threadAdmission";
+import { threadAdmissionAtom, type AdmissionSnapshot } from "../../src/services/agentRuns/threadAdmission";
 import { threadPresenceAtom } from "./threadProjection";
-import { currentWriter } from "./threadWriter";
+import { currentWriter } from "../../src/services/agentRuns/threadWriter";
+import { getRunSession } from "../../src/services/agentRuns/runSession";
 import { eventManager } from "../events/eventManager";
 import {
     hasThreadWriter,
@@ -155,7 +156,7 @@ export const windowCommands = {
                 navigation === store.get(threadNavigationSeqAtom) &&
                 destination === store.get(currentThreadIdAtom);
             const destinationBusy = () =>
-                !!currentWriter() ||
+                !!currentWriter(getRunSession()) ||
                 store.get(isWSChatPendingAtom) ||
                 isRunActive(store.get(activeRunAtom)) ||
                 (destination !== null &&

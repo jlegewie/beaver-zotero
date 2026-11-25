@@ -6,9 +6,9 @@
 import { createStore } from 'jotai';
 import { agentService } from '@beaver/agent-core/transport/agentService';
 import { store } from '../store';
-import { RunSession, getRunSession, installRunSession } from '../agentRuns/runSession';
-import { attachRunProjection, type RunProjection } from '../agentRuns/runProjection';
-import { sessionStateAtoms } from '../agentRuns/sessionState';
+import { RunSession, getRunSession, installRunSession } from '../../src/services/agentRuns/runSession';
+import { attachRunProjection, type RunProjection } from './runProjection';
+import { sessionStateAtoms } from '../../src/services/agentRuns/sessionState';
 import { createWindowRunHost } from './windowRunHost';
 import { tryGetWindowRuntime } from './windowRuntime';
 

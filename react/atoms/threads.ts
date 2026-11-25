@@ -1,9 +1,5 @@
-import {
-    setAdmission,
-    readAdmission,
-    threadConflictAtom,
-} from "../runtime/threadAdmission";
-import { viewedHistoryRevisionAtom } from '../runtime/threadProjection';
+import { setAdmission, readAdmission, threadConflictAtom } from "../../src/services/agentRuns/threadAdmission";
+import { viewedHistoryRevisionAtom } from '../../src/services/agentRuns/threadAdmission';
 import { atom } from "jotai";
 import { readerActionContextAtom, currentMessageItemsAtom, clearComposerAtom, currentMessageCollectionsAtom, currentMessageViewsAtom, currentMessageExternalFilesAtom, updateMessageItemsFromZoteroSelectionAtom, updateMessageCollectionsFromZoteroSelectionAtom, updateReaderAttachmentAtom } from "./messageComposition";
 import {
@@ -15,7 +11,7 @@ import {
 } from "./ui";
 
 import { citationsAtom, citationMapAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from "@beaver/agent-core/citations/atoms";
-import { runSessionStore } from "../agentRuns/runSession";
+import { runSessionStore } from "../../src/services/agentRuns/runSession";
 import { maybeShowCitationTipAtom } from "./citationTip";
 import { preloadPageLabelsForCitations } from "../utils/pageLabels";
 import { agentService } from "@beaver/agent-core/transport/agentService";
@@ -34,7 +30,7 @@ import { ExternalReference } from "@beaver/agent-core/types/externalReferences";
 import { threadRunsAtom, activeRunAtom, currentThreadIdAtom, currentThreadNameAtom, isLoadingThreadAtom, resetRunSelectorCaches } from "@beaver/agent-core/run-state/atoms";
 import { loadThreadRuns } from "@beaver/agent-core/run-state/loadThreadRuns";
 import { abandonActiveRunLocallyAtom, canLeaveReconnectingRun, isWSChatPendingAtom, isWSConnectedAtom, isWSReadyAtom, parkableRunId } from "./agentRunAtoms";
-import { clearParkedAnswersAtom, syncParkedCardsAtom } from "./parkedRuns";
+import { clearParkedAnswersAtom, syncParkedCardsAtom } from "../../src/services/agentRuns/parkedRuns";
 import { confirmLeaveJobWaitAtom, fillLeaveStops, leaveJobWait } from "./jobLeave";
 import { AgentRun, isRunActive } from "@beaver/agent-core/agents/types";
 import { 
@@ -99,6 +95,21 @@ function normalizeToolCallId(id: string): string {
     return normalized;
 }
 
+/** `run` with the display stubs its legacy item attachments lack filled from loaded items. */
+function withAttachmentStubs(run: AgentRun, refToItem: ReadonlyMap<string, Zotero.Item>): AgentRun {
+    const attachments = run.user_prompt.attachments;
+    if (!attachments) return run;
+    let changed = false;
+    const enriched = attachments.map((att) => {
+        if (att.type !== 'item' && att.type !== 'source') return att;
+        const item = refToItem.get(zoteroReferenceKey(att));
+        const next = item ? enrichMessageAttachmentStub(att, item) : att;
+        if (next !== att) changed = true;
+        return next;
+    });
+    return changed ? { ...run, user_prompt: { ...run.user_prompt, attachments: enriched } } : run;
+}
+
 /**
  * Reconcile toolcall_id mismatches between agent actions (from REST API)
  * and tool call parts (from model messages in runs).
@@ -109,9 +120,10 @@ function normalizeToolCallId(id: string): string {
  *
  * For newer data, the backend generates unique call_<hex> IDs that are consistent
  * between agent_actions and model messages, so no reconciliation is needed.
+ * Actions it fixes are copies; the others are returned as they are.
  */
-function reconcileToolcallIds(runs: AgentRun[], actions: AgentAction[]): void {
-    if (actions.length === 0 || runs.length === 0) return;
+function reconcileToolcallIds(runs: AgentRun[], actions: AgentAction[]): AgentAction[] {
+    if (actions.length === 0 || runs.length === 0) return actions;
 
     // Collect all tool_call_ids from model messages, indexed by normalized form
     const normalizedToFull = new Map<string, string>();
@@ -130,19 +142,17 @@ function reconcileToolcallIds(runs: AgentRun[], actions: AgentAction[]): void {
     // Fix agent actions whose toolcall_id doesn't match any model message tool_call_id
     const fullIds = new Set(normalizedToFull.values());
     let fixedCount = 0;
-    for (const action of actions) {
-        if (!action.toolcall_id || fullIds.has(action.toolcall_id)) continue;
-
-        const normalized = normalizeToolCallId(action.toolcall_id);
-        const fullId = normalizedToFull.get(normalized);
-        if (fullId) {
-            action.toolcall_id = fullId;
-            fixedCount++;
-        }
-    }
+    const reconciled = actions.map((action) => {
+        if (!action.toolcall_id || fullIds.has(action.toolcall_id)) return action;
+        const fullId = normalizedToFull.get(normalizeToolCallId(action.toolcall_id));
+        if (!fullId) return action;
+        fixedCount++;
+        return { ...action, toolcall_id: fullId };
+    });
     if (fixedCount > 0) {
         logger(`reconcileToolcallIds: Fixed ${fixedCount} mismatched toolcall_ids`, 1);
     }
+    return fixedCount > 0 ? reconciled : actions;
 }
 
 // Thread types
@@ -623,7 +633,7 @@ export const loadThreadAtom = atom(
                 activity,
                 runs: processedRuns,
                 citations: citationMetadata,
-                agentActions: agent_actions,
+                agentActions: loadedAgentActions,
             } = await loadThreadRuns(threadId, {
                 onToolReturn: async (part, toolCallArgs) => {
                     if (!isCurrent()) return;
@@ -632,7 +642,7 @@ export const loadThreadAtom = atom(
                     // Synthesize a hydrated `view` for legacy results that lack
                     // one, so the shared render layer can render old threads
                     // from `metadata.view`.
-                    await upgradeToolReturn(part, toolCallArgs);
+                    return upgradeToolReturn(part, toolCallArgs);
                 },
             });
 
@@ -688,13 +698,7 @@ export const loadThreadAtom = atom(
                 }
 
                 if (!isCurrent()) return false;
-                for (const run of processedRuns) {
-                    for (const att of run.user_prompt.attachments || []) {
-                        if (att.type !== 'item' && att.type !== 'source') continue;
-                        const item = refToItem.get(zoteroReferenceKey(att));
-                        if (item) enrichMessageAttachmentStub(att, item);
-                    }
-                }
+                const runs = processedRuns.map((run) => withAttachmentStubs(run, refToItem));
 
                 // Update citation state (synchronous: markers + citation tip)
                 chatSet(citationsAtom, citationMetadata);
@@ -715,20 +719,18 @@ export const loadThreadAtom = atom(
                 // in the store while this load ran, would populate them again.
                 if (canCommit) staged.push(resetThreadSelectorCaches);
                 else resetThreadSelectorCaches();
-                chatSet(threadRunsAtom, processedRuns);
+                chatSet(threadRunsAtom, runs);
                 // The cards of a run that parked waiting on the user.
                 chatSet(syncParkedCardsAtom);
 
                 // Reconcile toolcall_id mismatches between REST API and model messages
-                if (agent_actions && agent_actions.length > 0) {
-                    reconcileToolcallIds(processedRuns, agent_actions);
-                }
+                const agent_actions = loadedAgentActions && reconcileToolcallIds(runs, loadedAgentActions);
 
                 // Set agent actions, with any this window applied whose
                 // results the server has yet to record
                 set(
                     threadAgentActionsAtom,
-                    withUnrecordedResults(get, set, agent_actions || [], new Set(processedRuns.map((run) => run.id))),
+                    withUnrecordedResults(get, set, agent_actions || [], new Set(runs.map((run) => run.id))),
                 );
                 set(resumeUnrecordedResultsAtom);
 

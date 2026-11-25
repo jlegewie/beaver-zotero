@@ -100,7 +100,7 @@ import { annotationPanelStateAtom } from '../../../../react/atoms/messageUIState
 import { runStatusPopupCompletionAtom, runStatusPopupPreviewAtom } from '../../../../react/atoms/runStatusPopup';
 import { useRunStatusPopupCard } from '../../../../react/components/runStatusPopup/useRunStatusPopupCard';
 import type { RunStatusPopupCard } from '../../../../react/components/runStatusPopup/runStatusPopupModel';
-import { jobWaitAtom } from '../../../../react/atoms/jobWait';
+import { jobWaitAtom } from '../../../../src/services/agentRuns/jobWait';
 import { chatFillsAtom, recordChatFill } from '@beaver/agent-core/run-state/tableChatFills';
 import type { TableFillJobSnapshot } from '@beaver/agent-core/protocol/tableFillProtocol';
 
