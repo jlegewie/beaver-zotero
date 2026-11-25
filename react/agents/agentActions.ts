@@ -4,7 +4,7 @@ import { logger } from '@beaver/agent-core/platform/logger';
 import { isLibraryReferencePortable, resolveItemReference, resolveLibraryRef } from '../../src/utils/libraryIdentity';
 import { checkLibraryExcluded, getLibraryRevocations } from '../../src/services/agentDataProvider/utils';
 import { dismissDiffPreview } from '../utils/noteEditorDiffPreview';
-import { updateDiffPreviewForNote, noteLibraryIdFromActionData, diffPreviewNoteKeyAtom } from '../utils/diffPreviewCoordinator';
+import { updateDiffPreviewForNote, noteLibraryIdFromActionData, clearDiffPreviewNoteKey } from '../utils/diffPreviewCoordinator';
 import { agentActionsService, AckActionLink } from '@beaver/agent-core/transport/clients/agentActionsService';
 import { assertCredentialGeneration, getCredentialGeneration } from '@beaver/agent-core/transport/credentials';
 import { notifyApprovalRequest } from '../../src/services/systemNotifications';
@@ -1188,7 +1188,8 @@ export const clearAllPendingApprovalsAtom = atom(
     null,
     (_, set) => {
         dismissDiffPreview();
-        set(diffPreviewNoteKeyAtom, null);
+        // The preview is the window's, whichever store holds the approvals.
+        clearDiffPreviewNoteKey();
         set(pendingApprovalsAtom, new Map());
     }
 );

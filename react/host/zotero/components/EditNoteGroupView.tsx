@@ -88,6 +88,7 @@ import {
     parseEditNoteToolCallArgs,
     resolveEditNoteTargetFromData,
 } from '../../../components/agentRuns/editNoteShared';
+import { useSessionSetAtom } from '../../../hooks/useSessionSetAtom';
 
 interface EditNoteGroupViewProps {
     parts: ToolCallPart[];
@@ -124,7 +125,7 @@ export const EditNoteGroupView: React.FC<EditNoteGroupViewProps> = ({
     const groupPendingApprovals = useAtomValue(
         useMemo(() => pendingApprovalsForToolcallsAtom(toolcallIds), [toolcallIds]),
     );
-    const setPendingApprovals = useSetAtom(pendingApprovalsAtom);
+    const setPendingApprovals = useSessionSetAtom(pendingApprovalsAtom);
     const sendApprovalResponse = useSetAtom(sendApprovalResponseAtom);
     const isRunPending = useAtomValue(isWSChatPendingAtom);
     const rejectAgentActions = useSetAtom(rejectAgentActionsAtom);

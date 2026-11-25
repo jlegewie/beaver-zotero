@@ -763,7 +763,7 @@ export const sendComposedMessageAtom = atom(
         // resets the chat input, which ends it.
         const setupTask = get(activeFeatureTaskAtom);
         if (messageParksResume(get) && !(await set(parkResumeForMessageAtom))) return false;
-        return (await withThreadWriter(get, set, async set => {
+        return (await withThreadWriter(set, async set => {
         const { baseText, pills } = payload;
 
         // Only targets the send path keeps count: a library excluded since

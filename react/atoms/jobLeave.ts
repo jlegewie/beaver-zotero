@@ -18,6 +18,7 @@ import { getHost } from '@beaver/agent-ui/host';
 import { getTablesApi } from '../../src/services/artifacts/tablesApi';
 import { store } from '../store';
 import { jobWaitAtom, type JobWait } from './jobWait';
+import { runSessionStore } from '../agentRuns/runSession';
 
 /** Whether the fill's table is open, outside `except` (a window about to close). */
 function tableShown(fill: TableFillJobSnapshot, except?: Window | null): boolean {
@@ -86,7 +87,7 @@ export const confirmLeaveJobWaitAtom = atom(
 export function leaveJobWait(options: { closing?: Window | null } = {}): void {
     const wait = store.get(jobWaitAtom);
     if (!wait) return;
-    store.set(jobWaitAtom, null);
+    runSessionStore().set(jobWaitAtom, null);
     // A fill that ended, or is winding down after Stop, is left as it is.
     const fill = runningFill(store.get(chatFillsAtom), wait);
     if (!fill) return;

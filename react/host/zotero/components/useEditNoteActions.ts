@@ -46,6 +46,7 @@ import {
 } from '../../../components/agentRuns/editNoteShared';
 import type { EditNoteOperation } from '@beaver/agent-core/types/agentActions/editNote';
 import { dismissActiveEditNotePreview } from '../editNotePreviewLifecycle';
+import { useSessionSetAtom } from '../../../hooks/useSessionSetAtom';
 
 /** What a row reads in place of its own selectors when the group supplies them. */
 const NO_ACTIONS_ATOM = atom<AgentAction[]>([]);
@@ -176,7 +177,7 @@ export function useEditNoteActions({
     const approvalResponseIntents = useAtomValue(approvalResponseIntentsAtom);
     const sendApprovalResponse = useSetAtom(sendApprovalResponseAtom);
     const removeApprovalResponseIntent = useSetAtom(removeApprovalResponseIntentAtom);
-    const removePendingApproval = useSetAtom(removePendingApprovalAtom);
+    const removePendingApproval = useSessionSetAtom(removePendingApprovalAtom);
     const rejectAgentActions = useSetAtom(rejectAgentActionsAtom);
     const applyAgentActions = useSetAtom(applyAgentActionsAtom);
     const undoAgentActions = useSetAtom(undoAgentActionsAtom);

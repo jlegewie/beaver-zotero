@@ -69,10 +69,12 @@ import {
     RUN_FINISHED_WHILE_DISCONNECTED_NOTE,
 } from "@beaver/agent-core/transport/connectionFailure";
 import { threadNavigationSeqAtom } from "../../../react/atoms/threads";
+import { installStoreRunSession } from "../../helpers/runSession";
 
 beforeEach(() => {
     vi.useFakeTimers();
     state.store = createStore();
+    installStoreRunSession(state.store);
     state.generation = 0;
     state.writer = undefined;
     state.history.mockReset();

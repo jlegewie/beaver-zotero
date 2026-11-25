@@ -47,10 +47,9 @@ import type { AgentRun } from '@beaver/agent-core/agents/types';
 import type { AgentService } from '@beaver/agent-core/transport/agentService';
 import { activeRunAtom } from '@beaver/agent-core/run-state/atoms';
 // Installs the renderer's own session, which neither session below may touch.
-import { createWSCallbacks, isWSReadyAtom } from '../../../react/atoms/agentRunAtoms';
+import { createWSCallbacks, isWSReadyAtom, staleApprovalActionIdsAtom } from '../../../react/atoms/agentRunAtoms';
 import { RunSession, getRunSession } from '../../../react/agentRuns/runSession';
 import type { RunHost } from '../../../react/agentRuns/runHost';
-import { PartEventQueue } from '../../../react/utils/streamingPartQueue';
 
 function streamingRun(id: string): AgentRun {
     return {
@@ -85,12 +84,12 @@ function fakeHost(): RunHost {
     });
 }
 
-/** A session on its own store, with a queue that applies parts at once. */
+/** A session on its own store. */
 function makeSession() {
     const store = createStore();
     const host = fakeHost();
     const service = { close: vi.fn() } as unknown as AgentService;
-    const session = new RunSession(store, service, host, new PartEventQueue(store, () => null));
+    const session = new RunSession(store, service, host);
     return { store, host, service, session };
 }
 
@@ -140,5 +139,16 @@ describe('two run sessions in one realm', () => {
 
         expect(streamedText(a.store.get(activeRunAtom))).toBeUndefined();
         expect(streamedText(b.store.get(activeRunAtom))).toBe('live B');
+    });
+
+    it('keeps the actions its events start in its own store', () => {
+        const callbacksA = createWSCallbacks(a.store.set, undefined, undefined, a.session);
+
+        // Marking an approval stale is an action of its own, started by the event.
+        callbacksA.onDeferredApprovalStale?.({ action_id: 'action-1', reason: 'timeout' } as never);
+
+        expect(a.store.get(staleApprovalActionIdsAtom).has('action-1')).toBe(true);
+        expect(b.store.get(staleApprovalActionIdsAtom).size).toBe(0);
+        expect(getRunSession().store.get(staleApprovalActionIdsAtom).size).toBe(0);
     });
 });

@@ -8,12 +8,13 @@
  * events (loading item data for display, opening a created table, applying
  * annotations in the open reader).
  *
- * Methods that take a `Setter` write window state through the run's guarded
- * setter, so a write is dropped once the run no longer owns the chat, exactly
- * as for the run's own state.
+ * The engine writes only its session's store. Methods that take a `Setter`
+ * receive the run's guarded setter for that store and make their window write
+ * through it with `runEffect`, so the write is dropped once the run no longer
+ * owns the chat, exactly as for the run's own state.
  */
 
-import type { Getter, Setter } from 'jotai';
+import { atom, type Setter } from 'jotai';
 import type { AgentAction } from '../agents/agentActions';
 import type { ModelConfig } from '../atoms/models';
 import type { Citation } from '@beaver/agent-core/types/citations';
@@ -28,6 +29,20 @@ import type { MergeItemsChoices } from '@beaver/agent-core/protocol/duplicates';
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import type { FeatureCreditGrant } from '@beaver/agent-core/protocol/agentProtocol';
 import type { PageLabelsByAttachmentId } from '@beaver/agent-core/citations/atoms';
+import type { WSUndeliveredActionsInfo } from '@beaver/agent-core/protocol/agentProtocol';
+import type { TableFillJobSnapshot } from '@beaver/agent-core/protocol/tableFillProtocol';
+
+const runEffectAtom = atom(null, (_get, _set, effect: () => void) => {
+    effect();
+});
+
+/**
+ * Run a window write through a run's guarded setter: it happens only if the
+ * setter would still write the run's own state.
+ */
+export function runEffect(set: Setter, effect: () => void): void {
+    set(runEffectAtom, effect);
+}
 
 /** A message for the user, shown by the window as a popup. */
 export interface RunNotice {
@@ -51,18 +66,21 @@ export type UndoConfirmResult = 'undo' | 'skip' | 'cancel';
 
 export interface RunHost {
     // --- Window inputs -----------------------------------------------------
-    // Read through the run's getter, so they come from the store the run writes.
 
     /** Id of the window the run belongs to, as presence claims know it. */
     windowId(): string | undefined;
     /** The model selected in the window. */
-    getModel(get: Getter): ModelConfig | null;
+    getModel(): ModelConfig | null;
     /** The signed-in user. */
-    getUserId(get: Getter): string | null;
+    getUserId(): string | null;
     /** Increases on every chat navigation in the window. */
-    navigationSeq(get: Getter): number;
+    navigationSeq(): number;
     /** Choices the user made on a merge-items approval card. */
-    actionChanges(get: Getter, actionId: string): MergeItemsChoices | undefined;
+    actionChanges(actionId: string): MergeItemsChoices | undefined;
+    /** The agent actions of the chat, which the window owns. */
+    agentActions(): AgentAction[];
+    /** The latest state of a table fill this window runs for the chat. */
+    chatFillSnapshot(jobId: string): TableFillJobSnapshot | undefined;
 
     // --- Notices and dialogs -----------------------------------------------
 
@@ -95,12 +113,25 @@ export interface RunHost {
     citationsChanged(set: Setter): void;
     /** Page labels for cited attachments, keyed by attachment id. */
     preloadPageLabels(citations: Citation[]): Promise<PageLabelsByAttachmentId>;
+    /** Keep preloaded page labels for rendering. Render state, not chat history. */
+    mergePageLabels(labels: PageLabelsByAttachmentId): void;
     markExternalReferenceImported(set: Setter, externalId: string, ref: ZoteroItemReference): void;
     /** Undo applied actions, newest first. */
     undoAppliedActions(actions: AgentAction[]): Promise<void>;
     cleanupTemporaryAnnotations(logPrefix: string): Promise<void>;
     /** The window is closing: hand off or stop the fill its chat waits on. */
     leaveJobWaitOnClose(): void;
+
+    // --- Agent actions (window state) ------------------------------------------
+
+    addAgentActions(set: Setter, actions: AgentAction[]): void;
+    upsertAgentActions(set: Setter, actions: AgentAction[]): void;
+    /** Drop the actions of runs a retry removed. */
+    removeRunActions(set: Setter, runIds: readonly string[]): void;
+    /** Replace the chat's actions with saved ones, keeping results not yet recorded. */
+    replaceAgentActions(set: Setter, actions: AgentAction[], runIds: ReadonlySet<string>): void;
+    /** Applied in Zotero, but the result never reached the server: record it. */
+    recordUndeliveredActions(info: WSUndeliveredActionsInfo, revocationsAtRunStart: number | null): void;
 
     // --- Display enrichment and once-only window effects --------------------
 

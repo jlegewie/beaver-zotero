@@ -14,6 +14,7 @@ import { useStopRun } from '../../hooks/useStopRun';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { RECONNECT_HELD_CAPTION } from '@beaver/agent-core/transport/connectionFailure';
 import { useRunReconnectShown } from '../../hooks/useVisibleReconnect';
+import { useSessionSetAtom } from '../../hooks/useSessionSetAtom';
 
 interface CreditConfirmationPanelProps {
     confirmation: PendingCreditConfirmation;
@@ -38,7 +39,7 @@ interface CreditConfirmationPanelProps {
  */
 export const CreditConfirmationPanel: React.FC<CreditConfirmationPanelProps> = ({ confirmation }) => {
     const sendResponse = useSetAtom(sendCreditConfirmationResponseAtom);
-    const removeConfirmation = useSetAtom(removePendingCreditConfirmationAtom);
+    const removeConfirmation = useSessionSetAtom(removePendingCreditConfirmationAtom);
     const isReconnecting = useAtomValue(isRunReconnectingAtom);
     const reconnectShown = useRunReconnectShown();
 

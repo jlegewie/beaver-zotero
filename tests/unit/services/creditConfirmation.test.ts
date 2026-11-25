@@ -69,6 +69,7 @@ import {
     removePendingCreditConfirmationAtom,
 } from '@beaver/agent-core/run-state/pendingCreditConfirmations';
 import { sendCreditConfirmationResponseAtom } from '../../../react/atoms/agentRunAtoms';
+import { installWindowStoreRunSession } from '../../helpers/windowRunSession';
 
 class MockWebSocket {
     static CONNECTING = 0;
@@ -301,6 +302,7 @@ describe('AgentService credit confirmation transport', () => {
 describe('pendingCreditConfirmations atoms', () => {
     it('adds a pending confirmation keyed by confirmationId', () => {
         const store = createStore();
+        installWindowStoreRunSession(store);
         store.set(addPendingCreditConfirmationAtom, confirmationEvent());
 
         const map = store.get(pendingCreditConfirmationsAtom);
@@ -328,6 +330,7 @@ describe('pendingCreditConfirmations atoms', () => {
         // and returns must not be given a fresh countdown for a decision the
         // run has already given up on.
         const store = createStore();
+        installWindowStoreRunSession(store);
         const before = Date.now();
         store.set(addPendingCreditConfirmationAtom, confirmationEvent());
         const after = Date.now();
@@ -339,6 +342,7 @@ describe('pendingCreditConfirmations atoms', () => {
 
     it('removes a pending confirmation by id (the stale-notice path)', () => {
         const store = createStore();
+        installWindowStoreRunSession(store);
         store.set(addPendingCreditConfirmationAtom, confirmationEvent());
         store.set(addPendingCreditConfirmationAtom, confirmationEvent({ confirmation_id: 'conf-2' }));
 
@@ -351,6 +355,7 @@ describe('pendingCreditConfirmations atoms', () => {
 
     it('remove is a no-op for an unknown confirmationId', () => {
         const store = createStore();
+        installWindowStoreRunSession(store);
         store.set(addPendingCreditConfirmationAtom, confirmationEvent());
         const before = store.get(pendingCreditConfirmationsAtom);
 
@@ -362,6 +367,7 @@ describe('pendingCreditConfirmations atoms', () => {
 
     it('clears all pending confirmations (run end / disconnect / thread switch)', () => {
         const store = createStore();
+        installWindowStoreRunSession(store);
         store.set(addPendingCreditConfirmationAtom, confirmationEvent());
         store.set(addPendingCreditConfirmationAtom, confirmationEvent({ confirmation_id: 'conf-2' }));
 
@@ -378,6 +384,7 @@ describe('sendCreditConfirmationResponseAtom', () => {
 
     it('sends the decision and retires the card', () => {
         const store = createStore();
+        installWindowStoreRunSession(store);
         const send = vi
             .spyOn(agentService, 'sendCreditConfirmationResponse')
             .mockReturnValue(true);
@@ -396,6 +403,7 @@ describe('sendCreditConfirmationResponseAtom', () => {
         // The run can no longer be told, so keeping the card up would strand the
         // user on an unanswerable prompt.
         const store = createStore();
+        installWindowStoreRunSession(store);
         vi.spyOn(agentService, 'sendCreditConfirmationResponse').mockReturnValue(false);
         store.set(addPendingCreditConfirmationAtom, confirmationEvent());
 

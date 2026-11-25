@@ -37,6 +37,7 @@ import { store } from '../../../react/store';
 import { jobWaitAtom, openAnswerRunIdAtom, settleJobWait } from '../../../react/atoms/jobWait';
 import { runningChatJobsAtom, stopChatJobsAtom, watchJobCalls } from '../../../react/atoms/jobCalls';
 import { isThreadParkedAtom } from '../../../react/atoms/parkedRuns';
+import { chatStore } from '../../helpers/runSession';
 
 const THREAD = 'thread-1';
 
@@ -103,15 +104,15 @@ function parkedRun(): AgentRun {
 
 /** The run started the fill, waited 90 s, and parked; this window waited on it. */
 function parkedWhileWaiting(): void {
-    store.set(threadRunsAtom, [parkedRun()]);
+    chatStore().set(threadRunsAtom, [parkedRun()]);
     hooks.onJobWait!({ runId: 'run-1', threadId: THREAD, toolCallId: 'call-1', jobId: 'job-1' });
 }
 
 beforeEach(() => {
-    store.set(jobWaitAtom, null);
-    store.set(currentThreadIdAtom, THREAD);
-    store.set(threadRunsAtom, []);
-    store.set(activeRunAtom, null);
+    chatStore().set(jobWaitAtom, null);
+    chatStore().set(currentThreadIdAtom, THREAD);
+    chatStore().set(threadRunsAtom, []);
+    chatStore().set(activeRunAtom, null);
     vi.clearAllMocks();
     store.set(chatFillsAtom, recordChatFill(new Map(), snapshot()));
     watchJobCalls();
@@ -125,7 +126,7 @@ describe('the window waiting on a fill', () => {
         // The composer stays busy while the resume is admitted.
         expect(store.get(runningChatJobsAtom)).toEqual([{ jobId: 'job-1', stopping: false }]);
         // The resume started: the window no longer waits, and nothing resumes again.
-        store.set(jobWaitAtom, null);
+        chatStore().set(jobWaitAtom, null);
         store.set(chatFillsAtom, recordChatFill(new Map(), ended()));
         expect(requestJobResumeMock).toHaveBeenCalledTimes(1);
     });
@@ -135,39 +136,39 @@ describe('the window waiting on a fill', () => {
         hooks.onJobWait!({ runId: 'run-1', threadId: THREAD, toolCallId: 'call-1', jobId: 'job-1' });
         store.set(chatFillsAtom, recordChatFill(new Map(), ended()));
         requestJobResumeMock.mockClear();
-        store.set(threadRunsAtom, [parkedRun()]);
+        chatStore().set(threadRunsAtom, [parkedRun()]);
         expect(requestJobResumeMock).toHaveBeenCalled();
     });
 
     it('does not resume in a window that did not wait', () => {
-        store.set(threadRunsAtom, [parkedRun()]);
+        chatStore().set(threadRunsAtom, [parkedRun()]);
         store.set(chatFillsAtom, recordChatFill(new Map(), ended()));
         expect(requestJobResumeMock).not.toHaveBeenCalled();
     });
 
     it('stops waiting when the window leaves the chat, and resumes nothing', () => {
         parkedWhileWaiting();
-        store.set(currentThreadIdAtom, 'thread-2');
+        chatStore().set(currentThreadIdAtom, 'thread-2');
         expect(store.get(jobWaitAtom)).toBeNull();
         // The table is not on screen: the fill stops (jobLeave.test.ts covers the rest).
         expect(stopMock).toHaveBeenCalledWith('job-1');
-        store.set(currentThreadIdAtom, THREAD);
+        chatStore().set(currentThreadIdAtom, THREAD);
         store.set(chatFillsAtom, recordChatFill(new Map(), ended()));
         expect(requestJobResumeMock).not.toHaveBeenCalled();
     });
 
     it('keeps waiting through a park on the fill, and stops when the run ends otherwise', () => {
         parkedWhileWaiting();
-        settleJobWait(parkedRun());
+        settleJobWait(chatStore(), parkedRun());
         expect(store.get(jobWaitAtom)).not.toBeNull();
-        settleJobWait({ ...parkedRun(), parked: undefined } as AgentRun);
+        settleJobWait(chatStore(), { ...parkedRun(), parked: undefined } as AgentRun);
         expect(store.get(jobWaitAtom)).toBeNull();
     });
 });
 
 describe('the composer while a window waits on a fill', () => {
     it('is busy only in the window that waits', () => {
-        store.set(threadRunsAtom, [parkedRun()]);
+        chatStore().set(threadRunsAtom, [parkedRun()]);
         expect(store.get(runningChatJobsAtom)).toEqual([]);
         hooks.onJobWait!({ runId: 'run-1', threadId: THREAD, toolCallId: 'call-1', jobId: 'job-1' });
         expect(store.get(runningChatJobsAtom)).toEqual([{ jobId: 'job-1', stopping: false }]);
@@ -184,7 +185,7 @@ describe('the composer while a window waits on a fill', () => {
     });
 
     it('leaves Stop to the run while the run waits live, which stops its fill as it stops', () => {
-        store.set(activeRunAtom, { ...parkedRun(), parked: undefined, status: 'in_progress' } as AgentRun);
+        chatStore().set(activeRunAtom, { ...parkedRun(), parked: undefined, status: 'in_progress' } as AgentRun);
         hooks.onJobWait!({ runId: 'run-1', threadId: THREAD, toolCallId: 'call-1', jobId: 'job-1' });
         expect(store.get(runningChatJobsAtom)).toEqual([{ jobId: 'job-1', stopping: false }]);
         expect(store.set(stopChatJobsAtom)).toBe(false);
@@ -193,7 +194,7 @@ describe('the composer while a window waits on a fill', () => {
 
     it('leaves Stop to a live resume though the chat reads as parked', () => {
         parkedWhileWaiting();
-        store.set(activeRunAtom, {
+        chatStore().set(activeRunAtom, {
             ...parkedRun(), id: 'run-2', parked: undefined, status: 'in_progress', user_prompt: { content: '', resumes_run_id: 'run-1' },
         } as AgentRun);
         expect(store.get(isThreadParkedAtom)).toBe(true);
@@ -204,7 +205,7 @@ describe('the composer while a window waits on a fill', () => {
 
 describe('whether the answer of a run parked on a fill has ended', () => {
     it('goes on only in the window that waits on the fill', () => {
-        store.set(threadRunsAtom, [parkedRun()]);
+        chatStore().set(threadRunsAtom, [parkedRun()]);
         expect(store.get(openAnswerRunIdAtom)).toBeNull();
         hooks.onJobWait!({ runId: 'run-1', threadId: THREAD, toolCallId: 'call-1', jobId: 'job-1' });
         expect(store.get(openAnswerRunIdAtom)).toBe('run-1');
@@ -215,7 +216,7 @@ describe('whether the answer of a run parked on a fill has ended', () => {
         const card = { kind: 'ask_user_question', tool_call_id: 'call-2', tool_name: 'ask_user_question', correlation_id: 'q-1', request: {} };
         run.model_messages[0].parts.push({ part_kind: 'tool-call', tool_name: 'ask_user_question', tool_call_id: 'call-2', args: {} } as any);
         run.parked!.requests.push(card as ParkedDeferral);
-        store.set(threadRunsAtom, [run]);
+        chatStore().set(threadRunsAtom, [run]);
         expect(store.get(openAnswerRunIdAtom)).toBe('run-1');
     });
 });

@@ -4,13 +4,11 @@
  * Execution lives in the run engine (`react/agentRuns/runEngine`), whose atoms
  * this module re-exports. What stays here is the window's half of a send:
  * assembling the prompt from the composer and the window's context, and
- * clearing the composer once the run is accepted. The module also installs
- * this renderer's run session, with the window as its host.
+ * clearing the composer once the run is accepted. Importing this module
+ * installs this renderer's run session (`react/runtime/windowRunSession`).
  */
 
 import { atom, Getter, Setter } from 'jotai';
-import { store } from '../store';
-import { agentService } from '@beaver/agent-core/transport/agentService';
 import { getCredentialGeneration, assertCredentialGeneration } from '@beaver/agent-core/transport/credentials';
 import { logger } from '@beaver/agent-core/platform/logger';
 import type { ChargingPermissions } from '@beaver/agent-core/protocol/agentProtocol';
@@ -63,9 +61,8 @@ import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
 import { isTargetInLibraries } from '../utils/zoteroReferences';
 import { prewarmMuPDFWorker } from '../../src/beaver-extract';
 import { isRejectedItemValidation, itemValidationResultsAtom } from './itemValidation';
-import { windowPartQueue } from '../utils/streamingPartQueue';
-import { createWindowRunHost } from '../runtime/windowRunHost';
-import { RunSession, getRunSession, installRunSession } from '../agentRuns/runSession';
+import '../runtime/windowRunSession';
+import { getRunSession, runSessionStore } from '../agentRuns/runSession';
 import {
     buildModelSelectionOptions,
     isWSChatPendingAtom,
@@ -80,8 +77,6 @@ import {
 } from '../agentRuns/runEngine';
 
 export * from '../agentRuns/runEngine';
-
-installRunSession(new RunSession(store, agentService, createWindowRunHost(), windowPartQueue));
 
 // =============================================================================
 // Prompt assembly
@@ -149,21 +144,24 @@ export interface SendWSMessageOptions {
 
 /**
  * Send a chat message: assemble the prompt from the composer and the window's
- * context, then hand it to the engine, which starts its run.
+ * context, then hand it to the engine, which starts its run. `set` writes the
+ * window's state and `sessionSet` the chat's, in the session's store.
  */
 const sendWSMessage = async (
         get: Getter,
         set: Setter,
+        sessionSet: Setter,
         message: string,
         options?: SendWSMessageOptions,
     ) => {
         const session = getRunSession();
         const accountGeneration = getCredentialGeneration();
-        const originalSet = set;
-        set = ((...args: Parameters<Setter>) => {
+        const inAccount = (target: Setter): Setter => ((...args: Parameters<Setter>) => {
             assertCredentialGeneration(accountGeneration);
-            return originalSet(...args);
+            return target(...args);
         }) as Setter;
+        set = inAccount(set);
+        sessionSet = inAccount(sessionSet);
         const { runIdOverride, permissionsOverride, origin, actions, featureTask } = options ?? {};
         const isPending = get(isWSChatPendingAtom);
         logger('sendWSMessageAtom: Called at ' + Date.now() + ' with message: ' + message.substring(0, 50) + ' (isPending: ' + isPending + ')', 1);
@@ -185,9 +183,9 @@ const sendWSMessage = async (
         session.host.dismissDiffPreview();
 
         // Reset state
-        set(prepareForNewRunAtom);
+        sessionSet(prepareForNewRunAtom);
         prewarmMuPDFWorker();
-        set(isWSChatPendingAtom, true);
+        sessionSet(isWSChatPendingAtom, true);
 
         try {
             const applicationStatePromise = getApplicationStateProvider()(get);
@@ -463,7 +461,7 @@ const sendWSMessage = async (
 
             // Set temporary thread name for new threads (mirrors backend thread_name_hint[:35])
             if (!threadId && message) {
-                set(currentThreadNameAtom, message.substring(0, 35));
+                sessionSet(currentThreadNameAtom, message.substring(0, 35));
             }
 
             assertCredentialGeneration(accountGeneration);
@@ -471,11 +469,11 @@ const sendWSMessage = async (
             const userId = get(userIdAtom);
             if (!userId) {
                 logger('User ID not found', 1);
-                set(isWSChatPendingAtom, false);
+                sessionSet(isWSChatPendingAtom, false);
                 return;
             }
 
-            await startMessageRun(session, get, set, {
+            await startMessageRun(session, session.store.get, sessionSet, {
                 prompt: userPrompt,
                 threadId,
                 userId,
@@ -500,19 +498,20 @@ const sendWSMessage = async (
             if (accountGeneration !== getCredentialGeneration()) return;
             // Catch any unexpected errors during message preparation
             logger('sendWSMessageAtom: Unexpected error:', error, 1);
-            set(wsErrorAtom, {
+            sessionSet(wsErrorAtom, {
                 event: 'error',
                 type: 'preparation_error',
                 message: error instanceof Error ? error.message : 'Failed to prepare message',
                 is_retryable: true,
             });
-            set(activeRunAtom, null);
-            set(isWSChatPendingAtom, false);
+            sessionSet(activeRunAtom, null);
+            sessionSet(isWSChatPendingAtom, false);
         }
     };
 
 export const sendWSMessageAtom = atom(null, (get, set, message: string, options?: SendWSMessageOptions) => {
-    const send = () => withThreadWriter(get, set, guardedSet => sendWSMessage(get, guardedSet, message, options));
+    const send = () => withThreadWriter(set, (guardedSet, guardedSessionSet) =>
+        sendWSMessage(get, guardedSet, guardedSessionSet, message, options));
     // Claims the writer in the same tick as the click unless a resume must
     // be parked first, so a second click finds it taken.
     if (!messageParksResume(get)) return send();
@@ -523,24 +522,25 @@ export const sendWSMessageAtom = atom(null, (get, set, message: string, options?
  * Clear the current thread and start fresh
  */
 export const clearThreadAtom = atom(null, (_get, set) => {
-    set(threadRunsAtom, []);
-    set(activeRunAtom, null);
-    set(currentThreadIdAtom, null);
-    set(resetWSStateAtom);
+    const chat = runSessionStore();
+    chat.set(threadRunsAtom, []);
+    chat.set(activeRunAtom, null);
+    chat.set(currentThreadIdAtom, null);
+    chat.set(resetWSStateAtom);
     // Clear agent actions, citations, and warnings for the thread
     set(clearAgentActionsAtom);
-    set(citationsAtom, []);
+    chat.set(citationsAtom, []);
     set(resetCitationMarkersAtom);  // Reset citation markers for cleared thread
     resetRunSelectorCaches();  // Drop scoped run selectors keyed by the cleared thread's runs
     resetAgentActionSelectorCaches();  // ...and the action/approval selectors keyed by its tool calls
     set(clearWarningsAtom);
     // Clear pending questions so a reset never leaves the composer disabled
     // behind an unanswerable card (pending approvals are left as-is here).
-    set(clearAllPendingQuestionsAtom);
-    set(clearAllPendingCreditConfirmationsAtom);
-    set(clearAllPendingBatchApprovalsAtom);
-    set(clearAllPendingTableCardsAtom);
-    set(clearRunApprovalPolicyAtom);
-    set(clearParkedAnswersAtom);
+    chat.set(clearAllPendingQuestionsAtom);
+    chat.set(clearAllPendingCreditConfirmationsAtom);
+    chat.set(clearAllPendingBatchApprovalsAtom);
+    chat.set(clearAllPendingTableCardsAtom);
+    chat.set(clearRunApprovalPolicyAtom);
+    chat.set(clearParkedAnswersAtom);
 });
 
