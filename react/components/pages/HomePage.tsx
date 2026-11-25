@@ -4,6 +4,7 @@ import { allLibrariesExcludedAtom } from "../../atoms/profile";
 import RecentChats from "../RecentChats";
 import HomeLauncher from "../HomeLauncher";
 import HomeActionsTray from "../HomeActionsTray";
+import { showActionsTrayAtom } from "../../atoms/actions";
 import FeatureCreditsCard from "../featureCredits/FeatureCreditsCard";
 import FeatureCreditsTeaser from "../featureCredits/FeatureCreditsTeaser";
 import { featureCreditEntriesAtom, featureCreditsCardVisibleAtom, featureCreditsTeaserVisibleAtom } from "../../atoms/featureCredits";
@@ -44,6 +45,7 @@ const AllLibrariesExcludedMessage = () => (
 
 const HomePage: React.FC<HomePageProps> = ({ isWindow = false, inputRef }) => {
     const allLibrariesExcluded = useAtomValue(allLibrariesExcludedAtom);
+    const showActionsTray = useAtomValue(showActionsTrayAtom);
     const featureCreditsVisible = useAtomValue(featureCreditsCardVisibleAtom);
     const featureCreditEntries = useAtomValue(featureCreditEntriesAtom);
     const activeFeatureTask = useAtomValue(activeFeatureTaskAtom);
@@ -96,7 +98,7 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false, inputRef }) => {
                         </DragDropWrapper>
                         {showTableNotice && <TablePlusToolsNotice placement="tray" />}
                         {showFeatureCredits && (showTeaser ? <FeatureCreditsTeaser /> : <FeatureCreditsCard />)}
-                        {!allLibrariesExcluded && !showTableNotice && !trayOnScreen && <HomeActionsTray />}
+                        {showActionsTray && !allLibrariesExcluded && !showTableNotice && !trayOnScreen && <HomeActionsTray />}
                     </div>
 
                     {/* Action launcher — category row + expandable panels */}

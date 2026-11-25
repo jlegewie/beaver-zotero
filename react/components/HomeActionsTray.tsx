@@ -2,14 +2,23 @@ import React, { useRef } from "react";
 import { useAtomValue } from "jotai";
 import MenuButton from "@beaver/agent-ui/primitives/MenuButton";
 import { MenuItem } from "@beaver/agent-ui/primitives/ContextMenu";
-import { Icon, ArrowDownIcon, ZapIcon } from "./icons/icons";
+import { Icon, ArrowDownIcon, SettingsIcon, ZapIcon } from "./icons/icons";
 import GroupIcon from "./icons/GroupIcon";
 import { categoryIcon } from "./icons/categoryIcons";
 import { actionGroupsAtom } from "../atoms/actions";
-import { primaryActionGroup } from "../utils/actionVisibility";
+import { primaryActionGroup, type ActionGroup } from "../utils/actionVisibility";
+import type { AppliesToFilter } from "@beaver/agent-core/types/actions";
 import { useActionRunner } from "../hooks/useActionRunner";
 import { useSlidePresence } from "../hooks/useSlidePresence";
 import { useSurfaceWindow } from "../runtime/SurfaceWindowContext";
+import { openPreferencesWindow } from "../ui/openPreferencesWindow";
+
+/** The Preferences › Actions filter that lists what this group can offer. */
+function appliesToFilter(group: ActionGroup): AppliesToFilter {
+    if (group.id === 'collection') return 'collection';
+    if (group.id === 'note' || group.actions.every(a => a.targets.includes('note'))) return 'note';
+    return 'items';
+}
 
 /**
  * Tray under the homepage input naming what Beaver would act on (the open
@@ -40,7 +49,11 @@ const HomeActionsTray: React.FC = () => {
             onClick: () => runAction(action, shown.bind(action), surfaceWindow),
         })),
         { label: "", onClick: () => {}, isDivider: true },
-        { label: "Type / in the message for all actions", onClick: () => {}, disabled: true },
+        {
+            label: "Customize actions…",
+            icon: SettingsIcon,
+            onClick: () => openPreferencesWindow('actions', { appliesTo: appliesToFilter(shown) }, undefined, surfaceWindow),
+        },
     ];
 
     return (

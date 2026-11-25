@@ -6,13 +6,14 @@ import PlusSignIcon from '@beaver/agent-ui/icons/PlusSignIcon';
 import Button from "@beaver/agent-ui/primitives/Button";
 import { useSetAtom } from 'jotai';
 import { Action, ActionCategory, ActionCategoryFilter, APPLIES_TO_FILTER_LABELS, AppliesToFilter, generateActionId, matchesAppliesToFilter, targetsForAppliesToFilter, UNCATEGORIZED_FILTER, categoryLabel } from "@beaver/agent-core/types/actions";
-import { actionsAtom, saveActionsAtom, hideActionAtom, restoreActionAtom, resetActionToDefaultAtom, importActionAtom, reloadActionsAtom } from "../../atoms/actions";
+import { actionsAtom, saveActionsAtom, hideActionAtom, restoreActionAtom, resetActionToDefaultAtom, importActionAtom, reloadActionsAtom, showActionsTrayAtom } from "../../atoms/actions";
 import { pendingActionsFilterAtom, pendingActionEditRequestAtom } from "../../atoms/ui";
 import { importActionFromFile } from "../../utils/actionShareFile";
 import { addPopupMessageAtom } from "../../utils/popupMessageUtils";
 import { getActionCommand } from "@beaver/agent-ui/composer/slashCommands";
 import { isBuiltinAction, getActionCustomizations, getHiddenBuiltinActions, hasOldCustomPrompts } from "../../types/actionStorage";
 import ActionCard from "./ActionCard";
+import PreferenceToggle from "./PreferenceToggle";
 import MenuButton from "@beaver/agent-ui/primitives/MenuButton";
 import { MenuItem } from "@beaver/agent-ui/primitives/ContextMenu";
 import {DocLink, PageHeader} from "./components/SettingsElements";
@@ -50,6 +51,7 @@ const ActionsPreferenceSection: React.FC = () => {
     const resetActionToDefault = useSetAtom(resetActionToDefaultAtom);
     const importAction = useSetAtom(importActionAtom);
     const reloadActions = useSetAtom(reloadActionsAtom);
+    const [showActionsTray, setShowActionsTray] = useAtom(showActionsTrayAtom);
     const addPopupMessage = useSetAtom(addPopupMessageAtom);
 
     // --- Filter state (null = show all for that dimension) ---
@@ -250,6 +252,15 @@ const ActionsPreferenceSection: React.FC = () => {
                 Actions that work anywhere are also listed under the homepage category buttons.
                 {' '}<DocLink path="actions">Learn more</DocLink>.
             </PageHeader>
+
+            <div className="mt-4">
+                <PreferenceToggle
+                    checked={showActionsTray}
+                    onChange={setShowActionsTray}
+                    title="Suggest actions for your selection"
+                    description="Show the actions for the selected item, collection or open file under the message box on the home page."
+                />
+            </div>
 
             {/* Filter toolbar — narrow the list by target and/or category */}
             <div className="display-flex flex-row flex-1 items-center gap-3 flex-wrap mb-15 mt-4" style={{ paddingLeft: '2px' }}>
