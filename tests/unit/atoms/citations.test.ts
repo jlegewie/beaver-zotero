@@ -34,6 +34,8 @@ import {
     itemTypeToIconName,
     type Citation,
 } from '@beaver/agent-core/types/citations';
+import { normalizeCitationTag, parseRawCitationAttributes, requestedCitationKey } from '@beaver/agent-core/citations/citationGrammar';
+import type { CitationRef } from '@beaver/agent-core/citations/citationGrammar';
 
 function citation(overrides: Partial<Citation>): Citation {
     return {
@@ -164,6 +166,28 @@ describe('citationByKeyAtom', () => {
         // Reachable both as a normal external reference and via the raw id= tag.
         expect(byKey['external:openalex:W158378843']).toBe(data);
         expect(byKey['invalid:W158378843']).toBe(data);
+    });
+
+    it('keeps citations of one mistyped web page id apart by locator', () => {
+        // The backend resolves a web id the model mistyped by one character to
+        // the page; each citation of it must still show its own sentence.
+        const store = createStore();
+        const typed = 'web-KGXW3ODFN';
+        const cited = ['h1', 'h9', 'h5'].map((loc, i) => citation({
+            citation_id: `c${i}`,
+            citation_type: 'external_reference',
+            raw_tag: `<citation id="${typed}" loc="${loc}"/>`,
+            requested_ref: { kind: 'external', external_id: typed, loc: { kind: 'highlight', raw: loc, value: loc.slice(1) } },
+            resolved_ref: { kind: 'external', source: 'exa', external_id: 'web-KGXW3ODFNZ', loc: { kind: 'highlight', raw: loc, value: loc.slice(1) } },
+        }));
+        store.set(citationsAtom, cited);
+
+        const byKey = store.get(citationByKeyAtom);
+        for (const data of cited) {
+            const normalized = normalizeCitationTag(parseRawCitationAttributes(data.raw_tag!.slice('<citation '.length, -2)));
+            expect(normalized.ok).toBe(true);
+            expect(byKey[requestedCitationKey((normalized as { ref: CitationRef }).ref)]).toBe(data);
+        }
     });
 
     it('indexes external-file citations under extfile keys', () => {

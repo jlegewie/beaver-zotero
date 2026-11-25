@@ -427,7 +427,9 @@ export function normalizeCitationTag(rawAttrs: Record<string, string>): Normaliz
             };
         }
         // Web pages are documents cited with id= (`web-<KEY>`), like ext- files.
-        const webId = webPageId(rawIdentity);
+        // A mistyped `web-` id stays a web page citation, keyed with its
+        // locator, so the page the backend repairs it to shows per citation.
+        const webId = webPageId(rawIdentity) ?? (/^web-/i.test(rawIdentity.trim()) ? rawIdentity.trim() : null);
         if (webId) {
             return {
                 ok: true,

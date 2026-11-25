@@ -21,6 +21,7 @@ import { unwrapLegacyNoteTags } from '@beaver/agent-export/render/legacyNoteTags
 import {
     baseCitationKey,
     getPageLocator,
+    getResolvedRef,
     normalizeCitationTag,
     parseRawCitationAttributes,
     requestedCitationKey,
@@ -103,7 +104,11 @@ export function renderToMarkdown(
         }
 
         let ref = normalized.ref;
-        const externalId = ref.kind === 'external' ? ref.external_id : undefined;
+        // A mistyped web page id is copied as the page the citation resolved to.
+        const meta = ref.kind === 'external' ? citationByKey[requestedCitationKey(ref)] : undefined;
+        const resolvedRef = meta ? getResolvedRef(meta) : null;
+        const resolvedPageId = resolvedRef?.kind === 'external' ? webPageId(resolvedRef.external_id) : null;
+        const externalId = resolvedPageId ?? (ref.kind === 'external' ? ref.external_id : undefined);
         const isExternalReference = ref.kind === 'external';
         const isExternalReferenceMappedToZoteroItem = !!externalId && !!externalItemMapping[externalId];
 
