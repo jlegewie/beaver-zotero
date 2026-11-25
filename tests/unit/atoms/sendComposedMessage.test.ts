@@ -13,7 +13,7 @@ vi.mock('../../../react/atoms/agentRunAtoms', async () => {
     return {
         sendWSMessageAtom: atom(null, (_get, _set, message: string, options?: unknown) =>
             sendWSMessageMock(message, options)),
-        withThreadWriter: (_get: unknown, set: unknown, operation: (set: unknown) => Promise<unknown>) => operation(set),
+        withThreadWriter: (set: unknown, operation: (set: unknown, sessionSet: unknown) => Promise<unknown>) => operation(set, set),
         messageParksResume: () => false,
         parkResumeForMessageAtom: atom(null, async () => true),
         __sendWSMessageMock: sendWSMessageMock,

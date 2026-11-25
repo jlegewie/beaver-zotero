@@ -10,8 +10,8 @@ import { isJobDeferral } from '@beaver/agent-core/protocol/jobCallProtocol';
 import { openParkedRunAtom } from '@beaver/agent-core/run-state/parkedRun';
 import type { AgentRun } from '@beaver/agent-core/agents/types';
 import type { TableFillJobSnapshot } from '@beaver/agent-core/protocol/tableFillProtocol';
+import type { createStore } from 'jotai';
 import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
-import { store } from '../store';
 
 /** The job call this window waits on: the run that waited, and its tool call. */
 export interface JobWait {
@@ -30,9 +30,9 @@ export const jobWaitAtom = atom<JobWait | null>(null);
 
 /**
  * A run of this window ended: the wait goes on only when the run parked with
- * the waited call still open.
+ * the waited call still open. `store` is the run session's.
  */
-export function settleJobWait(run: AgentRun | null): void {
+export function settleJobWait(store: ReturnType<typeof createStore>, run: AgentRun | null): void {
     const wait = store.get(jobWaitAtom);
     if (!wait || !run || run.id !== wait.runId) return;
     const open = (run.parked?.requests ?? []).some(

@@ -1,5 +1,3 @@
-import { processToolReturnResults } from "../agents/toolResultProcessing";
-import { upgradeToolReturn } from "../compat/legacyToolResults";
 import { atom } from "jotai";
 import type { Getter, Setter } from "jotai";
 import {
@@ -14,22 +12,15 @@ import {
     activeRunAtom,
     threadRunsAtom,
 } from "@beaver/agent-core/run-state/atoms";
-import {
-    citationsAtom,
-    processCitationsAtom,
-} from "@beaver/agent-core/citations/atoms";
+import { citationsAtom } from "@beaver/agent-core/citations/atoms";
 import { getCredentialGeneration } from "@beaver/agent-core/transport/credentials";
-import {
-    resumeUnrecordedResultsAtom,
-    threadAgentActionsAtom,
-    withUnrecordedResults,
-} from "../agents/agentActions";
 import { threadNavigationSeqAtom } from "../atoms/threads";
 import { accountGenerationAtom } from "../atoms/profile";
 import { store } from "../store";
 import type { WindowRuntime } from "../../src/runtime/instance";
 import { currentWriter } from "./threadWriter";
 import { syncParkedCardsAtom } from "../atoms/parkedRuns";
+import { getRunSession, type RunSession } from "../agentRuns/runSession";
 import { viewedHistoryRevisionAtom } from "./threadProjection";
 import {
     REATTACH_RESOLUTION_WINDOW_MS,
@@ -85,7 +76,7 @@ const POLL_TIMEOUT_MS = 5000;
  * The chat whose activity reads have failed `UNREACHABLE_AFTER_FAILURES`
  * times in a row. The first successful read clears it.
  */
-const admissionUnreachableThreadAtom = atom<string | null>(null);
+export const admissionUnreachableThreadAtom = atom<string | null>(null);
 
 /** The open chat is blocked and the server could not be reached to settle it. */
 export const admissionUnreachableAtom = atom(
@@ -186,8 +177,13 @@ function mergeLocalFailures(local: AgentRun[], saved: AgentRun[]): AgentRun[] {
     return [...merged, ...saved.slice(next)];
 }
 
-/** Refresh only persisted history. Composer state and navigation are untouched. */
+/**
+ * Refresh only persisted history. Composer state and navigation are untouched.
+ * `get` and `set` are the session's store; the window's agent actions and
+ * tool-return display are updated through its host.
+ */
 export async function reconcileThread(
+    session: RunSession,
     get: Getter,
     set: Setter,
     isCurrent: () => boolean,
@@ -201,8 +197,8 @@ export async function reconcileThread(
         history,
         onToolReturn: async (part, args) => {
             if (!isCurrent()) return;
-            await processToolReturnResults(part, guardedSet);
-            if (isCurrent()) await upgradeToolReturn(part, args);
+            await session.host.processToolReturn(part, guardedSet);
+            if (isCurrent()) await session.host.upgradeToolReturn(part, args ?? null);
         },
     });
     if (!isCurrent() || get(currentThreadIdAtom) !== id) return false;
@@ -249,21 +245,15 @@ export async function reconcileThread(
     if (!keepLocal) set(activeRunAtom, null);
     // The saved history may end on a parked run, or no longer does.
     set(syncParkedCardsAtom);
-    set(
-        threadAgentActionsAtom,
-        withUnrecordedResults(
-            get,
-            set,
-            loaded.agentActions ?? [],
-            new Set([
-                ...loaded.runs.map((run) => run.id),
-                ...(keepLocal && local ? [local.id] : []),
-            ]),
-        ),
+    session.host.replaceAgentActions(
+        set,
+        loaded.agentActions ?? [],
+        new Set([
+            ...loaded.runs.map((run) => run.id),
+            ...(keepLocal && local ? [local.id] : []),
+        ]),
     );
-    set(resumeUnrecordedResultsAtom);
     set(citationsAtom, loaded.citations);
-    set(processCitationsAtom);
     set(
         viewedHistoryRevisionAtom,
         Zotero.Beaver?.presence?.getSnapshot().history[id] ?? 0,
@@ -310,23 +300,24 @@ export function attachThreadAdmission(runtime: WindowRuntime): void {
                 // once the server no longer reports the thread active.
                 if (!currentWriter() && id) {
                     const snapshot = await readAdmission(id, POLL_TIMEOUT_MS);
+                    const session = getRunSession();
                     if (current() && !currentWriter()) {
                         if (snapshot.activity.state === "active")
                             setAdmission(
-                                store.set,
+                                session.store.set,
                                 id,
                                 snapshot.tailRunId,
                                 snapshot.activity,
                                 undefined,
-                                currentReason(store.get, id),
+                                currentReason(session.store.get, id),
                             );
                         else
-                            await reconcileThread(store.get, store.set, current);
+                            await reconcileThread(session, session.store.get, session.store.set, current);
                     }
                     if (current()) {
                         failures = 0;
-                        if (store.get(admissionUnreachableThreadAtom) !== null)
-                            store.set(admissionUnreachableThreadAtom, null);
+                        if (session.store.get(admissionUnreachableThreadAtom) !== null)
+                            session.store.set(admissionUnreachableThreadAtom, null);
                     }
                 }
             } catch {
@@ -336,7 +327,7 @@ export function attachThreadAdmission(runtime: WindowRuntime): void {
                     (++failures >= UNREACHABLE_AFTER_FAILURES ||
                         resolutionOverdue(id))
                 )
-                    store.set(admissionUnreachableThreadAtom, id);
+                    getRunSession().store.set(admissionUnreachableThreadAtom, id);
             }
         };
         // Settled in a later microtask, so `inFlight` is assigned first even
@@ -355,8 +346,9 @@ export function attachThreadAdmission(runtime: WindowRuntime): void {
             // Each wait starts from a quick first read and a clean count.
             delay = 500;
             failures = 0;
-            if (store.get(admissionUnreachableThreadAtom) !== null)
-                store.set(admissionUnreachableThreadAtom, null);
+            const chat = getRunSession().store;
+            if (chat.get(admissionUnreachableThreadAtom) !== null)
+                chat.set(admissionUnreachableThreadAtom, null);
         }
         if (timer !== undefined || inFlight || !blocked()) return;
         const context = capture();
@@ -378,11 +370,12 @@ export function attachThreadAdmission(runtime: WindowRuntime): void {
         delay = 500;
         failures = 0;
         settlingThreads.clear();
-        store.set(threadAdmissionAtom, null);
-        store.set(threadConflictAtom, null);
-        store.set(admissionUnreachableThreadAtom, null);
-        store.set(reattachResolutionAtom, null);
-        store.set(runReplacementNotesAtom, new Map());
+        const chat = getRunSession().store;
+        chat.set(threadAdmissionAtom, null);
+        chat.set(threadConflictAtom, null);
+        chat.set(admissionUnreachableThreadAtom, null);
+        chat.set(reattachResolutionAtom, null);
+        chat.set(runReplacementNotesAtom, new Map());
     };
     const removers = [
         store.sub(threadAdmissionAtom, schedule),

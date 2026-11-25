@@ -7,6 +7,7 @@ import { currentThreadIdAtom } from '../atoms/threads';
 import { store } from '../store';
 import { captureAttachmentCompletion } from './attachmentCompletion';
 import { tryGetWindowRuntime } from './windowRuntime';
+import { runSessionStore } from '../agentRuns/runSession';
 
 /** Originless requests receive empty citation/grant state; Markdown renders in the plugin realm. */
 export function captureOperationContext(local = false): OperationContext {
@@ -33,7 +34,7 @@ export function captureOperationContext(local = false): OperationContext {
         renderMarkdown: async content => Zotero.Beaver.exporter.renderNoteMarkdown(content),
         grantCreatedNote: (libraryId, zoteroKey) => {
             if (runtime?.status !== 'closing' && runId && generation === Zotero.Beaver.account?.getGeneration() && store.get(activeRunAtom)?.id === runId) {
-                store.set(grantCreatedNoteEditsForRunAtom, { runId, libraryId, zoteroKey });
+                runSessionStore().set(grantCreatedNoteEditsForRunAtom, { runId, libraryId, zoteroKey });
             }
         },
     };

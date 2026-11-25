@@ -128,12 +128,14 @@ import {
     closeWSConnectionForShutdownAtom,
     retryPendingRunIdAtom,
 } from "../../../react/atoms/agentRunAtoms";
+import { chatStore } from '../../helpers/runSession';
+import { getRunSession } from '../../../react/agentRuns/runSession';
 const runtime = { id: "a", status: "ready", hostWindow: {} } as any;
 initializeWindowRuntime(runtime);
 let presence: ThreadPresence;
 beforeEach(() => {
-    store.set(threadAdmissionAtom, null);
-    store.set(threadConflictAtom, null);
+    chatStore().set(threadAdmissionAtom, null);
+    chatStore().set(threadConflictAtom, null);
     releaseWriter();
     vi.clearAllMocks();
     vi.mocked(agentRunService.getThreadRuns).mockReset().mockResolvedValue({
@@ -148,12 +150,12 @@ beforeEach(() => {
     };
     presence.subscribe(snapshot => store.set(threadPresenceAtom, snapshot));
     store.set(popupMessagesAtom, []);
-    store.set(currentThreadIdAtom, "t");
-    store.set(viewedHistoryRevisionAtom, 0);
-    store.set(activeRunAtom, null);
-    store.set(threadRunsAtom, []);
-    store.set(isWSChatPendingAtom, false);
-    store.set(wsErrorAtom, null);
+    chatStore().set(currentThreadIdAtom, "t");
+    chatStore().set(viewedHistoryRevisionAtom, 0);
+    chatStore().set(activeRunAtom, null);
+    chatStore().set(threadRunsAtom, []);
+    chatStore().set(isWSChatPendingAtom, false);
+    chatStore().set(wsErrorAtom, null);
     store.set(sessionAtom, { user: { id: "user-1" } } as any);
     store.set(currentMessageContentAtom, "my draft");
     store.set(currentMessageItemsAtom, []);
@@ -167,7 +169,7 @@ beforeEach(() => {
 });
 describe("writer admission at the real send entry point", () => {
     it("resumes a failed first run with the persisted server tail", async () => {
-        store.set(currentThreadIdAtom, null);
+        chatStore().set(currentThreadIdAtom, null);
         store.set(selectedModelAtom, { name: "test-model", provider: "test" } as any);
         let callbacks: any;
         connectMock.mockImplementation(async (_request, value) => { callbacks = value; });
@@ -190,7 +192,7 @@ describe("writer admission at the real send entry point", () => {
         });
     });
     it.each(["durable", "unconfirmed", "not-saved"])("sends a follow-up after a %s first-run failure", async (state) => {
-        store.set(currentThreadIdAtom, null);
+        chatStore().set(currentThreadIdAtom, null);
         let callbacks: any;
         connectMock.mockImplementation(async (_request, value) => { callbacks = value; });
         await store.set(sendWSMessageAtom, "hello");
@@ -212,7 +214,7 @@ describe("writer admission at the real send entry point", () => {
         if (state === "durable") expect(agentRunService.getThreadRuns).not.toHaveBeenCalled();
     });
     it("resumes a confirmed failure without reading history again", async () => {
-        store.set(currentThreadIdAtom, null);
+        chatStore().set(currentThreadIdAtom, null);
         store.set(selectedModelAtom, { name: "test-model", provider: "test" } as any);
         let callbacks: any;
         connectMock.mockImplementation(async (_request, value) => { callbacks = value; });
@@ -231,7 +233,7 @@ describe("writer admission at the real send entry point", () => {
         expect(agentRunService.getThreadRuns).not.toHaveBeenCalled();
     });
     it("retains the server tail when a claimed follow-up was never saved", async () => {
-        store.set(threadAdmissionAtom, { threadId: "t", tailRunId: "saved", activity: { state: "idle", run_id: null } });
+        chatStore().set(threadAdmissionAtom, { threadId: "t", tailRunId: "saved", activity: { state: "idle", run_id: null } });
         vi.mocked(agentRunService.getThreadRuns).mockResolvedValue({
             runs: [], tail_run_id: "saved", activity: { state: "idle", run_id: null },
         });
@@ -251,8 +253,8 @@ describe("writer admission at the real send entry point", () => {
     it.each(["stopped follow-up", "failed first run"])("admits a repeated send after a %s with the saved tail", async (shape) => {
         cancelMock.mockResolvedValue(undefined);
         const firstRun = shape === "failed first run";
-        if (firstRun) store.set(currentThreadIdAtom, null);
-        else store.set(threadAdmissionAtom, { threadId: "t", tailRunId: "saved", activity: { state: "idle", run_id: null } });
+        if (firstRun) chatStore().set(currentThreadIdAtom, null);
+        else chatStore().set(threadAdmissionAtom, { threadId: "t", tailRunId: "saved", activity: { state: "idle", run_id: null } });
         vi.mocked(agentRunService.getThreadRuns).mockResolvedValue({
             runs: [], tail_run_id: "saved", activity: { state: "idle", run_id: null },
         });
@@ -281,7 +283,7 @@ describe("writer admission at the real send entry point", () => {
     });
     it("refuses a repeated send when the admission read finds unseen history", async () => {
         cancelMock.mockResolvedValue(undefined);
-        store.set(threadAdmissionAtom, { threadId: "t", tailRunId: "saved", activity: { state: "idle", run_id: null } });
+        chatStore().set(threadAdmissionAtom, { threadId: "t", tailRunId: "saved", activity: { state: "idle", run_id: null } });
         vi.mocked(agentRunService.getThreadRuns).mockResolvedValue({
             runs: [], tail_run_id: "saved", activity: { state: "idle", run_id: null },
         });
@@ -309,7 +311,7 @@ describe("writer admission at the real send entry point", () => {
         await store.set(sendWSMessageAtom, "hello");
         const run = store.get(activeRunAtom)!;
         callbacks.onError({ event: "error", type: "setup_error", message: "Setup failed", run_id: run.id });
-        store.set(threadAdmissionAtom, snapshot === "missing" ? null : {
+        chatStore().set(threadAdmissionAtom, snapshot === "missing" ? null : {
             threadId: "other", tailRunId: "foreign", activity: { state: "idle", run_id: null },
         });
         store.set(currentMessageContentAtom, "my long draft");
@@ -331,7 +333,7 @@ describe("writer admission at the real send entry point", () => {
         connectMock.mockImplementation(async (_request, value) => { callbacks = value; });
         await store.set(sendWSMessageAtom, "hello");
         const run = store.get(activeRunAtom)!;
-        store.set(currentThreadIdAtom, "different-view");
+        chatStore().set(currentThreadIdAtom, "different-view");
 
         await callbacks.onRunComplete({ run_id: run.id });
 
@@ -348,7 +350,7 @@ describe("writer admission at the real send entry point", () => {
         expect(store.get(threadAdmissionAtom)).toBe(admission);
     });
     it("does not advance the saved tail on an acknowledgment rejected by admission", async () => {
-        store.set(threadAdmissionAtom, { threadId: "t", tailRunId: "saved", activity: { state: "idle", run_id: null } });
+        chatStore().set(threadAdmissionAtom, { threadId: "t", tailRunId: "saved", activity: { state: "idle", run_id: null } });
         vi.mocked(agentRunService.getThreadRuns).mockResolvedValueOnce({
             runs: [], tail_run_id: "saved", activity: { state: "idle", run_id: null },
         });
@@ -361,7 +363,7 @@ describe("writer admission at the real send entry point", () => {
         expect(store.get(threadAdmissionAtom)?.tailRunId).toBe("saved");
     });
     it.each(["changed", "busy", "offline"])("preserves the failed run when resume admission is %s", async (state) => {
-        store.set(currentThreadIdAtom, null);
+        chatStore().set(currentThreadIdAtom, null);
         store.set(selectedModelAtom, { name: "test-model", provider: "test" } as any);
         let callbacks: any;
         connectMock.mockImplementation(async (_request, value) => { callbacks = value; });
@@ -392,7 +394,7 @@ describe("writer admission at the real send entry point", () => {
     });
     it("keeps unseen server history behind the send admission check after opening the menu", async () => {
         const admission = { threadId: "t", tailRunId: "displayed", activity: { state: "idle" as const, run_id: null } };
-        store.set(threadAdmissionAtom, admission);
+        chatStore().set(threadAdmissionAtom, admission);
         const displayed = store.get(threadRunsAtom);
         const attachment = { key: "DRAFT", libraryID: 1 } as any;
         store.set(currentMessageItemsAtom, [attachment]);
@@ -476,7 +478,7 @@ describe("writer admission at the real send entry point", () => {
         );
         const sending = store.set(sendWSMessageAtom, "hello");
         await vi.waitFor(() => expect(connectMock).toHaveBeenCalledOnce());
-        store.set(retryPendingRunIdAtom, "retry-being-prepared");
+        chatStore().set(retryPendingRunIdAtom, "retry-being-prepared");
         store.set(closeWSConnectionForShutdownAtom, "Main window closed");
         expect(store.get(retryPendingRunIdAtom)).toBeNull();
         expect(presence.getSnapshot().claims).toHaveLength(0);
@@ -498,8 +500,8 @@ describe('navigation after streaming finishes with a writer lease', () => {
             await store.set(sendWSMessageAtom, 'hello');
             const run = store.get(activeRunAtom)!;
             callbacks.onStreamingDone({ run_id: run.id });
-            store.set(approvalResponseIntentsAtom, new Map([['approval', true]]));
-            store.set(runApprovalPolicyAtom, { runId: run.id, fullAccess: true, approvedResources: new Set(['item']) });
+            chatStore().set(approvalResponseIntentsAtom, new Map([['approval', true]]));
+            chatStore().set(runApprovalPolicyAtom, { runId: run.id, fullAccess: true, approvedResources: new Set(['item']) });
             expect(store.get(streamingDoneRunIdsAtom).has(run.id)).toBe(true);
             cancelMock.mockImplementation(async () => { callbacks.onClose(1000, 'User cancelled', true); });
             loadThreadRunsMock.mockResolvedValue({
@@ -557,8 +559,8 @@ describe('terminal cleanup before writer revocation', () => {
         let callbacks: any;
         connectMock.mockImplementation(async (_request, value) => { callbacks = value; });
         await store.set(sendWSMessageAtom, 'hello');
-        store.set(isWSConnectedAtom, true);
-        store.set(isWSReadyAtom, true);
+        chatStore().set(isWSConnectedAtom, true);
+        chatStore().set(isWSReadyAtom, true);
         callbacks.onStreamingDone({ run_id: store.get(activeRunAtom)!.id });
         callbacks.onError({ type: 'error', error: 'Failed', error_type: 'test_error' });
         callbacks.onClose(1000, 'Finished', true);
@@ -604,7 +606,7 @@ describe('a run whose connection was lost for good', () => {
         let callbacks: any;
         connectMock.mockImplementation(async (_request, value) => { callbacks = value; });
         await store.set(sendWSMessageAtom, 'hello');
-        store.set(isWSReadyAtom, true);
+        chatStore().set(isWSReadyAtom, true);
         return { callbacks, run: store.get(activeRunAtom)! };
     }
 
@@ -625,7 +627,7 @@ describe('a run whose connection was lost for good', () => {
         // The server finished the run while this window could not reach it.
         const completed = { ...run, status: 'completed', model_messages: [] };
         saved([completed]);
-        expect(await reconcileThread(store.get, store.set, () => true)).toBe(true);
+        expect(await reconcileThread(getRunSession(), chatStore().get, chatStore().set, () => true)).toBe(true);
 
         expect(store.get(activeRunAtom)).toBeNull();
         expect(store.get(threadRunsAtom)).toEqual([completed]);
@@ -637,19 +639,19 @@ describe('a run whose connection was lost for good', () => {
         callbacks.onReattachFailed({ runId: run.id, reason: 'not_found', evidence: DROP, gapMs: 400 });
 
         saved([]);
-        expect(await reconcileThread(store.get, store.set, () => true)).toBe(true);
+        expect(await reconcileThread(getRunSession(), chatStore().get, chatStore().set, () => true)).toBe(true);
 
         expect(store.get(activeRunAtom)).toMatchObject({ id: run.id, status: 'error', error: { type: 'connection_error' } });
         expect(store.get(threadReadOnlyAtom)).toBe(false);
     });
 
     it('does not keep a local failure that is not a lost connection', async () => {
-        store.set(activeRunAtom, {
+        chatStore().set(activeRunAtom, {
             id: 'refused', thread_id: 't', status: 'error', model_messages: [],
             error: { type: 'thread_busy', message: 'Busy', is_retryable: false },
         } as any);
         saved([]);
-        expect(await reconcileThread(store.get, store.set, () => true)).toBe(true);
+        expect(await reconcileThread(getRunSession(), chatStore().get, chatStore().set, () => true)).toBe(true);
         expect(store.get(activeRunAtom)).toBeNull();
     });
 
@@ -665,13 +667,13 @@ describe('a run whose connection was lost for good', () => {
 
         const completed = { ...run, status: 'completed', model_messages: [] };
         saved([completed]);
-        expect(await reconcileThread(store.get, store.set, () => true)).toBe(true);
+        expect(await reconcileThread(getRunSession(), chatStore().get, chatStore().set, () => true)).toBe(true);
         expect(store.get(threadRunsAtom)).toEqual([completed]);
     });
 
     it('keeps a stopped response the server never saved', async () => {
         const earlier = { id: 'earlier', thread_id: 't', status: 'completed', model_messages: [] } as any;
-        store.set(threadRunsAtom, [earlier]);
+        chatStore().set(threadRunsAtom, [earlier]);
         const { callbacks, run } = await startRun();
         await store.set(closeWSConnectionAtom);
 
@@ -679,14 +681,14 @@ describe('a run whose connection was lost for good', () => {
         expect(store.get(threadAdmissionAtom)).toMatchObject({ threadId: 't', activity: { state: 'unknown' } });
 
         saved([earlier]);
-        expect(await reconcileThread(store.get, store.set, () => true)).toBe(true);
+        expect(await reconcileThread(getRunSession(), chatStore().get, chatStore().set, () => true)).toBe(true);
         expect(store.get(threadRunsAtom).map((kept) => [kept.id, kept.status])).toEqual([
             ['earlier', 'completed'],
             [run.id, 'canceled'],
         ]);
 
         // Kept through that reconcile only: the next one shows the server's history.
-        expect(await reconcileThread(store.get, store.set, () => true)).toBe(true);
+        expect(await reconcileThread(getRunSession(), chatStore().get, chatStore().set, () => true)).toBe(true);
         expect(store.get(threadRunsAtom).map((kept) => kept.id)).toEqual(['earlier']);
     });
 
@@ -694,13 +696,13 @@ describe('a run whose connection was lost for good', () => {
         const first = { id: 'first', thread_id: 't', status: 'completed', model_messages: [] } as any;
         const unsaved = { id: 'unsaved', thread_id: 't', status: 'error', model_messages: [],
             error: { type: 'connection_error', message: 'Lost', is_retryable: true } } as any;
-        store.set(threadRunsAtom, [first, unsaved]);
+        chatStore().set(threadRunsAtom, [first, unsaved]);
         const { callbacks, run } = await startRun();
         callbacks.onReattachFailed({ runId: run.id, reason: 'gave_up', evidence: DROP, gapMs: 120_000 });
 
         const completed = { ...run, status: 'completed', model_messages: [] };
         saved([first, completed]);
-        expect(await reconcileThread(store.get, store.set, () => true)).toBe(true);
+        expect(await reconcileThread(getRunSession(), chatStore().get, chatStore().set, () => true)).toBe(true);
 
         expect(store.get(threadRunsAtom).map((kept) => [kept.id, kept.status])).toEqual([
             ['first', 'completed'],

@@ -3,26 +3,29 @@
  *
  * The run engine keeps no state at module level. What it needs between events
  * and across the runs a chat goes through (its transport, the quiet-stream
- * tracker, the part queue, connect loops in flight, stops held for a
- * reconnecting run, resume bookkeeping) lives here, so that each session is
- * independent of any other in the same realm.
+ * tracker, connect loops in flight, stops held for a reconnecting run, resume
+ * bookkeeping) lives here, so that each session is independent of any other
+ * in the same realm. Its chat state lives in its own store, which only the
+ * session writes; windows render copies of it (`runProjection.ts`).
  *
  * Today a renderer installs one session and reuses it for every run it
  * starts: the transport holds one run at a time, and a new run waits on it
  * for the cancel of a run stopped while reconnecting.
  */
 
-import type { createStore } from 'jotai';
+import { atom, type createStore, type Getter } from 'jotai';
 import type { AgentService } from '@beaver/agent-core/transport/agentService';
 import {
     createStreamActivityTracker,
     streamQuietAtom,
     type StreamActivityTracker,
 } from '@beaver/agent-core/run-state/streamActivity';
-import type { PartEventQueue } from '../utils/streamingPartQueue';
 import type { RunHost } from './runHost';
 
 type Store = ReturnType<typeof createStore>;
+
+/** The session a store belongs to: set in each session's own store. */
+const ownSessionAtom = atom<RunSession | null>(null);
 
 /** A retry committing its removal, and whether the user pressed Stop meanwhile. */
 export interface RetryCommit {
@@ -83,27 +86,56 @@ export class RunSession {
     retryCommit: RetryCommit | null = null;
 
     constructor(
-        /** The store the session's run state is written to. */
+        /** The session's private store: the authority for its chat state (`sessionStateAtoms`). */
         readonly store: Store,
         readonly agentService: AgentService,
         readonly host: RunHost,
-        readonly partQueue: PartEventQueue,
     ) {
         this.streamActivity = createStreamActivityTracker({
             publish: (state) => store.set(streamQuietAtom, state),
         });
+        store.set(ownSessionAtom, this);
     }
 }
 
 let installed: RunSession | null = null;
+let beforeFirstUse: (() => void) | null = null;
 
-/** Make `session` the one this renderer's runs execute in. */
-export function installRunSession(session: RunSession): void {
+/**
+ * Make `session` the one this renderer's runs execute in. `beforeFirstUse`
+ * runs once, when the session is first asked for: the renderer attaches its
+ * projection there, after the modules that define the session's state have
+ * loaded.
+ */
+export function installRunSession(session: RunSession, options?: { beforeFirstUse?: () => void }): void {
     installed = session;
+    beforeFirstUse = options?.beforeFirstUse ?? null;
 }
 
 /** The session this renderer's runs execute in. */
 export function getRunSession(): RunSession {
     if (!installed) throw new Error('No run session is installed');
+    if (beforeFirstUse) {
+        const prepare = beforeFirstUse;
+        beforeFirstUse = null;
+        prepare();
+    }
     return installed;
+}
+
+/**
+ * The session that owns the store `get` reads, or the installed one for any
+ * other store (a window's).
+ */
+export function sessionOf(get: Getter): RunSession {
+    return get(ownSessionAtom) ?? getRunSession();
+}
+
+/**
+ * The store of this renderer's run session. Window code that changes the
+ * chat's state (loading a chat, leaving it, answering a card) writes here,
+ * never to its own copies.
+ */
+export function runSessionStore(): Store {
+    return getRunSession().store;
 }

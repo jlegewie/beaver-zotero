@@ -118,6 +118,7 @@ import {
 import { threadAdmissionAtom } from '../../../react/runtime/threadAdmission';
 import { reattachResolutionAtom } from '@beaver/agent-core/run-state/runResolution';
 import { popupMessagesAtom } from '../../../react/atoms/ui';
+import { chatStore } from '../../helpers/runSession';
 
 const DROP: ConnectionFailureEvidence = {
     stage: 'mid_run',
@@ -138,7 +139,7 @@ async function startRun(): Promise<WSCallbacks> {
     });
     await store.set(sendWSMessageAtom, 'hello');
     if (!callbacks) throw new Error('Expected the run to connect');
-    store.set(isWSReadyAtom, true);
+    chatStore().set(isWSReadyAtom, true);
     (callbacks as WSCallbacks).onDeferredApprovalRequest?.({
         event: 'deferred_approval_request',
         action_id: 'action-1',
@@ -171,11 +172,11 @@ describe('a run reattaching after its connection dropped', () => {
             clientType: 'zotero-plugin',
             clientFeatures: [],
         });
-        store.set(wsErrorAtom, null);
-        store.set(wsReconnectingAtom, null);
-        store.set(isWSChatPendingAtom, false);
-        store.set(isWSReadyAtom, false);
-        store.set(pendingApprovalsAtom, new Map());
+        chatStore().set(wsErrorAtom, null);
+        chatStore().set(wsReconnectingAtom, null);
+        chatStore().set(isWSChatPendingAtom, false);
+        chatStore().set(isWSReadyAtom, false);
+        chatStore().set(pendingApprovalsAtom, new Map());
         store.set(sessionAtom, { user: { id: 'user-1' } } as any);
     });
 
@@ -323,9 +324,9 @@ describe('a run reattaching after its connection dropped', () => {
 
     describe('what the user can do while it reconnects', () => {
         beforeEach(() => {
-            store.set(currentThreadIdAtom, null);
-            store.set(threadRunsAtom, []);
-            store.set(threadAdmissionAtom, null);
+            chatStore().set(currentThreadIdAtom, null);
+            chatStore().set(threadRunsAtom, []);
+            chatStore().set(threadAdmissionAtom, null);
         });
 
         it('does not retry, edit or continue a run, which would stop the reconnecting one', async () => {
@@ -351,7 +352,7 @@ describe('a run reattaching after its connection dropped', () => {
         it('waits for the server to confirm a stop made while reconnecting', async () => {
             const callbacks = await startRun();
             const run = store.get(activeRunAtom)!;
-            store.set(currentThreadIdAtom, 'thread-1');
+            chatStore().set(currentThreadIdAtom, 'thread-1');
             isReattachingMock.mockReturnValue(true);
             dropConnection(callbacks);
 
@@ -370,13 +371,13 @@ describe('a run reattaching after its connection dropped', () => {
         it('does not wait again once the server settled a stopped run before the reattach', async () => {
             const callbacks = await startRun();
             const run = store.get(activeRunAtom)!;
-            store.set(currentThreadIdAtom, 'thread-1');
+            chatStore().set(currentThreadIdAtom, 'thread-1');
             isReattachingMock.mockReturnValue(true);
             dropConnection(callbacks);
             await store.set(closeWSConnectionAtom);
             isReattachingMock.mockReturnValue(false);
             // The poller found the server idle and loaded what it saved.
-            store.set(threadAdmissionAtom, {
+            chatStore().set(threadAdmissionAtom, {
                 threadId: 'thread-1',
                 tailRunId: run.id,
                 activity: { state: 'idle', run_id: null },
@@ -400,7 +401,7 @@ describe('a run reattaching after its connection dropped', () => {
 
         it('does not block the chat after an ordinary stop', async () => {
             await startRun();
-            store.set(currentThreadIdAtom, 'thread-1');
+            chatStore().set(currentThreadIdAtom, 'thread-1');
 
             await store.set(closeWSConnectionAtom);
 
@@ -410,7 +411,7 @@ describe('a run reattaching after its connection dropped', () => {
         it('checks with the server after a failed reattach', async () => {
             const callbacks = await startRun();
             const runId = store.get(activeRunAtom)!.id;
-            store.set(currentThreadIdAtom, 'thread-1');
+            chatStore().set(currentThreadIdAtom, 'thread-1');
             dropConnection(callbacks);
 
             callbacks.onReattachFailed?.({ runId, reason: 'not_found', evidence: DROP, gapMs: 500 });
@@ -425,9 +426,9 @@ describe('a run reattaching after its connection dropped', () => {
         });
 
         it('does not resolve a stopped run as a failed reattach', async () => {
-            store.set(reattachResolutionAtom, null);
+            chatStore().set(reattachResolutionAtom, null);
             const callbacks = await startRun();
-            store.set(currentThreadIdAtom, 'thread-1');
+            chatStore().set(currentThreadIdAtom, 'thread-1');
             isReattachingMock.mockReturnValue(true);
             dropConnection(callbacks);
             await store.set(closeWSConnectionAtom);
@@ -515,7 +516,7 @@ describe('a run reattaching after its connection dropped', () => {
 
         it('loads a recorded action applied without asking, which the window never received', async () => {
             store.set(threadAgentActionsAtom, []);
-            store.set(threadRunsAtom, [{ id: 'run-1' } as any]);
+            chatStore().set(threadRunsAtom, [{ id: 'run-1' } as any]);
             const ack = vi.spyOn(agentActionsService, 'acknowledgeActions')
                 .mockResolvedValue({ success: true, run_id: 'run-1', updated: 1, errors: [] } as any);
             const load = vi.spyOn(agentActionsService, 'getActionsForRun').mockResolvedValue([
@@ -533,7 +534,7 @@ describe('a run reattaching after its connection dropped', () => {
                 .toEqual([['action-1', 'applied']]);
             ack.mockRestore();
             load.mockRestore();
-            store.set(threadRunsAtom, []);
+            chatStore().set(threadRunsAtom, []);
         });
 
         it('shows a pending card as applied, with its result, while the action is being recorded', async () => {
@@ -567,7 +568,7 @@ describe('a run reattaching after its connection dropped', () => {
 
         it('shows an action applied without asking from its execute request until it is recorded', async () => {
             store.set(threadAgentActionsAtom, []);
-            store.set(threadRunsAtom, [{ id: 'run-1' } as any]);
+            chatStore().set(threadRunsAtom, [{ id: 'run-1' } as any]);
             vi.useFakeTimers();
             try {
                 const ack = vi.spyOn(agentActionsService, 'acknowledgeActions')
@@ -604,7 +605,7 @@ describe('a run reattaching after its connection dropped', () => {
                 load.mockRestore();
             } finally {
                 vi.useRealTimers();
-                store.set(threadRunsAtom, []);
+                chatStore().set(threadRunsAtom, []);
             }
         });
 
@@ -722,7 +723,7 @@ describe('a run reattaching after its connection dropped', () => {
 
         it('keeps an action built from its execute request that changed while the stored copy loaded', async () => {
             store.set(threadAgentActionsAtom, []);
-            store.set(threadRunsAtom, [{ id: 'run-1' } as any]);
+            chatStore().set(threadRunsAtom, [{ id: 'run-1' } as any]);
             const ack = vi.spyOn(agentActionsService, 'acknowledgeActions')
                 .mockResolvedValue({ success: true, run_id: 'run-1', updated: 1, errors: [] } as any);
             let respond!: (value: any) => void;
@@ -748,7 +749,7 @@ describe('a run reattaching after its connection dropped', () => {
             expect(store.get(threadAgentActionsAtom)[0].result_data).toEqual({ zotero_key: 'NEW12345' });
             ack.mockRestore();
             load.mockRestore();
-            store.set(threadRunsAtom, []);
+            chatStore().set(threadRunsAtom, []);
         });
 
         it('does not send the result with a failed undo once a library was excluded', async () => {
@@ -777,7 +778,7 @@ describe('a run reattaching after its connection dropped', () => {
 
         it('keeps an action built from its execute request that was undone while it was being recorded', async () => {
             store.set(threadAgentActionsAtom, []);
-            store.set(threadRunsAtom, [{ id: 'run-1' } as any]);
+            chatStore().set(threadRunsAtom, [{ id: 'run-1' } as any]);
             let respond!: (value: any) => void;
             const ack = vi.spyOn(agentActionsService, 'acknowledgeActions')
                 .mockImplementation(() => new Promise((resolve) => { respond = resolve; }));
@@ -803,7 +804,7 @@ describe('a run reattaching after its connection dropped', () => {
             ack.mockRestore();
             update.mockRestore();
             load.mockRestore();
-            store.set(threadRunsAtom, []);
+            chatStore().set(threadRunsAtom, []);
         });
 
         it('tries again when the thread loads after recording gave up', async () => {
@@ -842,7 +843,7 @@ describe('a run reattaching after its connection dropped', () => {
 
         it('keeps showing an applied action the server has no record of when the thread loads again', async () => {
             store.set(threadAgentActionsAtom, []);
-            store.set(threadRunsAtom, [{ id: 'run-1' } as any]);
+            chatStore().set(threadRunsAtom, [{ id: 'run-1' } as any]);
             const ack = vi.spyOn(agentActionsService, 'acknowledgeActions').mockResolvedValue({
                 success: true, run_id: 'run-1', updated: 0, errors: [],
                 skipped: [{ action_id: 'action-1', status: null, result_data: null }],
@@ -869,12 +870,12 @@ describe('a run reattaching after its connection dropped', () => {
             expect(ack).toHaveBeenCalledTimes(1);
             ack.mockRestore();
             load.mockRestore();
-            store.set(threadRunsAtom, []);
+            chatStore().set(threadRunsAtom, []);
         });
 
         it('keeps a failed undo made while the action was being recorded', async () => {
             store.set(threadAgentActionsAtom, []);
-            store.set(threadRunsAtom, [{ id: 'run-1' } as any]);
+            chatStore().set(threadRunsAtom, [{ id: 'run-1' } as any]);
             let respond!: (value: any) => void;
             const ack = vi.spyOn(agentActionsService, 'acknowledgeActions')
                 .mockImplementation(() => new Promise((resolve) => { respond = resolve; }));
@@ -898,7 +899,7 @@ describe('a run reattaching after its connection dropped', () => {
             expect(store.get(threadAgentActionsAtom)[0]).toMatchObject({ status: 'error', error_message: 'Undo failed' });
             ack.mockRestore();
             load.mockRestore();
-            store.set(threadRunsAtom, []);
+            chatStore().set(threadRunsAtom, []);
         });
 
         it('leaves an undo made while the acknowledgement was out', async () => {

@@ -97,6 +97,7 @@ import {
     sendWSMessageAtom,
     wsErrorAtom,
 } from '../../../react/atoms/agentRunAtoms';
+import { chatStore } from '../../helpers/runSession';
 
 function makeRun(overrides: Partial<AgentRun> = {}): AgentRun {
     return {
@@ -108,11 +109,11 @@ function makeRun(overrides: Partial<AgentRun> = {}): AgentRun {
 }
 
 function stagePendingCards() {
-    store.set(pendingApprovalsAtom, new Map([['action-1', {} as any]]));
-    store.set(pendingQuestionsAtom, new Map([['question-1', {} as any]]));
-    store.set(pendingCreditConfirmationsAtom, new Map([['confirm-1', {} as any]]));
-    store.set(approvalResponseIntentsAtom, new Map([['action-1', true]]));
-    store.set(runApprovalPolicyAtom, {
+    chatStore().set(pendingApprovalsAtom, new Map([['action-1', {} as any]]));
+    chatStore().set(pendingQuestionsAtom, new Map([['question-1', {} as any]]));
+    chatStore().set(pendingCreditConfirmationsAtom, new Map([['confirm-1', {} as any]]));
+    chatStore().set(approvalResponseIntentsAtom, new Map([['action-1', true]]));
+    chatStore().set(runApprovalPolicyAtom, {
         runId: 'run-1',
         fullAccess: true,
         approvedResources: new Set(['item-1']),
@@ -157,16 +158,16 @@ const NO_PENDING_CARDS = {
 describe('abandoning the active run locally', () => {
     beforeEach(() => {
         vi.clearAllMocks();
-        store.set(activeRunAtom, null);
-        store.set(threadRunsAtom, []);
-        store.set(isWSChatPendingAtom, false);
-        store.set(isWSConnectedAtom, false);
-        store.set(isWSReadyAtom, false);
+        chatStore().set(activeRunAtom, null);
+        chatStore().set(threadRunsAtom, []);
+        chatStore().set(isWSChatPendingAtom, false);
+        chatStore().set(isWSConnectedAtom, false);
+        chatStore().set(isWSReadyAtom, false);
     });
 
     it('archives a streaming run as canceled and releases the composer', () => {
-        store.set(activeRunAtom, makeRun());
-        store.set(isWSChatPendingAtom, true);
+        chatStore().set(activeRunAtom, makeRun());
+        chatStore().set(isWSChatPendingAtom, true);
 
         store.set(abandonActiveRunLocallyAtom);
 
@@ -179,7 +180,7 @@ describe('abandoning the active run locally', () => {
     });
 
     it('archives a run parked on a deferred approval', () => {
-        store.set(activeRunAtom, makeRun({ status: 'awaiting_deferred' }));
+        chatStore().set(activeRunAtom, makeRun({ status: 'awaiting_deferred' }));
 
         store.set(abandonActiveRunLocallyAtom);
 
@@ -191,7 +192,7 @@ describe('abandoning the active run locally', () => {
 
     it('leaves a failed run in the active slot so its retry survives', () => {
         const failed = makeRun({ status: 'error' });
-        store.set(activeRunAtom, failed);
+        chatStore().set(activeRunAtom, failed);
 
         store.set(abandonActiveRunLocallyAtom);
 
@@ -200,7 +201,7 @@ describe('abandoning the active run locally', () => {
     });
 
     it('clears every card whose answer can no longer be delivered', () => {
-        store.set(activeRunAtom, makeRun());
+        chatStore().set(activeRunAtom, makeRun());
         stagePendingCards();
 
         store.set(abandonActiveRunLocallyAtom);
@@ -209,7 +210,7 @@ describe('abandoning the active run locally', () => {
     });
 
     it('does not touch the socket', () => {
-        store.set(activeRunAtom, makeRun());
+        chatStore().set(activeRunAtom, makeRun());
 
         store.set(abandonActiveRunLocallyAtom);
 
@@ -222,16 +223,16 @@ describe('closing the connection from the stop button', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         isConnectedMock.mockReturnValue(true);
-        store.set(activeRunAtom, null);
-        store.set(threadRunsAtom, []);
-        store.set(isWSChatPendingAtom, false);
-        store.set(isWSConnectedAtom, true);
-        store.set(isWSReadyAtom, true);
+        chatStore().set(activeRunAtom, null);
+        chatStore().set(threadRunsAtom, []);
+        chatStore().set(isWSChatPendingAtom, false);
+        chatStore().set(isWSConnectedAtom, true);
+        chatStore().set(isWSReadyAtom, true);
     });
 
     it('still sends a cancel frame, on top of the local bookkeeping', async () => {
-        store.set(activeRunAtom, makeRun());
-        store.set(isWSChatPendingAtom, true);
+        chatStore().set(activeRunAtom, makeRun());
+        chatStore().set(isWSChatPendingAtom, true);
 
         await store.set(closeWSConnectionAtom);
 
@@ -246,8 +247,8 @@ describe('closing the connection from the stop button', () => {
     });
 
     it('ends the window wait on the fill the stopped run waited on', async () => {
-        store.set(activeRunAtom, makeRun());
-        store.set(jobWaitAtom, { threadId: 'thread-1', runId: 'run-1', toolCallId: 'call-1', jobId: 'job-1' });
+        chatStore().set(activeRunAtom, makeRun());
+        chatStore().set(jobWaitAtom, { threadId: 'thread-1', runId: 'run-1', toolCallId: 'call-1', jobId: 'job-1' });
 
         await store.set(closeWSConnectionAtom);
 
@@ -262,9 +263,9 @@ describe('closing the connection because the client is going away', () => {
         closeMock.mockReset();
         clearClientShutDownLatch();
         isConnectedMock.mockReturnValue(true);
-        store.set(activeRunAtom, null);
-        store.set(threadRunsAtom, []);
-        store.set(isWSChatPendingAtom, false);
+        chatStore().set(activeRunAtom, null);
+        chatStore().set(threadRunsAtom, []);
+        chatStore().set(isWSChatPendingAtom, false);
     });
 
     it('closes with 1000 and the caller\'s reason, and never cancels', () => {
@@ -277,7 +278,7 @@ describe('closing the connection because the client is going away', () => {
     it('sends the close before touching the store', () => {
         const order: string[] = [];
         closeMock.mockImplementation(() => order.push('close'));
-        store.set(activeRunAtom, makeRun());
+        chatStore().set(activeRunAtom, makeRun());
         const unsubscribe = store.sub(activeRunAtom, () => order.push('store'));
 
         store.set(closeWSConnectionForShutdownAtom, 'Zotero quitting');
@@ -287,8 +288,8 @@ describe('closing the connection because the client is going away', () => {
     });
 
     it('archives the run it abandons and releases the composer', () => {
-        store.set(activeRunAtom, makeRun());
-        store.set(isWSChatPendingAtom, true);
+        chatStore().set(activeRunAtom, makeRun());
+        chatStore().set(isWSChatPendingAtom, true);
         stagePendingCards();
 
         store.set(closeWSConnectionForShutdownAtom, 'Beaver plugin shutting down');
@@ -304,7 +305,7 @@ describe('closing the connection because the client is going away', () => {
     it('leaves another window\'s run alone when this bundle owns nothing', () => {
         isConnectedMock.mockReturnValue(false);
         const run = makeRun();
-        store.set(activeRunAtom, run);
+        chatStore().set(activeRunAtom, run);
 
         store.set(closeWSConnectionForShutdownAtom, 'Main window closed');
 
@@ -343,7 +344,7 @@ describe('closing the connection because the client is going away', () => {
             throw new AgentConnectionError('closed before ready', PRE_READY_DROP);
         });
         store.set(sessionAtom, { user: { id: 'user-1' } } as any);
-        store.set(wsReconnectingAtom, null);
+        chatStore().set(wsReconnectingAtom, null);
         const sending = store.set(sendWSMessageAtom, 'hello');
 
         // First attempt fails immediately, leaving the loop asleep in its
@@ -370,11 +371,11 @@ describe('closing the connection because the client is going away', () => {
             closeCallbacks = callbacks;
         });
         store.set(sessionAtom, { user: { id: 'user-1' } } as any);
-        store.set(wsErrorAtom, null);
+        chatStore().set(wsErrorAtom, null);
         await store.set(sendWSMessageAtom, 'hello');
         expect(closeCallbacks).not.toBeNull();
         // Past handshake, a close is no longer a connect-phase failure.
-        store.set(isWSReadyAtom, true);
+        chatStore().set(isWSReadyAtom, true);
         expect(store.get(activeRunAtom)?.status).toBe('in_progress');
 
         // Real `close()` notifies with three args and no evidence.
@@ -407,17 +408,17 @@ describe('remembering the chat a shutdown interrupted', () => {
         closeMock.mockReset();
         clearClientShutDownLatch();
         isConnectedMock.mockReturnValue(true);
-        store.set(activeRunAtom, null);
-        store.set(threadRunsAtom, []);
-        store.set(currentThreadIdAtom, null);
-        store.set(currentThreadNameAtom, null);
+        chatStore().set(activeRunAtom, null);
+        chatStore().set(threadRunsAtom, []);
+        chatStore().set(currentThreadIdAtom, null);
+        chatStore().set(currentThreadNameAtom, null);
         store.set(sessionAtom, { access_token: 'token', user: { id: 'user-1' } } as any);
     });
 
     it('records the open thread, its name, and the account', () => {
-        store.set(activeRunAtom, makeRun());
-        store.set(currentThreadIdAtom, 'thread-1');
-        store.set(currentThreadNameAtom, 'Protein folding');
+        chatStore().set(activeRunAtom, makeRun());
+        chatStore().set(currentThreadIdAtom, 'thread-1');
+        chatStore().set(currentThreadNameAtom, 'Protein folding');
 
         store.set(closeWSConnectionForShutdownAtom, 'Zotero quitting', REMEMBER);
 
@@ -430,9 +431,9 @@ describe('remembering the chat a shutdown interrupted', () => {
     });
 
     it('does not record a run it parked: its card is waiting in the chat', () => {
-        store.set(activeRunAtom, makeRun());
-        store.set(currentThreadIdAtom, 'thread-1');
-        store.set(pendingApprovalsAtom, new Map([['action-1', {
+        chatStore().set(activeRunAtom, makeRun());
+        chatStore().set(currentThreadIdAtom, 'thread-1');
+        chatStore().set(pendingApprovalsAtom, new Map([['action-1', {
             actionId: 'action-1', toolcallId: 'call-1', actionType: 'edit_metadata', actionData: {},
         } as any]]));
 
@@ -440,11 +441,11 @@ describe('remembering the chat a shutdown interrupted', () => {
 
         expect(sendParkMock).toHaveBeenCalledWith('run-1');
         expect(saveInterruptedThreadMock).not.toHaveBeenCalled();
-        store.set(pendingApprovalsAtom, new Map());
+        chatStore().set(pendingApprovalsAtom, new Map());
     });
 
     it('falls back to the run\'s thread when the store has no current thread', () => {
-        store.set(activeRunAtom, makeRun({ thread_id: 'thread-from-run' }));
+        chatStore().set(activeRunAtom, makeRun({ thread_id: 'thread-from-run' }));
 
         store.set(closeWSConnectionForShutdownAtom, 'Zotero quitting', REMEMBER);
 
@@ -457,8 +458,8 @@ describe('remembering the chat a shutdown interrupted', () => {
     });
 
     it('records nothing when the caller keeps the window\'s run on screen', () => {
-        store.set(activeRunAtom, makeRun());
-        store.set(currentThreadIdAtom, 'thread-1');
+        chatStore().set(activeRunAtom, makeRun());
+        chatStore().set(currentThreadIdAtom, 'thread-1');
 
         // Another main window remains: no options, so no record.
         store.set(closeWSConnectionForShutdownAtom, 'Main window closed');
@@ -469,7 +470,7 @@ describe('remembering the chat a shutdown interrupted', () => {
     });
 
     it('records nothing when no run was live', () => {
-        store.set(currentThreadIdAtom, 'thread-1');
+        chatStore().set(currentThreadIdAtom, 'thread-1');
 
         store.set(closeWSConnectionForShutdownAtom, 'Zotero quitting', REMEMBER);
 
@@ -478,8 +479,8 @@ describe('remembering the chat a shutdown interrupted', () => {
     });
 
     it('records nothing for a run that already finished', () => {
-        store.set(activeRunAtom, makeRun({ status: 'completed' }));
-        store.set(currentThreadIdAtom, 'thread-1');
+        chatStore().set(activeRunAtom, makeRun({ status: 'completed' }));
+        chatStore().set(currentThreadIdAtom, 'thread-1');
 
         store.set(closeWSConnectionForShutdownAtom, 'Zotero quitting', REMEMBER);
 
@@ -487,7 +488,7 @@ describe('remembering the chat a shutdown interrupted', () => {
     });
 
     it('records nothing before the backend has assigned a thread id', () => {
-        store.set(activeRunAtom, makeRun({ thread_id: undefined as any }));
+        chatStore().set(activeRunAtom, makeRun({ thread_id: undefined as any }));
 
         store.set(closeWSConnectionForShutdownAtom, 'Zotero quitting', REMEMBER);
 
@@ -496,8 +497,8 @@ describe('remembering the chat a shutdown interrupted', () => {
 
     it('records nothing it could not attribute to an account', () => {
         store.set(sessionAtom, null);
-        store.set(activeRunAtom, makeRun());
-        store.set(currentThreadIdAtom, 'thread-1');
+        chatStore().set(activeRunAtom, makeRun());
+        chatStore().set(currentThreadIdAtom, 'thread-1');
 
         store.set(closeWSConnectionForShutdownAtom, 'Zotero quitting', REMEMBER);
 
@@ -506,8 +507,8 @@ describe('remembering the chat a shutdown interrupted', () => {
 
     it('records nothing when this bundle owns neither socket nor connect loop', () => {
         isConnectedMock.mockReturnValue(false);
-        store.set(activeRunAtom, makeRun());
-        store.set(currentThreadIdAtom, 'thread-1');
+        chatStore().set(activeRunAtom, makeRun());
+        chatStore().set(currentThreadIdAtom, 'thread-1');
 
         store.set(closeWSConnectionForShutdownAtom, 'Main window closed', REMEMBER);
 
@@ -515,8 +516,8 @@ describe('remembering the chat a shutdown interrupted', () => {
     });
 
     it('is not written by the user-initiated close', async () => {
-        store.set(activeRunAtom, makeRun());
-        store.set(currentThreadIdAtom, 'thread-1');
+        chatStore().set(activeRunAtom, makeRun());
+        chatStore().set(currentThreadIdAtom, 'thread-1');
 
         await store.set(closeWSConnectionAtom);
 
@@ -530,9 +531,9 @@ describe('after the client has been told to go away', () => {
         closeMock.mockReset();
         connectMock.mockReset();
         clearClientShutDownLatch();
-        store.set(activeRunAtom, null);
-        store.set(threadRunsAtom, []);
-        store.set(isWSChatPendingAtom, false);
+        chatStore().set(activeRunAtom, null);
+        chatStore().set(threadRunsAtom, []);
+        chatStore().set(isWSChatPendingAtom, false);
     });
 
     it('does not connect for a run that was still being prepared', async () => {

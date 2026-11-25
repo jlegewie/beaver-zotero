@@ -1,16 +1,17 @@
 /**
  * The run host of a Zotero renderer: what the run engine reaches in the window
- * it runs for (selections, popups and dialogs, display enrichment of stream
- * events, and the window-side effects of a run).
+ * it runs for (selections, popups and dialogs, agent actions, display
+ * enrichment of stream events, and the window-side effects of a run).
  */
 
-import type { Getter, Setter } from 'jotai';
-import { store } from '../store';
+import type { createStore, Setter } from 'jotai';
 import { logger } from '@beaver/agent-core/platform/logger';
 import type { WSMissingZoteroDataEvent } from '@beaver/agent-core/protocol/agentProtocol';
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { extractZoteroReferencesFromToolCall } from '@beaver/agent-core/run-state/toolLabels';
-import type { RunHost, UndoConfirmResult } from '../agentRuns/runHost';
+import { runEffect, type RunHost, type UndoConfirmResult } from '../agentRuns/runHost';
+import { chatFillsAtom } from '@beaver/agent-core/run-state/tableChatFills';
+import { mergePageLabelsByAttachmentIdAtom } from '@beaver/agent-core/citations/atoms';
 import type { AgentRun } from '@beaver/agent-core/agents/types';
 import { collectTableArtifacts } from '@beaver/agent-core/run-state/tableResults';
 import { getHostWindow, tryGetWindowRuntime } from './windowRuntime';
@@ -44,6 +45,12 @@ import { wasItemAddedBeforeLastSync } from '../utils/sourceUtils';
 import { getAppliedPdfAnnotationCount } from '../agents/agentActionCounts';
 import {
     AgentAction,
+    addAgentActionsAtom,
+    upsertAgentActionsAtom,
+    threadAgentActionsAtom,
+    recordUndeliveredActionsAtom,
+    resumeUnrecordedResultsAtom,
+    withUnrecordedResults,
     isAnnotationAgentAction,
     isEditAnnotationsAgentAction,
     isEditMetadataAgentAction,
@@ -300,11 +307,11 @@ type MissingItemReason =
  * Determine why an item is missing from the backend.
  * Returns the most likely reason based on item status checks.
  */
-async function determineMissingReason(ref: ZoteroItemReference, userId: string | null): Promise<MissingItemReason> {
+async function determineMissingReason(view: Store, ref: ZoteroItemReference, userId: string | null): Promise<MissingItemReason> {
     try {
         // Get searchable libraries from store
-        const searchableLibraryIds = store.get(searchableLibraryIdsAtom);
-        const syncWithZotero = store.get(syncWithZoteroAtom);
+        const searchableLibraryIds = view.get(searchableLibraryIdsAtom);
+        const syncWithZotero = view.get(syncWithZoteroAtom);
         const resolvedLibraryId = resolveLibraryRef(ref);
         if (!resolvedLibraryId) {
             return 'library_unavailable';
@@ -385,6 +392,7 @@ const MISSING_REASON_MESSAGES: Record<MissingItemReason, string> = {
  * Determines reasons for all items and creates a warning with a list of reasons and counts.
  */
 async function handleMissingZoteroData(
+    view: Store,
     event: WSMissingZoteroDataEvent,
     userId: string | null,
     addWarning: (params: { run_id: string; type: string; message: string; data?: Record<string, unknown> }) => void
@@ -395,7 +403,7 @@ async function handleMissingZoteroData(
     const reasons = await Promise.all(
         event.items.map(async (item) => ({
             item,
-            reason: await determineMissingReason(item, userId)
+            reason: await determineMissingReason(view, item, userId)
         }))
     );
     logger('handleMissingZoteroData: reasons', reasons, 1);
@@ -452,22 +460,36 @@ async function handleMissingZoteroData(
     });
 }
 
-/** The run host for this renderer. */
-export function createWindowRunHost(): RunHost {
+type Store = ReturnType<typeof createStore>;
+
+/** The run host for the renderer whose store is `view`. */
+export function createWindowRunHost(view: Store): RunHost {
+    /**
+     * The window's setter, gated by a run's guarded setter: each write happens
+     * only while that setter would still write the run's own state.
+     */
+    const windowSet = (set: Setter): Setter => ((...args: Parameters<Setter>) => {
+        let result: unknown;
+        runEffect(set, () => { result = (view.set as Setter)(...args); });
+        return result;
+    }) as Setter;
     return {
         windowId: () => tryGetWindowRuntime()?.id,
-        getModel: (get: Getter) => get(selectedModelAtom),
-        getUserId: (get: Getter) => get(userIdAtom),
-        navigationSeq: (get: Getter) => get(threadNavigationSeqAtom),
-        actionChanges: (get: Getter, actionId: string) => get(mergeItemsChoicesAtom)[actionId],
+        getModel: () => view.get(selectedModelAtom),
+        getUserId: () => view.get(userIdAtom),
+        navigationSeq: () => view.get(threadNavigationSeqAtom),
+        actionChanges: (actionId: string) => view.get(mergeItemsChoicesAtom)[actionId],
+        agentActions: () => view.get(threadAgentActionsAtom),
+        chatFillSnapshot: (jobId: string) => view.get(chatFillsAtom).get(jobId)?.snapshot,
 
-        notify: (set, notice) => set(addPopupMessageAtom, notice),
-        addWarning: (set, warning) => set(addWarningAtom, warning),
+        notify: (set, notice) => windowSet(set)(addPopupMessageAtom, notice),
+        addWarning: (set, warning) => windowSet(set)(addWarningAtom, warning),
         reportMissingZoteroData: (set, event) => {
             handleMissingZoteroData(
+                view,
                 event,
-                store.get(userIdAtom),
-                (params) => set(addWarningAtom, params),
+                view.get(userIdAtom),
+                (params) => windowSet(set)(addWarningAtom, params),
             ).catch(err =>
                 logger(`WS onMissingZoteroData: Failed to handle missing data: ${err}`, 1)
             );
@@ -481,9 +503,9 @@ export function createWindowRunHost(): RunHost {
 
         dismissDiffPreview: () => dismissDiffPreview(),
         reloadThread: (threadId, userId) =>
-            store.set(loadThreadAtom, { user_id: userId, threadId, preserveDraft: true }),
-        dropPromptEditDrafts: (set: Setter, runIds) => {
-            set(promptEditDraftsAtom, (prev) => {
+            view.set(loadThreadAtom, { user_id: userId, threadId, preserveDraft: true }),
+        dropPromptEditDrafts: (set, runIds) => {
+            windowSet(set)(promptEditDraftsAtom, (prev) => {
                 const next = { ...prev };
                 let changed = false;
                 for (const id of runIds) {
@@ -500,17 +522,18 @@ export function createWindowRunHost(): RunHost {
             // backoff or the OS online event hasn't cleared it), force a
             // refresh so the header indicator drops promptly instead of
             // lingering until the next backoff tick.
-            if (store.get(profileSyncStatusAtom).kind !== 'ok') {
+            if (view.get(profileSyncStatusAtom).kind !== 'ok') {
                 triggerProfileRefresh();
             }
         },
-        recordFeatureCredit: (set, grant) => set(recordFeatureCreditGrantAtom, grant),
+        recordFeatureCredit: (set, grant) => windowSet(set)(recordFeatureCreditGrantAtom, grant),
         markHighTokenUsage: (set, runId) =>
-            set(backendHighTokenUsageRunsAtom, (prev) => ({ ...prev, [runId]: true })),
-        citationsChanged: (set) => set(maybeShowCitationTipAtom),
+            windowSet(set)(backendHighTokenUsageRunsAtom, (prev) => ({ ...prev, [runId]: true })),
+        citationsChanged: (set) => windowSet(set)(maybeShowCitationTipAtom),
         preloadPageLabels: (citations) => preloadPageLabelsForCitations(citations),
+        mergePageLabels: (labels) => view.set(mergePageLabelsByAttachmentIdAtom, labels),
         markExternalReferenceImported: (set, externalId, ref: ZoteroItemReference) =>
-            set(markExternalReferenceImportedAtom, externalId, ref),
+            windowSet(set)(markExternalReferenceImportedAtom, externalId, ref),
         undoAppliedActions: undoAppliedActionsInReverse,
         cleanupTemporaryAnnotations: async (logPrefix) => {
             // Reader-only citation highlights go before the runs that created them.
@@ -521,6 +544,18 @@ export function createWindowRunHost(): RunHost {
             }
         },
         leaveJobWaitOnClose: () => leaveJobWait({ closing: tryGetWindowRuntime(true)?.hostWindow ?? null }),
+
+        addAgentActions: (set, actions) => windowSet(set)(addAgentActionsAtom, actions),
+        upsertAgentActions: (set, actions) => windowSet(set)(upsertAgentActionsAtom, actions),
+        removeRunActions: (set, runIds) =>
+            windowSet(set)(threadAgentActionsAtom, (prev) => prev.filter((action) => !runIds.includes(action.run_id))),
+        replaceAgentActions: (set, actions, runIds) => runEffect(set, () => {
+            view.set(threadAgentActionsAtom, withUnrecordedResults(view.get, view.set, actions, runIds));
+            view.set(resumeUnrecordedResultsAtom);
+        }),
+        // Whether or not this window still owns the run.
+        recordUndeliveredActions: (info, revocationsAtRunStart) =>
+            void view.set(recordUndeliveredActionsAtom, info, revocationsAtRunStart),
 
         enrichToolCall: (part) => {
             const itemReferences = extractZoteroReferencesFromToolCall(part);
@@ -539,7 +574,7 @@ export function createWindowRunHost(): RunHost {
                 }
             })();
         },
-        processToolReturn: (part, set) => processToolReturnResults(part, set),
+        processToolReturn: (part, set) => processToolReturnResults(part, windowSet(set)),
         upgradeToolReturn: async (part, toolCallArgs) => { await upgradeToolReturn(part, toolCallArgs); },
         prepareAgentActions: async (runId, actions) => {
             await loadItemDataForAgentActions(actions).catch(err =>

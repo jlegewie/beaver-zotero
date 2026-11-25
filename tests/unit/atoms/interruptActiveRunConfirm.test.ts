@@ -218,6 +218,7 @@ import { isWSChatPendingAtom } from '../../../react/atoms/agentRunAtoms';
 import { jobWaitAtom } from '../../../react/atoms/jobWait';
 import { chatFillsAtom, recordChatFill } from '@beaver/agent-core/run-state/tableChatFills';
 import type { TableFillJobSnapshot } from '@beaver/agent-core/protocol/tableFillProtocol';
+import { installStoreRunSession } from '../../helpers/runSession';
 
 const run = (status: string) => ({ id: 'run-1', status });
 
@@ -238,6 +239,7 @@ describe('interrupt-active-run confirm', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         store = createStore();
+        installStoreRunSession(store);
         getPrefMock.mockReturnValue(false);
         confirmMock.mockReturnValue(true);
         leaveRunMock.mockReturnValue(false);
