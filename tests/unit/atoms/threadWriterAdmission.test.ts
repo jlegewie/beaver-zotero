@@ -1,8 +1,4 @@
-import {
-    reconcileThread,
-    threadAdmissionAtom,
-    threadConflictAtom,
-} from "../../../react/runtime/threadAdmission";
+import { reconcileThread, threadAdmissionAtom, threadConflictAtom } from "../../../src/services/agentRuns/threadAdmission";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { REATTACH_FAILED_MESSAGE, type ConnectionFailureEvidence } from "@beaver/agent-core/transport/connectionFailure";
@@ -88,7 +84,7 @@ vi.mock('../../../react/utils/annotationUtils', () => ({
 
 import { newThreadAtom, loadThreadAtom } from '../../../react/atoms/threads';
 import { citationsAtom } from '@beaver/agent-core/citations/atoms';
-import { runApprovalPolicyAtom } from '../../../react/atoms/runApprovalPolicy';
+import { runApprovalPolicyAtom } from '../../../src/services/agentRuns/runApprovalPolicy';
 import { streamingDoneRunIdsAtom, approvalResponseIntentsAtom, closeWSConnectionAtom, isWSConnectedAtom } from '../../../react/atoms/agentRunAtoms';
 import { refreshFinishedChatAvailabilityAtom, canOpenFinishedChatAtom } from "../../../react/runtime/windowCommands";
 import { agentRunService, AgentConnectionError } from "@beaver/agent-core/transport/agentService";
@@ -110,7 +106,7 @@ import { sessionAtom } from "../../../react/atoms/auth";
 
 import { ThreadPresence } from "../../../src/services/threads/threadPresence";
 import { initializeWindowRuntime } from "../../../react/runtime/windowRuntime";
-import { releaseWriter } from "../../../react/runtime/threadWriter";
+import { releaseWriter } from "../../../src/services/agentRuns/threadWriter";
 import { getCredentialGeneration } from "@beaver/agent-core/transport/credentials";
 import {
     currentThreadIdAtom,
@@ -122,21 +118,22 @@ import {
     currentMessageCollectionsAtom,
     currentMessageExternalFilesAtom,
 } from "../../../react/atoms/messageComposition";
-import { threadPresenceAtom, threadHistoryStaleAtom, threadReadOnlyAtom, otherThreadWriterAtom, viewedHistoryRevisionAtom } from "../../../react/runtime/threadProjection";
+import { threadPresenceAtom, threadHistoryStaleAtom, threadReadOnlyAtom, otherThreadWriterAtom } from "../../../react/runtime/threadProjection";
+import { viewedHistoryRevisionAtom } from "../../../src/services/agentRuns/threadAdmission";
 import {
     clearClientShutDownLatch,
     closeWSConnectionForShutdownAtom,
     retryPendingRunIdAtom,
 } from "../../../react/atoms/agentRunAtoms";
 import { chatStore } from '../../helpers/runSession';
-import { getRunSession } from '../../../react/agentRuns/runSession';
+import { getRunSession } from '../../../src/services/agentRuns/runSession';
 const runtime = { id: "a", status: "ready", hostWindow: {} } as any;
 initializeWindowRuntime(runtime);
 let presence: ThreadPresence;
 beforeEach(() => {
     chatStore().set(threadAdmissionAtom, null);
     chatStore().set(threadConflictAtom, null);
-    releaseWriter();
+    releaseWriter(getRunSession());
     vi.clearAllMocks();
     vi.mocked(agentRunService.getThreadRuns).mockReset().mockResolvedValue({
         runs: [], tail_run_id: null, activity: { state: "idle", run_id: null },

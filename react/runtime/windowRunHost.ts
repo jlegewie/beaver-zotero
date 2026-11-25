@@ -7,9 +7,10 @@
 import type { createStore, Setter } from 'jotai';
 import { logger } from '@beaver/agent-core/platform/logger';
 import type { WSMissingZoteroDataEvent } from '@beaver/agent-core/protocol/agentProtocol';
+import { pendingApprovalFromRequest, type PendingApproval } from '@beaver/agent-core/run-state/pendingApprovals';
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { extractZoteroReferencesFromToolCall } from '@beaver/agent-core/run-state/toolLabels';
-import { runEffect, type RunHost, type UndoConfirmResult } from '../agentRuns/runHost';
+import { runEffect, type RunHost, type UndoConfirmResult } from '../../src/services/agentRuns/runHost';
 import { chatFillsAtom } from '@beaver/agent-core/run-state/tableChatFills';
 import { mergePageLabelsByAttachmentIdAtom } from '@beaver/agent-core/citations/atoms';
 import type { AgentRun } from '@beaver/agent-core/agents/types';
@@ -32,7 +33,8 @@ import { markExternalReferenceImportedAtom } from '../atoms/externalReferences';
 import { BeaverTemporaryAnnotations } from '../utils/annotationUtils';
 import { leaveJobWait } from '../atoms/jobLeave';
 import { dismissDiffPreview } from '../utils/noteEditorDiffPreview';
-import { notifyBatchApproval, notifyCreditConfirmation, notifyRunComplete, notifyUserQuestion } from '../../src/services/systemNotifications';
+import { clearDiffPreviewNoteKey, noteLibraryIdFromActionData, updateDiffPreviewForNote } from '../utils/diffPreviewCoordinator';
+import { notifyApprovalRequest, notifyBatchApproval, notifyCreditConfirmation, notifyRunComplete, notifyUserQuestion } from '../../src/services/systemNotifications';
 import { processToolReturnResults } from '../agents/toolResultProcessing';
 import { upgradeToolReturn } from '../compat/legacyToolResults';
 import { loadItemDataForAgentActions, autoApplyAnnotationAgentActions } from '../utils/agentActionUtils';
@@ -50,6 +52,7 @@ import {
     threadAgentActionsAtom,
     recordUndeliveredActionsAtom,
     resumeUnrecordedResultsAtom,
+    retryUnrecordedActionsNow,
     withUnrecordedResults,
     isAnnotationAgentAction,
     isEditAnnotationsAgentAction,
@@ -462,6 +465,23 @@ async function handleMissingZoteroData(
 
 type Store = ReturnType<typeof createStore>;
 
+/**
+ * Show the session's pending edits of the notes `approvals` target in the note
+ * editor, once per note. A target may be named portably only, so its library
+ * is resolved rather than read off the numeric id.
+ */
+function refreshNotePreviews(approvals: readonly PendingApproval[]): void {
+    const notes = new Map<string, { libraryId: number; zoteroKey: string }>();
+    for (const approval of approvals) {
+        if (approval.actionType !== 'edit_note' && approval.actionType !== 'edit_note_batch') continue;
+        const libraryId = noteLibraryIdFromActionData(approval.actionData);
+        const zoteroKey = approval.actionData?.zotero_key;
+        if (libraryId == null || !zoteroKey) continue;
+        notes.set(`${libraryId}-${zoteroKey}`, { libraryId, zoteroKey });
+    }
+    for (const { libraryId, zoteroKey } of notes.values()) updateDiffPreviewForNote(libraryId, zoteroKey);
+}
+
 /** The run host for the renderer whose store is `view`. */
 export function createWindowRunHost(view: Store): RunHost {
     /**
@@ -501,6 +521,16 @@ export function createWindowRunHost(view: Store): RunHost {
         notifyBatchApproval: (event) => notifyBatchApproval(event),
         notifyUserQuestion: (event) => notifyUserQuestion(event),
 
+        approvalRequested: (event, { silent }) => {
+            refreshNotePreviews([pendingApprovalFromRequest(event)]);
+            // Tell the user when they can't see the approval (e.g. working in another app).
+            if (!silent) notifyApprovalRequest(event);
+        },
+        approvalsRemoved: (removed) => refreshNotePreviews(removed),
+        approvalsCleared: () => {
+            dismissDiffPreview();
+            clearDiffPreviewNoteKey();
+        },
         dismissDiffPreview: () => dismissDiffPreview(),
         reloadThread: (threadId, userId) =>
             view.set(loadThreadAtom, { user_id: userId, threadId, preserveDraft: true }),
@@ -525,6 +555,8 @@ export function createWindowRunHost(view: Store): RunHost {
             if (view.get(profileSyncStatusAtom).kind !== 'ok') {
                 triggerProfileRefresh();
             }
+            // Re-send acknowledgements of applied actions the server has yet to record.
+            retryUnrecordedActionsNow();
         },
         recordFeatureCredit: (set, grant) => windowSet(set)(recordFeatureCreditGrantAtom, grant),
         markHighTokenUsage: (set, runId) =>
@@ -575,7 +607,7 @@ export function createWindowRunHost(view: Store): RunHost {
             })();
         },
         processToolReturn: (part, set) => processToolReturnResults(part, windowSet(set)),
-        upgradeToolReturn: async (part, toolCallArgs) => { await upgradeToolReturn(part, toolCallArgs); },
+        upgradeToolReturn: (part, toolCallArgs) => upgradeToolReturn(part, toolCallArgs),
         prepareAgentActions: async (runId, actions) => {
             await loadItemDataForAgentActions(actions).catch(err =>
                 logger(`WS agent actions: Failed to load item data for agent actions: ${err}`, 1)

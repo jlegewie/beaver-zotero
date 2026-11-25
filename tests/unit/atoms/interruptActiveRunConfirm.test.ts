@@ -153,7 +153,7 @@ vi.mock('../../../react/atoms/agentRunAtoms', async () => {
     };
 });
 
-vi.mock('../../../react/atoms/parkedRuns', async () => {
+vi.mock('../../../src/services/agentRuns/parkedRuns', async () => {
     const { atom } = await import('jotai');
     return {
         clearParkedAnswersAtom: atom(null, () => {}),
@@ -215,7 +215,7 @@ import {
 import { isLibraryTabAtom } from '../../../react/atoms/ui';
 import { activeRunAtom } from '@beaver/agent-core/run-state/atoms';
 import { isWSChatPendingAtom } from '../../../react/atoms/agentRunAtoms';
-import { jobWaitAtom } from '../../../react/atoms/jobWait';
+import { jobWaitAtom } from '../../../src/services/agentRuns/jobWait';
 import { chatFillsAtom, recordChatFill } from '@beaver/agent-core/run-state/tableChatFills';
 import type { TableFillJobSnapshot } from '@beaver/agent-core/protocol/tableFillProtocol';
 import { installStoreRunSession } from '../../helpers/runSession';

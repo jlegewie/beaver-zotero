@@ -1,7 +1,7 @@
 /**
  * Chat runs as the window sees them.
  *
- * Execution lives in the run engine (`react/agentRuns/runEngine`), whose atoms
+ * Execution lives in the run engine (`src/services/agentRuns/runEngine`), whose atoms
  * this module re-exports. What stays here is the window's half of a send:
  * assembling the prompt from the composer and the window's context, and
  * clearing the composer once the run is accepted. Importing this module
@@ -54,15 +54,15 @@ import { uint8ArrayToBase64 } from '../utils/fileUtils';
 import { userIdAtom } from './auth';
 import { sanitizeMessageFiltersForSearchableLibraries } from '../utils/messageFilters';
 import { clearAgentActionsAtom, resetAgentActionSelectorCaches } from '../agents/agentActions';
-import { clearParkedAnswersAtom } from './parkedRuns';
+import { clearParkedAnswersAtom } from '../../src/services/agentRuns/parkedRuns';
 import { clearWarningsAtom } from './warnings';
-import { clearRunApprovalPolicyAtom } from './runApprovalPolicy';
+import { clearRunApprovalPolicyAtom } from '../../src/services/agentRuns/runApprovalPolicy';
 import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
 import { isTargetInLibraries } from '../utils/zoteroReferences';
 import { prewarmMuPDFWorker } from '../../src/beaver-extract';
 import { isRejectedItemValidation, itemValidationResultsAtom } from './itemValidation';
 import '../runtime/windowRunSession';
-import { getRunSession, runSessionStore } from '../agentRuns/runSession';
+import { getRunSession, runSessionStore } from '../../src/services/agentRuns/runSession';
 import {
     buildModelSelectionOptions,
     isWSChatPendingAtom,
@@ -74,9 +74,9 @@ import {
     startMessageRun,
     withThreadWriter,
     wsErrorAtom,
-} from '../agentRuns/runEngine';
+} from '../../src/services/agentRuns/runEngine';
 
-export * from '../agentRuns/runEngine';
+export * from '../../src/services/agentRuns/runEngine';
 
 // =============================================================================
 // Prompt assembly

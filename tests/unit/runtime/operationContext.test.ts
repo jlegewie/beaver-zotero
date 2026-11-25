@@ -15,7 +15,7 @@ import { captureOperationContext } from '../../../react/runtime/operationContext
 import { activeRunAtom } from '@beaver/agent-core/run-state/atoms';
 import { externalReferenceMappingAtom, externalReferenceItemMappingAtom } from '@beaver/agent-core/citations/externalReferences';
 import { currentThreadIdAtom } from '../../../react/atoms/threads';
-import { runApprovalPolicyAtom } from '../../../react/atoms/runApprovalPolicy';
+import { runApprovalPolicyAtom } from '../../../src/services/agentRuns/runApprovalPolicy';
 
 beforeEach(() => {
     vi.clearAllMocks();

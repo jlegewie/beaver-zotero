@@ -22,7 +22,7 @@ import type { TableFillJobSnapshot } from '@beaver/agent-core/protocol/tableFill
 import { currentThreadIdAtom } from '@beaver/agent-core/run-state/atoms';
 import { chatFillsAtom, recordChatFill } from '@beaver/agent-core/run-state/tableChatFills';
 import { store } from '../../../react/store';
-import { jobWaitAtom } from '../../../react/atoms/jobWait';
+import { jobWaitAtom } from '../../../src/services/agentRuns/jobWait';
 import { confirmLeaveJobWaitAtom, fillLeaveStops, leaveJobWait } from '../../../react/atoms/jobLeave';
 import { chatStore } from '../../helpers/runSession';
 

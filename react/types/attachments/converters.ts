@@ -128,15 +128,22 @@ export function externalFileRecordToAttachment(record: ExternalFileRecord): Exte
 }
 
 /**
- * Fills optional display stubs on legacy message attachments from a loaded item.
+ * A legacy message attachment with its missing display stubs filled from a
+ * loaded item: a copy, or `att` itself when it lacks none.
  */
-export function enrichMessageAttachmentStub(att: MessageAttachment, item: Zotero.Item): void {
+export function enrichMessageAttachmentStub(att: MessageAttachment, item: Zotero.Item): MessageAttachment {
     if (att.type === "item") {
-        if (!att.item) att.item = safeStub(() => serializeItemStub(item));
-    } else if (att.type === "source") {
-        if (!att.attachment) att.attachment = safeStub(() => serializeAttachmentStub(item));
-        if (!att.parent_item) {
-            att.parent_item = safeStub(() => item.parentItem ? serializeItemStub(item.parentItem) : undefined);
-        }
+        if (att.item) return att;
+        return { ...att, item: safeStub(() => serializeItemStub(item)) };
     }
+    if (att.type === "source") {
+        if (att.attachment && att.parent_item) return att;
+        return {
+            ...att,
+            attachment: att.attachment ?? safeStub(() => serializeAttachmentStub(item)),
+            parent_item: att.parent_item
+                ?? safeStub(() => item.parentItem ? serializeItemStub(item.parentItem) : undefined),
+        };
+    }
+    return att;
 }

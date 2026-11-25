@@ -48,9 +48,9 @@ import {
     getPendingApprovalIdsCoveredByFullAccess,
     isFullAccessGrantedForRun,
     runApprovalPolicyAtom,
-} from '../../atoms/runApprovalPolicy';
+} from '../../../src/services/agentRuns/runApprovalPolicy';
 import { isSidebarVisibleAtom } from '../../atoms/ui';
-import { jobWaitAtom, type JobWait } from '../../atoms/jobWait';
+import { jobWaitAtom, type JobWait } from '../../../src/services/agentRuns/jobWait';
 import { chatFillsAtom } from '@beaver/agent-core/run-state/tableChatFills';
 import {
     fillStateFromSnapshot,

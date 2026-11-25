@@ -12,7 +12,8 @@ import {
     reattachResolutionView,
     type ReattachResolutionView,
 } from '@beaver/agent-core/run-state/runResolution';
-import { admissionUnreachableAtom, threadAdmissionAtom } from '../../runtime/threadAdmission';
+import { admissionUnreachableAtom } from '../../runtime/threadAdmission';
+import { threadAdmissionAtom } from '../../../src/services/agentRuns/threadAdmission';
 
 /**
  * What a run whose reattach failed shows instead of its connection error, or

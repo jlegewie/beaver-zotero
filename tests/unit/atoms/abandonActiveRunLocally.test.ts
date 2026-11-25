@@ -80,9 +80,9 @@ import { pendingQuestionsAtom } from '@beaver/agent-core/run-state/pendingQuesti
 import { pendingCreditConfirmationsAtom } from '@beaver/agent-core/run-state/pendingCreditConfirmations';
 import type { AgentRun } from '@beaver/agent-core/agents/types';
 import { pendingApprovalsAtom } from '../../../react/agents/agentActions';
-import { runApprovalPolicyAtom } from '../../../react/atoms/runApprovalPolicy';
+import { runApprovalPolicyAtom } from '../../../src/services/agentRuns/runApprovalPolicy';
 import { store } from '../../../react/store';
-import { jobWaitAtom } from '../../../react/atoms/jobWait';
+import { jobWaitAtom } from '../../../src/services/agentRuns/jobWait';
 import { sessionAtom } from '../../../react/atoms/auth';
 import { AgentConnectionError } from '@beaver/agent-core/transport/agentService';
 import {

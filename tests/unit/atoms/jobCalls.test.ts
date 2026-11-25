@@ -34,9 +34,9 @@ import type { TableFillJobSnapshot } from '@beaver/agent-core/protocol/tableFill
 import { activeRunAtom, currentThreadIdAtom, threadRunsAtom } from '@beaver/agent-core/run-state/atoms';
 import { chatFillsAtom, recordChatFill } from '@beaver/agent-core/run-state/tableChatFills';
 import { store } from '../../../react/store';
-import { jobWaitAtom, openAnswerRunIdAtom, settleJobWait } from '../../../react/atoms/jobWait';
+import { jobWaitAtom, openAnswerRunIdAtom, settleJobWait } from '../../../src/services/agentRuns/jobWait';
 import { runningChatJobsAtom, stopChatJobsAtom, watchJobCalls } from '../../../react/atoms/jobCalls';
-import { isThreadParkedAtom } from '../../../react/atoms/parkedRuns';
+import { isThreadParkedAtom } from '../../../src/services/agentRuns/parkedRuns';
 import { chatStore } from '../../helpers/runSession';
 
 const THREAD = 'thread-1';
