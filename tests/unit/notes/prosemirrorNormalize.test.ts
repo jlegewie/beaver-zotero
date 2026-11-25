@@ -312,6 +312,40 @@ describe('normalizeNoteHtml (ProseMirror roundtrip)', () => {
     });
 
     // -------------------------------------------------------------------------
+    // Runs of spaces (written like Zotero's note editor writes them)
+    // -------------------------------------------------------------------------
+    describe('runs of spaces', () => {
+        it('writes double spaces in a code block as a space and a non-breaking space', () => {
+            const html = '<div data-schema-version="9"><pre>a  b   c</pre></div>';
+            const result = normalizeNoteHtml(html);
+            expect(result).toContain('<pre>a &nbsp;b &nbsp; c</pre>');
+            expect(normalizeNoteHtml(result)).toBe(result);
+        });
+
+        it('writes double spaces in marked text the same way', () => {
+            const html = '<div data-schema-version="9"><pre>x  <strong>y  z</strong></pre></div>';
+            const result = normalizeNoteHtml(html);
+            expect(result).toContain('<pre>x &nbsp;<strong>y &nbsp;z</strong></pre>');
+            expect(normalizeNoteHtml(result)).toBe(result);
+        });
+
+        it('keeps the spaces in math, which renders its own text', () => {
+            const html = '<div data-schema-version="9"><pre class="math">$$a  b$$</pre><p><span class="math">$c  d$</span></p></div>';
+            const result = normalizeNoteHtml(html);
+            expect(result).toContain('<pre class="math">$$a  b$$</pre>');
+            expect(result).toContain('<span class="math">$c  d$</span>');
+        });
+
+        it('leaves single spaces and text without spaces alone', () => {
+            const html = '<div data-schema-version="9"><pre>a b</pre><p>one two</p></div>';
+            const result = normalizeNoteHtml(html);
+            expect(result).toContain('<pre>a b</pre>');
+            expect(result).toContain('<p>one two</p>');
+            expect(result).not.toContain('&nbsp;');
+        });
+    });
+
+    // -------------------------------------------------------------------------
     // NFC normalization
     // -------------------------------------------------------------------------
     describe('NFC normalization', () => {

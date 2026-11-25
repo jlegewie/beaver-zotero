@@ -70,7 +70,7 @@
         "p-queue": "^9.0.1",
         "pako": "^1.0.11",
         "prop-types": "^15.8.1",
-        "prosemirror-model": "^1.25.4",
+        "prosemirror-model": "^1.25.13",
         "prosemirror-state": "^1.4.4",
         "prosemirror-tables": "^1.8.5",
         "prosemirror-transform": "^1.12.6",
