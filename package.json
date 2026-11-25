@@ -53,8 +53,8 @@
         "test:cli-smoke": "vitest run --config vitest.smoke.config.ts"
     },
     "dependencies": {
-        "@lexical/react": "^0.43.0",
-        "@lexical/utils": "^0.43.0",
+        "@lexical/react": "^0.53.0",
+        "@lexical/utils": "^0.53.0",
         "@supabase/supabase-js": "^2.119.0",
         "date-fns": "^4.4.0",
         "diff": "^8.0.4",
