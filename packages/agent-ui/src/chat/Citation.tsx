@@ -14,6 +14,7 @@ import {
 } from '@beaver/agent-core/citations/externalReferences';
 import { pageLabelsByAttachmentIdAtom, externalFileLocalPathsAtom } from '@beaver/agent-core/citations/atoms';
 import { textFragmentUrl, webCitationExport } from '@beaver/agent-core/identity/webPages';
+import { formatRegistryDate } from '@beaver/agent-core/citations/externalRecordDisplay';
 import { useCitationMarker } from './useCitationMarker';
 import { getHost } from '../host';
 import type { CitationExportRender, CitationReaderTarget } from '../host/types';
@@ -176,22 +177,24 @@ function webPageUrl(vm: CitationViewModel): string | null {
     return textFragmentUrl(page.url, sentences, { isPdf: page.isPdf });
 }
 
-/** What the click on a web citation does: "Highlights passage on who.int". */
+/** The cited page's site: its publisher or domain, else the URL's host without "www.". */
+function webPageSite(vm: CitationViewModel): string | null {
+    const page = vm.webPage;
+    if (page?.site) return page.site;
+    try {
+        return page?.url ? new URL(page.url).hostname.replace(/^www\./, '') : null;
+    } catch {
+        return null;
+    }
+}
+
+/** What the click on a web citation does: "Highlights passage in browser". */
 function webPageAction(vm: CitationViewModel): string {
     const page = vm.webPage;
     const url = webPageUrl(vm);
     if (!page?.url || !url) return '';
-    let site = page.site;
-    if (!site) {
-        try {
-            site = new URL(page.url).hostname.replace(/^www\./, '');
-        } catch {
-            site = null;
-        }
-    }
-    const where = site ? ` on ${site}` : ' in browser';
-    if (url !== page.url) return `Highlights passage${where}`;
-    return page.isPdf ? `Opens PDF${where}` : `Opens page${where}`;
+    if (url !== page.url) return 'Highlights passage in browser';
+    return page.isPdf ? 'Opens PDF in browser' : 'Opens page in browser';
 }
 
 /**
@@ -526,22 +529,61 @@ const Citation: React.FC<CitationProps> = (props) => {
         </span>
     );
 
-    const pageTitle = !showItemInfo ? webPage?.title : null;
+    // A web page's preview reads like its row in web search results: the site's
+    // icon beside the title, which leads, and the site and date quietly below.
+    const pageHeader = webPage && !showItemInfo;
+    const pageSite = pageHeader ? webPageSite(vm) : null;
+    const pageDate = pageHeader ? formatRegistryDate(webPage.published) : null;
+    const pageTitle = pageHeader ? webPage.title : null;
     const citationPreview = (
         <span className="block" style={{ overflow: 'hidden' }}>
             <span className="px-3 py-15 display-flex flex-row border-bottom-quinary gap-2">
-                {/* A page's title names it better than its site and year; a long
-                    one is cut to two lines so the cited passage stays in view. */}
-                <span
-                    className="font-color-primary text-sm"
-                    style={{
-                        minWidth: 0,
-                        wordBreak: 'break-word',
-                        overflowWrap: 'anywhere',
-                        ...(pageTitle ? { display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2, overflow: 'hidden' } : {}),
-                    }}
-                >
-                    {pageTitle || citation}
+                {pageHeader && (
+                    // One title line tall (the zero-width space takes the title's
+                    // line height), so the icon centers on the title's first line.
+                    <span className="text-sm display-flex items-center" style={{ flexShrink: 0, alignSelf: 'flex-start' }}>
+                        {'\u200b'}
+                        {webPage.icon ? (
+                            // The site's own icon, an inline image the backend fetched. The
+                            // tooltip renders inside the answer's Markdown, whose images get a
+                            // fill; the icon keeps its transparency, and the tile behind it
+                            // turns white in dark mode.
+                            <span className="site-icon-tile">
+                                <img src={webPage.icon} alt="" width={16} height={16} style={{ display: 'block', objectFit: 'contain', backgroundColor: 'transparent' }} />
+                            </span>
+                        ) : (
+                            // As wide as an icon on its tile, so titles line up either way.
+                            <span className="display-flex items-center" style={{ width: 18, justifyContent: 'center' }}>
+                                <Icon icon={webPage.isPdf ? PdfIcon : GlobeIcon} className="font-color-secondary" />
+                            </span>
+                        )}
+                    </span>
+                )}
+                <span className="display-flex flex-col gap-05 min-w-0">
+                    {/* A page's title names it better than its site and year; a long
+                        one is cut to two lines so the cited passage stays in view. */}
+                    <span
+                        className="font-color-primary text-sm"
+                        style={{
+                            minWidth: 0,
+                            wordBreak: 'break-word',
+                            overflowWrap: 'anywhere',
+                            ...(pageTitle ? { display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2, overflow: 'hidden' } : {}),
+                        }}
+                    >
+                        {pageTitle || citation}
+                    </span>
+                    {(pageSite || pageDate) && (
+                        // A long publisher name is cut; the date after it stays whole.
+                        <span className="display-flex flex-row text-sm font-color-secondary min-w-0">
+                            {pageSite && <span className="truncate min-w-0">{pageSite}</span>}
+                            {pageDate && (
+                                <span style={{ flexShrink: 0, whiteSpace: 'nowrap' }}>
+                                    {pageSite ? `\u00a0·\u00a0${pageDate}` : pageDate}
+                                </span>
+                            )}
+                        </span>
+                    )}
                 </span>
                 <span className="flex-1" />
                 {!showItemInfo && hasLocatorDisplay && (
@@ -584,14 +626,7 @@ const Citation: React.FC<CitationProps> = (props) => {
                     webPage.url && (
                         <span className={`px-3 py-15 block ${showPreviewText ? 'border-top-quinary' : ''}`}>
                             <span className="display-flex flex-row items-center gap-15">
-                                {webPage.icon ? (
-                                    // The site's own icon, an inline image the backend fetched. The
-                                    // tooltip renders inside the answer's Markdown, whose images get a
-                                    // fill; an icon keeps its transparency.
-                                    <img src={webPage.icon} alt="" width={14} height={14} style={{ flexShrink: 0, borderRadius: 2, objectFit: 'contain', backgroundColor: 'transparent' }} />
-                                ) : (
-                                    <Icon icon={webPage.isPdf ? PdfIcon : GlobeIcon} className="font-color-secondary" style={{ flexShrink: 0 }} />
-                                )}
+                                <Icon icon={ArrowUpRightIcon} className="font-color-secondary" style={{ flexShrink: 0 }} />
                                 <span className="text-sm font-color-secondary" style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                     {webPageAction(vm)}
                                 </span>

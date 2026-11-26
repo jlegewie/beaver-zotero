@@ -347,11 +347,13 @@ describe('an imported web page', () => {
     // The preview shows the site's icon from the citation, and never loads one
     // from a URL, which would contact the site.
     it('shows the site icon the citation carries, and only an inline one', () => {
-        const page = { url: PAGE_URL, title: 'Obesity and overweight', site: 'who.int', content_type: 'html' };
+        const page = { url: PAGE_URL, title: 'Obesity and overweight', site: 'who.int', content_type: 'html', published: '2026-10-07' };
         const icon = 'data:image/webp;base64,UklGRhwAAABXRUJQ';
         openPreview(mountImportedPage({ ...page, icon }));
-        expect(document.querySelector('[role="tooltip"] img')?.getAttribute('src')).toBe(icon);
-        expect(tooltipText()).toContain('Highlights passage on who.int');
+        expect(document.querySelector('[role="tooltip"] .site-icon-tile img')?.getAttribute('src')).toBe(icon);
+        // The site line names the site and the date; the footer says what the click does.
+        expect(tooltipText().replace(/\u00a0/g, ' ')).toContain('who.int · Oct 7, 2026');
+        expect(tooltipText()).toContain('Highlights passage in browser');
 
         unmountAll();
         openPreview(mountImportedPage({ ...page, icon: 'https://www.who.int/favicon.ico' }));

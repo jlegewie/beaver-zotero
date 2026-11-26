@@ -37,6 +37,8 @@ export interface CitationWebPage {
     site: string | null;
     /** The site's icon, an inline image; never a URL, which would contact the site. */
     icon: string | null;
+    /** When the page was published: "YYYY-MM-DD", "YYYY-MM" or "YYYY". */
+    published: string | null;
 }
 
 /**
@@ -355,6 +357,7 @@ export function useCitationViewModel(props: Record<string, unknown>): CitationVi
             title: page?.title || null,
             site: page?.site || null,
             icon: siteIconSrc(page?.icon),
+            published: page?.published || null,
         };
     }, [isExternal, externalSourceId, metadata]);
 
