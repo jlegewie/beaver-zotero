@@ -1,11 +1,13 @@
 /**
- * Page labels preloaded for a run's citations reach the renderer even when the
- * preload settles after the run, once the callback setter no longer writes.
+ * A run's citation data reaches the renderer after the run's own writes are
+ * revoked: page labels preloaded for its citations, and the citations the
+ * backend resolves for a run the user stopped.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { preloadPageLabelsForCitations } = vi.hoisted(() => ({
+const { preloadPageLabelsForCitations, notifyRunComplete } = vi.hoisted(() => ({
     preloadPageLabelsForCitations: vi.fn(),
+    notifyRunComplete: vi.fn(),
 }));
 
 vi.mock('../../../react/utils/pageLabels', () => ({ preloadPageLabelsForCitations }));
@@ -27,10 +29,17 @@ vi.mock('../../../src/utils/zoteroUtils', () => ({
 
 vi.mock('../../../src/services/agentDataProvider', () => ({}));
 
+vi.mock('../../../src/services/systemNotifications', () => ({
+    notifyRunComplete,
+    notifyUserQuestion: vi.fn(),
+}));
+
 import type { Setter } from 'jotai';
-import type { WSRunCitationsEvent } from '@beaver/agent-core/protocol/agentProtocol';
+import type { WSRunCitationsEvent, WSRunCompleteEvent } from '@beaver/agent-core/protocol/agentProtocol';
+import type { AgentRun } from '@beaver/agent-core/agents/types';
 import { citationsAtom, pageLabelsByAttachmentIdAtom } from '@beaver/agent-core/citations/atoms';
-import { createWSCallbacks } from '../../../react/atoms/agentRunAtoms';
+import { activeRunAtom, threadRunsAtom } from '@beaver/agent-core/run-state/atoms';
+import { abandonActiveRunLocallyAtom, createWSCallbacks } from '../../../react/atoms/agentRunAtoms';
 import { store } from '../../../react/store';
 import { chatStore } from '../../helpers/runSession';
 
@@ -68,5 +77,107 @@ describe('run citation page labels', () => {
         await vi.waitFor(() => {
             expect(store.get(pageLabelsByAttachmentIdAtom)).toEqual({ 101: { 1: '1302' } });
         });
+    });
+});
+
+const CITATION = {
+    citation_id: 'c1',
+    resolved_ref: { kind: 'external', external_id: 'web-ABC' },
+};
+
+function streamingRun(): AgentRun {
+    return {
+        id: 'run-1',
+        thread_id: 'thread-1',
+        status: 'in_progress',
+        model_messages: [{
+            kind: 'response',
+            parts: [{ part_kind: 'text', content: 'A claim. <citation id="web-ABC"/>' }],
+        }],
+    } as unknown as AgentRun;
+}
+
+function partialRunComplete(): WSRunCompleteEvent {
+    return {
+        event: 'run_complete',
+        run_id: 'run-1',
+        usage: null,
+        cost: null,
+        citations: [CITATION],
+        agent_actions: null,
+    } as unknown as WSRunCompleteEvent;
+}
+
+/** Start a run, then press Stop: the callbacks the run streamed through are revoked. */
+function stopStreamingRun() {
+    chatStore().set(activeRunAtom, streamingRun());
+    const callbacks = createWSCallbacks(chatStore().set);
+    store.set(abandonActiveRunLocallyAtom);
+    return callbacks;
+}
+
+describe('citations of a stopped run', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        preloadPageLabelsForCitations.mockResolvedValue({});
+        chatStore().set(citationsAtom, []);
+        chatStore().set(threadRunsAtom, []);
+        chatStore().set(activeRunAtom, null);
+    });
+
+    it('applies the citations its partial run_complete carries after the stop', async () => {
+        const callbacks = stopStreamingRun();
+
+        await callbacks.onRunComplete(partialRunComplete());
+
+        expect(store.get(citationsAtom)).toEqual([
+            expect.objectContaining({ citation_id: 'c1', run_id: 'run-1' }),
+        ]);
+        // Nothing else of the stopped run comes back.
+        expect(store.get(activeRunAtom)).toBeNull();
+        expect(store.get(threadRunsAtom)).toEqual([
+            expect.objectContaining({ id: 'run-1', status: 'canceled' }),
+        ]);
+    });
+
+    it('applies citations that arrive on run_citations after the stop', () => {
+        const callbacks = stopStreamingRun();
+
+        callbacks.onRunCitations?.({
+            event: 'run_citations',
+            run_id: 'run-1',
+            citations: [CITATION],
+        } as unknown as WSRunCitationsEvent);
+
+        expect(store.get(citationsAtom)).toEqual([
+            expect.objectContaining({ citation_id: 'c1', run_id: 'run-1' }),
+        ]);
+    });
+
+    it('drops them once the run has left the chat history', async () => {
+        const callbacks = stopStreamingRun();
+        // Another chat opened, or a retry removed the run.
+        chatStore().set(threadRunsAtom, []);
+
+        await callbacks.onRunComplete(partialRunComplete());
+
+        expect(store.get(citationsAtom)).toEqual([]);
+    });
+
+    it('does not add them to a run that already has its citations', async () => {
+        const callbacks = stopStreamingRun();
+
+        await callbacks.onRunComplete(partialRunComplete());
+        await callbacks.onRunComplete(partialRunComplete());
+
+        expect(store.get(citationsAtom)).toHaveLength(1);
+    });
+
+    it('does not announce the stopped run as complete', async () => {
+        const callbacks = stopStreamingRun();
+
+        await callbacks.onRunComplete(partialRunComplete());
+
+        expect(notifyRunComplete).not.toHaveBeenCalled();
     });
 });
