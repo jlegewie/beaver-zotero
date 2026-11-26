@@ -252,6 +252,16 @@ export interface ResolvedItemDisplay {
 }
 
 /**
+ * What a key in an object link (`[Smith 2004](u-KEY)`) names, for the link's
+ * type icon.
+ */
+export interface LinkedObject {
+    kind: 'item' | 'attachment' | 'note' | 'annotation' | 'collection';
+    /** Attachments only: the broad content kind ("pdf", "epub", "snapshot", …), when the client can say. */
+    contentKind?: string;
+}
+
+/**
  * Fallback data lookups for legacy (pre-v2) rendering data.
  *
  * Citation v2 metadata is self-contained, so this slice is deliberately minimal
@@ -289,6 +299,14 @@ export interface ItemDataHost {
         ref: ZoteroItemReference,
         options?: { attachment?: boolean },
     ): Promise<ResolvedItemDisplay | null>;
+    /**
+     * Say what the key of an object link names (an item, attachment, note,
+     * annotation or collection), so the link can show a type icon. Resolved
+     * like `navigation.revealObject`: an item key first, then a collection key.
+     * Returns null when the key names nothing this client can see. Optional —
+     * without it, object links show no type icon.
+     */
+    resolveLinkedObject?(ref: ZoteroItemReference): Promise<LinkedObject | null>;
     /**
      * Resolve a library's display name for a tool-call header label. Accepts the
      * raw `library` arg (numeric id or name). Returns null when unavailable.

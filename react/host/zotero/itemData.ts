@@ -7,7 +7,7 @@ import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { resolveLibraryRef } from '../../../src/utils/libraryIdentity';
 import { getContentKind } from '../../../src/services/documentExtraction/attachmentResolution';
-import type { ItemDataHost, ResolvedItemDisplay } from '@beaver/agent-ui/host/types';
+import type { ItemDataHost, LinkedObject, ResolvedItemDisplay } from '@beaver/agent-ui/host/types';
 
 /**
  * The item a row describes: the item itself, or the parent of an attachment,
@@ -165,6 +165,28 @@ export const zoteroItemData: ItemDataHost = {
             };
         } catch (e) {
             logger(`zoteroItemData: item display resolution failed: ${e}`);
+            return null;
+        }
+    },
+
+    async resolveLinkedObject(ref: ZoteroItemReference): Promise<LinkedObject | null> {
+        // A render-time lookup of persisted history: never gated on library
+        // exclusion, and it reads nothing but Zotero.
+        const libraryId = resolveLibraryRef(ref);
+        if (!libraryId) return null;
+        try {
+            const item = await Zotero.Items.getByLibraryAndKeyAsync(libraryId, ref.zotero_key);
+            if (item) {
+                if (item.isAnnotation()) return { kind: 'annotation' };
+                if (item.isNote()) return { kind: 'note' };
+                if (item.isAttachment()) return { kind: 'attachment', contentKind: contentKindOf(item) };
+                return { kind: 'item' };
+            }
+            // Items and collections have separate key spaces, as in revealObject.
+            const collection = Zotero.Collections.getByLibraryAndKey(libraryId, ref.zotero_key);
+            return collection ? { kind: 'collection' } : null;
+        } catch (e) {
+            logger(`zoteroItemData: linked object resolution failed: ${e}`);
             return null;
         }
     },

@@ -15,12 +15,7 @@ import {
     prepareMarkdownSource,
 } from '@beaver/agent-export/render/markdownPipeline';
 import { getHost } from '@beaver/agent-ui/host';
-import { resolveObjectIdReference } from '@beaver/agent-core/identity/libraryRef';
-import { parseItemLinkHref, type ItemLinkTarget } from '@beaver/agent-core/identity/itemLinks';
-import { parseWebLinkHref } from '@beaver/agent-core/identity/webPages';
-import { externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
-import { useAtomValue } from 'jotai';
-import { selectAtom } from 'jotai/utils';
+import MarkdownLink from '@beaver/agent-ui/chat/MarkdownLink';
 import { useFindQuery } from '@beaver/agent-ui/chat/findContext';
 import { rehypeFindHighlight } from '@beaver/agent-ui/chat/rehypeFindHighlight';
 import { rehypeTextDirection } from '@beaver/agent-export/render/textDirection';
@@ -28,58 +23,6 @@ import { NOTE_SECTION_LABELS } from '../../utils/threadContent';
 
 /** An export render is a chat saved as a note, whose section headings are interface text. */
 const NOTE_LABELS = Object.values(NOTE_SECTION_LABELS);
-
-/**
- * Follow a link to a Zotero object. The object id is resolved here, at click
- * time, so rendering never touches the host's libraries.
- */
-function activateItemLink(link: ItemLinkTarget): void {
-    const ref = resolveObjectIdReference(link.objectId);
-    if (!ref) return;
-    const navigation = getHost().navigation;
-    if (link.kind === 'collection') void navigation?.revealCollection(ref);
-    else void navigation?.revealObject?.(ref);
-}
-
-/**
- * Anchor rendered inside the chat.
- *
- * The UI is hosted in a chrome document, where a bare `<a href>` has no
- * navigation behavior — clicking one only selects its text. Links must be
- * opened explicitly through the host, so the default click is always
- * suppressed. Fragment-only links have no target to open and stay inert.
- *
- * A link whose href is a Zotero object id (`[Smith 2004](u-KEY)`, see
- * `itemLinks.ts`) reveals that object in the host instead of opening a URL. A
- * link to a web page by its id (`[WHO fact sheet](web-KEY)`) opens the page's
- * URL, from the conversation's record of the page; the hover shows the URL.
- */
-function MarkdownLink({ href, children, title, ...props }: any) {
-    const itemLink = parseItemLinkHref(href);
-    const webId = itemLink ? null : parseWebLinkHref(href);
-    const webUrlAtom = React.useMemo(
-        () => selectAtom(externalReferenceMappingAtom, (pages) => (webId ? pages[webId]?.url : undefined)),
-        [webId],
-    );
-    const webUrl = useAtomValue(webUrlAtom);
-    const isExternal = !itemLink && !webId && Boolean(href) && !href.startsWith('#');
-    const defaultTitle = itemLink ? 'Show in Zotero' : webId ? webUrl : isExternal ? href : undefined;
-    return (
-        <a
-            {...props}
-            href={href}
-            title={title ?? defaultTitle}
-            onClick={(event) => {
-                event.preventDefault();
-                if (itemLink) activateItemLink(itemLink);
-                else if (webUrl) getHost().navigation?.openExternalUrl(webUrl);
-                else if (isExternal) getHost().navigation?.openExternalUrl(href);
-            }}
-        >
-            {children}
-        </a>
-    );
-}
 
 /** The rehype plugin list ReactMarkdown accepts, named so it can be built up. */
 type RehypePlugins = NonNullable<React.ComponentProps<typeof ReactMarkdown>['rehypePlugins']>;
@@ -146,9 +89,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = React.memo(function Ma
                     },
                     // Exported notes keep a plain anchor: the note editor
                     // handles link clicks itself.
-                    ...(exportRendering ? {} : {
-                        a: ({node, ...props}: any) => <MarkdownLink {...props} />
-                    })
+                    ...(exportRendering ? {} : { a: MarkdownLink })
                 }}
             >
                 {processedMarkdown}

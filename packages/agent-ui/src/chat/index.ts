@@ -9,6 +9,9 @@ export { default as Citation } from './Citation';
 
 export { default as CitedSourcesList } from './CitedSourcesList';
 
+export { default as MarkdownLink } from './MarkdownLink';
+export type { MarkdownLinkProps } from './MarkdownLink';
+
 export { readCitationProps, useCitationViewModel } from './useCitationViewModel';
 export type { CitationDisplayState, CitationViewModel } from './useCitationViewModel';
 
