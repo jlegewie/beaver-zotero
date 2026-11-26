@@ -5,15 +5,19 @@ import { itemTypeToIconName, ContentKind } from '@beaver/agent-core/types/citati
 import {
     ItemListView,
     ItemRowView,
+    WebPageRowView,
+    isAnnotationRow,
     isItemRow,
+    isWebPageRow,
 } from '@beaver/agent-core/run-state/toolResultViews';
 import { getHost } from '@beaver/agent-ui/host';
 import { useItemContextMenu } from '@beaver/agent-ui/chat/useItemContextMenu';
 import { EXTERNAL_LIBRARY_ID } from '../../../../src/services/externalFiles';
 import { AnnotationResultRow } from './AnnotationResultRow';
+import { WebPageRowLayout } from '../../externalReferences/WebPageListItem';
 
 /**
- * Shared renderer for hydrated item and annotation rows.
+ * Shared renderer for hydrated item, annotation and web page rows.
  *
  * Each item row pairs its item-type icon (in a rounded tile) with a two-line
  * title/subtitle block; clicking reveals the item in the host library and
@@ -177,6 +181,23 @@ const ItemRow: React.FC<{
     );
 };
 
+/** A web page the tool read: its title and site; the click opens the page in the browser. */
+const WebPageRow: React.FC<{ row: WebPageRowView; siteIcons?: Record<string, string> | null } & RowEventProps> = ({ row, siteIcons, ...events }) => (
+    <WebPageRowLayout
+        title={row.display_name}
+        meta={row.site && row.site !== row.display_name ? row.site : null}
+        url={row.url}
+        icon={row.icon_host ? siteIcons?.[row.icon_host] : null}
+        faded={row.status === 'error'}
+        {...events}
+    />
+);
+
+/** A stable key for a row: its library object, or its web page. */
+function rowKey(row: ItemListView['items'][number], index: number): string {
+    return isWebPageRow(row) ? `${row.kind}-${row.web_id}-${index}` : `${row.kind}-${row.library_id}-${row.zotero_key}-${index}`;
+}
+
 export const ItemListResultView: React.FC<{ view: ItemListView; rowAction?: ItemRowAction }> = ({ view, rowAction }) => {
     const [hoveredKey, setHoveredKey] = useState<string | null>(null);
     const { openItemMenu, itemMenu } = useItemContextMenu();
@@ -192,7 +213,7 @@ export const ItemListResultView: React.FC<{ view: ItemListView; rowAction?: Item
     return (
         <div className="display-flex flex-col min-w-0">
             {view.items.map((row, index) => {
-                const key = `${row.kind}-${row.library_id}-${row.zotero_key}-${index}`;
+                const key = rowKey(row, index);
                 const rowEvents: RowEventProps = {
                     isHovered: hoveredKey === key,
                     onMouseEnter: () => setHoveredKey(key),
@@ -209,14 +230,16 @@ export const ItemListResultView: React.FC<{ view: ItemListView; rowAction?: Item
                                 onContextMenu={row.library_id === EXTERNAL_LIBRARY_ID ? undefined : (event) => openItemMenu(row, event)}
                                 {...rowEvents}
                             />
-                        ) : (
+                        ) : isAnnotationRow(row) ? (
                             <AnnotationResultRow
                                 row={row}
                                 variant="with-parent"
                                 onContextMenu={(event) => openItemMenu(row, event)}
                                 {...rowEvents}
                             />
-                        )}
+                        ) : isWebPageRow(row) ? (
+                            <WebPageRow row={row} siteIcons={view.site_icons} {...rowEvents} />
+                        ) : null}
                     </div>
                 );
             })}

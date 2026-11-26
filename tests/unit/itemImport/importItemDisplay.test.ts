@@ -23,6 +23,22 @@ describe('importSourceBadge', () => {
         expect(importSourceBadge(data({ resolution: { method: 'model_metadata' } }))).toBeNull();
     });
 
+    it('says why a web page or PDF link kept the search result\'s metadata', () => {
+        const page = data({ source: { kind: 'external', input: 'web-MJNNMKH4ED', provider: 'exa' }, resolution: { method: 'fallback_metadata' } });
+        expect(importSourceBadge({ ...page, pending_resolution: { url: 'https://reuters.com/x' } })?.tooltip)
+            .toBe('The page could not be loaded; from the search result');
+        expect(importSourceBadge({ ...page, pending_resolution: { url: 'https://nber.org/w1.pdf' } })?.tooltip)
+            .toBe('The PDF could not be identified; from the search result');
+        expect(importSourceBadge({ ...page, warnings: ['page lookup failed (HTTP 401); using the search result\'s metadata'] })?.tooltip)
+            .toBe('The page could not be loaded; from the search result');
+        expect(importSourceBadge(data({ resolution: { method: 'fallback_metadata' } }))?.tooltip)
+            .toBe('Lookup failed; from the search result');
+        expect(importSourceBadge(data({
+            source: { kind: 'url', input: 'url:https://x.org/r.pdf', url: 'https://x.org/r.pdf' },
+            resolution: { method: 'fallback_metadata' },
+        }))?.tooltip).toBe('The PDF could not be identified; named after the file');
+    });
+
     it('flags fallback metadata as partial', () => {
         expect(importSourceBadge(data({ resolution: { method: 'fallback_metadata' } })))
             .toMatchObject({ label: 'Partial metadata', caution: true });

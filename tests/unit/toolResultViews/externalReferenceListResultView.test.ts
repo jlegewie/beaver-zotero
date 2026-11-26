@@ -346,3 +346,31 @@ describe('OpenAlex search results', () => {
         expect(render(view([work], null), false)).not.toContain('Open on OpenAlex');
     });
 });
+
+describe('web search rows', () => {
+    it('show each page\'s site icon from the view\'s map by host', () => {
+        const icon = 'data:image/webp;base64,UklGRhwAAABXRUJQ';
+        const webPage = (id: string, url: string): ExternalReference => ({
+            source: 'exa',
+            source_id: id,
+            url,
+            title: `Page ${id}`,
+            details: { kind: 'webpage', site: 'who.int' },
+            library_items: [],
+        });
+        const html = render({
+            view_type: 'external_reference_list',
+            tool_name: 'web_search',
+            references: [
+                webPage('web-AAAAAAAAAA', 'https://www.who.int/a'),
+                webPage('web-BBBBBBBBBB', 'https://www.who.int/b'),
+                webPage('web-CCCCCCCCCC', 'https://www.cdc.gov/c'),
+            ],
+            icon_hosts: { 'web-AAAAAAAAAA': 'www.who.int', 'web-BBBBBBBBBB': 'www.who.int' },
+            site_icons: { 'www.who.int': icon },
+        } as ExternalReferenceListView);
+
+        expect(html.split(`src="${icon}"`)).toHaveLength(3);
+        expect(html).toContain('Page web-CCCCCCCCCC');
+    });
+});

@@ -23,7 +23,7 @@ import { getHost } from '@beaver/agent-ui/host';
 import { logger } from "@beaver/agent-core/platform/logger";
 import { isApiError } from "@beaver/agent-core/types/apiErrors";
 import { resetMessageUIStateAtom } from "./messageUIState";
-import { checkExternalReferencesAtom } from "./externalReferences";
+import { checkExternalReferencesAtom, markExternalReferenceImportedAtom } from "./externalReferences";
 import { clearExternalReferenceCacheAtom, addExternalReferencesToMappingAtom, externalReferenceMappingAtom } from "@beaver/agent-core/citations/externalReferences";
 import { importActionReference } from "../utils/importItemDisplay";
 import { ExternalReference } from "@beaver/agent-core/types/externalReferences";
@@ -56,6 +56,7 @@ import { BeaverTemporaryAnnotations } from "../utils/annotationUtils";
 import { enrichMessageAttachmentStub } from "../types/attachments/converters";
 import { zoteroReferenceKey } from "@beaver/agent-core/types/attachments/apiTypes";
 import { resolveItemReference } from "../../src/utils/libraryIdentity";
+import { createdItemRef, itemActionExternalId } from "@beaver/agent-core/agents/agentActionTypes";
 import type { ZoteroItemReference } from "@beaver/agent-core/types/zotero";
 
 /** Drop the selectors scoped to the previous thread's runs, tool calls and actions. */
@@ -752,7 +753,7 @@ export const loadThreadAtom = atom(
                             1
                         );
                     } else {
-                        await Promise.all(agent_actions.map(async (action: AgentAction) => {
+                        const validities = await Promise.all(agent_actions.map(async (action: AgentAction) => {
                             const validity = await validateAppliedAgentAction(action);
                             if (!isCurrent()) return validity;
                             if (validity === 'invalid') {
@@ -763,6 +764,17 @@ export const loadThreadAtom = atom(
                             }
                             return validity;
                         }));
+                        if (!isCurrent()) return false;
+                        // An applied import names the item it created: map its source to
+                        // that item. The library search matches by identifiers and URL,
+                        // which an imported PDF link (its item keeps the landing page
+                        // as its URL) doesn't share.
+                        agent_actions.forEach((action: AgentAction, index: number) => {
+                            if (action.status !== 'applied' || validities[index] !== 'valid') return;
+                            const sourceId = itemActionExternalId(action);
+                            const item = createdItemRef(action);
+                            if (sourceId && item) set(markExternalReferenceImportedAtom, sourceId, item);
+                        });
                     }
                 }
                 

@@ -14,11 +14,14 @@ import { ExternalReference } from '@beaver/agent-core/types/externalReferences';
 import { formatExternalCitation } from '@beaver/agent-core/citations/externalReferences';
 import { UNRESOLVED_LIBRARY_ID, libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
 import { hydrateItemLinkLibraryRefs } from '@beaver/agent-core/identity/itemLinks';
+import { rewriteWebLinkTargets, webCitationExport, webCitationMarkdown } from '@beaver/agent-core/identity/webPages';
+import { webPageId } from '@beaver/agent-core/citations/externalRecords';
 import { loadCitedLibraries } from './citationRenderContext';
 import { unwrapLegacyNoteTags } from '@beaver/agent-export/render/legacyNoteTags';
 import {
     baseCitationKey,
     getPageLocator,
+    getResolvedRef,
     normalizeCitationTag,
     parseRawCitationAttributes,
     requestedCitationKey,
@@ -88,6 +91,8 @@ export function renderToMarkdown(
 
     // Preprocess note tags and clean up backticks
     text = preprocessNoteContent(text);
+    // Web page links (`[WHO fact sheet](web-…)`) point at the page's URL.
+    text = rewriteWebLinkTargets(text, (webId) => externalReferenceMapping[webId]?.url);
 
     // Format references
     const formattedContent = text.replace(citationRegex, (match: string, attrString: string = ''): string => {
@@ -99,9 +104,20 @@ export function renderToMarkdown(
         }
 
         let ref = normalized.ref;
-        const externalId = ref.kind === 'external' ? ref.external_id : undefined;
+        // A mistyped web page id is copied as the page the citation resolved to.
+        const meta = ref.kind === 'external' ? citationByKey[requestedCitationKey(ref)] : undefined;
+        const resolvedRef = meta ? getResolvedRef(meta) : null;
+        const resolvedPageId = resolvedRef?.kind === 'external' ? webPageId(resolvedRef.external_id) : null;
+        const externalId = resolvedPageId ?? (ref.kind === 'external' ? ref.external_id : undefined);
         const isExternalReference = ref.kind === 'external';
         const isExternalReferenceMappedToZoteroItem = !!externalId && !!externalItemMapping[externalId];
+
+        // 0. A web page links to itself, in the library or not: ([Title](URL), site).
+        // Its sentences are Beaver's copy of the page, not a Zotero item's.
+        if (webPageId(externalId)) {
+            const page = webCitationExport(meta?.web_page);
+            return page ? webCitationMarkdown(page) : '';
+        }
 
         // 1. External reference (not mapped to Zotero) ---------------------------------------------------
         if (isExternalReference && !isExternalReferenceMappedToZoteroItem) {
@@ -312,6 +328,9 @@ export function renderToHTML(
     // older history become portable here, so the renderer can write them as
     // note links without consulting library state itself.
     content = hydrateItemLinkLibraryRefs(content, libraryRefForLibraryID);
+    // Web page links (`[WHO fact sheet](web-…)`) point at the page's URL.
+    const pages = contextData?.externalReferencesMap ?? store.get(externalReferenceMappingAtom);
+    content = rewriteWebLinkTargets(content, (webId) => pages[webId]?.url);
 
     // Pre-calculate citation markers for static render to avoid React state updates during render.
     // This must happen before the render since effects don't run during renderToStaticMarkup.

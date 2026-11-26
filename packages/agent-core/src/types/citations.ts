@@ -170,6 +170,37 @@ export interface TableCitation {
 }
 
 /**
+ * The cited web page, as the citation shows and opens it. Renderers use this
+ * alone, never the conversation's page records, which a later turn or an
+ * import may lack or replace.
+ */
+export interface WebPageCitation {
+    /** The page's URL; the click opens it. */
+    url?: string;
+    /** The page's title. */
+    title?: string;
+    /** Publisher name when known, else the domain ("World Health Organization", "who.int"). */
+    site?: string;
+    /** "pdf" for a PDF, whose viewers cannot be opened at a sentence. */
+    content_type?: "html" | "pdf";
+    /** When the page was published: "YYYY-MM-DD", or "YYYY-MM" / "YYYY" when only that is known. */
+    published?: string;
+    /**
+     * Key of the site's icon in the `site_icons` map that comes beside the
+     * citations (the run's metadata, `run_complete`, `run_citations`). Set only
+     * when there is an icon.
+     */
+    icon_host?: string;
+    /**
+     * The site's icon as an image data URI of at most 32 px ("data:image/webp;base64,…").
+     * Never sent: filled in by the client from the `site_icons` map when the
+     * citations arrive (`runCitations`). The backend fetches icons, so a client
+     * never loads one from the site.
+     */
+    icon?: string;
+}
+
+/**
  * V2 self-contained citation (mirrors the backend Citation model).
  *
  * Renders without live Zotero access: identity lives exclusively in
@@ -201,6 +232,11 @@ export interface Citation {
     filename?: string;
     /** Preview of the cited passage. */
     preview?: string;
+    /**
+     * Web pages: date the cited copy of the page was fetched (YYYY-MM-DD).
+     * Absent for citations of search highlights, whose age is unknown.
+     */
+    retrieved?: string;
     /** 1-based cited page numbers (EPUB: section ordinals). */
     pages?: number[];
     /** Sparse 0-based page index -> printed label map for cited pages. */
@@ -214,6 +250,8 @@ export interface Citation {
     invalid_reason?: string;
     /** A cell or row citation's preview (`citation_type` "table"). */
     table?: TableCitation;
+    /** A web page citation's page (`web-` ids). */
+    web_page?: WebPageCitation;
 
     /** The agent run ID of the citation (stamped client-side). */
     run_id?: string;
@@ -221,6 +259,26 @@ export interface Citation {
 
 /** A citation entry in the cited-sources list, with its thread-scoped marker. */
 export type CitedSource = Citation & { numericCitation: string | null };
+
+/**
+ * A run's citations as the client keeps them: stamped with the run's id, and
+ * each web page's site icon filled in from the `site_icons` map that comes
+ * beside them. The backend sends an icon once per host, and a citation names
+ * its icon by host (`icon_host`).
+ */
+export function runCitations(
+    runId: string,
+    citations: Citation[],
+    siteIcons: Record<string, string> | null | undefined,
+): Citation[] {
+    return citations.map((citation) => {
+        const page = citation.web_page;
+        const icon = page?.icon_host ? siteIcons?.[page.icon_host] : undefined;
+        return page && icon
+            ? { ...citation, run_id: runId, web_page: { ...page, icon } }
+            : { ...citation, run_id: runId };
+    });
+}
 
 /**
  * Helper functions for Citation

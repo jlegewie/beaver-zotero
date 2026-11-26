@@ -105,7 +105,27 @@ export interface AnnotationRowView {
  * get_metadata that can reference an annotation) an annotation. Discriminated
  * by `kind`.
  */
-export type ItemListRow = ItemRowView | AnnotationRowView;
+/**
+ * A web page row (a `web-` id the tool read, e.g. in `extract`). Self-contained:
+ * the click opens `url`; there is no library item to reveal.
+ */
+export interface WebPageRowView {
+    kind: "web_page";
+    /** The page's `web-` id. */
+    web_id: string;
+    /** The page's URL, opened on click. */
+    url?: string;
+    /** The page title, or its site when it has none. */
+    display_name: string;
+    /** The page's site, e.g. "who.int". */
+    site?: string;
+    /** Key of the site's icon in the view's `site_icons`, when one was fetched. */
+    icon_host?: string;
+    /** "error" when the tool failed on this page; absent or "ok" otherwise. */
+    status?: "ok" | "error";
+}
+
+export type ItemListRow = ItemRowView | AnnotationRowView | WebPageRowView;
 
 export interface CollectionRowView {
     collection_id?: string;
@@ -175,6 +195,8 @@ export interface ItemListView {
     view_type: "item_list";
     tool_name: string;
     items: ItemListRow[];
+    /** Web page rows' site icons (small image data URIs) by the rows' `icon_host`. */
+    site_icons?: Record<string, string> | null;
 }
 
 export interface AnnotationListView {
@@ -255,6 +277,13 @@ export interface ExternalReferenceListView {
     message?: string | null;
     /** Optional tool-specific extension; render per `info_type`. */
     tool_info?: ExternalReferenceViewInfo | null;
+    /**
+     * Web pages' `site_icons` keys by `source_id`, for pages whose site icon
+     * was fetched. Beside the references, which are cached as records.
+     */
+    icon_hosts?: Record<string, string> | null;
+    /** Site icons (small image data URIs) by host, one per site. */
+    site_icons?: Record<string, string> | null;
 }
 
 /** The related-works info of a view (rows without `info_type` predate the discriminator). */
@@ -535,6 +564,10 @@ export function isItemRow(row: ItemListRow): row is ItemRowView {
 
 export function isAnnotationRow(row: ItemListRow): row is AnnotationRowView {
     return row.kind === "annotation";
+}
+
+export function isWebPageRow(row: ItemListRow): row is WebPageRowView {
+    return row.kind === "web_page";
 }
 
 /**

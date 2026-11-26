@@ -251,6 +251,8 @@ export interface WSRunCompleteEvent extends WSBaseEvent {
     usage: RunUsage | null;
     cost: number | null;
     citations: import('../types/citations').Citation[] | null;
+    /** Site icons by host, named by web page citations' `icon_host`. */
+    site_icons?: Record<string, string> | null;
     agent_actions: import('../agents/agentActionTypes').AgentAction[] | null;
     /** Whether the run had high input token usage (backend-assessed). */
     high_token_usage?: boolean;
@@ -299,6 +301,8 @@ export interface WSRunCitationsEvent extends WSBaseEvent {
     event: 'run_citations';
     run_id: string;
     citations: import('../types/citations').Citation[];
+    /** Site icons by host, named by web page citations' `icon_host`. */
+    site_icons?: Record<string, string> | null;
 }
 
 /** Done event signaling the request is fully complete (after persistence, usage logging, etc.) */
@@ -3174,6 +3178,16 @@ export const CLIENT_FEATURES = {
      * `clinical_trials` capabilities; `openalex` replaces `external_sources`.
      */
     EXTERNAL_RECORDS: 'external_records',
+    /**
+     * Web pages from web search (`web-<KEY>` ids, `source: "exa"`): the client
+     * opens `web-` links and citations at the page's URL (with a text fragment
+     * for cited sentences), shows a web citation's cited sentences and
+     * retrieval date, renders `web_search` results, converts web citations and
+     * links in its own exports, matches library items by URL, and imports a
+     * PDF link by downloading and recognizing the file. Gates `web_search`,
+     * together with EXTERNAL_RECORDS.
+     */
+    WEB_PAGES: 'web_pages',
     /**
      * `resolve_population` honors `any_conditions`: a second condition list,
      * ORed among itself and ANDed with `conditions`. Without it the backend

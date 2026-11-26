@@ -102,7 +102,7 @@ import { isJobDeferral } from '@beaver/agent-core/protocol/jobCallProtocol';
 import { jobWaitAtom, settleJobWait } from './jobWait';
 import { citationsAtom } from '@beaver/agent-core/citations/atoms';
 import { CITATION_TAG_PATTERN } from '@beaver/agent-core/citations/citationGrammar';
-import type { Citation } from '@beaver/agent-core/types/citations';
+import { runCitations, type Citation } from '@beaver/agent-core/types/citations';
 import {
     toAgentAction,
     isItemCreatingAgentAction,
@@ -1267,13 +1267,14 @@ function applyRunCitations(
     set: Setter,
     runId: string,
     citations: Citation[] | null | undefined,
+    siteIcons: Record<string, string> | null | undefined,
 ): void {
     if (!citations || citations.length === 0) return;
 
     logger(`WS: Processing ${citations.length} citations for run ${runId}`, 1);
     set(citationsAtom, (prev) => [
         ...prev,
-        ...citations.map(c => ({ ...c, run_id: runId }))
+        ...runCitations(runId, citations, siteIcons)
     ]);
     session.host.citationsChanged(set);
 
@@ -1643,7 +1644,7 @@ export function createWSCallbacks(
 
             // Citations, for a backend that still embeds them here. Current
             // ones send `citations: null` and follow with `run_citations`.
-            applyRunCitations(session, set, event.run_id, event.citations);
+            applyRunCitations(session, set, event.run_id, event.citations, event.site_icons);
 
             // Process agent actions from run complete event
             if (event.agent_actions && event.agent_actions.length > 0) {
@@ -1667,7 +1668,7 @@ export function createWSCallbacks(
                 citationsCount: event.citations?.length ?? 0,
             }, 1);
 
-            applyRunCitations(session, set, event.run_id, event.citations);
+            applyRunCitations(session, set, event.run_id, event.citations, event.site_icons);
 
             // The lookup is over — whatever it found, including nothing. Every
             // other way it can end (`done`, an error, a cancel, the socket
@@ -2186,12 +2187,16 @@ export function createWSCallbacks(
      * it. They belong to the answer the chat still shows, so they are written
      * while that run is in its history and has none yet.
      */
-    const applyLeftRunCitations = ({ run_id: runId, citations }: { run_id: string; citations: Citation[] | null }) => {
+    const applyLeftRunCitations = ({ run_id: runId, citations, site_icons: siteIcons }: {
+        run_id: string;
+        citations: Citation[] | null;
+        site_icons?: Record<string, string> | null;
+    }) => {
         const chat = session.store;
         if (!citations?.length) return;
         if (!chat.get(threadRunsAtom).some((run) => run.id === runId)) return;
         if (chat.get(citationsAtom).some((citation) => citation.run_id === runId)) return;
-        applyRunCitations(session, chat.set, runId, citations);
+        applyRunCitations(session, chat.set, runId, citations, siteIcons);
     };
     // What still happens for a run this window has left, e.g. one the user
     // stopped. One stopped while it was reconnecting is still reattached, so

@@ -21,7 +21,7 @@ import { trialDetails, workDetails } from '../types/externalReferences';
 // Id grammar
 // =============================================================================
 
-export type ExternalIdNamespace = 'openalex' | 'openlibrary' | 'isbn' | 'doi' | 'pmid' | 'nct';
+export type ExternalIdNamespace = 'openalex' | 'openlibrary' | 'isbn' | 'doi' | 'pmid' | 'nct' | 'web';
 
 const ID_PATTERNS: Array<[ExternalIdNamespace, RegExp]> = [
     ['openalex', /^[Ww](\d+)$/],
@@ -30,6 +30,9 @@ const ID_PATTERNS: Array<[ExternalIdNamespace, RegExp]> = [
     ['doi', /^doi:(10\.\S+)$/i],
     ['pmid', /^pmid:(\d+)$/i],
     ['nct', /^(NCT\d{8})$/i],
+    // A web page found by web search: a hash of its normalized URL. A dash, not
+    // a colon, because web ids are also markdown link targets.
+    ['web', /^web-([A-Z2-7]{10})$/i],
 ];
 
 /** The namespace an external id belongs to, or null for ids outside the grammar. */
@@ -59,6 +62,12 @@ export function nctFromExternalId(externalId: string | null | undefined): string
     return match ? match[1].toUpperCase() : null;
 }
 
+/** The canonical `web-KEY` form (uppercase key) of a web page id, or null for anything else. */
+export function webPageId(externalId: string | null | undefined): string | null {
+    const match = typeof externalId === 'string' ? /^web-([A-Z2-7]{10})$/i.exec(externalId.trim()) : null;
+    return match ? `web-${match[1].toUpperCase()}` : null;
+}
+
 /** The source that natively supplies ids of a namespace. */
 const SUPPLIER_BY_NAMESPACE: Record<ExternalIdNamespace, string> = {
     openalex: 'openalex',
@@ -67,6 +76,7 @@ const SUPPLIER_BY_NAMESPACE: Record<ExternalIdNamespace, string> = {
     doi: 'crossref',
     pmid: 'pubmed',
     nct: 'clinicaltrials',
+    web: 'exa',
 };
 
 /** The source that natively supplies an id, or null for ids outside the grammar. */

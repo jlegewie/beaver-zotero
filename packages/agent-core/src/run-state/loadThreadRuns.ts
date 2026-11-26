@@ -3,7 +3,7 @@ import type { ThreadActivity, ThreadRunsResponse } from "../transport/agentServi
 import { agentRunService } from '../transport/agentService';
 import type { AgentAction } from '../agents/agentActionTypes';
 import type { AgentRun, ToolCallPart, ToolReturnPart } from '../agents/types';
-import type { Citation } from '../types/citations';
+import { runCitations, type Citation } from '../types/citations';
 import { logger } from '../platform/logger';
 
 /**
@@ -74,12 +74,9 @@ export async function loadThreadRuns(
         return run;
     });
 
-    // Extract citations from runs
+    // Extract citations from runs, with the site icons each run keeps beside them
     const citations = processedRuns.flatMap(run =>
-        (run.metadata?.citations || []).map(citation => ({
-            ...citation,
-            run_id: run.id
-        }))
+        runCitations(run.id, run.metadata?.citations || [], run.metadata?.site_icons)
     );
 
     let loadedRuns: AgentRun[] = processedRuns;

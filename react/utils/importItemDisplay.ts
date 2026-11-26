@@ -7,7 +7,10 @@
 import type { ExternalReference } from '@beaver/agent-core/types/externalReferences';
 import { supplierForExternalId } from '@beaver/agent-core/citations/externalRecords';
 import { externalSourceLabel } from '@beaver/agent-core/citations/externalRecordDisplay';
+import { urlNamesPdf } from '@beaver/agent-core/identity/webPages';
 import {
+    fallbackLookup,
+    type FallbackLookup,
     importItemDisplayJson,
     itemJsonPmid,
     itemJsonDisplay,
@@ -41,6 +44,23 @@ const FIELD_LABEL: Record<string, string> = {
     language: 'Language',
 };
 
+/** Why an item kept the search result's metadata: a page or PDF link names no identifier to look up. */
+function fallbackReason(data: ImportItemProposedData): string {
+    const identifier = data.source?.identifier ?? data.pending_resolution?.identifier;
+    const url = data.pending_resolution?.url ?? data.source?.url;
+    const lookup = fallbackLookup(data.warnings) ?? (identifier || !url ? null : urlNamesPdf(url) ? 'pdf' : 'page');
+    // A link the user gave has no search result: its fallback is named after the file.
+    const origin = data.source?.kind === 'url' ? 'named after the file' : 'from the search result';
+    return `${lookup ? FALLBACK_TOOLTIP[lookup] : 'Lookup failed'}; ${origin}`;
+}
+
+const FALLBACK_TOOLTIP: Record<FallbackLookup, string> = {
+    identifier: 'Lookup failed',
+    page: 'The page could not be loaded',
+    pdf_download: 'The PDF could not be downloaded',
+    pdf: 'The PDF could not be identified',
+};
+
 /** Where an item's metadata came from, as a short badge. Model-written metadata has none. */
 export function importSourceBadge(data: ImportItemProposedData | undefined): SourceBadge | null {
     if (!data) return null;
@@ -49,7 +69,7 @@ export function importSourceBadge(data: ImportItemProposedData | undefined): Sou
     const translatorTip = translator ? `Translator: ${translator}` : undefined;
     if (method === 'model_metadata') return null;
     if (method === 'fallback_metadata') {
-        return { label: 'Partial metadata', caution: true, tooltip: 'Lookup failed; from the search result' };
+        return { label: 'Partial metadata', caution: true, tooltip: fallbackReason(data) };
     }
     if (method === 'recognizer') {
         return { label: 'Identified from file', caution: false, tooltip: translatorTip };

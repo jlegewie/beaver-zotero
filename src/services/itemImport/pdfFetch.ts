@@ -12,6 +12,53 @@ import { buildPdfResolvers, type PdfFetchOptions } from '../../utils/pdfResolver
 import { fetchPdfAttachment, zoteroResolverSource, type PdfSource } from '../pdfAttachmentFetch';
 import { createPdfFetchDiagnostics } from '../pdfFetchDiagnostics';
 import { downloadServerPdf } from '../serverPdfSource';
+import { discardDownloadedFile } from '../pdfAttachmentFetch';
+import { downloadPdfLink, takeResolvedPdf, type PdfLinkDownload } from './pdfLinkImport';
+import type { PdfCandidate } from '@beaver/agent-core/types/agentActions/items';
+
+/** Budget of a guarded download of a PDF link. */
+const PDF_LINK_BUDGET_MS = 60_000;
+
+/** A failed guarded download as the error shape the attempt classifier reads (`classifyRequestError`). */
+function diagnosticError(download: Extract<PdfLinkDownload, { ok: false }>): Error {
+    if (download.status) return Object.assign(new Error(download.message), { status: download.status });
+    if (download.code === 'not_pdf') return new Error('Downloaded file was not a supported type');
+    if (download.code === 'timeout') return new Error(`Download timed out: ${download.message}`);
+    return new Error(download.message);
+}
+
+/**
+ * The PDF of an import from a PDF link: the file downloaded while resolving
+ * it (attached without a second download), else each candidate downloaded
+ * under the private-network guard and size limit of `downloadPdfLink`. Never
+ * Zotero's own resolvers, which check neither.
+ */
+function guardedPdfSource(candidates: PdfCandidate[]): PdfSource {
+    return async ({ signal, assertAccess, diagnostics }) => {
+        const urls = candidates.map((candidate) => candidate.url).filter((url): url is string => !!url);
+        for (const url of urls) {
+            const staged = takeResolvedPdf(url);
+            if (staged) return staged;
+        }
+        for (const url of urls) {
+            assertAccess();
+            let host = '';
+            try { host = new URL(url).hostname; } catch { /* recorded without a host */ }
+            const download = await downloadPdfLink(url, PDF_LINK_BUDGET_MS);
+            if (!download.ok) {
+                diagnostics?.recordSourceAttempt(candidates.find((candidate) => candidate.url === url)?.access_method ?? 'web', host, diagnosticError(download));
+                continue;
+            }
+            diagnostics?.recordSourceAttempt('web', host);
+            if (signal.aborted) {
+                await discardDownloadedFile(download.file);
+                return null;
+            }
+            return download.file;
+        }
+        return null;
+    };
+}
 
 /**
  * Filter attachment IDs to return only PDF attachments.
@@ -83,18 +130,21 @@ export function schedulePdfFetchTask(
                     return;
                 }
 
-                const resolvers = buildPdfResolvers(item, options);
-                resolverCount = resolvers.length;
-                if (resolvers.length === 0) {
+                const candidates = options.pdfCandidates ?? [];
+                const resolvers = options.guardedOnly ? [] : buildPdfResolvers(item, options);
+                resolverCount = options.guardedOnly ? candidates.filter((candidate) => candidate.url).length : resolvers.length;
+                if (resolverCount === 0) {
                     logger(`schedulePdfFetchTask: No resolvers for ${itemKey}`, 2);
                     return;
                 }
 
-                logger(`schedulePdfFetchTask: Trying ${resolvers.length} resolvers for ${itemKey}`, 2);
+                logger(`schedulePdfFetchTask: Trying ${resolverCount} sources for ${itemKey}`, 2);
                 // Where to look, in order; the first source with a file wins.
                 // The user's own download comes first; the backend's cached
                 // open-access copy is the fallback for when it fails.
-                const sources: PdfSource[] = [zoteroResolverSource(resolvers), downloadServerPdf];
+                // A PDF-link import never reaches Zotero's own resolvers.
+                const first: PdfSource = options.guardedOnly ? guardedPdfSource(candidates) : zoteroResolverSource(resolvers);
+                const sources: PdfSource[] = [first, downloadServerPdf];
                 const outcome = await fetchPdfAttachment(item, sources, signal, assertAccess, diagnostics);
                 if (outcome.attachment) {
                     attachedPdf = outcome.attachment;

@@ -10,6 +10,7 @@ vi.mock('../../../src/utils/zoteroDataLoading', async (importOriginal) => ({
 }));
 
 import { externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
+import { requestedCitationKey } from '@beaver/agent-core/citations/citationGrammar';
 import { store } from '../../../react/store';
 import { renderToMarkdown, renderToMarkdownAsync } from '../../../react/utils/citationRenderers';
 
@@ -49,5 +50,36 @@ describe('renderToMarkdown', () => {
             externalItemMapping: {},
         });
         expect(markdown).toBe('Most are surveys (Smith et al. 2021).');
+    });
+
+    it('writes a web page citation as a link to the page its citation names', () => {
+        const tag = '<citation id="web-MJNNMKH4ED" loc="s3"/>';
+        const ref = {
+            kind: 'external' as const,
+            external_id: 'web-MJNNMKH4ED',
+            loc: { kind: 'sentence' as const, value: '3', raw: 's3' },
+        };
+        const citation = {
+            citation_id: 'c',
+            citation_type: 'external_reference' as const,
+            requested_ref: ref,
+            resolved_ref: { ...ref, source: 'exa' },
+            raw_tag: tag,
+            web_page: {
+                url: 'https://www.who.int/news-room/fact-sheets/detail/obesity-and-overweight',
+                title: 'Obesity and overweight',
+                site: 'who.int',
+            },
+        };
+        // No page record in the thread: the citation alone carries the page.
+        const markdown = renderToMarkdown(`One in seven ${tag}.`, {
+            citations: [citation],
+            citationByKey: { [requestedCitationKey(ref)]: citation },
+            externalReferenceMapping: {},
+            externalItemMapping: {},
+        });
+        expect(markdown).toBe(
+            'One in seven ([Obesity and overweight](https://www.who.int/news-room/fact-sheets/detail/obesity-and-overweight), who.int).',
+        );
     });
 });

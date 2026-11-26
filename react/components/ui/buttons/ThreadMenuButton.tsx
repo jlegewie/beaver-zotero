@@ -28,6 +28,7 @@ import { getContextWindow } from '../../../runtime/windowRuntime';
 import { store } from '../../../store';
 import { prepareCitationRenderContext } from '../../../utils/citationRenderContext';
 import { preprocessNoteContent, renderToHTML, renderToMarkdownAsync } from '../../../utils/citationRenderers';
+import { streamingDoneRunIdsAtom } from '../../../atoms/agentRunAtoms';
 import { copyToClipboard } from '../../../utils/clipboard';
 import { exportWithFeedback, fileExportMenuItem } from '../../../utils/fileExportFeedback';
 import { menuDivider, saveAsNoteMenuItem } from '../../../utils/saveNoteMenu';
@@ -114,6 +115,9 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
     // re-render the header on every frame of a streaming response. Only the
     // count, which decides whether the entries are enabled, is subscribed.
     const runsCount = useAtomValue(runsCountAtom);
+    // A response whose sources are still being linked has no resolved
+    // citations yet, and web citations are written from them.
+    const linkingSources = useAtomValue(streamingDoneRunIdsAtom).size > 0;
     // Its own context, not the find query: this button must not re-render while
     // the reader types in the find bar.
     const findControls = useFindInChatControls();
@@ -390,7 +394,7 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
                 label: 'Copy chat',
                 icon: CopyIcon,
                 onClick: handleCopyThread,
-                disabled: !hasRuns,
+                disabled: !hasRuns || linkingSources,
             },
             {
                 label: 'Copy link to chat',
@@ -404,10 +408,10 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
                 onSaveChild: handleSaveAsChildNote,
                 hasParent,
                 parentTitle: hasParent ? host.noteWriter?.childNoteParentTitle?.() : null,
-                disabled: !hasRuns,
+                disabled: !hasRuns || linkingSources,
             }),
             ...(host.documentExport?.exportThreadToFile
-                ? [fileExportMenuItem(handleExportThread, !hasRuns)]
+                ? [fileExportMenuItem(handleExportThread, !hasRuns || linkingSources)]
                 : []),
             ...((host.config?.isDevelopment() ?? false) ? [
                 menuDivider('developer-divider'),

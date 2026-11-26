@@ -1,4 +1,5 @@
 import { atom } from 'jotai';
+import { webPageId } from '@beaver/agent-core/citations/externalRecords';
 import { ExternalReference, authorLastNames } from '@beaver/agent-core/types/externalReferences';
 import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { findExistingReference, FindReferenceData } from '../utils/findExistingReference';
@@ -30,7 +31,9 @@ import {
 export function referenceMatchData(ref: ExternalReference): FindReferenceData {
     const lastNames = authorLastNames(ref);
     return {
-        title: ref.title,
+        // A web page matches by its URL or an identifier, never by title:
+        // pages share generic titles ("About us") with unrelated items.
+        title: webPageId(ref.source_id) ? undefined : ref.title,
         date: ref.publication_date ?? (ref.year != null ? String(ref.year) : undefined),
         DOI: ref.identifiers?.doi,
         ISBN: ref.identifiers?.isbn,
@@ -273,10 +276,14 @@ export const checkExternalReferencesAtom = atom(
                 await loadFullItemDataWithAllTypes(foundItems);
             }
             
-            // Update cache with all results (including failed ones as null)
-            const updates = Object.fromEntries(results.filter((r): r is [string, ZoteroItemReference | null] => r !== null));
+            // Update cache with all results (including failed ones as null). A
+            // search that found nothing never replaces an item recorded while it
+            // ran (an import, or the item an applied import names).
+            const current = get(externalReferenceItemMappingAtom);
+            const updates = Object.fromEntries(results.filter((r): r is [string, ZoteroItemReference | null] =>
+                r !== null && (r[1] !== null || !current[r[0]])));
             set(externalReferenceItemMappingAtom, {
-                ...get(externalReferenceItemMappingAtom),
+                ...current,
                 ...updates
             });
             

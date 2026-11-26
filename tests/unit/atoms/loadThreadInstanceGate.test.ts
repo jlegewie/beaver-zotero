@@ -109,10 +109,14 @@ vi.mock('../../../react/atoms/messageUIState', async (importOriginal) => {
     return { ...actual, resetMessageUIStateAtom: atom(null, () => {}) };
 });
 
+const markExternalReferenceImportedMock = vi.fn();
 vi.mock('../../../react/atoms/externalReferences', async () => {
     const { atom } = await import('jotai');
     return {
         checkExternalReferencesAtom: atom(null, () => {}),
+        markExternalReferenceImportedAtom: atom(null, (_get: unknown, _set: unknown, sourceId: string, item: unknown) => {
+            markExternalReferenceImportedMock(sourceId, item);
+        }),
     };
 });
 
@@ -317,6 +321,43 @@ describe('loadThreadAtom instance-mismatch gate', () => {
         expect(loaded).toBe(true);
         expect(validateAppliedAgentActionMock).toHaveBeenCalled();
         expect(undoAgentActionWriteMock).toHaveBeenCalledWith('action-1');
+    });
+
+    // A library search can miss what an import created: an imported PDF link's
+    // item keeps the landing page as its URL. The applied action names the item.
+    it('maps an applied import to the item it created, and skips one that was undone in Zotero', async () => {
+        const importAction = (id: string, externalId: string, key: string) => ({
+            id,
+            action_type: 'import_item',
+            status: 'applied',
+            proposed_data: { source: { external_id: externalId } },
+            result_data: { library_id: 1, library_ref: 'u', zotero_key: key },
+        });
+        validateAppliedAgentActionMock.mockImplementation(async (action: any) => (action.id === 'gone' ? 'invalid' : 'valid'));
+        getThreadRunsMock.mockResolvedValue({
+            runs: [{
+                id: 'run-1',
+                status: 'completed',
+                completed_at: '2024-01-01T00:00:00Z',
+                user_prompt: { attachments: [] },
+                model_messages: [],
+                metadata: {},
+            }],
+            agent_actions: [
+                importAction('kept', 'web-NR67MTOGP2', 'KX5JEL2Z'),
+                importAction('gone', 'web-MJNNMKH4ED', 'GONE1234'),
+            ],
+        });
+
+        const loaded = await store.set(loadThreadAtom, {
+            user_id: 'u1', threadId: nextThreadId(), threadName: 'Mine', threadIdentity: CURRENT,
+        });
+
+        expect(loaded).toBe(true);
+        expect(markExternalReferenceImportedMock).toHaveBeenCalledTimes(1);
+        expect(markExternalReferenceImportedMock).toHaveBeenCalledWith(
+            'web-NR67MTOGP2', { library_id: 1, library_ref: 'u', zotero_key: 'KX5JEL2Z' },
+        );
     });
 
     it('matching and unattributed identities load without a confirm', async () => {

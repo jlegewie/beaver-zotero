@@ -5,7 +5,7 @@
  */
 
 import type { ExternalReference, TrialDetails } from '../types/externalReferences';
-import { trialDetails, workDetails } from '../types/externalReferences';
+import { trialDetails, webPageDetails, workDetails } from '../types/externalReferences';
 import { isOpenAlexWorkId, nctFromExternalId, pmidFromExternalId } from './externalRecords';
 
 // =============================================================================
@@ -29,7 +29,7 @@ export function externalSourceLabel(source: string | null | undefined): string {
 }
 
 /** Which presentation a record (or a results view) gets. */
-export type ExternalRecordPresentation = 'pubmed' | 'trial' | 'generic';
+export type ExternalRecordPresentation = 'pubmed' | 'trial' | 'webpage' | 'generic';
 
 /**
  * The presentation for a source: PubMed and ClinicalTrials.gov have their own;
@@ -41,6 +41,7 @@ export function externalRecordPresentation(
     ref?: ExternalReference | null,
 ): ExternalRecordPresentation {
     if (source === 'pubmed') return 'pubmed';
+    if (ref ? !!webPageDetails(ref) || source === 'exa' && !!ref.url : source === 'exa') return 'webpage';
     if (source === 'clinicaltrials') return ref && !trialDetails(ref) ? 'generic' : 'trial';
     return 'generic';
 }

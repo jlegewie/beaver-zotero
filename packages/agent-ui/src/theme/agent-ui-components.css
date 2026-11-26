@@ -786,3 +786,20 @@
 .beaver-root .tooltip-fade-in-top {
     animation: tooltipFadeInTop 0.2s ease-in-out forwards;
 }
+
+/* A site's icon in a web citation preview. Favicons are drawn for light
+   backgrounds, so in dark mode a small white tile keeps a dark logo (BBC,
+   GitHub, The New York Times) visible. The fixed white is deliberate: it is the
+   background the icon was made for, not a theme colour. */
+.beaver-root .site-icon-tile {
+    display: inline-flex;
+    flex-shrink: 0;
+    padding: 1px;
+    border-radius: 3px;
+}
+
+@media (prefers-color-scheme: dark) {
+    .beaver-root .site-icon-tile {
+        background-color: #fff;
+    }
+}

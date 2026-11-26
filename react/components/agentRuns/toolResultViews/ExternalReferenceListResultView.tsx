@@ -22,6 +22,7 @@ import type { SearchDetailsDisclosure } from '../ToolResultView';
 import ExternalReferenceListItem from '../../externalReferences/ExternalReferenceListItem';
 import PubMedReferenceListItem from '../../externalReferences/PubMedReferenceListItem';
 import TrialReferenceListItem from '../../externalReferences/TrialReferenceListItem';
+import WebPageListItem from '../../externalReferences/WebPageListItem';
 
 /** Compact citation-style label for a work: "Vaswani et al. (2017)". */
 function workShortLabel(work: ExternalReference): string {
@@ -240,6 +241,12 @@ function registryNotice(dataAsOf: string | null | undefined): string {
     return `Source: ClinicalTrials.gov ${date ? `(${date})` : ''}`;
 }
 
+/** A web page's site icon: the view sends each icon once per host and names it per page. */
+function siteIconOf(view: ExternalReferenceListView, sourceId: string | null | undefined): string | null {
+    const host = sourceId ? view.icon_hosts?.[sourceId] : undefined;
+    return (host && view.site_icons?.[host]) || null;
+}
+
 /**
  * Shared renderer for the {@link ExternalReferenceListView} view model
  * (external_search / lookup_work / find_related_works / find_book_chapters /
@@ -340,6 +347,14 @@ export const ExternalReferenceListResultView: React.FC<{
                         break;
                     case 'trial':
                         row = <TrialReferenceListItem {...rowProps} />;
+                        break;
+                    case 'webpage':
+                        // Hairlines between pages, as between items in a library list.
+                        row = (
+                            <div className={index < references.length - 1 ? 'border-bottom-quinary' : ''}>
+                                <WebPageListItem {...rowProps} siteIcon={siteIconOf(view, item.source_id)} />
+                            </div>
+                        );
                         break;
                     default:
                         row = <ExternalReferenceListItem {...rowProps} />;

@@ -315,3 +315,27 @@ export function itemJsonPmid(json: ZoteroItemJson | undefined): string | undefin
 export function importItemDisplayJson(data: ImportItemProposedData | undefined): ZoteroItemJson | undefined {
     return data?.item ?? data?.pending_resolution?.fallback_item;
 }
+
+/**
+ * Why an import kept its fallback metadata (the search result's), as the
+ * resolution's warning names it: an identifier, a page or a PDF that could not
+ * be looked up. Each warning starts with its phrase.
+ */
+export const FALLBACK_WARNINGS = {
+    identifier: 'identifier lookup failed',
+    page: 'page lookup failed',
+    pdf_download: 'PDF download failed',
+    pdf: 'PDF not identified',
+} as const;
+
+export type FallbackLookup = keyof typeof FALLBACK_WARNINGS;
+
+/** The lookup a fallback import's warnings say failed, or null when they name none. */
+export function fallbackLookup(warnings: readonly string[] | null | undefined): FallbackLookup | null {
+    for (const warning of warnings ?? []) {
+        for (const [lookup, phrase] of Object.entries(FALLBACK_WARNINGS) as Array<[FallbackLookup, string]>) {
+            if (warning.startsWith(phrase)) return lookup;
+        }
+    }
+    return null;
+}

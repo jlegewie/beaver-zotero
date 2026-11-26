@@ -19,6 +19,7 @@
 
 import type { AttachmentUrl } from '@beaver/agent-core/types/itemImport';
 import { logger } from '@beaver/agent-core/platform/logger';
+import { urlNamesPdf } from '@beaver/agent-core/identity/webPages';
 import { translatorAttachments } from './resolveIdentifier';
 import { systemDelay } from '../../utils/systemTimers';
 import { loadWebTranslationModules, pluginTimers, withTimeout } from './zoteroApis';
@@ -32,7 +33,7 @@ export type UrlTranslation =
         /** The page Zotero would snapshot for this item. */
         pageUrl: string;
     }
-    | { ok: false; code: 'unreachable' | 'not_found' | 'blocked' | 'timeout' | 'no_translator' | 'url_not_allowed' | 'unsupported_pdf_url' | 'multiple_items'; message: string };
+    | { ok: false; code: 'unreachable' | 'not_found' | 'blocked' | 'timeout' | 'no_translator' | 'url_not_allowed' | 'file_download' | 'multiple_items'; message: string };
 
 const CHALLENGE_TITLES = /just a moment|attention required|access denied|verify(ing)? you are (a )?human|are you a robot|security check|captcha|ddos-guard|request unsuccessful|checking your browser|please enable cookies/i;
 
@@ -111,6 +112,12 @@ async function lookupHost(host: string, timeoutMs: number): Promise<HostLookup> 
         logger(`itemImport/resolveUrl: DNS check failed for ${host}: ${error}`, 2);
         return 'unresolved';
     }
+}
+
+/** Whether a host may be loaded: not a private name or literal, and resolving only to public addresses. */
+export async function isLoadableHost(host: string, timeoutMs: number): Promise<boolean> {
+    if (isBlockedHost(host)) return false;
+    return (await lookupHost(host, timeoutMs)) === 'public';
 }
 
 /**
@@ -255,14 +262,6 @@ function statusFailure(status: number): UrlTranslation {
     return { ok: false, code: 'unreachable', message: `The page could not be loaded (HTTP ${status}).` };
 }
 
-function looksLikePdfUrl(url: string): boolean {
-    try {
-        const path = new URL(url).pathname.toLowerCase();
-        return path.endsWith('.pdf') || path.includes('/pdf/');
-    } catch {
-        return false;
-    }
-}
 
 /** A minimal `webpage` item, used when no translator returns anything. */
 export function minimalWebpageJson(url: string, title: string | undefined): Record<string, any> {
@@ -335,9 +334,10 @@ export async function translateUrl(url: string, budgetMs: number): Promise<UrlTr
                 return { ok: false, code: 'url_not_allowed', message: 'The page redirected to a local or private-network address.' };
             }
             if (!loaded) {
-                return looksLikePdfUrl(url)
-                    ? { ok: false, code: 'unsupported_pdf_url', message: 'The link is a file download, not a web page. Pass the article DOI or landing page instead.' }
-                    : { ok: false, code: 'unreachable', message: 'The page could not be loaded (it may be a file download rather than a web page).' };
+                // The hidden browser never shows a download: a file link fails to load as a page.
+                return urlNamesPdf(url)
+                    ? { ok: false, code: 'file_download', message: 'The link is a file download, not a web page.' }
+                    : { ok: false, code: 'file_download', message: 'The page could not be loaded (it may be a file download rather than a web page).' };
             }
 
             if (blocked() || landedOnBlockedHost(browser)) {

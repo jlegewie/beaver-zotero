@@ -181,7 +181,8 @@ if (!parsed.options.lib || nonEsLibs.length > 0) {
 // jobs and shows them, and nothing inside the package does.
 // `identity/itemLinks.ts` parses the Zotero object links the model writes in
 // chat markdown. Clients render and export them; nothing inside the package
-// follows a link, so it is a root too.
+// follows a link, so it is a root too. `identity/webPages.ts` (web page URLs,
+// `web-` link targets and text-fragment links) is a root on the same rule.
 const entryPaths = [
   "src/globals.d.ts",
   "src/protocol/agentProtocol.ts",
@@ -236,6 +237,7 @@ const entryPaths = [
   "src/layouts/tableCitations.ts",
   "src/layouts/tableExport.ts",
   "src/identity/itemLinks.ts",
+  "src/identity/webPages.ts",
   "src/extract/pageLabels/printedPageLabels.ts",
 ].map((p) => path.join(pkgDir, p));
 

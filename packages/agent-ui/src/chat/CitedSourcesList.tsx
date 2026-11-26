@@ -10,10 +10,15 @@ import {
     isExternalCitation,
     isExternalFileCitation,
     itemTypeToIconName,
+    type WebPageCitation,
 } from '@beaver/agent-core/types/citations';
 import Tooltip from '../primitives/Tooltip';
 import { externalReferenceMappingAtom, externalReferenceItemMappingAtom, formatExternalCitation } from '@beaver/agent-core/citations/externalReferences';
 import { ExternalReference } from '@beaver/agent-core/types/externalReferences';
+import { webPageId } from '@beaver/agent-core/citations/externalRecords';
+import { webPageIsPdf, webPageSiteName } from '@beaver/agent-core/identity/webPages';
+import SiteIcon from './SiteIcon';
+import { formatRegistryDate } from '@beaver/agent-core/citations/externalRecordDisplay';
 import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { getHost, type ResolvedItemDisplay } from '../host';
 import { useItemContextMenu } from './useItemContextMenu';
@@ -55,6 +60,8 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                 let ref: ZoteroItemReference | undefined;
                 if (isExternalCitation(citation)) {
                     const sourceId = getExternalSourceId(citation);
+                    // A web page shows its site's icon from the citation, imported or not.
+                    if (webPageId(sourceId)) continue;
                     const mapped = sourceId ? externalItemMapping[sourceId] : null;
                     ref = mapped ?? undefined;
                 } else if (citation.citation_type === 'item') {
@@ -142,6 +149,9 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                     const iconName = showAsExternal
                         ? undefined
                         : mappedItemType ?? itemTypeToIconName(citation.item_type ?? resolvedItemType, citation.content_kind);
+                    // A web page shows its site's icon, as in its citation's preview,
+                    // also once it is in the library.
+                    const webPage = isExternal && webPageId(getExternalSourceId(citation)) ? citation.web_page ?? {} : null;
 
                     return (
                         <div
@@ -152,7 +162,8 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                             {/* Left column - numeric citation */}
                             {!authorYearFormat &&
                                 <div className="p-2">
-                                    <div className={`source-citation text-sm ${showAsExternal ? 'mt-020 source-citation-external' : ''}`}>
+                                    {/* A web page's marker stays blue once imported, as in the text. */}
+                                    <div className={`source-citation text-sm ${showAsExternal ? 'mt-020' : ''} ${showAsExternal || (isExternal && webPageId(externalRef?.source_id)) ? 'source-citation-external' : ''}`}>
                                         {citation.numericCitation}
                                     </div>
                                 </div>
@@ -169,6 +180,14 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                                             <span className="mr-2 flex-shrink-0 display-flex items-center font-color-secondary">
                                                 <Icon icon={TableIcon} />
                                             </span>
+                                        ) : webPage ? (
+                                            <span className="mr-2 flex-shrink-0 display-flex items-center">
+                                                <SiteIcon
+                                                    icon={webPage.icon}
+                                                    isPdf={webPageIsPdf(webPage.content_type, webPage.url)}
+                                                    size={14}
+                                                />
+                                            </span>
                                         ) : iconName && (
                                             <span className="mr-2 flex-shrink-0" style={{ transform: 'translateY(-2px)' }}>
                                                 {/* The client owns its item-type artwork; the generic
@@ -177,9 +196,10 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                                                     ?? <Icon icon={FileIcon} className="scale-85" />}
                                             </span>
                                         )}
-                                        {/* Author-year heading */}
+                                        {/* Author-year heading; a web page's title, since its
+                                            label (its site and year) would not tell pages apart. */}
                                         <span className="truncate">
-                                            {table ? table.title : citation.display_name}
+                                            {table ? table.title : (webPage?.title || citation.display_name)}
                                         </span>
                                     </div>
 
@@ -191,9 +211,10 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                                                 buttonVariant: 'ghost-secondary',
                                                 revealButtonMode: 'icon-only',
                                                 importButtonMode: 'none',
-                                                detailsButtonMode: 'icon-only',
+                                                // A web page has no abstract or PDF of its own.
+                                                detailsButtonMode: webPageId(externalRef.source_id) ? 'none' : 'icon-only',
                                                 webButtonMode: 'icon-only',
-                                                pdfButtonMode: 'icon-only',
+                                                pdfButtonMode: webPageId(externalRef.source_id) ? 'none' : 'icon-only',
                                                 showCitationCount: false,
                                                 className: 'scale-12',
                                             })
@@ -275,7 +296,10 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                                 {/* Right bottom section - formatted citation */}
                                 <div className="flex-1 px-2 text-sm font-color-secondary
                                                 min-w-0 overflow-hidden text-ellipsis">
-                                    {showAsExternal && externalRef
+                                    {webPage
+                                        // As in the page's preview and its result rows: its site and date.
+                                        ? webPageSiteLine(webPage) || stripUrlsFromCitation(citation.formatted_citation)
+                                        : showAsExternal && externalRef && !webPageId(externalRef.source_id)
                                         ? formatExternalCitation(externalRef)
                                         : table
                                         ? 'Research table'
@@ -293,8 +317,74 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
 };
 
 /**
+ * The keys a record names its work by: its DOI, an arXiv id as the DataCite
+ * DOI arXiv registers (version dropped), and its PMID — the same rules the
+ * backend uses to list a web page as its paper.
+ */
+export function workKeys(reference: ExternalReference | undefined): string[] {
+    const ids = reference?.identifiers;
+    if (!ids) return [];
+    const keys: string[] = [];
+    const doi = typeof ids.doi === 'string' ? ids.doi.trim().toLowerCase() : '';
+    if (doi) keys.push(doi);
+    const arxiv = typeof ids.arXivID === 'string'
+        ? ids.arXivID.trim().replace(/^arxiv:/i, '').replace(/v\d+$/i, '').toLowerCase()
+        : '';
+    if (arxiv) keys.push(`10.48550/arxiv.${arxiv}`);
+    const pmid = typeof ids.pmid === 'string' ? ids.pmid.trim() : '';
+    if (/^\d+$/.test(pmid)) keys.push(`pmid:${Number(pmid)}`);
+    return keys;
+}
+
+/**
+ * One entry per work: a web page whose record names a work (a DOI, an arXiv
+ * id or a PMID: a journal landing page, an arXiv page, a PDF link) merges into
+ * another cited external record of that work, or into an earlier web page of
+ * it. The backend lists such a page as the paper, so the two entries would
+ * show the same work. The entry kept shows the numeric markers of both, since
+ * each was cited under its own.
+ */
+export function mergeWebPagesByDoi(
+    citations: CitedSource[],
+    references: Record<string, ExternalReference>,
+): CitedSource[] {
+    const keysOf = (citation: CitedSource): string[] => {
+        const id = getExternalSourceId(citation);
+        return id ? workKeys(references[id]) : [];
+    };
+    const isWebPage = (citation: CitedSource) => !!webPageId(getExternalSourceId(citation));
+    const merged = citations.map((citation) => ({ ...citation }));
+    const keeperByKey = new Map<string, CitedSource>();
+    const claim = (citation: CitedSource, keys: string[]) => {
+        for (const key of keys) if (!keeperByKey.has(key)) keeperByKey.set(key, citation);
+    };
+    // Works first, so a page merges into the work even when the page was cited first.
+    for (const citation of merged) if (!isWebPage(citation)) claim(citation, keysOf(citation));
+    const dropped = new Set<CitedSource>();
+    for (const citation of merged) {
+        if (!isWebPage(citation)) continue;
+        const keys = keysOf(citation);
+        const keeper = keys.map((key) => keeperByKey.get(key)).find(Boolean);
+        if (!keeper) {
+            claim(citation, keys);
+            continue;
+        }
+        dropped.add(citation);
+        const markers = [keeper.numericCitation, citation.numericCitation].filter((marker): marker is string => !!marker);
+        const numbers = [...new Set(markers.join(', ').split(', '))].sort((a, b) => Number(a) - Number(b));
+        keeper.numericCitation = numbers.length ? numbers.join(', ') : null;
+    }
+    return merged.filter((citation) => !dropped.has(citation));
+}
+
+/**
  * Return the citation identity used for source-list actions and lookups.
  */
+/** "nyc.gov · Jan 2024": a cited page's site and date. */
+function webPageSiteLine(page: WebPageCitation): string {
+    return [webPageSiteName(page.site, page.url), formatRegistryDate(page.published)].filter(Boolean).join(' · ');
+}
+
 function getDisplayRef(citation: CitedSource) {
     return getResolvedRef(citation) ?? getRequestedRef(citation);
 }

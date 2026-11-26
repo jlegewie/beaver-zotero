@@ -465,6 +465,35 @@ describe('writeImportItem finishing touches', () => {
         expect(saved.save).toHaveBeenCalled();
     });
 
+    it.each([
+        ['https://www.reuters.com/world/x', 'Beaver Metadata: search-result metadata (page could not be loaded)'],
+        ['https://www.nber.org/papers/w1.pdf', 'Beaver Metadata: search-result metadata (PDF could not be identified)'],
+    ])('names a failed page or PDF lookup of %s, not an identifier lookup', async (url, line) => {
+        await writeImportItem(journal({
+            source: { kind: 'external', input: 'web-MJNNMKH4ED', provider: 'exa', external_id: 'web-MJNNMKH4ED', url },
+            resolution: { method: 'fallback_metadata' },
+        }));
+        expect(saved.setField).toHaveBeenCalledWith('extra', line);
+    });
+
+    it('says an unidentified PDF link the user gave is named after the file', async () => {
+        await writeImportItem(journal({
+            source: { kind: 'url', input: 'url:https://www.nber.org/w31161.pdf', url: 'https://www.nber.org/w31161.pdf' },
+            resolution: { method: 'fallback_metadata' },
+            warnings: ['PDF not identified (Zotero could not identify w31161.pdf.); named after the file'],
+        }));
+        expect(saved.setField).toHaveBeenCalledWith('extra', 'Beaver Metadata: named after the file (PDF could not be identified)');
+    });
+
+    it('takes the failed lookup from the resolution warning over the link\'s shape', async () => {
+        await writeImportItem(journal({
+            source: { kind: 'external', input: 'web-MJNNMKH4ED', provider: 'exa', external_id: 'web-MJNNMKH4ED', url: 'https://iris.who.int/bitstreams/1/content' },
+            resolution: { method: 'fallback_metadata' },
+            warnings: ['PDF not identified (Zotero could not identify content.pdf.); using the search result\'s metadata'],
+        }));
+        expect(saved.setField).toHaveBeenCalledWith('extra', 'Beaver Metadata: search-result metadata (PDF could not be identified)');
+    });
+
     it('appends the metadata line to existing Extra without duplicating it', async () => {
         saved.getField.mockImplementation((name: string) => (name === 'extra' ? 'PMID: 1' : ''));
         await writeImportItem(journal({ resolution: { method: 'model_metadata' } }));
@@ -512,12 +541,57 @@ describe('writeImportItem attachments', () => {
         );
         expect(mocks.schedulePdfFetchTask).toHaveBeenCalledWith(1, 'ITEM0001', {
             pdfCandidates: [{ url: 'https://x.org/p.pdf' }],
+            guardedOnly: false,
             actionId: 'a1',
             runId: 'r1',
             threadId: 't1',
             onAttachmentResolved,
         });
         expect(result.attachment_status).toBe('pending');
+    });
+
+    it.each([
+        ['an identified PDF link', { resolution: { method: 'recognizer' } }],
+        ['a PDF link kept as the search result', { resolution: { method: 'fallback_metadata' }, warnings: ['PDF not identified (x); using the search result\'s metadata'] }],
+        ['the backend\'s web PDF candidate', { pdf_candidates: [{ url: 'https://x.org/p.pdf', access_method: 'web' }] }],
+    ])('fetches the PDF of %s only under the guard', async (_label, extra) => {
+        await writeImportItem(journal({
+            source: { kind: 'external', input: 'web-MJNNMKH4ED', provider: 'exa', external_id: 'web-MJNNMKH4ED' },
+            pdf_candidates: [{ url: 'https://x.org/p.pdf' } as any],
+            ...(extra as any),
+        }));
+        expect(mocks.schedulePdfFetchTask.mock.calls[0][2]).toMatchObject({ guardedOnly: true });
+    });
+
+    it('always tries the PDF link of a PDF-link import, even when the backend sent no candidate for it', async () => {
+        const link = 'https://papers.ssrn.com/sol3/Delivery.cfm/1.pdf';
+        await writeImportItem(journal({
+            source: { kind: 'url', input: `url:${link}`, url: link },
+            resolution: { method: 'recognizer' },
+            pdf_candidates: [],
+        }));
+        expect(mocks.schedulePdfFetchTask.mock.calls[0][2]).toMatchObject({
+            guardedOnly: true,
+            pdfCandidates: [{ url: link, access_method: 'web' }],
+        });
+    });
+
+    it('keeps the PDF link as a direct download when a page candidate names the same address', async () => {
+        const link = 'https://reports.example.org/report.pdf';
+        await writeImportItem(journal({
+            source: { kind: 'url', input: `url:${link}`, url: link },
+            resolution: { method: 'recognizer' },
+            pdf_candidates: [{ page_url: link, access_method: 'openalex' }],
+        }));
+        expect(mocks.schedulePdfFetchTask.mock.calls[0][2].pdfCandidates[0]).toEqual({ url: link, access_method: 'web' });
+    });
+
+    it('lets Zotero look for the PDF of a paper found on the web by its identifier', async () => {
+        await writeImportItem(journal({
+            source: { kind: 'external', input: 'web-MJNNMKH4ED', provider: 'exa', external_id: 'web-MJNNMKH4ED', identifier: { type: 'doi', value: '10.1/x' } },
+            pdf_candidates: [{ url: 'https://x.org/p.pdf' } as any],
+        }));
+        expect(mocks.schedulePdfFetchTask.mock.calls[0][2]).toMatchObject({ guardedOnly: false });
     });
 
     it('does not fetch a PDF for an item with no DOI, URL or candidates to look up', async () => {

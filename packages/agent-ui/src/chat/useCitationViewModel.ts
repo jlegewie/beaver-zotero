@@ -2,6 +2,8 @@ import { useMemo } from 'react';
 import { useAtomValue } from 'jotai';
 import { citationByKeyAtom, pageLabelsByAttachmentIdAtom } from '@beaver/agent-core/citations/atoms';
 import { externalReferenceItemMappingAtom } from '@beaver/agent-core/citations/externalReferences';
+import { webPageId } from '@beaver/agent-core/citations/externalRecords';
+import { webPageIsPdf } from '@beaver/agent-core/identity/webPages';
 import {
     Citation,
     getCitationPages,
@@ -23,6 +25,21 @@ import { formatCitedPages, hasPageLabels, resolvePageLabelFromLabels, type PageL
 import { explicitPageLabel } from '../utils/locationDisplay';
 import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { getHost } from '../host';
+
+/** A cited web page, as the citation shows and opens it. */
+export interface CitationWebPage {
+    /** The page's URL; null when the citation names none (not yet resolved). */
+    url: string | null;
+    /** A PDF: browsers ignore text fragments in it. */
+    isPdf: boolean;
+    title: string | null;
+    /** Publisher name or site, e.g. "World Health Organization", "who.int". */
+    site: string | null;
+    /** The site's icon as the citation carries it; `SiteIcon` draws it only if it is an inline image. */
+    icon: string | null;
+    /** When the page was published: "YYYY-MM-DD", "YYYY-MM" or "YYYY". */
+    published: string | null;
+}
 
 /**
  * Citation display state - explicit FSM for citation lifecycle.
@@ -161,6 +178,8 @@ export interface CitationViewModel {
     isExternalFile: boolean;
     externalFileKey: string | null;
     externalSourceId?: string;
+    /** Set for a web page citation (`web-` id). */
+    webPage: CitationWebPage | null;
     /** Resolved Zotero identity (0 / '' when not a Zotero citation). */
     libraryID: number;
     itemKey: string;
@@ -326,6 +345,22 @@ export function useCitationViewModel(props: Record<string, unknown>): CitationVi
         ? externalReferenceToZoteroItem[externalSourceId]
         : undefined;
 
+    // A web page (`web-` id): as the resolved citation recorded it, so it
+    // renders the same in every thread and after an import.
+    const webPage = useMemo((): CitationWebPage | null => {
+        if (!isExternal || !webPageId(externalSourceId)) return null;
+        const page = metadata?.web_page;
+        const url = page?.url || null;
+        return {
+            url,
+            isPdf: webPageIsPdf(page?.content_type, url),
+            title: page?.title || null,
+            site: page?.site || null,
+            icon: page?.icon || null,
+            published: page?.published || null,
+        };
+    }, [isExternal, externalSourceId, metadata]);
+
     // Compute effective libraryID and itemKey (accounting for mapped external citations).
     const effectiveLibraryID = libraryID || mappedZoteroItem?.library_id || 0;
     const effectiveItemKey = itemKey || mappedZoteroItem?.zotero_key || '';
@@ -455,6 +490,7 @@ export function useCitationViewModel(props: Record<string, unknown>): CitationVi
         isExternalFile,
         externalFileKey,
         externalSourceId,
+        webPage,
         libraryID,
         itemKey,
         mappedZoteroItem,

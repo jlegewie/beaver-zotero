@@ -3,16 +3,17 @@
  *
  * Bibliographic matching (DOI, ISBN, a PubMed id in Extra, a trial's registry
  * URL or report number, then title/creators/year) is
- * `batchFindExistingReferences`. Web content additionally matches an existing
- * item with exactly the same normalized URL, since pages rarely carry an
- * identifier and their titles change.
+ * `batchFindExistingReferences`, which also matches a record's URL. Web content
+ * without an identifier matches on its URL only (`findItemsByUrl`, the same
+ * normalized comparison), since pages rarely carry an identifier and their
+ * titles change.
  */
 
 import { itemJsonPmid, type ZoteroItemJson } from '@beaver/agent-core/types/itemImport';
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { logger } from '@beaver/agent-core/platform/logger';
 import { batchFindExistingReferences } from '../../utils/batchFindExistingReferences';
-import { libraryRefForLibraryID } from '../../utils/libraryIdentity';
+import { findItemsByUrl } from '../../utils/findItemsByUrl';
 
 export const WEB_CONTENT_ITEM_TYPES = new Set([
     'webpage',
@@ -27,52 +28,6 @@ export const WEB_CONTENT_ITEM_TYPES = new Set([
 function field(json: ZoteroItemJson, name: string): string | undefined {
     const value = json[name];
     return typeof value === 'string' && value.trim() ? value.trim() : undefined;
-}
-
-/** URL variants an existing item may store for the same page (trailing slash on the path, http/https). */
-export function urlVariants(url: string): string[] {
-    const trimmed = url.trim().replace(/#.*$/, '');
-    const variants = new Set<string>([trimmed]);
-    // The slash belongs to the path, never to the query string.
-    const queryStart = trimmed.indexOf('?');
-    const base = queryStart >= 0 ? trimmed.slice(0, queryStart) : trimmed;
-    const query = queryStart >= 0 ? trimmed.slice(queryStart) : '';
-    variants.add(base.endsWith('/') ? base.slice(0, -1) + query : `${base}/${query}`);
-    for (const value of Array.from(variants)) {
-        if (value.startsWith('https://')) variants.add('http://' + value.slice(8));
-        else if (value.startsWith('http://')) variants.add('https://' + value.slice(7));
-    }
-    return Array.from(variants);
-}
-
-/**
- * Regular items in `libraryID` whose URL field equals one of `urls`, keyed by
- * the matched URL. Attachments (snapshots, linked URLs), notes and annotations
- * are excluded: they are not bibliographic records, and a child attachment's
- * trashed parent would not show up in `deletedItems` for the child itself.
- */
-async function findByUrl(urls: string[], libraryID: number): Promise<Map<string, number>> {
-    const found = new Map<string, number>();
-    if (!urls.length) return found;
-    const fieldID = Zotero.ItemFields.getID('url');
-    if (!fieldID) return found;
-    const noteTypeID = Zotero.ItemTypes.getID('note') || 28;
-    const attachmentTypeID = Zotero.ItemTypes.getID('attachment') || 3;
-    const annotationTypeID = Zotero.ItemTypes.getID('annotation') || 1;
-    const placeholders = urls.map(() => '?').join(', ');
-    const sql = 'SELECT items.itemID, itemDataValues.value FROM items '
-        + 'JOIN itemData ON itemData.itemID = items.itemID '
-        + 'JOIN itemDataValues ON itemDataValues.valueID = itemData.valueID '
-        + `WHERE items.libraryID = ? AND itemData.fieldID = ? AND itemDataValues.value IN (${placeholders}) `
-        + 'AND items.itemTypeID NOT IN (?, ?, ?) '
-        + 'AND items.itemID NOT IN (SELECT itemID FROM deletedItems)';
-    await Zotero.DB.queryAsync(sql, [libraryID, fieldID, ...urls, noteTypeID, attachmentTypeID, annotationTypeID], {
-        onRow: (row: any) => {
-            const value = row.getResultByIndex(1);
-            if (!found.has(value)) found.set(value, row.getResultByIndex(0));
-        },
-    });
-    return found;
 }
 
 /**
@@ -120,24 +75,13 @@ export async function findExistingItems(
         logger(`itemImport/duplicates: reference check failed: ${error}`, 1);
     }
 
-    const webEntries = entries.filter(({ key, json }) =>
-        !existing.has(key) && WEB_CONTENT_ITEM_TYPES.has(json.itemType) && field(json, 'url'));
+    // The bibliographic check already matched the others' URLs.
+    const webEntries = entries.filter((entry) =>
+        !bibliographic.includes(entry) && WEB_CONTENT_ITEM_TYPES.has(entry.json.itemType) && field(entry.json, 'url'));
     if (webEntries.length) {
         try {
-            const variantsByKey = new Map(webEntries.map(({ key, json }) => [key, urlVariants(field(json, 'url')!)]));
-            const matches = await findByUrl(Array.from(new Set(Array.from(variantsByKey.values()).flat())), libraryID);
-            for (const [key, variants] of variantsByKey) {
-                const itemID = variants.map((variant) => matches.get(variant)).find((id) => id !== undefined);
-                if (itemID === undefined) continue;
-                const item = await Zotero.Items.getAsync(itemID);
-                if (item) {
-                    existing.set(key, {
-                        library_id: item.libraryID,
-                        zotero_key: item.key,
-                        library_ref: libraryRefForLibraryID(item.libraryID) ?? undefined,
-                    });
-                }
-            }
+            const matches = await findItemsByUrl(webEntries.map(({ key, json }) => ({ id: key, url: field(json, 'url')! })), [libraryID]);
+            for (const [key, match] of matches) existing.set(key, match);
         } catch (error) {
             logger(`itemImport/duplicates: URL check failed: ${error}`, 1);
         }

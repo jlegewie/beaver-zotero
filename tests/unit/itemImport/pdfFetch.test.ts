@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
     zoteroResolverSource: vi.fn((resolvers: unknown[]) => ({ resolvers })),
     downloadServerPdf: vi.fn(),
     isPdfDocument: vi.fn(() => true),
+    downloadPdfLink: vi.fn(),
 }));
 
 vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
@@ -21,6 +22,10 @@ vi.mock('../../../src/services/pdfAttachmentFetch', () => ({
 }));
 vi.mock('../../../src/services/serverPdfSource', () => ({ downloadServerPdf: mocks.downloadServerPdf }));
 vi.mock('../../../src/utils/attachmentFiles', () => ({ isPdfDocument: mocks.isPdfDocument }));
+vi.mock('../../../src/services/itemImport/pdfLinkImport', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('../../../src/services/itemImport/pdfLinkImport')>()),
+    downloadPdfLink: mocks.downloadPdfLink,
+}));
 
 import { schedulePdfFetchTask } from '../../../src/services/itemImport/pdfFetch';
 
@@ -37,7 +42,7 @@ async function runTask(): Promise<any> {
 beforeEach(() => {
     vi.clearAllMocks();
     onAttachmentResolved = vi.fn();
-    item = { key: 'ITEM0001', getAttachments: vi.fn(async () => []) };
+    item = { key: 'ITEM0001', getAttachments: vi.fn(async () => []), getField: vi.fn(() => '') };
     vi.stubGlobal('Zotero', {
         Beaver: { account: { getGeneration: () => 1 }, libraryScopeInitialized: true, searchableLibraryIds: [1] },
         Libraries: { get: () => ({ editable: true, filesEditable: true }) },
@@ -54,6 +59,45 @@ describe('schedulePdfFetchTask failure telemetry', () => {
 
         const sources = mocks.fetchPdfAttachment.mock.calls[0][1];
         expect(sources).toEqual([{ resolvers: [{ url: 'https://a.example/x.pdf' }] }, mocks.downloadServerPdf]);
+    });
+
+    describe('an import from a PDF link', () => {
+        const link = 'https://reports.example.org/report.pdf';
+        const ready = { signal: new AbortController().signal, assertAccess: () => {} };
+
+        async function guardedSources(candidates: unknown[]) {
+            mocks.fetchPdfAttachment.mockResolvedValue({ attachment: null });
+            schedulePdfFetchTask(1, 'ITEM0001', { threadId: 't1', onAttachmentResolved, pdfCandidates: candidates, guardedOnly: true } as any);
+            await mocks.scheduleBackgroundTask.mock.calls[0][2](new AbortController().signal);
+            return mocks.fetchPdfAttachment.mock.calls[0][1];
+        }
+
+        it('attaches the PDF downloaded while resolving it, without a second download', async () => {
+            const download = { directory: '/tmp/d', path: '/tmp/d/file.pdf', url: link, mimeType: 'application/pdf' };
+            const take = vi.fn((url: string) => (url === link ? download : null));
+            (Zotero as any).Beaver.itemImport = { resolvedPdfs: { take } };
+
+            const [guarded, server] = await guardedSources([{ url: link, access_method: 'translator' }]);
+
+            expect(server).toBe(mocks.downloadServerPdf);
+            expect(await guarded(ready)).toBe(download);
+            expect(mocks.downloadPdfLink).not.toHaveBeenCalled();
+        });
+
+        it('downloads it again only through the guarded downloader, never Zotero\'s resolvers, and records the attempt', async () => {
+            (Zotero as any).Beaver.itemImport = { resolvedPdfs: { take: vi.fn(() => null) } };
+            mocks.downloadPdfLink.mockResolvedValue({ ok: false, code: 'not_found', message: 'The file does not exist (HTTP 404).', status: 404 });
+
+            const sources = await guardedSources([{ url: link, access_method: 'web' }]);
+
+            expect(mocks.buildPdfResolvers).not.toHaveBeenCalled();
+            expect(mocks.zoteroResolverSource).not.toHaveBeenCalled();
+            expect(sources).toHaveLength(2);
+            const recordSourceAttempt = vi.fn();
+            expect(await sources[0]({ ...ready, diagnostics: { recordSourceAttempt } })).toBeNull();
+            expect(mocks.downloadPdfLink).toHaveBeenCalledWith(link, expect.any(Number));
+            expect(recordSourceAttempt).toHaveBeenCalledWith('web', 'reports.example.org', expect.objectContaining({ status: 404 }));
+        });
     });
 
     it('reports no_sources when no resolvers can be built', async () => {

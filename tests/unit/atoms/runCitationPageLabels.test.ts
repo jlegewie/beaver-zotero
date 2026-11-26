@@ -1,7 +1,8 @@
 /**
  * A run's citation data reaches the renderer after the run's own writes are
  * revoked: page labels preloaded for its citations, and the citations the
- * backend resolves for a run the user stopped.
+ * backend resolves for a run the user stopped. The site icons sent beside a
+ * run's citations, once per host, are filled in as the citations are stored.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -179,5 +180,70 @@ describe('citations of a stopped run', () => {
         await callbacks.onRunComplete(partialRunComplete());
 
         expect(notifyRunComplete).not.toHaveBeenCalled();
+    });
+});
+
+const icon = 'data:image/webp;base64,UklGRhwAAABXRUJQ';
+const webCitation = (id: string, iconHost?: string) => ({
+    citation_id: id,
+    citation_type: 'external_reference',
+    resolved_ref: { kind: 'external', external_id: id },
+    web_page: { url: `https://www.who.int/${id}`, ...(iconHost ? { icon_host: iconHost } : {}) },
+});
+
+describe('run citation site icons', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        preloadPageLabelsForCitations.mockResolvedValue({});
+        chatStore().set(citationsAtom, []);
+    });
+
+    it('fills in the icons a run_citations event sends beside its citations', () => {
+        const callbacks = createWSCallbacks(chatStore().set);
+
+        callbacks.onRunCitations({
+            event: 'run_citations',
+            run_id: 'run-1',
+            citations: [webCitation('web-AAAAAAAAAA', 'www.who.int'), webCitation('web-BBBBBBBBBB', 'www.who.int'), webCitation('web-CCCCCCCCCC')],
+            site_icons: { 'www.who.int': icon },
+        } as unknown as WSRunCitationsEvent);
+
+        expect(store.get(citationsAtom).map((citation) => [citation.run_id, citation.web_page?.icon])).toEqual([
+            ['run-1', icon],
+            ['run-1', icon],
+            ['run-1', undefined],
+        ]);
+    });
+
+    it('fills them in from a run_complete event that embeds the citations', async () => {
+        const callbacks = createWSCallbacks(chatStore().set);
+
+        await callbacks.onRunComplete({
+            event: 'run_complete',
+            run_id: 'run-2',
+            usage: null,
+            cost: null,
+            citations: [webCitation('web-AAAAAAAAAA', 'www.who.int')],
+            site_icons: { 'www.who.int': icon },
+            agent_actions: null,
+        } as unknown as WSRunCompleteEvent);
+
+        expect(store.get(citationsAtom).map((citation) => citation.web_page?.icon)).toEqual([icon]);
+    });
+
+    it('fills them in for citations that arrive after the run was stopped', () => {
+        chatStore().set(threadRunsAtom, []);
+        const callbacks = stopStreamingRun();
+
+        callbacks.onRunCitations?.({
+            event: 'run_citations',
+            run_id: 'run-1',
+            citations: [webCitation('web-AAAAAAAAAA', 'www.who.int')],
+            site_icons: { 'www.who.int': icon },
+        } as unknown as WSRunCitationsEvent);
+
+        expect(store.get(citationsAtom).map((citation) => [citation.run_id, citation.web_page?.icon])).toEqual([
+            ['run-1', icon],
+        ]);
     });
 });

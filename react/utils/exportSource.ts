@@ -16,6 +16,8 @@ import {
     externalReferenceMappingAtom,
 } from '@beaver/agent-core/citations/externalReferences';
 import { hydrateItemLinkLibraryRefs } from '@beaver/agent-core/identity/itemLinks';
+import { rewriteWebLinkTargets } from '@beaver/agent-core/identity/webPages';
+import type { ExternalReference } from '@beaver/agent-core/types/externalReferences';
 import { buildExportSource, buildResponseBlocks, buildThreadBlocks, noteFromToolCall } from '@beaver/agent-export/source/buildSource';
 import { buildCitationSnapshot } from '@beaver/agent-export/source/citationSnapshot';
 import type { ExportContent, ExportSource, ExportSourceBlock } from '@beaver/agent-export/types';
@@ -74,11 +76,16 @@ async function citationSnapshotFor(
     });
 }
 
-/** Older history names libraries by device-local id; links in agent text must be portable. */
-function withPortableItemLinks(block: ExportSourceBlock): ExportSourceBlock {
-    return block.type === 'markdown' || block.type === 'note'
-        ? { ...block, markdown: hydrateItemLinkLibraryRefs(block.markdown, libraryRefForLibraryID) }
+/** Links in agent text must work outside the chat: portable item links, and web page links as URLs. */
+function withExportableLinks(pages: Record<string, ExternalReference>) {
+    return (block: ExportSourceBlock): ExportSourceBlock => block.type === 'markdown' || block.type === 'note'
+        ? { ...block, markdown: exportableLinks(block.markdown, pages) }
         : block;
+}
+
+/** Older history names libraries by device-local id, and a web page link names the page by its id. */
+function exportableLinks(markdown: string, pages: Record<string, ExternalReference>): string {
+    return rewriteWebLinkTargets(hydrateItemLinkLibraryRefs(markdown, libraryRefForLibraryID), (webId) => pages[webId]?.url);
 }
 
 /**
@@ -107,7 +114,7 @@ export async function buildResponseExportSource(
 ): Promise<ExportSource> {
     const threadState = captureThreadState(runs);
     const describeToolCall = content === 'full' ? await toolCallDescriber(runs) : undefined;
-    const blocks = buildResponseBlocks(runs, { content, describeToolCall }).map(withPortableItemLinks);
+    const blocks = buildResponseBlocks(runs, { content, describeToolCall }).map(withExportableLinks(threadState.citationContext.externalReferencesMap));
     return buildExportSource({
         kind: 'response',
         title: threadState.title,
@@ -126,7 +133,7 @@ export async function buildResponseExportSource(
 export async function buildThreadExportSource(runs: AgentRun[]): Promise<ExportSource> {
     const threadState = captureThreadState(runs);
     const describeToolCall = await toolCallDescriber(runs);
-    const blocks = buildThreadBlocks(runs, { content: 'full', describeToolCall }).map(withPortableItemLinks);
+    const blocks = buildThreadBlocks(runs, { content: 'full', describeToolCall }).map(withExportableLinks(threadState.citationContext.externalReferencesMap));
     return buildExportSource({
         kind: 'thread',
         title: threadState.title,
@@ -154,7 +161,7 @@ export async function buildNoteExportSource(run: AgentRun, toolCallId: string): 
     if (!note) return null;
     const blocks: ExportSourceBlock[] = [{
         type: 'markdown',
-        markdown: hydrateItemLinkLibraryRefs(note.markdown, libraryRefForLibraryID),
+        markdown: exportableLinks(note.markdown, threadState.citationContext.externalReferencesMap),
     }];
     return buildExportSource({
         kind: 'note',

@@ -119,6 +119,7 @@
     "./src/icons/FlowConnectionIcon.tsx",
     "./src/icons/FourIcon.tsx",
     "./src/icons/GlobalSearchIcon.tsx",
+    "./src/icons/GlobeIcon.tsx",
     "./src/icons/HandIcon.tsx",
     "./src/icons/HelpCircleIcon.tsx",
     "./src/icons/HighlighterIcon.tsx",
@@ -213,6 +214,7 @@
 
     "./src/chat/index.ts",
     "./src/chat/Citation.tsx",
+    "./src/chat/SiteIcon.tsx",
     "./src/chat/CitedSourcesList.tsx",
     "./src/chat/ChipPopup.tsx",
     "./src/chat/AskUserQuestionCard.tsx",

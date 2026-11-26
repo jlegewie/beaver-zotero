@@ -1,0 +1,200 @@
+{
+  "description": "normalize_web_url and web- ids: input URL -> normalized URL -> web- id. Generated from app/external_sources/urls.py; the plugin keeps a copy at tests/fixtures/external_references/web_urls.json and runs its port against it.",
+  "cases": [
+    {
+      "input": "https://www.who.int/news-room/fact-sheets/detail/obesity-and-overweight",
+      "normalized": "https://www.who.int/news-room/fact-sheets/detail/obesity-and-overweight",
+      "web_id": "web-MJNNMKH4ED"
+    },
+    {
+      "input": "HTTPS://WWW.Who.Int/News",
+      "normalized": "https://www.who.int/News",
+      "web_id": "web-X45SUKGLKI"
+    },
+    {
+      "input": "https://who.int:443/a",
+      "normalized": "https://who.int/a",
+      "web_id": "web-YOLYZFUG4K"
+    },
+    {
+      "input": "http://who.int:80",
+      "normalized": "http://who.int/",
+      "web_id": "web-N5IOHUXDHG"
+    },
+    {
+      "input": "http://who.int:443/a",
+      "normalized": "http://who.int:443/a",
+      "web_id": "web-IGCSQR2SLO"
+    },
+    {
+      "input": "https://who.int:8443/a",
+      "normalized": "https://who.int:8443/a",
+      "web_id": "web-CNEUENOHCN"
+    },
+    {
+      "input": "https://who.int/a#section",
+      "normalized": "https://who.int/a",
+      "web_id": "web-YOLYZFUG4K"
+    },
+    {
+      "input": "https://who.int/a?x=1#frag?y=2",
+      "normalized": "https://who.int/a?x=1",
+      "web_id": "web-OFIXTZ2VS7"
+    },
+    {
+      "input": "https://who.int#top",
+      "normalized": "https://who.int/",
+      "web_id": "web-5JTMDJM4UN"
+    },
+    {
+      "input": "https://who.int?x=1",
+      "normalized": "https://who.int/?x=1",
+      "web_id": "web-YNQC6OJLB3"
+    },
+    {
+      "input": "https://who.int/a?utm_source=x&id=7&fbclid=y&UTM_medium=z",
+      "normalized": "https://who.int/a?id=7",
+      "web_id": "web-X3NO3GM7G5"
+    },
+    {
+      "input": "https://who.int/a?utm_source=x&utm_campaign=y",
+      "normalized": "https://who.int/a",
+      "web_id": "web-YOLYZFUG4K"
+    },
+    {
+      "input": "https://who.int/a?utm%5Fsource=x&id=7",
+      "normalized": "https://who.int/a?id=7",
+      "web_id": "web-X3NO3GM7G5"
+    },
+    {
+      "input": "https://who.int/a?gclid=1&_ga=2&mc_cid=3&mc_eid=4&igshid=5&msclkid=6",
+      "normalized": "https://who.int/a",
+      "web_id": "web-YOLYZFUG4K"
+    },
+    {
+      "input": "https://who.int/a?b=2&a=1",
+      "normalized": "https://who.int/a?b=2&a=1",
+      "web_id": "web-FXGTJGC4MN"
+    },
+    {
+      "input": "https://who.int/a?a=1&&b=2&",
+      "normalized": "https://who.int/a?a=1&b=2",
+      "web_id": "web-LXXBIM5HNV"
+    },
+    {
+      "input": "https://who.int/a?",
+      "normalized": "https://who.int/a",
+      "web_id": "web-YOLYZFUG4K"
+    },
+    {
+      "input": "https://who.int/a?=x&id",
+      "normalized": "https://who.int/a?=x&id",
+      "web_id": "web-TMHQ5KNXCZ"
+    },
+    {
+      "input": "https://who.int/a?q=a%20b&r=a+b",
+      "normalized": "https://who.int/a?q=a%20b&r=a+b",
+      "web_id": "web-TG6BTUXTY7"
+    },
+    {
+      "input": "https://who.int/a?redirect=https://x.org/?utm_source=y",
+      "normalized": "https://who.int/a?redirect=https://x.org/?utm_source=y",
+      "web_id": "web-FRZQZDE56M"
+    },
+    {
+      "input": "https://who.int/a/",
+      "normalized": "https://who.int/a/",
+      "web_id": "web-7GEOUWMI7I"
+    },
+    {
+      "input": "https://who.int/A/B.PDF",
+      "normalized": "https://who.int/A/B.PDF",
+      "web_id": "web-OMIJLNFPAH"
+    },
+    {
+      "input": "https://who.int/a%2Fb/%7Euser",
+      "normalized": "https://who.int/a%2Fb/%7Euser",
+      "web_id": "web-NQWV5TD3NZ"
+    },
+    {
+      "input": "https://who.int/a b",
+      "normalized": "https://who.int/a b",
+      "web_id": "web-BDEUFQU2BL"
+    },
+    {
+      "input": "https://who.int/./a/../b",
+      "normalized": "https://who.int/./a/../b",
+      "web_id": "web-BP2WZGMKKD"
+    },
+    {
+      "input": "https://who.int//double//slash",
+      "normalized": "https://who.int//double//slash",
+      "web_id": "web-KWDPWGEFLV"
+    },
+    {
+      "input": "  https://who.int/a  ",
+      "normalized": "https://who.int/a",
+      "web_id": "web-YOLYZFUG4K"
+    },
+    {
+      "input": "https://user:pass@Who.Int:443/a",
+      "normalized": "https://user:pass@who.int/a",
+      "web_id": "web-OS35MP5C22"
+    },
+    {
+      "input": "https://user@who.int/a",
+      "normalized": "https://user@who.int/a",
+      "web_id": "web-4RGRUJ5V3B"
+    },
+    {
+      "input": "https://[2001:DB8::1]:8080/a",
+      "normalized": "https://[2001:db8::1]:8080/a",
+      "web_id": "web-QWKO5KCHWM"
+    },
+    {
+      "input": "https://[::1]/a",
+      "normalized": "https://[::1]/a",
+      "web_id": "web-LNHYUOURVK"
+    },
+    {
+      "input": "https://who.int./a",
+      "normalized": "https://who.int./a",
+      "web_id": "web-REAFJZ7RHU"
+    },
+    {
+      "input": "https://bücher.de/a",
+      "normalized": "https://bücher.de/a",
+      "web_id": "web-HQPUBBHRQS"
+    },
+    {
+      "input": "https://www.nber.org/system/files/working_papers/w31161/w31161.pdf",
+      "normalized": "https://www.nber.org/system/files/working_papers/w31161/w31161.pdf",
+      "web_id": "web-QWZYI6PP5E"
+    },
+    {
+      "input": "https://iris.who.int/server/api/core/bitstreams/0f3b2a1c-1111-2222-3333-444455556666/content",
+      "normalized": "https://iris.who.int/server/api/core/bitstreams/0f3b2a1c-1111-2222-3333-444455556666/content",
+      "web_id": "web-JH4BD2GAXN"
+    },
+    {
+      "input": "https://www.cdc.gov/obesity/data-and-statistics/adult-obesity-prevalence-maps.html?CDC_AAref_Val=https://www.cdc.gov/obesity/data/prevalence-maps.html",
+      "normalized": "https://www.cdc.gov/obesity/data-and-statistics/adult-obesity-prevalence-maps.html?CDC_AAref_Val=https://www.cdc.gov/obesity/data/prevalence-maps.html",
+      "web_id": "web-XIPIK5NLBJ"
+    },
+    {
+      "input": "http://example.com/path;params?q=1",
+      "normalized": "http://example.com/path;params?q=1",
+      "web_id": "web-XWPISGFTFX"
+    }
+  ],
+  "invalid": [
+    "ftp://who.int/a",
+    "who.int/a",
+    "https://",
+    "",
+    "web-MJNNMKH4ED",
+    "mailto:a@who.int",
+    "https://who.int:99999/a",
+    "https://who.int:abc/a"
+  ]
+}

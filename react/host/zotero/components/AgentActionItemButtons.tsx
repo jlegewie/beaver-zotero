@@ -30,7 +30,7 @@ import {
 import { ButtonVariant } from '@beaver/agent-ui/primitives/Button';
 import { ItemCreatingAgentAction } from '../../../agents/agentActions';
 import { trialDetails, workDetails, type ExternalReference } from '@beaver/agent-core/types/externalReferences';
-import { isOpenAlexWorkId } from '@beaver/agent-core/citations/externalRecords';
+import { isOpenAlexWorkId, webPageId } from '@beaver/agent-core/citations/externalRecords';
 import { primaryExternalUrl } from '@beaver/agent-core/citations/externalRecordDisplay';
 import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { resolveSearchableLibraryId } from '../libraryAccess';
@@ -240,18 +240,20 @@ const AgentActionItemButtons: React.FC<AgentActionItemButtonsProps> = ({
     return (
         <div className="display-flex flex-row items-center gap-3 flex-wrap">
 
-            {/* Details button */}
-            <Tooltip content={`${hasDetails ? 'Show details' : 'No details available'}`} singleLine>
-                <IconButton
-                    variant={buttonVariant}
-                    icon={InformationCircleIcon}
-                    className={`font-color-secondary ${className}`}
-                    iconClassName="scale-90"
-                    ariaLabel="Show details"
-                    onClick={handleShowDetails}
-                    style={{ padding: '2px' }}
-                />
-            </Tooltip>
+            {/* Details button: a web page has no abstract or record to show */}
+            {!webPageId(item.source_id) && (
+                <Tooltip content={`${hasDetails ? 'Show details' : 'No details available'}`} singleLine>
+                    <IconButton
+                        variant={buttonVariant}
+                        icon={InformationCircleIcon}
+                        className={`font-color-secondary ${className}`}
+                        iconClassName="scale-90"
+                        ariaLabel="Show details"
+                        onClick={handleShowDetails}
+                        style={{ padding: '2px' }}
+                    />
+                </Tooltip>
+            )}
 
             {/* Web button */}
             {hasWeb && (

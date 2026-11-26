@@ -13,10 +13,13 @@ import {
     getExternalReferenceUrl,
 } from '@beaver/agent-core/citations/externalReferences';
 import { pageLabelsByAttachmentIdAtom, externalFileLocalPathsAtom } from '@beaver/agent-core/citations/atoms';
+import { textFragmentUrl, webCitationExport, webPageSiteName } from '@beaver/agent-core/identity/webPages';
+import { formatRegistryDate } from '@beaver/agent-core/citations/externalRecordDisplay';
 import { useCitationMarker } from './useCitationMarker';
 import { getHost } from '../host';
 import type { CitationExportRender, CitationReaderTarget } from '../host/types';
 import { useCitationViewModel, type CitationViewModel } from './useCitationViewModel';
+import SiteIcon from './SiteIcon';
 import { hasAlternateModifier, useAlternateActivation } from './useAlternateActivation';
 import { Icon, LibraryIcon, PdfIcon, FileIcon, GlobalSearchIcon, NoteIcon, HighlighterIcon, TextAlignLeftIcon, ExternalLinkIcon, TableIcon, ArrowUpRightIcon } from '../icons';
 const TOOLTIP_WIDTH = '250px';
@@ -167,6 +170,23 @@ export function citationTargetFlags(vm: CitationViewModel): CitationTargetFlags 
  */
 export const CitationReaderTargetContext = React.createContext<CitationReaderTarget | undefined>(undefined);
 
+/** The cited web page's URL, with a text fragment for the cited sentences when a browser can find them. */
+function webPageUrl(vm: CitationViewModel): string | null {
+    const page = vm.webPage;
+    if (!page?.url) return null;
+    const sentences = (vm.metadata?.locations ?? []).map((location) => ({ partId: location.part_id, text: location.text }));
+    return textFragmentUrl(page.url, sentences, { isPdf: page.isPdf });
+}
+
+/** What the click on a web citation does: "Highlights passage in browser". */
+function webPageAction(vm: CitationViewModel): string {
+    const page = vm.webPage;
+    const url = webPageUrl(vm);
+    if (!page?.url || !url) return '';
+    if (url !== page.url) return 'Highlights passage in browser';
+    return page.isPdf ? 'Opens PDF in browser' : 'Opens page in browser';
+}
+
 /**
  * Hand a ready citation to the host's activation: the cited passage, or the
  * cited work when `alternate` asks for it and that changes anything.
@@ -179,9 +199,18 @@ function activateCitationViewModel(
     readerTarget: CitationReaderTarget | undefined,
 ): void {
     if (!vm.metadata || vm.isStreaming || vm.isInvalid) return;
+    const intent = flags.canRevealItem && alternate ? 'item' : 'passage';
+    // A web page opens in the browser at the cited sentences. They are
+    // sentences of Beaver's copy of the page, never a Zotero snapshot's, so a
+    // reader never opens; the alternate click reveals an imported page.
+    if (vm.webPage && intent === 'passage') {
+        const pageUrl = webPageUrl(vm);
+        if (pageUrl) getHost().navigation?.openExternalUrl(pageUrl);
+        return;
+    }
     void getHost().navigation?.activateCitation({
         metadata: vm.metadata,
-        intent: flags.canRevealItem && alternate ? 'item' : 'passage',
+        intent,
         ...(readerTarget ? { readerTarget } : {}),
         isExternal: vm.isExternal,
         isExternalFile: vm.isExternalFile,
@@ -257,6 +286,7 @@ const Citation: React.FC<CitationProps> = (props) => {
         itemKey,
         requestedRef,
         externalSourceId,
+        webPage,
         mappedZoteroItem,
         effectiveLibraryID,
         effectiveItemKey,
@@ -318,7 +348,27 @@ const Citation: React.FC<CitationProps> = (props) => {
 
     // Rendering for export to Zotero note (using CSL JSON for citations)
     if (exportRendering) {
+        // A citation that resolved to nothing gives a reader nothing to follow:
+        // leave it out, as Copy does, rather than export its raw id.
+        if (isInvalid) return null;
         displayText = authorYearFormat ? ` (${displayText})` : ` [${displayText}]`;
+
+        // A web page, in the library or not: a link to the page with its title
+        // and site. Its sentences are Beaver's copy of the page, not a Zotero item's.
+        const exportedPage = webPage ? webCitationExport(citationMetadata?.web_page) : null;
+        if (exportedPage) {
+            return (
+                <span>
+                    (
+                    <a href={exportedPage.url} target="_blank" rel="noopener noreferrer">{exportedPage.title}</a>
+                    {exportedPage.site ? `, ${exportedPage.site}` : ''}
+                    )
+                </span>
+            );
+        }
+        // A web page citation that names no page: its id means nothing to a
+        // reader, and Copy leaves it out too.
+        if (webPage) return null;
 
         // External works not in the library: a host-native citation when the
         // host can build one, otherwise a link to the work.
@@ -436,8 +486,10 @@ const Citation: React.FC<CitationProps> = (props) => {
     // The locator style promises navigation to a place inside the document.
     // While the modifier is held the click reveals the work instead, so the
     // marker drops to the plain style — which is already exactly how a citation
-    // whose click reveals its item is drawn.
-    const citationClassBase = isExternal && !mappedZoteroItem
+    // whose click reveals its item is drawn. A web page keeps the external
+    // style once imported, since its click still opens the page in the
+    // browser, until the modifier turns the click into a reveal.
+    const citationClassBase = (isExternal && !mappedZoteroItem) || (webPage && !showItemInfo)
         ? "zotero-citation external-citation"
         : (hasLocator || isAnnotationCitation || hasSnapshotSymbolicLocator || isTableCitation) && !isExternalFile && !showItemInfo
         ? "zotero-citation with-locator"
@@ -467,11 +519,48 @@ const Citation: React.FC<CitationProps> = (props) => {
         </span>
     );
 
+    // A web page's preview reads like its row in web search results: the site's
+    // icon beside the title, which leads, and the site and date quietly below.
+    const pageHeader = webPage && !showItemInfo;
+    const pageSite = pageHeader ? webPageSiteName(webPage.site, webPage.url) : null;
+    const pageDate = pageHeader ? formatRegistryDate(webPage.published) : null;
+    const pageTitle = pageHeader ? webPage.title : null;
     const citationPreview = (
         <span className="block" style={{ overflow: 'hidden' }}>
             <span className="px-3 py-15 display-flex flex-row border-bottom-quinary gap-2">
-                <span className="font-color-primary text-sm" style={{ minWidth: 0, wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
-                    {citation}
+                {pageHeader && (
+                    // One title line tall (the zero-width space takes the title's
+                    // line height), so the icon centers on the title's first line.
+                    <span className="text-sm display-flex items-center" style={{ flexShrink: 0, alignSelf: 'flex-start' }}>
+                        {'\u200b'}
+                        <SiteIcon icon={webPage.icon} isPdf={webPage.isPdf} />
+                    </span>
+                )}
+                <span className="display-flex flex-col gap-05 min-w-0">
+                    {/* A page's title names it better than its site and year; a long
+                        one is cut to two lines so the cited passage stays in view. */}
+                    <span
+                        className="font-color-primary text-sm"
+                        style={{
+                            minWidth: 0,
+                            wordBreak: 'break-word',
+                            overflowWrap: 'anywhere',
+                            ...(pageTitle ? { display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2, overflow: 'hidden' } : {}),
+                        }}
+                    >
+                        {pageTitle || citation}
+                    </span>
+                    {(pageSite || pageDate) && (
+                        // A long publisher name is cut; the date after it stays whole.
+                        <span className="display-flex flex-row text-sm font-color-secondary min-w-0">
+                            {pageSite && <span className="truncate min-w-0">{pageSite}</span>}
+                            {pageDate && (
+                                <span style={{ flexShrink: 0, whiteSpace: 'nowrap' }}>
+                                    {pageSite ? `\u00a0·\u00a0${pageDate}` : pageDate}
+                                </span>
+                            )}
+                        </span>
+                    )}
                 </span>
                 <span className="flex-1" />
                 {!showItemInfo && hasLocatorDisplay && (
@@ -510,6 +599,18 @@ const Citation: React.FC<CitationProps> = (props) => {
                         {previewText}
                     </span>
                 )}
+                {webPage ? (
+                    webPage.url && (
+                        <span className={`px-3 py-15 block ${showPreviewText ? 'border-top-quinary' : ''}`}>
+                            <span className="display-flex flex-row items-center gap-15">
+                                <Icon icon={ArrowUpRightIcon} className="font-color-secondary" style={{ flexShrink: 0 }} />
+                                <span className="text-sm font-color-secondary" style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {webPageAction(vm)}
+                                </span>
+                            </span>
+                        </span>
+                    )
+                ) : (<>
                 {isExternal && !mappedZoteroItem && (
                     <span className={`px-3 py-15 block ${showPreviewText ? 'border-top-quinary' : ''}`}>
                         <span className="display-flex flex-row items-center gap-15">
@@ -594,6 +695,7 @@ const Citation: React.FC<CitationProps> = (props) => {
                         </span>
                     </span>
                 )}
+                </>)}
                 </>
             )}
         </span>

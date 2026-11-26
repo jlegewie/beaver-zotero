@@ -17,6 +17,10 @@ import {
 import { getHost } from '@beaver/agent-ui/host';
 import { resolveObjectIdReference } from '@beaver/agent-core/identity/libraryRef';
 import { parseItemLinkHref, type ItemLinkTarget } from '@beaver/agent-core/identity/itemLinks';
+import { parseWebLinkHref } from '@beaver/agent-core/identity/webPages';
+import { externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
+import { useAtomValue } from 'jotai';
+import { selectAtom } from 'jotai/utils';
 import { useFindQuery } from '@beaver/agent-ui/chat/findContext';
 import { rehypeFindHighlight } from '@beaver/agent-ui/chat/rehypeFindHighlight';
 import { rehypeTextDirection } from '@beaver/agent-export/render/textDirection';
@@ -46,12 +50,20 @@ function activateItemLink(link: ItemLinkTarget): void {
  * suppressed. Fragment-only links have no target to open and stay inert.
  *
  * A link whose href is a Zotero object id (`[Smith 2004](u-KEY)`, see
- * `itemLinks.ts`) reveals that object in the host instead of opening a URL.
+ * `itemLinks.ts`) reveals that object in the host instead of opening a URL. A
+ * link to a web page by its id (`[WHO fact sheet](web-KEY)`) opens the page's
+ * URL, from the conversation's record of the page; the hover shows the URL.
  */
 function MarkdownLink({ href, children, title, ...props }: any) {
     const itemLink = parseItemLinkHref(href);
-    const isExternal = !itemLink && Boolean(href) && !href.startsWith('#');
-    const defaultTitle = itemLink ? 'Show in Zotero' : isExternal ? href : undefined;
+    const webId = itemLink ? null : parseWebLinkHref(href);
+    const webUrlAtom = React.useMemo(
+        () => selectAtom(externalReferenceMappingAtom, (pages) => (webId ? pages[webId]?.url : undefined)),
+        [webId],
+    );
+    const webUrl = useAtomValue(webUrlAtom);
+    const isExternal = !itemLink && !webId && Boolean(href) && !href.startsWith('#');
+    const defaultTitle = itemLink ? 'Show in Zotero' : webId ? webUrl : isExternal ? href : undefined;
     return (
         <a
             {...props}
@@ -60,6 +72,7 @@ function MarkdownLink({ href, children, title, ...props }: any) {
             onClick={(event) => {
                 event.preventDefault();
                 if (itemLink) activateItemLink(itemLink);
+                else if (webUrl) getHost().navigation?.openExternalUrl(webUrl);
                 else if (isExternal) getHost().navigation?.openExternalUrl(href);
             }}
         >

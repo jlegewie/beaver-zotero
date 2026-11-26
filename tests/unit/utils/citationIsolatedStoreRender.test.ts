@@ -24,7 +24,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { Provider, createStore } from 'jotai';
 import { citationsAtom } from '@beaver/agent-core/citations/atoms';
-import { externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
+import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
 import type { Citation as CitationMetadata } from '@beaver/agent-core/types/citations';
 import type { ExternalReference } from '@beaver/agent-core/types/externalReferences';
 import Citation from '@beaver/agent-ui/chat/Citation';
@@ -116,5 +116,92 @@ describe('Citation under the isolated note-export store', () => {
         empty.set(citationsAtom, [externalCitation]);
 
         expect(renderCitation(empty)).not.toContain('https://example.org/state-of-oa');
+    });
+});
+
+describe('web page citations', () => {
+    const WEB_ID = 'web-MJNNMKH4ED';
+    const page = {
+        source: 'exa',
+        source_id: WEB_ID,
+        title: 'Obesity and overweight',
+        url: 'https://www.who.int/news-room/fact-sheets/detail/obesity-and-overweight',
+        details: { kind: 'webpage', site: 'who.int' },
+        library_items: [],
+    } as unknown as ExternalReference;
+
+    function renderWebCitation(store: ReturnType<typeof createStore>, webId: string): string {
+        return renderToStaticMarkup(
+            React.createElement(Provider, { store }, React.createElement(Citation, {
+                'data-external-id': webId,
+                'data-loc': 'h3',
+                'data-loc-kind': 'highlight',
+                'data-loc-value': '3',
+                exportRendering: true,
+            })),
+        );
+    }
+
+    // From the citation alone: the thread need not have a record of the page.
+    it('exports a page as a link with its title and site', () => {
+        const store = createStore();
+        store.set(citationsAtom, [{
+            citation_id: 'c1',
+            run_id: 'run-1',
+            citation_type: 'external_reference',
+            requested_ref: { kind: 'external', external_id: WEB_ID },
+            resolved_ref: { kind: 'external', external_id: WEB_ID, source: 'exa' },
+            raw_tag: `<citation id="${WEB_ID}" loc="h3"/>`,
+            web_page: { url: page.url, title: page.title, site: 'who.int' },
+        } as CitationMetadata]);
+
+        const html = renderWebCitation(store, WEB_ID);
+        expect(html).toContain(page.url);
+        expect(html).toContain('who.int');
+    });
+
+    it.each(['web-AAAAAAAAAA', 'web-KGXW3ODFN'])('leaves out an invalid citation instead of its raw id (%s)', (typed) => {
+        const store = createStore();
+        store.set(citationsAtom, [{
+            citation_id: 'c1',
+            run_id: 'run-1',
+            citation_type: 'external_reference',
+            invalid: true,
+            invalid_reason: 'external_reference_not_found',
+            requested_ref: { kind: 'external', external_id: typed },
+            raw_tag: `<citation id="${typed}" loc="h3"/>`,
+        } as CitationMetadata]);
+
+        expect(renderWebCitation(store, typed)).toBe('');
+    });
+
+    it('leaves out a web page citation that names no page', () => {
+        expect(renderWebCitation(createStore(), WEB_ID)).toBe('');
+    });
+
+    it('keeps the external style once the page is in the library, since the click still opens the browser', () => {
+        const store = createStore();
+        store.set(citationsAtom, [{
+            citation_id: 'c1',
+            run_id: 'run-1',
+            citation_type: 'external_reference',
+            requested_ref: { kind: 'external', external_id: WEB_ID },
+            resolved_ref: { kind: 'external', external_id: WEB_ID, source: 'exa' },
+            raw_tag: `<citation id="${WEB_ID}" loc="s3"/>`,
+            locations: [{ part_id: 's3', text: 'In 2024, 1 in 7 people were living with obesity.' }],
+        } as unknown as CitationMetadata]);
+        store.set(externalReferenceMappingAtom, { [WEB_ID]: page });
+        store.set(externalReferenceItemMappingAtom, { [WEB_ID]: { library_id: 1, zotero_key: 'ABCD1234' } });
+
+        const html = renderToStaticMarkup(
+            React.createElement(Provider, { store }, React.createElement(Citation, {
+                'data-external-id': WEB_ID,
+                'data-loc': 's3',
+                'data-loc-kind': 'sentence',
+                'data-loc-value': '3',
+            })),
+        );
+        expect(html).toContain('external-citation');
+        expect(html).not.toContain('with-locator');
     });
 });

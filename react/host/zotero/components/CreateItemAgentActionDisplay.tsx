@@ -29,7 +29,7 @@ import {
 } from '../../../agents/agentActions';
 import { AckActionLink } from '@beaver/agent-core/transport/clients/agentActionsService';
 import { CreateItemResultData } from '@beaver/agent-core/types/agentActions/items';
-import type { ExternalReference } from '@beaver/agent-core/types/externalReferences';
+import { webPageDetails, type ExternalReference } from '@beaver/agent-core/types/externalReferences';
 import { externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
 import { executeImportItemActions, undoImportItemActions } from '../../../utils/importItemActions';
 import { importActionReference } from '../../../utils/importItemDisplay';
@@ -138,7 +138,7 @@ const CreateItemListItem: React.FC<CreateItemListItemProps> = ({
                 <ReferenceMetadataDisplay
                     title={item.title}
                     authors={item.authors}
-                    publicationTitle={item.journal?.name || item.venue}
+                    publicationTitle={item.journal?.name || item.venue || webPageDetails(item)?.site_name || webPageDetails(item)?.site || undefined}
                     year={item.year}
                     getTextClasses={getTextClasses}
                 />
