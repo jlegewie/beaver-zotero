@@ -1,4 +1,5 @@
 import { checkLibraryExcluded } from './agentDataProvider/utils';
+import { excludedLibraryUserMessage } from '../utils/libraryMessages';
 
 export interface PreparedNote {
     libraryId: number;
@@ -10,8 +11,8 @@ export interface PreparedNote {
 
 /** All rendering and target selection have completed before this plugin-owned save. */
 export async function savePreparedNote(data: PreparedNote): Promise<Zotero.Item> {
-    const exclusion = checkLibraryExcluded(data.libraryId);
-    if (exclusion) throw new Error(exclusion.message);
+    // Only user-initiated saves reach here, so the error is worded for the popup.
+    if (checkLibraryExcluded(data.libraryId)) throw new Error(excludedLibraryUserMessage(data.libraryId));
     const note = new Zotero.Item('note');
     note.libraryID = data.libraryId;
     if (data.parentKey) {

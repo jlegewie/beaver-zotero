@@ -37,7 +37,7 @@ describe('savePreparedNote', () => {
         collections.set(9, new MockCollection(9, 2));
         (globalThis as any).Zotero = {
             Item: MockNote,
-            Libraries: { get: vi.fn((id: number) => (id === 1 || id === 2 || id === 3 ? { libraryID: id } : false)) },
+            Libraries: { get: vi.fn((id: number) => (id === 1 || id === 2 || id === 3 ? { libraryID: id, name: `Library ${id}` } : false)) },
             Collections: { get: vi.fn((id: number) => collections.get(id) ?? false) },
             DB: { executeTransaction: vi.fn() },
             Beaver: { libraryScopeInitialized: true, searchableLibraryIds: [1, 2] },
@@ -73,7 +73,7 @@ describe('savePreparedNote', () => {
 
     it('refuses to write to an excluded library', async () => {
         await expect(savePreparedNote({ libraryId: 3, collectionId: 5, html: '<p>Saved</p>' }))
-            .rejects.toThrow();
+            .rejects.toThrow('is excluded from Beaver, so Beaver cannot modify its items');
         expect(collections.get(5)!.childItems.size).toBe(0);
     });
 });

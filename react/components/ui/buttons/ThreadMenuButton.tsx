@@ -37,6 +37,7 @@ import { addPopupMessageAtom } from '../../../utils/popupMessageUtils';
 import { selectItem, selectItemById } from '../../../utils/selectItem';
 import { flushRunProjection } from '../../../runtime/windowRunSession';
 import { runWindowOperation } from '../../../runtime/libraryMutation';
+import type { PreparedNote } from '../../../../src/services/savePreparedNote';
 import { extractThreadContent, ExtractThreadContentOptions } from '../../../utils/threadContent';
 import { confirmAndDeleteThread, renameThread } from '../../../utils/threadActions';
 import { resolveToolCallLabelEnrichMap } from '../../../utils/toolCallLabelEnrich';
@@ -166,6 +167,20 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
         await copyToClipboard(formatted);
     };
 
+    /** Saves through the plugin operation; a failure (read-only or excluded library) shows a popup. */
+    const saveThreadNote = async (note: PreparedNote): Promise<Zotero.Item | null> => {
+        try {
+            return await runWindowOperation('savePreparedNote', [note]);
+        } catch (error: any) {
+            addPopupMessage({
+                type: 'error',
+                title: 'Could not save note',
+                text: error?.message || 'Failed to save note.',
+            });
+            return null;
+        }
+    };
+
     const handleSaveAsNote = async () => {
         const win = getContextWindow();
         const context = getZoteroTargetContextSync(win);
@@ -192,13 +207,13 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
         htmlContent += '<hr>' + brandingHtml;
 
         // Always filed in the library tab's collection (even when items are selected)
-        const newNote = await runWindowOperation('savePreparedNote', [{
+        const newNote = await saveThreadNote({
             libraryId: context.targetLibraryId,
             collectionId: selectedCollection?.id,
             html: htmlContent,
-        }]);
+        });
 
-        if (inLibraryTab) {
+        if (newNote && inLibraryTab) {
             await selectItemById(newNote.id, true, selectedCollection?.id, win);
         }
     };
@@ -229,13 +244,13 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
         }
         htmlContent += '<hr>' + brandingHtml;
 
-        const newNote = await runWindowOperation('savePreparedNote', [{
+        const newNote = await saveThreadNote({
             libraryId: context.parentReference.library_id,
             parentKey: context.parentReference.zotero_key,
             html: htmlContent,
-        }]);
+        });
 
-        if (inLibraryTab) {
+        if (newNote && inLibraryTab) {
             selectItem(newNote, true, win);
         }
     };
