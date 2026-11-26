@@ -36,6 +36,7 @@ import { getBeaverNoteFooterHTML } from '../../../utils/noteActions';
 import { addPopupMessageAtom } from '../../../utils/popupMessageUtils';
 import { selectItem, selectItemById } from '../../../utils/selectItem';
 import { flushRunProjection } from '../../../runtime/windowRunSession';
+import { runWindowOperation } from '../../../runtime/libraryMutation';
 import { extractThreadContent, ExtractThreadContentOptions } from '../../../utils/threadContent';
 import { confirmAndDeleteThread, renameThread } from '../../../utils/threadActions';
 import { resolveToolCallLabelEnrichMap } from '../../../utils/toolCallLabelEnrich';
@@ -190,19 +191,12 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
         }
         htmlContent += '<hr>' + brandingHtml;
 
-        const newNote = new Zotero.Item('note');
-        if (context.targetLibraryId !== undefined) {
-            newNote.libraryID = context.targetLibraryId;
-        }
-        newNote.setNote(htmlContent);
-        await newNote.saveTx();
-
-        // Always add to the library tab's collection (even when items are selected)
-        if (selectedCollection) {
-            await Zotero.DB.executeTransaction(async () => {
-                selectedCollection.addItem(newNote.id);
-            });
-        }
+        // Always filed in the library tab's collection (even when items are selected)
+        const newNote = await runWindowOperation('savePreparedNote', [{
+            libraryId: context.targetLibraryId,
+            collectionId: selectedCollection?.id,
+            html: htmlContent,
+        }]);
 
         if (inLibraryTab) {
             await selectItemById(newNote.id, true, selectedCollection?.id, win);
@@ -235,11 +229,11 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
         }
         htmlContent += '<hr>' + brandingHtml;
 
-        const newNote = new Zotero.Item('note');
-        newNote.libraryID = context.parentReference.library_id;
-        newNote.parentKey = context.parentReference.zotero_key;
-        newNote.setNote(htmlContent);
-        await newNote.saveTx();
+        const newNote = await runWindowOperation('savePreparedNote', [{
+            libraryId: context.parentReference.library_id,
+            parentKey: context.parentReference.zotero_key,
+            html: htmlContent,
+        }]);
 
         if (inLibraryTab) {
             selectItem(newNote, true, win);
