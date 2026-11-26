@@ -287,10 +287,13 @@ export interface WSParkRefusedEvent extends WSBaseEvent {
  * A run's resolved citations, sent after `run_complete`.
  *
  * Resolving citations means asking this plugin what each marker points at, so
- * it finishes well after the answer does. Always sent on the completed path —
- * including with an empty list — because it is what ends the "linking sources"
- * state that `streaming_done` began. On the error and cancel paths it is sent
- * only when there is something in it; those paths clear that state themselves.
+ * it finishes well after the answer does. Current backends embed a run's own
+ * citations in its `run_complete`: a completed run's frame is held until they
+ * are resolved, and a run that did not finish (stopped or failed) gets a
+ * partial `run_complete` carrying them, sent before its terminal `error`
+ * frame. This event carries the citations of earlier runs that a resume
+ * continues, under each run's own id. A client applies the citations of
+ * either frame the same way.
  */
 export interface WSRunCitationsEvent extends WSBaseEvent {
     event: 'run_citations';

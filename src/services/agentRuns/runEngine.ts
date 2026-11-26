@@ -101,6 +101,7 @@ import {
 import { isJobDeferral } from '@beaver/agent-core/protocol/jobCallProtocol';
 import { jobWaitAtom, settleJobWait } from './jobWait';
 import { citationsAtom } from '@beaver/agent-core/citations/atoms';
+import { CITATION_TAG_PATTERN } from '@beaver/agent-core/citations/citationGrammar';
 import type { Citation } from '@beaver/agent-core/types/citations';
 import {
     toAgentAction,
@@ -1672,12 +1673,7 @@ export function createWSCallbacks(
             // other way it can end (`done`, an error, a cancel, the socket
             // closing) clears this state wholesale; only the ordinary success
             // path needs it retired one run at a time.
-            set(streamingDoneRunIdsAtom, (prev) => {
-                if (!prev.has(event.run_id)) return prev;
-                const next = new Set(prev);
-                next.delete(event.run_id);
-                return next;
-            });
+            retireStreamingDone(set, event.run_id);
         },
 
         // The event's `retry_truncation` report is deliberately not consumed:
@@ -2185,12 +2181,26 @@ export function createWSCallbacks(
         ) return;
         awaitServerSettlement(session, session.store.set, 'stop_unconfirmed');
     };
+    /**
+     * Apply citations the backend resolved for a run after the user stopped
+     * it. They belong to the answer the chat still shows, so they are written
+     * while that run is in its history and has none yet.
+     */
+    const applyLeftRunCitations = ({ run_id: runId, citations }: { run_id: string; citations: Citation[] | null }) => {
+        const chat = session.store;
+        if (!citations?.length) return;
+        if (!chat.get(threadRunsAtom).some((run) => run.id === runId)) return;
+        if (chat.get(citationsAtom).some((citation) => citation.run_id === runId)) return;
+        applyRunCitations(session, chat.set, runId, citations);
+    };
     // What still happens for a run this window has left, e.g. one the user
-    // stopped while it was reconnecting: it is still reattached, so the server
-    // hears the cancel, its connection loss is still reported once the
-    // outcome is known, and the chat waits for the server to settle it. None
-    // of its events reach this window.
+    // stopped. One stopped while it was reconnecting is still reattached, so
+    // the server hears the cancel, its connection loss is still reported once
+    // the outcome is known, and the chat waits for the server to settle it.
+    // Of a left run's events, only its citations reach this window.
     const forLeftRun: Partial<WSCallbacks> = {
+        onRunComplete: applyLeftRunCitations,
+        onRunCitations: applyLeftRunCitations,
         onUndeliveredActions: (info) => recordUndeliveredActions(info),
         onReattaching: (info) => {
             if (info.cancelRequested) startReattach(info.runId);
@@ -3082,11 +3092,45 @@ export const closeWSConnectionAtom = sessionAction('closeWSConnection',async (ge
         awaitServerSettlement(session, set, 'stop_unconfirmed');
     }
 
-    // Send cancel message and close connection
-    await session.agentService.cancel();
+    // The backend resolves the stopped answer's citations and sends them
+    // before it ends the run. Until then the run's footer says its sources
+    // are being linked.
+    const linkingRunId = activeRun
+        && get(threadRunsAtom).some((run) => run.id === activeRun.id)
+        && citesSources(activeRun)
+        ? activeRun.id
+        : null;
+    if (linkingRunId) set(streamingDoneRunIdsAtom, (prev) => new Set([...prev, linkingRunId]));
+
+    // Send cancel message and close connection once the run has ended
+    await session.agentService.cancel(STOP_SETTLE_TIMEOUT_MS, { closeOnEnd: true });
+    if (linkingRunId) retireStreamingDone(set, linkingRunId);
     set(isWSConnectedAtom, false);
     set(isWSReadyAtom, false);
 });
+
+/**
+ * Longest a Stop keeps the socket open for the backend to end the run and
+ * send the stopped answer's citations.
+ */
+const STOP_SETTLE_TIMEOUT_MS = 2_000;
+
+/** Whether a run's answer contains citation tags. */
+function citesSources(run: AgentRun): boolean {
+    return run.model_messages.some((message) =>
+        message.kind === 'response'
+        && message.parts.some((part) => part.part_kind === 'text' && part.content.search(CITATION_TAG_PATTERN) !== -1));
+}
+
+/** End the "linking sources" state of one run. */
+function retireStreamingDone(set: Setter, runId: string): void {
+    set(streamingDoneRunIdsAtom, (prev) => {
+        if (!prev.has(runId)) return prev;
+        const next = new Set(prev);
+        next.delete(runId);
+        return next;
+    });
+}
 
 /**
  * Close because this client is going away (window close, quit, or plugin disable).

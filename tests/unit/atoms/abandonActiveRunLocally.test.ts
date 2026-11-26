@@ -95,6 +95,7 @@ import {
     isWSConnectedAtom,
     isWSReadyAtom,
     sendWSMessageAtom,
+    streamingDoneRunIdsAtom,
     wsErrorAtom,
 } from '../../../react/atoms/agentRunAtoms';
 import { chatStore } from '../../helpers/runSession';
@@ -104,6 +105,7 @@ function makeRun(overrides: Partial<AgentRun> = {}): AgentRun {
         id: 'run-1',
         thread_id: 'thread-1',
         status: 'in_progress',
+        model_messages: [],
         ...overrides,
     } as AgentRun;
 }
@@ -244,6 +246,39 @@ describe('closing the connection from the stop button', () => {
         expect(store.get(isWSChatPendingAtom)).toBe(false);
         expect(store.get(isWSConnectedAtom)).toBe(false);
         expect(store.get(isWSReadyAtom)).toBe(false);
+    });
+
+    it('shows the stopped answer\'s sources as linking until the backend ends the run', async () => {
+        let endRun!: () => void;
+        cancelMock.mockReturnValueOnce(new Promise<void>((resolve) => { endRun = resolve; }));
+        chatStore().set(activeRunAtom, makeRun({
+            model_messages: [{
+                kind: 'response',
+                parts: [{ part_kind: 'text', content: 'A claim. <citation id="web-ABC"/>' }],
+            }],
+        } as Partial<AgentRun>));
+
+        const stopping = store.set(closeWSConnectionAtom);
+        await vi.waitFor(() => expect(cancelMock).toHaveBeenCalled());
+
+        // The socket stays open until the backend has ended the run.
+        expect(cancelMock).toHaveBeenCalledWith(expect.any(Number), { closeOnEnd: true });
+        expect(store.get(streamingDoneRunIdsAtom).has('run-1')).toBe(true);
+
+        endRun();
+        await stopping;
+        expect(store.get(streamingDoneRunIdsAtom).has('run-1')).toBe(false);
+    });
+
+    it('does not show sources linking for a stopped answer without citations', async () => {
+        chatStore().set(activeRunAtom, makeRun({
+            model_messages: [{ kind: 'response', parts: [{ part_kind: 'text', content: 'No sources here.' }] }],
+        } as Partial<AgentRun>));
+
+        const stopping = store.set(closeWSConnectionAtom);
+        await vi.waitFor(() => expect(cancelMock).toHaveBeenCalled());
+        expect(store.get(streamingDoneRunIdsAtom).has('run-1')).toBe(false);
+        await stopping;
     });
 
     it('ends the window wait on the fill the stopped run waited on', async () => {

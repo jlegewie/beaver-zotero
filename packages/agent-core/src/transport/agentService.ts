@@ -274,6 +274,12 @@ export class AgentService {
     private connectionId: number = 0;
     /** Resolves the `parkRun` waiting on the server's answer, if one is. */
     private pendingPark: ((outcome: ParkOutcome) => void) | null = null;
+    /**
+     * Resolves a `cancel({ closeOnEnd })` waiting for the backend to end the
+     * stopped run: once its `error` or `done` frame has been handled, or the
+     * connection is gone.
+     */
+    private cancelEndWait: (() => void) | null = null;
     /** Whether the connected backend understands `request_received` acks (from the ready event) */
     private serverSupportsRequestAcks: boolean = false;
     /** Whether the connected backend understands `request_keepalive` messages (from the ready event) */
@@ -365,6 +371,8 @@ export class AgentService {
         this.ws = null;
         this.callbacks = null;
         this.connectionId++;
+        // Nothing more arrives for a stopped run on this socket.
+        this.settleCancelEndWait();
         if (!options.keepRunQueues) {
             this.messageQueue = Promise.resolve();
             this.actionExecutionQueue = Promise.resolve();
@@ -1721,6 +1729,7 @@ export class AgentService {
                     if (this.run) this.run.terminal = true;
                     this.settlePark('ended');
                     this.callbacks.onDone();
+                    this.settleCancelEndWait();
                     break;
 
                 case 'pong':
@@ -1754,6 +1763,9 @@ export class AgentService {
                     }
                     // Call onError callback
                     this.callbacks.onError(event);
+                    // A stopped run ends with its `canceled` error, after
+                    // the frame carrying what it still produced.
+                    this.settleCancelEndWait();
                     // Backend behavior: some errors close connection (auth, internal),
                     // others keep it open (LLM errors, rate limits, invalid_request).
                     // Since each connect() is for a single run (for now), close on any error.
@@ -1948,13 +1960,14 @@ export class AgentService {
                     }
                     logger(`AgentService: Received ${eventName}`, dataEvent, 1);
                     const requestConnectionId = this.connectionId;
-                    // A run the user stopped while it was reattaching only
-                    // waits to deliver the cancel; nothing queued for it runs.
-                    const isCurrent = (): boolean =>
-                        run
-                            ? this.run === run && !run.cancelRequested
-                            : this.connectionId === requestConnectionId;
                     const owner = this.run;
+                    // Nothing queued for a run the user stopped runs, though
+                    // its socket stays open for the cancel (or, while it is
+                    // reattaching, until it can deliver the cancel).
+                    const isCurrent = (): boolean =>
+                        !owner?.cancelRequested && (run
+                            ? this.run === run
+                            : this.connectionId === requestConnectionId);
                     const context: AgentDataRequestContext = {
                         assertCurrent: () => {
                             if (!isCurrent()) {
@@ -2117,14 +2130,18 @@ export class AgentService {
      * reattach; without that it would keep going on the server for the grace
      * period. If the reattach fails the run ends anyway.
      * @param waitMs Time to wait after sending cancel before closing (default: 250ms)
+     * @param options.closeOnEnd Close as soon as the backend has ended the run
+     *   (its `error` or `done` frame has been handled), with `waitMs` as the
+     *   longest wait. The backend sends what the stopped run still produced,
+     *   such as its resolved citations, ahead of those frames.
      */
-    async cancel(waitMs: number = 250): Promise<void> {
+    async cancel(waitMs: number = 250, options: { closeOnEnd?: boolean } = {}): Promise<void> {
         this.connectEpoch++;
-        return this.sendCancel(waitMs);
+        return this.sendCancel(waitMs, options);
     }
 
     /** `cancel()` without abandoning a connect that is waiting to start. */
-    private async sendCancel(waitMs: number = 250): Promise<void> {
+    private async sendCancel(waitMs: number = 250, options: { closeOnEnd?: boolean } = {}): Promise<void> {
         if (this.run?.state === 'reattaching') {
             logger(`AgentService: Run ${this.run.runId} is reattaching; cancelling it once reattached`, 1);
             this.run.cancelRequested = true;
@@ -2153,11 +2170,22 @@ export class AgentService {
         this.ws.send(JSON.stringify({ type: 'cancel' }));
         if (this.run) this.run.stopSettled = true;
 
-        // Wait briefly to allow the message to be flushed
-        await new Promise((resolve) => setTimeout(resolve, waitMs));
+        // Wait for the message to be flushed, or for the run to end.
+        await new Promise<void>((resolve) => {
+            const timer = setTimeout(resolve, waitMs);
+            if (!options.closeOnEnd) return;
+            this.settleCancelEndWait();
+            this.cancelEndWait = () => { clearTimeout(timer); resolve(); };
+        });
 
         // Close the connection (no-op if a newer connection superseded it)
         this.closeSocket(1000, 'User cancelled', { onlyIfConnectionId: connectionIdToCancel });
+    }
+
+    private settleCancelEndWait(): void {
+        const settle = this.cancelEndWait;
+        this.cancelEndWait = null;
+        settle?.();
     }
 
     /**
