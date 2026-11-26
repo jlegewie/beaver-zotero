@@ -3,7 +3,7 @@ import { useAtomValue } from 'jotai';
 import { citationByKeyAtom, pageLabelsByAttachmentIdAtom } from '@beaver/agent-core/citations/atoms';
 import { externalReferenceItemMappingAtom } from '@beaver/agent-core/citations/externalReferences';
 import { webPageId } from '@beaver/agent-core/citations/externalRecords';
-import { urlNamesPdf } from '@beaver/agent-core/identity/webPages';
+import { siteIconSrc, urlNamesPdf } from '@beaver/agent-core/identity/webPages';
 import {
     Citation,
     getCitationPages,
@@ -35,6 +35,8 @@ export interface CitationWebPage {
     title: string | null;
     /** Publisher name or site, e.g. "World Health Organization", "who.int". */
     site: string | null;
+    /** The site's icon, an inline image; never a URL, which would contact the site. */
+    icon: string | null;
 }
 
 /**
@@ -352,6 +354,7 @@ export function useCitationViewModel(props: Record<string, unknown>): CitationVi
             isPdf: page?.content_type === 'pdf' || (!!url && urlNamesPdf(url)),
             title: page?.title || null,
             site: page?.site || null,
+            icon: siteIconSrc(page?.icon),
         };
     }, [isExternal, externalSourceId, metadata]);
 

@@ -276,6 +276,7 @@ describe('an imported web page', () => {
             requested_ref: { kind: 'external', external_id: WEB_ID },
             resolved_ref: { kind: 'external', external_id: WEB_ID, source: 'exa' },
             display_name: 'who.int, 2026',
+            formatted_citation: `who.int. 2026. "Obesity and overweight." ${PAGE_URL}.`,
             locations: [{ part_id: 's3', text: 'In 2024, 1 in 7 people were living with obesity.' }],
             ...(webPage ? { web_page: webPage } : {}),
         } as unknown as CitationMetadata;
@@ -341,6 +342,21 @@ describe('an imported web page', () => {
 
         expect(activateCitation).not.toHaveBeenCalled();
         expect(openExternalUrl).not.toHaveBeenCalled();
+    });
+
+    // The preview shows the site's icon from the citation, and never loads one
+    // from a URL, which would contact the site.
+    it('shows the site icon the citation carries, and only an inline one', () => {
+        const page = { url: PAGE_URL, title: 'Obesity and overweight', site: 'who.int', content_type: 'html' };
+        const icon = 'data:image/webp;base64,UklGRhwAAABXRUJQ';
+        openPreview(mountImportedPage({ ...page, icon }));
+        expect(document.querySelector('[role="tooltip"] img')?.getAttribute('src')).toBe(icon);
+        expect(tooltipText()).toContain('Highlights passage on who.int');
+
+        unmountAll();
+        openPreview(mountImportedPage({ ...page, icon: 'https://www.who.int/favicon.ico' }));
+        expect(document.querySelector('[role="tooltip"]')).not.toBeNull();
+        expect(document.querySelector('[role="tooltip"] img')).toBeNull();
     });
 });
 

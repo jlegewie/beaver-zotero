@@ -225,6 +225,18 @@ export function urlNamesPdf(url: string): boolean {
     }
 }
 
+/** The backend's site icons are about 1 KB; anything far larger is not one. */
+const MAX_SITE_ICON_CHARS = 8192;
+const SITE_ICON_DATA_URI = /^data:image\/(?:webp|png);base64,[A-Za-z0-9+/]+={0,2}$/;
+
+/**
+ * A citation's site icon, when it is an inline WebP or PNG image; else null.
+ * Anything else, a URL above all, is refused: loading it would contact the site.
+ */
+export function siteIconSrc(icon: string | null | undefined): string | null {
+    return icon && icon.length <= MAX_SITE_ICON_CHARS && SITE_ICON_DATA_URI.test(icon) ? icon : null;
+}
+
 // =============================================================================
 // Text fragments
 // =============================================================================

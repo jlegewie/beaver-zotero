@@ -584,7 +584,14 @@ const Citation: React.FC<CitationProps> = (props) => {
                     webPage.url && (
                         <span className={`px-3 py-15 block ${showPreviewText ? 'border-top-quinary' : ''}`}>
                             <span className="display-flex flex-row items-center gap-15">
-                                <Icon icon={webPage.isPdf ? PdfIcon : GlobeIcon} className="font-color-secondary" style={{ flexShrink: 0 }} />
+                                {webPage.icon ? (
+                                    // The site's own icon, an inline image the backend fetched. The
+                                    // tooltip renders inside the answer's Markdown, whose images get a
+                                    // fill; an icon keeps its transparency.
+                                    <img src={webPage.icon} alt="" width={14} height={14} style={{ flexShrink: 0, borderRadius: 2, objectFit: 'contain', backgroundColor: 'transparent' }} />
+                                ) : (
+                                    <Icon icon={webPage.isPdf ? PdfIcon : GlobeIcon} className="font-color-secondary" style={{ flexShrink: 0 }} />
+                                )}
                                 <span className="text-sm font-color-secondary" style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                     {webPageAction(vm)}
                                 </span>

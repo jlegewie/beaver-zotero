@@ -183,6 +183,13 @@ export interface WebPageCitation {
     site?: string;
     /** "pdf" for a PDF, whose viewers cannot be opened at a sentence. */
     content_type?: "html" | "pdf";
+    /** When the page was published: "YYYY-MM-DD", or "YYYY-MM" / "YYYY" when only that is known. */
+    published?: string;
+    /**
+     * The site's icon as an image data URI of at most 32 px ("data:image/webp;base64,…").
+     * The backend fetches it, so a client never loads it from the site.
+     */
+    icon?: string;
 }
 
 /**

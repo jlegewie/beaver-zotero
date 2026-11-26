@@ -107,6 +107,24 @@ describe('textFragmentUrl', () => {
     });
 });
 
+describe('siteIconSrc', () => {
+    it('takes an inline WebP or PNG icon and refuses anything that would load from elsewhere', async () => {
+        const { siteIconSrc } = await import('@beaver/agent-core/identity/webPages');
+        expect(siteIconSrc('data:image/webp;base64,UklGRg==')).toBe('data:image/webp;base64,UklGRg==');
+        expect(siteIconSrc('data:image/png;base64,iVBORw0KGgo=')).toBe('data:image/png;base64,iVBORw0KGgo=');
+        for (const icon of [
+            'https://www.who.int/favicon.ico',
+            'data:image/svg+xml;base64,PHN2Zz4=',
+            'data:image/png;base64,iVBOR"><img src=x>',
+            `data:image/webp;base64,${'A'.repeat(9000)}`,
+            '',
+            undefined,
+        ]) {
+            expect(siteIconSrc(icon)).toBeNull();
+        }
+    });
+});
+
 describe('web page exports', () => {
     const pages: Record<string, string> = { 'web-MJNNMKH4ED': 'https://www.who.int/fact-sheets/obesity' };
 
