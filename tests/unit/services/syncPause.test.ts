@@ -284,10 +284,10 @@ it('closing one window retains another run and an executing write', async () => 
         service.pauseSyncForMutatingRun('chat:A:run-1');
         service.pauseSyncForMutatingRun('chat:B:run-2');
         service.pauseSyncForMutatingRun('mutation:1');
-        service.releaseWindow('A');
+        service.releaseOwnerRuns('A');
         await vi.advanceTimersByTimeAsync(service.RELEASE_DEBOUNCE_MS);
         expect(resume).not.toHaveBeenCalled();
-        service.releaseWindow('B');
+        service.releaseOwnerRuns('B');
         await vi.advanceTimersByTimeAsync(service.SAFETY_IDLE_MS - service.RELEASE_DEBOUNCE_MS - 1);
         expect(resume).not.toHaveBeenCalled();
         service.scheduleResumeAfterRun('mutation:1');

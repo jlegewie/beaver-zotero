@@ -1,8 +1,6 @@
 import * as duplicates from './duplicates/merge';
 import { executeRequest } from './agentDataProvider/handleAgentActionExecuteRequest';
 import { ensureReaderContentTypeForItem } from './attachmentContentType';
-import type { OperationContext } from './agentDataProvider/operationContext';
-import { hydrateOperationRendering } from './agentDataProvider/prepareOperationRendering';
 import * as tables from './artifacts/tableStore';
 import { handleArtifactRequestUncoordinated } from './artifacts/artifactProvider';
 import { applyUserCellEditUncoordinated, applyUserTableEditUncoordinated } from './artifacts/tableUserEdits';
@@ -88,14 +86,6 @@ export class LibraryOperations {
     run<K extends LibraryOperationName>(
         name: K, args: Parameters<LibraryOperationMap[K]>, options?: MutationOptions,
     ): ReturnType<LibraryOperationMap[K]> {
-        const ownedArgs: any[] = [...args];
-        if (name === 'executeRequest') {
-            ownedArgs[0] = { ...ownedArgs[0], operation: hydrateOperationRendering(ownedArgs[0].operation) };
-        } else if (name === 'executeCreateNoteAction') {
-            ownedArgs[2] = hydrateOperationRendering(ownedArgs[2] as OperationContext);
-        } else if (name === 'executeEditNoteAction' || name === 'executeEditNoteBatchAction' || name === 'undoEditNoteAction') {
-            ownedArgs[1] = hydrateOperationRendering(ownedArgs[1] as OperationContext);
-        }
-        return coordinateLibraryMutation(() => (operations[name] as (...values: any[]) => Promise<any>)(...ownedArgs), options) as ReturnType<LibraryOperationMap[K]>;
+        return coordinateLibraryMutation(() => (operations[name] as (...values: any[]) => Promise<any>)(...args), options) as ReturnType<LibraryOperationMap[K]>;
     }
 }

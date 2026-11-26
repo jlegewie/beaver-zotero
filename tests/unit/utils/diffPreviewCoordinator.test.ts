@@ -30,6 +30,7 @@ const {
             bannerAction: null as ((action: string) => void | Promise<void>) | null,
             dismiss: null as (() => void) | null,
             previewNoteKey: null as { libraryId: number; zoteroKey: string } | null,
+            refusedDuringWrite: null as { libraryId: number; zoteroKey: string } | null,
         },
         mockDismissDiffPreview: vi.fn(),
         mockShowDiffPreview: vi.fn().mockResolvedValue(true),
@@ -50,6 +51,11 @@ vi.mock('../../../react/utils/noteEditorDiffPreview', () => ({
     isDiffPreviewSupported: vi.fn().mockReturnValue(true),
     isNoteInSelectedTab: vi.fn().mockReturnValue(true),
     getPreviewNoteKey: () => capturedHandlers.previewNoteKey,
+    takePreviewRefusedDuringWrite: () => {
+        const refused = capturedHandlers.refusedDuringWrite;
+        capturedHandlers.refusedDuringWrite = null;
+        return refused;
+    },
     setOnBannerAction: (handler: any) => { capturedHandlers.bannerAction = handler; },
     setOnDismiss: (handler: any) => { capturedHandlers.dismiss = handler; },
 }));
@@ -92,12 +98,14 @@ vi.mock('../../../react/atoms/agentRunAtoms', () => ({
 // Import under test (triggers module-level setOnBannerAction registration)
 // ---------------------------------------------------------------------------
 
-import { diffPreviewNoteKeyAtom } from '../../../react/utils/diffPreviewCoordinator';
+import { attachDeferredDiffPreview, diffPreviewNoteKeyAtom } from '../../../react/utils/diffPreviewCoordinator';
+import { NotePreviews } from '../../../src/services/notePreviews';
 import { noteLibraryIdFromActionData, updateDiffPreviewForNote } from '../../../react/utils/diffPreviewCoordinator';
 import { installStoreRunSession } from '../../helpers/runSession';
+import { pendingApprovalsAtom as realPendingApprovalsAtom } from '@beaver/agent-core/run-state/pendingApprovals';
 
-// Now create the real atom and assign it
-const pendingApprovalsAtom = atom<Map<string, any>>(new Map());
+// The session's own approvals atom: the coordinator reaches it by name.
+const pendingApprovalsAtom = realPendingApprovalsAtom as unknown as ReturnType<typeof atom<Map<string, any>>>;
 testPendingApprovalsAtom.ref = pendingApprovalsAtom;
 
 // ---------------------------------------------------------------------------
@@ -509,6 +517,53 @@ describe('diffPreviewCoordinator — handleBannerAction', () => {
 
             expect(getApprovalResponses()).toEqual([{ actionId: 'a1', approved: true }]);
             expect(storeRef.current.get(pendingApprovalsAtom).size).toBe(1);
+        });
+    });
+
+    describe('a preview refused while a library write runs', () => {
+        let notePreviews: NotePreviews;
+        let cleanups: Array<() => void>;
+
+        beforeEach(() => {
+            notePreviews = new NotePreviews();
+            cleanups = [];
+            (globalThis as any).Zotero.Beaver = {
+                ...(globalThis as any).Zotero.Beaver,
+                notePreviews,
+                runtime: { addWindowCleanup: (_runtime: unknown, cleanup: () => void) => cleanups.push(cleanup) },
+            };
+            attachDeferredDiffPreview({} as any);
+        });
+
+        afterEach(() => cleanups.forEach((cleanup) => cleanup()));
+
+        it('is shown once the write ends', () => {
+            seedApprovals(makePendingApproval({ actionId: 'a1', zotero_key: 'NOTE_A' }));
+            notePreviews.setMutationActive(true);
+            // The approval's own attempt was refused by the write.
+            capturedHandlers.refusedDuringWrite = { libraryId: 1, zoteroKey: 'NOTE_A' };
+
+            notePreviews.setMutationActive(false);
+
+            expect(mockShowDiffPreview).toHaveBeenCalledExactlyOnceWith(1, 'NOTE_A', expect.any(Array));
+            // Later writes do not show it again.
+            notePreviews.setMutationActive(true);
+            notePreviews.setMutationActive(false);
+            expect(mockShowDiffPreview).toHaveBeenCalledOnce();
+        });
+
+        it('shows nothing when no preview was refused, or the window has closed', () => {
+            seedApprovals(makePendingApproval({ actionId: 'a1', zotero_key: 'NOTE_A' }));
+            notePreviews.setMutationActive(true);
+            notePreviews.setMutationActive(false);
+            expect(mockShowDiffPreview).not.toHaveBeenCalled();
+
+            cleanups.forEach((cleanup) => cleanup());
+            capturedHandlers.refusedDuringWrite = { libraryId: 1, zoteroKey: 'NOTE_A' };
+            notePreviews.setMutationActive(true);
+            notePreviews.setMutationActive(false);
+            expect(mockShowDiffPreview).not.toHaveBeenCalled();
+            capturedHandlers.refusedDuringWrite = null;
         });
     });
 });

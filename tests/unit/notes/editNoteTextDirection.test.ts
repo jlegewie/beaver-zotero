@@ -32,11 +32,21 @@ const P2 = 'نتایج در جدول زیر آمده است.';
 /** A Persian note directed by hand, block by block. */
 const HAND_DIRECTED = `<h1 dir="rtl">گزارش</h1><p dir="rtl">${P1}</p><ul dir="rtl"><li>یک</li><li>دو</li></ul><p dir="rtl">${P2}</p>`;
 
-/** The note renderer, as `OperationContext.renderMarkdown` runs it in Zotero (writer reads one direction). */
-async function renderMarkdown(content: string, options: NoteRenderOptions = {}): Promise<string> {
+/** The note renderer, as `Zotero.Beaver.exporter.renderNoteMarkdown` runs it in Zotero (writer reads one direction). */
+function renderMarkdownSync(content: string, options: NoteRenderOptions = {}): string {
     const textDirection = options.directions === 'all' ? { all: true } : options.directions === 'note' ? { all: false } : undefined;
     return renderNoteMarkdown({ codeRanges, renderNoteMarkdownHtml }, content, textDirection);
 }
+
+async function renderMarkdown(content: string, options: NoteRenderOptions = {}): Promise<string> {
+    return renderMarkdownSync(content, options);
+}
+
+// Note writes render through the plugin's exporter.
+(globalThis as any).Zotero.Beaver = {
+    ...(globalThis as any).Zotero.Beaver,
+    exporter: { renderNoteMarkdown: renderMarkdownSync },
+};
 
 function context(html: string): ResolveBatchContext {
     const strippedHtml = normalizeNoteHtml(`<div data-schema-version="9">${html}</div>`);
@@ -49,8 +59,8 @@ function context(html: string): ResolveBatchContext {
 }
 
 async function edit(ctx: ResolveBatchContext, oldString: string, newString: string, operation: BatchEditSpec['operation'] = 'str_replace') {
-    const rendered = await buildMarkdownRenderFields(oldString, newString, operation, 1, { renderMarkdown });
-    const result = resolveBatchEdits(ctx, [{ index: 0, oldString, newString, operation, ...rendered }]);
+    const renderMarkdownFallback = () => buildMarkdownRenderFields(oldString, newString, operation, 1);
+    const result = resolveBatchEdits(ctx, [{ index: 0, oldString, newString, operation, renderMarkdownFallback }]);
     expect(result.failures).toEqual([]);
     const body = (html: string) => html.replace(/^<div data-schema-version="9">|<\/div>$/g, '').replace(/\n/g, '');
     return {

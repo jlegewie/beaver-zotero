@@ -68,16 +68,17 @@ function resolveMappedExternalTags(
     });
 }
 
-/** Render note Markdown in a renderer; citations come back as tags. */
-async function renderWithCitationTags(
-    markdown: string,
-    context?: OperationContext,
-    options?: NoteRenderOptions,
-): Promise<string> {
-    if (!context?.renderMarkdown) {
+/**
+ * Render note Markdown with the plugin's exporter. Citation tags outside code
+ * come back as canonical `<citation …/>` tags for the note citation builder;
+ * tags inside code render as escaped code text.
+ */
+export function renderWithCitationTags(markdown: string, options?: NoteRenderOptions): string {
+    const exporter = Zotero.Beaver?.exporter;
+    if (!exporter) {
         throw Object.assign(new Error('Note rendering is unavailable'), { code: 'capability_unavailable' });
     }
-    return context.renderMarkdown(markdown, options);
+    return exporter.renderNoteMarkdown(markdown, options);
 }
 
 /**
@@ -92,7 +93,7 @@ export async function checkNoteMarkdownCitations(
     context?: OperationContext,
 ): Promise<{ error: string | null; warnings: string[] }> {
     if (!/<citation\b/i.test(markdown)) return { error: null, warnings: [] };
-    const { tags: rendered } = maskRenderedCitationTags(await renderWithCitationTags(markdown, context));
+    const { tags: rendered } = maskRenderedCitationTags(renderWithCitationTags(markdown));
     if (rendered.length === 0) return { error: null, warnings: [] };
 
     const externalRefContext = await getExternalRefContext(rendered.join('\n'), context);
@@ -112,7 +113,7 @@ export async function checkNoteMarkdownCitations(
  * their own text direction (see `NoteRenderOptions.directions`).
  *
  * The renderer leaves citations as `<citation …/>` tags (see
- * `OperationContext.renderMarkdown`); each is expanded here by the note
+ * {@link renderWithCitationTags}); each is expanded here by the note
  * citation builder, the same one `edit_note` uses, so a citation is stored
  * identically however the note was written. Throws (with code
  * {@link INVALID_NOTE_CITATION_CODE}) when a citation cannot be stored, rather
@@ -122,7 +123,7 @@ export async function renderNoteMarkdown(
     markdown: string,
     context?: OperationContext,
 ): Promise<{ html: string; warnings: string[] }> {
-    const masked = maskRenderedCitationTags(await renderWithCitationTags(markdown, context, { directions: 'note' }));
+    const masked = maskRenderedCitationTags(renderWithCitationTags(markdown, { directions: 'note' }));
     if (masked.tags.length === 0) return { html: masked.text, warnings: [] };
 
     const externalRefContext = await getExternalRefContext(masked.tags.join('\n'), context);

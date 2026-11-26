@@ -46,6 +46,9 @@ import {
 } from "./ui/tableWindow";
 import { stopTableTabProbe } from "./ui/tableTabProbe";
 import { cancelAllActiveTasks } from "./utils/backgroundTasks";
+import { InstanceAgentRuns } from "./services/agentRuns/registry";
+import { registerZoteroBusyContext, stopBusyContextHeartbeat } from "./services/busyContext";
+import { registerZoteroSyncPause } from "./services/syncPause";
 import { compareVersions } from "./utils/compareVersions";
 import { configurePDFForBeaver } from "./utils/configurePDFForBeaver";
 import { initLocale } from "./utils/locale";
@@ -147,22 +150,34 @@ function closePluginDatabase(): Promise<void> {
 }
 
 /**
- * Close the agent connection via the window's React bundle (`agentService` is
- * per-bundle). Synchronous and best-effort — teardown must not wait on the network.
+ * End the run session of a closing chat window: park a run that waits only
+ * on cards, close any other. Synchronous and best-effort; teardown must not
+ * wait on the network.
  */
 function closeAgentConnection(
     win: Window | null | undefined,
     reason: string,
     options?: { rememberInterruptedThread?: boolean },
 ): void {
-    const close = (win as any)?.BeaverReact?.closeAgentConnection;
-    if (typeof close !== "function") return;
-
+    const runtime = win ? addon.runtime.getWindow(win) : undefined;
+    if (!runtime) return;
     try {
-        close(reason, options);
+        addon.agentRuns?.closeWindow(runtime.id, reason, options);
     } catch (e) {
         ztoolkit.log(`closeAgentConnection: ${e}`);
     }
+}
+
+/** End every run session; nothing starts a run afterwards. */
+function disposeAgentRuns(reason: string): void {
+    const runs = addon.agentRuns;
+    addon.agentRuns = undefined;
+    try {
+        runs?.dispose(reason);
+    } catch (e) {
+        ztoolkit.log(`disposeAgentRuns: ${e}`);
+    }
+    stopBusyContextHeartbeat();
 }
 
 async function cleanupDevTemporaryAnnotations(
@@ -386,6 +401,11 @@ async function onStartup() {
     addon.account.start();
     addon.localEndpoints ??= new InstanceLocalEndpoints();
     addon.localEndpoints.start(addon.account, addon.preferences);
+    // Chat runs execute here; register the transport seams they read.
+    registerZoteroBusyContext();
+    registerZoteroSyncPause();
+    addon.agentRuns ??= new InstanceAgentRuns();
+    addon.agentRuns.start(addon.account);
     if (!addon.tableFills) {
         tableFillsDisposal = undefined;
         addon.tableFills = createInstanceTableFills();
@@ -547,11 +567,12 @@ function onStandaloneWindowUnload(win: Window): void {
     const runtime = addon.runtime.getWindow(win);
     if (!runtime || !addon.runtime.markClosing(win)) return;
     addon.mutations.cancelOwner(runtime.id);
+    addon.agentRuns?.cancelQueuedWork(runtime.id);
     void addon.notePreviews.detachOwner(runtime.id).catch(Zotero.logError);
     closeAgentConnection(win, "Beaver window closed", {
         rememberInterruptedThread: true,
     });
-    addon.syncPause.releaseWindow(runtime.id);
+    addon.syncPause.releaseOwnerRuns(runtime.id);
     BeaverUIFactory.closeWindowsRenderedBy(win);
     BeaverUIFactory.removeChatPanel(win);
     unregisterMainWindowFtl(win);
@@ -703,6 +724,7 @@ async function onMainWindowUnload(
     if (!addon.runtime.markClosing(win)) return;
     if (runtime) {
         addon.mutations.cancelOwner(runtime.id);
+        addon.agentRuns?.cancelQueuedWork(runtime.id);
         void addon.notePreviews.detachOwner(runtime.id).catch(error => {
             ztoolkit.log('Failed to restore closing window note previews', error);
         });
@@ -777,7 +799,7 @@ async function onMainWindowUnload(
         // this window's timers and React cleanup are torn down.
         try {
             const rescheduleSync = !(isAppQuitting || isAppShuttingDown);
-            if (runtime) addon.syncPause.releaseWindow(runtime.id);
+            if (runtime) addon.syncPause.releaseOwnerRuns(runtime.id);
         } catch (e) {
             ztoolkit.log(`resumeSyncAfterRun: ${e}`);
         }
@@ -1128,6 +1150,7 @@ async function disposePlugin(): Promise<void> {
             BeaverUIFactory.removeChatPanel(win as Window);
             addon.runtime.detachWindow(win);
         }
+        disposeAgentRuns("Beaver plugin shutting down");
 
         addon.newItemWatcher?.stop();
         addon.newItemWatcher = undefined;

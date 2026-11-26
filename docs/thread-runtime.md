@@ -2,8 +2,18 @@
 
 The plugin instance owns `threads` (metadata and query cache) and `presence`
 (viewers, active writers, and history invalidation). Each renderer subscribes
-before mounting and projects plain snapshots into its own atom graph. Drafts,
-attachments, run history, and streamed parts stay local to that renderer.
+before mounting and projects plain snapshots into its own atom graph. Drafts and
+attachments stay local to that renderer.
+
+Runs execute in the plugin realm, in the run session `addon.agentRuns` keeps for
+each chat window. The session holds the chat's run history, streamed parts, cards
+and transport in a private store; its window is its only viewer and projects that
+state onto its own atoms, applying streamed text once per animation frame. A
+message the window assembles is copied into the session, which then owns the run.
+Closing the window parks a run that waits only on cards and closes any other
+(recording it as interrupted); switching chats parks, leaves or stops the run as
+before. The account changing, or a library leaving the searchable scope, stops
+every session's run.
 
 The repository retains normalized entities, scoped query identities, pagination,
 pin reconciliation and error backoff. Reads share in-flight requests; metadata
@@ -19,8 +29,9 @@ synchronously. Changes made on another device surface through the view TTL, and
 a deletion through the 404 of a stale fetch, which marks the chat deleted for
 every viewer in this instance.
 
-A writer claim contains an account generation, runtime id, thread identity and
-unique token. Send (including slash-command preparation), continuation, retry,
+A writer claim contains an account generation, its owner (the run session, or a
+window deleting a thread), the window it acts for, thread identity and unique
+token. Send (including slash-command preparation), continuation, retry,
 regeneration and deletion claim before work begins. New chats use provisional
 identities and bind to server thread ids without sharing a draft. Claims cover
 preparation, connection, streaming, user-input waits, automatic replacement and

@@ -9,7 +9,8 @@
 import { vi } from 'vitest';
 import { createStore } from 'jotai';
 import type { AgentService } from '@beaver/agent-core/transport/agentService';
-import { RunSession, getRunSession, installRunSession, runSessionStore } from '../../src/services/agentRuns/runSession';
+import { RunSession, getRunSession, installRunSession } from '../../src/services/agentRuns/runSession';
+import { createSessionPort } from '../../src/services/agentRuns/sessionPort';
 import type { RunHost } from '../../src/services/agentRuns/runHost';
 import { attachRunProjection } from '../../react/runtime/runProjection';
 import { sessionStateAtoms } from '../../src/services/agentRuns/sessionState';
@@ -38,11 +39,11 @@ export function fakeRunHost(overrides: Partial<RunHost> = {}): RunHost {
  */
 export function chatStore(): Store {
     try {
-        return runSessionStore();
+        return getRunSession().store;
     } catch {
         const session = new RunSession(createStore(), { close: vi.fn() } as unknown as AgentService, fakeRunHost());
         installRunSession(session);
-        attachRunProjection(session.store, windowStore, sessionStateAtoms(), () => null);
+        attachRunProjection(createSessionPort(session), windowStore, sessionStateAtoms(), () => null);
         return getRunSession().store;
     }
 }

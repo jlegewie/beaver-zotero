@@ -307,7 +307,7 @@ const NOTE_HTML = '<div data-schema-version="9"><p>Hello world</p></div>';
 
 function makeValidateRequest(overrides: Partial<import("../../../src/services/agentDataProvider/operationContext").ActionValidateRequest> = {}): import("../../../src/services/agentDataProvider/operationContext").ActionValidateRequest {
     return {
-        operation: { renderMarkdown: async content => renderToHTML(content, 'markdown', {}), threadId: 'thread-1' },
+        operation: { threadId: 'thread-1' },
         event: 'agent_action_validate',
         request_id: 'val-1',
         action_type: 'edit_note',
@@ -323,7 +323,7 @@ function makeValidateRequest(overrides: Partial<import("../../../src/services/ag
 
 function makeExecuteRequest(overrides: Partial<import("../../../src/services/agentDataProvider/operationContext").ActionExecuteRequest> = {}): import("../../../src/services/agentDataProvider/operationContext").ActionExecuteRequest {
     return {
-        operation: { renderMarkdown: async content => renderToHTML(content, 'markdown', {}), threadId: 'thread-1' },
+        operation: { threadId: 'thread-1' },
         event: 'agent_action_execute',
         request_id: 'exe-1',
         action_type: 'edit_note',
@@ -417,6 +417,10 @@ beforeEach(() => {
     vi.mocked(enrichOldStringCitationRefs).mockReturnValue(null);
 
     installMutationInstance();
+    // Note Markdown renders through the plugin exporter, here the mocked chat renderer.
+    (globalThis as any).Zotero.Beaver.exporter = {
+        renderNoteMarkdown: vi.fn((content: string) => renderToHTML(content, 'markdown', {})),
+    };
 });
 
 
@@ -609,8 +613,8 @@ describe('validateEditNoteAction — success', () => {
             .mockImplementationOnce((str: string) => str)
             .mockImplementationOnce(() => { throw new Error('New citations cannot appear in old_string'); })
             .mockImplementation((str: string) => str);
-        // A minimal note render seam: the heading line, then one paragraph,
-        // with citation tags left in place as the real seam returns them.
+        // A minimal note renderer: the heading line, then one paragraph,
+        // with citation tags left in place as the real renderer returns them.
         vi.mocked(renderToHTML).mockImplementation((content: string) => {
             const [, body] = content.split('\n\n');
             return `<h3>Rendered Title</h3><p>${body.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')}</p>`;
@@ -969,9 +973,38 @@ describe('executeEditNoteAction — success', () => {
         }));
 
         expect(response.success).toBe(true);
-        expect(renderToHTML).toHaveBeenCalledTimes(4); // prepared: old and new, each as written and directed
+        // Rendered once the matchers missed: old and new as written, then old
+        // directed (the stub adds no direction, so new is not rendered again).
+        expect(renderToHTML).toHaveBeenCalledTimes(3);
         expect(item.setNote).toHaveBeenCalled();
         expect(item.setNote.mock.calls[0][0]).toContain(renderedNew);
+    });
+
+    it('renders nothing when a Markdown-looking old_string matches as written', async () => {
+        const noteText = '<p>Hello **world**</p>';
+        const item = makeMockItem({
+            getNote: vi.fn(() => `<div data-schema-version="9">${noteText}</div>`),
+        });
+        vi.mocked((globalThis as any).Zotero.Items.getByLibraryAndKeyAsync).mockResolvedValue(item);
+        vi.mocked(getOrSimplify).mockReturnValue({
+            simplified: noteText,
+            metadata: { elements: new Map() },
+            isStale: false,
+        });
+
+        const response = await handleAgentActionExecuteRequest(makeExecuteRequest({
+            action_data: {
+                library_id: 1,
+                zotero_key: 'NOTE0001',
+                old_string: 'Hello **world**',
+                new_string: 'Goodbye **world**',
+                operation: 'str_replace',
+            },
+        }));
+
+        expect(response.success).toBe(true);
+        expect(Zotero.Beaver.exporter.renderNoteMarkdown).not.toHaveBeenCalled();
+        expect(item.setNote.mock.calls[0][0]).toContain('Goodbye **world**');
     });
 
     it('str_replace_all replaces multiple occurrences', async () => {

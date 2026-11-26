@@ -2,8 +2,28 @@ import { restorePreviewEditor } from './restorePreviewEditor';
 /** Instance registry for editor-specific preview ownership and awaited restoration. */
 export class NotePreviews {
     private mutationActive = false;
+    private settleListeners = new Set<() => void>();
 
-    setMutationActive(active: boolean): void { this.mutationActive = active; }
+    setMutationActive(active: boolean): void {
+        const settled = this.mutationActive && !active;
+        this.mutationActive = active;
+        if (!settled) return;
+        for (const listener of [...this.settleListeners]) {
+            try { listener(); } catch (error) { Zotero.logError(error as Error); }
+        }
+    }
+
+    /** Whether a library write holds the queue, so no preview may be claimed. */
+    isWriting(): boolean { return this.mutationActive; }
+
+    /**
+     * Call `listener` whenever a library write ends. A preview refused during
+     * the write can be shown then. Returns how to stop listening.
+     */
+    whenWritesSettle(listener: () => void): () => void {
+        this.settleListeners.add(listener);
+        return () => { this.settleListeners.delete(listener); };
+    }
 
     private restorations = new Map<object, Promise<void>>();
 

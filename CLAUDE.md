@@ -206,7 +206,18 @@ into `registerZoteroHost()` → add the folder to the lint guard.
 
 Beaver runs in the **main Zotero window** and in a **separate Beaver window**
 (`addon/content/beaverWindow.xhtml`). Each main window and the standalone evaluate their
-own React bundle and own their chat store and socket.
+own React bundle and own their chat store.
+
+**Chat runs execute in the plugin realm.** `addon.agentRuns`
+(`src/services/agentRuns/registry.ts`) gives each chat window one run session (socket,
+engine, private store, writer claim, data provider and operation context) and ends it when
+the window closes, the account changes, a library leaves the searchable scope, or the plugin
+shuts down. The window reaches its session only through a `SessionPort`: it projects the
+session's state onto its own atoms by name (`react/runtime/runProjection.ts`), writes it
+through `runSessionStore()` and starts engine actions by name. Never hand the session a
+window atom or store; window-side effects of a run go through the window's `RunViewer`.
+Engine code under `src/services/agentRuns/` must stay free of `react/` and agent-ui
+(`providerClosure.test.ts`).
 
 **Never use bare `window`** in plugin code. Use the `win` parameter threaded through UI methods, `useSurfaceWindow()` for the
 rendered surface, or `ownerDocument.defaultView`. Context reads use `getContextWindow()`;
@@ -283,10 +294,10 @@ revocation clears listeners before late events can reach another account.
 `addon.libraryOperations` executes named library operations in the plugin realm;
 renderers pass data, not async write callbacks. `addon.mutations` serializes complete
 read/modify/write sequences. Window closure cancels queued owner work; active writes
-retain their lock and sync hold until settlement. Prepare Markdown rendering before
-admission, and keep asynchronous preview restoration in the plugin realm. Table writes
-and shadow restores use the same service and acquire table locks after the instance
-queue. See [library mutation ownership](docs/library-mutations.md).
+retain their lock and sync hold until settlement. Note writes render Markdown inside
+the operation (`exporter.renderNoteMarkdown`); keep asynchronous preview restoration
+in the plugin realm. Table writes and shadow restores use the same service and acquire
+table locks after the instance queue. See [library mutation ownership](docs/library-mutations.md).
 
 ### Window lifecycle (close window ≠ quit app)
 

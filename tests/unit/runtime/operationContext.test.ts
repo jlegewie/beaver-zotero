@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const state = vi.hoisted(() => ({ runtime: { id: 'window-A', status: 'ready' }, values: new Map<unknown, any>(), writes: vi.fn(), renderNoteMarkdown: vi.fn((content: string) => `<p>${content}</p>`) }));
+const state = vi.hoisted(() => ({ runtime: { id: 'window-A', status: 'ready' }, values: new Map<unknown, any>(), writes: vi.fn() }));
 vi.mock('../../../react/store', () => ({ store: { get: (atom: unknown) => state.values.get(atom), set: state.writes } }));
 vi.mock('../../../react/utils/attachmentResolvedEvent', () => ({ emitAttachmentResolved: vi.fn() }));
 vi.mock('../../../react/atoms/threads', () => ({ currentThreadIdAtom: Symbol('thread') }));
@@ -23,7 +23,6 @@ beforeEach(() => {
     state.runtime.status = 'ready';
     (Zotero as any).Beaver = {
         account: { getGeneration: () => 4, getSnapshot: () => ({ session: { user: { id: 'account-A' } } }) },
-        exporter: { renderNoteMarkdown: state.renderNoteMarkdown },
     };
     state.values.set(activeRunAtom, { id: 'run-A' });
     state.values.set(currentThreadIdAtom, 'thread-A');
@@ -62,11 +61,6 @@ describe('explicit data operation context', () => {
         expect(context.externalRefs).toEqual({ a: { title: 'Reference A' } });
         context.grantCreatedNote!(1, 'NEWNOTE1');
         expect(state.writes).not.toHaveBeenCalled();
-    });
-
-    it('renders note Markdown in the plugin realm', async () => {
-        expect(await captureOperationContext(true).renderMarkdown!('text', { directions: 'note' })).toBe('<p>text</p>');
-        expect(state.renderNoteMarkdown).toHaveBeenCalledExactlyOnceWith('text', { directions: 'note' });
     });
 
     it('never gives an originless request the local chat’s full access or reference mappings', async () => {

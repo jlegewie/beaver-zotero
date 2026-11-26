@@ -1,6 +1,7 @@
 import { BeaverInstance } from '../../src/runtime/instance';
 /**
- * Shutdown hooks close the agent connection through `BeaverReact`.
+ * Shutdown hooks end a closing window's run session through the instance's
+ * registry (`addon.agentRuns`).
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -76,16 +77,21 @@ vi.mock('../../react/constants/versionUpdateMessages', () => ({
     getAllVersionUpdateMessageVersions: vi.fn(() => []),
 }));
 
-function makeWindow(closeAgentConnection: unknown = vi.fn()) {
+/** What closing each window's session does, by window id. */
+const sessionClosers = new Map<string, (...args: unknown[]) => unknown>();
+
+/** A window with a run session; `closeSession` stands for the registry ending it. */
+function makeWindow(closeSession: ((...args: unknown[]) => unknown) | null = vi.fn()) {
     const win = {
         EventTarget,
         addEventListener: vi.fn(),
         removeEventListener: vi.fn(),
         closed: false,
         document: { getElementById: vi.fn().mockReturnValue(null), querySelector: vi.fn().mockReturnValue(null) },
-        BeaverReact: { closeAgentConnection },
     } as unknown as Window & Record<string, any>;
     (globalThis as any).addon.runtime.attachWindow(win);
+    const id = (globalThis as any).addon.runtime.getWindow(win).id;
+    if (closeSession) sessionClosers.set(id, closeSession);
     return win;
 }
 
@@ -119,11 +125,16 @@ function setupGlobals({ appShuttingDown }: { appShuttingDown: boolean }) {
         threads: { start: vi.fn(), dispose: vi.fn() },
         presence: { dispose: vi.fn() },
         runtime: new BeaverInstance(),
+        agentRuns: {
+            cancelQueuedWork: vi.fn(),
+            closeWindow: vi.fn((windowId: string, reason: string, options: unknown) => sessionClosers.get(windowId)?.(reason, options)),
+            dispose: vi.fn(),
+        },
         mutations: { cancelOwner: vi.fn(), dispose: vi.fn().mockResolvedValue(undefined) },
         itemImport: { dispose: vi.fn() },
         images: { dispose: vi.fn() },
         notePreviews: { detachOwner: vi.fn().mockResolvedValue(undefined) },
-        syncPause: { releaseWindow: vi.fn(), scheduleResumeAfterRun: vi.fn(), resumeSyncNow: vi.fn() },
+        syncPause: { releaseOwnerRuns: vi.fn(), scheduleResumeAfterRun: vi.fn(), resumeSyncNow: vi.fn() },
         transactionWatch: { start: vi.fn(), stop: vi.fn(), openAgeMs: vi.fn(() => 0) },
         data: {
             alive: true,
@@ -287,11 +298,31 @@ describe('closing the agent connection on window unload', () => {
         }
     });
 
-    it('carries on when the bundle throws', async () => {
+    it('cancels the session\'s queued writes as soon as a quit starts, before waiting for writes to settle', async () => {
+        setupGlobals({ appShuttingDown: true });
+        const hooks = await loadHooks();
+        const instance = (globalThis as any).addon;
+        let settle!: () => void;
+        instance.mutations.dispose = vi.fn(() => new Promise<void>((resolve) => { settle = resolve; }));
+        const close = vi.fn();
+        const win = makeWindow(close);
+        vi.mocked(Zotero.getMainWindows).mockReturnValue([win]);
+        const id = instance.runtime.getWindow(win).id;
+
+        const unloading = hooks.onMainWindowUnload(win);
+        await Promise.resolve();
+        expect(instance.agentRuns.cancelQueuedWork).toHaveBeenCalledWith(id);
+        expect(close).not.toHaveBeenCalled();
+        settle();
+        await unloading;
+        expect(close).toHaveBeenCalledOnce();
+    });
+
+    it('carries on when ending the session throws', async () => {
         setupGlobals({ appShuttingDown: false });
         const hooks = await loadHooks();
         const win = makeWindow(vi.fn(() => {
-            throw new Error('bundle is already gone');
+            throw new Error('session is already gone');
         }));
         vi.mocked(Zotero.getMainWindows).mockReturnValue([win, makeWindow()]);
 
@@ -299,15 +330,14 @@ describe('closing the agent connection on window unload', () => {
 
         expect(mockRemoveChatPanel).toHaveBeenCalled();
         expect(ztoolkit.log).toHaveBeenCalledWith(
-            expect.stringContaining('closeAgentConnection: Error: bundle is already gone'),
+            expect.stringContaining('closeAgentConnection: Error: session is already gone'),
         );
     });
 
-    it('carries on when the window has no bundle to ask', async () => {
+    it('carries on when the window has no run session', async () => {
         setupGlobals({ appShuttingDown: false });
         const hooks = await loadHooks();
-        const win = makeWindow();
-        delete win.BeaverReact;
+        const win = makeWindow(null);
         vi.mocked(Zotero.getMainWindows).mockReturnValue([win, makeWindow()]);
 
         await hooks.onMainWindowUnload(win);
@@ -400,6 +430,16 @@ describe('late application shutdown', () => {
         expect(Zotero.__beaverShuttingDown).toBe(true);
     });
 
+    it('leaves run sessions to their windows at app shutdown', async () => {
+        // Each window's unload has closed its session by now; the windows are
+        // gone, so nothing may call back into them.
+        const hooks = await loadHooks();
+        const runs = (globalThis as any).addon.agentRuns;
+        await hooks.onAppShutdown();
+        expect(runs.dispose).not.toHaveBeenCalled();
+        expect(runs.closeWindow).not.toHaveBeenCalled();
+    });
+
     it('continues service cleanup after failures and preserves the DB fallback', async () => {
         const hooks = await loadHooks();
         const instance = (globalThis as any).addon;
@@ -431,8 +471,10 @@ describe('quitting with several windows', () => {
         const closeDatabase = vi.fn().mockResolvedValue(undefined);
         instance.db = { closeDatabase };
         const disposeRuntime = vi.spyOn(instance.runtime, 'disposeInstance');
-        const first = makeWindow();
-        const second = makeWindow();
+        const closeFirst = vi.fn();
+        const closeSecond = vi.fn();
+        const first = makeWindow(closeFirst);
+        const second = makeWindow(closeSecond);
         // During a quit the other windows already read as closed, so each
         // unload takes itself for the last window.
         (first as any).closed = true;
@@ -451,8 +493,8 @@ describe('quitting with several windows', () => {
         // Each window still tears down its own UI and closes its own socket.
         expect(mockRemoveChatPanel).toHaveBeenCalledWith(first);
         expect(mockRemoveChatPanel).toHaveBeenCalledWith(second);
-        expect(first.BeaverReact.closeAgentConnection).toHaveBeenCalledOnce();
-        expect(second.BeaverReact.closeAgentConnection).toHaveBeenCalledOnce();
+        expect(closeFirst).toHaveBeenCalledOnce();
+        expect(closeSecond).toHaveBeenCalledOnce();
     });
 
     it('shares the database close between overlapping shutdown paths', async () => {

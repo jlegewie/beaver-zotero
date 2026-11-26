@@ -16,8 +16,7 @@ vi.mock('../../../src/services/threads/finishedChat', () => ({
     isFinishedChat: (...args: any[]) => state.finished(...args), hasThreadWriter: () => false,
     RESPONSE_FINISH_MESSAGE: 'Available when this response finishes.',
 }));
-vi.mock('../../../src/services/agentRuns/runSession', () => ({ getRunSession: () => ({}) }));
-vi.mock('../../../src/services/agentRuns/threadWriter', () => ({ currentWriter: () => state.writer }));
+vi.mock('../../../src/services/agentRuns/runSession', () => ({ getSessionPort: () => ({ hasWriter: () => !!state.writer }) }));
 vi.mock('../../../src/services/agentRuns/threadAdmission', async () => ({ threadAdmissionAtom: (await import('jotai')).atom(null) }));
 vi.mock('../../../react/runtime/threadProjection', async () => ({ threadPresenceAtom: (await import('jotai')).atom({ claims: [] }) }));
 vi.mock('../../../react/atoms/agentRunAtoms', async () => ({ isWSChatPendingAtom: (await import('jotai')).atom(false) }));

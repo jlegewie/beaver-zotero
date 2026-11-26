@@ -3,16 +3,24 @@
  *
  * For tests that drive the engine on a store they create: the session uses
  * that store itself (no projection), the renderer's transport and the
- * renderer's window host bound to the store, so the test reads what the
+ * renderer as its viewer, bound to the store, so the test reads what the
  * engine wrote where it wrote it.
  */
 import type { createStore } from 'jotai';
 import { agentService } from '@beaver/agent-core/transport/agentService';
+import { currentThreadIdAtom } from '@beaver/agent-core/run-state/atoms';
 import { RunSession, installRunSession } from '../../src/services/agentRuns/runSession';
-import { createWindowRunHost } from '../../react/runtime/windowRunHost';
+import '../../src/services/agentRuns/sessionPort';
+import { createViewerRunHost } from '../../src/services/agentRuns/runViewer';
+import { createWindowRunViewer } from '../../react/runtime/windowRunHost';
+import { tryGetWindowRuntime } from '../../react/runtime/windowRuntime';
 
 export function installWindowStoreRunSession(store: ReturnType<typeof createStore>): RunSession {
-    const session = new RunSession(store, agentService, createWindowRunHost(store));
+    const viewer = createWindowRunViewer(store);
+    const session = new RunSession(store, agentService, createViewerRunHost(() => tryGetWindowRuntime()?.id, () => viewer, {
+        owner: () => tryGetWindowRuntime()?.id,
+        threadId: () => store.get(currentThreadIdAtom),
+    }));
     installRunSession(session);
     return session;
 }

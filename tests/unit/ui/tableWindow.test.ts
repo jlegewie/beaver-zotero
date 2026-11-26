@@ -144,7 +144,7 @@ beforeEach(() => {
         Beaver: {
             ...(Zotero as any).Beaver,
             mutations: { cancelOwner: vi.fn() },
-            syncPause: { releaseWindow: vi.fn() },
+            syncPause: { releaseOwnerRuns: vi.fn() },
             runtime: {
                 attachWindow: vi.fn((win: any, kind: string) => {
                     const runtime = { id: `rt-${runtimes.size + 1}`, kind, status: 'attaching', hostWindow: win };

@@ -30,6 +30,14 @@ describe("instance thread admission", () => {
             expect(presence.claim("b", "thread", 3), phase).toBeNull();
         }
     });
+    it("records a session's claim as the session's, acting for its window", () => {
+        const claim = presence.claim("window-a", "t", 3, "session:s1")!;
+        expect(presence.getSnapshot().claims).toEqual([expect.objectContaining({ ownerId: "session:s1", windowId: "window-a" })]);
+        // The claim acts for its window: it ends when that window closes.
+        presence.detach("window-a");
+        expect(presence.owns(claim)).toBe(false);
+        expect(presence.claim("window-b", "t", 3)?.ownerId).toBe("window-b");
+    });
     it("never lets a stale completion release a successor", () => {
         const first = presence.claim("a", "t", 3)!;
         presence.release(first);

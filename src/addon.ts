@@ -33,6 +33,7 @@ class Addon {
     public preferences?: import("./services/instancePreferences").InstancePreferences;
     public account?: import("./services/instanceAccount").InstanceAccount;
     public tableFills?: import("./services/tableFills/service").InstanceTableFills;
+    public agentRuns?: import("./services/agentRuns/registry").InstanceAgentRuns;
     public notePreviews = new NotePreviews();
     public syncPause = createSyncPauseService();
     public mutations = new LibraryMutations(

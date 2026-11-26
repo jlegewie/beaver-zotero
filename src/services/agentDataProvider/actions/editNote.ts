@@ -73,7 +73,7 @@ import type { NoteRenderOptions } from '../../export/noteMarkdown';
 import type { ActionExecuteRequest, ActionValidateRequest, OperationContext } from '../operationContext';
 import { TimeoutContext, TimeoutError, checkAborted } from '../timeout';
 import { checkLibraryExcluded, excludedLibraryMessage, getDeferredToolPreference } from '../utils';
-import { getExternalRefContext } from './noteCitationRendering';
+import { getExternalRefContext, renderWithCitationTags } from './noteCitationRendering';
 import { actionError, assertLibraryNotExcluded, assertLibraryRefNotExcluded, toExecuteResponse } from './actionExecution';
 import { sha256Hex } from '../../../utils/hash';
 
@@ -109,44 +109,44 @@ export type MarkdownRenderFields = Pick<
 >;
 
 /**
- * Render Markdown-shaped edit strings through the same static renderer used by
+ * Render Markdown-shaped edit strings through the same renderer used by
  * create_note, then simplify the rendered HTML into the matcher's input format.
- * The helper is only called after the normal synchronous matcher misses.
+ * Call it only after the normal matcher misses: it is the one place an edit
+ * renders Markdown.
  *
  * Each string renders twice: as written, and with a direction on every block.
  * A note Beaver wrote with right-to-left text has a `dir` on every block (its
  * English blocks too), so only the directed render of a block-level anchor is
  * found there, and its replacement then keeps the note's directions.
  */
-export async function buildMarkdownRenderFields(
+export function buildMarkdownRenderFields(
     oldString: string,
     newString: string,
     operation: EditNoteOperation,
-    libraryId: number, context?: OperationContext): Promise<MarkdownRenderFields> {
+    libraryId: number,
+): MarkdownRenderFields {
     if (!oldString || !looksLikeMarkdownForRender(oldString)) return {};
-    if (!context?.renderMarkdown) return {};
-    const renderMarkdown = context.renderMarkdown;
 
     // The renderer leaves citations as the tags the model wrote, so the
     // strategy expands them like any other edit (old_string tags resolve
     // by `ref`, new ones are built from the model's page numbers). They
     // are masked while the HTML is simplified.
-    const renderer = (options: NoteRenderOptions) => async (content: string) => {
-        const masked = maskRenderedCitationTags(await renderMarkdown(content, options));
+    const renderer = (options: NoteRenderOptions) => (content: string) => {
+        const masked = maskRenderedCitationTags(renderWithCitationTags(content, options));
         return unmaskNoteCitationTags(simplifyNoteHtml(masked.text, libraryId).simplified, masked);
     };
-    const renderReplacement = async (render: (content: string) => Promise<string>, renderedOld: string) => {
+    const renderReplacement = (render: (content: string) => string, renderedOld: string) => {
         if (operation === 'insert_after') {
             const injected = newString.startsWith(oldString)
                 ? newString.substring(oldString.length)
                 : newString;
-            return renderedOld + (await render(injected));
+            return renderedOld + render(injected);
         }
         if (operation === 'insert_before') {
             const injected = newString.endsWith(oldString)
                 ? newString.substring(0, newString.length - oldString.length)
                 : newString;
-            return (await render(injected)) + renderedOld;
+            return render(injected) + renderedOld;
         }
         return render(newString);
     };
@@ -154,18 +154,18 @@ export async function buildMarkdownRenderFields(
     let fields: MarkdownRenderFields;
     try {
         const render = renderer({});
-        const renderedOld = await render(oldString);
-        fields = { renderedOldSimplified: renderedOld, renderedNewSimplified: await renderReplacement(render, renderedOld) };
+        const renderedOld = render(oldString);
+        fields = { renderedOldSimplified: renderedOld, renderedNewSimplified: renderReplacement(render, renderedOld) };
     } catch (e: any) {
         logger(`buildMarkdownRenderFields: Failed to render Markdown fallback: ${e?.message || String(e)}`, 1);
         return {};
     }
     try {
         const render = renderer({ directions: 'all' });
-        const renderedOld = await render(oldString);
+        const renderedOld = render(oldString);
         if (renderedOld !== fields.renderedOldSimplified) {
             fields.directedRenderedOldSimplified = renderedOld;
-            fields.directedRenderedNewSimplified = await renderReplacement(render, renderedOld);
+            fields.directedRenderedNewSimplified = renderReplacement(render, renderedOld);
         }
     } catch (e: any) {
         logger(`buildMarkdownRenderFields: Failed to render directed Markdown fallback: ${e?.message || String(e)}`, 1);
@@ -173,17 +173,14 @@ export async function buildMarkdownRenderFields(
     return fields;
 }
 
-async function findMarkdownRenderFallbackMatch(
+function findMarkdownRenderFallbackMatch(
     matchInput: MatchInput,
     oldString: string,
     newString: string,
     operation: EditNoteOperation,
-    libraryId: number, context?: OperationContext): Promise<ReturnType<typeof findBestMatch>> {
-    const rendered = await buildMarkdownRenderFields(
-        oldString,
-        newString,
-        operation,
-        libraryId, context);
+    libraryId: number,
+): ReturnType<typeof findBestMatch> {
+    const rendered = buildMarkdownRenderFields(oldString, newString, operation, libraryId);
     if (!rendered.renderedOldSimplified) return null;
     return findMarkdownRenderMatch({ ...matchInput, ...rendered });
 }
@@ -618,12 +615,12 @@ async function validateEditNoteAction(
     try {
         base = expandBase(matchInput);
     } catch (e: any) {
-        match = await findMarkdownRenderFallbackMatch(
+        match = findMarkdownRenderFallbackMatch(
             matchInput,
             old_string ?? '',
             new_string,
             operation,
-            resolvedLibraryId, request.operation);
+            resolvedLibraryId);
         if (!match) {
             return {
                 type: 'agent_action_validate_response',
@@ -654,12 +651,12 @@ async function validateEditNoteAction(
             };
         }
         if (!match) {
-            match = await findMarkdownRenderFallbackMatch(
+            match = findMarkdownRenderFallbackMatch(
                 matchInput,
                 old_string ?? '',
                 new_string,
                 operation,
-                resolvedLibraryId, request.operation);
+                resolvedLibraryId);
         }
     }
     if (!match) {
@@ -1122,12 +1119,12 @@ export async function applyEditNote(
     try {
         base = expandBase(matchInput);
     } catch (e: any) {
-        match = await findMarkdownRenderFallbackMatch(
+        match = findMarkdownRenderFallbackMatch(
             matchInput,
             old_string ?? '',
             new_string,
             operation,
-            resolvedLibraryId, operationContext);
+            resolvedLibraryId);
         if (!match) {
             throw actionError('expansion_failed', buildExpansionErrorMessage(e, simplified, old_string));
         }
@@ -1146,12 +1143,12 @@ export async function applyEditNote(
             throw actionError('ambiguous_match', error.message);
         }
         if (!match) {
-            match = await findMarkdownRenderFallbackMatch(
+            match = findMarkdownRenderFallbackMatch(
                 matchInput,
                 old_string ?? '',
                 new_string,
                 operation,
-                resolvedLibraryId, operationContext);
+                resolvedLibraryId);
         }
     }
     if (!match) {

@@ -1,5 +1,11 @@
 export interface ThreadClaim {
     readonly generation: number;
+    /**
+     * Who holds the claim: a chat window's run session (`session:<id>`), or a
+     * window itself (deleting a thread).
+     */
+    readonly ownerId: string;
+    /** The window the claim acts for; it ends when that window closes. */
     readonly windowId: string;
     readonly threadId: string;
     readonly token: number;
@@ -75,6 +81,7 @@ export class ThreadPresence {
         windowId: string,
         threadId: string,
         generation: number,
+        ownerId: string = windowId,
     ): ThreadClaim | null {
         if (
             generation !== this.generation ||
@@ -84,6 +91,7 @@ export class ThreadPresence {
         )
             return null;
         const claim = {
+            ownerId,
             windowId,
             threadId,
             generation,

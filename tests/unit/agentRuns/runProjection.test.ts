@@ -25,6 +25,15 @@ const ATOMS: ReadonlyArray<readonly [string, SessionStateAtom]> = [
     ['pendingQuestions', pendingQuestionsAtom],
 ];
 
+/** A session's store, read by name as a window reads its session's port. */
+function byName(store: ReturnType<typeof createStore>) {
+    const atomOf = (name: string) => ATOMS.find(([entry]) => entry === name)![1];
+    return {
+        get: (name: string) => store.get(atomOf(name)),
+        sub: (name: string, listener: () => void) => store.sub(atomOf(name), listener),
+    };
+}
+
 /** A window whose animation frames only run when the test says so. */
 function fakeWindow() {
     let armed: FrameRequestCallback | null = null;
@@ -63,7 +72,7 @@ describe('run projection', () => {
         session = createStore();
         view = createStore();
         win = fakeWindow();
-        projection = attachRunProjection(session, view, ATOMS, () => win as unknown as Window);
+        projection = attachRunProjection(byName(session), view, ATOMS, () => win as unknown as Window);
     });
 
     afterEach(() => projection.detach());
@@ -157,7 +166,7 @@ describe('run projection', () => {
         const later = createStore();
         const runs = [run('run-0', 'completed')];
         session.set(threadRunsAtom, runs);
-        const attached = attachRunProjection(session, later, ATOMS, () => null);
+        const attached = attachRunProjection(byName(session), later, ATOMS, () => null);
 
         expect(later.get(threadRunsAtom)).toBe(runs);
         attached.detach();

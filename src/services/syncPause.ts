@@ -236,13 +236,14 @@ export function createSyncPauseService() {
     }
 
 
-    function releaseWindow(windowId: string): void {
-        for (const owner of activeOwners.keys()) {
-            if (owner.startsWith(`chat:${windowId}:`)) scheduleResumeAfterRun(owner);
+    /** Release the pauses of an owner's runs: a window's, or a run session's (`run:<id>`). */
+    function releaseOwnerRuns(owner: string): void {
+        for (const active of activeOwners.keys()) {
+            if (active.startsWith(`chat:${owner}:`)) scheduleResumeAfterRun(active);
         }
     }
 
-    return { releaseWindow, pauseSyncForMutatingRun, scheduleResumeAfterRun, cancelScheduledResume, resumeSyncNow, isSyncPaused };
+    return { releaseOwnerRuns, pauseSyncForMutatingRun, scheduleResumeAfterRun, cancelScheduledResume, resumeSyncNow, isSyncPaused };
 }
 
 export function pauseSyncForMutatingRun(...args: Parameters<ReturnType<typeof createSyncPauseService>["pauseSyncForMutatingRun"]>): ReturnType<ReturnType<typeof createSyncPauseService>["pauseSyncForMutatingRun"]> {

@@ -25,15 +25,14 @@ import { openJobCallsAtom } from '@beaver/agent-core/run-state/jobCalls';
 import { openParkedRunAtom } from '@beaver/agent-core/run-state/parkedRun';
 import { chatFillsAtom } from '@beaver/agent-core/run-state/tableChatFills';
 import { isRunActive } from '@beaver/agent-core/agents/types';
-import { agentService } from '@beaver/agent-core/transport/agentService';
+import { getSessionPort } from '../../src/services/agentRuns/runSession';
 import { tryGetWindowRuntime } from '../runtime/windowRuntime';
 import { store } from '../store';
-import { requestJobResume } from './agentRunAtoms';
 import { jobWaitAtom } from '../../src/services/agentRuns/jobWait';
 import { leaveJobWait } from './jobLeave';
 import { isThreadParkedAtom } from '../../src/services/agentRuns/parkedRuns';
 import { watchChatFills } from './tableChatFills';
-import { runSessionStore } from '../../src/services/agentRuns/runSession';
+import { runSessionStore } from '../runtime/runSessionStore';
 
 // ---------------------------------------------------------------------------
 // The composer's Stop
@@ -125,7 +124,7 @@ export function watchJobCalls(): void {
     if (!runtime) return;
     try {
         watchChatFills();
-        const unsubscribeWaits = agentService.onJobWait((wait) => {
+        const unsubscribeWaits = getSessionPort().onJobWait((wait) => {
             const threadId = wait.threadId ?? store.get(currentThreadIdAtom);
             if (!threadId || threadId !== store.get(currentThreadIdAtom)) return;
             runSessionStore().set(jobWaitAtom, { threadId, runId: wait.runId, toolCallId: wait.toolCallId, jobId: wait.jobId });
@@ -134,7 +133,7 @@ export function watchJobCalls(): void {
         // The fill this window waits on may have ended, or its run's park
         // arrived after it did (a reattach): the parked run resumes.
         const resume = () => {
-            if (store.get(jobWaitAtom)) requestJobResume();
+            if (store.get(jobWaitAtom)) getSessionPort().requestJobResume();
         };
         Zotero.Beaver.runtime.addWindowCleanup(runtime, store.sub(chatFillsAtom, resume));
         Zotero.Beaver.runtime.addWindowCleanup(runtime, store.sub(openParkedRunAtom, resume));

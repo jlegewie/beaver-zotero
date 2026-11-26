@@ -303,7 +303,7 @@ export function onTableWindowUnload(win: Window): void {
     if (Zotero.Beaver.runtime.markClosing(win)) {
         try {
             Zotero.Beaver.mutations?.cancelOwner(runtime.id);
-            Zotero.Beaver.syncPause?.releaseWindow(runtime.id);
+            Zotero.Beaver.syncPause?.releaseOwnerRuns(runtime.id);
         } catch (error) {
             logger(`tableWindow: releasing the window's work failed: ${String(error)}`, 1);
         }
