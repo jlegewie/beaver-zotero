@@ -102,7 +102,7 @@ import {
 import { isJobDeferral } from '@beaver/agent-core/protocol/jobCallProtocol';
 import { jobWaitAtom, settleJobWait } from './jobWait';
 import { citationsAtom } from '@beaver/agent-core/citations/atoms';
-import type { Citation } from '@beaver/agent-core/types/citations';
+import { runCitations, type Citation } from '@beaver/agent-core/types/citations';
 import {
     toAgentAction,
     isItemCreatingAgentAction,
@@ -1261,13 +1261,14 @@ function applyRunCitations(
     set: Setter,
     runId: string,
     citations: Citation[] | null | undefined,
+    siteIcons: Record<string, string> | null | undefined,
 ): void {
     if (!citations || citations.length === 0) return;
 
     logger(`WS: Processing ${citations.length} citations for run ${runId}`, 1);
     set(citationsAtom, (prev) => [
         ...prev,
-        ...citations.map(c => ({ ...c, run_id: runId }))
+        ...runCitations(runId, citations, siteIcons)
     ]);
     session.host.citationsChanged(set);
 
@@ -1637,7 +1638,7 @@ export function createWSCallbacks(
 
             // Citations, for a backend that still embeds them here. Current
             // ones send `citations: null` and follow with `run_citations`.
-            applyRunCitations(session, set, event.run_id, event.citations);
+            applyRunCitations(session, set, event.run_id, event.citations, event.site_icons);
 
             // Process agent actions from run complete event
             if (event.agent_actions && event.agent_actions.length > 0) {
@@ -1661,7 +1662,7 @@ export function createWSCallbacks(
                 citationsCount: event.citations?.length ?? 0,
             }, 1);
 
-            applyRunCitations(session, set, event.run_id, event.citations);
+            applyRunCitations(session, set, event.run_id, event.citations, event.site_icons);
 
             // The lookup is over — whatever it found, including nothing. Every
             // other way it can end (`done`, an error, a cancel, the socket

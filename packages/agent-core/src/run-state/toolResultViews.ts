@@ -119,8 +119,8 @@ export interface WebPageRowView {
     display_name: string;
     /** The page's site, e.g. "who.int". */
     site?: string;
-    /** The site's icon as a small image data URI, when one was fetched. */
-    icon?: string;
+    /** Key of the site's icon in the view's `site_icons`, when one was fetched. */
+    icon_host?: string;
     /** "error" when the tool failed on this page; absent or "ok" otherwise. */
     status?: "ok" | "error";
 }
@@ -195,6 +195,8 @@ export interface ItemListView {
     view_type: "item_list";
     tool_name: string;
     items: ItemListRow[];
+    /** Web page rows' site icons (small image data URIs) by the rows' `icon_host`. */
+    site_icons?: Record<string, string> | null;
 }
 
 export interface AnnotationListView {
@@ -276,9 +278,11 @@ export interface ExternalReferenceListView {
     /** Optional tool-specific extension; render per `info_type`. */
     tool_info?: ExternalReferenceViewInfo | null;
     /**
-     * Web pages' site icons (small image data URIs) by `source_id`, for those
-     * already fetched. Beside the references, which are cached as records.
+     * Web pages' `site_icons` keys by `source_id`, for pages whose site icon
+     * was fetched. Beside the references, which are cached as records.
      */
+    icon_hosts?: Record<string, string> | null;
+    /** Site icons (small image data URIs) by host, one per site. */
     site_icons?: Record<string, string> | null;
 }
 

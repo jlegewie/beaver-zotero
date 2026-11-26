@@ -182,12 +182,12 @@ const ItemRow: React.FC<{
 };
 
 /** A web page the tool read: its title and site; the click opens the page in the browser. */
-const WebPageRow: React.FC<{ row: WebPageRowView } & RowEventProps> = ({ row, ...events }) => (
+const WebPageRow: React.FC<{ row: WebPageRowView; siteIcons?: Record<string, string> | null } & RowEventProps> = ({ row, siteIcons, ...events }) => (
     <WebPageRowLayout
         title={row.display_name}
         meta={row.site && row.site !== row.display_name ? row.site : null}
         url={row.url}
-        icon={row.icon}
+        icon={row.icon_host ? siteIcons?.[row.icon_host] : null}
         faded={row.status === 'error'}
         {...events}
     />
@@ -238,7 +238,7 @@ export const ItemListResultView: React.FC<{ view: ItemListView; rowAction?: Item
                                 {...rowEvents}
                             />
                         ) : isWebPageRow(row) ? (
-                            <WebPageRow row={row} {...rowEvents} />
+                            <WebPageRow row={row} siteIcons={view.site_icons} {...rowEvents} />
                         ) : null}
                     </div>
                 );

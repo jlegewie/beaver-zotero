@@ -47,3 +47,27 @@ it('lists a web page an extract read and opens it at its URL', async () => {
         act(() => root.unmount());
     }
 });
+
+it('shows a web page row\'s site icon from the view\'s map, one icon per host', async () => {
+    setHost({ navigation: { openExternalUrl: vi.fn(), revealInLibrary: vi.fn() } as any });
+    const icon = 'data:image/webp;base64,UklGRhwAAABXRUJQ';
+    const view: ItemListView = {
+        view_type: 'item_list',
+        tool_name: 'extract',
+        items: [
+            { kind: 'web_page', web_id: 'web-MJNNMKH4ED', url: URL, display_name: 'Obesity', site: 'who.int', icon_host: 'www.who.int' },
+            { kind: 'web_page', web_id: 'web-AAAAAAAAAA', url: 'https://www.who.int/b', display_name: 'Diabetes', site: 'who.int', icon_host: 'www.who.int' },
+            { kind: 'web_page', web_id: 'web-X45SUKGLKI', url: 'https://www.cdc.gov/c', display_name: 'cdc.gov', site: 'cdc.gov' },
+        ],
+        site_icons: { 'www.who.int': icon },
+    };
+    const container = document.createElement('div');
+    const root = createRoot(container);
+    try {
+        await act(async () => root.render(React.createElement(ItemListResultView, { view })));
+        const sources = Array.from(container.querySelectorAll('img')).map((img) => img.getAttribute('src'));
+        expect(sources).toEqual([icon, icon]);
+    } finally {
+        act(() => root.unmount());
+    }
+});

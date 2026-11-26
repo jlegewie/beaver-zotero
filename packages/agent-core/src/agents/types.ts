@@ -382,6 +382,8 @@ export function isRunActive(run: { status: AgentRunStatus } | null | undefined):
 
 interface AgentRunMetadata {
     citations: Citation[];
+    /** Site icons (small image data URIs) by host, named by web page citations' `icon_host`. */
+    site_icons?: Record<string, string> | null;
 }
 
 /**

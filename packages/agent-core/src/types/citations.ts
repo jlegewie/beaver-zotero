@@ -186,8 +186,16 @@ export interface WebPageCitation {
     /** When the page was published: "YYYY-MM-DD", or "YYYY-MM" / "YYYY" when only that is known. */
     published?: string;
     /**
+     * Key of the site's icon in the `site_icons` map that comes beside the
+     * citations (the run's metadata, `run_complete`, `run_citations`). Set only
+     * when there is an icon.
+     */
+    icon_host?: string;
+    /**
      * The site's icon as an image data URI of at most 32 px ("data:image/webp;base64,…").
-     * The backend fetches it, so a client never loads it from the site.
+     * Never sent: filled in by the client from the `site_icons` map when the
+     * citations arrive (`runCitations`). The backend fetches icons, so a client
+     * never loads one from the site.
      */
     icon?: string;
 }
@@ -251,6 +259,26 @@ export interface Citation {
 
 /** A citation entry in the cited-sources list, with its thread-scoped marker. */
 export type CitedSource = Citation & { numericCitation: string | null };
+
+/**
+ * A run's citations as the client keeps them: stamped with the run's id, and
+ * each web page's site icon filled in from the `site_icons` map that comes
+ * beside them. The backend sends an icon once per host, and a citation names
+ * its icon by host (`icon_host`).
+ */
+export function runCitations(
+    runId: string,
+    citations: Citation[],
+    siteIcons: Record<string, string> | null | undefined,
+): Citation[] {
+    return citations.map((citation) => {
+        const page = citation.web_page;
+        const icon = page?.icon_host ? siteIcons?.[page.icon_host] : undefined;
+        return page && icon
+            ? { ...citation, run_id: runId, web_page: { ...page, icon } }
+            : { ...citation, run_id: runId };
+    });
+}
 
 /**
  * Helper functions for Citation

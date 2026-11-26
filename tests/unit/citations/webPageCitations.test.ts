@@ -7,6 +7,8 @@ import type { CitedSource } from '@beaver/agent-core/types/citations';
 import CitedSourcesList, { mergeWebPagesByDoi } from '@beaver/agent-ui/chat/CitedSourcesList';
 import { externalReferenceToCsl, externalReferenceUri } from '@beaver/agent-export/citations/externalCsl';
 import { externalRecordPresentation } from '@beaver/agent-core/citations/externalRecordDisplay';
+import { loadThreadRuns } from '@beaver/agent-core/run-state/loadThreadRuns';
+import { runCitations, type Citation } from '@beaver/agent-core/types/citations';
 
 const page = (id: string, fields: Partial<ExternalReference> = {}): ExternalReference => ({
     source: 'exa',
@@ -113,5 +115,61 @@ describe('a web page in the sources list', () => {
         expect(html).not.toContain('nyc.gov 2024');
         expect(html).toContain('Figures &amp; Legewie 2019');
         expect(html).toContain('Figures, Kalisha Dessources, and Joscha Legewie (2019)');
+    });
+});
+
+
+describe('site icons beside a run\'s citations', () => {
+    const icon = 'data:image/webp;base64,UklGRhwAAABXRUJQ';
+    const webCitation = (id: string, url: string, iconHost?: string): Citation => ({
+        citation_id: id,
+        citation_type: 'external_reference',
+        resolved_ref: { kind: 'external', external_id: id },
+        web_page: { url, title: 'A page', ...(iconHost ? { icon_host: iconHost } : {}) },
+    } as unknown as Citation);
+
+    it('fill each web page citation\'s icon from the map by its host', () => {
+        const citations = [
+            webCitation('web-AAAAAAAAAA', 'https://www.who.int/a', 'www.who.int'),
+            webCitation('web-BBBBBBBBBB', 'https://www.who.int/b', 'www.who.int'),
+            webCitation('web-CCCCCCCCCC', 'https://www.cdc.gov/c'),
+            cited('W1') as unknown as Citation,
+        ];
+        const filled = runCitations('run-1', citations, { 'www.who.int': icon });
+
+        expect(filled.map((citation) => [citation.run_id, citation.web_page?.icon])).toEqual([
+            ['run-1', icon], ['run-1', icon], ['run-1', undefined], ['run-1', undefined],
+        ]);
+        expect(citations[0].web_page?.icon).toBeUndefined();
+        expect(runCitations('run-1', citations, null).map((citation) => citation.web_page?.icon)).toEqual([
+            undefined, undefined, undefined, undefined,
+        ]);
+    });
+
+    it('are filled in for each run of a loaded thread from its metadata', async () => {
+        const run = (id: string, citations: Citation[], siteIcons?: Record<string, string>) => ({
+            id,
+            status: 'completed',
+            user_prompt: { attachments: [] },
+            model_messages: [],
+            metadata: { citations, ...(siteIcons ? { site_icons: siteIcons } : {}) },
+        });
+        const history = {
+            runs: [
+                run('run-1', [webCitation('web-AAAAAAAAAA', 'https://www.who.int/a', 'www.who.int')], { 'www.who.int': icon }),
+                // Another run's map does not apply: each run keeps its own.
+                run('run-2', [webCitation('web-BBBBBBBBBB', 'https://www.who.int/b', 'www.who.int')]),
+            ],
+            agent_actions: null,
+            tail_run_id: 'run-2',
+            activity: { state: 'idle', run_id: null },
+        };
+
+        const loaded = await loadThreadRuns('thread-1', { history } as any);
+
+        expect(loaded.citations.map((citation) => [citation.run_id, citation.web_page?.icon])).toEqual([
+            ['run-1', icon],
+            ['run-2', undefined],
+        ]);
     });
 });

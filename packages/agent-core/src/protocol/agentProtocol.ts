@@ -251,6 +251,8 @@ export interface WSRunCompleteEvent extends WSBaseEvent {
     usage: RunUsage | null;
     cost: number | null;
     citations: import('../types/citations').Citation[] | null;
+    /** Site icons by host, named by web page citations' `icon_host`. */
+    site_icons?: Record<string, string> | null;
     agent_actions: import('../agents/agentActionTypes').AgentAction[] | null;
     /** Whether the run had high input token usage (backend-assessed). */
     high_token_usage?: boolean;
@@ -296,6 +298,8 @@ export interface WSRunCitationsEvent extends WSBaseEvent {
     event: 'run_citations';
     run_id: string;
     citations: import('../types/citations').Citation[];
+    /** Site icons by host, named by web page citations' `icon_host`. */
+    site_icons?: Record<string, string> | null;
 }
 
 /** Done event signaling the request is fully complete (after persistence, usage logging, etc.) */
