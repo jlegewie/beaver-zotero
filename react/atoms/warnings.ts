@@ -8,7 +8,6 @@
  */
 
 import { atom } from 'jotai';
-import { v4 as uuidv4 } from 'uuid';
 
 // =============================================================================
 // Types
@@ -53,7 +52,7 @@ export const addWarningAtom = atom(
     null,
     (_get, set, params: { run_id: string; type: string; message: string; data?: Record<string, unknown> }) => {
         const warning: RunWarning = {
-            id: uuidv4(),
+            id: crypto.randomUUID(),
             run_id: params.run_id,
             type: params.type,
             message: params.message,

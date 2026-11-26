@@ -1,9 +1,10 @@
 /**
  * Applies a run session's chat state to a window's store.
  *
- * The session's store is the authority for the atoms in `sessionStateAtoms()`.
- * The window renders from its own copies, which this projection keeps equal
- * to the session's: values are shared by reference, so state that did not
+ * The session is the authority for the atoms in `sessionStateAtoms()`. It
+ * lives in the plugin realm, so the window reads its state by name. The
+ * window renders from its own copies, which this projection keeps equal to
+ * the session's: values are shared by reference, so state that did not
  * change keeps its identity and its memoized render.
  *
  * Only streaming is paced. A change of the active run that keeps its id and
@@ -26,6 +27,12 @@ import { FrameScheduler } from '../utils/frameScheduler';
 import type { SessionStateAtom } from '../../src/services/agentRuns/sessionState';
 
 type Store = ReturnType<typeof createStore>;
+
+/** A session's state by name: its port, or a store-backed stand-in. */
+export interface SessionStateSource {
+    get(name: string): unknown;
+    sub(name: string, listener: () => void): () => void;
+}
 
 export interface RunProjection {
     /** Apply every pending change now, paced ones included. */
@@ -50,7 +57,7 @@ function reportStrayWrite(name: string): void {
 }
 
 export function attachRunProjection(
-    session: Store,
+    session: SessionStateSource,
     view: Store,
     atoms: ReadonlyArray<readonly [string, SessionStateAtom]>,
     frameWindow: () => Window | null | undefined,
@@ -62,9 +69,11 @@ export function attachRunProjection(
      */
     let writing: { atom: SessionStateAtom; value: unknown } | null = null;
     let detached = false;
+    const names = new Map(atoms.map(([name, atom]) => [atom, name] as const));
+    const sessionValue = (atom: SessionStateAtom): unknown => session.get(names.get(atom)!);
 
     const copy = (atom: SessionStateAtom): void => {
-        const value = session.get(atom);
+        const value = sessionValue(atom);
         writing = { atom, value };
         try {
             view.set(atom, value);
@@ -78,7 +87,7 @@ export function attachRunProjection(
         scheduler.cancel();
         let citationsChanged = false;
         for (const [, atom] of atoms) {
-            if (view.get(atom) === session.get(atom)) continue;
+            if (view.get(atom) === sessionValue(atom)) continue;
             copy(atom);
             if (atom === citationsAtom) citationsChanged = true;
         }
@@ -90,7 +99,7 @@ export function attachRunProjection(
     const scheduler = new FrameScheduler(frameWindow, apply);
 
     const onSessionChange = (atom: SessionStateAtom): void => {
-        if (atom === activeRunAtom && isStreamingChange(view.get(activeRunAtom), session.get(activeRunAtom))) {
+        if (atom === activeRunAtom && isStreamingChange(view.get(activeRunAtom), sessionValue(activeRunAtom) as AgentRun | null)) {
             scheduler.schedule();
             return;
         }
@@ -98,14 +107,14 @@ export function attachRunProjection(
     };
 
     const onViewChange = (name: string, atom: SessionStateAtom): void => {
-        if (detached || view.get(atom) === session.get(atom)) return;
+        if (detached || view.get(atom) === sessionValue(atom)) return;
         if (writing?.atom === atom && view.get(atom) === writing.value) return;
         copy(atom);
         reportStrayWrite(name);
     };
 
     const unsubscribers = atoms.flatMap(([name, atom]) => [
-        session.sub(atom, () => onSessionChange(atom)),
+        session.sub(name, () => onSessionChange(atom)),
         view.sub(atom, () => onViewChange(name, atom)),
     ]);
     apply();

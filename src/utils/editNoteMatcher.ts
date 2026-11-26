@@ -137,6 +137,14 @@ export interface MatchInput {
      * Populated together with renderedOldSimplified.
      */
     renderedNewSimplified?: string;
+    /**
+     * The same two renders with the block directions a note write gives them
+     * (`dir` on paragraphs, headings and lists), tried after the plain ones:
+     * a note Beaver wrote with right-to-left text stores those directions.
+     * Absent when the directed render adds none.
+     */
+    directedRenderedOldSimplified?: string;
+    directedRenderedNewSimplified?: string;
 }
 
 export interface BaseExpansion {
@@ -645,10 +653,103 @@ const partialElementStripStrategy: Strategy = {
     },
 };
 
+/**
+ * The opening tag of the stored block that a (raw, expanded) anchor body
+ * starts, when the anchor's own opening tag was stripped: the model wrote
+ * `<p>` for a stored `<p dir="rtl">` (or `style`, `data-indent`, …). Null
+ * unless every such block has the same opening tag.
+ */
+function storedOpeningTag(html: string, tagName: string, body: string): string | null {
+    const pattern = new RegExp(`<${escapeRegExp(tagName)}\\b[^>]*>(?=${escapeRegExp(body)})`, 'g');
+    const tags = new Set(html.match(pattern) ?? []);
+    return tags.size === 1 ? [...tags][0] : null;
+}
+
+/**
+ * `spurious_wrap_strip` for an insert. Only the anchor is unwrapped: the
+ * payload is new content, so its tags are never a wrapper, even when they are
+ * the same as the anchor's (an anchor `<p>A</p>` and a payload `<p>B</p>`).
+ * The insertion point must stay outside the block the anchor names:
+ * `insert_after` needs an anchor ending in a closing tag and keeps it, and
+ * `insert_before` takes a stripped opening tag back from the note, so the
+ * payload lands before the stored block (with its attributes), not inside it.
+ */
+function matchSpuriousWrapInsert(input: StrategyInput): MatchResult | null {
+    const after = input.operation === 'insert_after';
+    const old = input.oldString;
+    if (after && !/<\/[a-zA-Z][a-zA-Z0-9]*>\s*$/.test(old)) return null;
+    // The model may have copied the anchor into new_string itself (and the
+    // execute-time new_string is always merged); the payload is the rest.
+    const preCopied = after ? input.newString.startsWith(old) : input.newString.endsWith(old);
+    const injected = !preCopied ? input.newString
+        : after ? input.newString.substring(old.length)
+        : input.newString.substring(0, input.newString.length - old.length);
+    const leadingTagName = old.match(/^<([a-zA-Z][a-zA-Z0-9-]*)\b[^>]*>/)?.[1];
+
+    for (const candidate of stripSpuriousWrappingTags(old, old)) {
+        const stripped = candidate.strippedOld;
+        const strippedLeading = !old.startsWith(stripped);
+        if (after && !old.endsWith(stripped)) continue;
+        let body: string;
+        try {
+            body = expandOldAnchor(input, stripped);
+        } catch {
+            continue;
+        }
+
+        // [simplified anchor, raw anchor]
+        const anchors: Array<[string, string]> = [];
+        if (strippedLeading && leadingTagName) {
+            const tag = storedOpeningTag(input.strippedHtml, leadingTagName, body);
+            if (tag) anchors.push([tag + stripped, tag + body]);
+        }
+        // Without its opening tag an insert_before anchor would put the
+        // payload inside the block.
+        if (!strippedLeading || after) anchors.push([stripped, body]);
+
+        for (const [anchor, expandedOld] of anchors) {
+            const matchCount = countOccurrences(input.strippedHtml, expandedOld);
+            if (matchCount === 0) continue;
+            // A payload may also copy the anchor as stored (with the
+            // attributes old_string left out); that is a copied anchor too.
+            let payload = injected;
+            let copied = preCopied;
+            if (!copied && (after ? payload.startsWith(anchor) : payload.endsWith(anchor))) {
+                payload = after ? payload.substring(anchor.length) : payload.substring(0, payload.length - anchor.length);
+                copied = true;
+            }
+            let expandedInjected: string;
+            try {
+                expandedInjected = expandToRawHtml(
+                    payload, input.metadata, 'new', input.externalRefContext, input.pageLabels, input.resolvedLocatorPages,
+                );
+            } catch {
+                continue;
+            }
+            const result: MatchResult = {
+                strategy: 'spurious_wrap_strip',
+                oldString: anchor,
+                // Merged only when the model copied the anchor, so the dedup
+                // warning reflects what the model sent.
+                newString: !copied ? payload : after ? anchor + payload : payload + anchor,
+                expandedOld,
+                expandedNew: after ? expandedOld + expandedInjected : expandedInjected + expandedOld,
+                matchCount,
+                normalizeAnchor: identity,
+            };
+            if (acceptsMatch(input, result)) return result;
+        }
+    }
+    return null;
+}
+
 const spuriousWrapStripStrategy: Strategy = {
     name: 'spurious_wrap_strip',
     tryMatch(input) {
         if (!input.oldString) return null;
+        if (input.operation === 'insert_after' || input.operation === 'insert_before') {
+            return matchSpuriousWrapInsert(input);
+        }
         const candidates = stripSpuriousWrappingTags(input.oldString, input.newString);
         // Candidates are ordered least-to-most aggressive (leading-only,
         // trailing-only, both) — take the first that matches to preserve as
@@ -1277,49 +1378,54 @@ function preserveMathInsertAnchor(input: MatchInput, result: MatchResult): Match
     };
 }
 
+/** Match one handler-rendered old_string, replacing it with its rendered new_string. */
+function matchRendered(input: StrategyInput, renderedOld: string | undefined, renderedNew: string | undefined): MatchResult | null {
+    if (!renderedOld) return null;
+
+    let expandedOld: string;
+    try {
+        expandedOld = expandOldAnchor(input, renderedOld);
+    } catch {
+        return null;
+    }
+
+    const matchCount = countOccurrences(input.strippedHtml, expandedOld);
+    if (matchCount === 0) return null;
+
+    const replacement = renderedNew ?? renderedOld;
+    let expandedNew: string;
+    try {
+        expandedNew = expandToRawHtml(
+            replacement,
+            input.metadata,
+            'new',
+            input.externalRefContext,
+            input.pageLabels,
+            input.resolvedLocatorPages,
+        );
+    } catch {
+        return null;
+    }
+
+    if (input.operation === 'insert_after' && !expandedNew.startsWith(expandedOld)) return null;
+    if (input.operation === 'insert_before' && !expandedNew.endsWith(expandedOld)) return null;
+
+    return {
+        strategy: 'markdown_render',
+        oldString: renderedOld,
+        newString: replacement,
+        expandedOld,
+        expandedNew,
+        matchCount,
+        normalizeAnchor: identity,
+    };
+}
+
 const markdownRenderStrategy: Strategy = {
     name: 'markdown_render',
     tryMatch(input) {
-        const renderedOld = input.renderedOldSimplified;
-        if (!renderedOld) return null;
-
-        let expandedOld: string;
-        try {
-            expandedOld = expandOldAnchor(input, renderedOld);
-        } catch {
-            return null;
-        }
-
-        const matchCount = countOccurrences(input.strippedHtml, expandedOld);
-        if (matchCount === 0) return null;
-
-        const renderedNew = input.renderedNewSimplified ?? renderedOld;
-        let expandedNew: string;
-        try {
-            expandedNew = expandToRawHtml(
-                renderedNew,
-                input.metadata,
-                'new',
-                input.externalRefContext,
-                input.pageLabels,
-                input.resolvedLocatorPages,
-            );
-        } catch {
-            return null;
-        }
-
-        if (input.operation === 'insert_after' && !expandedNew.startsWith(expandedOld)) return null;
-        if (input.operation === 'insert_before' && !expandedNew.endsWith(expandedOld)) return null;
-
-        return {
-            strategy: 'markdown_render',
-            oldString: renderedOld,
-            newString: renderedNew,
-            expandedOld,
-            expandedNew,
-            matchCount,
-            normalizeAnchor: identity,
-        };
+        return matchRendered(input, input.renderedOldSimplified, input.renderedNewSimplified)
+            ?? matchRendered(input, input.directedRenderedOldSimplified, input.directedRenderedNewSimplified);
     },
 };
 
@@ -1562,6 +1668,19 @@ export function findBestMatch(
         }
     }
     return runStrategies(input, base, [markdownRenderStrategy]);
+}
+
+/**
+ * The Markdown-render step that ends {@link findBestMatch}, with the same
+ * safeguards. For a caller that renders the Markdown only after
+ * `findBestMatch` (run without rendered fields) missed.
+ */
+export function findMarkdownRenderBestMatch(
+    matchInput: MatchInput,
+    base: BaseExpansion,
+    diagnostics?: MatchDiagnostics,
+): MatchResult | null {
+    return runStrategies({ ...matchInput, diagnostics }, base, [markdownRenderStrategy]);
 }
 
 /**

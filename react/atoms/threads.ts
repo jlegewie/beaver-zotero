@@ -11,10 +11,10 @@ import {
 } from "./ui";
 
 import { citationsAtom, citationMapAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from "@beaver/agent-core/citations/atoms";
-import { runSessionStore } from "../../src/services/agentRuns/runSession";
+import { runSessionStore } from '../runtime/runSessionStore';
 import { maybeShowCitationTipAtom } from "./citationTip";
 import { preloadPageLabelsForCitations } from "../utils/pageLabels";
-import { agentService } from "@beaver/agent-core/transport/agentService";
+import { getSessionPort } from "../../src/services/agentRuns/runSession";
 import { threadService, ZoteroInstanceRef } from "@beaver/agent-core/transport/threadService";
 import { getPref } from "../../src/utils/prefs";
 import { loadFullItemDataWithAllTypes, currentZoteroInstanceRef } from "../../src/utils/zoteroUtils";
@@ -29,7 +29,7 @@ import { importActionReference } from "../utils/importItemDisplay";
 import { ExternalReference } from "@beaver/agent-core/types/externalReferences";
 import { threadRunsAtom, activeRunAtom, currentThreadIdAtom, currentThreadNameAtom, isLoadingThreadAtom, resetRunSelectorCaches } from "@beaver/agent-core/run-state/atoms";
 import { loadThreadRuns } from "@beaver/agent-core/run-state/loadThreadRuns";
-import { abandonActiveRunLocallyAtom, canLeaveReconnectingRun, isWSChatPendingAtom, isWSConnectedAtom, isWSReadyAtom, parkableRunId } from "./agentRunAtoms";
+import { abandonActiveRunLocallyAtom, isWSChatPendingAtom, isWSConnectedAtom, isWSReadyAtom } from "./agentRunAtoms";
 import { clearParkedAnswersAtom, syncParkedCardsAtom } from "../../src/services/agentRuns/parkedRuns";
 import { confirmLeaveJobWaitAtom, fillLeaveStops, leaveJobWait } from "./jobLeave";
 import { AgentRun, isRunActive } from "@beaver/agent-core/agents/types";
@@ -237,7 +237,7 @@ function confirmOpenMismatchedThread(window?: Window): boolean {
 
 /** The open chat's run, when it is reconnecting and can be left rather than stopped. */
 function leavableRunId(get: (atom: any) => any): string | null {
-    return canLeaveReconnectingRun(get) ? get(activeRunAtom)?.id ?? null : null;
+    return getSessionPort().canLeaveReconnectingRun() ? get(activeRunAtom)?.id ?? null : null;
 }
 
 /**
@@ -247,7 +247,7 @@ function leavableRunId(get: (atom: any) => any): string | null {
  * `leaveRunId` names a run that was reconnecting when the user chose to
  * leave, found with `leavableRunId` before any await. It is left instead of
  * stopped: losing the connection is not a Stop, so the server keeps the run
- * (see `agentService.leaveRun`) and the chat shows how it ended when the user
+ * (see `AgentService.leaveRun`) and the chat shows how it ended when the user
  * returns.
  */
 async function cancelActiveRunIfNeeded(
@@ -269,7 +269,7 @@ async function cancelActiveRunIfNeeded(
         // The run is waiting only on cards: it parks, and they stay
         // answerable when the user comes back. Stopped instead if the server
         // refuses.
-        const outcome = await agentService.parkRun(parkRunId);
+        const outcome = await getSessionPort().parkRun(parkRunId);
         logger(`cancelActiveRunIfNeeded: Parking run ${parkRunId} before switching threads: ${outcome}`, 1);
         // Leaving released the chat, which refetched thread lists before the
         // run parked: refetch them again so they show the chat as waiting.
@@ -280,7 +280,7 @@ async function cancelActiveRunIfNeeded(
         return;
     }
 
-    if (leaveRunId && agentService.leaveRun(leaveRunId)) {
+    if (leaveRunId && getSessionPort().leaveRun(leaveRunId)) {
         logger(`cancelActiveRunIfNeeded: Leaving run ${leaveRunId} to the server after it lost its connection`, 1);
         chat.set(isWSConnectedAtom, false);
         chat.set(isWSReadyAtom, false);
@@ -290,7 +290,7 @@ async function cancelActiveRunIfNeeded(
     if (hadActiveWork) {
         logger('cancelActiveRunIfNeeded: Canceling active run before switching threads', 1);
         // Cancel the WebSocket connection
-        await agentService.cancel();
+        await getSessionPort().cancel();
         if (!isCurrent()) return;
         chat.set(isWSConnectedAtom, false);
         chat.set(isWSReadyAtom, false);
@@ -332,7 +332,7 @@ export const newThreadAtom = atom(
         // A reconnecting run is left, and a run waiting only on cards is
         // parked, not stopped, so there is nothing to confirm.
         const leaveRunId = leavableRunId(get);
-        const parkRunId = leaveRunId ? null : parkableRunId(get);
+        const parkRunId = leaveRunId ? null : getSessionPort().parkableRunId();
         if (hasActiveWork) {
             if (!options?.skipActiveRunConfirm && !asksAboutFill && !leaveRunId && !parkRunId && !confirmInterruptActiveRun(
                 'Start new chat?',
@@ -454,7 +454,7 @@ export const loadThreadAtom = atom(
         // A reconnecting run is left, and a run waiting only on cards is
         // parked, not stopped, so there is nothing to confirm.
         const leaveRunId = leavableRunId(get);
-        const parkRunId = leaveRunId ? null : parkableRunId(get);
+        const parkRunId = leaveRunId ? null : getSessionPort().parkableRunId();
         // A fill the response waits on asks below, in place of this question.
         const leaving = threadId !== get(currentThreadIdAtom);
         const asksAboutFill = leaving && !!fillLeaveStops(get);

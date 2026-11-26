@@ -5,7 +5,6 @@
  */
 
 import { atom } from 'jotai';
-import { v4 as uuidv4 } from 'uuid';
 import { Action, ActionOverride, ActionTargetType, generateActionId, sameTargets, stripBuiltinOnlyFields } from '@beaver/agent-core/types/actions';
 import { ALL_BUILTIN_ACTIONS } from '../types/builtinActions';
 import {
@@ -762,7 +761,7 @@ export const sendComposedMessageAtom = atom(
         // Read while the feature task's setup card is still open: sending
         // resets the chat input, which ends it.
         const setupTask = get(activeFeatureTaskAtom);
-        if (messageParksResume(get) && !(await set(parkResumeForMessageAtom))) return false;
+        if (messageParksResume() && !(await set(parkResumeForMessageAtom))) return false;
         return (await withThreadWriter(set, async set => {
         const { baseText, pills } = payload;
 

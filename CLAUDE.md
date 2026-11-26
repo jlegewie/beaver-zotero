@@ -30,15 +30,15 @@ Notes:
 ### Dependencies and install scripts
 
 `.npmrc` sets `ignore-scripts=true`, so `npm ci` / `npm install` run no dependency
-install scripts (and no root `pre*`/`post*` hooks). After installing, run
-`npm run rebuild:native` to build the dependencies that need theirs — today only
-`better-sqlite3`, which the unit tests' SQLite doubles load. Tests failing with
-`Could not locate the bindings file` mean that step was skipped.
+install scripts (and no root `pre*`/`post*` hooks), and no dependency needs one:
+esbuild, `@swc/core` and sharp ship prebuilt platform packages, and their scripts only
+verify them. The unit tests' SQLite doubles use Node's built-in `node:sqlite`
+(Node ≥ 22.16).
 
-- A new dependency that needs its install script goes on the `npm rebuild` line of
-  `rebuild:native` in `package.json`. Check first whether it works without one:
-  esbuild, `@swc/core` and sharp ship prebuilt platform packages, and their scripts
-  only verify them.
+- Prefer dependencies that work without their install script. One that needs it (a
+  native addon built on install) must be rebuilt explicitly with
+  `npm rebuild <name> --ignore-scripts=false`, in CI and in
+  `scripts/worktree/setup-worktree.sh`.
 - `min-release-age=7` makes npm resolve only versions at least 7 days old (npm ≥ 11.10;
   `npm ci` installs the lockfile as is). To take a fresh security fix, pass
   `--min-release-age=0` for that one install.
@@ -206,7 +206,18 @@ into `registerZoteroHost()` → add the folder to the lint guard.
 
 Beaver runs in the **main Zotero window** and in a **separate Beaver window**
 (`addon/content/beaverWindow.xhtml`). Each main window and the standalone evaluate their
-own React bundle and own their chat store and socket.
+own React bundle and own their chat store.
+
+**Chat runs execute in the plugin realm.** `addon.agentRuns`
+(`src/services/agentRuns/registry.ts`) gives each chat window one run session (socket,
+engine, private store, writer claim, data provider and operation context) and ends it when
+the window closes, the account changes, a library leaves the searchable scope, or the plugin
+shuts down. The window reaches its session only through a `SessionPort`: it projects the
+session's state onto its own atoms by name (`react/runtime/runProjection.ts`), writes it
+through `runSessionStore()` and starts engine actions by name. Never hand the session a
+window atom or store; window-side effects of a run go through the window's `RunViewer`.
+Engine code under `src/services/agentRuns/` must stay free of `react/` and agent-ui
+(`providerClosure.test.ts`).
 
 **Never use bare `window`** in plugin code. Use the `win` parameter threaded through UI methods, `useSurfaceWindow()` for the
 rendered surface, or `ownerDocument.defaultView`. Context reads use `getContextWindow()`;
@@ -283,10 +294,10 @@ revocation clears listeners before late events can reach another account.
 `addon.libraryOperations` executes named library operations in the plugin realm;
 renderers pass data, not async write callbacks. `addon.mutations` serializes complete
 read/modify/write sequences. Window closure cancels queued owner work; active writes
-retain their lock and sync hold until settlement. Prepare Markdown rendering before
-admission, and keep asynchronous preview restoration in the plugin realm. Table writes
-and shadow restores use the same service and acquire table locks after the instance
-queue. See [library mutation ownership](docs/library-mutations.md).
+retain their lock and sync hold until settlement. Note writes render Markdown inside
+the operation (`exporter.renderNoteMarkdown`); keep asynchronous preview restoration
+in the plugin realm. Table writes and shadow restores use the same service and acquire
+table locks after the instance queue. See [library mutation ownership](docs/library-mutations.md).
 
 ### Window lifecycle (close window ≠ quit app)
 
@@ -469,7 +480,7 @@ Three tiers — **`tests/README.md` has the details, templates, and shared-state
 - Vitest does not load `.env`; pass `ZOTERO_HTTP_PORT` explicitly.
 - **Don't pipe a live run through `tail`/`head`** — the pipe buffers the whole run (~5 min).
   Redirect to a file and read that.
-- Unit-test essentials: `MockDBConnection` (better-sqlite3) for real SQLite semantics,
+- Unit-test essentials: `MockDBConnection` (`node:sqlite`) for real SQLite semantics,
   `tests/helpers/factories.ts` for items, `vi.clearAllMocks()` in `beforeEach`, and transitive
   mocks (`supabaseClient`, `zoteroUtils`, `react/atoms/profile`, `react/store`) for anything
   importing `agentDataProvider`. Behavior-driven test names.

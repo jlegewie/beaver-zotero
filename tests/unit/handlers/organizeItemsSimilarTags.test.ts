@@ -225,5 +225,82 @@ describe('executeOrganizeItemsAction similar_existing_tags', () => {
         expect(response.success).toBe(true);
         expect(items.AAAAAAAA.state.tags).toEqual(['machine learning']);
         expect(response.result_data?.similar_existing_tags).toBeUndefined();
+        // Which tags are new is unknown, so the field is left out.
+        expect(response.result_data?.tags_created).toBeUndefined();
+    });
+});
+
+describe('executeOrganizeItemsAction tags_created', () => {
+    let previousZotero: any;
+    let items: Record<string, ReturnType<typeof makeItem>>;
+
+    function installZotero(queryAsync: any) {
+        (globalThis as any).Zotero = {
+            Beaver: { libraryScopeInitialized: true, searchableLibraryIds: [1, 7] },
+            Libraries: {
+                get: vi.fn((id: number) => ({ libraryID: id, name: 'Library', editable: true })),
+                userLibraryID: 1,
+            },
+            Groups: {
+                getGroupIDFromLibraryID: vi.fn((id: number) => (id === 7 ? 42 : false)),
+                getLibraryIDFromGroupID: vi.fn((id: number) => (id === 42 ? 7 : false)),
+            },
+            Collections: { get: vi.fn(() => null), getByLibraryAndKey: vi.fn(() => null) },
+            Items: {
+                getByLibraryAndKeyAsync: vi.fn((_lib: number, key: string) => items[key] ?? null),
+            },
+            DB: {
+                executeTransaction: vi.fn(async (fn: () => Promise<void>) => fn()),
+                queryAsync,
+            },
+        };
+    }
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        items = {};
+        previousZotero = (globalThis as any).Zotero;
+    });
+
+    afterEach(() => {
+        (globalThis as any).Zotero = previousZotero;
+    });
+
+    it('lists the added tags that are new to their library', async () => {
+        installZotero(fakeTagQueries({ 1: ['ethics'] }));
+        items.AAAAAAAA = makeItem('AAAAAAAA', []);
+
+        const response = await executeOrganizeItemsAction(
+            buildRequest({ item_ids: ['u-AAAAAAAA'], tags: { add: ['ethics', 'deep learning'] } }),
+            timeoutCtx(),
+        );
+
+        expect(response.result_data?.tags_created).toEqual([
+            { tag: 'deep learning', library_ref: 'u' },
+        ]);
+    });
+
+    it('reports an empty list when every added tag already existed', async () => {
+        installZotero(fakeTagQueries({ 7: ['ethics'] }));
+        items.AAAAAAAA = makeItem('AAAAAAAA', [], 7);
+
+        const response = await executeOrganizeItemsAction(
+            buildRequest({ item_ids: ['g42-AAAAAAAA'], tags: { add: ['ethics'] } }),
+            timeoutCtx(),
+        );
+
+        expect(response.result_data?.tags_created).toEqual([]);
+    });
+
+    it('omits the field when the write added no tag', async () => {
+        installZotero(fakeTagQueries({ 1: ['ethics'] }));
+        items.AAAAAAAA = makeItem('AAAAAAAA', ['ethics']);
+
+        const response = await executeOrganizeItemsAction(
+            buildRequest({ item_ids: ['u-AAAAAAAA'], tags: { add: ['ethics'] } }),
+            timeoutCtx(),
+        );
+
+        expect(response.result_data?.tags_created).toBeUndefined();
     });
 });

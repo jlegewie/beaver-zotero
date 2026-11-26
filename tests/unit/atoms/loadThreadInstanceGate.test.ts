@@ -6,7 +6,7 @@ import { createThreadStore as createStore } from '../../helpers/threadRepository
 // supabase-backed services; stub everything loadThreadAtom touches.
 // =============================================================================
 
-const getThreadRunsMock = vi.fn();
+const getThreadRunsMock = vi.hoisted(() => vi.fn());
 vi.mock('@beaver/agent-core/transport/agentService', () => ({
     agentRunService: {
         getThreadRuns: (...args: unknown[]) => getThreadRunsMock(...args),
@@ -20,23 +20,23 @@ vi.mock('@beaver/agent-core/transport/agentService', () => ({
     agentService: { cancel: vi.fn(), cancelHandoff: () => null, canLeaveRun: () => false, leaveRun: () => false, isReattaching: () => false },
 }));
 
-const getThreadMock = vi.fn();
+const getThreadMock = vi.hoisted(() => vi.fn());
 vi.mock('@beaver/agent-core/transport/threadService', () => ({
     threadService: { getThread: (...args: unknown[]) => getThreadMock(...args) },
 }));
 
-const currentZoteroInstanceRefMock = vi.fn();
+const currentZoteroInstanceRefMock = vi.hoisted(() => vi.fn());
 vi.mock('../../../src/utils/zoteroUtils', () => ({
     loadFullItemDataWithAllTypes: vi.fn(),
     currentZoteroInstanceRef: (...args: unknown[]) => currentZoteroInstanceRefMock(...args),
 }));
 
-const getPrefMock = vi.fn();
+const getPrefMock = vi.hoisted(() => vi.fn());
 vi.mock('../../../src/utils/prefs', () => ({
     getPref: (...args: unknown[]) => getPrefMock(...args),
 }));
 
-const confirmMock = vi.fn();
+const confirmMock = vi.hoisted(() => vi.fn());
 vi.mock('@beaver/agent-ui/host', () => ({
     getHost: () => ({ dialogs: { confirm: confirmMock } }),
 }));
@@ -129,42 +129,30 @@ vi.mock('@beaver/agent-core/citations/externalReferences', async () => {
     };
 });
 
-vi.mock('@beaver/agent-core/run-state/atoms', async () => {
-    const { atom } = await import('jotai');
-    return {
-        threadRunsAtom: atom<unknown[]>([]),
-        activeRunAtom: atom<unknown | null>(null),
-        // threads.ts re-exports these three from the run state, so the stub must
-        // provide them
-        currentThreadIdAtom: atom<string | null>(null),
-        currentThreadNameAtom: atom<string | null>(null),
-        isLoadingThreadAtom: atom<boolean>(false),
-        resetRunSelectorCaches: () => {},
-    };
-});
+vi.mock('@beaver/agent-core/run-state/atoms', async (importOriginal) => ({
+    ...(await importOriginal<object>()),
+    resetRunSelectorCaches: () => {},
+}));
 
-vi.mock('../../../react/atoms/agentRunAtoms', async () => {
+vi.mock('../../../react/atoms/agentRunAtoms', async (importOriginal) => {
     const { atom } = await import('jotai');
     return {
+        ...(await importOriginal<object>()),
         abandonActiveRunLocallyAtom: atom(null, () => {}),
-        canLeaveReconnectingRun: () => false,
-        isWSChatPendingAtom: atom(false),
-        isWSConnectedAtom: atom(false),
-        isWSReadyAtom: atom(false),
-        parkableRunId: () => null,
     };
 });
 
-vi.mock('../../../src/services/agentRuns/parkedRuns', async () => {
+vi.mock('../../../src/services/agentRuns/parkedRuns', async (importOriginal) => {
     const { atom } = await import('jotai');
     return {
+        ...(await importOriginal<object>()),
         clearParkedAnswersAtom: atom(null, () => {}),
         syncParkedCardsAtom: atom(null, () => {}),
     };
 });
 
-const validateAppliedAgentActionMock = vi.fn(async () => 'valid' as const);
-const undoAgentActionWriteMock = vi.fn();
+const validateAppliedAgentActionMock = vi.hoisted(() => vi.fn(async () => 'valid' as const));
+const undoAgentActionWriteMock = vi.hoisted(() => vi.fn());
 vi.mock('../../../react/agents/agentActions', async () => {
     const { atom } = await import('jotai');
     return {
@@ -175,16 +163,17 @@ vi.mock('../../../react/agents/agentActions', async () => {
         undoAgentActionAtom: atom(null, (_get: unknown, _set: unknown, actionId: string) => {
             undoAgentActionWriteMock(actionId);
         }),
-        clearAllPendingApprovalsAtom: atom(null, () => {}),
+        // Session state: the session's own action, which the window reaches by name.
+        clearAllPendingApprovalsAtom: (await import('../../../src/services/agentRuns/pendingApprovals')).clearAllPendingApprovalsAtom,
         resetAgentActionSelectorCaches: vi.fn(),
         withUnrecordedResults: (_get: unknown, _set: unknown, actions: unknown[]) => actions,
         resumeUnrecordedResultsAtom: atom(null, () => {}),
     };
 });
 
-vi.mock('@beaver/agent-core/run-state/pendingQuestions', async () => {
+vi.mock('@beaver/agent-core/run-state/pendingQuestions', async (importOriginal) => {
     const { atom } = await import('jotai');
-    return { clearAllPendingQuestionsAtom: atom(null, () => {}) };
+    return { ...(await importOriginal<object>()), clearAllPendingQuestionsAtom: atom(null, () => {}) };
 });
 
 vi.mock('../../../react/agents/toolResultProcessing', () => ({

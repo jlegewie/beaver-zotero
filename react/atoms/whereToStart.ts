@@ -2,7 +2,6 @@
  * "Where should we start?" — a static, local-only first-action launcher.
  */
 import { atom } from 'jotai';
-import { v4 as uuidv4 } from 'uuid';
 import { ActionTargetType } from '@beaver/agent-core/types/actions';
 import { SignalItem } from '@beaver/agent-core/types/librarySuggestions';
 import { getActiveItems, getRecentItems, toSignalItem } from '../../src/utils/librarySignals';
@@ -327,7 +326,7 @@ export const startSelectedOptionAtom = atom(null, async (get, set) => {
         };
         set(markActionUsedAtom, action.id);
 
-        const runId = uuidv4();
+        const runId = crypto.randomUUID();
         set(firstRunPreviewAtom, false);
 
         await set(sendWSMessageAtom, ensurePromptActionTokens(topic, [promptAction]), {

@@ -161,6 +161,20 @@ describe('executeCreateNoteAction', () => {
         });
     });
 
+    it('renders the Markdown through the plugin exporter inside the queued write', async () => {
+        const writeActive: Array<string | null> = [];
+        (Zotero.Beaver as any).exporter.renderNoteMarkdown = vi.fn((content: string) => {
+            writeActive.push(Zotero.Beaver.mutations.getSnapshot().active);
+            return `<p>${content}</p>`;
+        });
+
+        await executeCreateNoteAction({ proposed_data: { title: 'Title', content: 'Body' } } as any, 'run-1');
+
+        expect((Zotero.Beaver as any).exporter.renderNoteMarkdown).toHaveBeenCalledExactlyOnceWith('<h1>Title</h1>\n\nBody', { directions: 'note' });
+        expect(writeActive).toEqual([expect.any(String)]);
+        expect(noteInstances[0].setNote.mock.calls[0][0]).toContain('<p><h1>Title</h1>\n\nBody</p>');
+    });
+
     it('records the note as read_note shows it, as the socket path does', async () => {
         const result = await executeCreateNoteAction({
             proposed_data: {

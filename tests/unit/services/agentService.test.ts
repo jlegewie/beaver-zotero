@@ -493,6 +493,71 @@ describe('AgentService reconnect handling', () => {
         expect(secondCallbacks.onPart).toHaveBeenCalledTimes(1);
     });
 
+    it('keeps a stopped run\'s socket open until the backend has ended the run', async () => {
+        const service = new AgentService('https://api.example.com');
+        const callbacks = createCallbacks();
+        const socket = await completeConnect(service, callbacks, { type: 'stop-settle' } as AgentRunRequest);
+
+        let settled = false;
+        const cancelling = service.cancel(2000, { closeOnEnd: true }).then(() => { settled = true; });
+        expect(JSON.parse(socket.send.mock.calls.at(-1)![0])).toEqual({ type: 'cancel' });
+
+        // Past the old fixed flush: the backend is still persisting the run.
+        await vi.advanceTimersByTimeAsync(400);
+        expect(socket.close).not.toHaveBeenCalled();
+
+        // What the stopped run produced, then the frame that ends it.
+        socket.emitMessage({
+            event: 'run_complete',
+            run_id: 'run-1',
+            usage: null,
+            cost: null,
+            citations: [{ citation_id: 'c1' }],
+            agent_actions: null,
+        });
+        socket.emitMessage({ event: 'error', type: 'canceled', run_id: 'run-1', message: 'Stopped' });
+        await flushMicrotasks();
+        await cancelling;
+
+        expect(settled).toBe(true);
+        expect(callbacks.onRunComplete).toHaveBeenCalledWith(
+            expect.objectContaining({ citations: [{ citation_id: 'c1' }] }),
+        );
+        expect(socket.close).toHaveBeenCalledWith(1000, 'User cancelled');
+    });
+
+    it('closes a stopped run\'s socket at the limit when the backend never ends the run', async () => {
+        const service = new AgentService('https://api.example.com');
+        const callbacks = createCallbacks();
+        const socket = await completeConnect(service, callbacks, { type: 'stop-cap' } as AgentRunRequest);
+
+        const cancelling = service.cancel(2000, { closeOnEnd: true });
+        await vi.advanceTimersByTimeAsync(1999);
+        expect(socket.close).not.toHaveBeenCalled();
+
+        await vi.advanceTimersByTimeAsync(1);
+        await cancelling;
+        expect(socket.close).toHaveBeenCalledWith(1000, 'User cancelled');
+    });
+
+    it('lets a new run take over a socket still waiting for a stopped run to end', async () => {
+        const service = new AgentService('https://api.example.com');
+        const firstSocket = await completeConnect(service, createCallbacks(), { type: 'first' } as AgentRunRequest);
+
+        let settled = false;
+        const cancelling = service.cancel(2000, { closeOnEnd: true }).then(() => { settled = true; });
+
+        const secondCallbacks = createCallbacks();
+        const secondSocket = await completeConnect(service, secondCallbacks, { type: 'second' } as AgentRunRequest);
+        await cancelling;
+
+        // The wait ended with the connection it was for, not at the limit.
+        expect(settled).toBe(true);
+        expect(firstSocket.close).toHaveBeenCalled();
+        expect(secondSocket.close).not.toHaveBeenCalled();
+        expect(secondCallbacks.onClose).not.toHaveBeenCalled();
+    });
+
     it('fails a connect attempt that never reaches ready via the backstop timeout', async () => {
         const service = new AgentService('https://api.example.com');
         const callbacks = createCallbacks();
@@ -872,6 +937,36 @@ describe('AgentService request acks and keepalives', () => {
         // The response itself carries no keepalive/ack timing pollution
         const response = sentMessages(socket).find((m) => m.type === 'zotero_data');
         expect(response.request_id).toBe('req-1');
+    });
+
+    it('does not start a queued execute once the user stops the run', async () => {
+        const pending: Array<() => void> = [];
+        const provider = {
+            agent_action_execute: {
+                serialize: true,
+                handle: vi.fn((event: any) => new Promise<Record<string, any>>((resolve) => {
+                    pending.push(() => resolve({ type: 'agent_action_execute_response', request_id: event.request_id, success: true }));
+                })),
+                errorResponse: (event: any) => ({ type: 'agent_action_execute_response', request_id: event.request_id, success: false }),
+            },
+        };
+        const service = new AgentService('https://api.example.com', provider);
+        // A backend without run reattach: the run lives and dies with this socket.
+        const socket = await connectWithFlags(service, createCallbacks(), {});
+
+        socket.emitMessage({ event: 'agent_action_execute', request_id: 'exec-1' });
+        socket.emitMessage({ event: 'agent_action_execute', request_id: 'exec-2' });
+        await flushMicrotasks();
+        expect(provider.agent_action_execute.handle).toHaveBeenCalledTimes(1);
+
+        // Stop keeps the socket open while the backend ends the run.
+        const cancelling = service.cancel(2000, { closeOnEnd: true });
+        pending[0]();
+        await flushMicrotasks();
+        expect(provider.agent_action_execute.handle).toHaveBeenCalledTimes(1);
+
+        await vi.advanceTimersByTimeAsync(2000);
+        await cancelling;
     });
 
     it('reports a serialized execute as queued until the one ahead of it finishes', async () => {

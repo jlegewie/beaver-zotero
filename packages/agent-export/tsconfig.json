@@ -71,6 +71,8 @@
     "./src/render/markdownPipeline.ts",
     "./src/render/reactStaticMarkup.ts",
     "./src/render/partialContent.ts",
-    "./src/render/legacyNoteTags.ts"
+    "./src/render/legacyNoteTags.ts",
+    "./src/render/hast.ts",
+    "./src/render/textDirection.ts"
   ]
 }

@@ -16,15 +16,9 @@ import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import { itemLinkExportHref } from '@beaver/agent-core/identity/itemLinks';
 import { processPartialContent } from './partialContent';
 import { unwrapLegacyNoteTags } from './legacyNoteTags';
+import { classNames, hastTextContent, type HastNode } from './hast';
+import { rehypeNoteTextDirection, type TextDirectionOptions } from './textDirection';
 
-/** A hast node, as far as the render modules read and write it. */
-export interface HastNode {
-    type: string;
-    tagName?: string;
-    value?: string;
-    properties?: Record<string, unknown>;
-    children?: HastNode[];
-}
 
 const citationDataAttributes = [
     'data-library-id', 'dataLibraryId',
@@ -69,18 +63,6 @@ export const markdownSanitizeSchema = {
         'citation',
     ],
 };
-
-/** Text content of a hast node tree. */
-function hastTextContent(node: HastNode): string {
-    if (node.type === 'text') return node.value || '';
-    if (node.children) return node.children.map(hastTextContent).join('');
-    return '';
-}
-
-function classNames(node: HastNode): unknown[] {
-    const className = node.properties?.className;
-    return Array.isArray(className) ? className : [];
-}
 
 /**
  * Rehype plugin that writes math in Zotero's note format instead of rendering
@@ -284,8 +266,18 @@ export const markdownSanitizePlugins: PluggableList = [
     rehypeImagesAsLinks,
 ];
 
-/** Rehype plugins that follow `markdownSanitizePlugins` when rendering for a Zotero note. */
-export const noteRehypePlugins: PluggableList = [rehypeZoteroMath, rehypeZoteroNoteFootnotes];
+/**
+ * Rehype plugins that follow `markdownSanitizePlugins` when rendering for a
+ * Zotero note.
+ *
+ * @param textDirection Give blocks their own text direction
+ *     (`rehypeNoteTextDirection`), for a note being written. Without it the
+ *     note's blocks take the reader's interface direction.
+ */
+export function noteRehypePlugins(textDirection?: TextDirectionOptions): PluggableList {
+    if (!textDirection) return [rehypeZoteroMath, rehypeZoteroNoteFootnotes];
+    return [rehypeZoteroMath, [rehypeNoteTextDirection, textDirection], rehypeZoteroNoteFootnotes];
+}
 
 /**
  * Prepare model Markdown for the parser: complete or drop fragments a stream

@@ -109,6 +109,8 @@ declare namespace Zotero {
         const account: import("../src/services/instanceAccount").InstanceAccount | undefined;
         /** Table fill plans and jobs; plugin realm, reached from renderers through this slot. */
         const tableFills: import("../src/services/tableFills/service").InstanceTableFills | undefined;
+        /** Chat run sessions, one per chat window; plugin realm, reached from renderers through this slot. */
+        const agentRuns: import("../src/services/agentRuns/registry").InstanceAgentRuns | undefined;
         const runtime: import("../src/runtime/instance").BeaverInstance;
         const pluginVersion: string;
 

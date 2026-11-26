@@ -8,9 +8,10 @@
  * in the same realm. Its chat state lives in its own store, which only the
  * session writes; windows render copies of it (`runProjection.ts`).
  *
- * Today a renderer installs one session and reuses it for every run it
- * starts: the transport holds one run at a time, and a new run waits on it
- * for the cancel of a run stopped while reconnecting.
+ * Sessions live in the plugin realm (`addon.agentRuns`), one per chat window,
+ * reused for every run the window starts: the transport holds one run at a
+ * time, and a new run waits on it for the cancel of a run stopped while
+ * reconnecting. A window reaches its session only through a `SessionPort`.
  */
 
 import { atom, type createStore, type Getter } from 'jotai/vanilla';
@@ -21,6 +22,7 @@ import {
     type StreamActivityTracker,
 } from '@beaver/agent-core/run-state/streamActivity';
 import type { RunHost } from './runHost';
+import type { SessionPort } from './sessionPort';
 import type { WriterLease } from './threadWriter';
 
 type Store = ReturnType<typeof createStore>;
@@ -34,7 +36,12 @@ export interface RetryCommit {
     stopRequested: boolean;
 }
 
+let sessionSeq = 0;
+
 export class RunSession {
+    /** Identifies the session in the registry, in owner tokens and in diagnostics. */
+    readonly id = `s${++sessionSeq}-${Date.now().toString(36)}`;
+
     /**
      * Measures how long the stream has been quiet. Every handler that
      * advances a run notes activity on it: one left out would make its event
@@ -96,6 +103,9 @@ export class RunSession {
     /** The session's claim on writing to its chat, while it holds one (`threadWriter.ts`). */
     writerLease: WriterLease | undefined = undefined;
 
+    /** Numbers the provisional claims of the session's new chats. */
+    draftSeq = 0;
+
     constructor(
         /** The session's private store: the authority for its chat state (`sessionStateAtoms`). */
         readonly store: Store,
@@ -110,43 +120,80 @@ export class RunSession {
 }
 
 let installed: RunSession | null = null;
+let installedPort: SessionPort | null = null;
 let beforeFirstUse: (() => void) | null = null;
+let localPortFactory: ((session: RunSession) => SessionPort) | null = null;
+
+function prepareFirstUse(): void {
+    if (!beforeFirstUse) return;
+    const prepare = beforeFirstUse;
+    beforeFirstUse = null;
+    prepare();
+}
 
 /**
- * Make `session` the one this renderer's runs execute in. `beforeFirstUse`
- * runs once, when the session is first asked for: the renderer attaches its
- * projection there, after the modules that define the session's state have
- * loaded.
+ * Make `session`, created in this realm, the one window code here talks to.
+ * Unit tests run a window and its session in one realm this way; a Zotero
+ * window installs the port of its plugin-realm session instead
+ * (`installSessionPort`). `beforeFirstUse` runs once, when the session is
+ * first asked for.
  */
 export function installRunSession(session: RunSession, options?: { beforeFirstUse?: () => void }): void {
     installed = session;
+    installedPort = null;
     beforeFirstUse = options?.beforeFirstUse ?? null;
 }
 
-/** The session this renderer's runs execute in. */
+/**
+ * Make `port` the session window code in this realm talks to. `beforeFirstUse`
+ * runs once, when the port is first asked for: the window attaches its
+ * projection there, after the modules that define the session's state have
+ * loaded.
+ */
+export function installSessionPort(port: SessionPort, options?: { beforeFirstUse?: () => void }): void {
+    installed = null;
+    installedPort = port;
+    beforeFirstUse = options?.beforeFirstUse ?? null;
+}
+
+/** Set by `sessionPort.ts`, so a session installed in this realm gets a port. */
+export function setLocalSessionPortFactory(factory: (session: RunSession) => SessionPort): void {
+    localPortFactory = factory;
+}
+
+/**
+ * The session installed in this realm. Only engine code running in the same
+ * realm as its session uses this (unit tests); window code uses
+ * `getSessionPort()`.
+ */
 export function getRunSession(): RunSession {
-    if (!installed) throw new Error('No run session is installed');
-    if (beforeFirstUse) {
-        const prepare = beforeFirstUse;
-        beforeFirstUse = null;
-        prepare();
-    }
+    if (!installed) throw new Error('No run session is installed in this realm');
+    prepareFirstUse();
     return installed;
 }
 
-/**
- * The session that owns the store `get` reads, or the installed one for any
- * other store (a window's).
- */
-export function sessionOf(get: Getter): RunSession {
-    return get(ownSessionAtom) ?? getRunSession();
+/** The port of the session this realm's window code talks to. */
+export function getSessionPort(): SessionPort {
+    prepareFirstUse();
+    if (installedPort) return installedPort;
+    if (!installed) throw new Error('No run session is installed');
+    if (!localPortFactory) throw new Error('Session ports are not loaded');
+    installedPort = localPortFactory(installed);
+    return installedPort;
 }
 
 /**
- * The store of this renderer's run session. Window code that changes the
- * chat's state (loading a chat, leaving it, answering a card) writes here,
- * never to its own copies.
+ * The session that owns the store `get` reads, or null for any other store
+ * (a window's).
  */
-export function runSessionStore(): Store {
-    return getRunSession().store;
+export function ownSessionOf(get: Getter): RunSession | null {
+    return get(ownSessionAtom);
+}
+
+/**
+ * The session that owns the store `get` reads, or the session installed in
+ * this realm for any other store.
+ */
+export function sessionOf(get: Getter): RunSession {
+    return get(ownSessionAtom) ?? getRunSession();
 }

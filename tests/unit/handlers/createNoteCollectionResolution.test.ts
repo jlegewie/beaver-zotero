@@ -61,7 +61,7 @@ vi.mock('../../../src/services/agentDataProvider/lookupZoteroReferences', () => 
 vi.mock('../../../src/services/agentDataProvider/actions/noteCitationRendering', () => ({
     INVALID_NOTE_CITATION_CODE: 'invalid_citation',
     checkNoteMarkdownCitations: vi.fn(async () => ({ error: null, warnings: [] })),
-    renderNoteMarkdown: vi.fn(async (markdown: string, context: any) => ({ html: await context.renderMarkdown(markdown), warnings: [] })),
+    renderNoteMarkdown: vi.fn(async (markdown: string) => ({ html: markdown, warnings: [] })),
     wrapNewNoteHtml: vi.fn((html: string) => html),
 }));
 
@@ -147,7 +147,7 @@ it.each(['automatic', 'manual'])('keeps note memberships fixed from approval thr
     target.name = 'Renamed';
     collections.push({ id: 22, libraryID: 7, key: 'NEWKEY12', name: 'Group only' });
     const data = prepared.normalized_action_data!;
-    const context = { renderMarkdown: async (html: string) => html };
+    const context = {};
     try {
         const result = route === 'manual'
             ? await manualNote.executeCreateNoteAction({ proposed_data: data } as any, undefined, context)
@@ -167,7 +167,7 @@ it('saves the note unfiled when an approved membership was deleted', async () =>
     const addToCollection = vi.fn();
     (Zotero as any).Item = function () { return { setNote: vi.fn(), saveTx: save, addToCollection, libraryID: 7, key: 'NOTEKEY1' }; };
     const result = await executeCreateNoteAction({ request_id: 'r', action_data: prepared.normalized_action_data,
-        operation: { renderMarkdown: async (html: string) => html } } as any,
+        operation: {} } as any,
         { signal: new AbortController().signal, timeoutSeconds: 60, startTime: Date.now() });
     expect(result).toMatchObject({ success: true });
     expect(save).toHaveBeenCalledOnce();
@@ -202,7 +202,7 @@ describe('create_note citations', () => {
         const prepared = await validate({});
 
         const result = await executeCreateNoteAction({ request_id: 'r', action_data: prepared.normalized_action_data,
-            operation: { renderMarkdown: async (html: string) => html } } as any, deadline());
+            operation: {} } as any, deadline());
 
         expect(result).toMatchObject({ success: false, error_code: 'invalid_citation' });
         expect(save).not.toHaveBeenCalled();
@@ -214,7 +214,7 @@ describe('create_note citations', () => {
         const prepared = await validate({});
 
         const result = await executeCreateNoteAction({ request_id: 'r', action_data: prepared.normalized_action_data,
-            operation: { renderMarkdown: async (html: string) => html } } as any, deadline());
+            operation: {} } as any, deadline());
 
         expect(result).toMatchObject({ success: true, result_data: { warnings: ['saved without a locator'] } });
     });

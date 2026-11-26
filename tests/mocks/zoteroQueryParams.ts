@@ -10,8 +10,8 @@
  * splice lands on an unrelated placeholder (or runs out and throws).
  *
  * MockDBConnection runs queries through this first so unit tests see the
- * statement Zotero would actually execute, not the one better-sqlite3 would
- * happily bind.
+ * statement Zotero would actually execute, not the one SQLite would happily
+ * bind.
  */
 export function parseQueryAndParams(sql: string, params: any): [string, any[]] {
     // If single scalar value, wrap in an array

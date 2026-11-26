@@ -9,7 +9,7 @@ import type { WindowRuntime } from "../../src/runtime/instance";
 import type { ThreadPresenceSnapshot } from "../../src/services/threads/threadPresence";
 import { store } from "../store";
 import { recentThreadsAtom } from "../atoms/threads";
-import { runSessionStore } from "../../src/services/agentRuns/runSession";
+import { runSessionStore } from './runSessionStore';
 import {
     threadEntitiesAtom,
     threadViewsAtom,

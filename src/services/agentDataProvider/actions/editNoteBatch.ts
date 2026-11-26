@@ -200,18 +200,18 @@ export async function preloadBatchLabels(edits: EditNoteBatchEditItem[]): Promis
 
 /**
  * Prepare per-edit specs for the core resolver: run the no-op guard + new_string
- * precheck (collecting failures), enrich old_string, and pre-render the Markdown
- * fallback. Edits that fail a pre-check are NOT added to `specs`, so the batch is
- * still rejected but every edit's diagnostics are collected.
+ * precheck (collecting failures), enrich old_string, and attach the Markdown
+ * fallback, which renders only if the resolver's normal matcher misses. Edits
+ * that fail a pre-check are NOT added to `specs`, so the batch is still rejected
+ * but every edit's diagnostics are collected.
  */
-export async function prepareSpecs(
+export function prepareSpecs(
     edits: EditNoteBatchEditItem[],
     metadata: SimplificationMetadata,
     externalRefContext: ExternalRefContext,
     labels: PreloadedLabels,
     libraryId: number,
-    context?: OperationContext,
-): Promise<{ specs: BatchEditSpec[]; failures: BatchEditFailure[] }> {
+): { specs: BatchEditSpec[]; failures: BatchEditFailure[] } {
     const specs: BatchEditSpec[] = [];
     const failures: BatchEditFailure[] = [];
 
@@ -234,10 +234,11 @@ export async function prepareSpecs(
 
         const isStrReplaceFamily = operation !== 'rewrite' && operation !== 'append';
         let oldString = edit.old_string ?? '';
-        let rendered: { renderedOldSimplified?: string; renderedNewSimplified?: string } = {};
+        let renderMarkdownFallback: BatchEditSpec['renderMarkdownFallback'];
         if (isStrReplaceFamily) {
             oldString = applyOldStringEnrichment(oldString, metadata, labels.pageLabels) ?? oldString;
-            rendered = await buildMarkdownRenderFields(oldString, edit.new_string, operation, libraryId, context);
+            const enrichedOld = oldString;
+            renderMarkdownFallback = () => buildMarkdownRenderFields(enrichedOld, edit.new_string, operation, libraryId);
         }
 
         specs.push({
@@ -248,7 +249,7 @@ export async function prepareSpecs(
             newString: edit.new_string,
             targetBeforeContext: edit.target_before_context,
             targetAfterContext: edit.target_after_context,
-            ...rendered,
+            renderMarkdownFallback,
         });
     }
 
@@ -484,8 +485,8 @@ async function validateEditNoteBatchAction(
     const strippedHtml = stripDataCitationItems(normalizeNoteHtml(rawHtml));
     const appendPoint = getBeaverFooterAppendPoint(strippedHtml);
 
-    const { specs, failures: prepFailures } = await prepareSpecs(
-        edits, metadata, externalRefContext, labels, resolvedLibraryId, request.operation,
+    const { specs, failures: prepFailures } = prepareSpecs(
+        edits, metadata, externalRefContext, labels, resolvedLibraryId,
     );
 
     const ctx: ResolveBatchContext = {
@@ -725,8 +726,8 @@ export async function applyEditNoteBatch(
     }
 
     // ── General batch ──
-    const { specs, failures: prepFailures } = await prepareSpecs(
-        edits, metadata, externalRefContext, labels, resolvedLibraryId, operationContext,
+    const { specs, failures: prepFailures } = prepareSpecs(
+        edits, metadata, externalRefContext, labels, resolvedLibraryId,
     );
     // A pre-check failure at execute time means the note drifted since approval.
     if (prepFailures.length > 0) {

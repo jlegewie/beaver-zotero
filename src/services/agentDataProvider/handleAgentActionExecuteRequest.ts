@@ -16,7 +16,6 @@ import { executeManageCollectionsAction } from './actions/manageCollections';
 import { executeManageTagsAction } from './actions/manageTags';
 import { executeOrganizeItemsAction } from './actions/organizeItems';
 import type { ActionExecuteRequest } from './operationContext';
-import { prepareOperationRendering } from './prepareOperationRendering';
 import { DEFAULT_TIMEOUT_SECONDS, TimeoutContext, TimeoutError } from './timeout';
 
 /** Keepalive phase while an execute waits for another library write to finish. */
@@ -177,7 +176,6 @@ export async function handleAgentActionExecuteRequest(
         context?.assertCurrent?.();
     };
     try {
-        const operation = await prepareOperationRendering(request.action_type, request.action_data, request.operation);
         const reportPhase = context?.reportPhase ?? (() => {});
         const executeContext: ExecuteContext = {
             ...context,
@@ -190,7 +188,7 @@ export async function handleAgentActionExecuteRequest(
         if (queue && (queue.active !== null || queue.pending > 0)) {
             reportPhase(QUEUED_BEHIND_WRITE_PHASE);
         }
-        return await Zotero.Beaver.libraryOperations.run('executeRequest', [{ ...request, operation }, executeContext], {
+        return await Zotero.Beaver.libraryOperations.run('executeRequest', [request, executeContext], {
             signal: context?.signal,
             owner: context?.owner,
             assertCurrent,

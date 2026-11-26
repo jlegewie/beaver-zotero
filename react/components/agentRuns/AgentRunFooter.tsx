@@ -18,7 +18,7 @@ import { CitedSource, getCitationKey } from '@beaver/agent-core/types/citations'
 import { messageSourcesVisibilityAtom, toggleMessageSourcesVisibilityAtom, setMessageSourcesVisibilityAtom } from '../../atoms/messageUIState';
 import { allRunsAtom, mergeRunToolResults, resumeChainAtom } from '@beaver/agent-core/run-state/atoms';
 import { sumChainUsage } from '@beaver/agent-core/run-state/runResumeHelpers';
-import { extractRunResponseContent } from '../../utils/threadContent';
+import { extractRunResponseContent, NOTE_SECTION_LABELS } from '../../utils/threadContent';
 import { resolveToolCallLabelEnrichMap } from '../../utils/toolCallLabelEnrich';
 import TokenUsageDisplay from './TokenUsageDisplay';
 import { isRunReconnectingAtom, regenerateFromRunAtom, retryPendingRunIdAtom, streamingDoneRunIdsAtom } from '../../atoms/agentRunAtoms';
@@ -205,9 +205,9 @@ export const AgentRunFooter: React.FC<AgentRunFooterProps> = ({ run }) => {
         const userQuestion = messageRun.user_prompt.content;
         const sections: string[] = [];
         if (userQuestion) {
-            sections.push(`## User\n\n> ${userQuestion.replace(/\n/g, '\n> ')}`);
+            sections.push(`## ${NOTE_SECTION_LABELS.user}\n\n> ${userQuestion.replace(/\n/g, '\n> ')}`);
         }
-        sections.push(`## Beaver\n\n${await buildRunContent()}`);
+        sections.push(`## ${NOTE_SECTION_LABELS.beaver}\n\n${await buildRunContent()}`);
         const noteMarkdown = sections.join('\n\n---\n\n');
 
         const renderContent = preprocessNoteContent(noteMarkdown);

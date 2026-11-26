@@ -268,6 +268,7 @@ import { renderToHTML } from '../../../react/utils/citationRenderers';
 import {
     executeEditNoteAction as executeLocalEditNoteAction,
     executeEditNoteBatchAction as executeLocalEditNoteBatchAction,
+    undoEditNoteAction as undoLocalEditNoteAction,
     undoEditNoteBatchAction as undoLocalEditNoteBatchAction,
 } from '../../../react/utils/editNoteActions';
 import type {
@@ -1458,5 +1459,114 @@ describe('empty note batch edits', () => {
         expect((await handleAgentActionValidateRequest(makeValidateRequest(edits))).valid).toBe(true);
         expect((await handleAgentActionExecuteRequest(makeExecuteRequest(edits))).success).toBe(true);
         expect(item.setNote.mock.calls[0][0]).toContain('<p>First</p><p>Second</p>');
+    });
+});
+
+
+describe('Markdown edits render through the plugin exporter', () => {
+    const RENDERED_OLD = '<h3>Rendered Title</h3><p><strong>bold</strong></p>';
+    const RENDERED_NEW = '<h3>Rendered Title</h3><p><strong>updated</strong></p>';
+    const MARKDOWN_NOTE = `<div data-schema-version="9">${RENDERED_OLD}<p>Plain **text** here.</p></div>`;
+    const markdownEdit = {
+        index: 0,
+        operation: 'str_replace' as const,
+        old_string: '### Rendered Title\n\n**bold**',
+        new_string: '### Rendered Title\n\n**updated**',
+    };
+    let renderNoteMarkdown: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+        renderNoteMarkdown = vi.fn((content: string) => (content.includes('updated') ? RENDERED_NEW : RENDERED_OLD));
+        (globalThis as any).Zotero.Beaver.exporter = { renderNoteMarkdown };
+    });
+
+    it('validates a Markdown edit the plain matcher misses by rendering it', async () => {
+        useNote(MARKDOWN_NOTE);
+
+        const response = await handleAgentActionValidateRequest(makeValidateRequest([markdownEdit]));
+
+        expect(response.valid).toBe(true);
+        // As written, then old_string with every block directed (this stub
+        // adds no direction, so its replacement is not rendered again).
+        expect(renderNoteMarkdown.mock.calls).toEqual([
+            [markdownEdit.old_string, {}],
+            [markdownEdit.new_string, {}],
+            [markdownEdit.old_string, { directions: 'all' }],
+        ]);
+        expect(response.normalized_action_data?.edits[0]).toMatchObject({
+            old_string: RENDERED_OLD,
+            new_string: RENDERED_NEW,
+        });
+    });
+
+    it('applies a Markdown edit over the socket path, rendering inside the write', async () => {
+        const item = useNote(MARKDOWN_NOTE);
+
+        const response = await handleAgentActionExecuteRequest(makeExecuteRequest([markdownEdit]));
+
+        expect(response.success).toBe(true);
+        expect(renderNoteMarkdown).toHaveBeenCalledTimes(3);
+        expect(item.setNote.mock.calls[0][0]).toContain(RENDERED_NEW);
+    });
+
+    it('applies a Markdown edit from the window with no prepared rendering', async () => {
+        const item = useNote(MARKDOWN_NOTE);
+
+        await executeLocalEditNoteBatchAction({
+            id: 'local-markdown-batch',
+            action_type: 'edit_note_batch',
+            proposed_data: { library_id: 1, zotero_key: 'NOTE0001', edits: [markdownEdit] },
+        } as any);
+
+        expect(renderNoteMarkdown).toHaveBeenCalledTimes(3);
+        expect(item.setNote.mock.calls[0][0]).toContain(RENDERED_NEW);
+    });
+
+    it('renders only the edits the plain matcher misses', async () => {
+        const item = useNote(MARKDOWN_NOTE);
+        const plainEdit = {
+            index: 1,
+            operation: 'str_replace' as const,
+            old_string: 'Plain **text** here.',
+            new_string: 'Plain **words** here.',
+        };
+
+        const response = await handleAgentActionExecuteRequest(makeExecuteRequest([markdownEdit, plainEdit]));
+
+        expect(response.success).toBe(true);
+        expect(renderNoteMarkdown.mock.calls.map(([content]) => content)).toEqual([
+            markdownEdit.old_string, markdownEdit.new_string, markdownEdit.old_string,
+        ]);
+        expect(item.setNote.mock.calls[0][0]).toContain('Plain **words** here.');
+    });
+
+    it('renders nothing when every Markdown-looking edit matches as written', async () => {
+        const item = useNote(MARKDOWN_NOTE);
+        const edits = [{ index: 0, operation: 'str_replace' as const, old_string: 'Plain **text** here.', new_string: 'Plain **words** here.' }];
+
+        expect((await handleAgentActionValidateRequest(makeValidateRequest(edits))).valid).toBe(true);
+        expect((await handleAgentActionExecuteRequest(makeExecuteRequest(edits))).success).toBe(true);
+
+        expect(renderNoteMarkdown).not.toHaveBeenCalled();
+        expect(item.setNote.mock.calls[0][0]).toContain('Plain **words** here.');
+    });
+
+    it('undoes a window-applied Markdown edit without rendering', async () => {
+        const item = useNote(MARKDOWN_NOTE);
+        const proposed = { library_id: 1, zotero_key: 'NOTE0001', ...markdownEdit };
+        const result = await executeLocalEditNoteAction({
+            id: 'local-markdown-single', action_type: 'edit_note', proposed_data: proposed,
+        } as any);
+        item.getNote.mockReturnValue(item.setNote.mock.calls[0][0]);
+        renderNoteMarkdown.mockClear();
+        (globalThis as any).Zotero.Beaver.exporter = undefined;
+
+        await undoLocalEditNoteAction({
+            id: 'local-markdown-single', action_type: 'edit_note', proposed_data: proposed, result_data: result,
+        } as any);
+
+        expect(renderNoteMarkdown).not.toHaveBeenCalled();
+        expect(item.setNote).toHaveBeenLastCalledWith(expect.stringContaining(RENDERED_OLD));
+        expect(item.setNote.mock.lastCall![0]).not.toContain(RENDERED_NEW);
     });
 });

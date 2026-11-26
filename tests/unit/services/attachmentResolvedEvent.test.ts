@@ -6,14 +6,16 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@beaver/agent-core/platform/logger', () => ({ logger: vi.fn() }));
-vi.mock('@beaver/agent-core/transport/agentService', () => ({
-    agentService: { isConnected: mocks.isConnected, send: mocks.send },
-}));
 vi.mock('../../../src/utils/libraryIdentity', () => ({
     libraryRefForLibraryID: (id: number) => (id === 1 ? 'u' : null),
 }));
 
-import { emitAttachmentResolved } from '../../../react/utils/attachmentResolvedEvent';
+import type { AgentService } from '@beaver/agent-core/transport/agentService';
+import { emitAttachmentResolved as emitOn } from '../../../src/services/agentRuns/attachmentResolvedEvent';
+
+/** The run session's transport. */
+const transport = { isConnected: mocks.isConnected, send: mocks.send } as unknown as AgentService;
+const emitAttachmentResolved = (payload: Parameters<typeof emitOn>[1]) => emitOn(transport, payload);
 
 const base = {
     threadId: 'thread-1',

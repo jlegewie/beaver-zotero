@@ -295,14 +295,10 @@ const nodes: Record<string, NodeSpec> = {
 
     // Inline nodes
 
-    // TinyMCE needs non-breaking spaces to represent sequential spaces,
-    // Google Docs does a similar thing when copying text. ProseMirror
-    // ignores sequential spaces when serializing to DOM.
+    // Runs of spaces are written as ' \u00a0' pairs by buildToHTML
+    // (serializer.ts), not here: DOMSerializer never calls a text node's toDOM.
     text: {
-        group: 'inline',
-        toDOM: (node) => {
-            return node.text!.replace(/ {2}/g, ' \u00a0');
-        }
+        group: 'inline'
     },
 
 

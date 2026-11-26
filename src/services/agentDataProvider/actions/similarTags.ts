@@ -19,6 +19,12 @@ export interface SimilarExistingTag {
     existing: string[];
 }
 
+/** A tag an action added that its library did not have before. */
+export interface CreatedTag {
+    tag: string;
+    library_ref: string | null;
+}
+
 export const MAX_SIMILAR_TAGS_REPORTED = 10;
 const MAX_EXISTING_PER_TAG = 3;
 // Keeps each IN (...) list well under SQLite's bound-parameter limit.
@@ -94,6 +100,29 @@ export async function snapshotSimilarTags(
         similar.set(key, [...(similar.get(key) ?? []), name]);
     }
     return { existing, similar };
+}
+
+/**
+ * Tags the write added that did not exist in their library before it.
+ *
+ * `added` maps each library to the tags the write added to its items. Returns
+ * undefined when a library's pre-write snapshot is missing (its lookup failed),
+ * since which of its tags are new is then unknown.
+ */
+export function createdTags(
+    added: Map<number, Set<string>>,
+    snapshots: Map<number, { existing: Set<string> }>,
+): CreatedTag[] | undefined {
+    const report: CreatedTag[] = [];
+    for (const [libraryID, tags] of added) {
+        const snapshot = snapshots.get(libraryID);
+        if (!snapshot) return undefined;
+        const libraryRef = libraryRefForLibraryID(libraryID);
+        for (const tag of tags) {
+            if (!snapshot.existing.has(tag)) report.push({ tag, library_ref: libraryRef });
+        }
+    }
+    return report;
 }
 
 /**

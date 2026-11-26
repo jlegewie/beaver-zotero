@@ -6,8 +6,7 @@ import { isWSChatPendingAtom } from "../atoms/agentRunAtoms";
 import { accountGenerationAtom, searchableLibraryIdsAtom } from "../atoms/profile";
 import { threadAdmissionAtom, type AdmissionSnapshot } from "../../src/services/agentRuns/threadAdmission";
 import { threadPresenceAtom } from "./threadProjection";
-import { currentWriter } from "../../src/services/agentRuns/threadWriter";
-import { getRunSession } from "../../src/services/agentRuns/runSession";
+import { getSessionPort } from "../../src/services/agentRuns/runSession";
 import { eventManager } from "../events/eventManager";
 import {
     hasThreadWriter,
@@ -156,7 +155,7 @@ export const windowCommands = {
                 navigation === store.get(threadNavigationSeqAtom) &&
                 destination === store.get(currentThreadIdAtom);
             const destinationBusy = () =>
-                !!currentWriter(getRunSession()) ||
+                getSessionPort().hasWriter() ||
                 store.get(isWSChatPendingAtom) ||
                 isRunActive(store.get(activeRunAtom)) ||
                 (destination !== null &&

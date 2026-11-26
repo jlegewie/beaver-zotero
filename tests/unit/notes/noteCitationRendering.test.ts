@@ -34,11 +34,21 @@ import {
 import { preloadExternalFileCitations } from '../../../src/utils/externalFileCitation';
 
 /**
- * Stand-in for the note render seam: paragraphs and bold only, with citation
- * tags left in place as the real seam returns them.
+ * Stand-in for the plugin exporter's note renderer: paragraphs and bold only,
+ * with citation tags left in place as the real renderer returns them.
  */
-const renderMarkdown = vi.fn(async (content: string) =>
+const renderMarkdown = vi.fn((content: string) =>
     content.split('\n\n').map(block => `<p>${block.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')}</p>`).join(''));
+
+const savedBeaver = (globalThis as any).Zotero.Beaver;
+
+/** Install `renderer` as `Zotero.Beaver.exporter.renderNoteMarkdown` (absent when null). */
+function useRenderer(renderer: ((content: string) => string) | null) {
+    (globalThis as any).Zotero.Beaver = { ...savedBeaver, exporter: renderer ? { renderNoteMarkdown: renderer } : undefined };
+}
+
+beforeEach(() => useRenderer(renderMarkdown));
+afterEach(() => { (globalThis as any).Zotero.Beaver = savedBeaver; });
 
 describe('renderNoteMarkdown', () => {
     beforeEach(() => {
@@ -48,10 +58,11 @@ describe('renderNoteMarkdown', () => {
     it('expands the citation tags the renderer returns with the note citation builder', async () => {
         const { html, warnings } = await renderNoteMarkdown(
             '**Claim** <citation id="u-AAAA1111" loc="page5"/>\n\nMore <citation id="u-BBBB2222"/>.',
-            { renderMarkdown },
+            {},
         );
 
-        expect(renderMarkdown).toHaveBeenCalledTimes(1);
+        // A created note's blocks get their own text direction.
+        expect(renderMarkdown).toHaveBeenCalledExactlyOnceWith(expect.any(String), { directions: 'note' });
         expect(html).toBe(
             '<p><strong>Claim</strong> <span class="citation">u-AAAA1111</span></p>'
             + '<p>More <span class="citation">u-BBBB2222</span>.</p>',
@@ -60,7 +71,7 @@ describe('renderNoteMarkdown', () => {
     });
 
     it('expands each tag as a new citation with the preloaded labels and structural pages', async () => {
-        await renderNoteMarkdown('Text <citation id="u-AAAA1111" loc="s4"/>', { renderMarkdown });
+        await renderNoteMarkdown('Text <citation id="u-AAAA1111" loc="s4"/>', {});
 
         expect(ensureCitedLibrariesLoaded).toHaveBeenCalledWith(['<citation id="u-AAAA1111" loc="s4"/>']);
         expect(expandNoteCitationTags).toHaveBeenCalledWith(
@@ -82,7 +93,7 @@ describe('renderNoteMarkdown', () => {
         const content = '<citation external_id="W1" loc="s4"/> <citation external_id="W2" loc="page5"/> <citation external_id="W3"/>';
         const resolved = '<citation id="8-MAPPED01" loc="s4"/>\n<citation id="g12345-MAPPED02" loc="page5"/>\n<citation external_id="W3"/>';
 
-        await renderNoteMarkdown(content, { renderMarkdown, externalItemMapping });
+        await renderNoteMarkdown(content, { externalItemMapping });
 
         expect(ensureCitedLibrariesLoaded).toHaveBeenCalledWith([resolved]);
         expect(preloadPageLabelsForNewCitations).toHaveBeenCalledWith(resolved);
@@ -92,7 +103,6 @@ describe('renderNoteMarkdown', () => {
 
     it('validates the mapped item of an external reference', async () => {
         await checkNoteMarkdownCitations('<citation external_id="W1"/>', {
-            renderMarkdown,
             externalItemMapping: { W1: { library_id: 8, zotero_key: 'MAPPED01' } },
         });
 
@@ -104,7 +114,7 @@ describe('renderNoteMarkdown', () => {
         const externalRefs = { W1: { source_id: 'W1' } } as any;
         const externalItemMapping = { W1: null };
 
-        await renderNoteMarkdown('<citation external_id="W1"/>', { renderMarkdown, externalRefs, externalItemMapping });
+        await renderNoteMarkdown('<citation external_id="W1"/>', { externalRefs, externalItemMapping });
 
         expect(vi.mocked(expandNoteCitationTags).mock.calls[0][3]).toMatchObject({ externalRefs, externalItemMapping });
     });
@@ -113,7 +123,7 @@ describe('renderNoteMarkdown', () => {
         vi.mocked(preloadStructuralLocatorPages).mockResolvedValueOnce({ pages: {}, unresolved: ['u-AAAA1111 s4'], unavailable: [] });
         vi.mocked(preloadExternalFileCitations).mockResolvedValueOnce({ files: {}, warnings: ['file link unavailable'] });
 
-        const { warnings } = await renderNoteMarkdown('<citation id="u-AAAA1111" loc="s4"/>', { renderMarkdown });
+        const { warnings } = await renderNoteMarkdown('<citation id="u-AAAA1111" loc="s4"/>', {});
 
         expect(warnings).toEqual(['file link unavailable', 'unresolved: u-AAAA1111 s4']);
     });
@@ -123,29 +133,30 @@ describe('renderNoteMarkdown', () => {
             throw new Error('Cannot cite id="u-AAAA1111": library excluded');
         });
 
-        await expect(renderNoteMarkdown('<citation id="u-AAAA1111"/>', { renderMarkdown }))
+        await expect(renderNoteMarkdown('<citation id="u-AAAA1111"/>', {}))
             .rejects.toMatchObject({ message: 'Cannot cite id="u-AAAA1111": library excluded', code: INVALID_NOTE_CITATION_CODE });
     });
 
     it('leaves code examples the renderer escaped alone', async () => {
         const code = '<pre><code>&lt;citation id=&quot;u-EXAMPLE1&quot;/&gt;</code></pre>';
-        const renderCode = vi.fn(async () => `<p>Real <citation id="u-AAAA1111"/></p>${code}`);
+        useRenderer(() => `<p>Real <citation id="u-AAAA1111"/></p>${code}`);
 
-        const { html } = await renderNoteMarkdown('ignored', { renderMarkdown: renderCode });
+        const { html } = await renderNoteMarkdown('ignored', {});
 
         expect(expandNoteCitationTags).toHaveBeenCalledTimes(1);
         expect(html).toBe(`<p>Real <span class="citation">u-AAAA1111</span></p>${code}`);
     });
 
     it('does no citation work for content without citations', async () => {
-        const { html } = await renderNoteMarkdown('Plain **text**', { renderMarkdown });
+        const { html } = await renderNoteMarkdown('Plain **text**', {});
 
         expect(html).toBe('<p>Plain <strong>text</strong></p>');
         expect(ensureCitedLibrariesLoaded).not.toHaveBeenCalled();
         expect(preloadPageLabelsForNewCitations).not.toHaveBeenCalled();
     });
 
-    it('requires a Markdown renderer', async () => {
+    it('requires the exporter', async () => {
+        useRenderer(null);
         await expect(renderNoteMarkdown('Text', {})).rejects.toMatchObject({ code: 'capability_unavailable' });
     });
 });
@@ -156,7 +167,7 @@ describe('checkNoteMarkdownCitations', () => {
     });
 
     it('accepts content whose citations all expand', async () => {
-        await expect(checkNoteMarkdownCitations('A <citation id="u-AAAA1111"/>', { renderMarkdown }))
+        await expect(checkNoteMarkdownCitations('A <citation id="u-AAAA1111"/>', {}))
             .resolves.toEqual({ error: null, warnings: [] });
         expect(expandNoteCitationTags).toHaveBeenCalledTimes(1);
     });
@@ -166,26 +177,29 @@ describe('checkNoteMarkdownCitations', () => {
             .mockImplementationOnce(() => 'ok')
             .mockImplementationOnce(() => { throw new Error('Item not found: u-BBBB2222'); });
 
-        const result = await checkNoteMarkdownCitations('<citation id="u-AAAA1111"/> <citation id="u-BBBB2222"/>', { renderMarkdown });
+        const result = await checkNoteMarkdownCitations('<citation id="u-AAAA1111"/> <citation id="u-BBBB2222"/>', {});
 
         expect(result.error).toBe('Item not found: u-BBBB2222');
     });
 
     it('finds citations by rendering, so a tag the renderer returned as code text is not checked', async () => {
-        const renderCode = vi.fn(async () => '<p><code>&lt;citation id=&quot;u-EXAMPLE1&quot;/&gt;</code></p>');
+        const renderCode = vi.fn(() => '<p><code>&lt;citation id=&quot;u-EXAMPLE1&quot;/&gt;</code></p>');
+        useRenderer(renderCode);
 
-        await expect(checkNoteMarkdownCitations('`x <citation id="u-EXAMPLE1"/>`', { renderMarkdown: renderCode }))
+        await expect(checkNoteMarkdownCitations('`x <citation id="u-EXAMPLE1"/>`', {}))
             .resolves.toEqual({ error: null, warnings: [] });
-        expect(renderCode).toHaveBeenCalledWith('`x <citation id="u-EXAMPLE1"/>`');
+        expect(renderCode).toHaveBeenCalledWith('`x <citation id="u-EXAMPLE1"/>`', undefined);
         expect(expandNoteCitationTags).not.toHaveBeenCalled();
     });
 
     it('renders nothing, and needs no renderer, for content without a citation tag', async () => {
+        useRenderer(null);
         await expect(checkNoteMarkdownCitations('No citations', {})).resolves.toEqual({ error: null, warnings: [] });
         expect(ensureCitedLibrariesLoaded).not.toHaveBeenCalled();
     });
 
-    it('requires a renderer for content with citation tags', async () => {
+    it('requires the exporter for content with citation tags', async () => {
+        useRenderer(null);
         await expect(checkNoteMarkdownCitations('A <citation id="u-AAAA1111"/>', {}))
             .rejects.toMatchObject({ code: 'capability_unavailable' });
     });

@@ -5,6 +5,13 @@ import { parseArgs } from '@beaver/agent-core/run-state/toolCallRequest';
 import { isToolResultView } from '@beaver/agent-core/run-state/toolResultViews';
 
 /**
+ * The section headings of a chat saved as a note. They are interface text,
+ * not content, so the note keeps them in its reader's direction
+ * (`TextDirectionOptions.labels`).
+ */
+export const NOTE_SECTION_LABELS = { user: 'User', beaver: 'Beaver' } as const;
+
+/**
  * Extract tool call details as a formatted string.
  *
  * `enrichMap` carries the host-resolved names the view model does not supply
@@ -138,14 +145,14 @@ export function extractThreadContent(
         if (userMessage) {
             const userHeading = includeRunLinks && threadId
                 ? ` [User ↗](zotero://beaver/thread/${threadId}/run/${run.id})`
-                : 'User';
+                : NOTE_SECTION_LABELS.user;
             const formattedMessage = userMessageAsBlockquote
                 ? `> ${userMessage.replace(/\n/g, '\n> ')}`
                 : userMessage;
             sections.push(`## ${userHeading}\n\n${formattedMessage}`);
         }
         if (responseContent) {
-            sections.push(`## Beaver\n\n${responseContent}`);
+            sections.push(`## ${NOTE_SECTION_LABELS.beaver}\n\n${responseContent}`);
         }
     }
 

@@ -1,6 +1,7 @@
 /**
  * The session's lease on writing to a chat: its presence claim on the thread,
- * held while it prepares a message, runs, and settles. Hosts without the
+ * held while it prepares a message, runs, and settles. The claim is the
+ * session's and acts for the window the session runs for. Hosts without the
  * Zotero instance's presence registry do not take part.
  */
 
@@ -13,8 +14,6 @@ export interface WriterLease {
     /** The admission read in flight for this lease; resolves to whether writes may proceed. */
     admission?: Promise<boolean>;
 }
-
-let draftSeq = 0;
 
 export function currentWriter(session: RunSession): WriterLease | undefined {
     return session.writerLease;
@@ -47,8 +46,9 @@ export function acquireWriter(
         return lease;
     const claim = Zotero.Beaver.presence.claim(
         windowId,
-        threadId ?? `draft:${windowId}:${++draftSeq}`,
+        threadId ?? `draft:${session.id}:${++session.draftSeq}`,
         generation,
+        `session:${session.id}`,
     );
     if (!claim) return null;
     session.writerLease = { claim, preparing: 0 };

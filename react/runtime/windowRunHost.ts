@@ -1,7 +1,7 @@
 /**
- * The run host of a Zotero renderer: what the run engine reaches in the window
- * it runs for (selections, popups and dialogs, agent actions, display
- * enrichment of stream events, and the window-side effects of a run).
+ * A Zotero renderer as the viewer of its run session: what the session reaches
+ * in the window it runs for (selections, popups and dialogs, agent actions,
+ * display enrichment of stream events, and the window-side effects of a run).
  */
 
 import type { createStore, Setter } from 'jotai';
@@ -10,7 +10,10 @@ import type { WSMissingZoteroDataEvent } from '@beaver/agent-core/protocol/agent
 import { pendingApprovalFromRequest, type PendingApproval } from '@beaver/agent-core/run-state/pendingApprovals';
 import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { extractZoteroReferencesFromToolCall } from '@beaver/agent-core/run-state/toolLabels';
-import { runEffect, type RunHost, type UndoConfirmResult } from '../../src/services/agentRuns/runHost';
+import type { UndoConfirmResult } from '../../src/services/agentRuns/runHost';
+import type { RunGate, RunViewer } from '../../src/services/agentRuns/runViewer';
+import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
+import { isSidebarVisibleAtom } from '../atoms/ui';
 import { chatFillsAtom } from '@beaver/agent-core/run-state/tableChatFills';
 import { mergePageLabelsByAttachmentIdAtom } from '@beaver/agent-core/citations/atoms';
 import type { AgentRun } from '@beaver/agent-core/agents/types';
@@ -34,7 +37,6 @@ import { BeaverTemporaryAnnotations } from '../utils/annotationUtils';
 import { leaveJobWait } from '../atoms/jobLeave';
 import { dismissDiffPreview } from '../utils/noteEditorDiffPreview';
 import { clearDiffPreviewNoteKey, noteLibraryIdFromActionData, updateDiffPreviewForNote } from '../utils/diffPreviewCoordinator';
-import { notifyApprovalRequest, notifyBatchApproval, notifyCreditConfirmation, notifyRunComplete, notifyUserQuestion } from '../../src/services/systemNotifications';
 import { processToolReturnResults } from '../agents/toolResultProcessing';
 import { upgradeToolReturn } from '../compat/legacyToolResults';
 import { loadItemDataForAgentActions, autoApplyAnnotationAgentActions } from '../utils/agentActionUtils';
@@ -72,93 +74,6 @@ import {
     hasAppliedBulkAnnotations,
     isCreateAnnotationsAgentAction,
 } from '../agents/agentActions';
-import { undoEditMetadataAction } from '../utils/editMetadataActions';
-import { undoCreateItemAction } from '../utils/createItemActions';
-import { undoImportItemAction } from '../utils/importItemActions';
-import { undoCreateCollectionAction } from '../utils/createCollectionActions';
-import { undoOrganizeItemsAction } from '../utils/organizeItemsActions';
-import { undoManageTagsAction } from '../utils/manageTagsActions';
-import { undoManageCollectionsAction } from '../utils/manageCollectionsActions';
-import { undoMergeItemsAction } from '../utils/mergeItemsActions';
-import { undoEditNoteAction, undoEditNoteBatchAction } from '../utils/editNoteActions';
-import { undoCreateNoteAction } from '../utils/createNoteActions';
-import { undoCreateAnnotationsAction } from '../utils/createAnnotationsActions';
-import { undoEditAnnotationsAction } from '../utils/editAnnotationsActions';
-
-/**
- * Undo all applied agent actions from removed runs in reverse chronological order.
- *
- * A single ordered loop is required because actions have cross-type dependencies.
- * Undoing in reverse chronological order restores the original state.
- *
- * Per-action failures are logged and do not stop the loop.
- */
-async function undoAppliedActionsInReverse(actions: AgentAction[]): Promise<void> {
-    // Filter applied actions, keeping their original array position as the
-    // tiebreaker for chronological ordering.
-    const indexed = actions
-        .map((action, index) => ({ action, index }))
-        .filter(({ action }) => {
-            if (isCreateAnnotationsAgentAction(action)) {
-                return hasAppliedBulkAnnotations(action);
-            }
-            if (isAnnotationAgentAction(action)) {
-                return hasAppliedZoteroItem(action);
-            }
-            return action.status === 'applied';
-        });
-
-    // Sort reverse-chronologically by `created_at`, falling back to array
-    // position (which reflects insertion order in threadAgentActionsAtom).
-    indexed.sort((a, b) => {
-        const ta = a.action.created_at ? Date.parse(a.action.created_at) : NaN;
-        const tb = b.action.created_at ? Date.parse(b.action.created_at) : NaN;
-        if (!Number.isNaN(ta) && !Number.isNaN(tb) && ta !== tb) return tb - ta;
-        return b.index - a.index;
-    });
-
-    for (const { action } of indexed) {
-        try {
-            if (isCreateAnnotationsAgentAction(action)) {
-                await undoCreateAnnotationsAction(action);
-            } else if (isEditAnnotationsAgentAction(action)) {
-                // Preserve fields the user manually modified after apply, as
-                // the other edit-action retry paths do.
-                await undoEditAnnotationsAction(action, false);
-            } else if (isAnnotationAgentAction(action)) {
-                const ref = action.result_data as ZoteroItemReference | undefined;
-                if (!ref) continue;
-                const resolved = await resolveItemReference(ref);
-                if (resolved.status === 'found') await resolved.item.eraseTx();
-            } else if (isEditMetadataAgentAction(action)) {
-                // false = preserve fields the user manually modified after apply
-                await undoEditMetadataAction(action, false);
-            } else if (isEditNoteAgentAction(action)) {
-                await undoEditNoteAction(action);
-            } else if (isEditNoteBatchAgentAction(action)) {
-                await undoEditNoteBatchAction(action);
-            } else if (isCreateItemAgentAction(action)) {
-                await undoCreateItemAction(action);
-            } else if (isImportItemAgentAction(action)) {
-                await undoImportItemAction(action);
-            } else if (isCreateCollectionAgentAction(action)) {
-                await undoCreateCollectionAction(action);
-            } else if (isOrganizeItemsAgentAction(action)) {
-                await undoOrganizeItemsAction(action);
-            } else if (isManageTagsAgentAction(action)) {
-                await undoManageTagsAction(action);
-            } else if (isManageCollectionsAgentAction(action)) {
-                await undoManageCollectionsAction(action);
-            } else if (isCreateNoteAgentAction(action)) {
-                await undoCreateNoteAction(action);
-            } else if (action.action_type === 'merge_items') {
-                await undoMergeItemsAction(action);
-            }
-        } catch (error) {
-            logger(`undoAppliedActionsInReverse: Failed to undo action ${action.id} (${action.action_type}): ${error}`, 1);
-        }
-    }
-}
 
 /** Applied actions a retry would remove, by kind, for the undo confirmation. */
 interface ActionsToUndo {
@@ -482,50 +397,49 @@ function refreshNotePreviews(approvals: readonly PendingApproval[]): void {
     for (const { libraryId, zoteroKey } of notes.values()) updateDiffPreviewForNote(libraryId, zoteroKey);
 }
 
-/** The run host for the renderer whose store is `view`. */
-export function createWindowRunHost(view: Store): RunHost {
+/** The renderer whose store is `view`, as the viewer of its run session. */
+export function createWindowRunViewer(view: Store): RunViewer {
     /**
-     * The window's setter, gated by a run's guarded setter: each write happens
-     * only while that setter would still write the run's own state.
+     * The window's setter, behind a run's gate: each write happens only while
+     * that run still owns the chat.
      */
-    const windowSet = (set: Setter): Setter => ((...args: Parameters<Setter>) => {
+    const windowSet = (gate: RunGate): Setter => ((...args: Parameters<Setter>) => {
         let result: unknown;
-        runEffect(set, () => { result = (view.set as Setter)(...args); });
+        gate(() => { result = (view.set as Setter)(...args); });
         return result;
     }) as Setter;
     return {
-        windowId: () => tryGetWindowRuntime()?.id,
+        hostWindow: () => {
+            const runtime = tryGetWindowRuntime(true);
+            return runtime && !runtime.hostWindow.closed ? runtime.hostWindow : null;
+        },
+        sidebarVisible: () => view.get(isSidebarVisibleAtom) === true,
         getModel: () => view.get(selectedModelAtom),
         getUserId: () => view.get(userIdAtom),
         navigationSeq: () => view.get(threadNavigationSeqAtom),
         actionChanges: (actionId: string) => view.get(mergeItemsChoicesAtom)[actionId],
         agentActions: () => view.get(threadAgentActionsAtom),
         chatFillSnapshot: (jobId: string) => view.get(chatFillsAtom).get(jobId)?.snapshot,
+        externalReferences: () => ({
+            externalRefs: view.get(externalReferenceMappingAtom),
+            externalItemMapping: view.get(externalReferenceItemMappingAtom),
+        }),
 
-        notify: (set, notice) => windowSet(set)(addPopupMessageAtom, notice),
-        addWarning: (set, warning) => windowSet(set)(addWarningAtom, warning),
-        reportMissingZoteroData: (set, event) => {
+        notify: (gate, notice) => windowSet(gate)(addPopupMessageAtom, notice),
+        addWarning: (gate, warning) => windowSet(gate)(addWarningAtom, warning),
+        reportMissingZoteroData: (gate, event) => {
             handleMissingZoteroData(
                 view,
                 event,
                 view.get(userIdAtom),
-                (params) => windowSet(set)(addWarningAtom, params),
+                (params) => windowSet(gate)(addWarningAtom, params),
             ).catch(err =>
                 logger(`WS onMissingZoteroData: Failed to handle missing data: ${err}`, 1)
             );
         },
         confirmUndo: (actions, removedRuns, win) => confirmUndoAppliedActions(actions, removedRuns, win),
-        // Resolved when called, not when the host is built.
-        notifyRunComplete: () => notifyRunComplete(),
-        notifyCreditConfirmation: (event) => notifyCreditConfirmation(event),
-        notifyBatchApproval: (event) => notifyBatchApproval(event),
-        notifyUserQuestion: (event) => notifyUserQuestion(event),
 
-        approvalRequested: (event, { silent }) => {
-            refreshNotePreviews([pendingApprovalFromRequest(event)]);
-            // Tell the user when they can't see the approval (e.g. working in another app).
-            if (!silent) notifyApprovalRequest(event);
-        },
+        approvalRequested: (event) => refreshNotePreviews([pendingApprovalFromRequest(event)]),
         approvalsRemoved: (removed) => refreshNotePreviews(removed),
         approvalsCleared: () => {
             dismissDiffPreview();
@@ -534,8 +448,8 @@ export function createWindowRunHost(view: Store): RunHost {
         dismissDiffPreview: () => dismissDiffPreview(),
         reloadThread: (threadId, userId) =>
             view.set(loadThreadAtom, { user_id: userId, threadId, preserveDraft: true }),
-        dropPromptEditDrafts: (set, runIds) => {
-            windowSet(set)(promptEditDraftsAtom, (prev) => {
+        dropPromptEditDrafts: (gate, runIds) => {
+            windowSet(gate)(promptEditDraftsAtom, (prev) => {
                 const next = { ...prev };
                 let changed = false;
                 for (const id of runIds) {
@@ -558,15 +472,14 @@ export function createWindowRunHost(view: Store): RunHost {
             // Re-send acknowledgements of applied actions the server has yet to record.
             retryUnrecordedActionsNow();
         },
-        recordFeatureCredit: (set, grant) => windowSet(set)(recordFeatureCreditGrantAtom, grant),
-        markHighTokenUsage: (set, runId) =>
-            windowSet(set)(backendHighTokenUsageRunsAtom, (prev) => ({ ...prev, [runId]: true })),
-        citationsChanged: (set) => windowSet(set)(maybeShowCitationTipAtom),
+        recordFeatureCredit: (gate, grant) => windowSet(gate)(recordFeatureCreditGrantAtom, grant),
+        markHighTokenUsage: (gate, runId) =>
+            windowSet(gate)(backendHighTokenUsageRunsAtom, (prev) => ({ ...prev, [runId]: true })),
+        citationsChanged: (gate) => windowSet(gate)(maybeShowCitationTipAtom),
         preloadPageLabels: (citations) => preloadPageLabelsForCitations(citations),
         mergePageLabels: (labels) => view.set(mergePageLabelsByAttachmentIdAtom, labels),
-        markExternalReferenceImported: (set, externalId, ref: ZoteroItemReference) =>
-            windowSet(set)(markExternalReferenceImportedAtom, externalId, ref),
-        undoAppliedActions: undoAppliedActionsInReverse,
+        markExternalReferenceImported: (gate, externalId, ref: ZoteroItemReference) =>
+            windowSet(gate)(markExternalReferenceImportedAtom, externalId, ref),
         cleanupTemporaryAnnotations: async (logPrefix) => {
             // Reader-only citation highlights go before the runs that created them.
             try {
@@ -577,15 +490,15 @@ export function createWindowRunHost(view: Store): RunHost {
         },
         leaveJobWaitOnClose: () => leaveJobWait({ closing: tryGetWindowRuntime(true)?.hostWindow ?? null }),
 
-        addAgentActions: (set, actions) => windowSet(set)(addAgentActionsAtom, actions),
-        upsertAgentActions: (set, actions) => windowSet(set)(upsertAgentActionsAtom, actions),
-        removeRunActions: (set, runIds) =>
-            windowSet(set)(threadAgentActionsAtom, (prev) => prev.filter((action) => !runIds.includes(action.run_id))),
-        replaceAgentActions: (set, actions, runIds) => runEffect(set, () => {
+        addAgentActions: (gate, actions) => windowSet(gate)(addAgentActionsAtom, actions),
+        upsertAgentActions: (gate, actions) => windowSet(gate)(upsertAgentActionsAtom, actions),
+        removeRunActions: (gate, runIds) =>
+            windowSet(gate)(threadAgentActionsAtom, (prev) => prev.filter((action) => !runIds.includes(action.run_id))),
+        replaceAgentActions: (gate, actions, runIds) => gate(() => {
             view.set(threadAgentActionsAtom, withUnrecordedResults(view.get, view.set, actions, runIds));
             view.set(resumeUnrecordedResultsAtom);
         }),
-        // Whether or not this window still owns the run.
+        // Whether or not the run still owns the chat.
         recordUndeliveredActions: (info, revocationsAtRunStart) =>
             void view.set(recordUndeliveredActionsAtom, info, revocationsAtRunStart),
 
@@ -606,7 +519,7 @@ export function createWindowRunHost(view: Store): RunHost {
                 }
             })();
         },
-        processToolReturn: (part, set) => processToolReturnResults(part, windowSet(set)),
+        processToolReturn: (part, gate) => processToolReturnResults(part, windowSet(gate)),
         upgradeToolReturn: (part, toolCallArgs) => upgradeToolReturn(part, toolCallArgs),
         prepareAgentActions: async (runId, actions) => {
             await loadItemDataForAgentActions(actions).catch(err =>

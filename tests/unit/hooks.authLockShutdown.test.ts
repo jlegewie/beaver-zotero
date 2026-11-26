@@ -199,7 +199,7 @@ function setupGlobals() {
         itemImport: { dispose: vi.fn() },
         images: { dispose: vi.fn() },
         notePreviews: { detachOwner: vi.fn().mockResolvedValue(undefined) },
-        syncPause: { releaseWindow: vi.fn(), scheduleResumeAfterRun: vi.fn(), resumeSyncNow: vi.fn() },
+        syncPause: { releaseOwnerRuns: vi.fn(), scheduleResumeAfterRun: vi.fn(), resumeSyncNow: vi.fn() },
         transactionWatch: { start: vi.fn(), stop: vi.fn(), openAgeMs: vi.fn(() => 0) },
         data: {
             alive: true,

@@ -10,11 +10,12 @@ must not re-enter the queue.
 
 An operation captures its account generation, source identity, grants and citation
 context at entry. Admission rechecks that identity after waiting. Provider handlers
-and their transitive imports stay React-free; rendering and UI notifications arrive
-through explicit context. Markdown rendering completes before admission and the
-plugin consumes the prepared strings. Preview restoration promises also belong to
-the plugin realm. Originless requests do not inherit a local chat's grants
-or citations. The provider bundle-closure unit test enforces this boundary.
+and their transitive imports stay React-free; UI notifications arrive through
+explicit context. Note writes render their Markdown inside the operation, through the
+plugin's synchronous `exporter.renderNoteMarkdown`; an edit renders only when its
+Markdown fallback runs. Preview restoration promises also belong to the plugin realm.
+Originless requests do not inherit a local chat's grants or citations. The provider
+bundle-closure unit test enforces this boundary.
 
 Item imports resolve an omitted target from the caller's context before admission.
 An explicit unavailable, excluded or read-only library is rejected at execution;

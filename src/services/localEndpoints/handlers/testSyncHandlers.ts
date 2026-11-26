@@ -49,7 +49,7 @@ function snapshot() {
         paused: isSyncPaused(),
         releaseDebounceMs: RELEASE_DEBOUNCE_MS,
         safetyIdleMs: SAFETY_IDLE_MS,
-        instanceServiceRegistered: typeof service?.releaseWindow === 'function'
+        instanceServiceRegistered: typeof service?.releaseOwnerRuns === 'function'
             && typeof service?.resumeSyncNow === 'function',
     };
 }

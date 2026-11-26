@@ -1928,7 +1928,10 @@ describe('tag_attribute_strip strategy', () => {
             newString: '<p>injected</p>',  // bare payload (validate-time shape)
             strippedHtml: '<p>anchor body text</p>',
         }));
-        expect(result?.strategy).toBe('tag_attribute_strip');
+        // spurious_wrap_strip claims an insert anchor first: it unwraps the
+        // anchor only and takes the opening tag from the note, giving the same
+        // splice tag_attribute_strip would.
+        expect(result?.strategy).toBe('spurious_wrap_strip');
         expect(result?.expandedOld).toBe('<p>anchor body text</p>');
         // expandedNew = anchor + injected (splice preserves the anchor).
         expect(result?.expandedNew).toBe('<p>anchor body text</p><p>injected</p>');
@@ -1964,20 +1967,17 @@ describe('tag_attribute_strip strategy', () => {
 
     it('insert_before with bare validate-time new_string preserves the anchor (regression: P2)', () => {
         // Validate-time: new_string is the bare injected payload (no merge yet).
-        // Old = `<p style=…>anchor</p>`, new = `<p>injected</p>`. They don't
-        // share the leading tag (different attributes) but DO share the
-        // trailing `</p>`. spurious_wrap_strip's trailing-only candidate
-        // produces `<p style=…>anchor` and `<p>injected` — the styled form
-        // doesn't appear in the bare-`<p>` haystack, so it fails. Falls
-        // through to tag_attribute_strip, which must build `injected + anchor`
-        // so the splice doesn't replace the anchor.
+        // Old = `<p style=…>anchor</p>`, stored `<p>anchor</p>`. The splice
+        // must keep the anchor and put the payload before the stored block:
+        // `injected + anchor`, never inside the paragraph.
         const result = match(makeInput({
             operation: 'insert_before' as EditNoteOperation,
             oldString: '<p style="font-size: 0.85em;">anchor body text</p>',
             newString: '<p>injected</p>',
             strippedHtml: '<p>anchor body text</p>',
         }));
-        expect(result?.strategy).toBe('tag_attribute_strip');
+        // Claimed by spurious_wrap_strip's insert path (see insert_after above).
+        expect(result?.strategy).toBe('spurious_wrap_strip');
         expect(result?.expandedOld).toBe('<p>anchor body text</p>');
         expect(result?.expandedNew).toBe('<p>injected</p><p>anchor body text</p>');
         expect(result?.expandedNew.endsWith(result!.expandedOld)).toBe(true);

@@ -13,13 +13,6 @@ export interface OperationContext {
     preference?: (tool: string, data?: Record<string, any>) => DeferredToolPreference;
     externalRefs?: ExternalRefContext['externalRefs'];
     externalItemMapping?: ExternalRefContext['externalItemMapping'];
-    renderedMarkdown?: Record<string, string>;
-    /**
-     * Render note Markdown to HTML in a renderer. Citation tags outside code
-     * come back as canonical `<citation …/>` tags for the note citation
-     * builder; tags inside code render as escaped code text.
-     */
-    renderMarkdown?: (content: string) => Promise<string>;
     grantCreatedNote?: (libraryId: number, key: string) => void;
 }
 

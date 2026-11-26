@@ -71,11 +71,14 @@ import {
     reattachResolutionView,
     runReplacementNotesAtom,
 } from '@beaver/agent-core/run-state/runResolution';
-import { agentService } from '@beaver/agent-core/transport/agentService';
+import { getSessionPort } from '../../../src/services/agentRuns/runSession';
+
+/** The transport of this window's run session (plugin realm). */
+const transport = () => getSessionPort().debugTransport();
 import { logger } from '@beaver/agent-core/platform/logger';
 import type { AgentRun } from '@beaver/agent-core/agents/types';
 import { flushRunProjection } from '../../runtime/windowRunSession';
-import { runSessionStore } from '../../../src/services/agentRuns/runSession';
+import { runSessionStore } from '../../runtime/runSessionStore';
 import { admissionUnreachableAtom } from '../../runtime/threadAdmission';
 import { threadAdmissionAtom } from '../../../src/services/agentRuns/threadAdmission';
 import {
@@ -219,8 +222,8 @@ function currentIds() {
         })(),
         stoppingPreviousRun: store.get(stoppingPreviousRunAtom),
         transport: {
-            connected: agentService.isConnected(),
-            run: agentService.runLinkState(),
+            connected: transport().isConnected(),
+            run: transport().runLinkState(),
         },
         runCount: runs.length,
         lastRunId: runs.length ? runs[runs.length - 1].id : null,
@@ -906,7 +909,7 @@ function disarmDrop(): void {
  * transport at a closed local port.
  */
 function dropSocketNow(request: any): string | null {
-    const service = agentService as any;
+    const service = transport() as any;
     const ws: WebSocket | null = service.ws ?? null;
     if (!ws || ws.readyState !== WebSocket.OPEN) return 'No open chat connection';
     if (request?.badToken && service.run) {
@@ -939,7 +942,7 @@ function dropSocketNow(request: any): string | null {
  */
 function armDrop(request: any): void {
     disarmDrop();
-    const service = agentService as any;
+    const service = transport() as any;
     const original = service.getDataProvider();
     const when: string = request.when;
     const isWrite = (name: string) => name === 'agent_action_execute';
@@ -996,7 +999,7 @@ function armDrop(request: any): void {
  *   disarm    cancel an armed drop.
  */
 export async function handleTestChatDropConnectionHttpRequest(request: any) {
-    const before = agentService.runLinkState();
+    const before = transport().runLinkState();
     if (request?.disarm) {
         const wasArmed = armedDrop !== null;
         disarmDrop();
@@ -1066,7 +1069,7 @@ export async function handleTestRunSnapshotHttpRequest(request: any) {
         ok: true,
         threadId: store.get(currentThreadIdAtom),
         runs: runs.map(summarizeRun),
-        runEvents: agentService.recentRunEvents(),
+        runEvents: transport().recentRunEvents(),
         armedDrop: armedDrop?.when ?? null,
         collectionCount,
         noteCount,

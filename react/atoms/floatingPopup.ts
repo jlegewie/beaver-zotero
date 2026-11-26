@@ -1,6 +1,5 @@
 import { atom } from 'jotai';
 import { PopupMessage } from '../types/popupMessage';
-import { v4 as uuidv4 } from 'uuid';
 
 /**
  * Floating popup messages that render over the main Zotero window,
@@ -16,7 +15,7 @@ export const floatingPopupMessagesAtom = atom<PopupMessage[]>([]);
 export const addFloatingPopupMessageAtom = atom(
     null,
     (get, set, newMessage: Omit<PopupMessage, 'id'> & { id?: string }) => {
-        const id = newMessage.id ?? uuidv4();
+        const id = newMessage.id ?? crypto.randomUUID();
         const messageWithDefaults: PopupMessage = {
             id,
             expire: true,

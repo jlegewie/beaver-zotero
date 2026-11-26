@@ -2,7 +2,9 @@
 
 Beaver 0.25.0-beta.1 gives each main Zotero window its own chat runtime and gives
 the single separate Beaver window another runtime. Different windows can respond
-in different chats concurrently. A window still has only one active chat.
+in different chats concurrently. A window still has only one active chat. Its runs
+execute in the plugin realm, in the run session the instance keeps for that window
+(see [thread runtime](thread-runtime.md)); the window shows and controls them.
 
 Opening the separate window focuses its existing chat. To show a saved chat there,
 use **Open in Beaver window** in the chat menu. The destination confirms replacing
