@@ -135,3 +135,60 @@ describe('zoteroItemData.resolveItemDisplay', () => {
         expect(display?.creator).toBe('Jones');
     });
 });
+
+describe('zoteroItemData.resolveLinkedObject', () => {
+    const getByLibraryAndKeyAsync = vi.fn();
+    const getByLibraryAndKey = vi.fn();
+    const ref = { library_id: 0, library_ref: 'u', zotero_key: 'ANVV522N' };
+
+    /** A Zotero item of one kind; the rest of its type checks answer false. */
+    function itemOf(kind: 'annotation' | 'note' | 'attachment' | 'regular', extra: Record<string, unknown> = {}) {
+        return {
+            isAnnotation: () => kind === 'annotation',
+            isNote: () => kind === 'note',
+            isAttachment: () => kind === 'attachment',
+            isRegularItem: () => kind === 'regular',
+            ...extra,
+        };
+    }
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        (Zotero as any).Items = { getByLibraryAndKeyAsync };
+        (Zotero as any).Collections = { getByLibraryAndKey };
+        resolveLibraryRef.mockReturnValue(1);
+        getByLibraryAndKeyAsync.mockResolvedValue(false);
+        getByLibraryAndKey.mockReturnValue(false);
+    });
+
+    it('names regular items, notes and annotations', async () => {
+        getByLibraryAndKeyAsync.mockResolvedValueOnce(itemOf('regular'));
+        expect(await zoteroItemData.resolveLinkedObject!(ref)).toEqual({ kind: 'item' });
+        getByLibraryAndKeyAsync.mockResolvedValueOnce(itemOf('note'));
+        expect(await zoteroItemData.resolveLinkedObject!(ref)).toEqual({ kind: 'note' });
+        getByLibraryAndKeyAsync.mockResolvedValueOnce(itemOf('annotation'));
+        expect(await zoteroItemData.resolveLinkedObject!(ref)).toEqual({ kind: 'annotation' });
+        expect(getByLibraryAndKeyAsync).toHaveBeenCalledWith(1, 'ANVV522N');
+    });
+
+    it('gives an attachment its content kind', async () => {
+        getByLibraryAndKeyAsync.mockResolvedValue(itemOf('attachment', {
+            attachmentContentType: 'application/pdf',
+            attachmentFilename: 'paper.pdf',
+            attachmentLinkMode: 0,
+        }));
+        expect(await zoteroItemData.resolveLinkedObject!(ref)).toEqual({ kind: 'attachment', contentKind: 'pdf' });
+    });
+
+    it('falls back to a collection when the key names no item', async () => {
+        getByLibraryAndKey.mockReturnValue({ key: 'ANVV522N' });
+        expect(await zoteroItemData.resolveLinkedObject!(ref)).toEqual({ kind: 'collection' });
+        expect(getByLibraryAndKey).toHaveBeenCalledWith(1, 'ANVV522N');
+    });
+
+    it('says nothing for a key it cannot find or a library this computer lacks', async () => {
+        expect(await zoteroItemData.resolveLinkedObject!(ref)).toBeNull();
+        resolveLibraryRef.mockReturnValue(null);
+        expect(await zoteroItemData.resolveLinkedObject!(ref)).toBeNull();
+    });
+});

@@ -21,6 +21,7 @@ export type {
     EditNoteResolvedTarget,
     HostButtonVariant,
     ResolvedItemDisplay,
+    LinkedObject,
     CitationActivation,
     CitationActivationIntent,
     CitationExportRequest,

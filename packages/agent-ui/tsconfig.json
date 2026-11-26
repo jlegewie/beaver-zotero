@@ -215,6 +215,7 @@
     "./src/chat/index.ts",
     "./src/chat/Citation.tsx",
     "./src/chat/SiteIcon.tsx",
+    "./src/chat/MarkdownLink.tsx",
     "./src/chat/CitedSourcesList.tsx",
     "./src/chat/ChipPopup.tsx",
     "./src/chat/AskUserQuestionCard.tsx",

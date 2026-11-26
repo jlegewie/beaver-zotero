@@ -7,12 +7,13 @@
  */
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@beaver/agent-ui/chat/Citation', () => ({
     default: () => null,
 }));
 
+import { setHost } from '@beaver/agent-ui/host';
 import { unwrapLegacyNoteTags } from '@beaver/agent-export/render/legacyNoteTags';
 import MarkdownRenderer from '../../../react/components/messages/MarkdownRenderer';
 
@@ -107,6 +108,10 @@ describe('unwrapLegacyNoteTags', () => {
 });
 
 describe('MarkdownRenderer on legacy note sections', () => {
+    // A link renders as an anchor only on a host that can open it.
+    beforeEach(() => setHost({ navigation: { openExternalUrl: vi.fn() } as any }));
+    afterEach(() => setHost({}));
+
     it('parses a body that follows the opening tag with no blank line', () => {
         // The shape the models actually wrote: tag, newline, content.
         const html = render('<note title="Summary">\n# Summary\n- First\n</note>');

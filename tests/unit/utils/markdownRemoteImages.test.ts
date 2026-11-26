@@ -62,7 +62,8 @@ describe('MarkdownRenderer images', () => {
     it('renders a markdown image as a link instead of an <img>', () => {
         const html = staticHtml(`Done.\n\n![chart](${EXFIL_URL})`);
         expect(html).not.toContain('<img');
-        expect(html).toContain('>chart</a>');
+        // The label, after the link's type icon.
+        expect(html).toMatch(/>chart(<\/span>)?<\/a>/);
     });
 
     it('does not render raw HTML images', () => {
@@ -113,7 +114,7 @@ describe('MarkdownRenderer images', () => {
             expect(html).not.toContain('<img');
             expect(html.match(/<a\b/g)).toHaveLength(1);
             expect(html).toContain(`href="${ARTICLE_URL}"`);
-            expect(html).toContain('>chart</a>');
+            expect(html).toMatch(/>chart(<\/span>)?<\/a>/);
             expect(html).not.toContain('attacker.example');
         });
 

@@ -803,3 +803,23 @@
         background-color: #fff;
     }
 }
+
+/* Chat Markdown links: a small type icon before the link text (an item, a PDF,
+   a note, an annotation, a collection, a web page). The icon is an inline box
+   whose start padding holds the glyph: unlike an inline-block, an inline box's
+   start edge never breaks from the text after it, so the icon cannot end a line
+   alone. The glyph is positioned, so a hover underline stays under the text. */
+.beaver-root .markdown-link-icon {
+    position: relative;
+    padding-inline-start: 1.17em;
+}
+
+.beaver-root .markdown-link-icon svg {
+    position: absolute;
+    inset-inline-start: 0;
+    top: 50%;
+    width: 0.95em;
+    height: 0.95em;
+    transform: translateY(-50%);
+    opacity: 0.9;
+}
