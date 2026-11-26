@@ -11,10 +11,12 @@ import {
 } from "./ui";
 
 import { citationsAtom, citationMapAtom, resetCitationMarkersAtom, mergePageLabelsByAttachmentIdAtom } from "@beaver/agent-core/citations/atoms";
-import { runSessionStore } from '../runtime/runSessionStore';
+import { runSessionStore, sessionStoreOf } from '../runtime/runSessionStore';
+import { prepareChatSession, showChatSession, type PendingChatSession } from '../runtime/windowRunSession';
 import { maybeShowCitationTipAtom } from "./citationTip";
 import { preloadPageLabelsForCitations } from "../utils/pageLabels";
-import { getSessionPort } from "../../src/services/agentRuns/runSession";
+import { threadNavigationSeqAtom } from './threadNavigation';
+import { getSessionPort } from '../../src/services/agentRuns/runSession';
 import { threadService, ZoteroInstanceRef } from "@beaver/agent-core/transport/threadService";
 import { getPref } from "../../src/utils/prefs";
 import { loadFullItemDataWithAllTypes, currentZoteroInstanceRef } from "../../src/utils/zoteroUtils";
@@ -29,10 +31,8 @@ import { importActionReference } from "../utils/importItemDisplay";
 import { ExternalReference } from "@beaver/agent-core/types/externalReferences";
 import { threadRunsAtom, activeRunAtom, currentThreadIdAtom, currentThreadNameAtom, isLoadingThreadAtom, resetRunSelectorCaches } from "@beaver/agent-core/run-state/atoms";
 import { loadThreadRuns } from "@beaver/agent-core/run-state/loadThreadRuns";
-import { abandonActiveRunLocallyAtom, isWSChatPendingAtom, isWSConnectedAtom, isWSReadyAtom } from "./agentRunAtoms";
 import { clearParkedAnswersAtom, syncParkedCardsAtom } from "../../src/services/agentRuns/parkedRuns";
-import { confirmLeaveJobWaitAtom, fillLeaveStops, leaveJobWait } from "./jobLeave";
-import { AgentRun, isRunActive } from "@beaver/agent-core/agents/types";
+import { AgentRun } from "@beaver/agent-core/agents/types";
 import { 
     threadAgentActionsAtom,
     withUnrecordedResults,
@@ -208,15 +208,6 @@ export const currentThreadScrollPositionAtom = atom(
 export const recentThreadsAtom = atom<ThreadData[]>([]);
 
 /**
- * Ask the user to confirm interrupting the currently streaming run.
- * Returns true if the user confirmed (or there was nothing to confirm).
- */
-function confirmInterruptActiveRun(title: string, text: string, confirmLabel: string, window?: Window): boolean {
-    // Hosts without a dialogs slice proceed as confirmed.
-    return getHost().dialogs?.confirm({ title, text, confirmLabel, window }) ?? true;
-}
-
-/**
  * Thread ids whose instance-mismatch warning the user has already confirmed
  * this session — don't re-prompt when switching back and forth.
  */
@@ -234,73 +225,7 @@ function confirmOpenMismatchedThread(window?: Window): boolean {
     }) ?? true;
 }
 
-/** The open chat's run, when it is reconnecting and can be left rather than stopped. */
-function leavableRunId(get: (atom: any) => any): string | null {
-    return getSessionPort().canLeaveReconnectingRun() ? get(activeRunAtom)?.id ?? null : null;
-}
-
-/**
- * Cancel any active run when switching threads.
- * This ensures the WebSocket connection is closed and UI state is consistent.
- *
- * `leaveRunId` names a run that was reconnecting when the user chose to
- * leave, found with `leavableRunId` before any await. It is left instead of
- * stopped: losing the connection is not a Stop, so the server keeps the run
- * (see `AgentService.leaveRun`) and the chat shows how it ended when the user
- * returns.
- */
-async function cancelActiveRunIfNeeded(
-    get: (atom: any) => any,
-    set: (atom: any, value?: any) => void,
-    isCurrent = () => true,
-    leaveRunId: string | null = null,
-    parkRunId: string | null = null,
-): Promise<void> {
-    const hadActiveWork = get(isWSChatPendingAtom) || get(activeRunAtom);
-    const chat = runSessionStore();
-    // Navigation revokes socket callbacks, so cleanup must be synchronous and
-    // complete even when the connection's close notification is ignored.
-    set(abandonActiveRunLocallyAtom);
-    chat.set(activeRunAtom, null);
-    chat.set(clearParkedAnswersAtom);
-
-    if (parkRunId) {
-        // The run is waiting only on cards: it parks, and they stay
-        // answerable when the user comes back. Stopped instead if the server
-        // refuses.
-        const outcome = await getSessionPort().parkRun(parkRunId);
-        logger(`cancelActiveRunIfNeeded: Parking run ${parkRunId} before switching threads: ${outcome}`, 1);
-        // Leaving released the chat, which refetched thread lists before the
-        // run parked: refetch them again so they show the chat as waiting.
-        if (outcome === 'ended' || outcome === 'sent') Zotero.Beaver?.threads?.invalidateViews();
-        if (!isCurrent()) return;
-        chat.set(isWSConnectedAtom, false);
-        chat.set(isWSReadyAtom, false);
-        return;
-    }
-
-    if (leaveRunId && getSessionPort().leaveRun(leaveRunId)) {
-        logger(`cancelActiveRunIfNeeded: Leaving run ${leaveRunId} to the server after it lost its connection`, 1);
-        chat.set(isWSConnectedAtom, false);
-        chat.set(isWSReadyAtom, false);
-        return;
-    }
-
-    if (hadActiveWork) {
-        logger('cancelActiveRunIfNeeded: Canceling active run before switching threads', 1);
-        // Cancel the WebSocket connection
-        await getSessionPort().cancel();
-        if (!isCurrent()) return;
-        chat.set(isWSConnectedAtom, false);
-        chat.set(isWSReadyAtom, false);
-    }
-}
-
-/**
- * Counts chat navigations, so work started in one chat can tell it has been
- * left behind.
- */
-export const threadNavigationSeqAtom = atom(0);
+export { threadNavigationSeqAtom };
 const threadLoadRequestSeqAtom = atom(0);
 
 /**
@@ -314,47 +239,16 @@ export const newThreadAtom = atom(
         options?: {
             window?: Window;
             skipAutoPopulate?: boolean;
-            skipActiveRunConfirm?: boolean;
             /** Keep the composer's text and pills; attachments are still reset. */
             preserveDraft?: boolean;
         },
     ): Promise<number | undefined> => {
-        // A fill the response waits on goes on in its open table, or stops;
-        // with the table closed, the user confirms leaving, or stays. That
-        // question replaces the one about stopping the response.
-        const asksAboutFill = !options?.skipActiveRunConfirm && !!fillLeaveStops(get);
-        if (asksAboutFill && !set(confirmLeaveJobWaitAtom, { leave: 'new_chat', window: options?.window })) return;
-        // Show loading state immediately if there's an active run to cancel.
-        // Gated on run status, not presence: a run that failed keeps sitting in
-        // activeRunAtom, and prompting over it claims Beaver is still working.
-        const hasActiveWork = get(isWSChatPendingAtom) || isRunActive(get(activeRunAtom));
-        // A reconnecting run is left, and a run waiting only on cards is
-        // parked, not stopped, so there is nothing to confirm.
-        const leaveRunId = leavableRunId(get);
-        const parkRunId = leaveRunId ? null : getSessionPort().parkableRunId();
-        if (hasActiveWork) {
-            if (!options?.skipActiveRunConfirm && !asksAboutFill && !leaveRunId && !parkRunId && !confirmInterruptActiveRun(
-                'Start new chat?',
-                'Beaver is still generating a response in this chat. Starting a new chat will stop it.',
-                'Start New Chat',
-                options?.window,
-            )) {
-                return;
-            }
-            set(isLoadingThreadAtom, true);
-        }
-        // The user has committed to leaving. See threadNavigationSeqAtom.
+        // A run going in the chat being left goes on in its session.
         const navigation = get(threadNavigationSeqAtom) + 1;
         set(threadNavigationSeqAtom, navigation);
         const isCurrent = () => get(threadNavigationSeqAtom) === navigation;
 
         try {
-            // Before the run stops: a fill left to its open table runs on.
-            leaveJobWait();
-            // Cancel any active run before switching threads
-            await cancelActiveRunIfNeeded(get, set, isCurrent, leaveRunId, parkRunId);
-            if (!isCurrent()) return;
-
             // Clean up any temporary annotations from previous thread
             await BeaverTemporaryAnnotations.cleanupAll().catch(error => {
                 logger(`newThreadAtom: Error cleaning up temporary annotations: ${error}`);
@@ -362,6 +256,7 @@ export const newThreadAtom = atom(
 
             if (!isCurrent()) return;
             const isLibraryTab = get(isLibraryTabAtom);
+            showChatSession(null);
             const chat = runSessionStore();
             chat.set(currentThreadIdAtom, null);
             chat.set(currentThreadNameAtom, null);
@@ -442,34 +337,15 @@ export const loadThreadAtom = atom(
             /** Skip the instance-mismatch confirm (headless test drivers). */
             skipInstanceMismatchConfirm?: boolean;
             preserveDraft?: boolean;
-            /** Finished-chat navigation stages all state until loading succeeds. */
+            /** Opening a chat from another window stages all state until loading succeeds. */
             canCommit?: () => boolean;
         },
     ): Promise<boolean> => {
-        // Confirm before interrupting a run that's actively streaming in the
-        // current thread. Status, not presence — see newThreadAtom.
-        const hasActiveWork = get(isWSChatPendingAtom) || isRunActive(get(activeRunAtom));
-        if (canCommit && (hasActiveWork || !canCommit())) return false;
-        // A reconnecting run is left, and a run waiting only on cards is
-        // parked, not stopped, so there is nothing to confirm.
-        const leaveRunId = leavableRunId(get);
-        const parkRunId = leaveRunId ? null : getSessionPort().parkableRunId();
-        // A fill the response waits on asks below, in place of this question.
+        const held: { pending: PendingChatSession | null } = { pending: null };
+        const load = async (): Promise<boolean> => {
+        if (canCommit && !canCommit()) return false;
+        // A run going in the chat being left goes on in its session.
         const leaving = threadId !== get(currentThreadIdAtom);
-        const asksAboutFill = leaving && !!fillLeaveStops(get);
-        // Asked here, the user has agreed to stop the response, and a fill it
-        // starts waiting on meanwhile is not asked about again.
-        const askedToStop = hasActiveWork && !asksAboutFill && !leaveRunId && !parkRunId;
-        if (askedToStop && !confirmInterruptActiveRun(
-            'Switch chat?',
-            'Beaver is still generating a response in this chat. Switching chats will stop it.',
-            'Switch Chat',
-            window,
-        )) {
-            // A canceled load can't fulfill a pending deep-link scroll target.
-            set(pendingScrollToRunAtom, null);
-            return false;
-        }
 
         // Preflight can still be cancelled. Keep the committed navigation generation
         // intact so in-flight retries are not abandoned unless a switch is accepted.
@@ -489,10 +365,29 @@ export const loadThreadAtom = atom(
             : get(threadLoadRequestSeqAtom) === request &&
                 (!canCommit || canCommit()) && get(threadNavigationSeqAtom) === previousNavigation;
         const liveSet = set;
-        // The chat's state is written to the run session's store, the
-        // window's own state to `set`.
-        const chat = runSessionStore();
-        let chatSet = chat.set;
+        // The chat's state is written to its run session's store, the
+        // window's own state to `set`. A staged load prepares the session of
+        // the chat it opens and shows it only once loading has succeeded.
+        const pending = held.pending = canCommit && leaving ? prepareChatSession(threadId) : null;
+        let chat = pending ? sessionStoreOf(pending.port) : runSessionStore();
+        let port = pending?.port ?? getSessionPort();
+        /**
+         * Whether the session has had work going since the load began: then
+         * it is the authority for the chat, and the load fills in only this
+         * window's own state. Checked again at every write, since another
+         * window viewing the session can start a run (and even finish it)
+         * while this one loads history that predates it.
+         */
+        let observing = false;
+        let writerSeq = port.writerSeq();
+        const writeChat = ((...args: any[]) => {
+            if (observing || port.isBusy() || port.writerSeq() !== writerSeq) {
+                observing = true;
+                return undefined;
+            }
+            return (chat.set as any)(...args);
+        }) as typeof chat.set;
+        let chatSet = writeChat;
         // Queue writes, including action atoms, while hydration can still fail.
         // No destination state is replaced until the final admission/draft check.
         const staged: Array<() => void> = [];
@@ -501,7 +396,7 @@ export const loadThreadAtom = atom(
                 staged.push(() => (liveSet as any)(...args));
             }) as typeof set;
             chatSet = ((...args: any[]) => {
-                staged.push(() => (chat.set as any)(...args));
+                staged.push(() => (writeChat as any)(...args));
             }) as typeof chatSet;
         }
         // Hydration callbacks can finish after this navigation is superseded.
@@ -562,13 +457,6 @@ export const loadThreadAtom = atom(
             confirmedMismatchedThreadIds.add(threadId);
         }
 
-        // Leaving a response that waits on a fill: see newThreadAtom.
-        if (isCurrent() && leaving && !askedToStop && !liveSet(confirmLeaveJobWaitAtom, { leave: 'switch_chat', window })) {
-            set(pendingScrollToRunAtom, null);
-            if (!canCommit) liveSet(isLoadingThreadAtom, false);
-            return false;
-        }
-
         if (!isCurrent()) return false;
         if (!canCommit) {
             committed = true;
@@ -577,12 +465,12 @@ export const loadThreadAtom = atom(
 
         let loaded = false;
         try {
-            // Before the run stops: a fill left to its open table runs on. A
-            // staged navigation ends the wait when it commits the new chat.
-            if (leaving && !canCommit) leaveJobWait();
-            // Cancel any active run before loading a different thread
-            if (!canCommit) await cancelActiveRunIfNeeded(get, set, isCurrent, leaveRunId, parkRunId);
-            if (!isCurrent()) return false;
+            if (!canCommit) {
+                port = showChatSession(threadId);
+                chat = runSessionStore();
+                writerSeq = port.writerSeq();
+            }
+            observing = port.isBusy();
             // Clean up any temporary annotations from previous thread
             if (!canCommit) await BeaverTemporaryAnnotations.cleanupAll().catch(error => {
                 logger(`loadThreadAtom: Error cleaning up temporary annotations: ${error}`);
@@ -647,7 +535,6 @@ export const loadThreadAtom = atom(
             });
 
             if (!isCurrent()) return false;
-            if (canCommit && activity.state !== "idle") return false;
             setAdmission(chatSet, threadId, tailRunId, activity);
             chatSet(threadConflictAtom, null);
             // Protocol deep-links can request a run that does not exist in the target thread.
@@ -807,9 +694,9 @@ export const loadThreadAtom = atom(
                     chatSet(currentThreadNameAtom, fetchedName);
                 }
             }
-            if (canCommit) {
+            if (canCommit && !observing) {
                 const latest = await readAdmission(threadId);
-                if (!isCurrent() || latest.activity.state !== 'idle' || latest.tailRunId !== tailRunId) return false;
+                if (!isCurrent() || latest.tailRunId !== tailRunId) return false;
             }
             loaded = true;
         } catch (error) {
@@ -840,14 +727,15 @@ export const loadThreadAtom = atom(
             if (!loaded || !canCommit()) return false;
             committed = true;
             liveSet(threadNavigationSeqAtom, navigation);
+            pending?.show();
             staged.forEach(apply => apply());
             set = liveSet;
-            chatSet = chat.set;
+            chatSet = writeChat;
             if (!preserveDraft) void BeaverTemporaryAnnotations.cleanupAll().catch(error => {
                 logger(`loadThreadAtom: Error cleaning up temporary annotations: ${error}`);
             });
         }
-        if (loaded) chatSet(viewedHistoryRevisionAtom, loadedHistoryRevision);
+        if (loaded && !observing) chatSet(viewedHistoryRevisionAtom, loadedHistoryRevision);
         if (preserveDraft || !loaded) return loaded;
         // Clear sources for now
         set(currentMessageItemsAtom, []);
@@ -858,5 +746,12 @@ export const loadThreadAtom = atom(
         set(removePopupMessagesByTypeAtom, ['items_summary']);
         set(clearComposerAtom);
         return loaded;
+        };
+        try {
+            return await load();
+        } finally {
+            // A staged load that did not show its chat lets go of its session.
+            held.pending?.cancel();
+        }
     },
 );

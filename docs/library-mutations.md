@@ -27,13 +27,16 @@ read snapshots and subscribe to that plugin-owned source, releasing subscription
 unmounted. Manual imports carry guarded completion callbacks and explicit thread/action
 identities; completion can outlive a run but cannot cross account replacement or window closure.
 
-Closing a window cancels that owner's waiting jobs. An executing job retains the
+Closing a window cancels that window's waiting jobs. A chat run's operations are owned
+by its session (`run:<sessionId>`), not by a window: they go on when windows close, and
+stop, account revocation and shutdown cancel them. An executing job retains the
 queue and its sync-pause token until its actual work settles. Timeouts and cancellation
 must not race a still-running save and release the lock early. Plugin disposal closes
 admission and awaits active work before disposing shared resources.
 
-`syncPause` owns independent tokens for chat runs and executing mutations. Window
-cleanup releases only that window's chat tokens. Safety timers cannot release an
+`syncPause` owns independent tokens for chat runs and executing mutations. A run's
+token is released once its run is no longer pending, and when its session ends; window
+cleanup releases only that window's own tokens. Safety timers cannot release an
 active mutation's token.
 
 `notePreviews` claims individual editor instances. A write awaits restoration of all

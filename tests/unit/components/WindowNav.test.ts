@@ -18,6 +18,14 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('jotai', () => ({ useAtomValue: () => null, useSetAtom: () => vi.fn() }));
 vi.mock('../../../react/atoms/threads', () => ({ newThreadAtom: {} }));
+vi.mock('../../../react/atoms/runActivity', async () => {
+    const { awaitingInputLabel } = await import('../../../src/services/threads/awaitingInput');
+    // No chat has a live session here: rows show what the backend reports.
+    return {
+        useThreadRunStatus: (_id: string, awaiting?: any) => (awaiting ? { kind: 'awaiting', awaiting } : null),
+        threadRunStatusLabel: (status: any) => (status ? awaitingInputLabel(status.awaiting).toLowerCase() : ''),
+    };
+});
 vi.mock('../../../react/atoms/auth', () => ({ userAtom: {} }));
 vi.mock('../../../react/atoms/profile', () => ({ creditPlanAtom: {}, hasCreditPlanAtom: {} }));
 vi.mock('../../../react/runtime/SurfaceWindowContext', () => ({ useSurfaceWindow: () => window }));

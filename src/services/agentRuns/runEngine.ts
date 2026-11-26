@@ -4,7 +4,7 @@
  * It owns connecting and reattaching, stream events, decision cards, stop,
  * retry, resume and parked-run resumes, and settlement with the server. It
  * writes only its session's store, applying each event as it arrives, and
- * reaches the window it runs for only through the session's host (`RunHost`):
+ * reaches the windows that show its chat only through the session's host (`RunHost`):
  * selections, notices, dialogs, agent actions, and the window-side work that
  * follows stream events. What the engine keeps between events lives on its
  * `RunSession`, never at module level.
@@ -12,7 +12,7 @@
  * Every action atom exported here runs on the session's store, whichever
  * store it is called on. Window code imports them through
  * `react/atoms/agentRunAtoms`, which assembles prompts from the composer and
- * installs the renderer's session.
+ * reaches the session of the chat the window shows.
  */
 
 import { isThreadConflict } from "@beaver/agent-core/types/apiErrors";
@@ -28,7 +28,7 @@ import {
     type AdmissionWaitReason,
 } from './threadAdmission';
 import { reattachResolutionAtom } from "@beaver/agent-core/run-state/runResolution";
-import { acquireWriter, assertWriter, bindWriter, currentWriter, ownsWriter, releaseWriter, type WriterLease } from './threadWriter';
+import { acquireWriter, assertWriter, bindWriter, currentWriter, ownsWriter, releaseWriter, sessionClaimHolder, type WriterLease } from './threadWriter';
 import { viewedHistoryRevisionAtom } from './threadAdmission';
 import { getCredentialGeneration, assertCredentialGeneration } from '@beaver/agent-core/transport/credentials';
 import { getLibraryRevocations } from '../agentDataProvider/utils';
@@ -99,6 +99,8 @@ import {
     wsRetryAtom,
 } from '@beaver/agent-core/run-state/atoms';
 import { isJobDeferral } from '@beaver/agent-core/protocol/jobCallProtocol';
+import { addExternalReferencesToMappingAtom, externalReferenceItemMappingAtom } from '@beaver/agent-core/citations/externalReferences';
+import { externalReferencesOfToolReturn } from './toolReturnReferences';
 import { jobWaitAtom, settleJobWait } from './jobWait';
 import { citationsAtom } from '@beaver/agent-core/citations/atoms';
 import type { Citation } from '@beaver/agent-core/types/citations';
@@ -1514,6 +1516,10 @@ export function createWSCallbacks(
 
             // Process tool return results
             if (event.part.part_kind === "tool-return") {
+                // The session keeps the references its run found, for the
+                // note citations of its later writes, with or without a window.
+                const references = externalReferencesOfToolReturn(event.part);
+                if (references.length) set(addExternalReferencesToMappingAtom, references);
                 await session.host.processToolReturn(event.part, set);
 
                 // Open the new table unless its fill already opened it.
@@ -1925,11 +1931,15 @@ export function createWSCallbacks(
                     const resultData = action.result_data as CreateItemResultData;
 
                     if (externalId && resultData.library_id && resultData.zotero_key) {
-                        session.host.markExternalReferenceImported(set, externalId, {
+                        const imported = {
                             library_id: resultData.library_id,
                             zotero_key: resultData.zotero_key,
                             library_ref: resultData.library_ref,
-                        });
+                        };
+                        // The session keeps it too, for the note citations of
+                        // its later writes, with or without a window.
+                        set(externalReferenceItemMappingAtom, (prev) => ({ ...prev, [externalId]: imported }));
+                        session.host.markExternalReferenceImported(set, externalId, imported);
                         logger(`WS onAgentActions: Marked external reference ${externalId} as imported`, 1);
                     }
                 }
@@ -3057,16 +3067,25 @@ export const abandonActiveRunLocallyAtom = sessionAction('abandonActiveRunLocall
 /**
  * User-initiated close: cancel on the backend, then close.
  * Local bookkeeping is shared with shutdown via `abandonActiveRunLocallyAtom`.
+ *
+ * `runId` names the run the Stop was pressed for, when the control showed
+ * one: a run that has replaced it since (a resume, another window's message)
+ * is not stopped.
  */
-export const closeWSConnectionAtom = sessionAction('closeWSConnection',async (get, set) => {
+export const closeWSConnectionAtom = sessionAction('closeWSConnection',async (get, set, runId?: string | null) => {
     const session = sessionOf(get);
     // A retry whose removal is committing cannot be called off any more; the
     // Stop is applied to its replacement once that is in place (see
     // `beginRetryCommit`).
     const commit = session.retryCommit;
-    if (commit && get(retryPendingRunIdAtom) === commit.runId) {
+    if (commit && get(retryPendingRunIdAtom) === commit.runId && (!runId || runId === commit.runId)) {
         commit.stopRequested = true;
         logger(`closeWSConnectionAtom: retry of run ${commit.runId} is committing its removal; holding the Stop`, 1);
+        return;
+    }
+    const shown = get(activeRunAtom)?.id ?? null;
+    if (runId && shown !== runId) {
+        logger(`closeWSConnectionAtom: Stop was for run ${runId}, not the running ${shown}; ignoring it`, 1);
         return;
     }
     // A run stopped while it reconnects is stopped once the server has it
@@ -3089,13 +3108,13 @@ export const closeWSConnectionAtom = sessionAction('closeWSConnection',async (ge
 });
 
 /**
- * Close because this client is going away (window close, quit, or plugin disable).
+ * Close because the instance is going away (Zotero quits or Beaver shuts
+ * down): the registry closes each session this way.
  *
  * Sends a 1000 close, not a cancel (cancel is billed as user-stop). Close is
- * synchronous and happens first. Also aborts in-flight connect loops; if this
- * bundle owns neither a socket nor a loop there is no live run of its own to
- * abandon, so skip. Each main window evaluates its own copy of this bundle,
- * so a window only ever closes the connection it opened.
+ * synchronous and happens first. Also aborts in-flight connect loops; if the
+ * session owns neither a socket nor a loop there is no live run of its own to
+ * abandon, so skip.
  *
  * `reason` is logged server-side as the disconnect path.
  */
@@ -3109,9 +3128,6 @@ export const closeWSConnectionForShutdownAtom = sessionAction('closeWSConnection
         const session = sessionOf(get);
         // Latch first: a send still preparing has nothing to close or abandon.
         session.clientShutDown = true;
-        // A window closing while Zotero runs on leaves the fill it waits on to
-        // a table still on screen, or stops it. On a quit Zotero stops it.
-        if (!Zotero.__beaverShuttingDown) session.host.leaveJobWaitOnClose();
         if (!session.agentService.isConnected() && session.connectLoopsInFlight === 0) { releaseWriter(session); return; }
         // A run waiting only on cards parks rather than ending with the
         // client, so they can be answered next time. Best effort: the server
@@ -3233,6 +3249,10 @@ export const unmarkApprovalStaleAtom = sessionAction('unmarkApprovalStale',
 export const sendApprovalResponseAtom = sessionAction('sendApprovalResponse',
     (get, set, { actionId, approved, userInstructions }: { actionId: string; approved: boolean; userInstructions?: string | null }) => {
         const session = sessionOf(get);
+        // Only a card still waiting is answered: one answered already, in this
+        // window or another that shows the chat, or whose run has ended, is
+        // gone. An answer that never left may be sent again.
+        if (!get(pendingApprovalsAtom).has(actionId) && !get(staleApprovalActionIdsAtom).has(actionId)) return;
         const actionChanges = approved ? session.host.actionChanges(actionId) : undefined;
         const toolcallId = get(pendingApprovalsAtom).get(actionId)?.toolcallId;
         const answer = deferredApprovalResponse(actionId, approved, userInstructions, actionChanges);
@@ -3418,6 +3438,8 @@ export const sendAskUserQuestionResponseAtom = sessionAction('sendAskUserQuestio
         cancelled?: boolean;
     }) => {
         const session = sessionOf(get);
+        // Answered already, in this window or another that shows the chat.
+        if (!get(pendingQuestionsAtom).has(toolcallId)) return;
         const answer = askUserQuestionResponse(questionId, answers, cancelled ?? false);
         if (answerParkedCard(session, get, set, toolcallId, answer)) {
             set(removePendingQuestionAtom, toolcallId);
@@ -3447,6 +3469,8 @@ export const sendCreditConfirmationResponseAtom = sessionAction('sendCreditConfi
         userInstructions?: string | null;
     }) => {
         const session = sessionOf(get);
+        // Answered already, in this window or another that shows the chat.
+        if (!get(pendingCreditConfirmationsAtom).has(confirmationId)) return;
         if (!ownsWriter(session, currentWriter(session))) return;
         logger(`sendCreditConfirmationResponseAtom: Sending credit confirmation response for ${confirmationId}: ${approved}`, 1);
         const delivered = session.agentService.sendCreditConfirmationResponse(
@@ -3476,6 +3500,8 @@ export const sendBatchApprovalResponseAtom = sessionAction('sendBatchApprovalRes
         userInstructions?: string | null;
     }) => {
         const session = sessionOf(get);
+        // Answered already, in this window or another that shows the chat.
+        if (!get(pendingBatchApprovalsAtom).has(approvalId)) return;
         const toolcallId = get(pendingBatchApprovalsAtom).get(approvalId)?.toolcallId;
         const answer = batchApprovalResponse(approvalId, approved, mode, userInstructions);
         if (toolcallId && answerParkedCard(session, get, set, toolcallId, answer)) {
@@ -3508,6 +3534,8 @@ export const sendBatchApprovalResponseAtom = sessionAction('sendBatchApprovalRes
 export const sendTableCardResponseAtom = sessionAction('sendTableCardResponse',
     (get, set, response: WSTableCardResponse) => {
         const session = sessionOf(get);
+        // Answered already, in this window or another that shows the chat.
+        if (!get(pendingTableCardsAtom).has(response.card_id)) return;
         const toolcallId = get(pendingTableCardsAtom).get(response.card_id)?.toolcall_id;
         // The card's edits are kept until its call resolves: if the answer
         // does not reach a run (the run parks first, or the resume fails),
@@ -3601,14 +3629,14 @@ function scheduleParkedAnswerFlush(session: RunSession): void {
 
 
 /**
- * The fill result that resumes the open chat's parked run: the fill this
- * window waits on ended, and its call is parked. Read as the resume goes
+ * The fill result that resumes the chat's parked run: the fill the session
+ * waits on ended, and its call is parked. Read as the resume goes
  * out, so the result is filtered by the library scope as it is then.
  */
 function jobResumeAnswer(session: RunSession, get: Getter): { toolCallId: string; answer: ParkedCardAnswer } | null {
     const wait = get(jobWaitAtom);
     if (!wait || wait.threadId !== get(currentThreadIdAtom)) return null;
-    const snapshot = session.host.chatFillSnapshot(wait.jobId);
+    const snapshot = Zotero.Beaver?.tableFills?.getJob(wait.jobId);
     if (snapshot?.state !== 'done' || !snapshot.result) return null;
     const parked = get(openParkedRunAtom)?.deferrals.some(
         (deferral) => deferral.tool_call_id === wait.toolCallId && isJobDeferral(deferral),
@@ -3622,7 +3650,7 @@ const JOB_RESUME_RETRIES = 4;
 
 /**
  * A fill resume that did not start: the server may still hold the chat for
- * the run that just parked. Try again shortly, a few times; then the window
+ * the run that just parked. Try again shortly, a few times; then the session
  * stops waiting, and the next message closes the fill's call instead.
  */
 function retryJobResume(session: RunSession, set: Setter): void {
@@ -3635,7 +3663,7 @@ function retryJobResume(session: RunSession, set: Setter): void {
 }
 
 /**
- * The fill this window waits on may have ended: resume its parked run with
+ * The fill the session waits on may have ended: resume its parked run with
  * the result, at once or once the run still landing has ended.
  */
 export function requestJobResume(session: RunSession = getRunSession()): void {
@@ -3643,7 +3671,7 @@ export function requestJobResume(session: RunSession = getRunSession()): void {
 }
 
 /**
- * Whether a run of this window is going or still landing, so a resume has to
+ * Whether a run of the session is going or still landing, so a resume has to
  * wait for it: `onDone` sends what was queued meanwhile.
  */
 function parkedResumeBlocked(session: RunSession, get: Getter): boolean {
@@ -3682,12 +3710,14 @@ export const flushParkedAnswersAtom = sessionAction('flushParkedAnswers',async (
     }
 
     session.parkedResumeStarting = true;
+    session.resumingFill = !!jobCallId;
     let started = false;
     try {
         started = (await withThreadWriter(set, guardedSet =>
             startParkedResumeOwned(session, get, guardedSet, open, answers, jobCallId), session)) ?? false;
     } finally {
         session.parkedResumeStarting = false;
+        session.resumingFill = false;
         if (!started) {
             // Nothing was sent: the cards are still open, and answerable again.
             set(parkedAnswersInFlightAtom, new Set<string>());
@@ -3730,11 +3760,13 @@ async function startParkedResumeOwned(
         logger(`${logPrefix}: Blocked — the active run is reconnecting`, 1);
         return false;
     }
+    // No model: the account's default, as for a message sent with none (a
+    // run started with no window).
     const model = session.host.getModel();
     const userId = session.host.getUserId();
     const threadId = get(currentThreadIdAtom) || open.threadId;
-    if (!model || !userId || !threadId) {
-        logger(`${logPrefix}: No model, user or thread`, 1);
+    if (!userId || !threadId) {
+        logger(`${logPrefix}: No user or thread`, 1);
         return false;
     }
     logger(`${logPrefix}: Resuming parked run ${open.runId} with ${Object.keys(answers).length} answer(s)${jobCallId ? ', one a fill result' : ''}`, 1);
@@ -3754,11 +3786,11 @@ async function startParkedResumeOwned(
             { content: '', deferred_results: answers, resumes_run_id: open.runId },
             threadId,
             userId,
-            model.name,
+            model?.name ?? 'unknown',
             buildModelSelectionOptions(model),
-            model.provider,
+            model?.provider,
             undefined,
-            model.is_custom ? model.custom_model : undefined,
+            model?.is_custom ? model.custom_model : undefined,
         );
         newRunId = run.id;
         set(activeRunAtom, run);
@@ -3902,8 +3934,8 @@ export async function withThreadWriter<T>(
     if (presence && id) {
         const snapshot = presence.getSnapshot();
         const owner = snapshot.claims.find(claim => claim.threadId === id);
-        if (owner && owner.windowId !== session.host.windowId()) {
-            session.host.notify(set, { type: 'info', title: 'Responding in another window', text: 'Wait for that response to finish or go to its window.', expire: true });
+        if (owner && owner.ownerId !== sessionClaimHolder(session)) {
+            session.host.notify(set, { type: 'info', title: 'This chat is busy', text: 'Wait a moment and try again.', expire: true });
             return;
         }
         if (snapshot.deleted.includes(id) || (!ownsWriter(session, currentWriter(session)) && (snapshot.history[id] ?? 0) !== get(viewedHistoryRevisionAtom))) {
@@ -3911,9 +3943,19 @@ export async function withThreadWriter<T>(
             return;
         }
     }
+    // A run the session starts while it writes already counts. A fill's
+    // result resumes the run that waited on it whatever the count: that
+    // session held no slot while it waited, and nothing else would resume it.
+    if (!currentWriter(session) && !session.resumingFill) {
+        const refusal = session.capacityRefusal?.();
+        if (refusal) {
+            session.host.notify(set, { type: 'warning', title: refusal.title, text: refusal.text, expire: true, duration: 6000 });
+            return;
+        }
+    }
     const writer = acquireWriter(session, id, getCredentialGeneration());
     if (writer === null) {
-        session.host.notify(set, { type: 'info', title: 'Responding in another window', text: 'Wait for that response to finish or go to its window.', expire: true });
+        session.host.notify(set, { type: 'info', title: 'This chat is busy', text: 'Wait a moment and try again.', expire: true });
         return;
     }
     if (writer) writer.preparing++;

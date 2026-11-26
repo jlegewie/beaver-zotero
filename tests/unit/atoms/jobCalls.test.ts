@@ -1,18 +1,14 @@
 /**
- * The waiting window of a table fill job call: only the window that waited on
- * the fill resumes the run once the fill ends, with its result as the call's
- * answer; the composer is busy only there; leaving ends the wait; and Stop
- * stops a parked wait's fill, while a live run stops as any run does.
+ * A chat whose session waits on a table fill job call: the composer is busy
+ * while the session waits, Stop stops a parked wait's fill, a live run stops
+ * as any run does, and the parked answer goes on while the wait does. (The
+ * registry resumes the run when the fill ends: `registry.test.ts`.)
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { requestJobResumeMock, stopMock, releaseMock, hooks } = vi.hoisted(() => ({
-    requestJobResumeMock: vi.fn(),
+const { stopMock, releaseMock } = vi.hoisted(() => ({
     stopMock: vi.fn(() => true),
     releaseMock: vi.fn(),
-    hooks: {
-        onJobWait: null as null | ((wait: unknown) => void),
-    },
 }));
 
 vi.mock('../../../react/atoms/tableChatFills', () => ({ watchChatFills: vi.fn() }));
@@ -24,19 +20,9 @@ import { activeRunAtom, currentThreadIdAtom, threadRunsAtom } from '@beaver/agen
 import { chatFillsAtom, recordChatFill } from '@beaver/agent-core/run-state/tableChatFills';
 import { store } from '../../../react/store';
 import { jobWaitAtom, openAnswerRunIdAtom, settleJobWait } from '../../../src/services/agentRuns/jobWait';
-import { runningChatJobsAtom, stopChatJobsAtom, watchJobCalls } from '../../../react/atoms/jobCalls';
+import { runningChatJobsAtom, stopChatJobsAtom } from '../../../react/atoms/jobCalls';
 import { isThreadParkedAtom } from '../../../src/services/agentRuns/parkedRuns';
 import { chatStore } from '../../helpers/runSession';
-import { getSessionPort } from '../../../src/services/agentRuns/runSession';
-
-// The session's job waits and resumes are observed at its port.
-chatStore();
-const port = getSessionPort();
-vi.spyOn(port, 'onJobWait').mockImplementation((listener) => {
-    hooks.onJobWait = listener as (wait: unknown) => void;
-    return () => undefined;
-});
-vi.spyOn(port, 'requestJobResume').mockImplementation(() => requestJobResumeMock());
 
 const THREAD = 'thread-1';
 
@@ -101,10 +87,15 @@ function parkedRun(): AgentRun {
     } as unknown as AgentRun;
 }
 
-/** The run started the fill, waited 90 s, and parked; this window waited on it. */
+/** The session waits on the fill of the run's call. */
+function waitOnFill(): void {
+    chatStore().set(jobWaitAtom, { runId: 'run-1', threadId: THREAD, toolCallId: 'call-1', jobId: 'job-1' });
+}
+
+/** The run started the fill, waited 90 s, and parked; its session waits on it. */
 function parkedWhileWaiting(): void {
     chatStore().set(threadRunsAtom, [parkedRun()]);
-    hooks.onJobWait!({ runId: 'run-1', threadId: THREAD, toolCallId: 'call-1', jobId: 'job-1' });
+    waitOnFill();
 }
 
 beforeEach(() => {
@@ -114,48 +105,9 @@ beforeEach(() => {
     chatStore().set(activeRunAtom, null);
     vi.clearAllMocks();
     store.set(chatFillsAtom, recordChatFill(new Map(), snapshot()));
-    watchJobCalls();
 });
 
-describe('the window waiting on a fill', () => {
-    it('asks for the resume as the fill changes, busy until the resume starts', () => {
-        parkedWhileWaiting();
-        store.set(chatFillsAtom, recordChatFill(new Map(), ended()));
-        expect(requestJobResumeMock).toHaveBeenCalledTimes(1);
-        // The composer stays busy while the resume is admitted.
-        expect(store.get(runningChatJobsAtom)).toEqual([{ jobId: 'job-1', stopping: false }]);
-        // The resume started: the window no longer waits, and nothing resumes again.
-        chatStore().set(jobWaitAtom, null);
-        store.set(chatFillsAtom, recordChatFill(new Map(), ended()));
-        expect(requestJobResumeMock).toHaveBeenCalledTimes(1);
-    });
-
-    it('asks for the resume when the park arrives after the fill ended', () => {
-        // The fill ended while the run reattached; its park comes in after.
-        hooks.onJobWait!({ runId: 'run-1', threadId: THREAD, toolCallId: 'call-1', jobId: 'job-1' });
-        store.set(chatFillsAtom, recordChatFill(new Map(), ended()));
-        requestJobResumeMock.mockClear();
-        chatStore().set(threadRunsAtom, [parkedRun()]);
-        expect(requestJobResumeMock).toHaveBeenCalled();
-    });
-
-    it('does not resume in a window that did not wait', () => {
-        chatStore().set(threadRunsAtom, [parkedRun()]);
-        store.set(chatFillsAtom, recordChatFill(new Map(), ended()));
-        expect(requestJobResumeMock).not.toHaveBeenCalled();
-    });
-
-    it('stops waiting when the window leaves the chat, and resumes nothing', () => {
-        parkedWhileWaiting();
-        chatStore().set(currentThreadIdAtom, 'thread-2');
-        expect(store.get(jobWaitAtom)).toBeNull();
-        // The table is not on screen: the fill stops (jobLeave.test.ts covers the rest).
-        expect(stopMock).toHaveBeenCalledWith('job-1');
-        chatStore().set(currentThreadIdAtom, THREAD);
-        store.set(chatFillsAtom, recordChatFill(new Map(), ended()));
-        expect(requestJobResumeMock).not.toHaveBeenCalled();
-    });
-
+describe('the session waiting on a fill', () => {
     it('keeps waiting through a park on the fill, and stops when the run ends otherwise', () => {
         parkedWhileWaiting();
         settleJobWait(chatStore(), parkedRun());
@@ -165,11 +117,11 @@ describe('the window waiting on a fill', () => {
     });
 });
 
-describe('the composer while a window waits on a fill', () => {
-    it('is busy only in the window that waits', () => {
+describe('the composer while the session waits on a fill', () => {
+    it('is busy while the session waits', () => {
         chatStore().set(threadRunsAtom, [parkedRun()]);
         expect(store.get(runningChatJobsAtom)).toEqual([]);
-        hooks.onJobWait!({ runId: 'run-1', threadId: THREAD, toolCallId: 'call-1', jobId: 'job-1' });
+        waitOnFill();
         expect(store.get(runningChatJobsAtom)).toEqual([{ jobId: 'job-1', stopping: false }]);
     });
 
@@ -179,13 +131,11 @@ describe('the composer while a window waits on a fill', () => {
         expect(stopMock).toHaveBeenCalledWith('job-1');
         expect(store.get(jobWaitAtom)).toBeNull();
         expect(store.get(runningChatJobsAtom)).toEqual([]);
-        store.set(chatFillsAtom, recordChatFill(new Map(), ended()));
-        expect(requestJobResumeMock).not.toHaveBeenCalled();
     });
 
     it('leaves Stop to the run while the run waits live, which stops its fill as it stops', () => {
         chatStore().set(activeRunAtom, { ...parkedRun(), parked: undefined, status: 'in_progress' } as AgentRun);
-        hooks.onJobWait!({ runId: 'run-1', threadId: THREAD, toolCallId: 'call-1', jobId: 'job-1' });
+        waitOnFill();
         expect(store.get(runningChatJobsAtom)).toEqual([{ jobId: 'job-1', stopping: false }]);
         expect(store.set(stopChatJobsAtom)).toBe(false);
         expect(stopMock).not.toHaveBeenCalled();
@@ -203,10 +153,10 @@ describe('the composer while a window waits on a fill', () => {
 });
 
 describe('whether the answer of a run parked on a fill has ended', () => {
-    it('goes on only in the window that waits on the fill', () => {
+    it('goes on only while the session waits on the fill', () => {
         chatStore().set(threadRunsAtom, [parkedRun()]);
         expect(store.get(openAnswerRunIdAtom)).toBeNull();
-        hooks.onJobWait!({ runId: 'run-1', threadId: THREAD, toolCallId: 'call-1', jobId: 'job-1' });
+        waitOnFill();
         expect(store.get(openAnswerRunIdAtom)).toBe('run-1');
     });
 

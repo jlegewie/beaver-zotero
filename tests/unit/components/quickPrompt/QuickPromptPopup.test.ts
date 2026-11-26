@@ -159,7 +159,7 @@ describe('QuickPromptPopup', () => {
         await fireShortcut();
         expect(store.get(quickPromptStateAtom)).toEqual({ mode: 'compose' });
         expect(container.querySelector('[data-testid="drop-zone"] .stub-composer')).not.toBeNull();
-        expect(mocks.newThread).toHaveBeenCalledWith({ skipActiveRunConfirm: true, preserveDraft: true });
+        expect(mocks.newThread).toHaveBeenCalledWith({ preserveDraft: true });
     });
 
     it('offers a close button that names the Escape shortcut', async () => {

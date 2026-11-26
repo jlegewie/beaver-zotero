@@ -11,8 +11,8 @@ import { currentThreadIdAtom } from '@beaver/agent-core/run-state/atoms';
 import { searchableLibraryIdsAtom } from '../atoms/profile';
 import { convertUTCToLocal } from '../utils/dateUtils';
 import { isThreadInstanceMismatch } from '../../src/services/threads/threadMatches';
-import { awaitingInputLabel } from '../../src/services/threads/awaitingInput';
-import AwaitingInputDot from './AwaitingInputDot';
+import ThreadRunIndicator from './ThreadRunIndicator';
+import { runActivityAtom, threadRunStatusLabel, useThreadRunStatus } from '../atoms/runActivity';
 import { currentZoteroInstanceRef } from '../../src/utils/zoteroUtils';
 import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
 import { getReaderOrNoteContextItem } from '../utils/zoteroTabContext';
@@ -43,6 +43,37 @@ function formatCompactTime(utcDateString: string): string {
     return `${Math.floor(diffDays / 30)}mo`;
 }
 
+/** A row of the recent chats, marked by its run. */
+const RecentChatRow: React.FC<{ thread: ThreadData; onSelect: (thread: ThreadData) => void }> = ({ thread, onSelect }) => {
+    const status = useThreadRunStatus(thread.id, thread.awaitingInput);
+    const statusLabel = threadRunStatusLabel(status);
+    return (
+        <div
+            className="recent-chats-item"
+            role="button"
+            tabIndex={0}
+            aria-label={`${thread.name || 'Unnamed conversation'}, ${formatCompactTime(thread.updatedAt)}${statusLabel ? `, ${statusLabel}` : ''}`}
+            onClick={() => onSelect(thread)}
+            onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    onSelect(thread);
+                }
+            }}
+        >
+            <span className="recent-chats-item-title">
+                <span className="recent-chats-item-name truncate" dir="auto">
+                    {thread.name || 'Unnamed conversation'}
+                </span>
+                <ThreadRunIndicator status={status} />
+            </span>
+            <span className="recent-chats-item-time">
+                {formatCompactTime(thread.updatedAt)}
+            </span>
+        </div>
+    );
+};
+
 const RecentChats: React.FC = () => {
     const surfaceWindow = useSurfaceWindow();
     const user = useAtomValue(userAtom);
@@ -58,6 +89,7 @@ const RecentChats: React.FC = () => {
     const views = useAtomValue(threadViewsAtom);
     const loadPage = useSetAtom(loadThreadPageAtom);
     const loadByItem = useSetAtom(loadThreadsByItemAtom);
+    const activity = useAtomValue(runActivityAtom);
     const { ctx, filter } = useMemo(() => {
         const ctx = !isLibraryTab && selectedTabId ? getReaderOrNoteContextItem(selectedTabId) : null;
         const lookup = ctx ? buildRecentChatsItemLookup(ctx.libraryId, ctx.keys, searchableLibraryIds) : null;
@@ -75,8 +107,17 @@ const RecentChats: React.FC = () => {
     const itemRows = resolveThreadView(itemView, entities).filter(thread => !isThreadInstanceMismatch(scope ?? null, thread));
     const useItems = !!itemKey && (itemView.status !== 'ready' || itemRows.length > 0);
     const activeView = useItems ? itemView : views.get(pageKey) ?? EMPTY_THREAD_VIEW;
-    const threads = (useItems ? itemRows : resolveThreadView(activeView, entities)).slice(0, MAX_RECENT);
+    const recent = (useItems ? itemRows : resolveThreadView(activeView, entities)).slice(0, MAX_RECENT);
     const contextType: ContextType = useItems ? ctx?.source === 'reader' ? 'file' : 'note' : 'recent';
+    // Chats with a response going stay findable when older than the recent
+    // ones: listed first, the open chat aside.
+    const busy = contextType === 'recent'
+        ? activity
+            .map((entry) => (entry.threadId ? entities.get(entry.threadId) : undefined))
+            .filter((thread): thread is ThreadData => !!thread && thread.id !== currentThreadId
+                && !recent.some((row) => row.id === thread.id) && !isThreadInstanceMismatch(scope ?? null, thread))
+        : [];
+    const threads = [...busy, ...recent];
     const fetchError = activeView.error;
     const isLoaded = activeView.status === 'ready' || activeView.status === 'error';
     const isFetching = activeView.status === 'loading';
@@ -152,30 +193,7 @@ const RecentChats: React.FC = () => {
             </div>
             {fetchError && <ChatLoadFailure error={fetchError} retry={retry} loading={isFetching} />}
             {threads.map(thread => (
-                <div
-                    key={thread.id}
-                    className="recent-chats-item"
-                    role="button"
-                    tabIndex={0}
-                    aria-label={`${thread.name || 'Unnamed conversation'}, ${formatCompactTime(thread.updatedAt)}${thread.awaitingInput ? `, ${awaitingInputLabel(thread.awaitingInput).toLowerCase()}` : ''}`}
-                    onClick={() => handleSelectThread(thread)}
-                    onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault();
-                            handleSelectThread(thread);
-                        }
-                    }}
-                >
-                    <span className="recent-chats-item-title">
-                        <span className="recent-chats-item-name truncate" dir="auto">
-                            {thread.name || 'Unnamed conversation'}
-                        </span>
-                        {thread.awaitingInput && <AwaitingInputDot awaiting={thread.awaitingInput} />}
-                    </span>
-                    <span className="recent-chats-item-time">
-                        {formatCompactTime(thread.updatedAt)}
-                    </span>
-                </div>
+                <RecentChatRow key={thread.id} thread={thread} onSelect={(row) => void handleSelectThread(row)} />
             ))}
         </div>
     );

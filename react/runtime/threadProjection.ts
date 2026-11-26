@@ -1,5 +1,6 @@
 import { serverThreadBlockedAtom, threadConflictAtom, viewedHistoryRevisionAtom } from "../../src/services/agentRuns/threadAdmission";
-import { tryGetWindowRuntime } from "./windowRuntime";
+import { getSessionPort } from "../../src/services/agentRuns/runSession";
+import { claimHolderOf } from "../../src/services/agentRuns/threadWriter";
 import { atom } from "jotai";
 import {
     currentThreadIdAtom,
@@ -23,22 +24,21 @@ export const threadPresenceAtom = atom<ThreadPresenceSnapshot>({
     history: {},
     deleted: [],
 });
-export const otherThreadWriterAtom = atom((get) => {
-    const id = get(currentThreadIdAtom);
-    const owner = get(threadPresenceAtom).claims.find(
-        (claim) => claim.threadId === id,
-    );
-    return owner && owner.windowId !== tryGetWindowRuntime()?.id ? owner : null;
-});
 export const threadDeletedAtom = atom((get) => {
     const id = get(currentThreadIdAtom);
     return !!id && get(threadPresenceAtom).deleted.includes(id);
 });
+/**
+ * The open chat's history changed in this instance since the window loaded
+ * it, by something other than the session it shows (a deletion, a write
+ * this window's session did not make).
+ */
 export const threadHistoryStaleAtom = atom((get) => {
     const id = get(currentThreadIdAtom);
     const presence = get(threadPresenceAtom);
+    // Writes of the session shown keep its history current.
     const ownsThread = presence.claims.some(
-        (claim) => claim.threadId === id && claim.windowId === tryGetWindowRuntime()?.id,
+        (claim) => claim.threadId === id && claim.ownerId === shownSessionClaimHolder(),
     );
     return (
         !!id &&
@@ -47,6 +47,15 @@ export const threadHistoryStaleAtom = atom((get) => {
             get(viewedHistoryRevisionAtom)
     );
 });
+/** Who the presence claims of the session this window shows are held by. */
+function shownSessionClaimHolder(): string | null {
+    try {
+        return claimHolderOf(getSessionPort().sessionId);
+    } catch {
+        return null;
+    }
+}
+
 export function attachThreadProjection(runtime: WindowRuntime): void {
     const instance = Zotero.Beaver;
     const removeCache = instance.threads.subscribe((snapshot) => {
@@ -85,7 +94,6 @@ export function attachThreadProjection(runtime: WindowRuntime): void {
 
 export const threadReadOnlyAtom = atom(
     (get) =>
-        !!get(otherThreadWriterAtom) ||
         get(serverThreadBlockedAtom) ||
         !!get(threadConflictAtom) ||
         get(threadDeletedAtom) ||

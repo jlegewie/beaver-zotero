@@ -18,6 +18,7 @@ import { openCreatedTable } from '../host/zotero/tables';
 import { store } from '../store';
 import { getHostWindow, tryGetWindowRuntime } from '../runtime/windowRuntime';
 import { findToolCallName } from './agentRunAtoms';
+import { getSessionPort } from '../../src/services/agentRuns/runSession';
 
 let subscribed = false;
 
@@ -53,12 +54,12 @@ export function watchChatFills(): void {
 }
 
 /**
- * Create table with the fill ticked: switch to the new table as the fill starts.
- * Only the renderer whose run started the fill knows the tool call.
+ * Create table with the fill ticked: switch to the new table as the fill
+ * starts, in the window that sent the message only.
  */
 function openTableForCreationFill(snapshot: TableFillJobSnapshot): void {
     const toolCall = snapshot?.origin?.run?.tool_call_id;
-    if (!toolCall || snapshot.state === 'done') return;
+    if (!toolCall || snapshot.state === 'done' || !getSessionPort().isOrigin()) return;
     const run = store.get(activeRunAtom);
     if (!run || run.id !== snapshot.origin.run?.run_id || findToolCallName(run, toolCall) !== 'create_table') return;
     const ref = libraryRefForLibraryID(snapshot.table.libraryID);

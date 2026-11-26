@@ -11,6 +11,7 @@ import { setCredentialAdapter } from '@beaver/agent-core/transport/credentials';
  * because an urgent change applied it, not because time passed.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import '../../helpers/localRunSession';
 
 const { mockSupabase, processToolReturnResults } = vi.hoisted(() => ({
     processToolReturnResults: vi.fn(),

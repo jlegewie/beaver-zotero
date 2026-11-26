@@ -176,7 +176,7 @@ describe('offering to reopen an interrupted chat', () => {
         signIn();
         mount();
 
-        expect(popup()?.text).toBe('The window closed before Beaver finished working on your last chat.');
+        expect(popup()?.text).toBe('Beaver closed before it finished working on your last chat.');
     });
 
     it('shows nothing when no chat was interrupted', () => {

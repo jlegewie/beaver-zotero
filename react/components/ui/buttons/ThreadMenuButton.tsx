@@ -1,5 +1,3 @@
-import { canOpenFinishedChatAtom, refreshFinishedChatAvailabilityAtom } from '../../../runtime/windowCommands';
-import { RESPONSE_FINISH_MESSAGE } from '../../../../src/services/threads/finishedChat';
 import { BeaverUIFactory } from "../../../../src/ui/ui";
 import { citationMapAtom } from '@beaver/agent-core/citations/atoms';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
@@ -43,7 +41,6 @@ import {
     CopyIcon,
     DeleteIcon,
     EditIcon,
-    Icon,
     LinkIcon,
     MoreHorizontalIcon,
     PictureInPictureIcon,
@@ -68,7 +65,6 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
     const surfaceWindow = useSurfaceWindow();
     const [, forceUpdate] = useState({});
     const threadId = useAtomValue(currentThreadIdAtom);
-    const canOpenFinishedChat = useAtomValue(canOpenFinishedChatAtom);
     // Derived from the thread store, so this entry cannot disagree with the
     // chat lists. `null` means the open chat is not in the store yet — a
     // zotero://beaver deep link, or a chat created in this session — which is
@@ -96,17 +92,10 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
         }
     }, []);
 
-    // Whether the finished-chat check started on open is still in flight.
-    // `canOpenFinishedChat` reads as unavailable until it lands, and the
-    // explanation for an unavailable entry must not flash in the meantime.
-    const [availabilityPending, setAvailabilityPending] = useState(false);
-
     const handleMenuToggle = useCallback((isOpen: boolean) => {
         if (!isOpen) return;
         forceUpdate({});
         void resolvePinnedState();
-        setAvailabilityPending(true);
-        void store.set(refreshFinishedChatAvailabilityAtom).finally(() => setAvailabilityPending(false));
     }, [resolvePinnedState]);
 
     // The menu's content is built when it is opened, so the runs and their tool
@@ -368,16 +357,9 @@ const ThreadMenuButton: React.FC<ThreadMenuButtonProps> = ({
             ...(!inWindow ? [{
                 label: "Open in Beaver window",
                 icon: PictureInPictureIcon,
-                disabled: !canOpenFinishedChat,
-                customContent: !canOpenFinishedChat && !availabilityPending ? (
-                    <span className="display-flex items-start gap-2">
-                        <Icon icon={PictureInPictureIcon} size={14} className="mt-010" />
-                        <span>
-                            <div>Open in Beaver window</div>
-                            <div className="text-xs">{RESPONSE_FINISH_MESSAGE}</div>
-                        </span>
-                    </span>
-                ) : undefined,
+                // A response still going opens there too: the window shows
+                // the same run.
+                disabled: !threadId,
                 onClick: () => {
                     if (threadId)
                         void BeaverUIFactory.commandBeaverWindow("open-chat", {

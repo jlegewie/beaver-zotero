@@ -14,6 +14,7 @@
  * that decides the failure is worth retrying, is the real thing.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import '../../helpers/localRunSession';
 
 import type { ConnectionFailureEvidence } from '@beaver/agent-core/transport/connectionFailure';
 

@@ -32,7 +32,6 @@ import type { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import type { FeatureCreditGrant } from '@beaver/agent-core/protocol/agentProtocol';
 import type { PageLabelsByAttachmentId } from '@beaver/agent-core/citations/atoms';
 import type { WSUndeliveredActionsInfo } from '@beaver/agent-core/protocol/agentProtocol';
-import type { TableFillJobSnapshot } from '@beaver/agent-core/protocol/tableFillProtocol';
 
 const runEffectAtom = atom(null, (_get, _set, effect: () => void) => {
     effect();
@@ -69,20 +68,19 @@ export type UndoConfirmResult = 'undo' | 'skip' | 'cancel';
 export interface RunHost {
     // --- Window inputs -----------------------------------------------------
 
-    /** Id of the window the run belongs to, as presence claims know it. */
-    windowId(): string | undefined;
     /** The model selected in the window. */
     getModel(): ModelConfig | null;
     /** The signed-in user. */
     getUserId(): string | null;
-    /** Increases on every chat navigation in the window. */
+    /**
+     * Increases when the session's chat is replaced in place (a host that
+     * runs one chat per session never does).
+     */
     navigationSeq(): number;
     /** Choices the user made on a merge-items approval card. */
     actionChanges(actionId: string): MergeItemsChoices | undefined;
     /** The agent actions of the chat, which the window owns. */
     agentActions(): AgentAction[];
-    /** The latest state of a table fill this window runs for the chat. */
-    chatFillSnapshot(jobId: string): TableFillJobSnapshot | undefined;
 
     // --- Notices and dialogs -----------------------------------------------
 
@@ -130,8 +128,6 @@ export interface RunHost {
     /** Undo applied actions, newest first. */
     undoAppliedActions(actions: AgentAction[]): Promise<void>;
     cleanupTemporaryAnnotations(logPrefix: string): Promise<void>;
-    /** The window is closing: hand off or stop the fill its chat waits on. */
-    leaveJobWaitOnClose(): void;
 
     // --- Agent actions (window state) ------------------------------------------
 

@@ -105,7 +105,7 @@ describe('openQuickPromptAtom', () => {
     it('starts a fresh thread but keeps the draft, and leaves the chat list view', async () => {
         store.set(isThreadListViewAtom, true);
         await store.set(openQuickPromptAtom);
-        expect(mocks.newThread).toHaveBeenCalledWith({ skipActiveRunConfirm: true, preserveDraft: true });
+        expect(mocks.newThread).toHaveBeenCalledWith({ preserveDraft: true });
         expect(store.get(quickPromptStateAtom)).toEqual({ mode: 'compose' });
         expect(store.get(isThreadListViewAtom)).toBe(false);
         expect(store.get(isQuickPromptOpenAtom)).toBe(true);

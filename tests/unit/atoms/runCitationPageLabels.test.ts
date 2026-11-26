@@ -3,6 +3,7 @@
  * preload settles after the run, once the callback setter no longer writes.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import '../../helpers/localRunSession';
 
 const { preloadPageLabelsForCitations } = vi.hoisted(() => ({
     preloadPageLabelsForCitations: vi.fn(),

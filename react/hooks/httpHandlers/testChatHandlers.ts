@@ -353,13 +353,11 @@ function resolveViews(
 // ---------------------------------------------------------------------------
 
 /**
- * Start a fresh thread. Passes `skipActiveRunConfirm`/`skipAutoPopulate` so it
- * never pops a `Zotero.Prompt.confirm` modal or auto-attaches the current Zotero
- * selection — a headless new thread is genuinely empty.
+ * Start a fresh thread. Passes `skipAutoPopulate` so it never auto-attaches
+ * the current Zotero selection — a headless new thread is genuinely empty.
  */
 export async function handleTestNewThreadHttpRequest(request: any) {
     await store.set(newThreadAtom, {
-        skipActiveRunConfirm: true,
         skipAutoPopulate: request?.autoPopulate === true ? false : true,
     });
     return { ok: true, ...currentIds() };
@@ -393,7 +391,7 @@ export async function handleTestChatSendHttpRequest(request: any) {
     }
 
     if (request?.newThread === true) {
-        await store.set(newThreadAtom, { skipActiveRunConfirm: true, skipAutoPopulate: true });
+        await store.set(newThreadAtom, { skipAutoPopulate: true });
     } else {
         // Continue a specific existing thread: load it first if it isn't already the
         // current one. Without this, the send targets whatever thread happens to be

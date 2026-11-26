@@ -1,6 +1,6 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import { createStore } from 'jotai';
-const state = vi.hoisted(() => ({ store: undefined as any, load: vi.fn(), confirm: vi.fn(), finished: vi.fn(), writer: null as any, alert: vi.fn(), focus: vi.fn() }));
+const state = vi.hoisted(() => ({ store: undefined as any, load: vi.fn(), confirm: vi.fn(), alert: vi.fn(), focus: vi.fn() }));
 vi.mock('../../../react/store', () => ({ store: {
     get: (...args: any[]) => state.store.get(...args),
     set: (...args: any[]) => state.store.set(...args),
@@ -12,14 +12,6 @@ vi.mock('../../../react/atoms/threads', async () => ({
     threadNavigationSeqAtom: (await import('jotai')).atom(0),
 }));
 vi.mock('../../../react/atoms/auth', async () => ({ userIdAtom: (await import('jotai')).atom('user') }));
-vi.mock('../../../src/services/threads/finishedChat', () => ({
-    isFinishedChat: (...args: any[]) => state.finished(...args), hasThreadWriter: () => false,
-    RESPONSE_FINISH_MESSAGE: 'Available when this response finishes.',
-}));
-vi.mock('../../../src/services/agentRuns/runSession', () => ({ getSessionPort: () => ({ hasWriter: () => !!state.writer }) }));
-vi.mock('../../../src/services/agentRuns/threadAdmission', async () => ({ threadAdmissionAtom: (await import('jotai')).atom(null) }));
-vi.mock('../../../react/runtime/threadProjection', async () => ({ threadPresenceAtom: (await import('jotai')).atom({ claims: [] }) }));
-vi.mock('../../../react/atoms/agentRunAtoms', async () => ({ isWSChatPendingAtom: (await import('jotai')).atom(false) }));
 vi.mock('../../../react/events/eventManager', () => ({ eventManager: { dispatch: vi.fn() } }));
 import { windowCommands } from '../../../react/runtime/windowCommands';
 import { currentThreadIdAtom } from '@beaver/agent-core/run-state/atoms';
@@ -29,8 +21,6 @@ beforeEach(() => {
     state.store = createStore();
     state.load.mockReset().mockResolvedValue(true);
     vi.clearAllMocks();
-    state.finished.mockReset().mockResolvedValue(true);
-    state.writer = null;
     state.confirm.mockReset().mockReturnValue(0);
     (Zotero as any).Prompt = { confirm: state.confirm };
     state.store.set(currentThreadIdAtom, 'current');
@@ -54,19 +44,15 @@ it('reveals the same chat without replacing its draft or asking to switch', asyn
     expect(state.store.get(currentMessageContentAtom)).toBe('unsent draft');
 });
 
-it('declines an unfinished requested chat before prompting or loading', async () => {
-    state.finished.mockResolvedValue(false);
-    expect(await windowCommands['open-chat']({ threadId: 'requested' })).toMatchObject({ ok: false });
+it('opens a chat whose response is still going, and the destination\'s own response goes on', async () => {
+    // The destination shows the chat's session; nothing is stopped on either side.
+    const { activeRunAtom } = await import('@beaver/agent-core/run-state/atoms');
+    state.store.set(activeRunAtom, { id: 'destination-run', status: 'in_progress' });
+    state.store.set(currentMessageContentAtom, '');
+    expect(await windowCommands['open-chat']({ threadId: 'requested' })).toMatchObject({ ok: true });
     expect(state.confirm).not.toHaveBeenCalled();
-    expect(state.load).not.toHaveBeenCalled();
-    expect(state.alert).toHaveBeenCalledWith('Available when this response finishes.');
-});
-it('keeps another destination response running without either confirmation', async () => {
-    state.writer = {};
-    expect(await windowCommands['open-chat']({ threadId: 'requested' })).toMatchObject({ ok: false });
-    expect(state.confirm).not.toHaveBeenCalled();
-    expect(state.load).not.toHaveBeenCalled();
-    expect(state.alert).toHaveBeenCalledWith('The Beaver window is responding to another chat. Try again when it finishes.');
+    expect(state.alert).not.toHaveBeenCalled();
+    expect(state.load).toHaveBeenCalledWith(expect.objectContaining({ threadId: 'requested', preserveDraft: false }));
 });
 it('does not prompt for whitespace and passes a guard that rejects later edits', async () => {
     state.store.set(currentMessageContentAtom, '  \n ');
@@ -79,15 +65,6 @@ it('does not prompt for whitespace and passes a guard that rejects later edits',
     await windowCommands['open-chat']({ threadId: 'requested' });
     expect(state.confirm).not.toHaveBeenCalled();
     expect(state.store.get(currentMessageContentAtom)).toBe('new edit');
-});
-it('rejects a draft edited and then restored during the initial server check', async () => {
-    state.finished.mockImplementation(async () => {
-        state.store.set(currentMessageContentAtom, 'changed');
-        state.store.set(currentMessageContentAtom, 'unsent draft');
-        return true;
-    });
-    expect(await windowCommands['open-chat']({ threadId: 'requested' })).toMatchObject({ ok: false });
-    expect(state.load).not.toHaveBeenCalled();
 });
 
 it('preserves edits made while refreshing the same finished chat', async () => {
@@ -110,57 +87,4 @@ it('rejects navigation during destination loading', async () => {
         return false;
     });
     expect(await windowCommands['open-chat']({ threadId: 'requested' })).toMatchObject({ ok: false });
-});
-
-it.each(['preparing', 'in_progress', 'awaiting_deferred', 'unknown', 'active'])('disables the menu while requested activity is %s', async phase => {
-    const { canOpenFinishedChatAtom } = await import('../../../react/runtime/windowCommands');
-    const { threadAdmissionAtom } = await import('../../../src/services/agentRuns/threadAdmission');
-    const { isWSChatPendingAtom } = await import('../../../react/atoms/agentRunAtoms');
-    const { activeRunAtom } = await import('@beaver/agent-core/run-state/atoms');
-    state.store.set(threadAdmissionAtom, { threadId: 'current', tailRunId: null, activity: { state: 'idle', run_id: null } });
-    expect(state.store.get(canOpenFinishedChatAtom)).toBe(true);
-    if (phase === 'preparing') state.store.set(isWSChatPendingAtom, true);
-    else if (phase === 'active' || phase === 'unknown') state.store.set(threadAdmissionAtom, { threadId: 'current', activity: { state: phase } });
-    else state.store.set(activeRunAtom, { status: phase });
-    expect(state.store.get(canOpenFinishedChatAtom)).toBe(false);
-});
-
-it('keeps failed availability checks separate from the displayed history tail', async () => {
-    const { refreshFinishedChatAvailabilityAtom, canOpenFinishedChatAtom } = await import('../../../react/runtime/windowCommands');
-    const { threadAdmissionAtom } = await import('../../../src/services/agentRuns/threadAdmission');
-    const admission = { threadId: 'current', tailRunId: 'displayed', activity: { state: 'idle', run_id: null } };
-    state.store.set(threadAdmissionAtom, admission);
-    state.finished.mockResolvedValue(false);
-    const refresh = state.store.set(refreshFinishedChatAvailabilityAtom);
-    expect(state.store.get(canOpenFinishedChatAtom)).toBe(false);
-    await refresh;
-    expect(state.store.get(canOpenFinishedChatAtom)).toBe(false);
-    expect(state.store.get(threadAdmissionAtom)).toBe(admission);
-});
-
-it.each(['navigation', 'account', 'admission'])('ignores availability received after %s changes', async change => {
-    const { refreshFinishedChatAvailabilityAtom, canOpenFinishedChatAtom } = await import('../../../react/runtime/windowCommands');
-    const { threadNavigationSeqAtom } = await import('../../../react/atoms/threads');
-    const { accountGenerationAtom } = await import('../../../react/atoms/profile');
-    const { threadAdmissionAtom } = await import('../../../src/services/agentRuns/threadAdmission');
-    let finish!: (value: boolean) => void;
-    state.finished.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
-    const refresh = state.store.set(refreshFinishedChatAvailabilityAtom);
-    if (change === 'navigation') state.store.set(threadNavigationSeqAtom, 1);
-    else if (change === 'account') state.store.set(accountGenerationAtom, 1);
-    else state.store.set(threadAdmissionAtom, { threadId: 'current', tailRunId: null, activity: { state: 'unknown', run_id: null } });
-    finish(true);
-    await refresh;
-    expect(state.store.get(canOpenFinishedChatAtom)).toBe(false);
-});
-
-it('ignores an earlier availability result after a newer menu check', async () => {
-    const { refreshFinishedChatAvailabilityAtom, canOpenFinishedChatAtom } = await import('../../../react/runtime/windowCommands');
-    let finish!: (value: boolean) => void;
-    state.finished.mockReturnValueOnce(new Promise(resolve => { finish = resolve; })).mockResolvedValueOnce(false);
-    const older = state.store.set(refreshFinishedChatAvailabilityAtom);
-    await state.store.set(refreshFinishedChatAvailabilityAtom);
-    finish(true);
-    await older;
-    expect(state.store.get(canOpenFinishedChatAtom)).toBe(false);
 });

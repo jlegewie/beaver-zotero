@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import '../../helpers/localRunSession';
 import { createThreadStore as createStore } from '../../helpers/threadRepository';
 
 // =============================================================================
@@ -371,21 +372,6 @@ describe('loadThreadAtom instance-mismatch gate', () => {
         expect(store.get(isLoadingThreadAtom)).toBe(false);
     });
 
-    it('canceling the active-run interrupt clears a pending deep-link target', async () => {
-        const { isWSChatPendingAtom } = await import('../../../react/atoms/agentRunAtoms');
-        store.set(isWSChatPendingAtom as any, true);
-        store.set(pendingScrollToRunAtom, 'run-9');
-        confirmMock.mockReturnValue(false);
-
-        const loaded = await store.set(loadThreadAtom, {
-            user_id: 'u1', threadId: nextThreadId(), threadName: 'Busy', threadIdentity: CURRENT,
-        });
-
-        expect(loaded).toBe(false);
-        expect(store.get(pendingScrollToRunAtom)).toBeNull();
-        expect(getThreadRunsMock).not.toHaveBeenCalled();
-    });
-
     it('a 404 while loading runs returns false, resets to the empty state, and marks the thread deleted', async () => {
         const threadId = nextThreadId();
         getThreadRunsMock.mockRejectedValue(new ApiError(404, 'Not Found'));
@@ -466,16 +452,16 @@ describe('finished-chat staged loading', () => {
         expect(store.get(currentThreadIdAtom)).toBe('destination');
         expect(store.get(currentMessageContentAtom)).toBe('keep me');
     });
-    it.each(['active', 'unknown', 'expired'])('does not open %s server activity', async state => {
+    it.each(['active', 'unknown', 'expired'])('opens a chat whose server activity is %s, as the server reports it', async state => {
         const store = destination();
+        const target = request();
         getThreadRunsMock.mockResolvedValue({ ...history, activity: { state, run_id: 'run' } });
-        expect(await store.set(loadThreadAtom, request())).toBe(false);
-        expect(store.get(currentThreadIdAtom)).toBe('destination');
-        expect(store.get(currentMessageContentAtom)).toBe('keep me');
+        expect(await store.set(loadThreadAtom, target)).toBe(true);
+        expect(store.get(currentThreadIdAtom)).toBe(target.threadId);
     });
-    it('rechecks server activity after hydration before committing', async () => {
+    it('rechecks the history tail after hydration before committing', async () => {
         const store = destination();
-        getThreadRunsMock.mockResolvedValueOnce(history).mockResolvedValueOnce({ ...history, activity: { state: 'active', run_id: 'new' } });
+        getThreadRunsMock.mockResolvedValueOnce(history).mockResolvedValueOnce({ ...history, tail_run_id: 'new' });
         expect(await store.set(loadThreadAtom, request())).toBe(false);
         expect(store.get(currentThreadIdAtom)).toBe('destination');
         expect(store.get(currentMessageContentAtom)).toBe('keep me');
@@ -521,7 +507,7 @@ describe('finished-chat staged loading', () => {
             finishIdentity({ id: 'old', name: 'Old' });
             expect(await ordinary).toBe(false);
             if (outcome === 'invalidated') valid = false;
-            finishHistory(outcome === 'failure' ? { ...history, activity: { state: 'active', run_id: 'run' } } : history);
+            finishHistory(outcome === 'failure' ? { ...history, tail_run_id: 'moved' } : history);
             expect(await guarded).toBe(outcome === 'success');
             expect(store.get(isLoadingThreadAtom)).toBe(false);
             expect(store.get(currentThreadIdAtom)).toBe(outcome === 'success' ? target.threadId : 'destination');

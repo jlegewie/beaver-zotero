@@ -17,9 +17,14 @@ import { tryGetWindowRuntime } from '../../react/runtime/windowRuntime';
 
 export function installWindowStoreRunSession(store: ReturnType<typeof createStore>): RunSession {
     const viewer = createWindowRunViewer(store);
-    const session = new RunSession(store, agentService, createViewerRunHost(() => tryGetWindowRuntime()?.id, () => viewer, {
+    const session = new RunSession(store, agentService, createViewerRunHost({
+        viewers: () => [viewer],
+        origin: () => viewer,
+        issuer: () => viewer,
         owner: () => tryGetWindowRuntime()?.id,
         threadId: () => store.get(currentThreadIdAtom),
+        live: () => true,
+        model: () => null,
     }));
     installRunSession(session);
     return session;

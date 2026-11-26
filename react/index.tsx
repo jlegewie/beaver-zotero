@@ -1,5 +1,4 @@
 import { regenerateFromRunAtom } from './atoms/agentRunAtoms';
-import { watchJobCalls } from './atoms/jobCalls';
 import { threadAdmissionAtom, threadConflictAtom } from '../src/services/agentRuns/threadAdmission';
 import { openPreferencesWindow } from './ui/openPreferencesWindow';
 import { attachThreadAdmission } from "./runtime/threadAdmission";
@@ -25,11 +24,11 @@ import { handleAgentActionExecuteRequest } from '../src/services/agentDataProvid
 import { registerZoteroBusyContext } from '../src/services/busyContext';
 import { registerZoteroSyncPause } from '../src/services/syncPause';
 import { registerZoteroClientIdentity } from '../src/services/zoteroClientIdentity';
-import { createZoteroDataProvider, registerZoteroDataProvider } from '../src/services/zoteroDataProvider';
 import { configurePDFForBeaver } from '../src/utils/configurePDFForBeaver';
 import { registerZoteroLibraryIdentity } from '../src/utils/libraryIdentity';
 import type { AgentAction } from './agents/agentActions';
 import { attachWindowRunSession } from './runtime/windowRunSession';
+import { attachRunActivityProjection } from './runtime/runActivityProjection';
 import { attachDeferredDiffPreview } from './utils/diffPreviewCoordinator';
 import { buildZoteroApplicationState } from './atoms/applicationState';
 import { sessionAtom } from './atoms/auth';
@@ -67,7 +66,6 @@ import { useReaderVisualizerActionHandler } from './hooks/useReaderVisualizerAct
 import { useRunStatusTip } from './hooks/useRunStatusTip';
 import { useNoteExportTip } from './hooks/useNoteExportTip';
 import { useFeatureCreditCompletions } from './hooks/useFeatureCreditCompletions';
-import { useSyncSuppression } from './hooks/useSyncSuppression';
 import { useThreadProtocolHandler } from './hooks/useThreadProtocolHandler';
 import { useToggleSidebar } from './hooks/useToggleSidebar';
 import { useUpgradeHandler } from './hooks/useUpgradeHandler';
@@ -99,15 +97,6 @@ configurePDFForBeaver();
 // resolve host-specific navigation and data lookups. Non-Zotero clients omit
 // this and run the render surface with the default empty host.
 registerZoteroHost();
-
-// Register the Zotero agent data-provider as the default for AgentService and
-// ProviderConnection. Must run before either singleton serves its first
-// WebSocket data request (both resolve their provider lazily on first use, so
-// this only needs to land before that point, not before module load).
-registerZoteroDataProvider(options => createZoteroDataProvider({
-    ...options,
-    operationContext: () => captureOperationContext(options?.source !== "provider"),
-}));
 
 // Register the Zotero library-identity resolvers: the object-id resolver used
 // by citation and note-reference parsing (citationGrammar.ts) to resolve a
@@ -171,7 +160,6 @@ const GlobalContextInitializer = () => {
     useUpgradeHandler();
 
     // Suppress Zotero auto-sync while mutating agent runs are active.
-    useSyncSuppression();
 
     // Realtime listener for user profile
     useProfileSync();
@@ -214,8 +202,8 @@ const GlobalContextInitializer = () => {
 
     useBackgroundProcessingWelcome();
 
-    // Table fills a chat waits on: the waiting window resumes the run with the result.
-    React.useEffect(() => watchJobCalls(), []);
+    // The fills of chat runs, for their progress and the composer's Stop.
+    React.useEffect(() => watchChatFills(), []);
 
     // Command readiness follows the subscription effects above, not createRoot().render().
     React.useEffect(() => {
@@ -384,6 +372,7 @@ export function initializeRuntime(runtime: WindowRuntime) {
     // A table window shows one table: it has no chat, so it follows no thread.
     if (runtime.kind === "table") return;
     attachThreadProjection(runtime);
+    attachRunActivityProjection(runtime);
     attachDeferredDiffPreview(runtime);
     attachThreadAdmission(runtime);
 }

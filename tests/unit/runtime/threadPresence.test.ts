@@ -74,8 +74,7 @@ describe("instance thread admission", () => {
             presence,
             threads: { invalidateViews: vi.fn() },
         };
-        const session = (windowId: string) =>
-            ({ host: { windowId: () => windowId }, writerLease: undefined }) as any;
+        const session = (id: string) => ({ id, writerLease: undefined, ended: false }) as any;
         vi.resetModules();
         const firstAtoms = await import("@beaver/agent-core/run-state/atoms");
         vi.resetModules();
@@ -94,7 +93,10 @@ describe("instance thread admission", () => {
         const successor = writer.acquireWriter(b, "t", 3)!;
         writer.releaseWriter(a, lease);
         expect(writer.ownsWriter(b, successor)).toBe(true);
+        // A session's claim ends with the session, not with a window.
         presence.detach("b");
+        expect(writer.ownsWriter(b, successor)).toBe(true);
+        presence.detach("session:b");
         expect(writer.ownsWriter(b, successor)).toBe(false);
     });
 });

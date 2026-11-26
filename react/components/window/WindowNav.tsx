@@ -10,8 +10,8 @@ import { useAccountMenuItems } from '../ui/buttons/UserAccountMenuButton';
 import { formatPlanName } from '../preferences/BillingSection';
 import { highlightMatch } from '../../utils/highlightMatch';
 import ChatLoadFailure from '../ChatLoadFailure';
-import AwaitingInputDot from '../AwaitingInputDot';
-import { awaitingInputLabel } from '../../../src/services/threads/awaitingInput';
+import ThreadRunIndicator from '../ThreadRunIndicator';
+import { threadRunStatusLabel, useThreadRunStatus } from '../../atoms/runActivity';
 import { Icon, MoreHorizontalIcon, PlusSignIcon, SearchIcon, UserIcon, CancelIcon, DeleteIcon, EditIcon, PinIcon, PinOffIcon } from '../icons/icons';
 import Spinner from '@beaver/agent-ui/icons/Spinner';
 import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
@@ -89,6 +89,8 @@ const ThreadRow: React.FC<ThreadRowProps> = ({
     onDelete,
 }) => {
     const name = thread.name || UNNAMED_CHAT;
+    const status = useThreadRunStatus(thread.id, thread.awaitingInput);
+    const statusLabel = threadRunStatusLabel(status);
     // Menus render inline, so the row must stay "hovered" while its menu is
     // open even when the pointer travels into the menu.
     const [menuOpen, setMenuOpen] = useState(false);
@@ -191,7 +193,7 @@ const ThreadRow: React.FC<ThreadRowProps> = ({
                 type="button"
                 className="beaver-window-nav-button beaver-window-nav-row-button"
                 aria-current={isCurrent ? 'page' : undefined}
-                aria-label={thread.awaitingInput ? `${name}, ${awaitingInputLabel(thread.awaitingInput).toLowerCase()}` : undefined}
+                aria-label={statusLabel ? `${name}, ${statusLabel}` : undefined}
                 title={name}
                 onClick={() => onSelect(thread)}
                 onDoubleClick={() => onStartRename(thread)}
@@ -200,7 +202,7 @@ const ThreadRow: React.FC<ThreadRowProps> = ({
                     <span className="beaver-window-nav-row-name-text">{highlightMatch(name, query)}</span>
                 </span>
             </button>
-            {thread.awaitingInput && <AwaitingInputDot awaiting={thread.awaitingInput} />}
+            <ThreadRunIndicator status={status} />
             <div className="beaver-window-nav-row-actions">
                 {menuAvailable ? (
                     <button
