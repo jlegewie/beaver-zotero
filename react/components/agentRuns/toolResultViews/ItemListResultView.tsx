@@ -187,6 +187,7 @@ const WebPageRow: React.FC<{ row: WebPageRowView } & RowEventProps> = ({ row, ..
         title={row.display_name}
         meta={row.site && row.site !== row.display_name ? row.site : null}
         url={row.url}
+        icon={row.icon}
         faded={row.status === 'error'}
         {...events}
     />

@@ -119,6 +119,8 @@ export interface WebPageRowView {
     display_name: string;
     /** The page's site, e.g. "who.int". */
     site?: string;
+    /** The site's icon as a small image data URI, when one was fetched. */
+    icon?: string;
     /** "error" when the tool failed on this page; absent or "ok" otherwise. */
     status?: "ok" | "error";
 }
@@ -273,6 +275,11 @@ export interface ExternalReferenceListView {
     message?: string | null;
     /** Optional tool-specific extension; render per `info_type`. */
     tool_info?: ExternalReferenceViewInfo | null;
+    /**
+     * Web pages' site icons (small image data URIs) by `source_id`, for those
+     * already fetched. Beside the references, which are cached as records.
+     */
+    site_icons?: Record<string, string> | null;
 }
 
 /** The related-works info of a view (rows without `info_type` predate the discriminator). */

@@ -225,6 +225,21 @@ export function urlNamesPdf(url: string): boolean {
     }
 }
 
+/** A web page's site as shown: its publisher or domain, else its URL's host without "www.". */
+export function webPageSiteName(site: string | null | undefined, url: string | null | undefined): string | null {
+    if (site) return site;
+    try {
+        return url ? new URL(url).hostname.replace(/^www\./, '') : null;
+    } catch {
+        return null;
+    }
+}
+
+/** Whether a web page is a PDF: its content type says so, or its URL names one. */
+export function webPageIsPdf(contentType: string | null | undefined, url: string | null | undefined): boolean {
+    return contentType === 'pdf' || (!!url && urlNamesPdf(url));
+}
+
 /** The backend's site icons are about 1 KB; anything far larger is not one. */
 const MAX_SITE_ICON_CHARS = 8192;
 const SITE_ICON_DATA_URI = /^data:image\/(?:webp|png);base64,[A-Za-z0-9+/]+={0,2}$/;

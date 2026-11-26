@@ -10,11 +10,15 @@ import {
     isExternalCitation,
     isExternalFileCitation,
     itemTypeToIconName,
+    type WebPageCitation,
 } from '@beaver/agent-core/types/citations';
 import Tooltip from '../primitives/Tooltip';
 import { externalReferenceMappingAtom, externalReferenceItemMappingAtom, formatExternalCitation } from '@beaver/agent-core/citations/externalReferences';
 import { ExternalReference } from '@beaver/agent-core/types/externalReferences';
 import { webPageId } from '@beaver/agent-core/citations/externalRecords';
+import { webPageIsPdf, webPageSiteName } from '@beaver/agent-core/identity/webPages';
+import SiteIcon from './SiteIcon';
+import { formatRegistryDate } from '@beaver/agent-core/citations/externalRecordDisplay';
 import { ZoteroItemReference } from '@beaver/agent-core/types/zotero';
 import { getHost, type ResolvedItemDisplay } from '../host';
 import { useItemContextMenu } from './useItemContextMenu';
@@ -56,6 +60,8 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                 let ref: ZoteroItemReference | undefined;
                 if (isExternalCitation(citation)) {
                     const sourceId = getExternalSourceId(citation);
+                    // A web page shows its site's icon from the citation, imported or not.
+                    if (webPageId(sourceId)) continue;
                     const mapped = sourceId ? externalItemMapping[sourceId] : null;
                     ref = mapped ?? undefined;
                 } else if (citation.citation_type === 'item') {
@@ -143,6 +149,9 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                     const iconName = showAsExternal
                         ? undefined
                         : mappedItemType ?? itemTypeToIconName(citation.item_type ?? resolvedItemType, citation.content_kind);
+                    // A web page shows its site's icon, as in its citation's preview,
+                    // also once it is in the library.
+                    const webPage = isExternal && webPageId(getExternalSourceId(citation)) ? citation.web_page ?? {} : null;
 
                     return (
                         <div
@@ -171,6 +180,14 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                                             <span className="mr-2 flex-shrink-0 display-flex items-center font-color-secondary">
                                                 <Icon icon={TableIcon} />
                                             </span>
+                                        ) : webPage ? (
+                                            <span className="mr-2 flex-shrink-0 display-flex items-center">
+                                                <SiteIcon
+                                                    icon={webPage.icon}
+                                                    isPdf={webPageIsPdf(webPage.content_type, webPage.url)}
+                                                    size={14}
+                                                />
+                                            </span>
                                         ) : iconName && (
                                             <span className="mr-2 flex-shrink-0" style={{ transform: 'translateY(-2px)' }}>
                                                 {/* The client owns its item-type artwork; the generic
@@ -179,9 +196,10 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                                                     ?? <Icon icon={FileIcon} className="scale-85" />}
                                             </span>
                                         )}
-                                        {/* Author-year heading */}
+                                        {/* Author-year heading; a web page's title, since its
+                                            label (its site and year) would not tell pages apart. */}
                                         <span className="truncate">
-                                            {table ? table.title : citation.display_name}
+                                            {table ? table.title : (webPage?.title || citation.display_name)}
                                         </span>
                                     </div>
 
@@ -278,7 +296,10 @@ const CitedSourcesList: React.FC<CitedSourcesListProps> = ({
                                 {/* Right bottom section - formatted citation */}
                                 <div className="flex-1 px-2 text-sm font-color-secondary
                                                 min-w-0 overflow-hidden text-ellipsis">
-                                    {showAsExternal && externalRef && !webPageId(externalRef.source_id)
+                                    {webPage
+                                        // As in the page's preview and its result rows: its site and date.
+                                        ? webPageSiteLine(webPage) || stripUrlsFromCitation(citation.formatted_citation)
+                                        : showAsExternal && externalRef && !webPageId(externalRef.source_id)
                                         ? formatExternalCitation(externalRef)
                                         : table
                                         ? 'Research table'
@@ -359,6 +380,11 @@ export function mergeWebPagesByDoi(
 /**
  * Return the citation identity used for source-list actions and lookups.
  */
+/** "nyc.gov · Jan 2024": a cited page's site and date. */
+function webPageSiteLine(page: WebPageCitation): string {
+    return [webPageSiteName(page.site, page.url), formatRegistryDate(page.published)].filter(Boolean).join(' · ');
+}
+
 function getDisplayRef(citation: CitedSource) {
     return getResolvedRef(citation) ?? getRequestedRef(citation);
 }

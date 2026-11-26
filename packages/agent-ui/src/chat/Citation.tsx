@@ -13,14 +13,15 @@ import {
     getExternalReferenceUrl,
 } from '@beaver/agent-core/citations/externalReferences';
 import { pageLabelsByAttachmentIdAtom, externalFileLocalPathsAtom } from '@beaver/agent-core/citations/atoms';
-import { textFragmentUrl, webCitationExport } from '@beaver/agent-core/identity/webPages';
+import { textFragmentUrl, webCitationExport, webPageSiteName } from '@beaver/agent-core/identity/webPages';
 import { formatRegistryDate } from '@beaver/agent-core/citations/externalRecordDisplay';
 import { useCitationMarker } from './useCitationMarker';
 import { getHost } from '../host';
 import type { CitationExportRender, CitationReaderTarget } from '../host/types';
 import { useCitationViewModel, type CitationViewModel } from './useCitationViewModel';
+import SiteIcon from './SiteIcon';
 import { hasAlternateModifier, useAlternateActivation } from './useAlternateActivation';
-import { Icon, LibraryIcon, PdfIcon, FileIcon, GlobalSearchIcon, NoteIcon, HighlighterIcon, TextAlignLeftIcon, ExternalLinkIcon, TableIcon, ArrowUpRightIcon, GlobeIcon } from '../icons';
+import { Icon, LibraryIcon, PdfIcon, FileIcon, GlobalSearchIcon, NoteIcon, HighlighterIcon, TextAlignLeftIcon, ExternalLinkIcon, TableIcon, ArrowUpRightIcon } from '../icons';
 const TOOLTIP_WIDTH = '250px';
 
 /**
@@ -175,17 +176,6 @@ function webPageUrl(vm: CitationViewModel): string | null {
     if (!page?.url) return null;
     const sentences = (vm.metadata?.locations ?? []).map((location) => ({ partId: location.part_id, text: location.text }));
     return textFragmentUrl(page.url, sentences, { isPdf: page.isPdf });
-}
-
-/** The cited page's site: its publisher or domain, else the URL's host without "www.". */
-function webPageSite(vm: CitationViewModel): string | null {
-    const page = vm.webPage;
-    if (page?.site) return page.site;
-    try {
-        return page?.url ? new URL(page.url).hostname.replace(/^www\./, '') : null;
-    } catch {
-        return null;
-    }
 }
 
 /** What the click on a web citation does: "Highlights passage in browser". */
@@ -532,7 +522,7 @@ const Citation: React.FC<CitationProps> = (props) => {
     // A web page's preview reads like its row in web search results: the site's
     // icon beside the title, which leads, and the site and date quietly below.
     const pageHeader = webPage && !showItemInfo;
-    const pageSite = pageHeader ? webPageSite(vm) : null;
+    const pageSite = pageHeader ? webPageSiteName(webPage.site, webPage.url) : null;
     const pageDate = pageHeader ? formatRegistryDate(webPage.published) : null;
     const pageTitle = pageHeader ? webPage.title : null;
     const citationPreview = (
@@ -543,20 +533,7 @@ const Citation: React.FC<CitationProps> = (props) => {
                     // line height), so the icon centers on the title's first line.
                     <span className="text-sm display-flex items-center" style={{ flexShrink: 0, alignSelf: 'flex-start' }}>
                         {'\u200b'}
-                        {webPage.icon ? (
-                            // The site's own icon, an inline image the backend fetched. The
-                            // tooltip renders inside the answer's Markdown, whose images get a
-                            // fill; the icon keeps its transparency, and the tile behind it
-                            // turns white in dark mode.
-                            <span className="site-icon-tile">
-                                <img src={webPage.icon} alt="" width={16} height={16} style={{ display: 'block', objectFit: 'contain', backgroundColor: 'transparent' }} />
-                            </span>
-                        ) : (
-                            // As wide as an icon on its tile, so titles line up either way.
-                            <span className="display-flex items-center" style={{ width: 18, justifyContent: 'center' }}>
-                                <Icon icon={webPage.isPdf ? PdfIcon : GlobeIcon} className="font-color-secondary" />
-                            </span>
-                        )}
+                        <SiteIcon icon={webPage.icon} isPdf={webPage.isPdf} />
                     </span>
                 )}
                 <span className="display-flex flex-col gap-05 min-w-0">

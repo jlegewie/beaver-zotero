@@ -3,7 +3,7 @@ import { useAtomValue } from 'jotai';
 import { citationByKeyAtom, pageLabelsByAttachmentIdAtom } from '@beaver/agent-core/citations/atoms';
 import { externalReferenceItemMappingAtom } from '@beaver/agent-core/citations/externalReferences';
 import { webPageId } from '@beaver/agent-core/citations/externalRecords';
-import { siteIconSrc, urlNamesPdf } from '@beaver/agent-core/identity/webPages';
+import { webPageIsPdf } from '@beaver/agent-core/identity/webPages';
 import {
     Citation,
     getCitationPages,
@@ -35,7 +35,7 @@ export interface CitationWebPage {
     title: string | null;
     /** Publisher name or site, e.g. "World Health Organization", "who.int". */
     site: string | null;
-    /** The site's icon, an inline image; never a URL, which would contact the site. */
+    /** The site's icon as the citation carries it; `SiteIcon` draws it only if it is an inline image. */
     icon: string | null;
     /** When the page was published: "YYYY-MM-DD", "YYYY-MM" or "YYYY". */
     published: string | null;
@@ -353,10 +353,10 @@ export function useCitationViewModel(props: Record<string, unknown>): CitationVi
         const url = page?.url || null;
         return {
             url,
-            isPdf: page?.content_type === 'pdf' || (!!url && urlNamesPdf(url)),
+            isPdf: webPageIsPdf(page?.content_type, url),
             title: page?.title || null,
             site: page?.site || null,
-            icon: siteIconSrc(page?.icon),
+            icon: page?.icon || null,
             published: page?.published || null,
         };
     }, [isExternal, externalSourceId, metadata]);

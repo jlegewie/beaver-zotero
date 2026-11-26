@@ -1,7 +1,10 @@
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { Provider, createStore } from 'jotai';
 import { describe, expect, it } from 'vitest';
 import type { ExternalReference } from '@beaver/agent-core/types/externalReferences';
 import type { CitedSource } from '@beaver/agent-core/types/citations';
-import { mergeWebPagesByDoi } from '@beaver/agent-ui/chat/CitedSourcesList';
+import CitedSourcesList, { mergeWebPagesByDoi } from '@beaver/agent-ui/chat/CitedSourcesList';
 import { externalReferenceToCsl, externalReferenceUri } from '@beaver/agent-export/citations/externalCsl';
 import { externalRecordPresentation } from '@beaver/agent-core/citations/externalRecordDisplay';
 
@@ -78,5 +81,37 @@ describe('web pages in exports and rows', () => {
         // A web read's view has no search source; the record decides.
         expect(externalRecordPresentation(undefined, page('web-AAAAAAAAAA'))).toBe('webpage');
         expect(externalRecordPresentation('openalex', { source: 'openalex', library_items: [] })).toBe('generic');
+    });
+});
+
+
+describe('a web page in the sources list', () => {
+    it('is listed by its title and its site and date, beside a library item listed as before', () => {
+        const icon = 'data:image/webp;base64,UklGRhwAAABXRUJQ';
+        const webPage: CitedSource = {
+            ...cited('web-AAAAAAAAAA', '1'),
+            display_name: 'nyc.gov 2024',
+            formatted_citation: 'nyc.gov. 2024. "Crime and Enforcement Activity." Accessed 2026-11-26.',
+            web_page: { url: 'https://www.nyc.gov/report.pdf', title: 'Crime and Enforcement Activity', site: 'nyc.gov', published: '2024-01', icon },
+        };
+        const paper = {
+            citation_id: 'c-paper',
+            citation_type: 'item',
+            resolved_ref: { kind: 'zotero', library_id: 1, zotero_key: 'ABCD2345' },
+            display_name: 'Figures & Legewie 2019',
+            formatted_citation: 'Figures, Kalisha Dessources, and Joscha Legewie (2019). Visualizing Police Exposure.',
+            numericCitation: '2',
+        } as unknown as CitedSource;
+
+        const html = renderToStaticMarkup(
+            React.createElement(Provider, { store: createStore() }, React.createElement(CitedSourcesList, { citations: [webPage, paper] })),
+        );
+
+        expect(html).toContain('Crime and Enforcement Activity');
+        expect(html).toContain('nyc.gov · Jan 2024');
+        expect(html).toContain(`src="${icon}"`);
+        expect(html).not.toContain('nyc.gov 2024');
+        expect(html).toContain('Figures &amp; Legewie 2019');
+        expect(html).toContain('Figures, Kalisha Dessources, and Joscha Legewie (2019)');
     });
 });

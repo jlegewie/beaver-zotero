@@ -346,7 +346,7 @@ export const ExternalReferenceListResultView: React.FC<{
                         // Hairlines between pages, as between items in a library list.
                         row = (
                             <div className={index < references.length - 1 ? 'border-bottom-quinary' : ''}>
-                                <WebPageListItem {...rowProps} />
+                                <WebPageListItem {...rowProps} siteIcon={item.source_id ? view.site_icons?.[item.source_id] : null} />
                             </div>
                         );
                         break;

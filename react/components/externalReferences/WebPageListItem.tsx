@@ -3,10 +3,10 @@ import { useAtomValue } from 'jotai';
 import { webPageDetails, type ExternalReference } from '@beaver/agent-core/types/externalReferences';
 import { externalReferenceItemMappingAtom } from '@beaver/agent-core/citations/externalReferences';
 import { formatRegistryDate } from '@beaver/agent-core/citations/externalRecordDisplay';
-import { urlNamesPdf } from '@beaver/agent-core/identity/webPages';
+import { urlNamesPdf, webPageIsPdf } from '@beaver/agent-core/identity/webPages';
 import { getHost } from '@beaver/agent-ui/host';
 import { useItemContextMenu } from '@beaver/agent-ui/chat/useItemContextMenu';
-import { GlobeIcon, Icon, PdfIcon } from '@beaver/agent-ui/icons';
+import SiteIcon from '@beaver/agent-ui/chat/SiteIcon';
 import { openExternal } from './ExternalRecordParts';
 
 interface WebPageRowLayoutProps {
@@ -16,6 +16,8 @@ interface WebPageRowLayoutProps {
     url?: string | null;
     /** Defaults to whether the URL names a PDF. */
     isPdf?: boolean;
+    /** The site's icon as a small image data URI; a globe (PDF) glyph without one. */
+    icon?: string | null;
     /** Drawn faded, e.g. a page the tool failed on. */
     faded?: boolean;
     /** Controls at the row's end; their clicks don't open the page. */
@@ -35,6 +37,7 @@ export const WebPageRowLayout: React.FC<WebPageRowLayoutProps> = ({
     meta,
     url,
     isPdf,
+    icon,
     faded = false,
     trailing,
     isHovered,
@@ -50,9 +53,10 @@ export const WebPageRowLayout: React.FC<WebPageRowLayoutProps> = ({
         onMouseLeave={onMouseLeave}
         title={url ?? undefined}
     >
-        {/* A web glyph, not Zotero's item-type icon: a library icon would say the page is in the library. */}
+        {/* The site's icon, not Zotero's item-type icon: a library icon would say
+            the page is in the library. It takes an item icon's 16 px slot. */}
         <div className="display-flex items-center justify-center flex-shrink-0 ml-05" style={{ width: 16, height: 18 }}>
-            <Icon icon={isPdf ?? (!!url && urlNamesPdf(url)) ? PdfIcon : GlobeIcon} size={15} className="font-color-secondary" />
+            <SiteIcon icon={icon} isPdf={isPdf ?? (!!url && urlNamesPdf(url))} size={14} />
         </div>
         <div className="display-flex flex-col flex-1 gap-05 min-w-0">
             <div className="truncate font-color-primary" style={{ fontSize: '0.925rem' }}>
@@ -74,6 +78,8 @@ export const WebPageRowLayout: React.FC<WebPageRowLayoutProps> = ({
 
 interface WebPageListItemProps {
     item: ExternalReference;
+    /** The site's icon from the tool-result view, as a small image data URI. */
+    siteIcon?: string | null;
     isHovered: boolean;
     onMouseEnter: () => void;
     onMouseLeave: () => void;
@@ -84,7 +90,7 @@ interface WebPageListItemProps {
  * hover; once the page is in the library, its reveal control stays and the
  * row gets the item menu.
  */
-const WebPageListItem: React.FC<WebPageListItemProps> = ({ item, isHovered, onMouseEnter, onMouseLeave }) => {
+const WebPageListItem: React.FC<WebPageListItemProps> = ({ item, siteIcon, isHovered, onMouseEnter, onMouseLeave }) => {
     const itemMapping = useAtomValue(externalReferenceItemMappingAtom);
     const libraryItem = (item.source_id && itemMapping[item.source_id]) || item.library_items?.[0];
     const { openItemMenu, itemMenu } = useItemContextMenu();
@@ -109,7 +115,8 @@ const WebPageListItem: React.FC<WebPageListItemProps> = ({ item, isHovered, onMo
                 title={item.title || site || url || item.source_id || 'Web page'}
                 meta={[site, date].filter(Boolean).join(' · ')}
                 url={url}
-                isPdf={details?.content_type === 'pdf' || (!!url && urlNamesPdf(url))}
+                isPdf={webPageIsPdf(details?.content_type, url)}
+                icon={siteIcon}
                 trailing={actions && (
                     // Hidden, not removed, off hover: the control keeps its library check.
                     <div style={{ visibility: isHovered || libraryItem ? 'visible' : 'hidden' }}>{actions}</div>
