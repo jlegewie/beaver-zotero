@@ -195,10 +195,19 @@ export function attachThreadAdmission(runtime: WindowRuntime): void {
         delay = 500;
         return poll(capture());
     };
-    const reset = () => {
+    /** This window's polling starts over: it shows another chat now. */
+    const restart = () => {
         stop();
         delay = 500;
         failures = 0;
+    };
+    /**
+     * The account changed: the session shown starts over too. A chat left by
+     * navigation keeps its state, which belongs to its session and to the
+     * other windows that show it.
+     */
+    const reset = () => {
+        restart();
         getSessionPort().clearSettlingThreads();
         const chat = runSessionStore();
         chat.set(threadAdmissionAtom, null);
@@ -209,7 +218,7 @@ export function attachThreadAdmission(runtime: WindowRuntime): void {
     };
     const removers = [
         store.sub(threadAdmissionAtom, schedule),
-        store.sub(threadNavigationSeqAtom, reset),
+        store.sub(threadNavigationSeqAtom, restart),
         store.sub(accountGenerationAtom, reset),
     ];
     Zotero.Beaver.runtime.addWindowCleanup(runtime, () => {

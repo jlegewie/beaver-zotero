@@ -2,10 +2,11 @@
  * Chat runs as the window sees them.
  *
  * Execution lives in the run engine (`src/services/agentRuns/runEngine`), whose atoms
- * this module re-exports; it runs in the plugin realm, in this window's run
- * session, which the window reaches through its port. What stays here is the
- * window's half of a send: assembling the prompt from the composer and the
- * window's context, and clearing the composer once the run is accepted.
+ * this module re-exports; it runs in the plugin realm, in the run session of
+ * the chat the window shows, which the window reaches through its port. What
+ * stays here is the window's half of a send: assembling the prompt from the
+ * composer and the window's context, and clearing the composer once the run
+ * is accepted.
  */
 
 import { atom, Getter, Setter } from 'jotai';
@@ -61,8 +62,10 @@ import { libraryRefForLibraryID } from '../../src/utils/libraryIdentity';
 import { isTargetInLibraries } from '../utils/zoteroReferences';
 import { prewarmMuPDFWorker } from '../../src/beaver-extract';
 import { isRejectedItemValidation, itemValidationResultsAtom } from './itemValidation';
-import '../runtime/windowRunSession';
+import { showChatSession } from '../runtime/windowRunSession';
 import { getSessionPort } from '../../src/services/agentRuns/runSession';
+import { store as windowStore } from '../store';
+import { threadNavigationSeqAtom } from './threadNavigation';
 import type { WriterScope } from '../../src/services/agentRuns/sessionPort';
 import { sessionAtomName } from '../../src/services/agentRuns/sessionState';
 import { runSessionStore } from '../runtime/runSessionStore';
@@ -79,16 +82,37 @@ import {
 export * from '../../src/services/agentRuns/runEngine';
 
 /**
- * Run a window operation under the chat's writer lease, held by the session:
- * it claims the chat and reads admission first. `operation` gets the
- * window's setter and the session's, both guarded by the lease (they throw
- * once it is lost or the window navigates), and the lease's scope.
+ * Run a window operation under the chat's writer lease, held by the session
+ * of the chat the window shows: it claims the chat and reads admission
+ * first. `operation` gets the window's setter and the session's, both
+ * guarded by the lease, and the lease's scope. The window's setter and the
+ * run's start also throw once the window has navigated to another chat; the
+ * session's setter does not, so an abandoned preparation can still free the
+ * chat it was for.
  */
 export function withThreadWriter<T>(
     set: Setter,
     operation: (set: Setter, sessionSet: Setter, scope: WriterScope) => Promise<T>,
 ): Promise<T | undefined> {
-    return getSessionPort().withThreadWriter((scope) => {
+    const navigation = windowStore.get(threadNavigationSeqAtom);
+    const assertShown = () => {
+        if (windowStore.get(threadNavigationSeqAtom) !== navigation) {
+            throw Object.assign(new Error('Chat changed'), { code: 'thread_operation_canceled' });
+        }
+    };
+    return getSessionPort().withThreadWriter((sessionScope) => {
+        const scope: WriterScope = {
+            assertCurrent: () => {
+                assertShown();
+                sessionScope.assertCurrent();
+            },
+            // The session's own state, written whichever chat the window shows.
+            set: (name, ...args) => sessionScope.set(name, ...args),
+            startMessageRun: (submission, onAccepted) => {
+                assertShown();
+                return sessionScope.startMessageRun(submission, onAccepted);
+            },
+        };
         const guardedSet = ((...args: Parameters<Setter>) => {
             scope.assertCurrent();
             return (set as (...a: unknown[]) => unknown)(...args);
@@ -526,6 +550,12 @@ const sendWSMessage = async (
             });
         } catch (error) {
             if (accountGeneration !== getCredentialGeneration()) return;
+            if ((error as { code?: string } | null)?.code === 'thread_operation_canceled') {
+                // The window opened another chat while it prepared the
+                // message: nothing was sent, and the chat it left is free.
+                sessionSet(isWSChatPendingAtom, false);
+                return;
+            }
             // Catch any unexpected errors during message preparation
             logger('sendWSMessageAtom: Unexpected error:', error, 1);
             sessionSet(wsErrorAtom, {
@@ -540,8 +570,13 @@ const sendWSMessage = async (
     };
 
 export const sendWSMessageAtom = atom(null, (get, set, message: string, options?: SendWSMessageOptions) => {
-    const send = () => withThreadWriter(set, (guardedSet, guardedSessionSet, scope) =>
-        sendWSMessage(get, guardedSet, guardedSessionSet, scope, message, options));
+    // The message is for the chat shown now: once the window shows another,
+    // it is not sent.
+    const navigation = windowStore.get(threadNavigationSeqAtom);
+    const send = () => windowStore.get(threadNavigationSeqAtom) !== navigation
+        ? Promise.resolve(undefined)
+        : withThreadWriter(set, (guardedSet, guardedSessionSet, scope) =>
+            sendWSMessage(get, guardedSet, guardedSessionSet, scope, message, options));
     // Claims the writer in the same tick as the click unless a resume must
     // be parked first, so a second click finds it taken.
     if (!messageParksResume()) return send();
@@ -552,6 +587,8 @@ export const sendWSMessageAtom = atom(null, (get, set, message: string, options?
  * Clear the current thread and start fresh
  */
 export const clearThreadAtom = atom(null, (_get, set) => {
+    // A run going in the chat shown goes on in its session.
+    showChatSession(null);
     const chat = runSessionStore();
     chat.set(threadRunsAtom, []);
     chat.set(activeRunAtom, null);

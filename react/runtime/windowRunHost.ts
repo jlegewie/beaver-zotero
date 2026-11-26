@@ -1,6 +1,6 @@
 /**
- * A Zotero renderer as the viewer of its run session: what the session reaches
- * in the window it runs for (selections, popups and dialogs, agent actions,
+ * A Zotero renderer as a viewer of run sessions: what a session reaches in a
+ * window that shows its chat (selections, popups and dialogs, agent actions,
  * display enrichment of stream events, and the window-side effects of a run).
  */
 
@@ -14,14 +14,13 @@ import type { UndoConfirmResult } from '../../src/services/agentRuns/runHost';
 import type { RunGate, RunViewer } from '../../src/services/agentRuns/runViewer';
 import { externalReferenceItemMappingAtom, externalReferenceMappingAtom } from '@beaver/agent-core/citations/externalReferences';
 import { isSidebarVisibleAtom } from '../atoms/ui';
-import { chatFillsAtom } from '@beaver/agent-core/run-state/tableChatFills';
 import { mergePageLabelsByAttachmentIdAtom } from '@beaver/agent-core/citations/atoms';
 import type { AgentRun } from '@beaver/agent-core/agents/types';
 import { collectTableArtifacts } from '@beaver/agent-core/run-state/tableResults';
 import { getHostWindow, tryGetWindowRuntime } from './windowRuntime';
 import { selectedModelAtom } from '../atoms/models';
 import { userIdAtom } from '../atoms/auth';
-import { threadNavigationSeqAtom, loadThreadAtom } from '../atoms/threads';
+import { loadThreadAtom } from '../atoms/threads';
 import { mergeItemsChoicesAtom } from '../atoms/mergeItemsChoices';
 import { addPopupMessageAtom } from '../utils/popupMessageUtils';
 import { addWarningAtom } from '../atoms/warnings';
@@ -34,7 +33,6 @@ import { maybeShowCitationTipAtom } from '../atoms/citationTip';
 import { preloadPageLabelsForCitations } from '../utils/pageLabels';
 import { markExternalReferenceImportedAtom } from '../atoms/externalReferences';
 import { BeaverTemporaryAnnotations } from '../utils/annotationUtils';
-import { leaveJobWait } from '../atoms/jobLeave';
 import { dismissDiffPreview } from '../utils/noteEditorDiffPreview';
 import { clearDiffPreviewNoteKey, noteLibraryIdFromActionData, updateDiffPreviewForNote } from '../utils/diffPreviewCoordinator';
 import { processToolReturnResults } from '../agents/toolResultProcessing';
@@ -397,7 +395,7 @@ function refreshNotePreviews(approvals: readonly PendingApproval[]): void {
     for (const { libraryId, zoteroKey } of notes.values()) updateDiffPreviewForNote(libraryId, zoteroKey);
 }
 
-/** The renderer whose store is `view`, as the viewer of its run session. */
+/** The renderer whose store is `view`, as the viewer of the sessions it shows. */
 export function createWindowRunViewer(view: Store): RunViewer {
     /**
      * The window's setter, behind a run's gate: each write happens only while
@@ -416,10 +414,8 @@ export function createWindowRunViewer(view: Store): RunViewer {
         sidebarVisible: () => view.get(isSidebarVisibleAtom) === true,
         getModel: () => view.get(selectedModelAtom),
         getUserId: () => view.get(userIdAtom),
-        navigationSeq: () => view.get(threadNavigationSeqAtom),
         actionChanges: (actionId: string) => view.get(mergeItemsChoicesAtom)[actionId],
         agentActions: () => view.get(threadAgentActionsAtom),
-        chatFillSnapshot: (jobId: string) => view.get(chatFillsAtom).get(jobId)?.snapshot,
         externalReferences: () => ({
             externalRefs: view.get(externalReferenceMappingAtom),
             externalItemMapping: view.get(externalReferenceItemMappingAtom),
@@ -488,7 +484,6 @@ export function createWindowRunViewer(view: Store): RunViewer {
                 logger(`${logPrefix}: Error cleaning up temporary annotations: ${error}`);
             }
         },
-        leaveJobWaitOnClose: () => leaveJobWait({ closing: tryGetWindowRuntime(true)?.hostWindow ?? null }),
 
         addAgentActions: (gate, actions) => windowSet(gate)(addAgentActionsAtom, actions),
         upsertAgentActions: (gate, actions) => windowSet(gate)(upsertAgentActionsAtom, actions),
@@ -521,12 +516,12 @@ export function createWindowRunViewer(view: Store): RunViewer {
         },
         processToolReturn: (part, gate) => processToolReturnResults(part, windowSet(gate)),
         upgradeToolReturn: (part, toolCallArgs) => upgradeToolReturn(part, toolCallArgs),
-        prepareAgentActions: async (runId, actions) => {
+        prepareAgentActions: async (runId, actions, autoApply) => {
             await loadItemDataForAgentActions(actions).catch(err =>
                 logger(`WS agent actions: Failed to load item data for agent actions: ${err}`, 1)
             );
-            // Auto-apply annotations if enabled
-            autoApplyAnnotationAgentActions(runId, actions);
+            // Auto-apply annotations if enabled, in the window that started the run
+            if (autoApply) autoApplyAnnotationAgentActions(runId, actions);
         },
         openCreatedTable: (tableKey, runId, toolCallId) => {
             void openCreatedTable(tableKey, getHostWindow(), runId, toolCallId);

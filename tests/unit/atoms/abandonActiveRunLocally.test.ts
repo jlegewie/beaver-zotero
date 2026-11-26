@@ -3,6 +3,7 @@
  * the shutdown path (plain close).
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import '../../helpers/localRunSession';
 
 const {
     cancelMock,

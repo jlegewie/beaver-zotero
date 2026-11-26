@@ -1,4 +1,3 @@
-import { isFinishedChat, RESPONSE_FINISH_MESSAGE } from "../services/threads/finishedChat";
 import { getLocaleID, getString } from "../utils/locale";
 import { triggerToggleChat, triggerToggleQuickPrompt } from "./toggleChat";
 import { KeyboardManager } from "../utils/keyboardManager";
@@ -597,11 +596,6 @@ export class BeaverUIFactory {
         payload: Record<string, unknown> = {},
     ): Promise<any> {
         const generation = Zotero.Beaver.account?.getSnapshot().generation;
-        const allowed = async () => command !== "open-chat" || (
-            await isFinishedChat(String(payload.threadId ?? "")) &&
-            generation === Zotero.Beaver.account?.getSnapshot().generation
-        );
-        if (!await allowed()) return { ok: false, reason: "thread_active", message: RESPONSE_FINISH_MESSAGE };
         const win = this.openBeaverWindow(undefined, command === "open-chat");
         if (!win)
             throw Object.assign(new Error("Beaver window unavailable"), {
@@ -620,7 +614,7 @@ export class BeaverUIFactory {
                 code: "window_unavailable",
             });
         }
-        if (!await allowed()) return { ok: false, reason: "thread_active", message: RESPONSE_FINISH_MESSAGE };
+        if (generation !== Zotero.Beaver.account?.getSnapshot().generation) return { ok: false, canceled: true };
         return Zotero.Beaver.runtime.dispatchWindowCommand(command, {
             ...JSON.parse(JSON.stringify(payload)),
             windowId: win.__beaverRuntime.id,

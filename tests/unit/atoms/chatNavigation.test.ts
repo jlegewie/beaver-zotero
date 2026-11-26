@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import '../../helpers/localRunSession';
 import { createThreadStore as createStore } from '../../helpers/threadRepository';
 
 // =============================================================================
@@ -224,21 +225,15 @@ const loadArgs = {
     skipInstanceMismatchConfirm: true,
 };
 
-describe('interrupt-active-run confirm', () => {
+describe('chat navigation', () => {
     let store: ReturnType<typeof createStore>;
 
     beforeEach(() => {
         vi.clearAllMocks();
         store = createStore();
         installStoreRunSession(store, { agentService });
-        const port = getSessionPort();
-        vi.spyOn(port, 'canLeaveReconnectingRun').mockImplementation(() => canLeaveReconnectingRunMock());
-        vi.spyOn(port, 'parkableRunId').mockImplementation(() => parkableRunIdMock());
         getPrefMock.mockReturnValue(false);
         confirmMock.mockReturnValue(true);
-        leaveRunMock.mockReturnValue(false);
-        canLeaveReconnectingRunMock.mockReturnValue(false);
-        parkableRunIdMock.mockReturnValue(null);
         getThreadRunsMock.mockResolvedValue({ runs: [], agent_actions: [] });
         getThreadMock.mockResolvedValue({ name: 'Thread', zotero_user_id: '111', zotero_local_id: 'CURKEY' });
     });
@@ -256,131 +251,56 @@ describe('interrupt-active-run confirm', () => {
             expect(attachCollectionsMock).toHaveBeenCalledTimes(expected ? 1 : 0);
         });
 
-        it('does not prompt when the active run already failed', async () => {
-            store.set(activeRunAtom, run('error'));
-
-            await store.set(newThreadAtom, { skipAutoPopulate: true });
-
-            expect(confirmMock).not.toHaveBeenCalled();
-            expect(store.get(activeRunAtom)).toBeNull();
-        });
-
-        it('does not prompt when the active run was canceled', async () => {
-            store.set(activeRunAtom, run('canceled'));
-
-            await store.set(newThreadAtom, { skipAutoPopulate: true });
-
-            expect(confirmMock).not.toHaveBeenCalled();
-        });
-
-        it('prompts while a run is streaming', async () => {
-            store.set(activeRunAtom, run('in_progress'));
-
-            await store.set(newThreadAtom, { skipAutoPopulate: true });
-
-            expect(confirmMock).toHaveBeenCalledTimes(1);
-            expect(confirmMock.mock.calls[0][0]).toMatchObject({ title: 'Start new chat?' });
-        });
-
-        it('prompts while a run waits on a deferred approval', async () => {
-            store.set(activeRunAtom, run('awaiting_deferred'));
-
-            await store.set(newThreadAtom, { skipAutoPopulate: true });
-
-            expect(confirmMock).toHaveBeenCalledTimes(1);
-        });
-
-        it('prompts while the send is pending with no run shell yet', async () => {
-            store.set(isWSChatPendingAtom, true);
-
-            await store.set(newThreadAtom, { skipAutoPopulate: true });
-
-            expect(confirmMock).toHaveBeenCalledTimes(1);
-        });
-
-        it('leaves the streaming run untouched when the prompt is canceled', async () => {
-            confirmMock.mockReturnValue(false);
-            const streaming = run('in_progress');
-            store.set(activeRunAtom, streaming);
-
-            await store.set(newThreadAtom, { skipAutoPopulate: true });
-
-            expect(store.get(activeRunAtom)).toBe(streaming);
-        });
-    });
-
-    describe('loadThreadAtom', () => {
-        it('does not prompt when the active run already failed', async () => {
-            store.set(activeRunAtom, run('error'));
-
-            const loaded = await store.set(loadThreadAtom, loadArgs);
-
-            expect(loaded).toBe(true);
-            expect(confirmMock).not.toHaveBeenCalled();
-            expect(store.get(currentThreadIdAtom)).toBe('thread-1');
-        });
-
-        it('prompts while a run is streaming', async () => {
-            store.set(activeRunAtom, run('in_progress'));
-
-            await store.set(loadThreadAtom, loadArgs);
-
-            expect(confirmMock).toHaveBeenCalledTimes(1);
-            expect(confirmMock.mock.calls[0][0]).toMatchObject({ title: 'Switch chat?' });
-        });
     });
 
     /** A live run waits on a fill whose table is not open: one question, naming the fill. */
-    describe('while the run waits on a fill', () => {
-        const fill = {
-            job_id: 'job-1',
-            plan_id: 'plan-1',
-            table: { libraryID: 1, key: 'TABLE001', title: 'Trials' },
-            origin: { kind: 'agent', run: { run_id: 'run-1', thread_id: 'thread-0', tool_call_id: 'call-1' } },
-            state: 'running',
-            rows_total: 10,
-            rows_done: 2,
-            rows_failed: 0,
-            in_flight: 2,
-            credits_charged: 0,
-            credits_planned: 1,
-            balance: null,
-            started_at: 1,
-            seconds_left: null,
-        } as TableFillJobSnapshot;
-
-        beforeEach(() => {
-            store.set(currentThreadIdAtom, 'thread-0');
-            store.set(activeRunAtom, run('in_progress'));
-            store.set(chatFillsAtom, recordChatFill(new Map(), fill));
-            store.set(jobWaitAtom, { threadId: 'thread-0', runId: 'run-1', toolCallId: 'call-1', jobId: 'job-1' });
-        });
-
-        it('asks once, about the fill, before a new chat, then stops the run', async () => {
-            await store.set(newThreadAtom, { skipAutoPopulate: true });
-            expect(confirmMock).toHaveBeenCalledTimes(1);
-            expect(confirmMock.mock.calls[0][0]).toMatchObject({ title: 'Start new chat?', confirmLabel: 'Start New Chat' });
-            expect(confirmMock.mock.calls[0][0].text).toContain('the fill of “Trials”');
-            expect(cancelMock).toHaveBeenCalledTimes(1);
-        });
-
-        it('asks once, about the fill, before another chat', async () => {
-            confirmMock.mockReturnValue(false);
-            const loaded = await store.set(loadThreadAtom, loadArgs);
-            expect(loaded).toBe(false);
-            expect(confirmMock).toHaveBeenCalledTimes(1);
-            expect(confirmMock.mock.calls[0][0]).toMatchObject({ title: 'Switch chat?', confirmLabel: 'Switch Chat' });
-            expect(confirmMock.mock.calls[0][0].text).toContain('the fill of “Trials”');
-            expect(store.get(currentThreadIdAtom)).toBe('thread-0');
-        });
-    });
-
     /**
      * Work started in one chat asks this counter whether it has been left
      * behind. The thread id cannot answer: a new chat opened from an unnamed
      * first run leaves it null on both sides, and a load writes it only after
      * its own awaits.
      */
+    /**
+     * A run belongs to its chat's session: leaving the chat never asks, and
+     * never stops, parks or leaves the run.
+     */
+    describe('leaving a chat with a run going', () => {
+        it.each(['in_progress', 'awaiting_deferred'])('starts a new chat without asking or stopping a run %s', async (status) => {
+            store.set(activeRunAtom, run(status));
+            store.set(isWSChatPendingAtom, true);
+
+            await store.set(newThreadAtom, { skipAutoPopulate: true });
+
+            expect(confirmMock).not.toHaveBeenCalled();
+            expect(cancelMock).not.toHaveBeenCalled();
+            expect(parkRunMock).not.toHaveBeenCalled();
+            expect(leaveRunMock).not.toHaveBeenCalled();
+        });
+
+        it('opens another chat without asking or stopping the run', async () => {
+            store.set(activeRunAtom, run('in_progress'));
+            store.set(isWSChatPendingAtom, true);
+
+            expect(await store.set(loadThreadAtom, { ...loadArgs, threadId: 'thread-2' })).toBe(true);
+
+            expect(confirmMock).not.toHaveBeenCalled();
+            expect(cancelMock).not.toHaveBeenCalled();
+            expect(parkRunMock).not.toHaveBeenCalled();
+        });
+
+        it('leaves a fill the run waits on running, and the wait in place', async () => {
+            store.set(activeRunAtom, run('in_progress'));
+            store.set(jobWaitAtom, { threadId: 'thread-0', runId: 'run-1', toolCallId: 'call-1', jobId: 'job-1' });
+            const stop = vi.fn();
+            (globalThis as any).Zotero.Beaver = { ...(globalThis as any).Zotero.Beaver, tableFills: { stop, agent: { release: stop } } };
+
+            await store.set(newThreadAtom, { skipAutoPopulate: true });
+
+            expect(confirmMock).not.toHaveBeenCalled();
+            expect(stop).not.toHaveBeenCalled();
+        });
+    });
+
     describe('threadNavigationSeqAtom', () => {
         it('counts a new chat even when the thread id does not change', async () => {
             store.set(currentThreadIdAtom, null);
@@ -438,18 +358,6 @@ describe('interrupt-active-run confirm', () => {
             expect(store.get(threadNavigationSeqAtom)).toBe(before);
         });
 
-        it('does not count a navigation the user declined', async () => {
-            confirmMock.mockReturnValue(false);
-            store.set(activeRunAtom, run('in_progress'));
-            const before = store.get(threadNavigationSeqAtom);
-
-            await store.set(newThreadAtom, { skipAutoPopulate: true });
-            await store.set(loadThreadAtom, loadArgs);
-
-            expect(confirmMock).toHaveBeenCalledTimes(2);
-            expect(store.get(threadNavigationSeqAtom)).toBe(before);
-        });
-
         it('moves before the new chat state does', async () => {
             store.set(currentThreadIdAtom, 'thread-0');
             const seenWhenIdChanged: number[] = [];
@@ -466,90 +374,4 @@ describe('interrupt-active-run confirm', () => {
         });
     });
 
-    describe('leaving a run that waits only on cards', () => {
-        beforeEach(() => {
-            parkableRunIdMock.mockReturnValue('run-1');
-        });
-
-        it('starts a new chat without asking, parking the run instead of stopping it', async () => {
-            store.set(activeRunAtom, run('in_progress'));
-            store.set(isWSChatPendingAtom, true);
-
-            await store.set(newThreadAtom, { skipAutoPopulate: true });
-
-            expect(confirmMock).not.toHaveBeenCalled();
-            expect(parkRunMock).toHaveBeenCalledWith('run-1');
-            expect(cancelMock).not.toHaveBeenCalled();
-            expect(store.get(activeRunAtom)).toBeNull();
-        });
-
-        it('opens another chat without asking, parking the run instead of stopping it', async () => {
-            store.set(activeRunAtom, run('in_progress'));
-            store.set(isWSChatPendingAtom, true);
-
-            await store.set(loadThreadAtom, loadArgs);
-
-            expect(confirmMock).not.toHaveBeenCalled();
-            expect(parkRunMock).toHaveBeenCalledWith('run-1');
-            expect(cancelMock).not.toHaveBeenCalled();
-            expect(store.get(currentThreadIdAtom)).toBe('thread-1');
-        });
-
-        it('refetches thread lists once the run parks, so they show the chat as waiting', async () => {
-            const invalidateViews = vi.fn();
-            (Zotero as any).Beaver = { ...(Zotero as any).Beaver, threads: { invalidateViews } };
-            store.set(activeRunAtom, run('in_progress'));
-            store.set(isWSChatPendingAtom, true);
-            parkRunMock.mockResolvedValueOnce('refused');
-            await store.set(newThreadAtom, { skipAutoPopulate: true });
-            expect(invalidateViews).not.toHaveBeenCalled();
-
-            store.set(activeRunAtom, run('in_progress'));
-            store.set(isWSChatPendingAtom, true);
-            await store.set(newThreadAtom, { skipAutoPopulate: true });
-            expect(invalidateViews).toHaveBeenCalledTimes(1);
-        });
-    });
-
-    describe('leaving a run that is reconnecting', () => {
-        beforeEach(() => {
-            canLeaveReconnectingRunMock.mockReturnValue(true);
-            leaveRunMock.mockReturnValue(true);
-        });
-
-        it('starts a new chat without asking or stopping the run', async () => {
-            store.set(activeRunAtom, run('in_progress'));
-            store.set(isWSChatPendingAtom, true);
-
-            await store.set(newThreadAtom, { skipAutoPopulate: true });
-
-            expect(confirmMock).not.toHaveBeenCalled();
-            expect(leaveRunMock).toHaveBeenCalledWith('run-1');
-            expect(cancelMock).not.toHaveBeenCalled();
-            expect(store.get(activeRunAtom)).toBeNull();
-        });
-
-        it('opens another chat without asking or stopping the run', async () => {
-            store.set(activeRunAtom, run('in_progress'));
-            store.set(isWSChatPendingAtom, true);
-
-            await store.set(loadThreadAtom, loadArgs);
-
-            expect(confirmMock).not.toHaveBeenCalled();
-            expect(leaveRunMock).toHaveBeenCalledWith('run-1');
-            expect(cancelMock).not.toHaveBeenCalled();
-            expect(store.get(currentThreadIdAtom)).toBe('thread-1');
-        });
-
-        it('stops the run when the server could not hold it', async () => {
-            leaveRunMock.mockReturnValue(false);
-            store.set(activeRunAtom, run('in_progress'));
-            store.set(isWSChatPendingAtom, true);
-
-            await store.set(newThreadAtom, { skipAutoPopulate: true });
-
-            expect(leaveRunMock).toHaveBeenCalledWith('run-1');
-            expect(cancelMock).toHaveBeenCalledTimes(1);
-        });
-    });
 });

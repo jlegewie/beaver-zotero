@@ -57,6 +57,7 @@ vi.mock('../../../src/services/agentDataProvider', () => ({
     handleReadNoteRequest: vi.fn(),
 }));
 
+import { pendingApprovalsAtom } from '@beaver/agent-core/run-state/pendingApprovals';
 import { createStore } from 'jotai';
 import { AgentConnectionError, AgentService, agentService } from '@beaver/agent-core/transport/agentService';
 import { isRetryablePreReadyConnectFailure } from '@beaver/agent-core/transport/connectionFailure';
@@ -396,6 +397,8 @@ describe('sendApprovalResponseAtom delivery handling', () => {
         const store = createStore();
         installWindowStoreRunSession(store);
         vi.spyOn(agentService, 'sendApprovalResponse').mockReturnValue(false);
+        // The card waits for its answer.
+        store.set(pendingApprovalsAtom, new Map([['action-1', { actionId: 'action-1' } as any]]));
 
         store.set(sendApprovalResponseAtom, { actionId: 'action-1', approved: true });
 
@@ -406,6 +409,8 @@ describe('sendApprovalResponseAtom delivery handling', () => {
         const store = createStore();
         installWindowStoreRunSession(store);
         vi.spyOn(agentService, 'sendApprovalResponse').mockReturnValue(true);
+        // The card waits for its answer.
+        store.set(pendingApprovalsAtom, new Map([['action-1', { actionId: 'action-1' } as any]]));
 
         store.set(sendApprovalResponseAtom, { actionId: 'action-1', approved: true });
 

@@ -12,6 +12,7 @@
  * started with; the atoms and the store are the real thing.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import '../../helpers/localRunSession';
 
 const { connectMock, closeMock, sendApprovalResponseMock, sendQuestionResponseMock, sendCardAnswerMock, parkRunMock, isConnectedMock, transport } = vi.hoisted(() => ({
     connectMock: vi.fn(),
@@ -865,7 +866,10 @@ describe('resuming with a fill result', () => {
         beaver = zotero.Beaver;
         zotero.Beaver = {
             ...(beaver as object | undefined),
-            tableFills: { agent: { doneAnswer: (_snapshot: unknown, requestId: string) => ({ ...answer, request_id: requestId }) } },
+            tableFills: {
+                agent: { doneAnswer: (_snapshot: unknown, requestId: string) => ({ ...answer, request_id: requestId }) },
+                getJob: (jobId: string) => store.get(chatFillsAtom).get(jobId)?.snapshot ?? null,
+            },
         };
     });
     afterEach(() => {

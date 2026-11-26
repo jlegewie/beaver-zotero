@@ -6,7 +6,7 @@ import Spinner from '@beaver/agent-ui/icons/Spinner';
 import IconButton from '@beaver/agent-ui/primitives/IconButton';
 import { isThreadListViewAtom, threadListFilterAtom, showAllThreadInstancesAtom } from '../atoms/ui';
 import { ThreadData } from '../atoms/threads';
-import { threadViewsAtom, threadViewKey } from '../atoms/threadList';
+import { threadEntitiesAtom, threadViewsAtom, threadViewKey } from '../atoms/threadList';
 import { userAtom } from '../atoms/auth';
 import { searchableLibraryIdsAtom } from '../atoms/profile';
 import { formatTimeAgo } from '../utils/formatTimeAgo';
@@ -20,8 +20,8 @@ import { ChipButton } from './agentRuns/requestChips/ChipButton';
 import { CSSIcon, CSSItemTypeIcon } from './icons/zotero';
 import ThreadFilterMenu from './ui/menus/ThreadFilterMenu';
 import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
-import AwaitingInputDot from './AwaitingInputDot';
-import { awaitingInputLabel } from '../../src/services/threads/awaitingInput';
+import ThreadRunIndicator from './ThreadRunIndicator';
+import { listRunningFirst, runActivityAtom, runActivityByThreadAtom, threadRunStatus, threadRunStatusLabel } from '../atoms/runActivity';
 
 interface ThreadListViewProps {
     isWindow?: boolean;
@@ -63,6 +63,27 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
         currentThreadId,
     } = history;
     const fetchError = view.error;
+    const activity = useAtomValue(runActivityAtom);
+    const activityByThread = useAtomValue(runActivityByThreadAtom);
+    const entities = useAtomValue(threadEntitiesAtom);
+    /**
+     * Chats with a live session, listed first, above pinned chats, most
+     * recently started first. Each chat is listed once: it leaves its usual
+     * group while its session lives. Searching or filtering lists what
+     * matches, in the usual order.
+     */
+    const { running: runningThreads, pinned: listedPinned, groups: listedGroups } = useMemo(
+        () => listRunningFirst(
+            activeQuery || filter ? [] : activity,
+            entities,
+            pinnedThreads,
+            groups,
+            (thread) => showAllInstances || !isThreadInstanceMismatch(instanceRef, {
+                zoteroUserId: thread.zoteroUserId, zoteroLocalId: thread.zoteroLocalId,
+            }),
+        ),
+        [activity, entities, pinnedThreads, groups, activeQuery, filter, showAllInstances, instanceRef],
+    );
 
     const [editingThreadId, setEditingThreadId] = useState<string | null>(null);
     const [editingName, setEditingName] = useState('');
@@ -174,8 +195,8 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
     // The rendered order, as a value that only changes when a row is added,
     // removed or moved — the moments a stationary pointer lands on a new row.
     const rowOrderKey = useMemo(
-        () => `${pinnedThreads.map(t => t.id).join(',')}|${groups.map(g => g.threads.map(t => t.id).join(',')).join(',')}`,
-        [pinnedThreads, groups]
+        () => `${runningThreads.map(t => t.id).join(',')}|${listedPinned.map(t => t.id).join(',')}|${listedGroups.map(g => g.threads.map(t => t.id).join(',')).join(',')}`,
+        [runningThreads, listedPinned, listedGroups]
     );
     useLayoutEffect(() => {
         syncHoverToPointer();
@@ -223,6 +244,8 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
             zoteroUserId: thread.zoteroUserId, zoteroLocalId: thread.zoteroLocalId,
         });
         const pinPending = history.isPinPending(thread.id);
+        const status = threadRunStatus(activityByThread.get(thread.id), thread.awaitingInput);
+        const statusLabel = threadRunStatusLabel(status);
 
         return (
             <div
@@ -231,7 +254,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                 className={`thread-list-item ${isEditing ? 'thread-list-item-editing' : ''} ${isHovered ? 'thread-list-item-hovered' : ''}`}
                 role={isEditing ? undefined : 'button'}
                 tabIndex={isEditing ? undefined : 0}
-                aria-label={isEditing ? undefined : `${threadName}, ${formatTimeAgo(thread.updatedAt)}${isCurrent ? ', current chat' : ''}${thread.isPinned ? ', pinned' : ''}${thread.awaitingInput ? `, ${awaitingInputLabel(thread.awaitingInput).toLowerCase()}` : ''}${isForeign ? `, ${FOREIGN_THREAD_TITLE}` : ''}`}
+                aria-label={isEditing ? undefined : `${threadName}, ${formatTimeAgo(thread.updatedAt)}${isCurrent ? ', current chat' : ''}${thread.isPinned ? ', pinned' : ''}${statusLabel ? `, ${statusLabel}` : ''}${isForeign ? `, ${FOREIGN_THREAD_TITLE}` : ''}`}
                 onClick={() => {
                     if (!isEditing) {
                         handleSelectThread(thread);
@@ -266,7 +289,7 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
                             <div className="thread-list-item-name truncate" dir="auto">
                                 {highlightMatch(threadName, activeQuery)}
                             </div>
-                            {thread.awaitingInput && <AwaitingInputDot awaiting={thread.awaitingInput} />}
+                            <ThreadRunIndicator status={status} />
                         </div>
                     )}
                     <div className="thread-list-item-time">
@@ -441,13 +464,19 @@ const ThreadListView: React.FC<ThreadListViewProps> = ({ isWindow: _isWindow }) 
 
             {/* Thread list */}
             <div className="flex-1 min-h-0 overflow-y-auto px-1" ref={scrollRef}>
-                {pinnedThreads.length > 0 && (
+                {runningThreads.length > 0 && (
                     <div>
-                        <div className="thread-group-header">Pinned</div>
-                        {pinnedThreads.map(renderThreadRow)}
+                        <div className="thread-group-header">Running</div>
+                        {runningThreads.map(renderThreadRow)}
                     </div>
                 )}
-                {groups.map(group => (
+                {listedPinned.length > 0 && (
+                    <div>
+                        <div className="thread-group-header">Pinned</div>
+                        {listedPinned.map(renderThreadRow)}
+                    </div>
+                )}
+                {listedGroups.map(group => (
                     <div key={group.label}>
                         <div className="thread-group-header">{group.label}</div>
                         {group.threads.map(renderThreadRow)}

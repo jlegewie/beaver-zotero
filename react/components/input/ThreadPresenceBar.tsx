@@ -2,23 +2,40 @@ import { admissionUnreachableAtom, describeAdmissionWait, refreshThreadAdmission
 import { serverThreadBlockedAtom, threadAdmissionAtom, threadConflictAtom } from "../../../src/services/agentRuns/threadAdmission";
 import React, { useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { otherThreadWriterAtom, threadDeletedAtom, threadHistoryStaleAtom } from '../../runtime/threadProjection';
+import { threadDeletedAtom, threadHistoryStaleAtom } from '../../runtime/threadProjection';
 import { currentThreadIdAtom, loadThreadAtom, newThreadAtom } from '../../atoms/threads';
 import { userIdAtom } from '../../atoms/auth';
 import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
 import { retryPendingRunIdAtom, stoppingPreviousRunAtom } from '../../atoms/agentRunAtoms';
 import Button from '@beaver/agent-ui/primitives/Button';
 import Spinner from '@beaver/agent-ui/icons/Spinner';
-import { Icon, AlertIcon, ArrowUpRightIcon, DeleteIcon, PictureInPictureIcon, SyncIcon } from '../icons/icons';
+import { Icon, AlertIcon, DeleteIcon, SyncIcon } from '../icons/icons';
 
 /** Compact button sizing shared by the composer's docked bars. */
 const BAR_BUTTON_STYLE: React.CSSProperties = { padding: '2px 8px', fontSize: '0.875rem' };
 
 /**
+ * What the bar says when the server refused a write to the chat: what
+ * happened, so the user knows why a refresh is needed.
+ */
+function conflictMessage(conflict: string): string {
+    switch (conflict) {
+        case 'thread_tail_mismatch':
+            return 'This chat has newer messages on the server';
+        case 'thread_busy':
+            return 'The server is still finishing a response in this chat';
+        default:
+            // The server lost the chat's reservation, or could not admit the
+            // write: its history may differ from what is shown.
+            return 'Refresh this chat to continue';
+    }
+}
+
+/**
  * Bar docked above the composer while this window cannot write to the open
- * chat: another window is responding in it, it was deleted, the server has
- * not settled a response in it, or its history changed elsewhere and this
- * window is still showing the old one. Each state names the one thing that
+ * chat: it was deleted, the server has not settled a response in it, the
+ * server refused a write, or its history changed elsewhere in this Zotero and
+ * this window is still showing the old one. Each state names the one thing that
  * gets the user unstuck. It also explains a new message that waits for a
  * stopped response to end.
  *
@@ -27,7 +44,6 @@ const BAR_BUTTON_STYLE: React.CSSProperties = { padding: '2px 8px', fontSize: '0
  */
 const ThreadPresenceBar: React.FC = () => {
     const surfaceWindow = useSurfaceWindow();
-    const otherWriter = useAtomValue(otherThreadWriterAtom);
     const chatDeleted = useAtomValue(threadDeletedAtom);
     const serverBlocked = useAtomValue(serverThreadBlockedAtom);
     const admission = useAtomValue(threadAdmissionAtom);
@@ -46,18 +62,6 @@ const ThreadPresenceBar: React.FC = () => {
     const newThread = useSetAtom(newThreadAtom);
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [isPolling, setIsPolling] = useState(false);
-
-    const handleGoToWindow = (e: React.FormEvent | React.MouseEvent) => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (!otherWriter) return;
-        const target = Zotero.Beaver.runtime.resolveWindow(otherWriter.windowId);
-        if (!target) return;
-        target.hostWindow.focus();
-        target.hostWindow.__beaverEventBus?.dispatchEvent(
-            new target.hostWindow.CustomEvent('toggleChat', { detail: { forceOpen: true } }),
-        );
-    };
 
     const handleRefresh = async (e: React.FormEvent | React.MouseEvent) => {
         e.preventDefault();
@@ -102,19 +106,6 @@ const ThreadPresenceBar: React.FC = () => {
                 <div className="flex-1" />
                 <Button variant="outline" onClick={handleNewChat} style={BAR_BUTTON_STYLE}>
                     New chat
-                </Button>
-            </>
-        );
-    } else if (otherWriter) {
-        content = (
-            <>
-                <Icon icon={PictureInPictureIcon} className="font-color-secondary flex-none" size={15} />
-                <span className="font-color-primary text-sm truncate">
-                    Responding in another window
-                </span>
-                <div className="flex-1" />
-                <Button variant="outline" rightIcon={ArrowUpRightIcon} onClick={handleGoToWindow} style={BAR_BUTTON_STYLE}>
-                    Go to window
                 </Button>
             </>
         );
@@ -168,7 +159,7 @@ const ThreadPresenceBar: React.FC = () => {
                     size={12}
                 />
                 <span className="font-color-primary text-sm truncate">
-                    This chat was updated in another window
+                    {conflict ? conflictMessage(conflict) : 'This chat was updated in another window'}
                 </span>
                 <div className="flex-1" />
                 <Button

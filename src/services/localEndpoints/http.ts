@@ -1166,11 +1166,53 @@ export function registerEndpoints(): (() => void) | undefined {
         endpoints['/beaver/test/run-snapshot'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/run-snapshot', request));
         // The instance's run sessions (plugin realm); with `sessionId`, one
         // session's state.
-        endpoints['/beaver/test/runs'] = createEndpoint(async (request: { sessionId?: string } | undefined) => {
+        // `capacity` changes how many chats may run at once.
+        endpoints['/beaver/test/runs'] = createEndpoint(async (request: { sessionId?: string; capacity?: number } | undefined) => {
             const runs = Zotero.Beaver.agentRuns;
             if (!runs) return { error: 'agent_runs_unavailable' };
+            if (typeof request?.capacity === 'number') runs.setCapacity(request.capacity);
             if (request?.sessionId) return runs.snapshot(request.sessionId) ?? { error: 'session_not_found' };
-            return { sessions: runs.list() };
+            return { sessions: runs.list(), activity: runs.listActivity() };
+        });
+        // A new chat started with no window, as `addon.agentRuns.submit` does.
+        endpoints['/beaver/test/run-submit'] = createEndpoint(async (request: { text?: string; attachments?: unknown[] } | undefined) => {
+            const runs = Zotero.Beaver.agentRuns;
+            if (!runs) return { error: 'agent_runs_unavailable' };
+            return runs.submit({
+                text: String(request?.text ?? ''),
+                attachments: Array.isArray(request?.attachments) ? request!.attachments as any[] : [],
+                origin: { kind: 'api', label: 'development endpoint' },
+            });
+        });
+        // A command to a session, as a window's controls send it: `stop`
+        // (with `runId`, only that run), or `approve` / `reject` with `actionId`.
+        endpoints['/beaver/test/run-command'] = createEndpoint(async (request: { sessionId?: string; op?: string; actionId?: string; runId?: string } | undefined) => {
+            const port = request?.sessionId ? Zotero.Beaver.agentRuns?.portOf(request.sessionId) : null;
+            if (!port) return { error: 'session_not_found' };
+            switch (request?.op) {
+                case 'stop': {
+                    // A run parked on a fill: stop the fill, and stop waiting
+                    // on it, as the composer's Stop does.
+                    const wait = port.get('jobWait') as { jobId: string; runId: string } | null;
+                    const run = port.get('activeRun') as { status: string } | null;
+                    if (wait && run?.status !== 'in_progress' && run?.status !== 'awaiting_deferred') {
+                        if (request.runId && request.runId !== wait.runId) return { ok: false, stopped: null };
+                        Zotero.Beaver.tableFills?.stop(wait.jobId);
+                        port.set('jobWait', null);
+                        return { ok: true, stopped: 'fill' };
+                    }
+                    await port.set('closeWSConnection', request.runId ?? null);
+                    return { ok: true, stopped: 'run' };
+                }
+                case 'approve':
+                case 'reject': {
+                    if (!request.actionId) return { error: 'action_required' };
+                    const answered = port.set('answerPendingApprovals', { actionIds: [request.actionId], approved: request.op === 'approve' });
+                    return { ok: true, answered };
+                }
+                default:
+                    return { error: 'unknown_op' };
+            }
         });
         endpoints['/beaver/test/chat-stop'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/chat-stop', request));
         endpoints['/beaver/test/chat-continue'] = createEndpoint(request => Zotero.Beaver.runtime.dispatchWindowCommand('/beaver/test/chat-continue', request));

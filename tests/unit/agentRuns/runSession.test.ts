@@ -6,6 +6,7 @@
  * epoch. Two sessions side by side never see each other's events.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import '../../helpers/localRunSession';
 import { createStore } from 'jotai';
 
 const { mockSupabase } = vi.hoisted(() => ({

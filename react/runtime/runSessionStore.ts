@@ -1,5 +1,5 @@
 /**
- * The chat state of this window's run session, as a store.
+ * The chat state of the run session this window shows, as a store.
  *
  * Window code that changes the chat's state (loading a chat, leaving it,
  * answering a card) writes here, never to its own copies, which the run
@@ -17,14 +17,19 @@ type Store = ReturnType<typeof createStore>;
 
 let cached: { port: SessionPort; store: Store } | null = null;
 
-export function runSessionStore(): Store {
-    const port = getSessionPort();
-    if (cached?.port === port) return cached.store;
-    const store = {
+/** The chat state of `port`'s session, as a store. */
+export function sessionStoreOf(port: SessionPort): Store {
+    return {
         get: (atom: object) => port.get(sessionAtomName(atom)),
         set: (atom: object, ...args: unknown[]) => port.set(sessionAtomName(atom), ...args),
         sub: (atom: object, listener: () => void) => port.sub(sessionAtomName(atom), listener),
     } as unknown as Store;
-    cached = { port, store };
-    return store;
+}
+
+/** The chat state of the session this window shows, as a store. */
+export function runSessionStore(): Store {
+    const port = getSessionPort();
+    if (cached?.port === port) return cached.store;
+    cached = { port, store: sessionStoreOf(port) };
+    return cached.store;
 }

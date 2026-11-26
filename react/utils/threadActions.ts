@@ -22,7 +22,7 @@ export async function confirmAndDeleteThread(threadId: string, win: Window): Pro
         await Zotero.Beaver.threads.deleteThread(threadId, getWindowRuntime().id, getCredentialGeneration());
         // The delete was confirmed; leave only if this is still the open chat.
         if (threadId === store.get(currentThreadIdAtom)) {
-            await store.set(newThreadAtom, { skipActiveRunConfirm: true, window: win });
+            await store.set(newThreadAtom, { window: win });
         }
         return true;
     } catch (error) {

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import '../../helpers/localRunSession';
 
 // agentRunAtoms.ts transitively imports the WS transport layer. Mock it wholesale
 // (rather than pulling in agentDataProvider's handler graph) since this test only

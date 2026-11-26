@@ -208,16 +208,20 @@ Beaver runs in the **main Zotero window** and in a **separate Beaver window**
 (`addon/content/beaverWindow.xhtml`). Each main window and the standalone evaluate their
 own React bundle and own their chat store.
 
-**Chat runs execute in the plugin realm.** `addon.agentRuns`
-(`src/services/agentRuns/registry.ts`) gives each chat window one run session (socket,
-engine, private store, writer claim, data provider and operation context) and ends it when
-the window closes, the account changes, a library leaves the searchable scope, or the plugin
-shuts down. The window reaches its session only through a `SessionPort`: it projects the
+**Chat runs execute in the plugin realm and belong to the instance, not to a window.**
+`addon.agentRuns` (`src/services/agentRuns/registry.ts`) keeps one run session per chat
+(socket, engine, private store, writer claim, data provider and operation context). A window
+views the session of the chat it shows (`react/runtime/windowRunSession.ts`); switching chats
+or closing the window only changes what is viewed, and the session ends once nothing views it
+and it is idle. Account changes and library-scope loss stop every run; quit and plugin
+shutdown end them. A window reaches a session only through its `SessionPort`: it projects the
 session's state onto its own atoms by name (`react/runtime/runProjection.ts`), writes it
-through `runSessionStore()` and starts engine actions by name. Never hand the session a
-window atom or store; window-side effects of a run go through the window's `RunViewer`.
-Engine code under `src/services/agentRuns/` must stay free of `react/` and agent-ui
-(`providerClosure.test.ts`).
+through `runSessionStore()` and starts engine actions by name; what it passes in is copied
+into the plugin realm (`copyIn`). Never hand a session a window atom or store; window-side
+effects of a run go through the viewers (`RunViewer`), to every window that shows the chat,
+and once-only effects (annotation auto-apply, opening a created table) to the window that
+sent the message only. Engine code under `src/services/agentRuns/` must stay free of
+`react/` and agent-ui (`providerClosure.test.ts`).
 
 **Never use bare `window`** in plugin code. Use the `win` parameter threaded through UI methods, `useSurfaceWindow()` for the
 rendered surface, or `ownerDocument.defaultView`. Context reads use `getContextWindow()`;
@@ -673,10 +677,10 @@ window and becomes empty when none remain. Rebinding replaces context observers,
 its chat and explicit attachments. Preferences borrows the actual initiating renderer and
 closes with it. Use `BeaverUIFactory.commandBeaverWindow` with `open-chat`; commands pass
 persisted thread ids, never stores or atoms.
-Ordinary window opening only focuses it. Explicit chat opening requires settled history,
-preserves a same-chat draft, and confirms replacement of user-authored drafts. It never
-stops a response in the destination; guarded loads commit only while the destination and
-draft are unchanged. Automatic selection attachments retain their origin and do not count
+Ordinary window opening only focuses it. Explicit chat opening works for a chat with a
+response going (the destination views its session), preserves a same-chat draft, and
+confirms replacement of user-authored drafts. It never stops a response in the destination;
+guarded loads commit only while the destination and draft are unchanged. Automatic selection attachments retain their origin and do not count
 as user drafts.
 
 Chat execution requires server admission v1. Every request carries `expected_tail_run_id`,

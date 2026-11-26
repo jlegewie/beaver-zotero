@@ -66,8 +66,8 @@ export function useInterruptedThreadPopup() {
             type: 'info',
             title: 'Beaver chat was interrupted',
             text: interrupted.threadName
-                ? `The window closed before Beaver finished working on “${interrupted.threadName}”.`
-                : 'The window closed before Beaver finished working on your last chat.',
+                ? `Beaver closed before it finished working on “${interrupted.threadName}”.`
+                : 'Beaver closed before it finished working on your last chat.',
             expire: false,
             button: {
                 text: 'Open chat',

@@ -58,6 +58,7 @@ import {
     RUN_FINISHED_WHILE_DISCONNECTED_NOTE,
 } from "@beaver/agent-core/transport/connectionFailure";
 import { threadNavigationSeqAtom } from "../../../react/atoms/threads";
+import { accountGenerationAtom } from "../../../react/atoms/profile";
 import { installStoreRunSession } from "../../helpers/runSession";
 import { getRunSession } from "../../../src/services/agentRuns/runSession";
 
@@ -276,10 +277,16 @@ it("keeps reporting the server unreachable when a refresh fails too", async () =
     expect(state.activity).toHaveBeenCalledTimes(reads + 1);
     expect(state.store.get(admissionUnreachableAtom)).toBe(true);
 });
-it("forgets failed reads when the chat changes", async () => {
+it("forgets failed reads when the account changes", async () => {
     await failUntilUnreachable();
-    state.store.set(threadNavigationSeqAtom, 1);
+    state.store.set(accountGenerationAtom, 1);
     expect(state.store.get(admissionUnreachableAtom)).toBe(false);
+});
+it("leaves the chat's admission to its session when the window opens another chat", async () => {
+    await failUntilUnreachable();
+    // The chat left goes on in its session, which other windows may show.
+    state.store.set(threadNavigationSeqAtom, 1);
+    expect(state.store.get(admissionUnreachableAtom)).toBe(true);
 });
 it("keeps the reason while the server still reports the run active, and drops it once idle", async () => {
     state.store.set(threadAdmissionAtom, {
@@ -371,13 +378,13 @@ describe("settling a run this window lost track of", () => {
         expect(state.store.get(runReplacementNotesAtom).get("run")).toBe(RUN_FINISHED_BEFORE_STOP_NOTE);
     });
 
-    it("adds no note to an ordinary reload, and forgets notes when the chat changes", async () => {
+    it("adds no note to an ordinary reload, and forgets notes when the account changes", async () => {
         state.store.set(threadRunsAtom, [{ id: "run", status: "canceled" }] as any);
         await settleWith([{ id: "run", status: "completed" }]);
         expect(state.store.get(runReplacementNotesAtom).size).toBe(0);
         state.store.set(runReplacementNotesAtom, new Map([["run", "note"]]));
         state.store.set(reattachResolutionAtom, { threadId: "thread", runId: "run", since: 0 });
-        state.store.set(threadNavigationSeqAtom, 1);
+        state.store.set(accountGenerationAtom, 1);
         expect(state.store.get(runReplacementNotesAtom).size).toBe(0);
         expect(state.store.get(reattachResolutionAtom)).toBeNull();
     });

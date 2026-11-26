@@ -11,6 +11,7 @@
  * started with; the atoms, the store and the retry loop are the real thing.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import '../../helpers/localRunSession';
 import { atom } from 'jotai';
 
 import type { ConnectionFailureEvidence } from '@beaver/agent-core/transport/connectionFailure';

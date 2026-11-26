@@ -1,5 +1,5 @@
 /**
- * The job call this window waits on, whether the open thread's answer is
+ * The job call a session waits on, whether the open thread's answer is
  * still going, and the table a fill tool call opens. Kept apart from
  * `jobCalls.ts` so the run atoms and the tool call view can read it without
  * importing the composer's job state.
@@ -13,7 +13,7 @@ import type { TableFillJobSnapshot } from '@beaver/agent-core/protocol/tableFill
 import type { createStore } from 'jotai/vanilla';
 import { libraryRefForLibraryID } from '../../utils/libraryIdentity';
 
-/** The job call this window waits on: the run that waited, and its tool call. */
+/** The job call a session waits on: the run that waited, and its tool call. */
 export interface JobWait {
     threadId: string;
     runId: string;
@@ -22,14 +22,15 @@ export interface JobWait {
 }
 
 /**
- * The fill this window waits on, or null. Set when the run's job wait
- * starts and kept when the run parks for the wait's timeout; cleared when
- * the window leaves the chat, on Stop, and when the resume starts.
+ * The fill the session waits on, or null. Set when the run's job wait
+ * starts and kept when the run parks for the wait's timeout; cleared on
+ * Stop, when the resume starts, and when the account or library scope
+ * changes.
  */
 export const jobWaitAtom = atom<JobWait | null>(null);
 
 /**
- * A run of this window ended: the wait goes on only when the run parked with
+ * A run of the session ended: the wait goes on only when the run parked with
  * the waited call still open. `store` is the run session's.
  */
 export function settleJobWait(store: ReturnType<typeof createStore>, run: AgentRun | null): void {
@@ -43,11 +44,11 @@ export function settleJobWait(store: ReturnType<typeof createStore>, run: AgentR
 
 /**
  * The open parked run while its answer is still going, else null. It goes
- * on while a card waits for the user, and, in the window waiting on a fill,
- * until that fill's result continues it. A run whose only open calls are
- * fills nobody waits on here has ended: the fill was stopped or left to its
- * table, or another window waits on it. Its footer and what it changed show,
- * though the next message still closes those calls.
+ * on while a card waits for the user, and, while the session waits on a
+ * fill, until that fill's result continues it. A run whose only open calls
+ * are fills nobody waits on has ended: the fill was stopped, or Zotero
+ * restarted since. Its footer and what it changed show, though the next
+ * message still closes those calls.
  */
 export const openAnswerRunIdAtom = atom((get): string | null => {
     const open = get(openParkedRunAtom);

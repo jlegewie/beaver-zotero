@@ -2,16 +2,13 @@
  * This renderer's side of job calls: a table fill a chat run waits on, which
  * can outlast the run's live wait.
  *
- * Only the window that has been waiting on the fill since it started resumes
- * the run (`jobWaitAtom`). It waits from the run's `job_wait_request`,
- * through the park that ends the live wait, until the fill ends; then it
- * resumes the run with the fill's result as the call's answer, and the model
- * continues the same answer. Stop and the resume itself end the wait, and so
- * does leaving the chat, which leaves the fill to its open table or stops it
- * (`jobLeave.ts`). Every other window shows the answer as ended, and the next
- * message closes the call with a text saying the fill may still be running.
+ * The run's session waits on the fill (`agentRuns` registry), from the run's
+ * `job_wait_request`, through the park that ends the live wait, until the
+ * fill ends; then it resumes the run with the fill's result as the call's
+ * answer, and the model continues the same answer. That happens whether or
+ * not a window shows the chat. Stop and the resume itself end the wait.
  *
- * While the window waits on a parked call, the chat is busy as during any
+ * While the session waits on a parked call, the chat is busy as during any
  * other tool call: the composer's Stop stops the fill (`stopChatJobsAtom`).
  * During the live wait, Stop stops the run, which stops the fill.
  */
@@ -22,23 +19,17 @@ import { logger } from '@beaver/agent-core/platform/logger';
 import { jobIdOf } from '@beaver/agent-core/protocol/jobCallProtocol';
 import { activeRunAtom, currentThreadIdAtom, getRunToolResults } from '@beaver/agent-core/run-state/atoms';
 import { openJobCallsAtom } from '@beaver/agent-core/run-state/jobCalls';
-import { openParkedRunAtom } from '@beaver/agent-core/run-state/parkedRun';
 import { chatFillsAtom } from '@beaver/agent-core/run-state/tableChatFills';
 import { isRunActive } from '@beaver/agent-core/agents/types';
-import { getSessionPort } from '../../src/services/agentRuns/runSession';
-import { tryGetWindowRuntime } from '../runtime/windowRuntime';
-import { store } from '../store';
 import { jobWaitAtom } from '../../src/services/agentRuns/jobWait';
-import { leaveJobWait } from './jobLeave';
 import { isThreadParkedAtom } from '../../src/services/agentRuns/parkedRuns';
-import { watchChatFills } from './tableChatFills';
 import { runSessionStore } from '../runtime/runSessionStore';
 
 // ---------------------------------------------------------------------------
 // The composer's Stop
 // ---------------------------------------------------------------------------
 
-/** A fill of the open chat that this window waits on, as the composer sees it. */
+/** A fill the open chat waits on, as the composer sees it. */
 export interface ChatJob {
     jobId: string;
     /** It is winding down after a Stop in its table. */
@@ -46,9 +37,8 @@ export interface ChatJob {
 }
 
 /**
- * The fills the open chat waits on in this window: those the run going now
- * waits for (its tool call has not returned), and the parked call this
- * window waits on. Recomputed on every fill snapshot and streamed frame;
+ * The fills the open chat waits on: those the run going now waits for (its
+ * tool call has not returned), and the parked call its session waits on. Recomputed on every fill snapshot and streamed frame;
  * read {@link runningChatJobsAtom}, which changes only when the list does.
  */
 const chatJobsAtom = atom((get): readonly ChatJob[] => {
@@ -84,7 +74,7 @@ function sameJobs(a: readonly ChatJob[], b: readonly ChatJob[]): boolean {
 }
 
 /**
- * The fills the open chat waits on in this window (see `chatJobsAtom`).
+ * The fills the open chat waits on (see `chatJobsAtom`).
  * While any is going, the chat is busy as during any other tool call: the
  * composer shows Stop.
  */
@@ -107,45 +97,3 @@ export const stopChatJobsAtom = atom(null, (get): boolean => {
     runSessionStore().set(jobWaitAtom, null);
     return true;
 });
-
-// ---------------------------------------------------------------------------
-// Following the wait
-// ---------------------------------------------------------------------------
-
-let watching = false;
-
-/**
- * Follow this window's job waits and the fills they wait on, once per
- * renderer.
- */
-export function watchJobCalls(): void {
-    if (watching) return;
-    const runtime = tryGetWindowRuntime();
-    if (!runtime) return;
-    try {
-        watchChatFills();
-        const unsubscribeWaits = getSessionPort().onJobWait((wait) => {
-            const threadId = wait.threadId ?? store.get(currentThreadIdAtom);
-            if (!threadId || threadId !== store.get(currentThreadIdAtom)) return;
-            runSessionStore().set(jobWaitAtom, { threadId, runId: wait.runId, toolCallId: wait.toolCallId, jobId: wait.jobId });
-        });
-        Zotero.Beaver.runtime.addWindowCleanup(runtime, unsubscribeWaits);
-        // The fill this window waits on may have ended, or its run's park
-        // arrived after it did (a reattach): the parked run resumes.
-        const resume = () => {
-            if (store.get(jobWaitAtom)) getSessionPort().requestJobResume();
-        };
-        Zotero.Beaver.runtime.addWindowCleanup(runtime, store.sub(chatFillsAtom, resume));
-        Zotero.Beaver.runtime.addWindowCleanup(runtime, store.sub(openParkedRunAtom, resume));
-        // Leaving the chat by any other way than the thread commands (which
-        // end the wait before they stop the run) ends it too.
-        const unsubscribeThread = store.sub(currentThreadIdAtom, () => {
-            const wait = store.get(jobWaitAtom);
-            if (wait && wait.threadId !== store.get(currentThreadIdAtom)) leaveJobWait();
-        });
-        Zotero.Beaver.runtime.addWindowCleanup(runtime, unsubscribeThread);
-        watching = true;
-    } catch (error) {
-        logger(`jobCalls: could not follow job waits: ${String(error)}`, 1);
-    }
-}

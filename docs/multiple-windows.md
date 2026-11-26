@@ -1,14 +1,17 @@
 # Multiple chat windows
 
 Beaver 0.25.0-beta.1 gives each main Zotero window its own chat runtime and gives
-the single separate Beaver window another runtime. Different windows can respond
-in different chats concurrently. A window still has only one active chat. Its runs
-execute in the plugin realm, in the run session the instance keeps for that window
-(see [thread runtime](thread-runtime.md)); the window shows and controls them.
+the single separate Beaver window another runtime. A window shows one chat at a
+time. Runs belong to the instance, not to a window: they execute in the plugin
+realm, in the run session of their chat (see [thread runtime](thread-runtime.md)),
+and every window that shows the chat shows and controls the same run. Switching
+chats or closing a window does not stop a run, and several chats can respond at
+once, in one window or in several.
 
-Opening the separate window focuses its existing chat. To show a saved chat there,
-use **Open in Beaver window** in the chat menu. The destination confirms replacing
-an unsent draft and uses the usual stop-and-switch confirmation if it is responding.
+Opening the separate window focuses its existing chat. To show a chat there, use
+**Open in Beaver window** in the chat menu, also while it is responding. The
+destination confirms replacing an unsent draft; a response going in the chat it
+showed goes on.
 Tables temporarily replace the standalone's presentation; returning to chat keeps
 that window's history and draft.
 
@@ -32,10 +35,10 @@ execution supplies an `expected_tail_run_id`, including explicit null for an emp
 thread. The server's authoritative tail includes runs omitted from presentation.
 The existing transport remains compatible with callers that omit the precondition.
 
-A chat can be viewed in several windows, but only one may write at a time. Local
-writer presence provides a **Go to window** action. Server activity also blocks
-writes when a response is active or its settlement is unknown. A viewer polls
-persisted history with bounded backoff; it does not mirror another window's stream.
+A chat can be viewed in several windows; they show its one session, and one run
+writes at a time. Server activity also blocks writes when a response is active on
+another device or its settlement is unknown. Then a viewer polls persisted history
+with bounded backoff.
 Conflicts preserve the draft and require explicit refresh and retry. Failed polling
 never counts as an idle response, and conflicts are never automatically resent.
 

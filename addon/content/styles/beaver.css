@@ -4082,6 +4082,16 @@
     background: var(--accent-blue);
 }
 
+/* A chat with a response going, marked after its title like a waiting one. */
+[id^="beaver-pane-"] .thread-run-indicator {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 10px;
+    height: 12px;
+    flex-shrink: 0;
+}
+
 [id^="beaver-pane-"] .recent-chats {
     transition: opacity 0.2s ease;
 }
@@ -4477,14 +4487,18 @@
     pointer-events: auto;
 }
 
-/* The waiting-chat dot ends the row, and moves aside for the actions. */
-#beaver-pane-window .beaver-window-nav-row .thread-awaiting-input {
+/* The waiting or running chat's mark ends the row, and moves aside for the actions. */
+#beaver-pane-window .beaver-window-nav-row .thread-awaiting-input,
+#beaver-pane-window .beaver-window-nav-row .thread-run-indicator {
     margin-right: 8px;
 }
 
 #beaver-pane-window .beaver-window-nav-row:hover .thread-awaiting-input,
 #beaver-pane-window .beaver-window-nav-row-menu-open .thread-awaiting-input,
-#beaver-pane-window .beaver-window-nav-row:focus-within .thread-awaiting-input {
+#beaver-pane-window .beaver-window-nav-row:focus-within .thread-awaiting-input,
+#beaver-pane-window .beaver-window-nav-row:hover .thread-run-indicator,
+#beaver-pane-window .beaver-window-nav-row-menu-open .thread-run-indicator,
+#beaver-pane-window .beaver-window-nav-row:focus-within .thread-run-indicator {
     margin-right: 30px;
 }
 

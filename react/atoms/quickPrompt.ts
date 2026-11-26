@@ -86,7 +86,7 @@ export const openQuickPromptAtom = atom(null, async (get, set) => {
         set(isThreadListViewAtom, false);
         // No confirmation: there is no live work to interrupt (checked above), and
         // a run that slips in meanwhile must not raise a modal from a hotkey.
-        await set(newThreadAtom, { skipActiveRunConfirm: true, preserveDraft: true });
+        await set(newThreadAtom, { preserveDraft: true });
         try {
             const annotations = await selectedReaderAnnotations(get(currentReaderAttachmentAtom));
             if (annotations.length > 0) await set(addItemsToCurrentMessageItemsAtom, annotations);

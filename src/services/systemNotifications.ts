@@ -53,6 +53,12 @@ export interface NotificationTarget {
     hostWindow(): Window | null | undefined;
     /** Whether that window's Beaver sidebar is open. */
     sidebarVisible(): boolean;
+    /**
+     * Open the run's chat in `hostWindow`, for a run no window shows. Absent,
+     * or doing nothing, when a window shows it: clicking then only brings
+     * that window's Beaver forward.
+     */
+    open?(): void;
 }
 
 const NOTIFICATION_ICON = `chrome://${config.addonRef}/content/icons/beaver.png`;
@@ -77,6 +83,20 @@ const COALESCE_WINDOW_MS = 400;
 
 /** Approvals waiting to be surfaced together, per window that shows them. */
 const queuedApprovals = new Map<NotificationTarget, WSDeferredApprovalRequest[]>();
+
+/** Whether any Zotero window has the focus, i.e. Zotero is the app in front. */
+function anyZoteroWindowFocused(): boolean {
+    try {
+        const windows = Services.wm.getEnumerator(null as unknown as string);
+        while (windows.hasMoreElements()) {
+            const win = windows.getNext() as Window;
+            if (!win.closed && win.document?.hasFocus?.() === true) return true;
+        }
+    } catch {
+        // No window mediator: no window has the focus.
+    }
+    return false;
+}
 
 /**
  * Determine whether the user can currently see the Beaver UI.
@@ -112,8 +132,9 @@ function getBeaverVisibility(target: NotificationTarget): BeaverVisibility {
         return "beaver-visible";
     }
 
-    // Scenario B: a Zotero window is focused, but Beaver is not visible.
-    if (mainWindowFocused) {
+    // Scenario B: a Zotero window is focused, but Beaver is not visible. Any
+    // Zotero window counts: runs go on in chats no focused window shows.
+    if (mainWindowFocused || anyZoteroWindowFocused()) {
         return "zotero-focused";
     }
 
@@ -190,6 +211,7 @@ function describeApprovals(events: WSDeferredApprovalRequest[]): { title: string
  */
 function focusBeaver(target: NotificationTarget): void {
     try {
+        target.open?.();
         const beaverWindow = findBeaverWindow();
         if (beaverWindow && !beaverWindow.closed && beaverWindow.__beaverOwnerWindowRef?.deref() === target.hostWindow()) {
             beaverWindow.focus();

@@ -1,3 +1,4 @@
+import '../../helpers/localRunSession';
 import { reconcileThread, threadAdmissionAtom, threadConflictAtom } from "../../../src/services/agentRuns/threadAdmission";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -86,7 +87,6 @@ import { newThreadAtom, loadThreadAtom } from '../../../react/atoms/threads';
 import { citationsAtom } from '@beaver/agent-core/citations/atoms';
 import { runApprovalPolicyAtom } from '../../../src/services/agentRuns/runApprovalPolicy';
 import { streamingDoneRunIdsAtom, approvalResponseIntentsAtom, closeWSConnectionAtom, isWSConnectedAtom } from '../../../react/atoms/agentRunAtoms';
-import { refreshFinishedChatAvailabilityAtom, canOpenFinishedChatAtom } from "../../../react/runtime/windowCommands";
 import { agentRunService, AgentConnectionError } from "@beaver/agent-core/transport/agentService";
 import {
     activeRunAtom,
@@ -118,7 +118,7 @@ import {
     currentMessageCollectionsAtom,
     currentMessageExternalFilesAtom,
 } from "../../../react/atoms/messageComposition";
-import { threadPresenceAtom, threadHistoryStaleAtom, threadReadOnlyAtom, otherThreadWriterAtom } from "../../../react/runtime/threadProjection";
+import { threadPresenceAtom, threadHistoryStaleAtom, threadReadOnlyAtom } from "../../../react/runtime/threadProjection";
 import { viewedHistoryRevisionAtom } from "../../../src/services/agentRuns/threadAdmission";
 import {
     clearClientShutDownLatch,
@@ -398,8 +398,6 @@ describe("writer admission at the real send entry point", () => {
         const unseen = { runs: [], agent_actions: [], tail_run_id: "unseen-successor", activity: { state: "idle" as const, run_id: null } };
         vi.mocked(agentRunService.getThreadRuns).mockResolvedValueOnce(unseen).mockResolvedValueOnce(unseen);
 
-        await store.set(refreshFinishedChatAvailabilityAtom);
-        expect(store.get(canOpenFinishedChatAtom)).toBe(true);
         expect(store.get(threadAdmissionAtom)).toBe(admission);
         expect(store.get(threadRunsAtom)).toBe(displayed);
 
@@ -423,14 +421,13 @@ describe("writer admission at the real send entry point", () => {
         await store.set(sendWSMessageAtom, "hello");
         expect(connectMock).not.toHaveBeenCalled();
         expect(store.get(currentMessageContentAtom)).toBe("my draft");
-        expect(store.get(popupMessagesAtom).at(-1)?.title).toBe("Responding in another window");
+        expect(store.get(popupMessagesAtom).at(-1)?.title).toBe("This chat is busy");
     });
     it("keeps the owner and its borrowed surfaces editable through its own realtime invalidation", async () => {
         let callbacks: any;
         connectMock.mockImplementation(async (_request, value) => { callbacks = value; });
         await store.set(sendWSMessageAtom, "hello");
         presence.invalidate("t");
-        expect(store.get(otherThreadWriterAtom)).toBeNull();
         expect(store.get(threadHistoryStaleAtom)).toBe(false);
         expect(store.get(threadReadOnlyAtom)).toBe(false);
         callbacks.onDone();
@@ -488,8 +485,8 @@ describe("writer admission at the real send entry point", () => {
     });
 });
 
-describe('navigation after streaming finishes with a writer lease', () => {
-    it.each(['new chat', 'switch chat', 'stop'] as const)(
+describe('stopping after streaming finishes with a writer lease', () => {
+    it.each(['stop'] as const)(
         'clears abandoned source linking on %s and reopening',
         async (navigation) => {
             let callbacks: any;
@@ -509,7 +506,7 @@ describe('navigation after streaming finishes with a writer lease', () => {
                 activity: { state: "idle", run_id: null },
             });
             if (navigation === 'new chat') {
-            await store.set(newThreadAtom, { skipAutoPopulate: true, skipActiveRunConfirm: true });
+            await store.set(newThreadAtom, { skipAutoPopulate: true });
         } else if (navigation === 'switch chat') {
             expect(await store.set(loadThreadAtom, { threadId: 'other', user_id: 'user-1', threadName: 'Other', threadIdentity: { zoteroUserId: null, zoteroLocalId: null } })).toBe(true);
         } else {
@@ -712,7 +709,7 @@ describe('a run whose connection was lost for good', () => {
     it('leaves a chat the user has moved on from alone', async () => {
         const { callbacks, run } = await startRun();
         await store.set(closeWSConnectionAtom);
-        await store.set(newThreadAtom, { skipAutoPopulate: true, skipActiveRunConfirm: true });
+        await store.set(newThreadAtom, { skipAutoPopulate: true });
         const before = store.get(threadAdmissionAtom);
 
         callbacks.onReattachFailed({ runId: run.id, reason: 'gave_up', evidence: DROP, gapMs: 120_000 });

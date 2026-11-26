@@ -8,10 +8,11 @@
  * in the same realm. Its chat state lives in its own store, which only the
  * session writes; windows render copies of it (`runProjection.ts`).
  *
- * Sessions live in the plugin realm (`addon.agentRuns`), one per chat window,
- * reused for every run the window starts: the transport holds one run at a
- * time, and a new run waits on it for the cancel of a run stopped while
- * reconnecting. A window reaches its session only through a `SessionPort`.
+ * Sessions live in the plugin realm (`addon.agentRuns`), one per chat that a
+ * window shows or that has a run going, reused for every run of that chat:
+ * the transport holds one run at a time, and a new run waits on it for the
+ * cancel of a run stopped while reconnecting. Windows view a session, any
+ * number at once, and reach it only through a `SessionPort`.
  */
 
 import { atom, type createStore, type Getter } from 'jotai/vanilla';
@@ -70,6 +71,9 @@ export class RunSession {
     /** Set while a parked-run resume is being started, before its run is installed. */
     parkedResumeStarting = false;
 
+    /** Set while that resume carries the result of a fill the session waited on. */
+    resumingFill = false;
+
     /** Fill resumes the server was not ready for yet, in a row. */
     jobResumeRetries = 0;
 
@@ -105,6 +109,24 @@ export class RunSession {
 
     /** Numbers the provisional claims of the session's new chats. */
     draftSeq = 0;
+
+    /** Counts the writer claims the session has taken: each run, or retry, starts with one. */
+    writerSeq = 0;
+
+    /** Set once the session has left its registry; it starts nothing afterwards. */
+    ended = false;
+
+    /**
+     * Called when something outside the session's store that decides whether
+     * it is busy changes (its writer claim). Set by the registry.
+     */
+    lifecycleListener: (() => void) | null = null;
+
+    /**
+     * Why the session may not start writing now (too many runs at once), or
+     * null. Asked before the session claims its chat. Set by the registry.
+     */
+    capacityRefusal: (() => { title: string; text: string } | null) | null = null;
 
     constructor(
         /** The session's private store: the authority for its chat state (`sessionStateAtoms`). */

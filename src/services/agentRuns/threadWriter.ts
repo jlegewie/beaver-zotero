@@ -1,8 +1,9 @@
 /**
  * The session's lease on writing to a chat: its presence claim on the thread,
  * held while it prepares a message, runs, and settles. The claim is the
- * session's and acts for the window the session runs for. Hosts without the
- * Zotero instance's presence registry do not take part.
+ * session's own (`session:<id>`), not a window's: it outlives the windows that
+ * view the session and ends with the session. Hosts without the Zotero
+ * instance's presence registry do not take part.
  */
 
 import type { ThreadClaim } from "../threads/threadPresence";
@@ -15,6 +16,16 @@ export interface WriterLease {
     admission?: Promise<boolean>;
 }
 
+/** Who the presence claims of session `sessionId` are held by: the session itself. */
+export function claimHolderOf(sessionId: string): string {
+    return `session:${sessionId}`;
+}
+
+/** Who a session's presence claims are held by. */
+export function sessionClaimHolder(session: RunSession): string {
+    return claimHolderOf(session.id);
+}
+
 export function currentWriter(session: RunSession): WriterLease | undefined {
     return session.writerLease;
 }
@@ -23,7 +34,7 @@ export function ownsWriter(session: RunSession, value: WriterLease | undefined):
     if (!value) return !Zotero.Beaver?.presence;
     return (
         session.writerLease === value &&
-        session.host.windowId() !== undefined &&
+        !session.ended &&
         Zotero.Beaver.presence.owns(value.claim)
     );
 }
@@ -35,8 +46,7 @@ export function acquireWriter(
 ): WriterLease | null | undefined {
     // Pure atom tests and hosts without the Zotero instance do not participate.
     if (!Zotero.Beaver?.presence) return undefined;
-    const windowId = session.host.windowId();
-    if (windowId === undefined) return null;
+    if (session.ended) return null;
     const lease = session.writerLease;
     if (
         lease &&
@@ -44,14 +54,17 @@ export function acquireWriter(
         (!threadId || lease.claim.threadId === threadId)
     )
         return lease;
+    const holder = sessionClaimHolder(session);
     const claim = Zotero.Beaver.presence.claim(
-        windowId,
+        holder,
         threadId ?? `draft:${session.id}:${++session.draftSeq}`,
         generation,
-        `session:${session.id}`,
+        holder,
     );
     if (!claim) return null;
     session.writerLease = { claim, preparing: 0 };
+    session.writerSeq++;
+    session.lifecycleListener?.();
     return session.writerLease;
 }
 
@@ -71,6 +84,7 @@ export function releaseWriter(session: RunSession, value = session.writerLease):
     session.writerLease = undefined; // Revoke callbacks before notifying viewers.
     Zotero.Beaver.presence.release(value.claim);
     Zotero.Beaver.threads.invalidateViews();
+    session.lifecycleListener?.();
 }
 
 export function assertWriter(session: RunSession, value: WriterLease | undefined): void {
