@@ -1,11 +1,15 @@
-import { afterEach, describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { version as CURRENT_VERSION } from '../../../package.json';
 import {
     CLIENT_FEATURES,
     ZOTERO_PLUGIN_CLIENT_TYPE,
     ZOTERO_PLUGIN_FEATURES,
 } from '@beaver/agent-core/protocol/agentProtocol';
-import { isExternalRecordsEnabled } from '../../../src/services/externalRecordsCapability';
+import { resolveClientIdentity } from '@beaver/agent-core/transport/clientIdentity';
+
+vi.mock('../../../src/services/zoteroInstanceWire', () => ({
+    buildZoteroInstanceWire: () => ({ local_user_key: 'test', index_scope_refs: [] }),
+}));
 
 // Guards the client-feature handshake (Lane C).
 type Op = 'gt' | 'gte';
@@ -220,12 +224,8 @@ function featuresFromVersion(version: string): string[] {
     }).map(({ feature }) => feature);
 }
 
-// The plugin version drives the derivation, so the contract is checked against
-// whatever this build actually is.
-
-// Expected declared set for the current production build: everything the
-// backend grants a client of this version, plus the declaration-only features
-// this plugin always ships.
+// Expected production features for this plugin version, based on the version
+// gates and declaration-only features mirrored in this file.
 const EXPECTED_DECLARED_FEATURES = [
     ...featuresFromVersion(CURRENT_VERSION),
     ...DECLARATION_ONLY_FEATURES,
@@ -244,10 +244,17 @@ describe('client feature declaration (Lane C)', () => {
         expect(new Set(ZOTERO_PLUGIN_FEATURES).size).toBe(ZOTERO_PLUGIN_FEATURES.length);
     });
 
-    it('declares exactly the features the backend grants this plugin version', () => {
-        // Derived from the version-gate table — not a frozen mirror — so a new
-        // backend gate that this version crosses forces a CLIENT_FEATURES update.
-        expect(ZOTERO_PLUGIN_FEATURES.slice().sort()).toEqual(EXPECTED_DECLARED_FEATURES);
+    it('advertises the full feature set in the production handshake', async ({ onTestFinished }) => {
+        onTestFinished(() => {
+            vi.unstubAllEnvs();
+        });
+        vi.stubEnv('NODE_ENV', 'production');
+        vi.stubEnv('BUILD_ENV', '');
+
+        const { registerZoteroClientIdentity } = await import('../../../src/services/zoteroClientIdentity');
+        registerZoteroClientIdentity();
+
+        expect(resolveClientIdentity().clientFeatures.slice().sort()).toEqual(EXPECTED_DECLARED_FEATURES);
     });
 
     it('declares citation_v2 so streaming run_complete events serialize as v2', () => {
@@ -302,31 +309,5 @@ describe('version-gate mirror integrity', () => {
         expect(compareVersions('0.22.0-beta.1', '0.22.0b1')).toBe(0);
         expect(compareVersions('0.22.0-beta.1', '0.22.0')).toBe(-1);
         expect(compareVersions('0.22.0-beta.2', '0.22.0-beta.1')).toBe(1);
-    });
-});
-
-// The external-records declaration is withheld from the handshake on release
-// builds (`zoteroClientIdentity.ts` filters it out), while the feature stays in
-// the vocabulary above: the build gate decides what is declared, not what this
-// build knows how to do.
-describe('external records build gate', () => {
-    afterEach(() => vi.unstubAllEnvs());
-
-    it('enables external records only on development and staging builds', () => {
-        vi.stubEnv('NODE_ENV', 'production');
-        vi.stubEnv('BUILD_ENV', '');
-        expect(isExternalRecordsEnabled()).toBe(false);
-
-        vi.stubEnv('NODE_ENV', 'development');
-        expect(isExternalRecordsEnabled()).toBe(true);
-
-        vi.stubEnv('NODE_ENV', 'production');
-        vi.stubEnv('BUILD_ENV', 'staging');
-        expect(isExternalRecordsEnabled()).toBe(true);
-    });
-
-    it('keeps external_records and web_pages in the declared vocabulary this build implements', () => {
-        expect(ZOTERO_PLUGIN_FEATURES).toContain(CLIENT_FEATURES.EXTERNAL_RECORDS);
-        expect(ZOTERO_PLUGIN_FEATURES).toContain(CLIENT_FEATURES.WEB_PAGES);
     });
 });
