@@ -96,17 +96,25 @@ export interface MutationOptions {
     onStart?: () => void;
 }
 
+/** A check that throws `account_changed` once the signed-in account differs from the current one. */
+export function captureAccountCheck(): () => void {
+    const generation = Zotero.Beaver.account?.getGeneration();
+    return () => {
+        if (generation !== Zotero.Beaver.account?.getGeneration()) {
+            throw Object.assign(new Error('Account changed'), { code: 'account_changed' });
+        }
+    };
+}
+
 /** Call at the outer operation boundary, before acquiring a table-specific lock. */
 export function coordinateLibraryMutation<T>(work: () => Promise<T>, options?: MutationOptions): Promise<T> {
     const mutations = Zotero.Beaver?.mutations;
     if (!mutations) return Promise.reject(new Error('Library mutation service is unavailable'));
-    const generation = Zotero.Beaver.account?.getGeneration();
+    const assertAccount = captureAccountCheck();
     return mutations.run(work, {
         ...options,
         assertCurrent: () => {
-            if (generation !== Zotero.Beaver.account?.getGeneration()) {
-                throw Object.assign(new Error('Account changed'), { code: 'account_changed' });
-            }
+            assertAccount();
             options?.assertCurrent?.();
         },
     });

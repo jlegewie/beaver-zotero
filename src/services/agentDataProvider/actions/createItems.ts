@@ -236,6 +236,7 @@ export async function applyCreateItem(
                 runId: options.runId,
                 onAttachmentResolved: options.onAttachmentResolved,
                 threadId: options.threadId,
+                assertCurrent: () => checkAborted(ctx, 'create_item:before_retry'),
             })
         );
 
